@@ -9343,6 +9343,87 @@ rather than whole-command NotSent. No native GRVT constructor or queue adoption
 is enabled by this shared prerequisite.
 
 
+### Kraken managed socket admission
+
+Futures and Spot public/private sockets now use engine-issued feed epochs and
+shared lifecycle timers. Duplicate OPEN cannot replay auth/subscriptions, and
+connect, auth or receive ingress at deadline equality refuses before delayed
+timer delivery. Unopened or retired Spot balances cannot issue account HTTP.
+Only successfully decoded envelopes refresh receive; malformed Spot traffic
+therefore no longer keeps a silent connection alive. These safer differences
+are pinned by actual-ingress controls, not venue-owned clocks.
+
+Futures challenge and three distinct ACKs remain separate from the OPEN+180s
+validated initial-payload bound. Its post-Ready Timeout(Auth) means lifecycle
+timeout, never invalid credentials or a write resend. Spot tokens belong to
+the exact physical epoch; obsolete token responses/retries are inert, and the
+two native subscription frames use an epoch-bound one-shot queue with final
+release expiry checks. Native HTTP signing and nonce namespace stay unchanged.
+The newly linked managed-sockets feature has a family cost (#2189); CI records
+Kraken size. The venue-only policy waives a local combined measurement while
+combined headroom exceeds 200K.
+
+Public subscription Capacity retires the current epoch once and recovers through
+shared Closed/backoff, preserving native ticker/book/OHLC demand. Repeated
+capacity while already retired cannot erase or renew that retry. Permanent
+encoder errors and private admission errors remain explicit fail-closed stops;
+this recovery grants no HTTP, auth, signing or venue-owned supervisor authority.
+
+Replacement admission follows the same public Capacity recovery: an engine
+issued epoch and its native socket reference exist before fallible interest
+staging, so a refusal retires that exact epoch and takes shared exponential
+backoff instead of permanently failing the feed. Controls saturate resources at
+the captured real retry and prove subsequent demand replay and private liveness.
+
+
+## Backpack snapshot-issued trigger repair
+
+Accepted managed account Orders snapshots publish under live Background DATA,
+then mint the existing cancel-then-place authority before retiring that Read.
+Discovery may use the installed Secondary; repair always uses the genuine
+installed native-ready Primary. Streams never mint. A missing Primary produces
+one local typed NoPrimary Warn per accepted snapshot, with no mint call or write;
+public-only or native-unready account state cannot start repair.
+
+Each physical cancel/place leg has its own 20-second Never policy, with no
+aggregate clock, fake Command or borrowed Read mutation authority. The placement
+successor is issued only inside the accepted cancel DATA delivery. Explicit
+finite zero baseline and cumulative fill are required for the full frozen size;
+partial, missing, invalid, decreasing, contradictory or later fill evidence
+suppresses replacement and prompts manual reconciliation. No remainder math is
+introduced. Raw per-ID evidence is independent of candidate eligibility and
+survives retained rows and Store rollback. These are intentional safety
+improvements over native automatic full-size replacement.
+
+Unsafe current stream or accepted REST evidence retires the exact held successor
+Context before any early return. Held Prepare/Bind then settles Some(NotSent),
+while released work remains Unknown. A successor never issued is place=None;
+the accepted cancel remains factual. Cleanup settles once and independent
+account observations and real command owners keep their own custody. Unknown
+subjects cannot be retired merely by a terminal-looking Store row.
+
+An accepted placement with a malformed financial row retains the original Store
+identity and publishes no fabricated replacement. It still fences older Orders
+reads before reconciliation. Existing native financial formatting and private
+socket authentication remain unchanged.
+
+### Explicit authentication on serial calls
+
+SerialCall declares Preflight or Session authentication. Existing adopters use
+Preflight with their previous read/write policy. A Session call carries no
+credential, signing or nonce authority and uses the retained login Session's
+explicit egress. Installed unsigned-only commands may deliberately use a Session
+root; sign-requiring commands never fall back to it. Credential-bearing login
+Sessions must match the engine's own installed Primary slot and credential ref.
+The venue selects the actual login Session: the engine checks authority and
+liveness but cannot distinguish its business purpose from a listen-key Session.
+Mixed roots retain the exact write credential for their later Preflight calls.
+Session calls keep Mutation journal evidence, order locks and Unknown on an
+unproven released send. Their resend freezes codec bytes while refreshing the
+bundle at Bind; Preflight signed calls repeat their existing provider work.
+No current venue enables a new auth mode in this engine slice.
+
+
 ### GRVT result-bound provider signer
 
 GRVT's signer-independent EIP712 digest needs no separate setup/address request.

@@ -94,6 +94,7 @@ mod keyless_serial {
     }
     fn call(operation: Operation) -> SerialCall {
         SerialCall {
+            auth: crate::request_context::plan::CallAuth::Session,
             operation,
             timeout_ms: 20_000,
             attempts: 2,
@@ -262,7 +263,10 @@ mod keyless_serial {
                 let (plan, _) = cx
                     .admit_serial_plan(
                         &preflight,
-                        call(Operation::Mutation),
+                        SerialCall {
+                            auth: crate::request_context::plan::CallAuth::Preflight,
+                            ..call(Operation::Mutation)
+                        },
                         SerialPolicy {
                             credential: Some(credential()),
                             pacing: None,

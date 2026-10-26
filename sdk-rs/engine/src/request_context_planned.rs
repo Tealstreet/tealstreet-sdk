@@ -83,6 +83,19 @@ impl State {
     pub(super) fn session_root(&self) -> Option<&crate::request_context::Session> {
         self.body.first()?.serial.as_ref()?.session_root.as_ref()
     }
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(in crate::engine) fn session_write(&self) -> Option<&crate::request_context::Credential> {
+        self.body.first()?.policy.credential.as_ref()
+    }
+
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(in crate::engine) fn session_call(&self) -> bool {
+        self.body
+            .first()
+            .and_then(|body| body.serial.as_ref())
+            .is_some_and(|serial| serial.session_call())
+    }
+
     /// A Mutation Plan's admitted credential, for repair mint custody.
     #[cfg(feature = "repair-mutations")]
     pub(in crate::engine) fn repair_write_credential(
@@ -1128,7 +1141,7 @@ impl<P> Cx<'_, P> {
             .io
             .core
             .request_contexts
-            .keyless_session_egress(plan.owner())?;
+            .keyless_session_egress(plan.owner(), &self.io.core.identities)?;
         let body = self
             .io
             .core
@@ -2128,6 +2141,34 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Raise a live Mutation Plan's failure projection to Unknown, for an
+    /// effect the venue can no longer prove (such as a failed protective
+    /// census after an accepted placement). Monotonic; it grants no send,
+    /// retry or success authority and records no write fact.
+    pub fn inherit_plan_uncertainty(&mut self, plan: &Plan) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        let owner = self
+            .io
+            .core
+            .request_contexts
+            .owner_entry_mut(plan.owner())
+            .ok_or(Error::Revoked)?;
+        owner
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .inherit_uncertain();
+        owner.inherited_uncertain = true;
+        Ok(())
+    }
+
     /// Retire the current unissued call of an independent complete Plan that
     /// the venue decides not to send. No journal fact; its reservations return.
     /// Admitted only where the call could have been issued; every check
@@ -2340,7 +2381,7 @@ impl ContextRegistry {
             return Ok(None);
         };
         let current = self.plan_body(&plan)?;
-        let Some(serial) = current.serial.as_ref().filter(|s| s.session_root.is_some()) else {
+        let Some(serial) = current.serial.as_ref().filter(|s| s.session_call()) else {
             return Ok(None);
         };
         let fingerprint = super::keyless_session::wire_fingerprint(method, url, headers, body);

@@ -1,5 +1,4 @@
 use super::*;
-use safe_cex_engine::test_support::{ProbeVenue, http_requests};
 use safe_cex_engine::{Action, ReadCredentials};
 fn options() -> Options {
     Options {
@@ -15,33 +14,13 @@ fn options() -> Options {
     }
 }
 
-fn probe(venue: Backpack) -> ProbeVenue<Backpack, impl FnMut(&mut Backpack, &mut Cx<'_, Pending>)> {
-    ProbeVenue::new(venue, |venue, cx| {
-        for method in [Method::Get, Method::Post, Method::Delete] {
-            venue.account_start(cx);
-            let path = if method == Method::Get {
-                "/api/v1/orders"
-            } else {
-                "/api/v1/order"
-            };
-            venue
-                .signed(
-                    cx,
-                    method,
-                    path,
-                    Default::default(),
-                    None,
-                    Pending::SigningProbe,
-                )
-                .unwrap();
-        }
-    })
-}
+#[path = "../tests/support/secondary_signing.rs"]
+mod managed_probe;
+use managed_probe::probe;
+
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Backpack::new(options())));
-    engine.start(1700000000000.0);
-    let requests: Vec<_> = http_requests(&mut engine)
+    let requests: Vec<_> = probe(Backpack::new(options()))
         .into_iter()
         .filter(|r| r.url.ends_with("/api/v1/orders") || r.url.ends_with("/api/v1/order"))
         .collect();
