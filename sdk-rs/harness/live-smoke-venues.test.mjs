@@ -23,7 +23,7 @@ test('OKX smoke profiles use default TLS on the exact live/demo entity host', ()
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
     // KuCoin Spot needs a separate host and sizing review.
-    if (['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot'].includes(venue)) {
+    if (['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
@@ -41,7 +41,7 @@ test('every registry name has an explicitly reviewed environment or fails closed
 
 test('unreviewed profiles refuse all modes before credential access', () => {
   const env = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
-  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot'])
+  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot'])
     for (const mode of [undefined, 'testnet', 'demo', 'mainnet'])
       assert.throws(() => liveSmokeProfile(venue, mode, env), /no reviewed/);
 });
@@ -197,6 +197,24 @@ test('reviewed venue profiles enable post-only whenever the engine supports it',
   }
 });
 
+test('Binance Spot defaults to its testnet and allows exactly its own hosts', () => {
+  const spot = liveSmokeProfile('binancespot', undefined, env);
+  assert.equal(spot.mode, 'testnet');
+  assert.equal(spot.options.testnet, true);
+  assert.equal(spot.leverage, 'fixed');
+  assert.equal(spot.allowUrl('https://testnet.binance.vision/api/v3/order'), true);
+  assert.equal(spot.allowUrl('wss://ws-api.testnet.binance.vision/ws-api/v3', 'ws'), true);
+  assert.equal(spot.allowUrl('https://api.binance.com/api/v3/order'), false);
+  assert.equal(spot.allowUrl('https://demo-fapi.binance.com/fapi/v1/order'), false);
+  const mainnet = liveSmokeProfile('binancespot', 'mainnet', env);
+  assert.equal(mainnet.options.testnet, false);
+  assert.equal(mainnet.allowUrl('wss://ws-api.binance.com:443/ws-api/v3', 'ws'), true);
+  assert.equal(mainnet.allowUrl('wss://stream.binance.com:9443/ws', 'ws'), true);
+  assert.equal(mainnet.allowUrl('wss://stream.binance.com/ws', 'ws'), false);
+  assert.equal(mainnet.allowUrl('https://fapi.binance.com/fapi/v1/order'), false);
+  assert.throws(() => liveSmokeProfile('binancespot', 'mainnet', {}),
+    /^Error: Missing environment variable RUST_LIVE_SMOKE_BINANCESPOT_MAINNET_KEY$/);
+});
 
 test('Kraken Spot requires explicit mainnet before touching its separate credentials', () => {
   const poisoned = new Proxy({}, { get() { throw new Error('credentials accessed'); } });

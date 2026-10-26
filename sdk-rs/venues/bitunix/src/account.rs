@@ -461,6 +461,7 @@ impl BitunixFutures {
                             operation: Operation::Read,
                             timeout_ms: crate::trading::CALL_MS,
                             attempts: 1,
+                            pacing: None,
                         },
                     )
                     .and_then(|slot| {
