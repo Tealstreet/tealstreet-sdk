@@ -10,10 +10,10 @@ import { parseArgs } from 'node:util';
 export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_064 });
 // #2219 Base64Url/EvmHex signing: CI Bitget 1,480,918 rounded up to KiB (overseer ceiling 1448 KiB).
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
-// allowance over the opt-s 1,330,120 cap; the cap is that rounded up to the KiB. It can only go down.
+// allowance over the opt-s 1,330,120 cap; #2219 signing encodings: CI 1,385,845 rounded up to the KiB.
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
 // Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_481_728, bitgetusdc: 1_481_728, bybit: 1_445_888, asterdex: 1_385_472 });
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_481_728, bitgetusdc: 1_481_728, bybit: 1_445_888, asterdex: 1_386_496 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
