@@ -1,12 +1,15 @@
 //! Native Lighter transaction envelopes and ECgFp5 signing.
-use safe_cex_crypto::lighter::{SchnorrNonce, poseidon2_hash_fp5, schnorr_sign};
+use safe_cex_crypto::lighter::poseidon2_hash_fp5;
+#[cfg(test)]
+use safe_cex_crypto::lighter::schnorr_sign;
 use safe_cex_engine::signing::{
     Algorithm, Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
     SignResult,
 };
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep};
 use serde::Serialize;
-use zeroize::{Zeroize, Zeroizing};
+#[cfg(test)]
+use zeroize::Zeroizing;
 
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 const MAX_ACCOUNT: u64 = (1 << 48) - 2;
@@ -80,11 +83,6 @@ impl Account {
             api_key_index,
         })
     }
-}
-
-pub struct Signer {
-    key: Zeroizing<[u8; 40]>,
-    account: Account,
 }
 
 #[derive(Serialize)]
@@ -172,6 +170,7 @@ fn append_words(bytes: &mut Vec<u8>, words: &[u64]) {
     }
 }
 
+#[cfg(test)]
 fn hedged_sign_with_entropy(
     input: &[u8],
     key: &[u8],
@@ -270,100 +269,6 @@ fn signing_preimage(data: &[u8], attributes: Option<&Attributes>) -> Result<Vec<
     preimage.extend_from_slice(&poseidon2_hash_fp5(data)?);
     preimage.extend_from_slice(&poseidon2_hash_fp5(&words)?);
     Ok(preimage)
-}
-
-impl Signer {
-    pub fn new(
-        secret: &str,
-        chain_id: u32,
-        account_index: u64,
-        api_key_index: u8,
-    ) -> Result<Self, String> {
-        let account = Account::new(chain_id, account_index, api_key_index)?;
-        let secret = secret.strip_prefix("0x").unwrap_or(secret);
-        if secret.len() != 80 {
-            return Err("Lighter private key must contain exactly 40 bytes".into());
-        }
-        let mut key = Zeroizing::new([0u8; 40]);
-        for (byte, pair) in key.iter_mut().zip(secret.as_bytes().as_chunks::<2>().0) {
-            let pair = std::str::from_utf8(pair).map_err(|_| "Invalid Lighter private key hex")?;
-            *byte = u8::from_str_radix(pair, 16).map_err(|_| "Invalid Lighter private key hex")?;
-        }
-        // Scalar reduction belongs to the shared crypto primitive, as in the venue signer.
-        if safe_cex_crypto::lighter::public_key(key.as_ref())? == [0; 40] {
-            key.zeroize();
-            return Err("Lighter private key must not reduce to zero".into());
-        }
-        Ok(Self { key, account })
-    }
-
-    pub fn auth_token(
-        &self,
-        deadline_seconds: u64,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
-    ) -> Result<String, String> {
-        self.auth_token_inner(deadline_seconds, None, fill)
-    }
-
-    /// The supplied nonce must come from fresh CSPRNG entropy and must never be reused.
-    pub fn auth_token_with_nonce(
-        &self,
-        deadline_seconds: u64,
-        schnorr_nonce: SchnorrNonce,
-    ) -> Result<String, String> {
-        self.auth_token_inner(deadline_seconds, Some(schnorr_nonce), |_| Err(()))
-    }
-
-    fn auth_token_inner(
-        &self,
-        deadline_seconds: u64,
-        schnorr_nonce: Option<SchnorrNonce>,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
-    ) -> Result<String, String> {
-        let (message, data) = auth_message(&self.account, deadline_seconds)?;
-        let signature = match schnorr_nonce {
-            Some(nonce) => schnorr_sign(&data, self.key.as_ref(), nonce)?,
-            None => hedged_sign_with_entropy(&data, self.key.as_ref(), fill)?,
-        };
-        Ok(format!("{message}:{}", safe_cex_crypto::hex(&signature)))
-    }
-
-    pub fn sign(
-        &self,
-        tx: &Transaction,
-        nonce: u64,
-        now_ms: u64,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
-    ) -> Result<SignedTransaction, String> {
-        self.sign_inner(tx, nonce, now_ms, None, fill)
-    }
-
-    /// The supplied nonce must come from fresh CSPRNG entropy and must never be reused.
-    pub fn sign_with_nonce(
-        &self,
-        tx: &Transaction,
-        nonce: u64,
-        now_ms: u64,
-        schnorr_nonce: SchnorrNonce,
-    ) -> Result<SignedTransaction, String> {
-        self.sign_inner(tx, nonce, now_ms, Some(schnorr_nonce), |_| Err(()))
-    }
-
-    fn sign_inner(
-        &self,
-        tx: &Transaction,
-        nonce: u64,
-        now_ms: u64,
-        schnorr_nonce: Option<SchnorrNonce>,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
-    ) -> Result<SignedTransaction, String> {
-        let input = tx_input(&self.account, tx, nonce, now_ms)?;
-        let signature = match schnorr_nonce {
-            Some(nonce) => schnorr_sign(&input.preimage, self.key.as_ref(), nonce)?,
-            None => hedged_sign_with_entropy(&input.preimage, self.key.as_ref(), fill)?,
-        };
-        input.finish(&signature)
-    }
 }
 
 enum Fields {
@@ -916,5 +821,33 @@ mod security_hedging {
         let public = safe_cex_crypto::lighter::public_key(&[3; 40]).unwrap();
         assert!(safe_cex_crypto::lighter::schnorr_verify(&[1; 8], &public, &first).unwrap());
         assert!(safe_cex_crypto::lighter::schnorr_verify(&[2; 8], &public, &second).unwrap());
+    }
+}
+
+/// A tier POST has the native form header before the recipe binds its unsigned bytes.
+pub(crate) struct FormRecipe<T>(pub T);
+impl<T: SignStep> SignStep for FormRecipe<T> {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        if let Action::Http(http) = outbound
+            && http.method == Method::Post
+        {
+            http.headers
+                .retain(|(name, _)| !name.eq_ignore_ascii_case("content-type"));
+            http.headers.push((
+                "Content-Type".into(),
+                "application/x-www-form-urlencoded".into(),
+            ));
+        }
+        self.0.prepare(outbound, dispatch)
+    }
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        self.0.apply(outbound, result)
+    }
+    fn freshness_ms(&self) -> f64 {
+        self.0.freshness_ms()
     }
 }

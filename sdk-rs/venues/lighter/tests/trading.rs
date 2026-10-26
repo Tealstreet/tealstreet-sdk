@@ -24,7 +24,7 @@ fn place(e: &mut Engine<Lighter>, orders: Vec<PlaceOrderOpts>) {
     );
 }
 fn http(e: &mut Engine<Lighter>, path: &str) -> HttpRequest {
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(e, NOW);
     let debug = format!("{actions:?}");
     actions
         .into_iter()

@@ -489,9 +489,8 @@ fn direct_account_fill_arrays_accept_both_fill_and_trade_ids_without_duplicate_f
 #[test]
 fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
     use safe_cex_engine::SocketChannel;
-    use safe_cex_venue_lighter::Lighter;
     let mut timers = Timers::new();
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(options()));
+    let mut e = support::engine(options());
     e.start(NOW);
     let meta = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
         .into_iter()
@@ -618,9 +617,7 @@ fn unmapped_working_order_is_skipped_with_a_warning_and_terminal_unknown_rows_ar
 #[test]
 fn unmapped_initial_position_values_the_balance_only_with_its_native_pnl() {
     for pnl in [true, false] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(
-            safe_cex_venue_lighter::Lighter::new(options()),
-        );
+        let mut e = support::engine(options());
         e.start(NOW);
         let mut bad = ACCOUNT.replace("\"market_id\":1", "\"market_id\":999");
         if !pnl {
@@ -720,8 +717,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    let mut pending: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, due)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,

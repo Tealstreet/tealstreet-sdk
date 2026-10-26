@@ -1,7 +1,8 @@
 //! TS fetchAccountLimits(): coalesced reads, 5m cache, 60s failure cooldown.
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, TimerId};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use serde_json::json;
 use support::*;
 
@@ -12,7 +13,7 @@ struct Client {
 impl Client {
     fn new(options: Options) -> Self {
         let mut client = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Lighter::new(options)),
+            engine: support::engine(options),
             timers: vec![],
         };
         client.engine.start(NOW);
@@ -63,7 +64,7 @@ impl Client {
         }
         let mut limits = vec![];
         for _ in 0..10 {
-            let actions = self.engine.drain_actions().collect::<Vec<_>>();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut self.engine, now);
             if actions.is_empty() {
                 break;
             }

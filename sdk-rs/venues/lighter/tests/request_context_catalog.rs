@@ -7,16 +7,17 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Method, Notice, TimerId, VenueError};
 use safe_cex_engine::{Command, Cx, Response, SocketId, Venue};
-use safe_cex_venue_lighter::{Lighter, Options, Pending};
+use safe_cex_venue_lighter::{Lighter, Pending};
+use support::Options;
 use support::{NOW, reply_at};
 const META: &str = r#"{"code":200,"order_book_details":[{"market_id":1,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2,"symbol":"BTC","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot"}]}"#;
 fn engine(robinhood: bool, testnet: bool) -> Engine<Lighter> {
-    safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    support::engine(Options {
         robinhood,
         testnet,
         public_data_only: true,
         ..Default::default()
-    }))
+    })
 }
 fn start<V: Venue<Pending = Pending>>(e: &mut Engine<V>) -> Vec<Action> {
     e.start(NOW);
@@ -463,10 +464,10 @@ impl Venue for CapacityProbe {
 #[test]
 fn saturated_registry_frees_each_catalog_root_before_fallback_retry_and_success() {
     let mut e = safe_cex_engine::test_support::seeded_engine(CapacityProbe {
-        venue: Lighter::new(Options {
+        venue: Lighter::new((Options {
             public_data_only: true,
             ..Default::default()
-        }),
+        }).into()),
         roots: vec![],
     });
     for command in 1..=255 {

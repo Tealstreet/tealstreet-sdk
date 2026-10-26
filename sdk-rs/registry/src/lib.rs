@@ -38,6 +38,8 @@ compile_error!(
 #[cfg(feature = "asterdex")]
 mod asterdex_setup;
 mod construction;
+#[cfg(feature = "lighter")]
+mod lighter_setup;
 #[cfg(feature = "dispatch-signing")]
 pub mod hosted_signing;
 pub use construction::{
@@ -682,6 +684,10 @@ pub fn prepare_local_signer_for(
         let (provider, identities) = local_signer_from_setup(setup, policy, public_data_only)?;
         return apexomni_admit(provider, identities);
     }
+    #[cfg(feature = "lighter")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
+        return lighter_setup::native(options, signer_setup_policy_for(venue, options));
+    }
     let policy = signer_setup_policy_for(venue, options);
     let read_policy = construction::read_credentials_policy(venue);
     prepare_local_signer_with_policy(options, policy, public_data_only, read_policy)
@@ -975,6 +981,10 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    #[cfg(feature = "lighter")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
+        return lighter_setup::json(input, signer_setup_policy_for(venue, options), options);
+    }
     let (provider, identities) = local_signer_from_json_with_policy(
         input,
         signer_setup_policy_for(venue, options),
@@ -1553,27 +1563,28 @@ pub fn build_with_signer<T: Visit>(
             )
         }
         #[cfg(feature = "lighter")]
-        "lighter" | "lighter-robinhood" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Lighter::new(LighterOptions {
-                    robinhood: venue == "lighter-robinhood",
-                    remote_signer: options.lighter_remote_signer,
-                    signer_provider: options.lighter_signer_provider.take(),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    application_id: options.application_id.take(),
-                    api_key_index: options.api_key_index.take(),
-                    integrator_account_index: options.lighter_integrator_account_index.take(),
-                    stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
-                }),
-                entropy,
-            )?,
-        ),
+        "lighter" | "lighter-robinhood" => {
+            lighter_setup::capture_lookup(&mut options);
+            if options.key.is_some() || options.secret.is_some() || options.read_credentials.is_some() { return Err(invalid("Lighter credentials belong in trusted signer setup")); }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() || (identities.primary.is_some() && signer.is_none()) { return Err(invalid("Lighter requires its installed primary signer")); }
+            let mut engine = Engine::new(Lighter::new(LighterOptions {
+                robinhood: venue == "lighter-robinhood",
+                remote_signer: options.lighter_remote_signer,
+                signer_provider: options.lighter_signer_provider.take(),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                identity: identities.primary.clone(),
+                l1_address: options.lighter_l1_address.take(),
+                application_id: options.application_id.take(),
+                api_key_index: options.api_key_index.take(),
+                integrator_account_index: options.lighter_integrator_account_index.take(),
+                stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
+            }), entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bitrue")]
         "bitrue" => {
             if options.key.is_some()
@@ -2160,6 +2171,8 @@ pub struct EngineOptions {
     #[cfg(feature = "lighter")]
     #[serde(default)]
     pub lighter_remote_signer: bool,
+    #[cfg(feature = "lighter")]
+    pub lighter_l1_address: Option<String>,
     #[cfg(feature = "lighter")]
     pub lighter_signer_provider: Option<String>,
     #[cfg(any(

@@ -1,7 +1,8 @@
 //! TS start()/ensureSignerAdapter(): remote callbacks never sign Lighter transactions.
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, TimerId};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use serde_json::json;
 use support::*;
 
@@ -13,7 +14,7 @@ struct Startup {
 }
 fn startup(options: Options) -> Startup {
     let mut result = Startup {
-        engine: safe_cex_engine::test_support::seeded_engine(Lighter::new(options)),
+        engine: support::engine(options),
         sockets: 0,
         private_requests: 0,
         timers: Vec::new(),

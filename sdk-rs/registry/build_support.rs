@@ -42,6 +42,7 @@ enum SetupMapping {
     Asterdex,
     #[serde(rename = "apexomni")]
     ApexOmni,
+    Lighter,
 }
 
 #[derive(Default, Deserialize)]

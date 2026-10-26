@@ -13,7 +13,7 @@ use support::{ACCOUNT, META, NOW, options, ready_with, reply_at};
 const COMMAND: u32 = 901;
 
 fn ready(testnet: bool) -> Engine<Lighter> {
-    let (mut engine, _) = ready_with(safe_cex_venue_lighter::Options {
+    let (mut engine, _) = ready_with(support::Options {
         testnet,
         ..options()
     });
@@ -153,7 +153,7 @@ fn after_reply(engine: &mut Engine<Lighter>, packet: &HttpRequest, body: &str) -
 }
 
 fn lookup() -> (Engine<Lighter>, Vec<Action>) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options()));
+    let mut engine = support::engine(options());
     engine.start(NOW);
     let catalog = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
         .into_iter()
@@ -413,13 +413,11 @@ fn proven_21104_reseed_then_acceptance_is_plain_success() {
 #[test]
 fn public_l1_setup_keeps_the_address_lookup_candidate() {
     let address = "0x1111111111111111111111111111111111111111";
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(
-        safe_cex_venue_lighter::Options {
-            key: Some(address.into()),
-            application_id: None,
-            ..options()
-        },
-    ));
+    let mut engine = support::engine(support::Options {
+        key: Some(address.into()),
+        application_id: None,
+        ..options()
+    });
     engine.start(NOW);
     let catalog = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
         .into_iter()
@@ -441,4 +439,85 @@ fn secret_only_setup_keeps_the_explicit_account_lookup() {
     let request = candidate(&actions, "/account?by=index");
     assert!(request.url.ends_with("value=718895"));
     assert!(request.headers.is_empty());
+}
+
+#[test]
+fn second_21104_fails_once_without_a_third_submission() {
+    let mut engine = ready(true);
+    let actions = nonce_then_submit(&mut engine);
+    let first = release(&mut engine, &actions, "sendTx");
+    let actions = after_reply(
+        &mut engine,
+        &first,
+        r#"{"code":21104,"message":"invalid nonce"}"#,
+    );
+    let timer = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 150.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(NOW + 150.0, Event::TimerFired { timer });
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let nonce = release_at(&mut engine, &actions, "nextNonce", NOW + 150.0);
+    reply_at(
+        &mut engine,
+        NOW + 150.0,
+        &nonce,
+        200,
+        r#"{"code":200,"nonce":20}"#,
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let retry = release_at(&mut engine, &actions, "sendTx", NOW + 150.0);
+    reply_at(
+        &mut engine,
+        NOW + 150.0,
+        &retry,
+        200,
+        r#"{"code":21104,"message":"invalid nonce"}"#,
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(matches!(
+        terminal(&actions).as_slice(),
+        [Notice::CommandFailed { .. }]
+    ));
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("nextNonce") || request.url.contains("sendTx")))));
+    engine.handle(NOW + 300.0, Event::TimerFired { timer });
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(terminal(&actions).is_empty());
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("sendTx")))));
+}
+
+#[test]
+fn typed_provider_refusal_preserves_its_kind_without_a_write_retry() {
+    let mut engine = ready(true);
+    let actions = nonce_then_submit(&mut engine);
+    let preparation = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.url.contains("sendTx") => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.http_preparation_failed(
+        NOW,
+        preparation,
+        safe_cex_engine::request_context::Error::Invalid,
+        safe_cex_engine::VenueError::new("provider refused")
+            .kind(safe_cex_engine::ErrorKind::Internal)
+            .outcome(safe_cex_engine::Outcome::NotSent),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(
+        matches!(terminal(&actions).as_slice(), [Notice::CommandFailed { error, .. }] if error.kind == Some(safe_cex_engine::ErrorKind::Internal) && error.outcome == Some(safe_cex_engine::Outcome::NotSent))
+    );
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("sendTx")))));
 }
