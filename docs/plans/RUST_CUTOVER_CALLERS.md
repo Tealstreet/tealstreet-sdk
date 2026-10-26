@@ -9658,11 +9658,6 @@ peers then two independent candle peers after genuine429. Exact completion
 Cancel is captured/checked once. The secondary helper is test support with real
 installed providers and genuine test command entry; native assertions retained.
 
-<<<<<<< HEAD
-### Bitunix closed positions and journal on Rust
-
-Bitunix on the Rust engine now serves the journal (historical positions) and closed PnL from the venue's reported position history, mapped by TypeScript's own Bitunix mappers, as TypeScript does ([RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md)). The journal previously threw "no journal records path declared", and closed PnL was always empty. Capability records gain `positionHistory: "bitunix"` and `closedPositionFormat: "bitunix"`. A failed journal read throws, as on every other reported-closed venue; a failed closed-PnL read yields `[]`.
-=======
 ### Phemex beta non-success write diagnostics
 
 Non-2xx managed writes retain the shared classifier's kind and strict native
@@ -9674,4 +9669,7 @@ Auth/rate status fallbacks and header-proven Retry-After remain shared policy.
 The regression covers coded400,401,403,429,408,500 and malformed gateway bodies.
 Beta public evidence uses explicit Rust through the JS/WASM host, including
 managed HTTP recording; native unit results alone do not certify that path.
->>>>>>> origin/feat/rust-rewrite
+
+### Bitunix closed positions and journal on Rust
+
+Bitunix on the Rust engine now serves the journal (historical positions) and closed PnL from the venue's reported position history, mapped by TypeScript's own Bitunix mappers, as TypeScript does ([RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md)). The journal previously threw "no journal records path declared", and closed PnL was always empty. Capability records gain `positionHistory: "bitunix"` and `closedPositionFormat: "bitunix"`. A failed journal read throws, as on every other reported-closed venue; a failed closed-PnL read yields `[]`.
