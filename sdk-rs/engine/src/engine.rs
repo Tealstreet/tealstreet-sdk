@@ -4126,6 +4126,11 @@ impl<V: Venue> Engine<V> {
         self.venue.capabilities()
     }
 
+    /// Whether the venue start boundary has already run.
+    pub fn has_started(&self) -> bool {
+        self.started
+    }
+
     pub fn start(&mut self, now: f64) {
         self.assert_live();
         self.io.core.dispatch_now = now;
