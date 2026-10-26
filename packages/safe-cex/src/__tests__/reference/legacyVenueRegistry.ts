@@ -1,23 +1,10 @@
 // Test-only pre-beta adapter characterization; never imported by SDK runtime.
-/**
- * Exchange Registry
- *
- * Maps exchange names to their dynamic import functions.
- * This enables lazy-loading of exchange implementations to reduce initial bundle size.
- *
- * Each exchange is loaded only when createExchange() is called for that exchange,
- * keeping the initial bundle small regardless of how many exchanges are supported.
- */
 
 import type { BaseExchange } from '../../exchanges/base';
 import type { ExchangeName } from '../../types';
 
 type ExchangeLoader = () => Promise<typeof BaseExchange>;
 
-/**
- * Registry mapping exchange names to their dynamic import functions.
- * Uses webpack magic comments for named chunks to improve caching and debugging.
- */
 export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
   // Apex Omni
   apexomni: () =>
@@ -146,8 +133,8 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
     ),
 
   // Coinbase Advanced Trade and saved spot-only accounts
-  coinbase: () => import('../../exchanges/coinbase/coinbase.exchange').then((m) => m.CoinbaseExchange),
-  coinbasespot: () => import('../../exchanges/coinbase/coinbasespot.exchange').then((m) => m.CoinbaseSpotExchange),
+  coinbase: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
+  coinbasespot: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
   // Crypto.com
   cryptocom: () =>
@@ -256,26 +243,34 @@ export const legacyVenueRegistry: Record<ExchangeName, ExchangeLoader> = {
     import(/* webpackChunkName: "exchange-woo" */ '../../exchanges/woo/woo.exchange').then((m) => m.WOOXExchange),
 
   // Orderly Network exchanges
-  kodiakfi: () => import('./orderly/exchanges/kodiakfi/kodiakfi.exchange').then((m) => m.KodiakFIExchange),
+  kodiakfi: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  mode: () => import('./orderly/exchanges/mode/mode.exchange').then((m) => m.MODEExchange),
+  mode: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  salsadex: () => import('./orderly/exchanges/salsadex/salsadex.exchange').then((m) => m.SalsaDEXExchange),
+  salsadex: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  'tealstreet-dex': () =>
-    import('./orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange').then((m) => m.TealstreetDEXExchange),
+  'tealstreet-dex': () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
   // TxFlow testnet
-  txflow: () => import('./txflow/txflow.exchange').then((m) => m.TxFlowExchange),
+  txflow: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  what: () => import('./orderly/exchanges/what/what.exchange').then((m) => m.WhatExchange),
+  what: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  woofi: () => import('./orderly/exchanges/woofi/woofi.exchange').then((m) => m.WoofiExchange),
+  woofi: () => import('../../exchanges/rust/rust.exchange').then((m) => m.RustEngineExchange),
 };
 
-/**
- * Get all registered exchange names
- */
 export const getRegisteredExchangeNames = (): ExchangeName[] => {
   return Object.keys(legacyVenueRegistry) as ExchangeName[];
 };
+
+// Kept hosted signing codecs are independent reference oracles, never SDK loaders.
+export const hostedSigningReferenceRegistry = {
+  coinbase: () => import('../../exchanges/coinbase/coinbase.exchange').then((m) => m.CoinbaseExchange),
+  coinbasespot: () => import('../../exchanges/coinbase/coinbasespot.exchange').then((m) => m.CoinbaseSpotExchange),
+  kodiakfi: () => import('./orderly/exchanges/kodiakfi/kodiakfi.exchange').then((m) => m.KodiakFIExchange),
+  mode: () => import('./orderly/exchanges/mode/mode.exchange').then((m) => m.MODEExchange),
+  salsadex: () => import('./orderly/exchanges/salsadex/salsadex.exchange').then((m) => m.SalsaDEXExchange),
+  'tealstreet-dex': () => import('./orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange').then((m) => m.TealstreetDEXExchange),
+  what: () => import('./orderly/exchanges/what/what.exchange').then((m) => m.WhatExchange),
+  woofi: () => import('./orderly/exchanges/woofi/woofi.exchange').then((m) => m.WoofiExchange),
+} as Partial<Record<ExchangeName, ExchangeLoader>>;

@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
@@ -132,14 +137,14 @@ it('reports the structured refusal through start and validateAccount', async () 
 });
 
 it('routes declared PayloadSigner families to Rust and leaves unadopted admission intact', () => {
-  for (const name of ['bybit', 'bybitspot', 'hyrotrader', 'binance', 'binancepm', 'binanceinverse'] as const) {
+  for (const name of ['bybit', 'bybitspot', 'binance', 'binancepm', 'binanceinverse'] as const) {
     expect(runsOnRustEngine(name, { engine: 'rust', secret: '', payloadSigner }), name).toBe(true);
     expect(runsOnRustEngine(name, { engine: 'rust', secret: 's', payloadSigner }), name).toBe(true);
     expect(runsOnRustEngine(name, { engine: 'rust', payloadSigner, publicDataOnly: true }), name).toBe(true);
     expect(runsOnRustEngine(name, { engine: 'rust', secret: 's' }), name).toBe(true);
   }
   // Their TS venues ignore a payload signer too, so the engine's startup refusal is the outcome.
-  for (const name of ['hyperliquid', 'coinbase', 'polymarket', 'lighter', 'paradex'] as const) {
+  for (const name of ['hyperliquid', 'lighter', 'paradex'] as const) {
     expect(runsOnRustEngine(name, { engine: 'rust', secret: '', payloadSigner }), name).toBe(true);
   }
 });
@@ -161,17 +166,14 @@ describe('factory and worker loaders', () => {
     }
   }, 60_000);
 
-  it('a default-Rust name never falls back to its hosted TS class, which cannot payload-sign', async () => {
+  it('OUT names refuse without constructing a hosted TS class', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
     for (const name of ['coinbase', 'tealstreet-dex'] as const) {
       // The hosted loader serves keyless remote signing only.
       expect(isKeylessRemoteSigned(name, signed()), name).toBe(false);
       for (const options of [signed(), signed({ engine: undefined })]) {
         recordEngine(name, true);
-        const exchange = await createExchange(name, options);
-        running.push(exchange as RustEngineExchange);
-        expect(exchange, name).toBeInstanceOf(RustEngineExchange);
-        await expect(exchange.start(), name).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+        await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       }
     }
   }, 60_000);

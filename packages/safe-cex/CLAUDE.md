@@ -4,6 +4,9 @@ The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
 SDK factories and workers have no TypeScript venue fallback; OUT names refuse
 with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
 and test-only replay/reference implementations remain independent dependencies.
+Historical Rust-adapter fixtures mock only beta admission through
+`__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
+the real refusal boundary. These fixtures confer no beta activation.
 
 
 Core exchange integration library. See also exchange-specific `CLAUDE.md` files in `src/exchanges/*/`.

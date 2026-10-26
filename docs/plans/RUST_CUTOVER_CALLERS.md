@@ -9657,3 +9657,24 @@ clock; payload financial timestamps/values stay. Paused capacity uses254 depth
 peers then two independent candle peers after genuine429. Exact completion
 Cancel is captured/checked once. The secondary helper is test support with real
 installed providers and genuine test command entry; native assertions retained.
+
+## Rust-only beta SDK admission
+
+SDK web/native registries, saved-account/public factories and worker startup
+select `RustEngineExchange` without an engine opt-in. The single SDK beta roster
+is `packages/safe-cex/src/exchanges/rust/betaVenues.ts`; names outside it refuse
+with typed `Unsupported` / `NotSent` before clock, runtime or transport work.
+Previously saved OUT accounts cannot start in this build. The `engine: 'rust'`
+input remains compatible but no longer selects between implementations.
+
+There is no TypeScript venue or hosted-signing venue fallback. An IN account
+using `remoteSigner` / `payloadSigner` without enabled Rust remote policy
+refuses with `Unsupported` / `NotSent`; Paradex beta supports local keys only.
+Enabled Rust provider paths retain their existing custody and wire contracts.
+
+Metadata and standalone `*.signing.ts` codecs used by `rust/legacySigning.ts`
+remain runtime dependencies. Independent TS/native financial, transport and
+signing reference oracles remain test-only. Historical Rust adapter fixtures
+mock the beta admission layer explicitly; real SDK/worker refusal controls do
+not use that fixture. Retained oracle execution is not beta activation. R2 owns
+adapter relocation/deletion and retargets those test-only imports.

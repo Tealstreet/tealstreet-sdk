@@ -1,3 +1,8 @@
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+});
+
 import type { AxiosInstance } from 'axios';
 import type { BaseExchange } from '../exchanges/base';
 import type { ExchangeName, ExchangeOptions } from '../types';

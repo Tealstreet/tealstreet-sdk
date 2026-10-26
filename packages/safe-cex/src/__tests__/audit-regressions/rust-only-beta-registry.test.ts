@@ -9,7 +9,7 @@ import { exchangeRegistry } from '../../exchanges/registry';
 import { exchangeRegistry as nativeRegistry } from '../../exchanges/registry.native';
 import { assertBetaAccount, BETA_VENUES } from '../../exchanges/rust/betaVenues';
 import { createRustRegistry, getRegisteredExchangeNames } from '../../exchanges/rustRegistry';
-import { createExchange, createPublicExchange } from '../../index';
+import { createExchange, createPublicExchange, preloadExchange } from '../../index';
 import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
 
@@ -88,6 +88,7 @@ describe('Rust-only beta construction', () => {
     for (const name of out) {
       await expect(createExchange(name, { key: '', secret: '' })).rejects.toMatchObject(unsupported);
       await expect(createPublicExchange(name)).rejects.toMatchObject(unsupported);
+      await expect(preloadExchange(name)).rejects.toMatchObject(unsupported);
       await expect(createExchangeFromAccount({ exchange: name } as ExchangeAccountConfig)).rejects.toMatchObject(
         unsupported,
       );
@@ -115,7 +116,7 @@ describe('Rust-only beta construction', () => {
     const { ExchangeWorker } = await import('../../webworker/ExchangeWorker');
     const messages: unknown[] = [];
     const worker = new ExchangeWorker(
-      { postMessage: (message: unknown) => messages.push(message) } as Worker,
+      { postMessage: (message: unknown) => messages.push(message) } as unknown as Worker,
       'saved-out-account',
       'coinbase',
       { key: '', secret: '' },

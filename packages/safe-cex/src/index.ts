@@ -46,6 +46,7 @@ const exchangeCache = new Map<ExchangeName, typeof BaseExchange>();
  * Returns cached class if already loaded
  */
 async function loadExchange(name: ExchangeName): Promise<typeof BaseExchange> {
+  assertBetaVenue(name);
   // Return cached if already loaded
   const cached = exchangeCache.get(name);
   if (cached) return cached;

@@ -1,3 +1,10 @@
+import { vi } from 'vitest';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
 
@@ -466,9 +473,9 @@ describe('ApeX signer admission (RUST_APEXOMNI_SIGNER_ADMISSION.md)', () => {
     expect(deriveBridgeConstruction('apexomni', apex).dispatchSigning).toBe(true);
   });
 
-  it('keeps keyless and remote-signer ApeX accounts on TS until P8', () => {
+  it('keeps the Rust route while beta admission refuses unsupported ApeX signing', () => {
     const remoteSigner = { sign: async () => ({}) } as unknown as ExchangeOptions['remoteSigner'];
-    expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: '', remoteSigner })).toBe(false);
+    expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: '', remoteSigner })).toBe(true);
     expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: 'local' })).toBe(true);
   });
 });

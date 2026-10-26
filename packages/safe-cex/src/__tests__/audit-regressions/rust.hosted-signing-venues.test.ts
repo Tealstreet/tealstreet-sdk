@@ -10,7 +10,7 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
 import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
-import { legacyVenueRegistry } from '../reference/legacyVenueRegistry';
+import { hostedSigningReferenceRegistry } from '../reference/legacyVenueRegistry';
 
 const remoteSigner: RemoteSigner = {
   sign: async () => ({ id: 'never-called' }),
@@ -60,7 +60,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
     for (const name of orderlyNames) {
       const options = { ...orderlyCredentials() };
       const signing = request(name, 'https://api-evm.orderly.org', '/v1/positions');
-      const Venue = await legacyVenueRegistry[name]();
+      const Venue = await hostedSigningReferenceRegistry[name]!();
       const engine = new Venue(name, options, new DefaultStore());
       const venue = new Venue(name, options, new DefaultStore());
       try {
@@ -88,7 +88,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
     for (const name of ['coinbase', 'coinbasespot'] as ExchangeName[]) {
       const options = coinbaseCredentials();
       const signing = request(name, 'https://api.coinbase.com', '/api/v3/brokerage/accounts');
-      const Venue = await legacyVenueRegistry[name]();
+      const Venue = await hostedSigningReferenceRegistry[name]!();
       const engine = new Venue(name, options, new DefaultStore());
       const venue = new Venue(name, options, new DefaultStore());
       try {
