@@ -320,7 +320,7 @@ pub enum CallAuth {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SerialCall {
     pub auth: CallAuth,
-    /// Read or Mutation, under the Plan's admitted credential.
+    /// Read or Mutation, authenticated by this call's declared `auth`.
     pub operation: super::Operation,
     /// The per-call bound: `now + timeout_ms`. The root has no wall-clock.
     pub timeout_ms: u32,
