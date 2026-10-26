@@ -201,15 +201,18 @@ export function venueMarketRules(venue, records, market) {
         rule = (row) => known(10, decimalStep(row.szDecimals), decimalStep(row.szDecimals)); break;
       }
       case 'hyperliquidspot': {
-        if (method !== 'POST' || path !== '/info' || !Array.isArray(payload) || market.quote !== 'USDC') continue;
+        if (method !== 'POST' || path !== '/info' || market.quote !== 'USDC') continue;
         let request;
         try { request = JSON.parse(record.requestBody); } catch { continue; }
         if (request?.type !== 'spotMetaAndAssetCtxs') continue;
+        result = unknown();
+        if (!Array.isArray(payload)) continue;
         const meta = payload[0];
         rows = array(meta?.universe).filter((row) => row?.name === market.id);
         match = () => true;
         rule = (row) => {
-          if (!Number.isSafeInteger(row.index) || row.index < 0 ||
+          if (array(meta.universe).filter((candidate) => candidate?.index === row.index).length !== 1 ||
+            !Number.isSafeInteger(row.index) || row.index < 0 ||
             (row.name.startsWith('@') && row.name !== `@${row.index}`) ||
             !Array.isArray(row.tokens) || row.tokens.length !== 2 ||
             row.tokens.some((index) => !Number.isSafeInteger(index) || index < 0) || row.tokens[0] === row.tokens[1]) return unknown();

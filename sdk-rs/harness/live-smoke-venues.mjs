@@ -172,6 +172,8 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
   };
   for (const [path, suffix] of Object.entries(profile.fields)) read(path, suffix, true);
   for (const [path, suffix] of Object.entries(profile.optionalFields ?? {})) read(path, suffix, false);
+  if (profile.family === 'HYPERLIQUID' && options.key.toLowerCase() === options.applicationId.toLowerCase())
+    throw new Error('Hyperliquid smoke requires an agent wallet distinct from the account');
   const endpointSet = profile.environments[mode];
   const allowUrl = (url, kind) => {
     try {

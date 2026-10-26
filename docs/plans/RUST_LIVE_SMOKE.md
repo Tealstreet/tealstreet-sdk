@@ -155,7 +155,8 @@ native network primitives provide its transport. No engine shapes change.
 Hyperliquid and Hyperliquid Spot share the HYPERLIQUID environment fields:
 SIGNER_ADDRESS is the agent (API) wallet address, PRIVATE_KEY is that agent's
 key, and ACCOUNT_ADDRESS is the funded account. Never provide the main wallet
-key. The mainnet beta run must explicitly use --mainnet and a dedicated account
+key. Equal signer/account addresses refuse; distinct addresses alone do not
+prove that an API wallet was authorized. The mainnet beta run must explicitly use --mainnet and a dedicated account
 with no open orders; use --symbol UBTC/USDC for Spot. Spot leverage is fixed at 1,
 so the harness never attempts a leverage change. Existing write caps, no-retry,
 post-only and fresh cleanup readback checks stay in effect.

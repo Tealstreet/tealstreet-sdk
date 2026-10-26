@@ -207,6 +207,7 @@ test('Hyperliquid Spot sizing binds the exact pair, base lot and USDC quote', ()
     (m) => { m.universe[0].name = '@143'; },
     (m) => { m.universe[0].index = 143; },
     (m) => { m.universe.push({ ...m.universe[0] }); },
+    (m) => { m.universe.push({ ...m.universe[0], name: '@143' }); },
     (m) => { m.universe[0].tokens = [0, 197]; },
     (m) => { m.tokens[0].name = 'HYPE'; },
     (m) => { m.tokens[1].name = 'ETH'; },
@@ -239,4 +240,14 @@ test('Hyperliquid Spot minimum order remains post-only, step-aligned and below t
   assert.ok(order.amount * order.amendPrice >= 10);
   assert.ok(order.amount * order.price <= LIVE_SMOKE_MAX_NOTIONAL);
   assert.ok(Math.abs(order.amount / rules.amountStep - Math.round(order.amount / rules.amountStep)) < 1e-8);
+});
+
+
+test('Hyperliquid Spot full replacement snapshots revoke sizing for absent or renamed pairs', () => {
+  const [, venue, selected, record] = fixtures.find(([family]) => family === 'hyperliquidspot');
+  for (const universe of [[], [{ name: '@143', index: 143, tokens: [197, 0] }]]) {
+    const payload = JSON.parse(record.body); payload[0].universe = universe;
+    assert.deepEqual(venueMarketRules(venue, [record, { ...record, body: JSON.stringify(payload) }], selected),
+      { notionalKnown: false, minNotional: 0 });
+  }
 });

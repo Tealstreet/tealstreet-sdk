@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { liveSmokeProfile, LIVE_SMOKE_VENUES } from './live-smoke-venues.mjs';
 
-const env = new Proxy({}, { get: (_, key) => key.endsWith('SIGNER_TYPE') ? '0' :
+const env = new Proxy({}, { get: (_, key) => key.includes('_HYPERLIQUID_') && key.endsWith('SIGNER_ADDRESS') ? '0x' + '11'.repeat(20) :
+  key.includes('_HYPERLIQUID_') && key.endsWith('ACCOUNT_ADDRESS') ? '0x' + '33'.repeat(20) :
+  key.endsWith('SIGNER_TYPE') ? '0' :
   key.endsWith('API_VERSION') ? 'v3' : 'fake-credential' });
 
 test('OKX smoke profiles use default TLS on the exact live/demo entity host', () => {
@@ -223,4 +225,13 @@ test('Hyperliquid Spot uses the same agent and account fields with fixed leverag
   const testnet = liveSmokeProfile('hyperliquidspot', undefined, env);
   assert.equal(testnet.mode, 'testnet');
   assert.equal(testnet.allowUrl('https://api.hyperliquid.xyz/info'), false);
+});
+
+
+test('Hyperliquid smoke refuses an account wallet supplied as the agent', () => {
+  const prefix = 'RUST_LIVE_SMOKE_HYPERLIQUID_MAINNET_';
+  const values = { [prefix + 'SIGNER_ADDRESS']: '0x' + 'aa'.repeat(20),
+    [prefix + 'PRIVATE_KEY']: 'fixture-agent-secret', [prefix + 'ACCOUNT_ADDRESS']: '0x' + 'AA'.repeat(20) };
+  for (const venue of ['hyperliquid', 'hyperliquidspot'])
+    assert.throws(() => liveSmokeProfile(venue, 'mainnet', values), /^Error: Hyperliquid smoke requires an agent wallet distinct from the account$/);
 });
