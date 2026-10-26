@@ -134,7 +134,7 @@ a mandatory-Some guard preserving the old serial behavior, the new test include,
 and its controls. It grants no keyless write authority.
 
 Thirteen controls execute: twelve behavior assertion REDs and one GREEN, zero
-ignored. Eight fail at the genuine keyless entry assertion, the empty-cleanup
+ignored. Seven fail at the genuine keyless entry assertion, the empty-cleanup
 and mixed-policy controls likewise stop at entry, foreign and retired controls
 observe Invalid instead of Revoked, and the ReadOnly rejection control observes
 that the stub still delegates ordinary ReadOnly admission. Missing methods,
