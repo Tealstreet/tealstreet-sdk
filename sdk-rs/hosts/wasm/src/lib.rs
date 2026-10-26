@@ -53,6 +53,10 @@ use managed_http::{HttpPacket, HttpPhaseOut};
 
 trait AnyEngine {
     #[cfg(feature = "address-nonce")]
+    fn has_started(&self) -> bool {
+        false
+    }
+    #[cfg(feature = "address-nonce")]
     fn address_setup_support(
         &mut self,
         _supported: bool,
@@ -176,6 +180,10 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    #[cfg(feature = "address-nonce")]
+    fn has_started(&self) -> bool {
+        Engine::has_started(self)
+    }
     #[cfg(feature = "address-nonce")]
     fn address_setup_support(
         &mut self,
@@ -1193,6 +1201,12 @@ impl WasmEngine {
     }
 
     pub fn start(&mut self, now: f64) -> String {
+        #[cfg(feature = "address-nonce")]
+        if !self.inner.has_started()
+            && let Err(error) = self.inner.initialize_address_setup(now, false)
+        {
+            return encode(&[Action::Notice(Notice::StartupFailed { error })]);
+        }
         self.inner.start(now);
         self.flush()
     }
@@ -2937,3 +2951,9 @@ mod tests {
         ));
     }
 }
+
+#[cfg(all(test, feature = "address-nonce", feature = "asterdex"))]
+#[path = "../../native/tests/support/address_start.rs"]
+mod address_start_fixture;
+#[cfg(all(test, feature = "address-nonce", feature = "asterdex"))]
+mod address_start_tests;
