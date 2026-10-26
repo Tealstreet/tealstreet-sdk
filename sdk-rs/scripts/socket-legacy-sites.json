@@ -5,12 +5,6 @@
   "venues/apexomni/src/public.rs": {
     "5f909e96e7b6a63ad0bf29ce5603bb2147062337ba502396a0d8a060ef9d8cfb": 1
   },
-  "venues/asterdex/src/account.rs": {
-    "636727ac935b8262441935b36413173080a83d5c18b1f615a67bf2b51264e02b": 1
-  },
-  "venues/asterdex/src/lib.rs": {
-    "2f2da7c6f310b0f056fed7fd7bce4abdeb0976542d25ce0be1a6c90bf46b1599": 1
-  },
   "venues/binance/src/lib.rs": {
     "3060648449b23280179314cd92797f38b0e594ffcf428857b8059f23cba98e0a": 1,
     "914d8478f1d42bb51af9781252934d30705b1b5a520f72db075e320a9fc12dcc": 1,
