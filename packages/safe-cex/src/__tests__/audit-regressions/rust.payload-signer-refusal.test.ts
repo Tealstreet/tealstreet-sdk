@@ -32,7 +32,7 @@ const recordEngine = (name: string, nativeFailure = false) => {
     constructor(venue: string, options: string) {
       construct(venue, JSON.parse(options));
       if (nativeFailure) {
-        const message = `Rust ${venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials.`;
+        const message = `Rust ${venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
         throw Object.assign(new Error(message), { venueError: JSON.stringify({ message, kind: 'unsupported', outcome: 'notSent' }) });
       }
     }
@@ -82,10 +82,10 @@ it.each([
     expect(failure).toMatchObject({
       kind: 'unsupported',
       outcome: 'notSent',
-      message: expect.stringContaining(`Rust ${name} does not support payloadSigner`),
+      message: expect.stringContaining(`Rust ${name} delegated signing is unsupported in this build`),
     });
-    expect((failure as Error).message).toContain('remote signing is unsupported');
-    expect((failure as Error).message).toContain('remove payloadSigner and configure local signing credentials');
+    expect((failure as Error).message).toContain('delegated signing is unsupported in this build');
+    expect((failure as Error).message).toContain('Remove payloadSigner and configure local signing credentials');
     expect(construct).toHaveBeenCalledOnce();
     expect(transport).toHaveBeenCalledOnce();
     expect(io).not.toHaveBeenCalled();
@@ -101,7 +101,7 @@ it('leaves Paradex and explicitly public-only payload signers to native construc
     const { transport } = recordEngine(name);
     // Host creation reaches the constructor; only native policy can refuse it.
     const failure = await start(name, options as Partial<ExchangeOptions>).catch((error: unknown) => error);
-    expect(String((failure as Error)?.message)).not.toContain('does not support payloadSigner');
+    expect(String((failure as Error)?.message)).not.toContain('delegated signing is unsupported in this build');
     expect(transport).toHaveBeenCalled();
   }
 });
@@ -124,7 +124,7 @@ it('reports the structured refusal through start and validateAccount', async () 
   running.push(coinbase);
   await expect(coinbase.validateAccount()).resolves.toMatchObject({
     kind: 'unsupported',
-    error: expect.stringContaining('Rust coinbase does not support payloadSigner'),
+    error: expect.stringContaining('Rust coinbase delegated signing is unsupported in this build'),
   });
   expect(construct).toHaveBeenCalledTimes(2);
   expect(transport).toHaveBeenCalledTimes(2);
