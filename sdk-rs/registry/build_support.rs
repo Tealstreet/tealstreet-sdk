@@ -146,6 +146,7 @@ enum KeyEncoding {
     Pem,
     Base64Text,
     Base58,
+    Base64Url,
 }
 
 #[derive(Debug, Deserialize)]
@@ -470,6 +471,8 @@ mod tests {
         assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None })"));
         let base58 = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"secretEncoding":"base58"}}}}}"#;
         assert!(generate(base58).unwrap().contains("KeyEncoding::Base58"));
+        let url = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"secretEncoding":"base64Url"}}}}}"#;
+        assert!(generate(url).unwrap().contains("KeyEncoding::Base64Url"));
         for field in [
             r#"{"secretEncoding":"base32"}"#,
             r#"{"extra":{"key":"unknownRole"}}"#,
