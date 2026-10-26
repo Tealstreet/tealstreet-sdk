@@ -98,8 +98,12 @@ issue and finish. Until source, the API is an inert stub returning `Invalid`.
 4. Reservation: retirement frees exactly one reserved context immediately, and
    the next step's issue succeeds.
 5. Every step retired, from admission custody, consecutively in one callback:
-   no physical call, and `done_plan` returns native `[]` with no journal leg. The
-   same with `fail_plan` projects NotSent (4yjlw0 a/b/c, dazzy3 P1).
+   no physical call. A Mutation Plan succeeds only with confirmed accepted
+   writes, so both `done_plan` and `fail_plan` project NotSent. A venue whose
+   targets are all closed completes natively with `done_empty_plan` before
+   admission (`[]`), which is a positive control. Ruled with dazzy3 and
+   4yjlw0: there is no engine special case. Native Bitrue drops terminal
+   targets in planning and issues step 0 in the same callback.
 6. A step of two calls: the second Available call retires while the first is
    Active (dazzy3 P2).
 7. Refusals each leave state byte-identical (same available slots, reserved
@@ -117,11 +121,10 @@ A Waiting slot and a slot before its `eligible_at` cannot be named by a venue:
 back. Admission still checks both as defense in depth, with no executable
 control. An expired owner refuses with `validate_plan`'s `TimedOut`.
 
-Executed against the inert stub: 10 tests, 9 assertion RED, 1 GREEN (the
-dependent-Plan refusal, which the stub's `Invalid` satisfies), 0 ignored. The
-serial and barrier refusals are source-stage controls (they need those
-features' fixtures). Suffix assertions after a RED stop are not claimed as
-executed.
+Originals against the inert stub: 10 tests, 9 assertion RED, 1 GREEN (the
+dependent-Plan refusal, which the stub's `Invalid` satisfies). With source,
+all pass: 11 under `http-plans`, plus the serial (`State`) and barrier
+(`Invalid`) source-stage refusals under their features (13 combined).
 
 ## Gates
 

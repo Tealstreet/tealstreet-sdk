@@ -22,6 +22,14 @@ mod retire_unissued_plan_calls {
         width: usize,
         /// End with fail_plan even without a failed call.
         force_fail: bool,
+        /// Every target is already closed at planning: complete before admission.
+        all_closed: bool,
+        /// Admit a serial Plan and try to retire its first call.
+        #[cfg(feature = "serial-plans")]
+        serial: bool,
+        /// Admit one two-call barrier step and try to retire a member.
+        #[cfg(feature = "http-mutation-barriers")]
+        barrier: bool,
         plan: Option<Plan>,
         active: Vec<(Context, Slot)>,
         handled: usize,
@@ -135,6 +143,31 @@ mod retire_unissued_plan_calls {
                     write_credential: credential.clone(),
                 })
                 .unwrap();
+            if self.all_closed {
+                cx.done_empty_plan(&preflight, "[]".into()).unwrap();
+                return;
+            }
+            #[cfg(feature = "serial-plans")]
+            if self.serial {
+                let (plan, slot) = cx
+                    .admit_serial_plan(
+                        &preflight,
+                        crate::request_context::plan::SerialCall {
+                            operation: Operation::Mutation,
+                            timeout_ms: 100,
+                            attempts: 1,
+                        },
+                        crate::request_context::plan::SerialPolicy {
+                            credential: credential.clone().unwrap(),
+                            pacing: None,
+                            refusals_complete: false,
+                        },
+                    )
+                    .unwrap();
+                self.retires.push(cx.retire_unissued_plan_call(&plan, &slot));
+                cx.fail_plan(&plan, "serial refusal control").unwrap();
+                return;
+            }
             let call: Vec<CallBound<'_>> = (0..self.width.max(1))
                 .map(|_| CallBound {
                     timeout_ms: 100,
@@ -149,19 +182,29 @@ mod retire_unissued_plan_calls {
                     calls: &call,
                 })
                 .collect();
-            let plan = cx
-                .admit_plan(
-                    &preflight,
-                    &steps,
-                    PlanPolicy {
-                        independent_calls: !self.dependent,
-                        operation: Operation::Mutation,
-                        credential,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    },
-                )
-                .unwrap();
+            let policy = PlanPolicy {
+                independent_calls: !self.dependent,
+                operation: Operation::Mutation,
+                credential,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            };
+            #[cfg(feature = "http-mutation-barriers")]
+            if self.barrier {
+                let plan = cx
+                    .admit_plan_with_barriers(
+                        &preflight,
+                        &steps,
+                        policy,
+                        &[crate::request_context::plan::MutationBarrierBound { step: 0 }],
+                    )
+                    .unwrap();
+                let slot = cx.plan_slots(&plan).unwrap().remove(1);
+                self.retires.push(cx.retire_unissued_plan_call(&plan, &slot));
+                cx.fail_plan(&plan, "barrier refusal control").unwrap();
+                return;
+            }
+            let plan = cx.admit_plan(&preflight, &steps, policy).unwrap();
             self.plan = Some(plan);
             self.next(cx);
         }
@@ -429,15 +472,31 @@ mod retire_unissued_plan_calls {
     }
 
     #[test]
-    fn every_step_retired_at_entry_completes_with_no_physical_call() {
-        // 4yjlw0 (a)(b)(c), dazzy3 P1: retire at admission custody, consecutive
-        // retirements in one callback, then done_plan with no journal leg.
+    fn every_step_retired_at_entry_cannot_succeed() {
+        // 4yjlw0 (a)(b), dazzy3 P1 as amended: consecutive retirements at
+        // admission custody are allowed, but a Mutation Plan with no confirmed
+        // accepted write cannot succeed; done_plan projects NotSent.
         let (e, actions) = start(Skipper::new(3, &[0, 1, 2]));
         assert_eq!(e.venue.retires, vec![Ok(()), Ok(()), Ok(())]);
         assert_eq!(e.venue.sent, 0);
         assert_eq!(prepares(&actions), 0);
-        assert_eq!(terminals(&actions), vec![Ok("[]".into())], "native []");
+        let [Err(error)] = &terminals(&actions)[..] else {
+            panic!("one failure terminal: {:?}", terminals(&actions));
+        };
+        assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
         assert_eq!(e.io.core.request_contexts.plan_context_storage().2, 0);
+    }
+
+    #[test]
+    fn all_closed_targets_complete_natively_before_admission() {
+        // Native []: a venue whose targets are all closed never admits a Plan.
+        let (e, actions) = start(Skipper {
+            all_closed: true,
+            ..Skipper::new(3, &[])
+        });
+        assert_eq!(terminals(&actions), vec![Ok("[]".into())]);
+        assert_eq!(prepares(&actions), 0);
+        assert!(e.venue.plan.is_none());
     }
 
     #[test]
@@ -465,5 +524,26 @@ mod retire_unissued_plan_calls {
         let actions = answer(&mut e, first, 200, 1.);
         assert_eq!(terminals(&actions), vec![Ok("[]".into())]);
         assert_eq!(e.venue.sent, 1);
+    }
+
+    #[cfg(feature = "serial-plans")]
+    #[test]
+    fn a_serial_plan_refuses_retirement() {
+        let (e, _) = start(Skipper {
+            serial: true,
+            ..Skipper::new(1, &[])
+        });
+        assert_eq!(e.venue.retires, vec![Err(Error::State)]);
+    }
+
+    #[cfg(feature = "http-mutation-barriers")]
+    #[test]
+    fn a_barrier_group_member_refuses_retirement() {
+        let (e, _) = start(Skipper {
+            barrier: true,
+            width: 2,
+            ..Skipper::new(1, &[])
+        });
+        assert_eq!(e.venue.retires, vec![Err(Error::Invalid)]);
     }
 }
