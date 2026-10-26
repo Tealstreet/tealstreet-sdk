@@ -507,37 +507,59 @@ fn a_v3_stp_read_signs_as_the_read_agent_and_a_write_as_the_primary() {
     );
 }
 
-/// Declares the fixture's capabilities but refuses every signature.
-struct Refusing(std::sync::Arc<dyn safe_cex_engine::signing::Signer>, bool);
+/// Delegates admission and owned address setup to the fixture provider, so
+/// setup verifies the real address; refuses every business signature and
+/// counts each refusal.
+struct Refusing {
+    inner: std::sync::Arc<dyn safe_cex_engine::signing::Signer>,
+    immediate: bool,
+    refused: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+impl Refusing {
+    fn refuse(&self) -> safe_cex_engine::signing::SignError {
+        self.refused
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        safe_cex_engine::signing::SignError::Refused
+    }
+}
 impl safe_cex_engine::signing::Signer for Refusing {
     fn immediate(&self) -> bool {
-        self.1
+        self.immediate
     }
     fn sign(
         &self,
         _: safe_cex_engine::signing::SignRequest,
     ) -> safe_cex_engine::signing::SignFuture {
-        Box::pin(std::future::ready(Err(
-            safe_cex_engine::signing::SignError::Refused,
-        )))
+        Box::pin(std::future::ready(Err(self.refuse())))
     }
     fn sign_ready(
         &self,
         _: &safe_cex_engine::signing::SignRequest,
     ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
     {
-        Some(Err(safe_cex_engine::signing::SignError::Refused))
+        self.immediate.then(|| Err(self.refuse()))
     }
     fn can_sign(
         &self,
         key: &safe_cex_engine::signing::KeyRef,
         algorithm: safe_cex_engine::signing::Algorithm,
     ) -> safe_cex_engine::signing::Capability {
-        self.0.can_sign(key, algorithm)
+        self.inner.can_sign(key, algorithm)
+    }
+    fn owned_public_address_capability(&self) -> safe_cex_engine::signing::Capability {
+        self.inner.owned_public_address_capability()
+    }
+    fn create_public_address_setup(
+        &self,
+        request: safe_cex_engine::signing::SignRequest,
+    ) -> Option<Box<dyn safe_cex_engine::signing::OwnedSetupExecution>> {
+        self.inner.create_public_address_setup(request)
     }
 }
 
 /// A signer refusal happens before release, so the write is provably not sent.
+/// The refusing provider is installed before setup, so V3 slots are verified
+/// and the business signature itself is what refuses.
 #[test]
 fn a_refused_write_signature_is_not_sent() {
     for (options, immediate) in [
@@ -552,15 +574,53 @@ fn a_refused_write_signature_is_not_sent() {
     .flat_map(|options| [(options.clone(), true), (options, false)])
     {
         let (venue, provider, identities) = options.build_installed();
+        let refused = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let signer = std::sync::Arc::new(Refusing {
+            inner: provider,
+            immediate,
+            refused: refused.clone(),
+        });
         let mut e = safe_cex_engine::test_support::seeded_engine(venue);
-        e.set_signer(Some(provider.clone())).unwrap();
+        e.set_signer(Some(signer.clone())).unwrap();
         e.set_identities(identities).unwrap();
         e.initialize_address_nonce(0.0).unwrap();
-        e.set_signer(Some(std::sync::Arc::new(Refusing(provider, immediate))))
-            .unwrap();
+        assert!(e.address_nonce_setup_ready(), "setup must complete");
         e.store_mut().set_markets(vec![market()]);
-        let failed = command(&mut e, place());
+        let mut failed = command(&mut e, place());
+        // An asynchronous provider is the host's to drive: answer each Sign
+        // with the provider's own future, as a host does.
+        for _ in 0..4 {
+            let mut signs = Vec::new();
+            failed.actions.retain(|action| match action {
+                Action::Sign { attempt, work, .. } => {
+                    signs.push((*attempt, work.clone()));
+                    false
+                }
+                _ => true,
+            });
+            if signs.is_empty() {
+                break;
+            }
+            for (attempt, work) in signs {
+                use safe_cex_engine::signing::Signer;
+                let mut future = signer.sign(work);
+                let std::task::Poll::Ready(result) = future
+                    .as_mut()
+                    .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+                else {
+                    panic!("the refusing provider completes at once");
+                };
+                e.handle(NOW, Event::Signed { attempt, result });
+                let more = drain(&mut e, NOW);
+                failed.requests.extend(more.requests);
+                failed.actions.extend(more.actions);
+            }
+        }
         assert!(failed.requests.is_empty());
+        assert!(
+            refused.load(std::sync::atomic::Ordering::SeqCst) > 0,
+            "immediate {immediate}: the business signature must be what refused"
+        );
         let error = terminal(&failed).expect("one terminal").unwrap_err();
         assert_eq!(
             error.outcome,
