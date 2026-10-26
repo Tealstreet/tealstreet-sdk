@@ -1157,7 +1157,7 @@ impl Hyperliquid {
                 if (job.effective || !job.ids.is_empty())
                     && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
                 {
-                    error.outcome = None;
+                    error.outcome = Some(Outcome::Unknown);
                 }
                 cx.fail(job.command, error);
                 self.pump_trades(cx);

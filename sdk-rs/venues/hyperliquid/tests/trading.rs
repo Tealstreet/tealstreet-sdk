@@ -1348,7 +1348,8 @@ fn write_failures_are_classified_without_changing_their_text() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order price too far"}]}}}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(error.outcome, None);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["1"]);
     // Transport loss on a write is Unknown.
     let (mut e, _) = ready("disabled");
     e.handle(

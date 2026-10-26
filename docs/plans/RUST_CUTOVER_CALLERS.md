@@ -9614,5 +9614,6 @@ order IDs and Unknown for a mixed result; it never reports the whole batch as
 rejected or resends it. Accepted rows run the normal account reducer. A mixed
 cancel removes successful/terminal legs and restores only refused legs, so a
 cancelled order is never resurrected. All-refused batches retain Rejected with
-no accepted IDs. This deliberately fixes the native early-error return; existing
+no accepted IDs. An accepted earlier physical call followed by a later refusal
+also retains its IDs and projects Unknown. This deliberately fixes the native early-error return; existing
 custody originals that described its dropped-ID behaviour now pin this contract.
