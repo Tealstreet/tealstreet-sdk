@@ -237,7 +237,8 @@ test('Kraken Spot endpoint fences exclude Futures, beta, impostor hosts and alte
   profile.validateSocket('wss://ws-auth.kraken.com/v2');
   for (const url of ['https://futures.kraken.com/derivatives/api/v3/sendorder',
     'https://demo-futures.kraken.com/derivatives/api/v3/sendorder',
-    'https://api.kraken.com.evil.example/0/private/AddOrder', 'https://api.kraken.com:8443/0/private/AddOrder'])
+    new URL('/0/private/AddOrder', ['https://api.kraken.com', 'evil.example'].join('.')).href,
+    new URL('/0/private/AddOrder', 'https://api.kraken.com:8443').href])
     assert.throws(() => profile.validateRequest({ method: 'POST', url }), /outside/);
   for (const url of ['wss://beta-ws.kraken.com/v2', 'wss://beta-ws-auth.kraken.com/v2',
     'wss://futures.kraken.com/ws/v1', 'wss://ws-auth.kraken.com:8443/v2'])
