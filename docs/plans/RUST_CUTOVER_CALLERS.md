@@ -9207,6 +9207,22 @@ Every Bitrue HTTP request except trading now runs under engine-managed authority
 - **B1 interim (deleted by B2).** While a protective census is pending, an order read's census result and its queue bookkeeping run one tick later from a zero-delay timer, in native order, because the census still completes a legacy trading command.
 - **Fixtures.** Tests drive managed reads through `prepared_actions`, take socket and request IDs from their actions, and read routes from the preparation intent.
 
+
+## Hosted signing ownership metadata
+
+EngineHost reads signMeta once for a current Action::Sign before the provider
+microtask. A provider may receive a deeply frozen meta beside its AbortSignal;
+the engine supplies task, genuine owner, raw absolute deadline, slot and role.
+This is local ownership metadata, not peer capability or a caller-selected ref.
+Legacy engines and invalid/ordinary-failing exports retain exactly {signal}.
+WASM traps and RangeError remain fatal with no callback or pending revival.
+The closed parser also drops impossible Session/role and Secondary/role pairs.
+These rules are pinned by 55 host controls; they change no request, retry,
+financial outcome or authentication latch. Negotiated v2 refuses missing
+ownership before transport; no route, timeout or method fabricates metadata.
+Setup ownership remains a distinct reviewed extension with its own negotiated
+owned-execution and retirement support, not a SessionAuth substitute.
+
 ### Phemex final four: late repair authority
 
 Late cancel-only requests spend engine repair subjects minted at the original admitted cancel-all entry. Primary signing, native symbol/side groups, chunks of ten, FIFO, immediate stream discovery, signing-expiry-plus-5000 read discovery, no resend, and original command terminals are retained. A refused admission emits the native manual-cancel diagnostic without publishing Canceling; a repeat observation does not retry it. The 20-second per-call bound now includes preparation, signing and queue time as well as native physical HTTP; no aggregate repair lifetime is added.
