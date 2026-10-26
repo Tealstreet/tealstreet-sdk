@@ -43,7 +43,7 @@ Rust accounts load `dist/wasm/rust/safe_cex_wasm.cjs` and its sibling WASM.
 Build the pinned Rust engine from the repository root with `corepack yarn -s
 rust:build-wasm` before the package build; the existing release job does this.
 The `rust-smoke.mjs` probe copies release-owned assets outside the checkout and
-starts a real native Coinbase catalog, so workspace resolution cannot mask a
+starts a real native Binance Spot catalog, so workspace resolution cannot mask a
 missing artifact. `EXCHANGE_ENGINE=rust` remains a compatible input; the beta registry always
 selects Rust and rejects OUT names with typed Unsupported/NotSent before I/O. Tests selected by `SAFE_CEX_WASM_TESTS=1`
 exercise real protocol tool calls and account state, using documented inputs.
