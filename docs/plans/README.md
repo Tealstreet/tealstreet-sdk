@@ -490,3 +490,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Retire an unissued independent Plan call | Plan/originals CLEAR (dazzy3, 4yjlw0); source review pending | Before a venue skips a declared complete-Plan call it decides not to send (Bitrue B2 cancel batches). | [RUST_PLAN_RETIRE_UNISSUED.md](RUST_PLAN_RETIRE_UNISSUED.md) |
 
 | WOO unsigned public-seed read custody | Local source/fixtures CLEAR;264PASS, sizes fit; unpushed, CI pending | Before converting Markets, Tickers or Funding to independent Background Read observations. | [RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md](RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md) |
+
+| Bitget history Read funnel | Source CLEAR; correctness green; direct overseer landing GO | Before changing history caller bounds, paging, promotion, retry custody or selected identity. | [RUST_BITGET_HISTORY_READ_FUNNEL.md](RUST_BITGET_HISTORY_READ_FUNNEL.md) |
+
+| Phemex late cancel repair: final four | Source CLEAR; correctness green; direct overseer landing GO | Before retiring Phemex’s four commandless late-cancel request holdouts. | [RUST_PHEMEX_LATE_REPAIR_CONTEXT.md](RUST_PHEMEX_LATE_REPAIR_CONTEXT.md) |
