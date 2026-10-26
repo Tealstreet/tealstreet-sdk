@@ -77,6 +77,10 @@ pub struct Account {
     reconcile_owed: bool,
     /// The order read in flight started after every such ask, so it may release the fence.
     order_read_fresh: bool,
+    /// Bumped at every write dispatch and end. A census whose count moved between its
+    /// Orders leg and its last leg may have read a page before a lost write: re-census.
+    pub(crate) writes: u64,
+    census_writes: u64,
     order_versions: HashMap<String, u64>,
     position_versions: HashMap<String, u64>,
     symbol_closures: HashMap<String, (u64, f64)>,
@@ -796,6 +800,7 @@ impl Cryptocom {
                     self.account.order_revision = self.account.revision;
                     self.account.order_read_fresh =
                         std::mem::take(&mut self.account.reconcile_owed);
+                    self.account.census_writes = self.account.writes;
                     self.read_account(cx, Read::Orders, 0);
                 } else {
                     self.account.count += 1;
@@ -864,10 +869,15 @@ impl Cryptocom {
                                 .retain(|id| regular.iter().any(|row| row.id == *id));
                             regular
                         });
-                        // Both lists published cleanly from a read started after the mark.
+                        // Both lists published cleanly from a read started after the mark,
+                        // with no write dispatched or ended while either leg was out.
                         if committed && clean && std::mem::take(&mut self.account.order_read_fresh)
                         {
-                            cx.orders_reconciled(None);
+                            if self.account.writes == self.account.census_writes {
+                                cx.orders_reconciled(None);
+                            } else {
+                                self.account.reconcile_owed = true;
+                            }
                         }
                     }
                     self.account.count += 1;

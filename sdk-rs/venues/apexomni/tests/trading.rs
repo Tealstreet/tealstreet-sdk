@@ -1854,3 +1854,71 @@ fn engine_re_asks_join_the_fresh_read_in_flight_and_its_clean_answer_releases() 
     assert!(!refused(&retry), "the held fresh read releases the fence");
     assert_eq!(order_writes(&retry), 1, "the retry places once released");
 }
+
+/// Cancel-all on a symbol with an Unknown placement is refused NotSent until the
+/// fresh order read releases the fence (default `fence_uncertain_cancel_all`).
+#[test]
+fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() {
+    const EMPTY: &str = r#"{"code":0,"data":[]}"#;
+    let cancel_all = |e: &mut TestEngine, now: f64, command: safe_cex_engine::CommandId| {
+        e.handle(
+            now,
+            Event::Command(Command::CancelSymbolOrders {
+                command,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        actions(e)
+    };
+    let cancels = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/delete-open-orders")))
+            .count()
+    };
+    let (mut e, _) = ready_with_socket();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::PlaceOrders {
+            command: 42,
+            orders: vec![order(serde_json::json!({ "clientOrderId": "first" }))],
+        }),
+    );
+    let write = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/order"))
+        .expect("the placement write");
+    e.handle(
+        NOW + 20.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "connection reset after write",
+        },
+    );
+    let fresh = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the fresh reconcile read");
+
+    let fenced = cancel_all(&mut e, NOW + 30.0, 43);
+    assert!(
+        fenced.iter().any(
+            |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 43, error })
+            if error.message.contains("reconcile before cancel-all")
+                && error.outcome == Some(safe_cex_engine::Outcome::NotSent))
+        ),
+        "cancel-all is refused NotSent while the placement is uncertain"
+    );
+    assert_eq!(cancels(&fenced), 0, "nothing is cancelled while fenced");
+
+    response(&mut e, &fresh, NOW + 40.0, EMPTY);
+    actions(&mut e);
+    let released = cancel_all(&mut e, NOW + 50.0, 44);
+    assert!(
+        !released
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 44, .. }))),
+        "a fresh clean read releases cancel-all"
+    );
+    assert_eq!(cancels(&released), 1, "cancel-all is sent once released");
+}
