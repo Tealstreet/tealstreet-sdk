@@ -337,3 +337,21 @@ fn lighter_principal_refuses_invalid_scalar_before_installation() {
         ));
     }
 }
+
+#[cfg(feature = "schnorr")]
+#[test]
+fn lighter_blank_key_does_not_leave_an_orphaned_credential() {
+    let (signer, ids, facts) = installed(Some(json!(" \t")), false, 1);
+    let old = KeyRef("primary.credential".into());
+    assert_eq!(facts.primary_key(), KeyPresence::Blank);
+    assert_ne!(ids.primary.unwrap().credential, old);
+    assert!(
+        !signer.keys.contains_key(&old),
+        "the replaced blank credential is retired"
+    );
+    assert!(
+        signer
+            .sign_now(&request(Operation::Present { key: old }))
+            .is_err()
+    );
+}
