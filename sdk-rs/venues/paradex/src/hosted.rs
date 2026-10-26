@@ -460,9 +460,20 @@ pub fn validate(
     fresh.then_some(()).ok_or(DescriptorError::Skew)
 }
 
-/// The native typed-data hashes to sign, through the same builder local signing
-/// uses.
-pub fn digests(
+/// The only public way to obtain hashes to sign: the time policy runs first,
+/// so no caller can hash a descriptor without its deadline and skew checks.
+pub fn validated_digests(
+    descriptor: &ParadexDescriptor,
+    binding: &ParadexBinding,
+    peer_now_ms: f64,
+    deadline_ms: f64,
+) -> Result<Digests, DescriptorError> {
+    validate(descriptor, peer_now_ms, deadline_ms)?;
+    digests(descriptor, binding)
+}
+
+/// The native typed-data hashes, through the same builder local signing uses.
+fn digests(
     descriptor: &ParadexDescriptor,
     binding: &ParadexBinding,
 ) -> Result<Digests, DescriptorError> {

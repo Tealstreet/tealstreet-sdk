@@ -2,7 +2,7 @@
 //! table, time policy, and digests equal to independent starknet-js hashes and
 //! to local signing (RUST_PARADEX_HOSTED_STARK_CONSUMER.md).
 use safe_cex_venue_paradex::hosted::{
-    DescriptorError, ParadexBinding, ParadexDescriptor, digests, validate,
+    DescriptorError, ParadexBinding, ParadexDescriptor, validate, validated_digests,
 };
 use safe_cex_venue_paradex::sign::{Credentials, SystemConfig};
 use serde::Deserialize;
@@ -86,9 +86,18 @@ fn modify(now_ms: u64, kind: &str, price: &str, trigger: Option<&str>) -> Value 
         "triggerPrice": trigger})
 }
 
+/// Digests at the corpus clock, inside its deadline.
+fn signable(
+    descriptor: &ParadexDescriptor,
+    case: &Case,
+) -> Result<safe_cex_venue_paradex::hosted::Digests, DescriptorError> {
+    let now = case.now as f64;
+    validated_digests(descriptor, &binding(case), now, now + 1_000.)
+}
+
 fn single(value: &Value, case: &Case) -> String {
     let descriptor = parse(value).unwrap();
-    let digests = digests(&descriptor, &binding(case)).unwrap();
+    let digests = signable(&descriptor, case).unwrap();
     assert_eq!(digests.as_slice().len(), 1);
     hex(&digests.as_slice()[0])
 }
@@ -183,7 +192,7 @@ fn a_batch_returns_one_digest_per_item_in_order() {
         items.push(item);
     }
     let descriptor = parse(&batch(items.clone())).unwrap();
-    let all = digests(&descriptor, &binding(case)).unwrap();
+    let all = signable(&descriptor, case).unwrap();
     assert_eq!(all.as_slice().len(), 10);
     for (item, digest) in items.into_iter().zip(all.as_slice()) {
         assert_eq!(hex(digest), single(&create("orders", item), case));
@@ -428,4 +437,25 @@ fn binding_refuses_a_zero_account_or_unknown_chain() {
         ),
         Err(DescriptorError::Binding)
     );
+}
+
+#[test]
+fn expired_or_skewed_descriptors_yield_no_digests() {
+    let case = &corpus()[0];
+    let descriptor = parse(&create("orders", order(case.now))).unwrap();
+    let now = case.now as f64;
+    let bind = binding(case);
+    assert_eq!(
+        validated_digests(&descriptor, &bind, now, now),
+        Err(DescriptorError::Deadline)
+    );
+    assert_eq!(
+        validated_digests(&descriptor, &bind, now + 30_001., now + 60_000.),
+        Err(DescriptorError::Skew)
+    );
+    assert_eq!(
+        validated_digests(&descriptor, &bind, f64::NAN, now),
+        Err(DescriptorError::Time)
+    );
+    assert!(validated_digests(&descriptor, &bind, now, now + 1.).is_ok());
 }
