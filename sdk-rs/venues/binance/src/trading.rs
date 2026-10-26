@@ -1054,8 +1054,9 @@ impl BinanceFutures {
         // Binance allows one closePosition order per direction per symbol.
         let mut replaced: Vec<Order> = Vec::new();
         let pm = self.options.portfolio_margin;
+        let replaces_close_orders = !pm && !self.is_spot();
         for opts in orders {
-            if !pm {
+            if replaces_close_orders {
                 for existing in self.conflicting_close_orders(cx, opts) {
                     if !replaced.iter().any(|o| o.id == existing.id) {
                         replaced.push(existing);
@@ -1288,9 +1289,8 @@ impl BinanceFutures {
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
     ) -> Result<Vec<Params>, String> {
-        if opts.reduce_only == Some(true) || opts.close == Some(true) {
-            return Err("Binance Spot does not support reduceOnly or closePosition".into());
-        }
+        // Spot has no position to reduce, so the flags are dropped as in TS; a sell
+        // beyond the balance fails at Binance.
         if matches!(
             opts.kind,
             OrderType::TrailingStopLoss | OrderType::Conditional

@@ -9749,3 +9749,10 @@ rows if such a venue is ever fronted by CloudFront.
 ### Bitunix account read classification (P1 #33)
 
 A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
+
+### Binance Spot: reduceOnly and close are ignored, as in TypeScript
+
+Binance Spot placement no longer rejects `reduceOnly: true` or `close: true`.
+Spot has no position to reduce, so both flags are dropped and never sent; a
+sell beyond the balance fails at Binance. Spot `conditional` and trailing
+orders are still refused, exactly as TypeScript refuses them.
