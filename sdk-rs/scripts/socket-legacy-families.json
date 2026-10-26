@@ -2,7 +2,6 @@
   "temporaryFeature": "managed-sockets",
   "sourceRoots": {
     "apexomni": "venues/apexomni/src/",
-    "asterdex": "venues/asterdex/src/",
     "binance": "venues/binance/src/",
     "bingx": "venues/bingx/src/",
     "bitget": "venues/bitget/src/",
