@@ -9826,3 +9826,11 @@ Raw compatibility and explicit setup both construct a real installed provider,
 retain private capability, and start managed discovery. Native constructor and
 compiled-family integration controls exercise both paths with the public zkLink
 seed corpus. The cross-venue construction feature guard is a separate follow-up.
+
+### Isolated WASM construction feature guard
+
+The construction guard checks every declared venue through its actual family
+alias and transitive local Cargo features. Setup mappings declare their required
+bootstrap features; AsterDEX additionally requires address setup and signing
+metadata. Combined default features cannot satisfy an isolated family's check.
+Negative controls pin missing features and reject unknown setup mappings.
