@@ -45,7 +45,6 @@ parser.add_argument('--out', required=True)
 parser.add_argument('--check-only', action='store_true')
 parser.add_argument('--authority', required=True)
 parser.add_argument('--module-path', required=True)
-parser.add_argument('--candidate-cache')
 args = parser.parse_args()
 root = Path.cwd()
 refs = {'baseline': args.baseline, 'candidate': args.candidate}
@@ -132,34 +131,15 @@ for arm, ref in refs.items():
     phase = result_root / arm
     phase.mkdir()
     try:
-        if arm == 'candidate' and args.candidate_cache:
-            insist(authority['witness'] == 'anchor', 'candidate reuse is anchor-only')
-            cache = Path(args.candidate_cache).resolve()
-            insist(cache == result_root.parent.parent / 'tip/records/candidate', 'candidate cache must be this physical job tip build')
-            logged(['node', 'sdk-rs/harness/ci-wasm.mjs', '--venue', 'bitget',
-                    '--verify', str(cache / 'node')], phase / 'archive.log')
-            for name in ('node', 'shipped'):
-                shutil.copytree(cache / name, phase / name)
-            for name in ('raw.wasm', 'web.wasm', 'budget.json'):
-                shutil.copy2(cache / name, phase / name)
-            budget = json.loads((phase / 'budget.json').read_text())
-        else:
-            logged(['bash', 'sdk-rs/harness/build.sh', '--venue', 'bitget'], phase / 'build.log')
-            logged(['node', 'sdk-rs/harness/wasm-budget.mjs', '--venue', 'bitget'], phase / 'budget.log')
-            budget = json.loads(Path('sdk-rs/harness/out/wasm-budget-venue.json').read_text())
-            write_json(phase / 'budget.json', budget)
-            logged(['node', 'sdk-rs/harness/ci-wasm.mjs', '--venue', 'bitget',
-                    '--archive', str(phase / 'node')], phase / 'archive.log')
-            shutil.copy2('sdk-rs/target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm', phase / 'raw.wasm')
-            shutil.copy2('sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm', phase / 'web.wasm')
-            for target in ('node', 'web'):
-                shipped = phase / 'shipped' / target
-                shipped.mkdir(parents=True)
-                names = ['safe_cex_wasm.js', 'safe_cex_wasm_bg.wasm', 'safe_cex_wasm.d.ts', 'safe_cex_wasm_bg.wasm.d.ts']
-                if target == 'node':
-                    names.append('package.json')
-                for name in names:
-                    shutil.copy2('sdk-rs/hosts/wasm/pkg/' + target + '/' + name, shipped / name)
+        logged(['bash', 'sdk-rs/harness/build.sh', '--venue', 'bitget'], phase / 'build.log')
+        logged(['node', 'sdk-rs/harness/wasm-budget.mjs', '--venue', 'bitget'], phase / 'budget.log')
+        budget = json.loads(Path('sdk-rs/harness/out/wasm-budget-venue.json').read_text())
+        write_json(phase / 'budget.json', budget)
+        logged(['node', 'sdk-rs/harness/ci-wasm.mjs', '--venue', 'bitget',
+                '--archive', str(phase / 'node')], phase / 'archive.log')
+        shutil.copy2('sdk-rs/target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm',
+                     phase / 'raw.wasm')
+        shutil.copy2('sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm', phase / 'web.wasm')
         shipped = phase / 'node/safe_cex_wasm_bg.wasm'
         size_records[arm] = {'source': ref, 'budgetBytes': budget['budgetBytes'], 'nodeBytes': shipped.stat().st_size,
                              'webBytes': (phase / 'web.wasm').stat().st_size,
