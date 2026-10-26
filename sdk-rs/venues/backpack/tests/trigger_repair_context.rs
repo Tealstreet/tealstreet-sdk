@@ -342,9 +342,20 @@ macro_rules! unsafe_baseline {
         }
     };
 }
-unsafe_baseline!(nan_snapshot_is_not_zero_fill_proof, "\"NaN\"");
-unsafe_baseline!(infinite_snapshot_is_not_zero_fill_proof, "\"Infinity\"");
-unsafe_baseline!(
+macro_rules! invalid_snapshot {
+    ($name:ident, $fill:expr) => {
+        #[test]
+        fn $name() {
+            let (e, _, work) = discover(&format!("[{}]", old($fill)));
+            assert!(e.store().order("123").is_none(), "strict native decoder rejects nonfinite rows");
+            no_place(&work);
+            assert!(!work.iter().any(|p| p.request.method == Method::Delete));
+        }
+    };
+}
+invalid_snapshot!(nan_snapshot_is_not_zero_fill_proof, "\"NaN\"");
+invalid_snapshot!(infinite_snapshot_is_not_zero_fill_proof, "\"Infinity\"");
+invalid_snapshot!(
     negative_infinite_snapshot_is_not_zero_fill_proof,
     "\"-Infinity\""
 );

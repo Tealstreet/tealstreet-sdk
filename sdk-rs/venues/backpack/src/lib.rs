@@ -3,6 +3,7 @@ mod account;
 mod depth_query;
 mod history;
 mod identity;
+mod repair;
 pub mod sign;
 mod socket_codec;
 mod trading;
@@ -57,6 +58,7 @@ pub enum Pending {
     },
     Account(Box<account::Request>),
     Trade(trading::Request),
+    Repair(Box<repair::Request>),
     History(Box<history::Request>),
     Markets {
         context: Context,
@@ -158,6 +160,7 @@ pub struct Backpack {
     reread_stalls: u8,
     account: account::Account,
     trading: trading::Trading,
+    repairs: repair::Repairs,
     generation: u64,
 }
 
@@ -420,6 +423,7 @@ impl Backpack {
             reread_stalls: 0,
             account: account::Account::default(),
             trading: trading::Trading::default(),
+            repairs: repair::Repairs::default(),
             generation: 0,
         }
     }
@@ -1049,6 +1053,10 @@ impl Venue for Backpack {
             self.history_response(cx, *request, response);
             return;
         }
+        if let Pending::Repair(request) = pending {
+            self.repair_response(cx, *request, response);
+            return;
+        }
         if let Pending::Trade(request) = pending {
             self.trade_response(cx, request, response);
             return;
@@ -1124,6 +1132,7 @@ impl Venue for Backpack {
                 self.history_failed(cx, *request, error);
             }
             Pending::Identity(request) => self.identity_failed(cx, request, error),
+            Pending::Repair(request) => self.repair_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error);
@@ -1170,9 +1179,17 @@ impl Venue for Backpack {
             ),
             Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Identity(request) => self.identity_failed(cx, request, error),
+            Pending::Repair(request) => self.repair_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
+    }
+    fn on_repair_notice(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        notice: safe_cex_engine::repair::RepairNotice<'_>,
+    ) {
+        self.repair_notice(cx, notice);
     }
     fn on_http_plan_ready(
         &mut self,
@@ -1195,6 +1212,7 @@ impl Venue for Backpack {
         safe_cex_engine::request_context::Error,
     > {
         match pending {
+            Pending::Repair(request) => self.repair_reconciliation(request),
             Pending::Trade(request) => request.reconciliation(),
             _ => Err(safe_cex_engine::request_context::Error::Invalid),
         }
