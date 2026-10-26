@@ -230,7 +230,8 @@ generation, result AND resource-join contract and RetireAddressSetup lifecycle.
 Do not manufacture a Mutation/Session owner or accept arbitrary role-less work.
 This source must land before HL consumes it.
 
-PayloadSigner is an explicit structured HL scheme owned by this PR, with
+PayloadSigner is an explicit structured HL scheme owned by the future HL source
+slice, with
 9czdjh shared-host and kuhwxi security review of PayloadSignerRequest. It uses
 that SAME v2 frame/channel and codec: the validated action/nonce/vault/network
 descriptor in, the family codec's complete SignResult shape and exact receipt
@@ -330,8 +331,9 @@ separately. Feature-off/nonadopter checks must demonstrate the actual cost.
 
 Then scoped native and JS/TS tests, strict clippy/fmt/typecheck/lint, bans, hosted
 JS/WASM round trips, HL/Spot replay measurement, current-tip composition and one
-reviewer CLEAR. Publish source only after the plan/shared directions are settled.
-Send exact head/tree, correctness, family/combined and hosted evidence to 8x5tm1;
+reviewer CLEAR. This PR publishes the plan only. Future source requires renewed
+post-beta authorization plus the settled plan/shared directions and actual
+prerequisite landings. Send exact head/tree, correctness, family/combined and hosted evidence to 8x5tm1;
 merge only on auditor GO with a head-matched guarded merge. No CPU wait or
 production-bundle release is implied by this beta branch.
 
