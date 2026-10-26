@@ -1810,7 +1810,7 @@ mod tests {
             ));
         }
 
-        // Unmigrated control family: MEXC (moved from Bitunix by #2190).
+        // Provider-enabled MEXC discovery still has no signing authority.
         #[cfg(feature = "mexc")]
         #[test]
         fn shared_provider_feature_keeps_managed_public_mexc_unsigned() {
@@ -1819,7 +1819,7 @@ mod tests {
             else {
                 panic!("public MEXC setup must remain native-safe and successful");
             };
-            assert!(!engine.dispatch_signing);
+            assert!(engine.dispatch_signing);
             assert!(!engine.requires_external_signer());
             #[derive(serde::Deserialize)]
             struct Packet {
