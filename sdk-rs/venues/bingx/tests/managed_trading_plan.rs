@@ -873,10 +873,10 @@ fn assert_fence_clears_only_on_the_primary_snapshot(
     );
 }
 
-/// Native BingX keeps cancel-all concurrent with placement, so a lost create
-/// reconciles on the primary key but does not fence cancel-all (ruled parity).
+/// The beta ruling keeps cancel-all fenced: an Unknown create may land after
+/// the native DELETE, and BingX has no automatic late-landing cancellation.
 #[test]
-fn lost_create_reconciles_on_the_primary_key_without_fencing_cancel_all() {
+fn lost_create_fences_cancel_all_until_the_fresh_primary_read() {
     let mut e = engine();
     place(&mut e, 1);
     let first = packet(&collect(&mut e, START));
@@ -892,12 +892,7 @@ fn lost_create_reconciles_on_the_primary_key_without_fencing_cancel_all() {
     let reads = order_reads(&actions);
     assert_eq!(reads.len(), 1, "one fresh reconciliation snapshot");
     assert_eq!(api_key(&reads[0]), "primary-key", "PostUnknownOrderRead");
-    let admitted = cancel_all(&mut e, COMMAND + 1, START + 2.);
-    assert!(!fenced(&admitted, COMMAND + 1));
-    assert!(
-        cancel_all_sent(&admitted),
-        "native cancel-all is not fenced"
-    );
+    assert_fence_clears_only_on_the_primary_snapshot(&mut e, &actions);
 }
 
 #[test]

@@ -568,6 +568,9 @@ impl Account {
     /// The snapshot that clears an uncertain-write fence is Primary-signed, so a
     /// read key can never be the read that proves the trading account's orders.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
+        if cx.reconcile_reask() && self.orders_in_flight.is_some() {
+            return;
+        }
         self.bump_orders();
         self.start_order_read(cx, credentials, Some(PrimaryReason::PostUnknownOrderRead));
     }

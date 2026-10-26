@@ -748,6 +748,199 @@ fn a_released_503_seals_unknown_restores_rows_and_wakes_the_next() {
 }
 
 #[test]
+fn an_unknown_placement_stays_fenced_until_a_fresh_complete_order_read() {
+    let mut h = seeded();
+    let tick = h.tick;
+    event(&mut h, 10_000., Event::TimerFired { timer: tick });
+    let stale = h.take("orders-pending?");
+    command(&mut h, place(700, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 700).outcome, Some(Outcome::Unknown));
+
+    let refused = |h: &mut Harness, id| {
+        command(h, place(id, 1.0));
+        assert_eq!(count(h, "batch-orders"), 0, "no retry POST while uncertain");
+        let error = failure(h, id);
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(error.message.contains("uncertain"));
+    };
+    refused(&mut h, 701);
+
+    answer(&mut h, &stale, 200, r#"{"code":"0","data":[]}"#);
+    for path in ["orders-tpsl-pending", "orders-algo-pending"] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    refused(&mut h, 702);
+    let retry_at = h.now + 1_000.;
+    fire_until(&mut h, retry_at);
+    assert_eq!(count(&h, "orders-pending?"), 1, "fresh reconcile is owed");
+    for path in [
+        "orders-pending?",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    command(&mut h, place(703, 1.0));
+    assert_eq!(
+        count(&h, "batch-orders"),
+        1,
+        "fresh read releases the fence"
+    );
+}
+
+#[test]
+fn engine_reasks_join_a_slow_primary_reconciliation_read() {
+    let mut h = seeded();
+    command(&mut h, place(750, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 750).outcome, Some(Outcome::Unknown));
+    let first = h.take("orders-pending?");
+    let sealed_at = h.now;
+    for at in [sealed_at + 1_000., sealed_at + 3_000.] {
+        let timer = h
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+                _ => None,
+            })
+            .expect("actual engine reconciliation re-ask timer");
+        event(&mut h, at, Event::TimerFired { timer });
+        assert_eq!(
+            count(&h, "orders-pending?"),
+            0,
+            "join the held Primary read"
+        );
+    }
+    h.now = sealed_at + 3_100.;
+    answer(&mut h, &first, 200, r#"{"code":"0","data":[]}"#);
+    for path in ["orders-tpsl-pending", "orders-algo-pending"] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    command(&mut h, place(751, 1.0));
+    assert_eq!(
+        count(&h, "batch-orders"),
+        1,
+        "the original slow census releases"
+    );
+}
+
+#[test]
+fn an_engine_reask_restarts_reconciliation_after_native_retries_are_exhausted() {
+    let mut h = seeded();
+    command(&mut h, place(770, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 770).outcome, Some(Outcome::Unknown));
+    let sealed_at = h.now;
+
+    for delay in [0., 1_000., 3_000.] {
+        if delay > 0. {
+            fire_until(&mut h, sealed_at + delay);
+        }
+        assert_eq!(count(&h, "orders-pending?"), 1);
+        let request = h.take("orders-pending?");
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(name, value)| name.eq_ignore_ascii_case("ACCESS-KEY") && value == "key")
+        );
+        answer(&mut h, &request, 200, r#"{"code":"0","data":{}}"#);
+        assert_eq!(count(&h, "orders-pending?"), 0);
+    }
+
+    command(&mut h, place(771, 1.0));
+    assert_eq!(failure(&h, 771).outcome, Some(Outcome::NotSent));
+    assert_eq!(count(&h, "batch-orders"), 0);
+    let before_reask = h.actions.len();
+    fire_until(&mut h, sealed_at + 7_000.);
+    assert!(
+        h.actions[before_reask..]
+            .iter()
+            .all(|a| !matches!(a, Action::Http(r) if r.url.contains("account/positions")))
+    );
+    assert_eq!(
+        count(&h, "orders-pending?"),
+        1,
+        "the engine re-ask restarts the idle owed census without the periodic poll"
+    );
+    for path in [
+        "orders-pending?",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    command(&mut h, place(772, 1.0));
+    assert_eq!(count(&h, "batch-orders"), 1, "the clean census releases");
+}
+
+#[test]
+fn a_new_uncertain_amend_requires_a_census_started_after_its_mark() {
+    let mut instruments: serde_json::Value = serde_json::from_str(INSTRUMENT).unwrap();
+    let mut eth = instruments["data"][0].clone();
+    eth["instId"] = "ETH-USDT".into();
+    eth["baseCurrency"] = "ETH".into();
+    instruments["data"].as_array_mut().unwrap().push(eth);
+    let mut h = Harness::with_instruments(&instruments.to_string());
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"ETH-USDT","orderCategory":"normal","orderId":"22","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"}]}"#);
+
+    command(&mut h, place(780, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 780).outcome, Some(Outcome::Unknown));
+    command(
+        &mut h,
+        Command::AmendOrder {
+            command: 781,
+            id: "22".into(),
+            price: Some(61000.),
+            amount: None,
+        },
+    );
+    assert_eq!(count(&h, "cancel-batch-orders"), 1);
+    reply(&mut h, "orders-pending?", 200, r#"{"code":"0","data":[]}"#);
+    reply(&mut h, "cancel-batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 781).outcome, Some(Outcome::Unknown));
+    for path in ["orders-tpsl-pending", "orders-algo-pending"] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    let eth_place = |id| {
+        let mut order = limit(1.0);
+        order.symbol = "ETHUSDT".into();
+        Command::PlaceOrders {
+            command: id,
+            orders: vec![order],
+        }
+    };
+    command(&mut h, eth_place(782));
+    assert_eq!(
+        count(&h, "batch-orders"),
+        0,
+        "a post-mark last family cannot make a pre-mark first page fresh"
+    );
+    assert_eq!(failure(&h, 782).outcome, Some(Outcome::NotSent));
+    assert!(failure(&h, 782).message.contains("uncertain"));
+    let reask_at = h.now + 1_000.;
+    fire_until(&mut h, reask_at);
+    for path in [
+        "orders-pending?",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    command(&mut h, eth_place(783));
+    assert_eq!(
+        count(&h, "batch-orders"),
+        1,
+        "a wholly fresh census releases"
+    );
+}
+
+#[test]
 fn a_late_or_duplicate_response_after_a_terminal_changes_nothing() {
     let mut h = seeded();
     let intents = command(&mut h, place(7, 1.0));
