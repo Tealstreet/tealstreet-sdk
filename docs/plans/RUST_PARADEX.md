@@ -501,3 +501,25 @@ gates/CI remain required; their proof is posted on PR #1320.
   regressions pass. Independent read-only review cleared the two-file docs diff,
   including the source-only zero-config claim. No runtime tests were invented
   for unchanged behavior; CI validates the documentation commit.
+
+## Beta readiness (2026-10-26)
+
+Gates ran through the JS/wasm host (`EngineHost`, `hosts/wasm/js/host.mjs`) on the
+Paradex family build.
+
+- **Live public:** `rust:record`, 60 s with #2240's managed-HTTP recorder. 369,866
+  WS frames, 215 store updates, both books, and `/v1/markets` and
+  `/v1/markets/summary` answering 200. PASS.
+- **Replay gate on that tape:** one intermediate checkpoint differs, in
+  BTC-USD-PERP asks only, and the final snapshot matches. **Rust is correct.**
+  Decoding the native SBE book frames (template 3) shows a delta deleting the
+  80402.8 ask and a later delta (seq 7700674538) setting it again at 0.02451,
+  with no gap, no crossed book and no removal before the checkpoint. Rust holds
+  that level; the TypeScript reference drops the re-insert after a delete. This
+  is a TS reference defect, so no Rust change was made and no CI tape entry was
+  added.
+- **Hosted (payloadSigner) Paradex** refuses at construction, typed
+  Unsupported/NotSent; only local-key Paradex is in the beta.
+- **Entry or TP/SL legs whose outcome is unknown** fail the command Unknown with
+  the accepted order IDs; they never report success.
+- **A 401/403 from `/auth`** is terminal and typed `AuthInvalid`, with no retry loop.
