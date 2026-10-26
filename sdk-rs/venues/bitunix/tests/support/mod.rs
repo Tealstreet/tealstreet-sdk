@@ -119,7 +119,11 @@ pub fn startup() -> (TestEngine, SocketId) {
 /// Settle the initial mode-change reconciliation before the fixture's time zero.
 /// Tests exercise post-startup events from 100ms onward without a hidden pending
 /// debounce that a notification would previously postpone.
-pub fn startup_with_engine(mut e: TestEngine) -> (TestEngine, SocketId) {
+pub fn startup_with_engine(e: TestEngine) -> (TestEngine, SocketId) {
+    startup_serving(e, PAIRS, TICKERS)
+}
+/// `startup_with_engine` over a caller's pairs and tickers.
+pub fn startup_serving(mut e: TestEngine, pairs: &str, tickers: &str) -> (TestEngine, SocketId) {
     let mut now = -1000.0;
     e.start(now);
     let mut private = None;
@@ -144,9 +148,9 @@ pub fn startup_with_engine(mut e: TestEngine) -> (TestEngine, SocketId) {
                 }
                 Action::Http(r) => {
                     let body = if r.url.ends_with("/trading_pairs") {
-                        PAIRS
+                        pairs
                     } else if r.url.ends_with("/tickers") {
-                        TICKERS
+                        tickers
                     } else if r.url.contains("get_pending_positions") {
                         POSITIONS
                     } else if r.url.contains("/tpsl/") {

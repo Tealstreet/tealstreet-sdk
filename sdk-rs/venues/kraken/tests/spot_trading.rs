@@ -897,6 +897,14 @@ fn beta_one_http_auth_failure_does_not_deactivate_spot() {
                 .iter()
                 .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
         );
+        let reconcile = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) if r.url.ends_with("OpenOrders") => Some(r.clone()),
+                _ => None,
+            })
+            .expect("the ambiguous write is reconciled before another placement");
+        reply(&mut e, &reconcile, r#"{"error":[],"result":{"open":{}}}"#);
         e.handle(
             NOW,
             Event::Command(Command::PlaceOrders {
@@ -920,12 +928,16 @@ fn beta_one_http_auth_failure_does_not_deactivate_spot() {
 #[test]
 fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
     let (mut e, _, _) = ready(false);
-    let send = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>, command| {
+    let send = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>,
+                command,
+                symbol: &str| {
+        let mut order = opts("limit", 49.);
+        order.symbol = symbol.into();
         e.handle(
             NOW,
             Event::Command(Command::PlaceOrders {
                 command,
-                orders: vec![opts("limit", 99.)],
+                orders: vec![order],
             }),
         );
         let request = requests(e).pop().unwrap();
@@ -941,12 +953,12 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
             },
         );
     };
-    send(&mut e, 81);
+    send(&mut e, 81, "ETH/USD");
     let old = requests(&mut e)
         .into_iter()
         .find(|r| r.url.ends_with("OpenOrders"))
         .unwrap();
-    send(&mut e, 82);
+    send(&mut e, 82, "XBT/USD");
     assert!(
         !requests(&mut e)
             .iter()
@@ -966,7 +978,7 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
         }),
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:83, error}) if error.message.contains("uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:83, error}) if error.message.contains("uncertain") && error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     reply(&mut e, &fresh, r#"{"error":[],"result":{"open":{}}}"#);
     e.handle(
@@ -1049,4 +1061,283 @@ fn beta_unproven_status_never_grants_a_signature_resend() {
                 .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
         );
     }
+}
+
+#[test]
+fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
+    let (mut e, _, _) = ready(false);
+    let place = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>, command| {
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![opts("limit", 99.)],
+            }),
+        );
+    };
+    let mut other = opts("limit", 49.);
+    other.symbol = "ETH/USD".into();
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 80,
+            orders: vec![other],
+        }),
+    );
+    let prior = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("AddOrder"))
+        .unwrap();
+    e.handle(
+        NOW,
+        Event::HttpResponse {
+            request: prior.id,
+            response: safe_cex_engine::Response {
+                status: 503,
+                headers: "",
+                body: "<html>",
+            },
+        },
+    );
+    let old = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("OpenOrders"))
+        .unwrap();
+    place(&mut e, 81);
+    let unknown = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("AddOrder"))
+        .unwrap();
+    e.handle(
+        NOW,
+        Event::HttpResponse {
+            request: unknown.id,
+            response: safe_cex_engine::Response {
+                status: 503,
+                headers: "",
+                body: "<html>",
+            },
+        },
+    );
+    let sealed = e.drain_plain().collect::<Vec<_>>();
+    assert!(sealed.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 81, error })
+            if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+    assert!(
+        !sealed
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("OpenOrders")))
+    );
+    let refused =
+        |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>, input, id| {
+            e.handle(NOW, Event::Command(input));
+            let actions = e.drain_plain().collect::<Vec<_>>();
+            assert!(
+                !actions.iter().any(
+                    |a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)
+                ),
+                "an uncertain placement must not admit another write: {actions:?}"
+            );
+            assert!(
+                actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command, error })
+                if *command == id && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.message.contains("uncertain"))),
+                "{actions:?}"
+            );
+        };
+    refused(
+        &mut e,
+        Command::PlaceOrders {
+            command: 82,
+            orders: vec![opts("limit", 99.)],
+        },
+        82,
+    );
+    refused(
+        &mut e,
+        Command::AmendOrder {
+            command: 83,
+            id: "O-100".into(),
+            amount: Some(3.),
+            price: Some(98.),
+        },
+        83,
+    );
+    reply(&mut e, &old, r#"{"error":[],"result":{"open":{}}}"#);
+    let fresh = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("OpenOrders"))
+        .unwrap();
+    assert_ne!(old.id, fresh.id);
+    refused(
+        &mut e,
+        Command::PlaceOrders {
+            command: 84,
+            orders: vec![opts("limit", 99.)],
+        },
+        84,
+    );
+    reply(&mut e, &fresh, r#"{"error":[],"result":{"open":{}}}"#);
+    place(&mut e, 85);
+    assert!(requests(&mut e).iter().any(|r| r.url.ends_with("AddOrder")));
+}
+
+#[test]
+fn beta_slow_reconcile_joins_reasks_and_only_a_clean_retry_releases() {
+    slow_reconcile(false);
+}
+
+#[test]
+fn beta_slow_fresh_read_releases_after_three_engine_reasks() {
+    slow_reconcile(true);
+}
+
+fn slow_reconcile(held_completes_cleanly: bool) {
+    let (mut e, _, _) = ready(false);
+    let collect = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>| {
+        e.drain_plain().collect::<Vec<_>>()
+    };
+    let read = |actions: &[Action]| {
+        actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) if r.url.ends_with("OpenOrders") => Some(r.clone()),
+                _ => None,
+            })
+            .expect("a reconcile read")
+    };
+    let place =
+        |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>, now, command| {
+            e.handle(
+                now,
+                Event::Command(Command::PlaceOrders {
+                    command,
+                    orders: vec![opts("limit", 99.)],
+                }),
+            );
+        };
+    let respond = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>,
+                   now,
+                   request: &safe_cex_engine::HttpRequest,
+                   status,
+                   body: &str| {
+        e.handle(
+            now,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    };
+    let refused = |actions: &[Action]| {
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder")))
+        );
+        assert!(
+            actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { error, .. })
+                if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                    && error.message.contains("uncertain"))),
+            "{actions:?}"
+        );
+    };
+    place(&mut e, NOW, 180);
+    let sent = collect(&mut e);
+    let write = sent
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("AddOrder") => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
+    respond(&mut e, NOW, &write, 503, "<html>");
+    let mut log = collect(&mut e);
+    let held = read(&log);
+    // These are the engine's captured re-ask wakes, while the original read is held.
+    let fire = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>,
+                log: &mut Vec<Action>,
+                offset: f64| {
+        let timer = log
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + offset => Some(*timer),
+                _ => None,
+            })
+            .expect("the engine reconcile wake");
+        e.handle(NOW + offset, Event::TimerFired { timer });
+        let out = collect(e);
+        log.extend(out.iter().cloned());
+        out
+    };
+    for offset in [1000., 3000., 7000.] {
+        let out = fire(&mut e, &mut log, offset);
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("OpenOrders"))),
+            "a re-ask must join the original read: {out:?}"
+        );
+    }
+    if held_completes_cleanly {
+        place(&mut e, NOW + 7050., 181);
+        refused(&collect(&mut e));
+        respond(
+            &mut e,
+            NOW + 7100.,
+            &held,
+            200,
+            r#"{"error":[],"result":{"open":{}}}"#,
+        );
+        let completed = collect(&mut e);
+        assert!(
+            !completed.iter().any(|a| matches!(a,
+            Action::Http(r) if r.url.ends_with("OpenOrders"))),
+            "the original clean read must not owe a spurious successor: {completed:?}"
+        );
+        place(&mut e, NOW + 7200., 182);
+        assert!(
+            collect(&mut e).iter().any(|a| matches!(a,
+            Action::Http(r) if r.url.ends_with("AddOrder"))),
+            "the original held read releases the fence"
+        );
+        return;
+    }
+    // Failure preserves the fence; a later engine wake supplies another read.
+    respond(&mut e, NOW + 7100., &held, 503, "<html>");
+    log.extend(collect(&mut e));
+    place(&mut e, NOW + 7200., 181);
+    refused(&collect(&mut e));
+    let second = read(&fire(&mut e, &mut log, 15000.));
+    respond(
+        &mut e,
+        NOW + 15100.,
+        &second,
+        200,
+        r#"{"error":[],"result":{"open":{"unknown":{"descr":{}}}}}"#,
+    );
+    log.extend(collect(&mut e));
+    place(&mut e, NOW + 15200., 182);
+    refused(&collect(&mut e));
+    let third = read(&fire(&mut e, &mut log, 31000.));
+    respond(
+        &mut e,
+        NOW + 31100.,
+        &third,
+        200,
+        r#"{"error":[],"result":{"open":{}}}"#,
+    );
+    collect(&mut e);
+    place(&mut e, NOW + 31200., 183);
+    assert!(
+        collect(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder")))
+    );
 }

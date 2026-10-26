@@ -538,6 +538,10 @@ impl Venue for BitunixFutures {
     fn guard_pending_placements(&self) -> bool {
         true
     }
+    // reconcile_uncertain starts the regular and tpsl census reads at once.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
     /// One mutation per order for its whole job, continuations included.
     fn guard_order_mutations(&self) -> bool {
         true
