@@ -147,3 +147,19 @@ One hcmq3f CLEAR plus green correctness build/tests/strict Clippy/fmt/bans and
 MEXC replay permits a guarded owner merge under speed mode. CI supplies family
 size; no auditor/CPU/certification wait for an eligible venue-only slice. Shared
 source/checker/additive-inventory work is outside this scope and its own gate.
+
+## Current unchanged-runtime checkpoint
+
+On exact eeb9d170f640, scoped native qualification is223PASS/0FAIL/0ignored
+across18 targets. Historical eighteen controls have been refreshed locally:
+only five public startup collections now release genuine managed preparation
+at the original0/100ms clocks. Reversing those statements reconstructs the
+entire historical target; existing assertions and raw financial literals stay
+unchanged. Current outcome11nativeGREEN/7intended assertionRED/0ignored/filter.
+Five REDs expose eager signed private transport; one exposes queue-time450ms
+spacing after delayed handoff, and one exposes a NotSent refresh consuming the
+next native slot. No compile/setup failure is counted. These legacy witnesses
+do not yet prove installed-provider ownership or final managed Claims.
+
+Exact current source/API plan review remains before implementation, especially
+the trusted persisted-ID mapping and the trading per-call pacing/Plan fit.
