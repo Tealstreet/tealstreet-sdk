@@ -9572,6 +9572,23 @@ stripped signing path; the native preimage builder still strips /derivatives at
 the same cryptographic boundary. HTTP bytes, financial fields and native MACs are
 unchanged. This foundation does not enable hosted Kraken or alter nonce issuers.
 
+### Address setup at host start
+
+With `address-nonce`, native Host, frame-server and WASM startup initialize the
+installed provider before the existing engine seal. Synchronous local providers
+therefore expose genuine verified public addresses to `Venue::start`, including
+independently sealed aliased slots. Unsupported providers retain their per-slot
+NotSent refusal while public work starts. Hosted/asynchronous callers must finish
+the explicit pre-start result and actual-cleanup join before invoking start;
+unfinished work is still retired and refused at that boundary. No host support,
+nonce permission, retry or peer activation is inferred by these automatic calls.
+
+In address-nonce builds the frame-server account actor retains the same independent
+cleanup owner as native Host. Normal shutdown waits for actual setup cleanup;
+cleanup/task failures return a sanitized server error. Aborted actors retain the
+original cleanup in the live runtime and grant no retirement or replacement
+acknowledgement. Runtime teardown remains no join.
+
 ### Explicit authentication on serial calls
 
 SerialCall declares Preflight or Session authentication. Existing adopters use
