@@ -64,8 +64,11 @@ pinned dyn compatibility of `Venue` (E0038).
 
 **Phase 1, managed-sockets:**
 
-- `fn managed_sockets() -> bool where Self: Sized { false }`, `#[inline]`,
-  compiled only under the feature.
+- `fn managed_sockets() -> bool where Self: Sized { false }`, `#[inline]`. The
+  declaration method itself is unconditional, compiled in every build, and only
+  the dispatch it guards is behind the feature (fe7lgm). Adopter impls then need
+  no cfg, and the trait's method set stays stable under feature unification, the
+  same rule as for public enums.
 - Every managed dispatch site in `Engine<V>` reads `V::managed_sockets()`, a
   const-folded branch:
   - the `handle_managed_socket` call in event dispatch;
@@ -77,12 +80,16 @@ pinned dyn compatibility of `Venue` (E0038).
   refuse `SocketError::NotPermitted` as their first statement unless the
   construction-time `IoCore` copy says the venue declared managed sockets. Work
   for a compiled-out path can never be admitted.
+- The managed timer arms refuse to arm under `false`, not only skip dispatch, so
+  no `TimerId` is allocated for a compiled-out path (fe7lgm).
 - **Default polarity is `false`**, so existing and future non-adopters pay
   nothing without any edit. Each current adopter declares `true` in the same PR:
   OKX, Phemex, Hyperliquid, TxFlow, Backpack, WEEX and WOO, plus Bybit (#2180)
   and Kraken when they land. A missed declaration fails closed at registration
   and is caught by that venue's own managed-socket tests. It never silently
-  degrades.
+  degrades. Each adopter crate also gets a one-line test asserting
+  `V::managed_sockets()`, so a dropped declaration fails that suite directly
+  even where its managed-socket tests are sparse (fe7lgm).
 - `managed_sockets()` and #2161's `socket_capabilities()` compose: capabilities
   narrow inside an adopter, and `managed_sockets()` decides whether the venue
   adopts at all.
@@ -103,13 +110,20 @@ pinned dyn compatibility of `Venue` (E0038).
   Rule: copy the declaration into an `IoCore` bool at `Engine::new` (as
   `nonce_enabled`) only for the registration refusal and true leaf checks. Move
   every dispatch decision to an `Engine<V>` caller wherever one exists. The
-  prototype pair measures what is left.
+  prototype pair measures what is left. If the `Cx<P>` residual proves material,
+  a static path exists that keeps `Venue` dyn compatible: production `Cx<'_, P>`
+  instances are effectively per-venue, so a hidden sealed trait on `P` with an
+  associated const (impl'd for adopter Pending types, defaulting via a blanket
+  marker) can fold those checks too (fe7lgm). Measure first.
 
 **Phase 2, http-mutation-barriers**, then any later per-venue feature: the same
 shape, `fn http_mutation_barriers() -> bool`. It comes after a measured
 attribution of the +395K and an inventory of barrier entry points (group release,
 `prepare_group_http_release`, the planned-mutation paths in `http_lifecycle` and
-`request_context_planned`).
+`request_context_planned`). Attribution comes first because the +395K is a
+combined figure, not a per-family one. Much of it may be Plan-core duplication
+across adopters rather than barrier code, and gating cannot recover that
+(fe7lgm).
 
 **Why gating beats erasure for barriers** (dazzy3 review): erasure keeps one
 shared copy plus a generic shell per adopter, and S1 showed it saves combined
@@ -149,7 +163,9 @@ declaration shape.
 ## Order
 
 1. This plan: fe7lgm and dazzy3 review.
-2. Originals: a non-adopter refusal control, adopter parity unchanged.
+2. Originals: a non-adopter refusal control that spends nothing (no FeedId, ID,
+   timer or allocation), per-adopter declaration tests, and adopter parity
+   unchanged.
 3. The Phase 1 prototype size pair.
 4. Phase 1 source PR, one CI run, auditor GO.
 5. Phase 2 attribution, then its plan delta.
