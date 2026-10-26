@@ -9980,6 +9980,11 @@ last page cannot release a mark its first page never saw. OKX adopts it (its
 census already restarts on every mark's immediate reconcile); a venue whose
 census spans contexts should do the same.
 
+Paradex opts in: after an Unknown placement or amend it reads `/orders` and
+releases on a clean snapshot. Cancel-all keeps the engine default (refused
+until reconciled). If `/auth` has been refused (401/403), no order read can run,
+so the fence holds until the account is reconnected or re-keyed.
+
 ## Lighter public beta data
 
 Market snapshots seed last price and start ticker hydration before socket Open.
