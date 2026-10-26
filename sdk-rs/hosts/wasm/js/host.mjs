@@ -47,7 +47,7 @@ function checkedSigningMeta(json, task) {
     if (!signingMetaKeys(role, role.kind === 'read' ? ['kind', 'scope'] : ['kind', 'reason', 'scope'])
       || (role.scope !== null && !['account', 'balance', 'orders', 'positions', 'settings'].includes(role.scope))) return undefined;
     if (role.kind === 'primaryRead'
-      && !['clientOrderLookup', 'postUnknownOrderRead', 'degradedRead', 'catalog', 'history'].includes(role.reason)) return undefined;
+      && !['clientOrderLookup', 'postUnknownOrderRead', 'degradedRead', 'catalog', 'history', 'keyPermissions'].includes(role.reason)) return undefined;
     retainedRole = { kind: role.kind, ...(role.kind === 'primaryRead' ? { reason: role.reason } : {}), scope: role.scope };
   } else {
     if (!['mutation', 'sessionAuth'].includes(role.kind) || !signingMetaKeys(role, ['kind'])) return undefined;

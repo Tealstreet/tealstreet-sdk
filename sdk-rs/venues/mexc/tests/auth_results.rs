@@ -1,12 +1,12 @@
 //! Actual private-read dispatch, credential attribution and typed envelope controls.
+mod support;
 use safe_cex_engine::{
-    AccountReadScope, Action, AuthOutcome, CredentialSlot, Engine, Event, HttpRequest, Notice,
-    Response,
+    AccountReadScope, Action, AuthOutcome, CredentialSlot, Event, HttpRequest, Notice, Response,
 };
-use safe_cex_venue_mexc::{MexcFutures, Options};
+use support::Options;
 const MARKETS: &str = r#"{"success":true,"code":0,"data":[{"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","state":0,"apiAllowed":true,"contractSize":0.0001,"volUnit":1,"priceUnit":0.1,"minVol":1,"maxVol":400000,"minLeverage":1,"maxLeverage":500,"makerFeeRate":0,"takerFeeRate":0.0002}]}"#;
 const TICKERS: &str = r#"{"success":true,"code":0,"data":[{"symbol":"BTC_USDT","lastPrice":60000,"fairPrice":60001,"indexPrice":59999,"bid1":59999.9,"ask1":60000,"riseFallRate":0.01,"holdVol":10000,"fundingRate":0.0001,"volume24":50000,"amount24":300000}]}"#;
-fn drain(e: &mut Engine<MexcFutures>) -> Vec<Action> {
+fn drain(e: &mut support::TestEngine) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(e, 1000.)
 }
 fn http(actions: &[Action], path: &str) -> HttpRequest {
@@ -18,7 +18,7 @@ fn http(actions: &[Action], path: &str) -> HttpRequest {
         })
         .unwrap_or_else(|| panic!("missing {path}"))
 }
-fn reply(e: &mut Engine<MexcFutures>, r: &HttpRequest, status: u16, body: &str) -> Vec<Action> {
+fn reply(e: &mut support::TestEngine, r: &HttpRequest, status: u16, body: &str) -> Vec<Action> {
     e.handle(
         1000.,
         Event::HttpResponse {
@@ -45,8 +45,8 @@ fn auth(actions: &[Action]) -> Vec<(CredentialSlot, AccountReadScope, AuthOutcom
         })
         .collect()
 }
-fn started(read: bool) -> (Engine<MexcFutures>, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
+fn started(read: bool) -> (support::TestEngine, Vec<Action>) {
+    let mut e = support::configured(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: read.then(|| safe_cex_engine::ReadCredentials {
@@ -55,7 +55,7 @@ fn started(read: bool) -> (Engine<MexcFutures>, Vec<Action>) {
             passphrase: Some("read-pass".into()),
         }),
         ..Options::default()
-    }));
+    });
     e.start(1000.);
     let a = drain(&mut e);
     let r = http(&a, "contract/detail");
