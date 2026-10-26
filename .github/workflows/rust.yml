@@ -86,6 +86,7 @@ jobs:
       checkoutSha: ${{ steps.select.outputs.checkoutSha }}
       nativeFull: ${{ steps.select.outputs.nativeFull }}
       combinedRequired: ${{ steps.select.outputs.combinedRequired }}
+      integrationTests: ${{ steps.select.outputs.integrationTests }}
       nativeCrates: ${{ steps.select.outputs.nativeCrates }}
       native: ${{ steps.select.outputs.native }}
       replay: ${{ steps.select.outputs.replay }}
@@ -350,10 +351,14 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
-      - name: Build and lint the selected venue family
+      - name: Build the selected venue family
         run: |
           corepack yarn rust:build-wasm --venue '${{ matrix.family }}'
-          cargo clippy --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-wasm --no-default-features --features '${{ matrix.family }}' --target wasm32-unknown-unknown -- -D warnings
+      - name: Lint the selected venue family with the pinned toolchain
+        working-directory: sdk-rs
+        run: cargo clippy --locked -p safe-cex-wasm --no-default-features --features '${{ matrix.family }}' --target wasm32-unknown-unknown -- -D warnings
+      - name: Seal the selected family build
+        run: |
           node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.family }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
           mkdir -p 'sdk-rs/hosts/wasm/pkg/web/${{ matrix.family }}' 'sdk-rs/hosts/wasm/pkg/node/${{ matrix.family }}'
           cp sdk-rs/hosts/wasm/pkg/web/*.* 'sdk-rs/hosts/wasm/pkg/web/${{ matrix.family }}/'
@@ -419,7 +424,8 @@ jobs:
       - name: Rust book delta wire through the JS decoder and SDK
         run: corepack yarn rust:test-frame-wire
       - name: Build the offline native session fixture
-        run: cargo build --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-native --example session-adapter-fixture
+        working-directory: sdk-rs
+        run: cargo build --locked -p safe-cex-native --example session-adapter-fixture
       - name: Native frame session adapter through real WebSockets
         run: corepack yarn rust:test-server-adapter
       - name: Build the combined wasm engine
@@ -459,6 +465,19 @@ jobs:
         run: corepack yarn rust:test-product-semantics
       - name: The Cloudflare Workers host
         run: corepack yarn workspace @tealstreet/safe-cex-wasm test
+      - name: Run changed venue integration controls against the built combined engine
+        env:
+          CHANGED_INTEGRATION_TESTS: ${{ needs.selection.outputs.integrationTests }}
+        run: |
+          node --input-type=module <<'JS'
+          import { spawnSync } from 'node:child_process';
+          const tests = JSON.parse(process.env.CHANGED_INTEGRATION_TESTS);
+          if (!Array.isArray(tests) || tests.some(path => !/^sdk-rs\/harness\/[a-z0-9-]+\.integration\.[cm]?[jt]s$/.test(path))) throw new Error('Invalid integration test selection');
+          if (tests.length) {
+            const child = spawnSync(process.execPath, ['--import', 'tsx', '--test', ...tests], { stdio: 'inherit' });
+            if (child.error || child.signal || child.status !== 0) throw new Error('Changed integration controls failed');
+          }
+          JS
       - name: Retain built combined module for reuse
         uses: actions/upload-artifact@v7
         with:
@@ -579,6 +598,9 @@ jobs:
       - name: Scripted lifecycle financial parity (fixed sanitized capture)
         if: matrix.venue == 'binance'
         run: corepack yarn -s rust:gate:record --venue binance --tape sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl --books BTCUSDT
+      - name: Credentialed lifecycle runner (scripted transport only)
+        if: matrix.venue == 'binance'
+        run: corepack yarn rust:test-live-smoke
       - name: Seal approved CPU measurement inputs
         if: github.event_name != 'pull_request'
         id: cpu_prepare

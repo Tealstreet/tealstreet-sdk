@@ -26,15 +26,20 @@ function check(text) {
   assert.match(gate, /include: \$\{\{ fromJSON\(needs.selection.outputs.replay\) \}\}/);
   assert.match(gate, /name: wasm-family-\$\{\{ matrix.family \}\}/);
   assert.match(gate, /ci-wasm\.mjs --venue.*--verify/);
+  assert.match(gate, /name: Credentialed lifecycle runner \(scripted transport only\)\n        if: matrix.venue == 'binance'\n        run: corepack yarn rust:test-live-smoke/);
   assert.doesNotMatch(gate, /rust:build-wasm|rust:test-harness/);
   const families = job(text, 'families');
   assert.match(families, /if: needs.selection.outputs.sizeRequired == 'true'/);
   assert.match(families, /family: \$\{\{ fromJSON\(needs.selection.outputs.families\) \}\}/);
   assert.match(families, /rust:build-wasm --venue '\$\{\{ matrix.family \}\}'/);
+  assert.match(families, /name: Lint the selected venue family with the pinned toolchain\n        working-directory: sdk-rs\n        run: cargo clippy --locked/);
+  assert.doesNotMatch(families, /cargo clippy --manifest-path/);
   assert.match(families, /name: wasm-family-\$\{\{ matrix.family \}\}/);
   assert.match(families, /if-no-files-found: error/);
   assert.match(job(text, 'wasm'), /if: needs.selection.outputs.nativeFull == 'true'/);
   assert.match(job(text, 'combined'), /if: needs.selection.outputs.combinedRequired == 'true'/);
+  assert.match(job(text, 'combined'), /CHANGED_INTEGRATION_TESTS: \$\{\{ needs.selection.outputs.integrationTests \}\}/);
+  assert.match(job(text, 'combined'), /\['--import', 'tsx', '--test', \.\.\.tests\]/);
   const native = job(text, 'native');
   assert.match(native, /include: \$\{\{ fromJSON\(needs.selection.outputs.native\) \}\}/);
   assert.match(native, /NATIVE_CRATES: \$\{\{ needs.selection.outputs.nativeCrates \}\}/);
@@ -55,6 +60,8 @@ test('removing a path/coverage guard, enabling PR CPU, or rebuilding replay refu
     text => text.replace('--mode correctness', '--mode collect'),
     text => text.replace('--verify sdk-rs/hosts/wasm/pkg/ci-replay', '--archive sdk-rs/hosts/wasm/pkg/ci-replay'),
     text => text.replace('include: ${{ fromJSON(needs.selection.outputs.native) }}', 'include: []'),
+    text => text.replace('run: corepack yarn rust:test-live-smoke', 'run: true'),
+    text => text.replace('name: Lint the selected venue family with the pinned toolchain\n        working-directory: sdk-rs', 'name: Lint the selected venue family with the pinned toolchain\n        working-directory: .'),
     text => text.replace('      - name: Verify the same-run matching family capsule', '      - run: corepack yarn rust:build-wasm\n      - name: Verify the same-run matching family capsule'),
   ];
   for (const [index, mutate] of mutations.entries()) {

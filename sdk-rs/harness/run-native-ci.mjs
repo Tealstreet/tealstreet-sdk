@@ -19,4 +19,6 @@ if (NATIVE_FULL === 'true' || NATIVE_CHECK === 'fmt') {
     run('cargo', [NATIVE_CHECK, '--locked', '-p', 'safe-cex-venues', '--no-default-features',
       '--features', crate, '--all-targets', ...(NATIVE_CHECK === 'clippy' ? ['--', '-D', 'warnings'] : [])]);
   }
+  if (crates.length) run('cargo', [NATIVE_CHECK, '--locked', '-p', 'safe-cex-native', '--all-targets',
+    ...(NATIVE_CHECK === 'clippy' ? ['--', '-D', 'warnings'] : [])]);
 } else console.log(`${NATIVE_CHECK}: no shared native change; covered by scoped crate tests`);

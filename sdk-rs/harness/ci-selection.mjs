@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,10 +44,20 @@ export function rustDocumentInputs(sources) {
   return { paths, unresolved };
 }
 
-export function selectCi({ paths, manifests, full = false, documents = { paths: new Set(), unresolved: false } }) {
+export function externallyImportedVenues(sources) {
+  const imported = new Set();
+  for (const [source, text] of sources) for (const match of text.matchAll(/['"](\.[^'"\n]+)['"]/g)) {
+    const target = posix.normalize(posix.join(posix.dirname(source), match[1]));
+    const venue = /^packages\/safe-cex\/src\/exchanges\/([^/]+)(?:\/|$)/.exec(target)?.[1];
+    if (venue && !source.startsWith(`packages/safe-cex/src/exchanges/${venue}/`)) imported.add(venue);
+  }
+  return imported;
+}
+
+export function selectCi({ paths, manifests, full = false, documents = { paths: new Set(), unresolved: false }, externalImports = new Set() }) {
   if (!Array.isArray(paths) || paths.some(path => typeof path !== 'string' || !path || path.startsWith('/') || path.split('/').includes('..')))
     throw new Error('Invalid changed paths');
-  const crates = new Set(), reasons = [], tests = new Set();
+  const crates = new Set(), reasons = [], tests = new Set(), integrationTests = [];
   let nativeFull = full, consumerTests = false;
   for (const path of paths) {
     if (path.startsWith('docs/')) continue;
@@ -60,17 +70,27 @@ export function selectCi({ paths, manifests, full = false, documents = { paths: 
       try { crateFamily(venue[1]); } catch { full = true; reasons.push(path); continue; }
       tests.add(venue[1]);
       if (venue[2].startsWith('tests/') || venue[2].startsWith('benches/')) continue;
+      if (venue[2] === 'Cargo.toml') nativeFull = true;
       crates.add(venue[1]); continue;
     }
     const ts = /^packages\/safe-cex\/src\/exchanges\/([^/]+)\//.exec(path);
     if (ts) {
       try { family(ts[1]); } catch { full = true; reasons.push(path); continue; }
-      if (!/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path) && !path.includes('/__tests__/')) crates.add(venueCrate(ts[1]));
+      if (!/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path) && !path.includes('/__tests__/')) {
+        crates.add(venueCrate(ts[1]));
+        if (externalImports.has(ts[1])) { full = true; reasons.push(`Cross-venue TS import: ${ts[1]}`); }
+      }
       continue;
     }
-    if (/^sdk-rs\/(?:engine|crypto|registry|hosts\/(?:native|wasm))\/tests\//.test(path)) { nativeFull = true; continue; }
-    if (/^sdk-rs\/hosts\/wasm\/js\/.*\.test\.mjs$/.test(path) ||
-        /^sdk-rs\/harness\/.*\.integration\.[cm]?[jt]s$/.test(path)) { consumerTests = true; continue; }
+    if (/^sdk-rs\/(?:engine|crypto|registry|hosts\/(?:native|wasm))\/tests\//.test(path)) {
+      nativeFull = true;
+      if (path.startsWith('sdk-rs/engine/tests/support/')) consumerTests = true;
+      continue;
+    }
+    if (/^sdk-rs\/harness\/.*\.integration\.[cm]?[jt]s$/.test(path)) {
+      consumerTests = true; integrationTests.push(path); continue;
+    }
+    if (/^sdk-rs\/hosts\/wasm\/js\/.*\.test\.mjs$/.test(path)) { consumerTests = true; continue; }
     if (/^\.github\/tests\//.test(path) ||
         /\.(?:test|integration)\.[cm]?[jt]s$/.test(path)) continue;
     full = true; reasons.push(path);
@@ -84,7 +104,7 @@ export function selectCi({ paths, manifests, full = false, documents = { paths: 
   const nativeCrates = [...new Set([...crates, ...tests])].sort();
   return { full, nativeFull: nativeFull || full, combinedRequired: full || consumerTests,
     native: nativeMatrix(nativeFull || full, nativeCrates),
-    reasons, families, replay: replayMatrix(suites, family), nativeCrates,
+    reasons, families, replay: replayMatrix(suites, family), nativeCrates, integrationTests,
     replayRequired: suites.length > 0, sizeRequired: families.length > 0 };
 }
 
@@ -128,7 +148,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     ? rustDocumentInputs(execFileSync('git', ['ls-files', '-z', '--', '*.rs'], { encoding: 'utf8' })
       .split('\0').filter(Boolean).map(path => [path, readFileSync(path, 'utf8')]))
     : undefined;
-  const result = selectCi({ paths, manifests, full: !isPr, documents });
+  const externalImports = paths.some(path => path.startsWith('packages/safe-cex/src/exchanges/'))
+    ? externallyImportedVenues(execFileSync('git', ['ls-files', '-z', '--', '*.ts', '*.tsx', '*.mts', '*.js', '*.mjs'], { encoding: 'utf8' })
+      .split('\0').filter(Boolean).map(path => [path, readFileSync(path, 'utf8')]))
+    : undefined;
+  const result = selectCi({ paths, manifests, full: !isPr, documents, externalImports });
+  result.integrationTests = result.integrationTests.filter(path => existsSync(path));
   result.checkoutSha = git('rev-parse', 'HEAD');
   console.log(JSON.stringify({ base: base ?? null, ...result }, null, 2));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, ciOutputs(result));

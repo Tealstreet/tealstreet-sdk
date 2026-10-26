@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
-import { selectCi, checkoutBase, ciOutputs, rustDocumentInputs } from './ci-selection.mjs';
+import { selectCi, checkoutBase, ciOutputs, rustDocumentInputs, externallyImportedVenues } from './ci-selection.mjs';
 import { GATE_SUITES } from './ci-gate-suites.mjs';
 import { venueFamilies } from '../hosts/wasm/js/venues.mjs';
 
@@ -32,6 +32,35 @@ test('checkout outputs are literal SHAs while matrices remain JSON', () => {
   const sha = 'a'.repeat(40);
   assert.equal(ciOutputs({ checkoutSha: sha, full: false, native: [{ check: 'fmt' }] }),
     `checkoutSha=${sha}\nfull=false\nnative=[{"check":"fmt"}]\n`);
+});
+
+test('venue feature declarations retain complete engine combinations and wasm checks', () => {
+  const result = select('sdk-rs/venues/bitget/Cargo.toml');
+  assert.equal(result.nativeFull, true);
+  for (let shard = 0; shard < 4; shard++) assert(result.native.some(row => row.check === `engine-feature-modes-${shard}`));
+  assert(result.native.some(row => row.check === 'mutation-barriers'));
+});
+
+test('cross-venue and non-venue TS imports conservatively select the full matrix', () => {
+  const sources = [
+    ['packages/safe-cex/src/exchanges/binance/binanceoptions.exchange.ts', "import { options } from '../bybit/bybit.options'"],
+    ['packages/safe-cex/src/transport/engine.ts', "import { site } from '../exchanges/bybit/bybit.site'"],
+    ['packages/safe-cex/src/exchanges/bitget/ticker.ts', "import { row } from './wire'"],
+  ];
+  const externalImports = externallyImportedVenues(sources);
+  assert.equal(selectCi({ paths: ['packages/safe-cex/src/exchanges/bybit/bybit.site.ts'], manifests, externalImports }).full, true);
+  assert.equal(selectCi({ paths: ['packages/safe-cex/src/exchanges/bitget/ticker.ts'], manifests, externalImports }).full, false);
+});
+
+test('edited integration controls execute, and engine support shared with wire examples builds consumers', () => {
+  for (const path of ['sdk-rs/harness/bitget-parity.integration.mjs', 'sdk-rs/harness/krakenspot-frame.integration.mts']) {
+    const result = select(path);
+    assert.equal(result.combinedRequired, true);
+    assert.deepEqual(result.integrationTests, [path]);
+    assert.equal(result.replayRequired, false);
+    assert.equal(result.sizeRequired, false);
+  }
+  assert.equal(select('sdk-rs/engine/tests/support/mod.rs').combinedRequired, true);
 });
 
 test('documentation included by Rust, and unresolved include macros, select full checks', () => {
