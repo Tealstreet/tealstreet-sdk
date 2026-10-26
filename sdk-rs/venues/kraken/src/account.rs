@@ -752,6 +752,8 @@ impl Kraken {
         self.account.challenge = None;
         self.account.signed_challenge = None;
         self.account.acks.clear();
+        self.account.payloads.clear();
+        self.account.payload_complete = false;
         self.account.waiting_challenge = false;
         true
     }

@@ -246,3 +246,10 @@ persistent-token replay implementation. That implementation was removed. The
 corrected source passed 32/32, then 37/37 after five additive controls. The first
 broader native run stopped at the duplicate-OPEN fixture setup described above;
 it is not reported as a green suite. Frozen composed qualification follows.
+
+The broader composed run exposed the same duplicate-OPEN setup in the Dogecoin
+public wire oracle. That fixture now also holds the physical public socket
+unopened and retains every original symbol/JSON assertion. The native suite is
+not declared green until this corrected setup passes. An additional real HTTP
+token result at idle equality must release zero subscription frames and retire
+the epoch through the shared one-shot final fence.

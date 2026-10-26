@@ -336,3 +336,25 @@ fn nonfinite_socket_receipts_produce_no_native_work() {
     invalid_time(spot(true, PublicFeedPolicy::Direct), noop);
     invalid_time(spot(false, PublicFeedPolicy::Direct), spot_subscribed);
 }
+
+#[test]
+fn a_token_result_at_idle_equality_releases_no_subscription_frames() {
+    let mut h = spot(false, PublicFeedPolicy::Direct);
+    let socket = h.socket();
+    let request = take_spot_token(&mut h, socket);
+    h.sent.clear();
+    h.now += 45_000.;
+    h.event(Event::HttpResponse {
+        request,
+        response: Response {
+            status: 200,
+            headers: "",
+            body: SPOT_TOKEN,
+        },
+    });
+    assert!(h.sent.is_empty());
+    assert!(
+        h.closed.contains(&socket),
+        "one-shot final release must retire an expired epoch"
+    );
+}
