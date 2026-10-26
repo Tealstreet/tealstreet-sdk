@@ -24,13 +24,29 @@ impl ContextRegistry {
         &self,
         owner: Owner,
     ) -> Result<Option<Egress>, Error> {
-        Ok(self
-            .validate_keyless_session(owner)?
-            .and_then(|generation| self.sessions.egress(generation)))
+        self.validate_keyless_session(owner)?
+            .map(|generation| self.sessions.egress(generation).ok_or(Error::Invalid))
+            .transpose()
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(in crate::engine) fn keyless_scan_visits(&self) -> usize {
+        self.keyless_scan_visits.get()
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(in crate::engine) fn keyless_root_count(&self) -> usize {
+        self.keyless_roots
     }
 
     fn revoked_session_root(&self) -> Option<(Preflight, Option<Plan>)> {
+        if self.keyless_roots == 0 {
+            return None;
+        }
         self.commands.iter().find_map(|(id, owner)| {
+            #[cfg(any(test, feature = "test-support"))]
+            self.keyless_scan_visits
+                .set(self.keyless_scan_visits.get() + 1);
             let handle = Preflight::new(&self.issuer, *id, owner.generation);
             if owner.pending != 0
                 || owner.deliveries != 0
@@ -49,7 +65,10 @@ impl ContextRegistry {
 
 impl<V: crate::Venue> crate::Engine<V> {
     pub(in crate::engine) fn flush_keyless_session_roots(&mut self, now: f64) {
-        if !now.is_finite()
+        if self.io.core.request_contexts.keyless_roots == 0
+            || !now.is_finite()
+            || self.io.core.command_entry.is_some()
+            || self.io.core.http_plan_expiring.is_some()
             || self.io.core.http_delivery.is_some()
             || self.io.core.http_plan_ready.is_some()
             || self.io.core.http_preflight_ready.is_some()
@@ -64,12 +83,17 @@ impl<V: crate::Venue> crate::Engine<V> {
                 store: &mut self.store,
                 io: &mut self.io,
             };
-            if let Some(plan) = plan {
+            let sealed = if let Some(plan) = plan {
                 cx.fail_plan_owned(&plan, error)
             } else {
                 cx.fail_preflight(&preflight, error)
+            };
+            if let Err(error) = sealed {
+                debug_assert!(false, "retired Session root seal refused: {error:?}");
+                break;
             }
-            .expect("current retired Session root");
+            self.flush_http_owner_retirements();
+            self.finish_deferred_commands(now);
         }
     }
 }

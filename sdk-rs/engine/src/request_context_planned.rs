@@ -2280,6 +2280,9 @@ impl ContextRegistry {
         headers: &[(&str, &str)],
         body: Option<&str>,
     ) -> Result<Option<[u8; 32]>, Error> {
+        if self.keyless_session(context.owner()).is_none() {
+            return Ok(None);
+        }
         let Some(plan) = self.plan_from_context(context) else {
             return Ok(None);
         };

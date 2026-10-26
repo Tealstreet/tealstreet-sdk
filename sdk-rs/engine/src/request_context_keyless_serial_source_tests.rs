@@ -186,6 +186,16 @@ fn installed_secondary_does_not_sign_or_route_a_keyless_read() {
     let mut e = admitted(Mode::ReadWithSecondary);
     assert!(e.identities().secondary.is_some());
     assert!(e.identities().primary.is_none());
+    let context = e.venue.preflight.as_ref().unwrap().owner();
+    let session = e.venue.session.as_ref().unwrap();
+    let generation =
+        e.io.core
+            .request_contexts
+            .validate_session(session)
+            .unwrap();
+    assert!(
+        matches!(e.io.core.request_contexts.keyless_session_egress(context).unwrap(), Some(crate::request_context::Egress::Session(egress)) if egress.generation() == generation)
+    );
     let actions = e.drain_actions().collect();
     let request = drive(&mut e, actions, 1.).pop().unwrap();
     assert_eq!(request.headers, vec![("Cookie", "cookie-1".into())]);
@@ -245,6 +255,7 @@ fn retirement_after_accepted_call_seals_the_command_with_journal_projection() {
     );
     assert_eq!(e.health().auth_failures, 0);
     assert!(!e.io.core.signing.refused());
+    later_signed_stages(&mut e);
 }
 
 #[test]
@@ -279,5 +290,92 @@ fn session_entry_cannot_mix_in_a_write_credential() {
     enter(&mut e);
     assert_eq!(e.venue.entry, Some(Err(Error::Invalid)));
     assert_eq!(e.venue.before, e.venue.after);
+    local_session_refusal(&mut e);
+}
+
+#[test]
+fn ordinary_signed_staging_is_a_working_control_before_any_session_refusal() {
+    let mut e = ready(Mode::Chain);
+    later_signed_stages(&mut e);
+}
+
+#[test]
+fn keyless_entry_requires_a_declared_credential_free_session_egress() {
+    for mode in [Mode::NoSessionEgress, Mode::CredentialSession] {
+        let mut e = ready(mode);
+        enter(&mut e);
+        assert_eq!(e.venue.entry, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.before, e.venue.after);
+        local_session_refusal(&mut e);
+    }
+}
+
+#[test]
+fn no_keyless_roots_means_no_retirement_scan_visits() {
+    let mut e = ready(Mode::Chain);
+    assert_eq!(e.io.core.request_contexts.keyless_root_count(), 0);
+    let before = e.io.core.request_contexts.keyless_scan_visits();
+    later_signed_stages(&mut e);
+    e.flush_keyless_session_roots(30_001.);
+    assert_eq!(e.io.core.request_contexts.keyless_scan_visits(), before);
+}
+
+#[test]
+fn empty_root_completion_releases_the_scan_fast_path() {
+    for mode in [Mode::EmptyDone, Mode::EmptyFail] {
+        let mut e = ready(mode);
+        enter(&mut e);
+        assert_eq!(e.venue.entry, Some(Ok(())));
+        assert_eq!(e.io.core.request_contexts.keyless_root_count(), 0);
+        let before = e.io.core.request_contexts.keyless_scan_visits();
+        e.flush_keyless_session_roots(3.);
+        assert_eq!(e.io.core.request_contexts.keyless_scan_visits(), before);
+    }
+}
+
+#[test]
+#[cfg(feature = "condition-waits")]
+fn retired_preflight_waits_until_expiry_and_command_custody_end() {
+    let mut e = ready(Mode::ParkRetire);
+    enter(&mut e);
+    e.handle_command(
+        1.,
+        Command::CancelOrdersWithSymbols {
+            command: 9,
+            orders: vec![],
+        },
+        None,
+    )
+    .unwrap();
+    let session = e.venue.session.clone().unwrap();
+    assert!(
+        Cx {
+            now: 2.,
+            store: &mut e.store,
+            io: &mut e.io
+        }
+        .retire_session(&session)
+        .unwrap()
+        .is_empty()
+    );
+    let before = e.io.core.request_contexts.keyless_scan_visits();
+    e.io.core.http_plan_expiring = e.venue.expiry_plan.clone();
+    e.flush_keyless_session_roots(2.);
+    assert_eq!(e.io.core.request_contexts.keyless_scan_visits(), before);
+    assert_eq!(e.io.core.request_contexts.keyless_root_count(), 1);
+    e.io.core.http_plan_expiring = None;
+    e.io.begin_command_entry(Some(10));
+    e.flush_keyless_session_roots(2.);
+    assert_eq!(e.io.core.request_contexts.keyless_scan_visits(), before);
+    assert_eq!(e.io.core.request_contexts.keyless_root_count(), 1);
+    e.io.core.command_entry = None;
+    let retired = e.venue.retirements;
+    e.flush_keyless_session_roots(2.);
+    assert_eq!(e.io.core.request_contexts.keyless_root_count(), 0);
+    assert_eq!(
+        e.venue.retirements,
+        retired + 1,
+        "retirement callback delivered at the same flush"
+    );
     local_session_refusal(&mut e);
 }

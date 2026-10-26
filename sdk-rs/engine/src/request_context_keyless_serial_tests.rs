@@ -48,6 +48,8 @@ mod keyless_serial {
         SignedResend,
         Selected,
         ReadWithSecondary,
+        NoSessionEgress,
+        CredentialSession,
         Forbidden,
         LegacyAttach,
         #[cfg(feature = "condition-waits")]
@@ -56,6 +58,7 @@ mod keyless_serial {
     enum Pending {
         Login(Context),
         Call(Context),
+        Later,
     }
     #[derive(Default)]
     struct Probe {
@@ -65,6 +68,8 @@ mod keyless_serial {
         revision: u64,
         timer: Option<TimerId>,
         plan: Option<Plan>,
+        expiry_plan: Option<Plan>,
+        retirements: usize,
         slot: Option<Slot>,
         entry: Option<Result<(), Error>>,
         admitted: Option<Result<(), Error>>,
@@ -99,6 +104,18 @@ mod keyless_serial {
                 context.credential().is_none(),
                 "keyless context cannot sign"
             );
+            if self.mode == Mode::ReadWithSecondary {
+                let generation = cx
+                    .io
+                    .core
+                    .request_contexts
+                    .validate_session(self.session.as_ref().unwrap())
+                    .unwrap();
+                assert!(
+                    matches!(context.egress(), Some(crate::request_context::Egress::Session(egress)) if egress.generation() == generation),
+                    "actual Read Context keeps the root Session egress"
+                );
+            }
             let session = if self.mode == Mode::NoBearer {
                 None
             } else if self.mode == Mode::WrongBearer {
@@ -194,17 +211,26 @@ mod keyless_serial {
             assert!(cx.io.core.identities.primary.is_none());
             let session = cx
                 .open_session(SessionPolicy {
-                    credential: None,
+                    credential: (self.mode == Mode::CredentialSession).then(credential),
                     repeat_safe: true,
-                    private_egress: selection.session_egress(),
+                    private_egress: (!matches!(
+                        self.mode,
+                        Mode::NoSessionEgress | Mode::CredentialSession
+                    ))
+                    .then(|| selection.session_egress())
+                    .flatten(),
                 })
                 .unwrap();
+            if self.mode == Mode::CredentialSession {
+                self.session = Some(session);
+                return;
+            }
             let context = cx
                 .session_context(
                     &session,
                     Policy {
                         operation: Operation::Mutation,
-                        credential: None,
+                        credential: (self.mode == Mode::CredentialSession).then(credential),
                         timeout_ms: 20_000,
                         pacing: None,
                         retry: crate::request_context::RetryPolicy::Never,
@@ -223,7 +249,55 @@ mod keyless_serial {
             .unwrap();
             self.session = Some(session);
         }
-        fn on_command(&mut self, cx: &mut Cx<'_, Pending>, _: Command) {
+        fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+            if command.completion_id() == Some(9) {
+                let preflight = cx
+                    .begin_preflight(PreflightPolicy {
+                        purpose: PreflightPurpose::WriteAfterReads,
+                        read_credential: None,
+                        write_credential: Some(credential()),
+                    })
+                    .unwrap();
+                let (plan, _) = cx
+                    .admit_serial_plan(
+                        &preflight,
+                        call(Operation::Mutation),
+                        SerialPolicy {
+                            credential: Some(credential()),
+                            pacing: None,
+                            refusals_complete: true,
+                        },
+                    )
+                    .unwrap();
+                self.expiry_plan = Some(plan);
+                return;
+            }
+            if command.completion_id() == Some(8) {
+                let context = cx
+                    .admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: Some(crate::request_context::Credential {
+                            slot: crate::CredentialSlot::Primary,
+                            reference: crate::signing::KeyRef("fixture".into()),
+                        }),
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: crate::request_context::RetryPolicy::Never,
+                    })
+                    .unwrap();
+                cx.request_signed_managed(
+                    context,
+                    None,
+                    Method::Post,
+                    "https://venue.test/later".into(),
+                    None,
+                    Box::new(Recipe),
+                    Pending::Later,
+                )
+                .map_err(|(_, error)| error)
+                .unwrap();
+                return;
+            }
             if self.mode == Mode::Retired {
                 cx.retire_session(self.session.as_ref().unwrap()).unwrap();
             }
@@ -389,6 +463,7 @@ mod keyless_serial {
                     return;
                 }
                 Pending::Call(context) => context,
+                Pending::Later => panic!("later signing proof stops at actual provider staging"),
             };
             let plan = self.plan.clone().unwrap();
             let slot = self.slot.clone().unwrap();
@@ -502,6 +577,9 @@ mod keyless_serial {
                 assert!(cx.session_ready(self.session.as_ref().unwrap()).is_empty());
             }
         }
+        fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
+            self.retirements += 1;
+        }
         fn book(&self, _: &str) -> Option<&Book> {
             None
         }
@@ -525,6 +603,50 @@ mod keyless_serial {
         assert_eq!(failures[0].outcome, Some(crate::Outcome::NotSent));
         assert_ne!(failures[0].kind, Some(ErrorKind::AuthInvalid));
         assert_ne!(failures[0].kind, Some(ErrorKind::AuthExpired));
+        later_signed_stages(e);
+    }
+    fn later_signed_stages(e: &mut Engine<Probe>) {
+        e.handle_command(
+            30_000.,
+            Command::CancelOrdersWithSymbols {
+                command: 8,
+                orders: vec![],
+            },
+            None,
+        )
+        .unwrap();
+        let actions: Vec<_> = e.drain_actions().collect();
+        let preparation = actions
+            .into_iter()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { preparation, .. } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("ordinary signed work still prepares");
+        e.http_prepared(
+            30_000.,
+            preparation,
+            Prepared {
+                id: preparation.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let work = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Sign { work, .. } => Some(work),
+                _ => None,
+            })
+            .expect("ordinary provider work still stages");
+        assert!(
+            matches!(work.operations.as_slice(), [crate::signing::Operation::Present { key }] if key.0 == "fixture")
+        );
+        assert!(!e.io.core.signing.refused());
+        assert_eq!(e.health().auth_failures, 0);
     }
     fn no_sign(actions: &[Action]) {
         assert!(
@@ -618,6 +740,10 @@ mod keyless_serial {
             .unwrap();
         }
         e.start(0.);
+        if mode == Mode::CredentialSession {
+            assert!(e.drain_actions().next().is_none());
+            return e;
+        }
         let actions = e.drain_actions().collect();
         let login = drive(&mut e, actions, 0.).pop().unwrap();
         assert_eq!(login.body.as_deref(), Some(r#"{"api_key":""}"#));
@@ -755,6 +881,7 @@ mod keyless_serial {
             assert_eq!(e.venue.admitted, Some(Ok(())));
             assert_eq!(e.venue.issue, Some(Err(Error::Revoked)));
             assert_eq!(e.venue.before, e.venue.after);
+            local_session_refusal(&mut e);
         }
     }
     #[test]

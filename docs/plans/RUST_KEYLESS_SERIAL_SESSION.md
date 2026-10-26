@@ -218,3 +218,28 @@ entry, nonce/signing-intent refusal, legacy/selected attachment, genuine install
 secondary isolation, duplicate old DATA, parked retirement, exact equality and
 late completion, changed resend body, and accepted-prefix journal retirement.
 They are source evidence, not retroactively counted as original REDs.
+
+
+### Bounded source review corrections
+
+The Session entry requires credential-free private Session egress; a live Session
+without that egress cannot fall back to Primary. Root egress resolution also
+refuses a missing declaration. The installed-secondary Read control checks the
+actual Context's Session generation, in addition to the resulting route.
+
+Retirement sweeps skip command-entry and Plan-expiry custody. A failed seal stops
+the sweep, with a debug assertion, rather than panicking in release or repeatedly
+finding the same root. Successful seals drain owner retirement callbacks and
+wake deferred commands at that flush. A live-root count increments only after
+successful Session entry and decrements when its owner enters retirement. Zero
+roots skip the command scan; test-only visit counters pin that fast path before
+keyless work and after empty completion. A custody-scope control uses genuine
+issued Plan/Preflight handles and the engine's existing scope markers to pin
+that retirement waits for expiry/entry custody to end.
+
+The resend fixture now explicitly fails its Plan when Session resend selection
+refuses, using the existing journal rather than leaving an owner open. This is
+source-stage collector plumbing, not original evidence. Per-operation refusal
+controls additionally stage a later ordinary signed request on the same engine,
+through genuine Prepare into provider work, proving that no account signing latch
+was set. A separate pre-refusal positive validates that probe itself.

@@ -26,7 +26,10 @@ impl ContextRegistry {
         }
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         if let Some(session) = session {
-            self.validate_session(session)?;
+            let generation = self.validate_session(session)?;
+            if self.sessions.egress(generation).is_none() {
+                return Err(Error::Invalid);
+            }
             if policy.purpose != PreflightPurpose::WriteAfterReads
                 || policy.read_credential.is_some()
                 || policy.write_credential.is_some()
@@ -318,6 +321,9 @@ impl<P> Cx<'_, P> {
                 .preflight_state_mut(&preflight)
                 .expect("new Preflight")
                 .session_root = session.cloned();
+            if session.is_some() {
+                self.io.core.request_contexts.keyless_roots += 1;
+            }
         }
         #[cfg(feature = "order-locks")]
         if writes {
