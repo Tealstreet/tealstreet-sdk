@@ -1,6 +1,7 @@
 # Lighter remaining request and signing funnel
 
-Status: local plan on landing tip fff73624e8578c623a41875b3946d0c665f561af.
+Status: local plan and reviewed originals; composed on adb6555aeac27d1c4947c88ed5a3cdd76b6a0bf8.
+Original RED/GREEN baseline: unchanged fff73624e8578c623a41875b3946d0c665f561af.
 Owner: codex-ih35js. One venue PR will contain this plan, original regressions
 and the source. Reviewer: claude-dazzy3 or claude-55ao7t. The overseer confirms sole venue ownership; codex-zs5e83’s old lane is inactive.
 claude-m26ps4 retains recipe/provider ownership. Historical plans are evidence, not clearance for this cutover.
@@ -100,11 +101,28 @@ Header appends authorization; WS owns the escaped subscription frame. It
 refuses an existing auth parameter/header. Preparation binds the outbound
 method/host/path, uses floor(stamp/1000)+60 and fresh dispatch entropy; apply
 requires exactly one 80-byte result. Receipt expiry is deadline*1000 and the
-signing window is five seconds. This fits all three current native placements.
+signing window is five seconds. Query and Header fit their native placements. WsSubscribe still needs explicit
+public socket URL metadata: WsSend carries only socket/text, and DispatchContext
+has no socket URL. The recipe owner is correcting this API before freezing it;
+do not infer the signing host from a chain ID shared by two deployments.
 The provider public-key result is canonical, on-curve, 40 bytes; malformed or
 zero scalar material is refused at trusted setup. codex-uufub4 or
 claude-55ao7t supplies API/plan-fit review; historical venue ownership does not
 substitute for that review.
+
+### Trusted setup capability pins
+
+A local scalar plus account index and API-key index works today without key.
+The generic local-provider capsule requires a nonempty credential value to issue
+an admissible Primary. The core reviewer must confirm the venue setup mapping
+for this secret-only shape before cutover; do not fabricate opaque refs or drop
+this supported configuration. No shared setup behavior changes without review.
+
+The optional key is also a public L1 address selector. Preserve only a validated
+public address as explicit venue metadata before the bridge strips credentials,
+keeping both application-index and L1-address lookup candidates. Scalar material
+stays exclusively in trusted provider setup; public identity metadata is not a
+signing secret and must not substitute for proof of the installed Primary.
 
 ## Background reads and publication
 
@@ -284,8 +302,9 @@ financial/signing/coverage assertions remain required alongside these additions.
 
 Original-review pins: the reseed control selects exactly reply-time + 150 ms
 and checks the successful result is the original ClientOrderIndex, not merely
-a Done notice. Its strengthened native-GREEN body will be re-executed before
-source publication. Source-stage gates explicitly include typed provider
+a Done notice. The strengthened native-GREEN body passed on the unchanged fff73624e85 runtime
+using original head 1513268d185 (one selected test, zero failures or ignored);
+its scratch target was deleted. Source-stage gates explicitly include typed provider
 refusal kind/no write retry, scalar absence from options/serialized bridge/Debug,
 FIFO/coalesced tier/approval/exposure waits, tier success/refusal/Unknown once,
 and the second-21104 explicit failure/no third send.
