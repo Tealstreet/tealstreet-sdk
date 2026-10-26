@@ -5541,6 +5541,7 @@ mod tests {
             ],
         };
         let (mut engine, _) = start(Probe::default());
+        engine.io.core.order_locks = crate::order_locks::OrderLocks::fencing_placements(true);
         // A released managed placement that seals Unknown (a lost 503 answer).
         seal_uncertain(
             &mut engine,

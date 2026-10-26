@@ -3401,6 +3401,13 @@ pub trait Venue {
         true
     }
 
+    /// Refuse a placement or amend on a symbol whose earlier placement is
+    /// Unknown until a fresh order read resolves it. Opt in only when
+    /// `reconcile_uncertain` starts that read at once, so the fence is short-lived.
+    fn fence_uncertain_placements(&self) -> bool {
+        false
+    }
+
     /// What this venue answers beyond the common commands; the engine gates
     /// option and symbol-routed commands from it.
     fn capabilities(&self) -> Capabilities {
@@ -3697,6 +3704,9 @@ impl<V: Venue> Engine<V> {
         )
         .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
         let http_release = V::http_release();
+        #[cfg(feature = "order-locks")]
+        let order_locks =
+            crate::order_locks::OrderLocks::fencing_placements(venue.fence_uncertain_placements());
         #[cfg(feature = "release-domains")]
         let release_domain = V::http_release_domain();
         #[cfg(feature = "release-domains")]
@@ -3729,6 +3739,8 @@ impl<V: Venue> Engine<V> {
                     mutation_barriers_declared: V::http_mutation_barriers(),
                     #[cfg(feature = "managed-sockets")]
                     socket_capabilities: V::socket_capabilities(),
+                    #[cfg(feature = "order-locks")]
+                    order_locks,
                     ..IoCore::default()
                 },
                 ..Io::default()
@@ -6539,6 +6551,9 @@ mod streaming_tests {
         }
         fn fence_uncertain_cancel_all(&self) -> bool {
             self.fence_uncertain
+        }
+        fn fence_uncertain_placements(&self) -> bool {
+            true
         }
         type Pending = Vec<String>;
         fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
