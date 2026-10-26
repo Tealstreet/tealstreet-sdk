@@ -188,6 +188,13 @@ impl Harness {
         self.requests.iter().any(|r| r.url.contains(path))
     }
 
+    /// Nothing is replayed: an unproven write only starts the fence's open-orders reconcile.
+    pub fn only_reconcile_reads(&self) -> bool {
+        self.requests.iter().all(|r| {
+            r.method == safe_cex_engine::Method::Get
+                && (r.url.contains("openOrders") || r.url.contains("openAlgoOrders"))
+        })
+    }
     pub fn take(&mut self, path: &str) -> HttpRequest {
         let index = self
             .requests
