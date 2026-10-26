@@ -9831,6 +9831,9 @@ There is no TypeScript venue or hosted-signing venue fallback. An IN account
 using `remoteSigner` / `payloadSigner` without enabled Rust remote policy
 refuses with `Unsupported` / `NotSent`; Paradex beta supports local keys only.
 Enabled Rust provider paths retain their existing custody and wire contracts.
+Bitunix joins the hosted-enabled set only when #2262's declared remote policy
+lands; until then its hosted accounts remain refused. No separate beta override
+enables it early.
 
 Metadata and standalone `*.signing.ts` codecs used by `rust/legacySigning.ts`
 remain runtime dependencies. Independent TS/native financial, transport and

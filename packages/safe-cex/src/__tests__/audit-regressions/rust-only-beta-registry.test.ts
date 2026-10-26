@@ -8,6 +8,7 @@ import { exchangeMetadata } from '../../exchangeMetadata';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { exchangeRegistry as nativeRegistry } from '../../exchanges/registry.native';
 import { assertBetaAccount, BETA_VENUES } from '../../exchanges/rust/betaVenues';
+import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 import { createRustRegistry, getRegisteredExchangeNames } from '../../exchanges/rustRegistry';
 import { createExchange, createPublicExchange, preloadExchange } from '../../index';
 import { DefaultStore } from '../../store/store.base';
@@ -132,7 +133,12 @@ describe('Rust-only beta construction', () => {
   });
   it('refuses unsupported delegated modes and Paradex callbacks without fallback', async () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
-    for (const name of ['kraken', 'krakenspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'paradex', 'bitunix', 'phemex', 'bingx', 'apexomni', 'blofin', 'cryptocom', 'asterdex'] as const) {
+    const localOnly = ['kraken', 'krakenspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'paradex', 'phemex', 'bingx', 'apexomni', 'blofin', 'cryptocom', 'asterdex'] as const;
+    // #2262 enables Bitunix through the shared policy, without a beta override.
+    const refused: readonly ExchangeName[] = deriveRemoteSigningPolicy('bitunix')?.enabled
+      ? localOnly
+      : [...localOnly, 'bitunix'];
+    for (const name of refused) {
       for (const signing of [{ remoteSigner }, { payloadSigner: vi.fn() }]) {
         expect(() => assertBetaAccount(name, { key: 'local', secret: 'local', ...signing })).toThrow(ExchangeError);
         await expect(createExchange(name, { key: 'local', secret: 'local', ...signing })).rejects.toMatchObject(
