@@ -27,6 +27,7 @@ mod serial_plans {
     }
     fn mutation() -> SerialCall {
         SerialCall {
+            auth: Default::default(),
             operation: Operation::Mutation,
             timeout_ms: 20_000,
             attempts: 1,
@@ -34,6 +35,7 @@ mod serial_plans {
     }
     fn read() -> SerialCall {
         SerialCall {
+            auth: Default::default(),
             operation: Operation::Read,
             timeout_ms: 20_000,
             attempts: 1,

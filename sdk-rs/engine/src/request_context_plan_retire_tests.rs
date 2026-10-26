@@ -153,6 +153,7 @@ mod retire_unissued_plan_calls {
                     .admit_serial_plan(
                         &preflight,
                         crate::request_context::plan::SerialCall {
+                            auth: Default::default(),
                             operation: Operation::Mutation,
                             timeout_ms: 100,
                             attempts: 1,

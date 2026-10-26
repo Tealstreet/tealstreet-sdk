@@ -260,6 +260,7 @@ mod serial {
     };
     fn call() -> SerialCall {
         SerialCall {
+            auth: Default::default(),
             operation: Operation::Mutation,
             timeout_ms: 20_000,
             attempts: 1,

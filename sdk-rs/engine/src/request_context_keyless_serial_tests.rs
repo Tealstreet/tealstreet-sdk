@@ -94,6 +94,7 @@ mod keyless_serial {
     }
     fn call(operation: Operation) -> SerialCall {
         SerialCall {
+            auth: Default::default(),
             operation,
             timeout_ms: 20_000,
             attempts: 2,
