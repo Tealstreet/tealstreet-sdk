@@ -1725,7 +1725,7 @@ impl crate::Bingx {
             code: i64,
         }
         let evidence: Evidence = serde_json::from_str(response.body).ok()?;
-        if matches!(evidence.code, 100001 | 100004 | 100413 | 100419) {
+        if crate::trading::KEY_REFUSALS.contains(&evidence.code) {
             return Some(Rejected);
         }
         if !(200..300).contains(&response.status) || evidence.code != 0 {

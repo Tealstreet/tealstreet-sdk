@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::error::ErrorKind;
 use safe_cex_engine::{Action, Command, Event, Notice};
-use safe_cex_venue_mexc::{MexcFutures, Options};
+use support::Options;
 use support::*;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -297,15 +297,13 @@ fn unrelated_order_update_does_not_skip_the_second_hedge_rail() {
 
 #[test]
 fn startup_mode_and_metadata_reads_respect_the_rate_limit_pause() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_mexc::MexcFutures::new(safe_cex_venue_mexc::Options {
-            recv_window: None,
-            read_credentials: None,
-            key: Some("key".into()),
-            secret: Some("secret".into()),
-            public_data_only: false,
-        }),
-    );
+    let mut e = support::configured(support::Options {
+        recv_window: None,
+        read_credentials: None,
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        public_data_only: false,
+    });
     e.start(0.0);
     let r = public_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, MARKETS);
@@ -840,13 +838,13 @@ fn bad_asset_row_keeps_its_stored_balance_while_peers_update() {
 
 #[test]
 fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
+    let mut e = support::configured(Options {
         read_credentials: None,
         public_data_only: false,
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
         recv_window: None,
-    }));
+    });
     e.start(0.0);
     let r = public_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, &catalogue_with("0"));
@@ -993,8 +991,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -1281,13 +1279,13 @@ fn missing_order_identity_protects_known_orders_and_commits_its_peers() {
 }
 
 fn mode_read(body: &str, status: u16) -> (support::TestEngine, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
+    let mut e = support::configured(Options {
         read_credentials: None,
         public_data_only: false,
         recv_window: None,
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
-    }));
+    });
     e.start(0.0);
     let r = support::public_requests(&mut e, 0.).remove(0);
     support::response(&mut e, &r, support::MARKETS);
@@ -1335,7 +1333,7 @@ fn mode_retried(e: &mut support::TestEngine, mut actions: Vec<Action>, until: f6
     }) {
         actions.retain(|a| !matches!(a, Action::SetTimer { timer: t, .. } if *t == timer));
         e.handle(at, Event::TimerFired { timer });
-        let next: Vec<_> = e.drain_actions().collect();
+        let next = support::prepared(e, at);
         retried |= next
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("position_mode")));
@@ -1560,7 +1558,7 @@ impl ReporterHarness {
 
     fn collect(&mut self) -> Vec<safe_cex_engine::HttpRequest> {
         let mut reads = Vec::new();
-        for action in self.engine.drain_actions() {
+        for action in support::prepared(&mut self.engine, self.now) {
             match action {
                 Action::Http(request) => reads.push(request),
                 Action::SetTimer { timer, at_ms } if at_ms == self.now + POLL_MS => {
@@ -1964,7 +1962,7 @@ fn initial_plan_transient_failures_keep_the_existing_retry_policy() {
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(startup_failure(&actions).is_none(), "{status} {body}");
         e.handle(2100.0, Event::TimerFired { timer: poll });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = support::prepared(&mut e, 2100.);
         assert!(startup_failure(&actions).is_none());
         assert!(
             actions
