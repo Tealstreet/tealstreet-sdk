@@ -1776,6 +1776,9 @@ impl Venue for BinanceFutures {
                 let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
                     Ok(query) => query,
                     Err(error) => {
+                        let error = safe_cex_engine::VenueError::new(error)
+                            .kind(safe_cex_engine::ErrorKind::InvalidInput)
+                            .outcome(safe_cex_engine::Outcome::NotSent);
                         cx.refuse_command(Operation::Read, error);
                         return;
                     }

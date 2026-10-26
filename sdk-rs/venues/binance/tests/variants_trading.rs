@@ -646,11 +646,16 @@ fn spot_market_take_profit_still_amends_while_spot_take_profit_limit_refuses() {
             price: Some(125.0),
             amount: None,
         }));
-        let failed = h
-            .failures
-            .iter()
-            .any(|(c, e)| *c == 88 && e.kind == Some(safe_cex_engine::ErrorKind::Unsupported));
-        assert_eq!(failed, refused, "{native}");
+        let failures: Vec<_> = h.failures.iter().filter(|(c, _)| *c == 88).collect();
+        assert_eq!(failures.len(), usize::from(refused), "{native}");
+        if let Some((_, error)) = failures.first() {
+            assert_eq!(
+                error.message,
+                "Binance stop-limit orders cannot be amended; cancel and place a new one"
+            );
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        }
         assert_eq!(h.requests.is_empty(), refused, "{native}");
     }
 }
