@@ -33,11 +33,16 @@ def modes():
     grouped[('metadata-freshness', 'test-support')] = ['metadata-only CI control']
     grouped[('http-plans', 'metadata-freshness', 'order-locks', 'test-support')] = [
         'metadata Plan CI control']
+    # No venue enables address setup until its own adoption; exercise the real seam.
+    grouped[('address-nonce', 'http-plans', 'test-support')] = ['verified address nonce setup control']
     # No family enables serial Plans before adoption; keep them compiled and tested.
     grouped[('http-plans', 'order-locks', 'serial-plans', 'test-support')] = ['serial Plan control']
     # Condition waits imply serial-plans; no family enables them before adoption.
     grouped[('condition-waits', 'http-plans', 'order-locks', 'serial-plans', 'test-support')] = [
         'condition wait control']
+    # No family declares a release domain before adoption; its tests run here.
+    grouped[('http-mutation-barriers', 'http-plans', 'release-domains', 'serial-plans', 'test-support')] = [
+        'release domain control']
     # No family parks capped write Preflights before adoption; its tests run here.
     grouped[('http-plans', 'order-locks', 'serial-plans', 'test-support', 'write-preflight-wait')] = [
         'write Preflight wait control']
