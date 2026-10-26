@@ -162,7 +162,7 @@ test('all installs follow restore and save cache immediately only on install suc
   assert.ok(!install.includes('always()'));
   const callers = {
     'ci.yml': ['ci'],
-    'rust.yml': ['families', 'browser', 'gate', 'bitget-paired', 'cpu-plan', 'cpu-certify'],
+    'rust.yml': ['harness', 'families', 'combined', 'browser', 'gate', 'bitget-paired', 'cpu-plan', 'cpu-certify'],
     'exchange-mcp-release.yml': ['release'],
   };
   for (const [file, expected] of Object.entries(callers)) {

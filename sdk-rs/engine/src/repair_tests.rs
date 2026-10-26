@@ -172,6 +172,9 @@ mod repair {
         foreign_successor: Option<Result<(), RepairRefusal>>,
         failures: usize,
         reconciles: Vec<Option<Vec<String>>>,
+        /// Hold the replace root's cancel unreleased, then finish it inside a
+        /// later Background read delivery (a revocation by new evidence).
+        finish_held_in_read: bool,
         /// Finish the admitted leg instead of sending, as after a refused send.
         refuse_send: bool,
     }
@@ -278,6 +281,12 @@ mod repair {
         }
         fn snapshot_data(&mut self, cx: &mut Cx<'_, Context>, context: &Context) {
             cx.validate_background_read_http_delivery(context).unwrap();
+            if self.finish_held_in_read
+                && let Some((_, held)) = self.roots.first()
+            {
+                cx.finish_http_context(held).unwrap();
+                return;
+            }
             let token = self.token.take().expect("token begun before the read");
             let publish = matches!(
                 self.snap,
@@ -486,6 +495,9 @@ mod repair {
                 if let Ok((root, context)) = result {
                     self.roots.push((root, context.clone()));
                     self.send(cx, context, Method::Delete);
+                    if self.finish_held_in_read {
+                        self.read_snapshot(cx);
+                    }
                 }
                 return;
             }
@@ -968,6 +980,40 @@ mod repair {
         reply(&mut e, token, 3., 200, r#"{"code":0}"#);
         assert_eq!(e.venue.notices.len(), 1, "{:?}", e.venue.notices);
         assert!(e.venue.notices[0].contains("cancel: Rejected"), "{:?}", e.venue.notices);
+    }
+
+    #[test]
+    fn a_held_repair_leg_finished_inside_a_background_delivery_settles_its_root() {
+        let (mut e, _) = snapshot(Repairer {
+            replace: true,
+            finish_held_in_read: true,
+            ..Default::default()
+        });
+        let actions = fire(&mut e, 2.);
+        assert_eq!(e.venue.admits, vec![Ok(())]);
+        let read = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match a.as_ref() {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } if request.method == Method::Get => Some(*preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("the later Background read");
+        release(&mut e, read, 2.);
+        reply(&mut e, read, 2.5, 200, "[]");
+        assert_eq!(e.venue.notices.len(), 1, "{:?}", e.venue.notices);
+        assert!(
+            e.venue.notices[0].contains("cancel: NotSent"),
+            "{:?}",
+            e.venue.notices
+        );
+        assert_eq!(e.venue.notice_outside_entry, vec![true]);
     }
 
     // Snapshot origin (cancel-then-place).
