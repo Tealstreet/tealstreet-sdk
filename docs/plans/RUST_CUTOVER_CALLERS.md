@@ -9934,9 +9934,12 @@ opts in. AsterDEX opts in: its hook starts an open-orders read at once, or, when
 read is already in flight (which predates the seal and cannot clear the fence),
 starts the fresh one as that read completes. It releases only on a clean read,
 so a persistently malformed order row keeps that venue's placements refused
-(cancels by ID stay admitted) until the row parses. Not covered yet (Phase B): an Unknown marker for venues with no
-placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
-until its opt-in) from managed, single-Context and legacy `cx.request` writes,
-and amend roots whose replacement places (zs5e83's audits,
-/tmp/codex-beta-plan-fence-audit/report.md and followup.md). Paradex's
-venue-local same-ID amend fence stays as is.
+(cancels by ID stay admitted) until the row parses. Phase B: the fence no longer needs a lock scope. On an opted-in venue whose
+placements or amends hold no scope (guard flags off: Binance x4, Bybit,
+Crypto.com, BingX, ApeX, Hyperliquid, Paradex), entry still refuses a fenced
+symbol, and every admitted placement or amend is marked with its symbols (all
+symbols for an amend whose symbol is unknown). An Unknown outcome on that
+command (managed, single-Context or legacy `cx.request`) fences them and queues
+their reconcile; any other end drops the mark. Amend roots are marked too, so an
+Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
+same-ID amend fence stays as is.
