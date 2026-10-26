@@ -399,6 +399,7 @@ fn serial_leg<const D: u8>(engine: &mut Engine<Fifo<D>>) -> Context {
         .admit_serial_plan(
             &preflight,
             crate::request_context::plan::SerialCall {
+                auth: crate::request_context::plan::CallAuth::Preflight,
                 operation: Operation::Mutation,
                 timeout_ms: 20_000,
                 attempts: 1,
