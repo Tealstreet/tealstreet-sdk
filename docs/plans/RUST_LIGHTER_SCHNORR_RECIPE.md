@@ -92,20 +92,26 @@ Goldilocks, Lighter's scheme.
   fails closed. The admission PR flips it to `cfg!(feature = "schnorr")` in
   the same cutover.
 
-**Part 2: auth-token recipe** (on part 1)
+**Part 2: auth-token recipe** (on part 1). Implemented with part 3 (m26ps4).
 - `sign::AuthRecipe` for HTTP `auth=` query strings and the private WS
   subscribe (through `send_signed`), with deadline `stamp/1000 + 60`. The
   canonicalization is shared with the legacy `auth_token`.
 
-**Part 3: public key** (after #1963 lands), per claude-19pt8s:
+**Part 3: public key** (after #1963 lands), per claude-19pt8s. Implemented with
+part 2: the PublicKey arm, the 40-byte width, the canonical point check, canonical
+public-key encoding and the setup-time refusal. `asymmetric()`, `build_support`
+and the TS union already carried SchnorrDigest.
 - `public_key_len` gives `SchnorrDigest => Some(40)`.
 - crypto `asymmetric()` includes SchnorrDigest.
 - `build_support` and the TS `SigningAlgorithm` union gain `schnorrDigest`.
 - `LocalSigner` gets a `PublicKey` arm (`lighter::public_key`), and
   `valid_public_value` a canonical, on-curve ECgFp5 check.
-- Lighter's signing ref declares `signingAlgorithm: schnorrDigest`, so
+- **Cutover prerequisite (Lighter venue owner, now codex-ih35js):** Lighter's
+  signing ref declares `signingAlgorithm: schnorrDigest` in the registry, in the
+  same change that removes the eager holder and flips `implemented()`. Until
+  then the setup check is inert for Lighter. Once declared, the ref falls under
   claude-19pt8s's cross-family follow-up (asymmetric Sign requires a matching
-  declaration, closing key confusion with an undeclared MAC secret) covers it.
+  declaration, closing key confusion with an undeclared MAC secret).
 
 **Part 4: remote recipe ids** (after #1926 and part 3 land)
 - `lighter.tx.1` and `lighter.auth.1` in `REMOTE_RECIPES`.
