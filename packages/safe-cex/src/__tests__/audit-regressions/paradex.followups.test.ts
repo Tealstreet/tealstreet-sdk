@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
-import { ENDPOINTS } from '../../exchanges/paradex/paradex.types';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
+import { ENDPOINTS } from '../reference/paradex/paradex.types';
 import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () =>

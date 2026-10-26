@@ -161,15 +161,28 @@ jobs:
           - check: fmt
             command: cargo fmt --all --check
           - check: clippy
-            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 -- -D warnings
+            command: cargo clippy --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 -- -D warnings
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
-            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
+            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
           # Workspace resolution unifies family features. Exercise each
           # standalone engine closure, including both Plan configurations.
           - check: engine-feature-modes
             timeout: 90
             command: python3 scripts/test-http-plan-feature-modes.py
+          # The restored master candle-cache crates (mono candle-server image) build
+          # alone, with master's serde_json features, never unified into the port.
+          - check: candle-cache
+            command: |
+              cargo build --locked -p safe-cex-candle-cache --bin candle-cache-owner
+              cargo clippy --locked -p safe-cex-candle-cache -p safe-cex-num -p safe-cex-types --lib --bins -- -D warnings
+              # The fix_audit and monthly_behavior targets and two lib tests load the TypeScript
+              # compiler over TS venue sources, which the Rust-only bundle deletes.
+              cargo test --locked -p safe-cex-candle-cache --lib --bins --test backend_api --test divergence_audit --test field_identity --test numeric_ingress --test owner_lifecycle --test p4_calendar --test runtime_backends -- --skip tests::cleaning_2000_nan_permutations_match_actual_source_order --skip tests::cleaning_source_nan_permutations_keep_first_duplicates
+              cargo test --locked -p safe-cex-num --lib
+              # This audit reads source of a crate the port deleted.
+              cargo test --locked -p safe-cex-types --lib -- --skip position_record::tests::serde_accepted_spelling_inventory_matches_source
+              python3 scripts/check-serde-json-features.py
           - check: mutation-barriers
             command: |
               cargo clippy --locked -p safe-cex-engine --all-targets --no-default-features --features http-mutation-barriers,test-support,order-locks,managed-sockets -- -D warnings
@@ -221,9 +234,9 @@ jobs:
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
       - name: Build every crate for wasm32
-        run: cargo build --locked --workspace --target wasm32-unknown-unknown
+        run: cargo build --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --target wasm32-unknown-unknown
       - name: Lint every crate for wasm32
-        run: cargo clippy --locked --workspace --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --target wasm32-unknown-unknown -- -D warnings
       - name: Lint explicit WASM Mutation-barrier host support
         run: cargo clippy --locked -p safe-cex-wasm --no-default-features --features bitunix,http-mutation-barriers --target wasm32-unknown-unknown -- -D warnings
 

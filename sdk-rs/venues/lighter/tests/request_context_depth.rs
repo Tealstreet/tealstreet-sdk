@@ -28,7 +28,7 @@ fn boot(robinhood: bool, testnet: bool) -> (Engine<Lighter>, TimerId, SocketId) 
         })
         .unwrap();
     reply_at(&mut engine, NOW, &metadata, 200, META);
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = support::finish_startup_tickers(&mut engine, NOW);
     let poll = actions
         .iter()
         .find_map(|action| match action {

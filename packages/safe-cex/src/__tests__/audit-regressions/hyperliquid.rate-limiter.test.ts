@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getHyperliquidRestRequestWeight,
   RateLimiter,
-} from '../../exchanges/hyperliquid/hyperliquid.rateLimiter';
+} from '../reference/hyperliquid/hyperliquid.rateLimiter';
 import { ENDPOINTS, INFO_TYPES } from '../../exchanges/hyperliquid/hyperliquid.types';
 
 describe('Hyperliquid REST weighted rate limiter', () => {

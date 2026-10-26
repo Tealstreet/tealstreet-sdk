@@ -21,8 +21,8 @@ import { DefaultStore } from '../store/store.base';
 import { legacyVenueRegistry as exchangeRegistry } from './reference/legacyVenueRegistry';
 
 // Inspect REST adapter construction, without bootstrapping a remote SDK account.
-vi.mock('../exchanges/paradex/paradex.sdk', async (original) => ({
-  ...(await original<typeof import('../exchanges/paradex/paradex.sdk')>()),
+vi.mock('./reference/paradex/paradex.sdk', async (original) => ({
+  ...(await original<typeof import('./reference/paradex/paradex.sdk')>()),
   initializeParadexSDK: vi.fn(async () => null),
 }));
 

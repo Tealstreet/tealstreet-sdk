@@ -3,7 +3,7 @@ import type { RemoteSigner, RemoteSignerRequest } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { BitgetPrivateWebsocket } from '../../exchanges/bitget/bitget.ws-private';
+import { BitgetPrivateWebsocket } from '../reference/bitget/bitget.ws-private';
 import { createRemoteSignerProvider } from '../../exchanges/rust/remoteSignerProvider';
 import { virtualClock } from '../../utils/virtualClock';
 

@@ -4,7 +4,7 @@ import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 import { createHash } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
 
-import { createAPI } from '../../exchanges/bitunix/bitunix.api';
+import { createAPI } from '../reference/bitunix/bitunix.api';
 import { signHostedHttp, signHostedWsAuth } from '../../exchanges/rust/legacySigning';
 import { signHttpCapture } from '../../utils/signHttpCapture';
 import { virtualClock } from '../../utils/virtualClock';
