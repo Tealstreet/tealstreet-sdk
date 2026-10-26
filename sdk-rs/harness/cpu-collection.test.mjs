@@ -283,7 +283,7 @@ test('actual post-merge workflow invocation enters and completes the real collec
     const result = reportFixture(state, claim);
     fs.copyFileSync(result.reportPath, process.argv[process.argv.indexOf('--report') + 1]);`;
   write(options.root, 'sdk-rs/harness/gate.mjs', gate);
-  git(options.root, 'add', 'sdk-rs/harness/gate.mjs'); git(options.root, 'commit', '-qm', 'scripted child report');
+  git(options.root, 'add', 'sdk-rs/harness/gate.mjs'); git(options.root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'scripted child report');
   options.run.head_sha = options.job.head_sha = git(options.root, 'rev-parse', 'HEAD');
   const state = prepareCollection(options), claim = state.claims[0];
   const bin = path.join(path.dirname(options.root), 'bin'); fs.mkdirSync(bin);
