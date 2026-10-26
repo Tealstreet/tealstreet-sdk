@@ -690,8 +690,7 @@ pub fn prepare_local_signer_for(
     }
     #[cfg(feature = "lighter")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
-        let public = lighter_setup::setup_public_mode(options);
-        payload_signing_rules_in_mode(venue, options, false, public)?;
+        payload_signing_rules(venue, options, false)?;
         return lighter_setup::native(options, signer_setup_policy_for(venue, options));
     }
     let policy = signer_setup_policy_for(venue, options);

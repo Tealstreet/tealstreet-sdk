@@ -376,6 +376,18 @@ mod tests {
             options.public_data_only = false;
             options.public_mode = Some(serde_json::from_value(json!({"requested":true})).unwrap());
             assert!(crate::local_signer_from_json_for_mode(venue, "{}".into(), &options).is_ok());
+            options.public_mode = Some(
+                serde_json::from_value(json!({
+                    "payloadSigner":true,"apiKeyIndexPresent":true
+                }))
+                .unwrap(),
+            );
+            options.api_key_index = None;
+            options.key = Some("public-key".into());
+            let (provider, identities) =
+                crate::prepare_local_signer_for(venue, &mut options).unwrap();
+            assert!(identities.primary.is_none());
+            assert_no_signing_material(&provider);
         }
     }
 
