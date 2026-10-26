@@ -18,6 +18,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = 'scripts/request-legacy-sites.json'
 TEST_MANIFEST = 'scripts/request-legacy-test-sites.json'
 ENGINE_LIB = 'engine/src/lib.rs'
+SUPER_GLOB = ['use', 'super', '::', '*', ';']
+# Prelude macros trusted where the same scope proof shows no definition, import or
+# glob can shadow them; none can introduce a textual macro or an import.
+STD_MACROS = {'matches', 'format', 'assert', 'assert_eq', 'assert_ne', 'vec', 'panic', 'unreachable'}
 METHODS = {'request', 'request_streamed', 'request_streamed_body', 'sign_http', 'done', 'fail'}
 IDENT = re.compile(r'[A-Za-z_][A-Za-z_0-9]*')
 RAW = re.compile(r'(?:br|cr|r)(\#*)"')
@@ -701,7 +705,45 @@ class MacroImportProof:
                                              + b'\0' + self.sources[item].encode()).hexdigest()}
                        for item in (*parents, path)]
 
+        def namespace(file, module):
+            """Glob proofs for the module-level uses of `module` in `file`, else None."""
+            stream = self.streams[file]
+            modules, scopes = module_ranges(stream), brace_ranges(stream)
+            proofs = []
+            for start, end in use_items(stream):
+                if enclosing_module(modules, start) != module or \
+                        {a for a, _ in scopes if a < start < _} != set(module):
+                    continue  # Block-scoped uses never enter a module namespace.
+                part = stream[start:end]
+                if any(token.removeprefix('r#') in STD_MACROS for token in part):
+                    return None
+                if '*' in part:
+                    proof = super_glob(file, module) if part == SUPER_GLOB else glob_proof(part, start)
+                    if proof is None:
+                        return None
+                    proofs.append(proof)
+            return proofs
+
+        def super_glob(file, module):
+            """`use super::*;` names everything the parent module holds, its own
+            imports and globs included, so the parent namespace must be proven too."""
+            if module:
+                parent, parent_module = file, module[:-1]
+            else:
+                lineage = (*parents, path)
+                at = lineage.index(file)
+                if at == 0:
+                    return None
+                parent, parent_module = lineage[at - 1], ()
+            imports = namespace(parent, parent_module)
+            if imports is None:
+                return None
+            return {'super': str(parent.relative_to(ROOT.resolve())),
+                    'module_scope': list(parent_module), 'imports': imports}
+
         def glob_proof(part, index):
+            if part == SUPER_GLOB:
+                return super_glob(path, enclosing_module(module_ranges(self.streams[path]), index))
             if part[:2] == ['use', 'safe_cex_engine']:
                 return self.engine_glob_proof(root, part)
             if part[:2] != ['use', 'crate'] or len(part) != 7 \
@@ -715,7 +757,11 @@ class MacroImportProof:
             if target not in self.tracked or names[:1] == (target_name,):
                 return None
             stream = self.streams[target]
-            if source_macro_hazard(stream) or 'mod' in stream:
+            # `#[cfg(test)]` modules are absent from the production module graph.
+            tests = test_ranges(stream)
+            if source_macro_hazard(stream) or any(
+                    token == 'mod' and not any(a <= i < b for a, b in tests)
+                    for i, token in enumerate(stream)):
                 return None
             # Re-exports with every visibility spelling are excluded.
             for start, _ in use_items(stream):
@@ -791,14 +837,14 @@ def macro_imports_at(stream, index, resolve_glob=None, chain=None):
     if any(token in {'macro_use', 'macro_export', 'macro'} for token in stream):
         return None
     for i, token in enumerate(stream):
-        if token == 'macro_rules' and [t.removeprefix('r#') for t in stream[i + 2:i + 3]] in [['matches'], ['format']]:
+        if token == 'macro_rules' and stream[i + 2:i + 3] and stream[i + 2].removeprefix('r#') in STD_MACROS:
             return None
     # Unknown invocations may introduce textual macros or imports without arguments.
     for at, token in enumerate(stream):
         if stream[at + 1:at + 2] != ['!'] or stream[at + 2:at + 3] not in [['('], ['{'], ['[']]:
             continue
         scope = enclosing_module(modules, at)
-        if scope == invocation_module and token in {'matches', 'format'} \
+        if scope == invocation_module and token in STD_MACROS \
                 and (not at or stream[at - 1] not in {'::', '.'}):
             continue
         if invocation_module[:len(scope)] != scope:
@@ -813,10 +859,12 @@ def macro_imports_at(stream, index, resolve_glob=None, chain=None):
         if not all(a < index < b for a, b in enclosing):
             continue
         part = stream[start:end]
-        if any(token.removeprefix('r#') in {'matches', 'format'} for token in part):
+        if any(token.removeprefix('r#') in STD_MACROS for token in part):
             return None
         if '*' in part:
-            if enclosing or resolve_glob is None or (proof := resolve_glob(part, start)) is None:
+            # A glob is proven only at module level (file scope or an inline module).
+            module_level = {a for a, _ in enclosing} == set(invocation_module)
+            if not module_level or resolve_glob is None or (proof := resolve_glob(part, start)) is None:
                 return None
             proofs.append(proof)
     return {'mod_chain': chain or [], 'imports': proofs,
@@ -1099,6 +1147,81 @@ def data_macro_proof(stream, index, end, imports):
             'out_of_scope_bindings': excluded_bindings}
 
 
+def pattern_macro_proof(stream, index, end, imports, found, bound=frozenset()):
+    """`matches!(scrutinee, pattern [if guard])` whose every METHODS-named token is a
+    struct-pattern shorthand binding of this or an enclosing `matches!`, read only
+    as `name.field` in a guard. Guards may nest further proven `matches!`; nothing
+    may carry a Cx binding, call a closure, open a block or invoke another macro."""
+    if stream[index] != 'matches' or index and stream[index - 1] in {'::', '.'}:
+        return None
+    if stream[index + 2] != '(' or imports is None:
+        return None
+    arguments = list(range(index + 3, end - 1))
+
+    def top_level(positions, token):
+        depth = 0
+        for k in positions:
+            if depth == 0 and stream[k] == token:
+                return k
+            depth += (stream[k] in {'(', '[', '{'}) - (stream[k] in {')', ']', '}'})
+        return None
+
+    comma = top_level(arguments, ',')
+    if comma is None:
+        return None
+    guard_at = top_level(range(comma + 1, end - 1), 'if')
+    scrutinee = range(index + 3, comma)
+    pattern = range(comma + 1, guard_at if guard_at is not None else end - 1)
+    guard = range(guard_at + 1, end - 1) if guard_at is not None else range(0)
+    # A lone scrutinee name matched against an `Enum::Variant` path is that enum,
+    # never the `Cx` struct; any other possibly-Cx token refuses the proof.
+    head = [stream[k] for k in range(comma + 1, min(comma + 5, end - 1))]
+    typed_by_pattern = len(scrutinee) == 1 and len(head) >= 3 and IDENT.fullmatch(head[0]) \
+        and head[0] not in {CX, 'Self'} and head[1] == '::' and IDENT.fullmatch(head[2]) \
+        and head[3:4] in ([], ['('], ['{'], ['|'], ['if'])
+    if any(innermost(found, stream[k], k) is not None and innermost(found, stream[k], k)[0] in POSSIBLY_CX
+           for k in arguments if IDENT.fullmatch(stream[k])
+           and not (typed_by_pattern and k in scrutinee)):
+        return None
+    if any(stream[k] in {'!', '|', 'let', ';', '$'} or stream[k].removeprefix('r#') in METHODS
+           for k in scrutinee):
+        return None
+    names = set(bound)
+    for k in pattern:
+        token = stream[k]
+        if token in {'!', '$', '@'} or token.startswith('r#'):
+            return None
+        if token in METHODS:
+            opener = next((j for j in range(k - 1, comma, -1) if stream[j] in {'{', '('}
+                           and group_end(stream, j) > k), None)
+            if opener is None or stream[opener] != '{' or stream[k - 1] not in {'{', ','} \
+                    or stream[k + 1] not in {',', '}'}:
+                return None
+            names.add(token)
+    nested = []
+    k = guard.start
+    while k < guard.stop:
+        token = stream[k]
+        if token == 'matches' and stream[k + 1:k + 3] == ['!', '('] and stream[k - 1] not in {'::', '.'}:
+            inner_end = group_end(stream, k + 2)
+            proof = pattern_macro_proof(stream, k, inner_end, imports, found, names)
+            if proof is None:
+                return None
+            nested.append(proof)
+            k = inner_end
+            continue
+        if token in {'!', '|', 'let', ';', '{', '$'} or token.startswith('r#'):
+            return None
+        if token in METHODS and (token not in names or stream[k - 1] in {'.', '::'}
+                                 or stream[k + 1:k + 2] != ['.']):
+            return None
+        k += 1
+    if not names - set(bound) and not nested and not any(stream[k] in METHODS for k in guard):
+        return None
+    return {'macro': 'matches', 'pattern_bindings': sorted(names - set(bound)),
+            'nested': nested, 'import_scope': imports}
+
+
 def context_fingerprints(source, index_of=None, macro_scope=None, removed=None):
     """(prod, test) fingerprints of legacy calls on a resolved Cx binding.
 
@@ -1164,7 +1287,8 @@ def context_fingerprints(source, index_of=None, macro_scope=None, removed=None):
             if any(i + 3 <= at < end for at in counted) or (
                     escaped(i) and any(t.removeprefix('r#') in METHODS for t in stream[i + 3:end])):
                 imports = macro_scope(i) if macro_scope is not None else macro_imports_at(stream, i)
-                proof = data_macro_proof(stream, i, end, imports)
+                proof = data_macro_proof(stream, i, end, imports) or pattern_macro_proof(
+                    stream, i, end, imports, found)
                 if not any(i + 3 <= at < end for at in counted) and proof is not None:
                     if removed is not None:
                         removed.append({'tokens': stream[i:end], 'proof': proof,

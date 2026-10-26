@@ -556,6 +556,42 @@ class DataMacroProvenance(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.assertEqual(sum(self.prod(source).values()), 2)
 
+    PHEMEX = ('let next = actions.iter().filter(|action| matches!(action, Action::ManagedHttp(a) if '
+              'matches!(a.as_ref(), safe_cex_engine::request_context::HttpAction::Prepare{request, ..} '
+              'if request.method == Method::Delete && request.url.ends_with("orderID=two")))).count();')
+
+    def test_nested_guarded_pattern_bindings_named_like_methods_are_proven(self):
+        self.assertEqual(self.prod(self.source(self.PHEMEX)), {})
+        self.assertEqual(self.prod(self.source(
+            'assert!(ok); let v = vec![1]; matches!(step, Step::Send { request, .. } if request.ready);')), {})
+
+    def test_pattern_proof_keeps_calls_cx_values_and_unbound_names_counted(self):
+        for body in [
+                'matches!(step, Step::Send { request, .. } if cx.request(1).is_ok());',
+                'matches!(step, Step::Send { request, .. } if request.request(1).is_ok());',
+                'matches!(step, Step::Send { request, .. } if request(1));',
+                'matches!(step, Step::Send { inner, .. } if request.ready);',
+                'matches!(step, Step::Send { request: inner, .. } if inner.ready);',
+                'matches!(cx, Cx::Send { request, .. } if request.ready);',
+                'matches!(cx, request if request.ready);',
+                'matches!(step.request, Step::Send);',
+                'matches!(step, Step::Send { request, .. } if { cx.done(); true });',
+                'matches!(step, Step::Send { request, .. } if (|| request.ready)());',
+                'matches!(step, Step::Send { request, .. } if other!(request));',
+                'matches!(step, Step::Send { request, .. } if matches!(cx.request(1), Ok(_)));',
+                'matches!(step, Step::Send { r#request, .. } if r#request.ready);']:
+            with self.subTest(body=body):
+                self.assertTrue(self.prod(self.source(body)))
+
+    def test_trusted_prelude_macros_stay_conservative_when_shadowed(self):
+        body = 'assert!(ok); matches!(step, Step::Send { request, .. } if request.ready);'
+        for prefix in ['macro_rules! assert { ($x:expr) => {} }', 'use other::assert;',
+                       'use other::{custom as vec};', 'macro_rules! r#vec { () => {} }',
+                       'use other::*;']:
+            with self.subTest(prefix=prefix):
+                self.assertTrue(self.prod(self.source(body, prefix=prefix)))
+        self.assertTrue(self.prod(self.source('custom!(); ' + body)))
+
     def test_test_partition_and_plain_socket_fingerprints_stay_independent(self):
         pure = self.source('matches!(request.kind, Kind::Normal);')
         raw = self.source('matches!(cx.request(1), Kind::Normal);')
@@ -571,7 +607,8 @@ class DataMacroModuleProvenance(unittest.TestCase):
 
     def inventory(self, root_source='mod wire; mod account;', target='pub struct Request;',
                   consumer_prefix='use crate::wire::*;', extras=None, consumer='account.rs',
-                  body='matches!(request.kind, Kind::Normal);', consumer_suffix=''):
+                  body='matches!(request.kind, Kind::Normal);', consumer_suffix='', engine=None,
+                  untracked=None):
         with tempfile.TemporaryDirectory() as directory:
             repo = pathlib.Path(directory)
             sdk = repo / 'sdk-rs'
@@ -584,9 +621,15 @@ class DataMacroModuleProvenance(unittest.TestCase):
                 path = venue / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(source)
+            for name, source in (engine or {}).items():
+                path = sdk / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source)
             for args in [['init'], ['add', 'sdk-rs']]:
                 subprocess.run(['git', '-C', str(repo), *args], check=True,
                                capture_output=True, text=True)
+            for name, source in (untracked or {}).items():
+                (sdk / name).write_text(source)
             with mock.patch.object(ban, 'ROOT', sdk):
                 prod, test = ban.request_sites()
             self.assertFalse(test)
@@ -620,6 +663,105 @@ class DataMacroModuleProvenance(unittest.TestCase):
                 ('mod wire; mod account;', 'use crate::wire::*; use external::*;', {})]:
             with self.subTest(root=root, prefix=prefix):
                 self.assertTrue(self.inventory(root_source=root, consumer_prefix=prefix, extras=extras))
+
+    def test_test_only_target_modules_do_not_block_the_crate_glob_proof(self):
+        self.assertEqual(self.inventory(target='pub struct Request; #[cfg(test)] mod tests { use super::*; }'), {})
+        for target in ['pub struct Request; #[cfg(not(test))] mod nested {}',
+                       'pub struct Request; mod nested {}',
+                       'pub struct Request; #[cfg(test)] mod tests { macro_rules! matches { () => {} } }']:
+            with self.subTest(target=target):
+                self.assertTrue(self.inventory(target=target))
+
+    ENGINE = {'Cargo.toml': '[workspace.dependencies]\nsafe-cex-engine = { path = "engine" }\n',
+              'venues/reference/Cargo.toml': '[dependencies]\nsafe-cex-engine = { workspace = true }\n',
+              'engine/src/lib.rs': 'pub mod model;\n',
+              'engine/src/model.rs': 'pub enum Kind { Normal } pub(crate) mod inner {} '
+                                     '#[cfg(test)] mod tests { use super::*; }'}
+
+    def engine_inventory(self, prefix='use safe_cex_engine::model::*;',
+                         body='matches!(request.kind, Kind::Normal);', **changes):
+        return self.inventory(consumer_prefix=prefix, body=body, engine={**self.ENGINE, **changes})
+
+    def test_a_workspace_engine_module_glob_without_reexports_is_proven(self):
+        self.assertEqual(self.engine_inventory(), {})
+        self.assertEqual(self.engine_inventory(**{'venues/reference/Cargo.toml':
+            '[dependencies]\nsafe-cex-engine = { workspace = true, features = ["x"] }\n'}), {})
+        # The Bitget false positive: a pattern match over a plain local named `request`.
+        self.assertEqual(self.engine_inventory(
+            prefix='use crate::wire::*; use safe_cex_engine::model::*;',
+            body='matches!(request, Request::Probe);'), {})
+
+    def test_engine_module_globs_that_could_carry_a_macro_stay_conservative(self):
+        cases = {
+            'pub use': {'engine/src/model.rs': 'pub use std::matches; pub enum Kind { Normal }'},
+            'restricted use': {'engine/src/model.rs': 'pub(crate) use x::*; pub enum Kind { Normal }'},
+            'macro definition': {'engine/src/model.rs': 'macro_rules! matches { ($a:expr,$b:pat) => { true } }'},
+            'exported macro': {'engine/src/model.rs': '#[macro_export] macro_rules! custom { () => {} }'},
+            'item macro': {'engine/src/model.rs': 'items!(); pub enum Kind { Normal }'},
+            'conditional module': {'engine/src/lib.rs': '#[cfg(feature = "x")] pub mod model;\n'},
+            'path module': {'engine/src/lib.rs': '#[path = "model.rs"] pub mod model;\n'},
+            'missing module': {'engine/src/lib.rs': 'pub mod other;\n'},
+            'lib macro': {'engine/src/lib.rs': 'pub mod model; macro_rules! m { () => {} }\n'},
+            'renamed dependency': {'venues/reference/Cargo.toml':
+                '[dependencies]\nsafe-cex-engine = { package = "other", path = "../other" }\n'},
+            'elsewhere workspace': {'Cargo.toml': '[workspace.dependencies]\nsafe-cex-engine = { path = "fork" }\n'},
+            'no dependency': {'venues/reference/Cargo.toml': '[dependencies]\n'},
+        }
+        for name, changes in cases.items():
+            with self.subTest(name):
+                self.assertTrue(self.engine_inventory(**changes))
+        for prefix in ['use safe_cex_engine::*;', 'use safe_cex_engine::model::inner::*;',
+                       'use safe_cex_engine::{model::*};', 'use safe_cex_engine::model::*; use other::*;']:
+            with self.subTest(prefix=prefix):
+                self.assertTrue(self.engine_inventory(prefix=prefix))
+        engine = dict(self.ENGINE)
+        model = engine.pop('engine/src/model.rs')
+        with self.subTest('untracked module'):
+            self.assertTrue(self.inventory(consumer_prefix='use safe_cex_engine::model::*;', engine=engine,
+                                           untracked={'engine/src/model.rs': model}))
+
+    def test_engine_glob_proof_keeps_legacy_calls_and_shadows_counted(self):
+        for body in ['matches!(cx.request(1), Kind::Normal);', 'cx.request(1);']:
+            with self.subTest(body=body):
+                self.assertTrue(self.engine_inventory(body=body))
+        self.assertTrue(self.engine_inventory(prefix='use safe_cex_engine::model::*; use other::matches;'))
+
+    def test_super_globs_prove_each_parent_namespace(self):
+        body = 'matches!(step, Step::Send { request, .. } if request.ready);'
+        self.assertEqual(self.inventory(consumer_prefix='use super::*;', body=body), {})
+        self.assertEqual(self.inventory(root_source='mod wire; mod account; use crate::wire::*;',
+                                        consumer_prefix='use super::*;', body=body), {})
+        self.assertEqual(self.inventory(consumer_prefix='', body=body,
+                                        consumer_suffix=' #[cfg(test)] mod tests { use super::*; '
+                                        "fn t(cx: &mut Cx<'_, P>) { let e = opaque(cx); assert!(true); "
+                                        'matches!(s, S::A { request } if request.b); } }'), {})
+        self.assertTrue(self.inventory(consumer_prefix='', body=body,
+                                       consumer_suffix=' mod tests { use other::*; '
+                                       "fn t(cx: &mut Cx<'_, P>) { let e = opaque(cx); "
+                                       'matches!(s, S::A { request } if request.b); } }'))
+        for root, prefix, suffix in [
+                ('mod wire; mod account; use other::matches;', 'use super::*;', ''),
+                ('mod wire; mod account; use other::*;', 'use super::*;', ''),
+                ('mod wire; mod account; use other::{x as assert};', 'use super::*;', ''),
+                ('mod wire; mod account; use crate::wire::*;', 'use super::*;', ''),
+                ('mod wire; mod account;', 'use super::super::*;', ''),
+                ('mod wire; mod account;', '', " fn g(cx: &mut Cx<'_, P>) { let e = opaque(cx); use super::*; "
+                 'matches!(s, S::A { request } if request.b); }'),
+                ('mod wire; mod account; use other::*;', '',
+                 " mod inner { use super::super::*; fn t(cx: &mut Cx<'_, P>) { let e = opaque(cx); "
+                 'matches!(s, S::A { request } if request.b); } }'),
+                ('mod wire; mod account;', 'use other::*;',
+                 " mod inner { use super::*; fn t(cx: &mut Cx<'_, P>) { let e = opaque(cx); "
+                 'matches!(s, S::A { request } if request.b); } }')]:
+            with self.subTest(root=root, prefix=prefix, suffix=suffix):
+                target = 'pub struct Request; mod nested {}' if 'crate::wire' in root else 'pub struct Request;'
+                found = self.inventory(root_source=root, consumer_prefix=prefix,
+                                       body='let ok = true;' if suffix else body,
+                                       consumer_suffix=suffix, target=target)
+                self.assertTrue(found)
+        # The crate root has no parent namespace.
+        self.assertTrue(self.inventory(root_source='use super::*; mod wire;', consumer='lib.rs',
+                                       consumer_prefix='mod wire; use super::*;', body=body))
 
     def test_descendant_cannot_use_private_target_import_exception(self):
         self.assertTrue(self.inventory(root_source='mod wire;', target='use external::*; mod account;',
