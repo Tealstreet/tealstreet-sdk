@@ -22,6 +22,8 @@ condition-waits = ["serial-plans"]
 session-bearer = []
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
+# Opt-in native receive, initial-payload and stability timing.
+socket-native-timing = ["managed-sockets"]
 order-locks = []
 # Read-only signing-task metadata for hosted signing; only Kraken and Paradex link it.
 sign-meta = []
