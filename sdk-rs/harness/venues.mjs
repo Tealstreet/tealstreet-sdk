@@ -87,6 +87,7 @@ const lighter = (name) => {
     verifySubscribe: (message) => verifier?.subscribe(message) ?? false,
     validateMatchedRequest: (record, request) => verifier?.matched(record, request),
     commandResult: (result, command, index) => verifier?.commandResult(result, command, index) ?? result,
+    frameText: (text) => verifier?.echoCreated(text) ?? text,
     compareFillPrices: true,
     compareWriteOrder: true,
   };

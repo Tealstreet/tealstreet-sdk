@@ -970,6 +970,7 @@ export class Tape {
 
   deliver(socket, text) {
     if (text === undefined && socket.text !== undefined) return this.deliverFrame(socket);
+    if (typeof text === 'string' && this.venue.frameText) text = this.venue.frameText(text);
     if (this.auditEnabled && (this.venue.validateLogin || this.venue.validateSubscriptions) && typeof text === 'string' && text.trimStart().startsWith('{')) {
       const message = JSON.parse(text);
       if (

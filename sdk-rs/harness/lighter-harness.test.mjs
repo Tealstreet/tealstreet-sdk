@@ -35,6 +35,22 @@ test('economic transaction mutations cannot survive valid signature normalizatio
  assert.equal(v.request({method:'POST',url,body:rewrite(form(),i=>{i.Sig=Buffer.alloc(80).toString('base64');}),now}),false);
  assert.equal(v.request({method:'POST',url,body:form(),now:now+120_000}),false);
 });
+test('grouped orders (type 28) verify against the Go-signed corpus and refuse tampered legs or grouping',()=>{
+ const v=verifier();
+ for(const name of ['create-grouped-oto','create-grouped-oco','create-grouped-otoco'])assert.equal(v.request({method:'POST',url,body:form(name),now}),true,name);
+ const otoco=form('create-grouped-otoco');
+ assert.equal(JSON.parse(new URLSearchParams(otoco).get('tx_type')),28);
+ for(const field of ['BaseAmount','Price','TriggerPrice','Type','ReduceOnly'])assert.equal(v.request({method:'POST',url,body:rewrite(otoco,i=>{i.Orders[2][field]+=1;}),now}),false,'leg '+field);
+ assert.equal(v.request({method:'POST',url,body:rewrite(otoco,i=>{i.GroupingType=2;}),now}),false,'grouping');
+ assert.equal(v.request({method:'POST',url,body:rewrite(otoco,i=>{i.Orders.pop();}),now}),false,'count');
+ assert.equal(v.request({method:'POST',url,body:rewrite(otoco,i=>{i.Orders.reverse();}),now}),false,'order');
+ // Every grouped order's index is created by the acknowledged write.
+ v.matched({url,body:'{"code":200,"tx_hash":"ack"}'},{body:otoco,commandIndex:1});
+ const ids=JSON.parse(new URLSearchParams(otoco).get('tx_info')).Orders.map(o=>String(o.ClientOrderIndex));
+ assert.equal(v.echoCreated('{"client_order_index":"<created:1:2>"}'),`{"client_order_index":"${ids[2]}"}`);
+ assert.throws(()=>v.echoCreated('"<created:1:3>"'),/never created/);
+ assert.equal(v.request({method:'POST',url,body:otoco,now}),false,'grouped indexes are not reusable');
+});
 test('only matched successful acknowledgements consume generated order identity',()=>{
  const v=verifier(),body=form();
  assert.equal(v.request({method:'POST',url,body,now}),true);
