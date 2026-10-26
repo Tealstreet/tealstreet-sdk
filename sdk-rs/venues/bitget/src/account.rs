@@ -2121,9 +2121,11 @@ impl BitgetFutures {
     }
 
     /// A complete order read for an Unknown write. One already in flight may
-    /// predate the write, so another follows it; a re-ask joins either.
+    /// predate the write, so another follows it; an engine re-ask joins either.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.orders_dirty = true;
+        if !cx.reconcile_reask() {
+            self.account.orders_dirty = true;
+        }
         self.refresh_orders(cx, false);
     }
 
