@@ -50,6 +50,8 @@ schnorr = []
 alloy-signer = { workspace = true, features = ["eip712"] }
 alloy-dyn-abi.workspace = true
 serde.workspace = true
+# The scalar-only managed-flow control drives a real engine with this provider.
+safe-cex-engine = { workspace = true, features = ["test-support", "serial-plans", "address-nonce"] }
 
 [lints]
 workspace = true
