@@ -97,3 +97,34 @@ Reviewers: uufub4 dispatch/nonce/capture fit; m26ps4 shared provider/setup and
 remote wire; security review for the closed peer descriptor if requested by the
 owners. Native namespace takeover, numeric owner windows and mandatory Mutation
 barriers remain distinct gates. A passing adapter proof alone activates none.
+
+## Engine metadata consumer originals after #2163
+
+The companion envelope plan #2156 and engine metadata #2163 are now landed;
+817a488c9d2 is the first composition used here. The next local checkpoint first
+pins the existing EngineHost's read-only forwarding seam, before any v2 capture
+or transport implementation. The proposed provider context is
+`{ signal: AbortSignal, meta?: SignMeta }`, with the exact engine-exported
+task, owner, raw fractional deadlineMs, slot and full role. The owner stays local;
+only the signing-task id, deadline, slot and role enter the reviewed envelope.
+Peer-confirmed binding.generation remains independent of the engine owner.
+
+The metadata is queried once at Action::Sign delivery, before its provider
+microtask, and copied into a deeply frozen descriptor. It is never reconstructed
+from timeoutMs, receipt stamps, route, method or socket. Missing metadata leaves
+the existing v1 context unchanged; the v2 consumer separately refuses missing
+ownership before transport. Retired tasks query neither export nor provider.
+Exact callback API and validation are sent to m26ps4/fe7lgm/uufub4 before source.
+
+Run `node --test sdk-rs/hosts/wasm/js/sign-meta.originals.mjs` explicitly. Its
+non-default filename keeps intentionally RED controls out of ordinary host CI,
+without skipped tests. It uses the actual EngineHost with a fixture WASM export:
+no genuine engine ownership, full envelope, HMAC, reservation or Claim proof is
+claimed. The closed F1 method/path allowlist, F2 replay tombstones and actual
+EngineHost/family-WASM/peer resource-drain proof remain mandatory later gates.
+
+The first metadata run executes seven controls: four assertion REDs (three
+ownership shapes have no forwarded metadata, and no export is read at action
+delivery) and three v1/retired-task GREENs, zero skipped. Deep-freeze and snapshot
+suffixes after the missing-metadata assertions are not claimed executed. JS
+syntax passes. Production host, provider, registry and venue code is unchanged.
