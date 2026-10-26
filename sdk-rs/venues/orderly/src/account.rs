@@ -1356,6 +1356,9 @@ impl Orderly {
                 if algo {
                     self.account.algo_snapshots += 1;
                 } else {
+                    // A complete fresh order read clears the engine's placement
+                    // fences; one started before the placement cannot.
+                    cx.orders_reconciled(None);
                     for id in self.account.uncertain_placements.drain() {
                         cx.store.remove_orders(&[&id]);
                     }

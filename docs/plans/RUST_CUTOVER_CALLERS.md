@@ -9472,3 +9472,13 @@ Orderly's private reads and its socket auth now sign through an installed Ed2551
   - A signing refusal fails the query outright, even after accepted pages, as before.
 - **Socket auth.** A provider refusal sends no frame and closes the socket. Without a Primary identity the socket closes without signing.
 - **Interim (until O2).** A protective placement that an account snapshot confirms completes one tick after that snapshot, rather than inside it. The result is unchanged.
+
+### Orderly O2: trading writes on Preflights and Plans, raw seed retired
+
+Every Orderly trading command now runs under an engine-owned root, and the raw key and seed are gone from the venue ([RUST_ORDERLY_PROVIDER_READS.md](RUST_ORDERLY_PROVIDER_READS.md)).
+- **Requests unchanged.** Endpoints, bodies, the FIFO order, the 100-command cap and the queued-supersede behaviour of bulk cancellation all match native, with native's error text.
+- **Better than TypeScript:**
+  - A protective pair that ends a job is confirmed by one open-algo snapshot read before success, so the terminal arrives one round trip later. When it can't be confirmed (expiry, a missing leg, or a failed read), the command fails Unknown with the accepted IDs and native's "protective state is unconfirmed" text, and the account reconciles.
+  - A refusal code Orderly doesn't document now proves nothing. The write is Unknown and reconciles, instead of native's blanket Rejected for any 4xx. Documented refusals stay Rejected.
+  - A write lost or retired by the engine restores its rows as uncertain and reconciles; it is never replayed.
+- **Removed:** the O1 one-tick deferral of a snapshot-confirmed placement.

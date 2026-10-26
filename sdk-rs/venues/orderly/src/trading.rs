@@ -108,6 +108,11 @@ impl Request {
         self.step.method == Method::Get
     }
 }
+impl Step {
+    fn is_verify(&self) -> bool {
+        matches!(self.effect, Effect::Verify(_))
+    }
+}
 #[derive(Clone)]
 struct Step {
     method: Method,
@@ -175,6 +180,8 @@ struct Queued {
     command: Command,
     /// The caller's wait, when it set one; checked at the Preflight's wake.
     deadline: Option<f64>,
+    /// Bulk cancellation superseded it: it fails NotSent at its own wake.
+    superseded: bool,
 }
 enum At<'a> {
     Entry,
@@ -194,8 +201,9 @@ pub struct Trading {
     active: Option<Active>,
     queue: VecDeque<Queued>,
     detached: Vec<(Waiting, HashSet<String>)>,
-    /// A call the engine sealed itself: restore it as lost at the next callback.
-    retired: Option<Step>,
+    /// A call the engine sealed itself, with its job's scopes: restore it as
+    /// lost at the next callback.
+    retired: Option<(Step, HashSet<String>)>,
 }
 fn mode(m: MarginType) -> &'static str {
     if m == MarginType::Isolated {
@@ -1211,6 +1219,7 @@ impl Orderly {
             preflight,
             command,
             deadline,
+            superseded: false,
         };
         if front {
             self.trading.queue.push_front(queued);
@@ -1218,10 +1227,10 @@ impl Orderly {
             self.trading.queue.push_back(queued);
         }
     }
-    /// Bulk cancellation supersedes queued order mutations on its scope.
+    /// Bulk cancellation supersedes queued order mutations on its scope. A
+    /// parked Preflight fails only in its own ready custody, so each is woken.
     fn supersede_queued(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
-        let mut keep = VecDeque::new();
-        for queued in self.trading.queue.drain(..) {
+        for queued in &mut self.trading.queue {
             let in_scope = |id: &String, children: bool| {
                 symbol.is_empty()
                     || cx
@@ -1239,16 +1248,11 @@ impl Orderly {
                 Command::AmendOrder { id, .. } => in_scope(id, false),
                 _ => false,
             };
-            if affected {
-                let _ = cx.fail_preflight(
-                    &queued.preflight,
-                    not_sent("Orderly queued order mutation was superseded by bulk cancellation"),
-                );
-            } else {
-                keep.push_back(queued);
+            if affected && !queued.superseded {
+                queued.superseded = true;
+                let _ = cx.request_preflight_ready(&queued.preflight);
             }
         }
-        self.trading.queue = keep;
     }
     /// The live job on the bulk cancellation's scope sends nothing more; the
     /// cancellation runs next, at the front of the FIFO.
@@ -1326,8 +1330,13 @@ impl Orderly {
                     return self.end(cx, active, None, error);
                 };
                 let admitted = if independent {
-                    admit_independent(cx, &active.preflight, credential, active.job.steps.len() + 1)
-                        .and_then(|plan| first_slot(cx, &plan).map(|slot| (plan, slot)))
+                    admit_independent(
+                        cx,
+                        &active.preflight,
+                        credential,
+                        active.job.steps.len() + 1,
+                    )
+                    .and_then(|plan| first_slot(cx, &plan).map(|slot| (plan, slot)))
                 } else {
                     let policy = SerialPolicy {
                         credential: Some(credential),
@@ -1497,7 +1506,12 @@ impl Orderly {
         }
         self.next_job(cx);
     }
-    fn finish(&mut self, cx: &mut Cx<'_, Pending>, mut active: Active, current: Option<(&Slot, &Context)>) {
+    fn finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut active: Active,
+        current: Option<(&Slot, &Context)>,
+    ) {
         let plan = active.plan.clone().expect("a job with calls has a Plan");
         if let Some((slot, context)) = current {
             let finished = cx.finish_plan_call(&plan, slot, context);
@@ -1536,7 +1550,23 @@ impl Orderly {
             let _ = cx.fail_preflight(&queued.preflight, not_sent(reason.venue_error().message));
         }
     }
-    pub(crate) fn trading_preflight_ready(&mut self, cx: &mut Cx<'_, Pending>, preflight: &Preflight) {
+    pub(crate) fn trading_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &Preflight,
+    ) {
+        if let Some(index) =
+            self.trading.queue.iter().position(|queued| {
+                queued.superseded && queued.preflight.owner() == preflight.owner()
+            })
+        {
+            let queued = self.trading.queue.remove(index).expect("superseded entry");
+            let _ = cx.fail_preflight(
+                &queued.preflight,
+                not_sent("Orderly queued order mutation was superseded by bulk cancellation"),
+            );
+            return self.next_job(cx);
+        }
         let front = self.trading.active.is_none()
             && self
                 .trading
@@ -1576,14 +1606,24 @@ impl Orderly {
     }
     /// Native: an unconfirmed protective state after the bound sends no
     /// further write, and its scope stays fenced until reconciled.
-    pub(crate) fn trading_condition_expired(&mut self, cx: &mut Cx<'_, Pending>, owner: &ConditionOwner) {
-        let ours = self.trading.active.as_ref().is_some_and(|active| match owner {
-            ConditionOwner::Preflight(preflight) => active.preflight.owner() == preflight.owner(),
-            ConditionOwner::Plan(plan) => active
-                .plan
-                .as_ref()
-                .is_some_and(|own| own.owner() == plan.owner()),
-        });
+    pub(crate) fn trading_condition_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &ConditionOwner,
+    ) {
+        let ours = self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|active| match owner {
+                ConditionOwner::Preflight(preflight) => {
+                    active.preflight.owner() == preflight.owner()
+                }
+                ConditionOwner::Plan(plan) => active
+                    .plan
+                    .as_ref()
+                    .is_some_and(|own| own.owner() == plan.owner()),
+            });
         if !ours {
             return;
         }
@@ -1604,9 +1644,11 @@ impl Orderly {
         {
             let mut active = self.trading.active.take().expect("retired job");
             if let Some((_, waiting)) = active.parked.take() {
-                self.trading.detached.push((waiting, active.job.scopes));
+                self.trading
+                    .detached
+                    .push((waiting, active.job.scopes.clone()));
             }
-            self.trading.retired = active.flight;
+            self.trading.retired = active.flight.map(|step| (step, active.job.scopes));
         }
         if self.trading.active.is_some() {
             return None;
@@ -1619,8 +1661,8 @@ impl Orderly {
     /// A retired call settles as a lost one: its rows stay uncertain and the
     /// account reconciles, as native's lost write did.
     pub(crate) fn settle_retired(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(step) = self.trading.retired.take() {
-            self.undo_step(cx, step, true);
+        if let Some((step, scopes)) = self.trading.retired.take() {
+            self.undo_step(cx, step, true, scopes);
             self.account_after_uncertain_write(cx);
         }
     }
@@ -1672,7 +1714,7 @@ impl Orderly {
         current: Option<(&Slot, &Context)>,
     ) {
         let lost = uncertain || error.outcome == Some(Outcome::Unknown);
-        self.undo_step(cx, step, lost);
+        self.undo_step(cx, step, lost, active.job.scopes.clone());
         cx.command_error(active.job.command, &error.message);
         let first = active.job.error.get_or_insert(error);
         if lost {
@@ -1692,7 +1734,13 @@ impl Orderly {
         self.end(cx, active, current, error);
     }
     /// Native restoration of a failed call's optimistic rows.
-    fn undo_step(&mut self, cx: &mut Cx<'_, Pending>, step: Step, uncertain: bool) {
+    fn undo_step(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        step: Step,
+        uncertain: bool,
+        scopes: HashSet<String>,
+    ) {
         match step.effect {
             Effect::Place(order) if !uncertain => cx.store.remove_orders(&[&order.id]),
             Effect::Place(order) => {
@@ -1709,12 +1757,6 @@ impl Orderly {
             }
             Effect::Pair { legs, .. } if uncertain => {
                 // A lost response cannot prove the pair was rejected.
-                let scopes = self
-                    .trading
-                    .active
-                    .as_ref()
-                    .map(|active| active.job.scopes.clone())
-                    .unwrap_or_default();
                 self.trading.detached.push((
                     Waiting {
                         parent: String::new(),
@@ -1740,7 +1782,13 @@ impl Orderly {
     }
     /// After the call's write fact: pause until the stream confirms the pair,
     /// then issue the next call (a final REST verification when none is left).
-    fn pause(&mut self, cx: &mut Cx<'_, Pending>, mut active: Active, request: &Request, waiting: Waiting) {
+    fn pause(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut active: Active,
+        request: &Request,
+        waiting: Waiting,
+    ) {
         if active.job.superseded {
             self.trading
                 .detached
@@ -1792,7 +1840,10 @@ impl Orderly {
             let _ = cx.inherit_plan_uncertainty(plan);
         }
         self.account_after_uncertain_write(cx);
-        let error = VenueError::new("Orderly protective state is unconfirmed; no subsequent write was sent").outcome(Outcome::Unknown);
+        let error = VenueError::new(
+            "Orderly protective state is unconfirmed; no subsequent write was sent",
+        )
+        .outcome(Outcome::Unknown);
         self.end(cx, active, current, error);
     }
     /// The open-algo snapshot of the pair's symbol, read under the Plan.
@@ -2162,7 +2213,9 @@ impl Orderly {
                     let _ = cx.http_write_fact(&request.context, accepted, None);
                 }
                 match answer {
-                    Answer::Next => self.drive(cx, active, At::Data(&request.slot, &request.context)),
+                    Answer::Next => {
+                        self.drive(cx, active, At::Data(&request.slot, &request.context))
+                    }
                     Answer::Wait(waiting) => self.pause(cx, active, &request, waiting),
                     Answer::Done(result) => {
                         let plan = active.plan.clone().expect("live Plan");
@@ -2181,7 +2234,7 @@ impl Orderly {
                     }
                 }
             }
-            Err(_) if matches!(request.step.effect, Effect::Verify(_)) => {
+            Err(_) if request.step.is_verify() => {
                 let Effect::Verify(waiting) = request.step.effect.clone() else {
                     unreachable!()
                 };
@@ -2400,7 +2453,12 @@ fn answer_failure(response: Response<'_>, message: String) -> VenueError {
 }
 
 /// Records one whole failed answer for the delivered write.
-fn record_failed(cx: &mut Cx<'_, Pending>, context: &Context, response: Response<'_>, message: &str) {
+fn record_failed(
+    cx: &mut Cx<'_, Pending>,
+    context: &Context,
+    response: Response<'_>,
+    message: &str,
+) {
     let native = native_code(response.body).map(|code| Native {
         code: NativeCode::Int(code),
         message,

@@ -184,7 +184,11 @@ fn dispatch_recipe_headers_are_native_exact_for_every_method() {
     );
     assert_eq!(released.len(), cases.len());
     for ((method, path, body), http) in cases.iter().zip(&released) {
-        assert_eq!(http.headers, native_headers(*method, path, *body), "{method:?} {path}");
+        assert_eq!(
+            http.headers,
+            native_headers(*method, path, *body),
+            "{method:?} {path}"
+        );
         assert_eq!(http.body.as_deref(), *body);
         // Independent check: the released signature verifies under the public key.
         let header = |name: &str| &http.headers.iter().find(|(k, _)| *k == name).unwrap().1;

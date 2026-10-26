@@ -332,9 +332,19 @@ fn an_unlisted_final_pair_ends_unknown_after_the_verification_read() {
         r#"[{"symbol":"BTCUSDC","type":"market","side":"buy","amount":1,"stopLoss":49000,"takeProfit":55000}]"#,
     );
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 200, r#"{"success":true,"data":{"order_id":50}}"#);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"success":true,"data":{"order_id":50}}"#,
+    );
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 200, r#"{"success":true,"data":{"order_id":51}}"#);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"success":true,"data":{"order_id":51}}"#,
+    );
     for (id, kind, seq) in [(510, "STOP_LOSS", 1), (511, "TAKE_PROFIT", 2)] {
         ws(
             &mut e,
@@ -348,7 +358,12 @@ fn an_unlisted_final_pair_ends_unknown_after_the_verification_read() {
         .into_iter()
         .find(|r| r.url.contains("/v1/algo/orders?"))
         .expect("the verification read");
-    reply(&mut e, &verify, 200, r#"{"success":true,"data":{"rows":[]}}"#);
+    reply(
+        &mut e,
+        &verify,
+        200,
+        r#"{"success":true,"data":{"rows":[]}}"#,
+    );
     let out = settled(&mut e, 2000.0);
     let error = out
         .iter()
@@ -362,7 +377,10 @@ fn an_unlisted_final_pair_ends_unknown_after_the_verification_read() {
         "Orderly protective state is unconfirmed; no subsequent write was sent"
     );
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert!(!out.iter().any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)));
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+    );
 }
 
 #[test]
@@ -584,6 +602,17 @@ fn queued_second_stop_waits_for_first_pair_then_cancels_it_before_replacement() 
         &mut e,
         s,
         r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":101,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","triggerPrice":49000,"quantity":0,"seq":1}}"#,
+    );
+    // D1: the stream's confirmation is checked against the open-algo snapshot.
+    let verify = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("/v1/algo/orders?"))
+        .expect("the verification read");
+    reply(
+        &mut e,
+        &verify,
+        200,
+        r#"{"success":true,"data":{"rows":[{"algo_order_id":100,"child_orders":[{"algo_order_id":101}]}]}}"#,
     );
     let out = actions(&mut e);
     assert!(out.iter().any(|a| matches!(
@@ -1251,7 +1280,17 @@ fn omitted_stream_fields_do_not_erase_prior_type_or_margin_contradictions() {
                     r#"{{"topic":"algoexecutionreportv2","ts":3000,"data":{{"algoOrderId":101,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","triggerPrice":49000,"quantity":0,"seq":{seq}{fields}}}}}"#
                 ),
             );
-            actions(&mut e);
+            // D1: the first job settles on its open-algo verification read.
+            for r in requests(&mut e) {
+                if r.url.contains("/v1/algo/orders?") {
+                    reply(
+                        &mut e,
+                        &r,
+                        200,
+                        r#"{"success":true,"data":{"rows":[{"algo_order_id":100,"child_orders":[{"algo_order_id":101}]}]}}"#,
+                    );
+                }
+            }
         }
         place(
             &mut e,
@@ -1877,5 +1916,98 @@ fn lost_and_server_failed_writes_are_unknown_but_rejections_are_not() {
     assert!(
         out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get))
+    );
+}
+
+/// Better than TS: only a cited pre-execution code proves a refusal. An
+/// unlisted code at a 4xx proves nothing, so the write is Unknown and the
+/// account reconciles, rather than native's blanket Rejected.
+#[test]
+fn an_unlisted_refusal_code_is_unknown_and_reconciles() {
+    let (mut e, _) = ready();
+    requests(&mut e);
+    place(
+        &mut e,
+        91,
+        r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#,
+    );
+    let write = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &write,
+        400,
+        r#"{"success":false,"code":-1999,"message":"undocumented"}"#,
+    );
+    let out = actions(&mut e);
+    let error = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error.clone()),
+            _ => None,
+        })
+        .expect("one terminal");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/v1/orders?"))),
+        "the account reconciles"
+    );
+    assert!(
+        e.store().order("pending:91").is_some(),
+        "the placement stays uncertain"
+    );
+}
+
+/// D1 pin: a verification read lost after the pair was accepted ends Unknown
+/// with native's text, never NotSent and never a success.
+#[test]
+fn a_lost_verification_read_ends_unknown() {
+    let (mut e, s) = ready();
+    requests(&mut e);
+    place(
+        &mut e,
+        1,
+        r#"[{"symbol":"BTCUSDC","type":"stop_market","side":"sell","amount":1,"price":49000}]"#,
+    );
+    let pair = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &pair,
+        200,
+        r#"{"success":true,"data":{"order_id":100}}"#,
+    );
+    requests(&mut e);
+    ws(
+        &mut e,
+        s,
+        r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":101,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","triggerPrice":49000,"quantity":0,"seq":1}}"#,
+    );
+    let verify = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("/v1/algo/orders?"))
+        .expect("the verification read");
+    e.handle(
+        2000.0,
+        Event::HttpFailed {
+            request: verify.id,
+            error: "lost",
+        },
+    );
+    let out = actions(&mut e);
+    let error = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error.clone()),
+            _ => None,
+        })
+        .expect("one terminal");
+    assert_eq!(
+        error.message,
+        "Orderly protective state is unconfirmed; no subsequent write was sent"
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
 }

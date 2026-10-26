@@ -739,10 +739,12 @@ impl Venue for Orderly {
     ) -> Option<safe_cex_engine::request_context::Preflight> {
         self.trading_retired(owner)
     }
-    /// An uncertain seal: the native account snapshot reconciles.
+    /// An uncertain seal: a call the engine retired settles as lost (which
+    /// reconciles); otherwise the failure already invalidated older reads, so
+    /// only a missing fresh poll is requested.
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.settle_retired(cx);
-        self.account_after_uncertain_write(cx);
+        self.account_poll(cx, true);
     }
     fn cancel_needs_stored_order(&self) -> bool {
         true
