@@ -6,10 +6,8 @@ use safe_cex_engine::signing::{
 #[test]
 fn setup_facts_cannot_be_injected_through_options_json() {
     for name in ["setupFacts", "setup_facts", "SetupFacts"] {
-        let options: EngineOptions = serde_json::from_value(serde_json::json!({
-            name: {"primaryKey": "empty"}
-        }))
-        .unwrap();
+        let options: EngineOptions =
+            serde_json::from_str(&format!(r#"{{"{name}":{{"primaryKey":"empty"}}}}"#,)).unwrap();
         assert_eq!(options.setup_facts, None);
     }
 }
