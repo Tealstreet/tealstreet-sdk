@@ -1565,6 +1565,8 @@ impl Orderly {
         cx: &mut Cx<'_, Pending>,
         preflight: &Preflight,
     ) {
+        // A call the engine retired settles before anything plans against the Store.
+        self.settle_retired(cx);
         if let Some(index) =
             self.trading.queue.iter().position(|queued| {
                 queued.superseded && queued.preflight.owner() == preflight.owner()
@@ -1600,6 +1602,8 @@ impl Orderly {
     }
     /// A protective pause released: issue the next call on the slot it handed back.
     pub(crate) fn trading_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
+        // A call the engine retired settles before anything plans against the Store.
+        self.settle_retired(cx);
         let Some(active) = self.trading.active.take() else {
             return;
         };
@@ -1621,6 +1625,8 @@ impl Orderly {
         cx: &mut Cx<'_, Pending>,
         owner: &ConditionOwner,
     ) {
+        // A call the engine retired settles before anything plans against the Store.
+        self.settle_retired(cx);
         let ours = self
             .trading
             .active

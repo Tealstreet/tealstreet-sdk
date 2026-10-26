@@ -2045,3 +2045,53 @@ fn fetch_leverage_reads_through_the_trading_fifo() {
         r#"{"buyLeverage":12.0,"sellLeverage":12.0}"#
     );
 }
+
+/// A write the engine retires settles (uncertain rows, a reconcile) before
+/// its queued successor is planned at its wake.
+#[test]
+fn a_retired_write_settles_before_the_queued_successor_plans() {
+    let (mut e, _) = ready();
+    requests(&mut e);
+    place(
+        &mut e,
+        71,
+        r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#,
+    );
+    let first = requests(&mut e).pop().unwrap();
+    place(
+        &mut e,
+        72,
+        r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":49000}]"#,
+    );
+    assert!(requests(&mut e).is_empty(), "the successor parks");
+    // The engine seals a 408 itself and retires the owner.
+    e.handle(
+        2000.0,
+        Event::HttpResponse {
+            request: first.id,
+            response: safe_cex_engine::Response {
+                status: 408,
+                headers: "",
+                body: "request timeout",
+            },
+        },
+    );
+    let out = actions(&mut e);
+    assert!(done(out.clone(), 71).is_err());
+    let reconcile = out
+        .iter()
+        .position(|a| matches!(a, Action::Http(r) if r.url.contains("/v1/orders?")))
+        .expect("the retired placement reconciles");
+    let successor = out
+        .iter()
+        .position(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
+        .expect("the successor still runs");
+    assert!(
+        reconcile < successor,
+        "settled before the successor planned"
+    );
+    assert!(
+        e.store().order("pending:71").is_some(),
+        "the retired placement stays uncertain"
+    );
+}
