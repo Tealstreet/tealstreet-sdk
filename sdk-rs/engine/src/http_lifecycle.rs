@@ -1639,7 +1639,7 @@ impl<V: Venue> Engine<V> {
     /// role was captured at admission. Descriptive only: it grants nothing.
     #[cfg(feature = "sign-meta")]
     pub fn sign_meta(&self, task: RequestId) -> Option<crate::sign_meta::SignMeta> {
-        use crate::sign_meta::{SignMeta, SignOwner};
+        use crate::sign_meta::{SignKind, SignMeta};
         let (request, deadline_ms) = self.io.core.signing.prepared_task(task)?;
         let managed = self.io.core.managed_http.get(&request)?;
         if managed.signing_attempt != Some(task) {
@@ -1648,22 +1648,26 @@ impl<V: Venue> Engine<V> {
         let role = managed.role?;
         let context = managed.lifecycle.context();
         let slot = context.credential()?.slot;
-        let owner = match context.owner() {
-            Owner::Session { generation } => SignOwner::Session { generation },
+        let kind = match context.owner() {
+            Owner::Session { generation } => SignKind::Session {
+                generation,
+                slot,
+                role,
+            },
             _ => {
                 let attempt = managed.lifecycle.attempt();
-                SignOwner::Managed {
+                SignKind::Managed {
                     request: attempt.request,
                     generation: attempt.generation,
+                    slot,
+                    role,
                 }
             }
         };
         Some(SignMeta {
             task,
-            owner,
             deadline_ms,
-            slot,
-            role,
+            kind,
         })
     }
 

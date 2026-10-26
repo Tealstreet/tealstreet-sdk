@@ -2,9 +2,42 @@
 // selection, admission, Prepare and a host-visible Action::Sign.
 mod sign_meta {
     use super::*;
-    use crate::credential_selection::{CredentialRole, PrimaryReason, Selection, SlotPolicy, Slots};
+    use crate::credential_selection::{
+        CredentialRole, PrimaryReason, Selection, SlotPolicy, Slots,
+    };
     use crate::request_context::{Credential, Session, SessionPolicy};
-    use crate::sign_meta::{SignMeta, SignOwner};
+    use crate::sign_meta::{SignKind, SignMeta};
+    #[derive(Debug, PartialEq, Eq)]
+    enum SignOwner {
+        Managed { request: RequestId, generation: u64 },
+        Session { generation: u64 },
+    }
+    fn business_owner(meta: SignMeta) -> SignOwner {
+        match meta.kind {
+            SignKind::Managed {
+                request,
+                generation,
+                ..
+            } => SignOwner::Managed {
+                request,
+                generation,
+            },
+            SignKind::Session { generation, .. } => SignOwner::Session { generation },
+            SignKind::Setup { .. } => panic!("business test received setup metadata"),
+        }
+    }
+    fn business_slot(meta: SignMeta) -> crate::CredentialSlot {
+        match meta.kind {
+            SignKind::Managed { slot, .. } | SignKind::Session { slot, .. } => slot,
+            _ => panic!("business slot"),
+        }
+    }
+    fn business_role(meta: SignMeta) -> CredentialRole {
+        match meta.kind {
+            SignKind::Managed { role, .. } | SignKind::Session { role, .. } => role,
+            _ => panic!("business role"),
+        }
+    }
     use crate::signing::{Identities, Identity, KeyRef};
 
     fn identity(name: &str) -> Identity {
@@ -98,7 +131,12 @@ mod sign_meta {
                 retry: RetryPolicy::Never,
             }
         }
-        fn queue(&mut self, cx: &mut Cx<'_, Option<Context>>, context: Context, selection: &Selection) {
+        fn queue(
+            &mut self,
+            cx: &mut Cx<'_, Option<Context>>,
+            context: Context,
+            selection: &Selection,
+        ) {
             self.context = Some(context.clone());
             let key = context.credential().unwrap().reference.clone();
             self.actions_before = cx.io.core.actions.len();
@@ -183,8 +221,20 @@ mod sign_meta {
                 .unwrap();
             self.queue(cx, context, &selection);
         }
-        fn on_response(&mut self, _: &mut Cx<'_, Option<Context>>, _: Option<Context>, _: Response<'_>) {}
-        fn on_request_failed(&mut self, _: &mut Cx<'_, Option<Context>>, _: Option<Context>, _: &str) {}
+        fn on_response(
+            &mut self,
+            _: &mut Cx<'_, Option<Context>>,
+            _: Option<Context>,
+            _: Response<'_>,
+        ) {
+        }
+        fn on_request_failed(
+            &mut self,
+            _: &mut Cx<'_, Option<Context>>,
+            _: Option<Context>,
+            _: &str,
+        ) {
+        }
         fn on_timer(&mut self, _: &mut Cx<'_, Option<Context>>, _: TimerId) {}
         fn guard_pending_placements(&self) -> bool {
             true
@@ -278,12 +328,20 @@ mod sign_meta {
         sign_action(actions).is_none()
     }
     /// The host's answer, echoing the task's exact receipt.
-    fn signed<V: Venue>(e: &mut Engine<V>, task: RequestId, receipt: Receipt, now: f64) -> Vec<Action> {
+    fn signed<V: Venue>(
+        e: &mut Engine<V>,
+        task: RequestId,
+        receipt: Receipt,
+        now: f64,
+    ) -> Vec<Action> {
         e.handle(
             now,
             Event::Signed {
                 attempt: task,
-                result: Ok(crate::signing::SignResult::new(vec![b"value".to_vec()], receipt)),
+                result: Ok(crate::signing::SignResult::new(
+                    vec![b"value".to_vec()],
+                    receipt,
+                )),
             },
         );
         e.drain_actions().collect()
@@ -305,13 +363,13 @@ mod sign_meta {
             e.sign_meta(task),
             Some(SignMeta {
                 task,
-                owner: SignOwner::Managed {
+                deadline_ms: context.deadline(),
+                kind: SignKind::Managed {
                     request: token.attempt().request,
                     generation: token.attempt().generation,
+                    slot: crate::CredentialSlot::Primary,
+                    role: CredentialRole::Mutation,
                 },
-                deadline_ms: context.deadline(),
-                slot: crate::CredentialSlot::Primary,
-                role: CredentialRole::Mutation,
             })
         );
     }
@@ -332,8 +390,8 @@ mod sign_meta {
         let meta = e.sign_meta(task);
         assert!(meta.is_some(), "selected read metadata");
         let meta = meta.unwrap();
-        assert_eq!(meta.role, role);
-        assert_eq!(meta.slot, crate::CredentialSlot::Primary);
+        assert_eq!(business_role(meta), role);
+        assert_eq!(business_slot(meta), crate::CredentialSlot::Primary);
     }
     #[test]
     fn a_secondary_read_reports_the_secondary_slot() {
@@ -351,7 +409,10 @@ mod sign_meta {
         let meta = e.sign_meta(task);
         assert!(meta.is_some(), "selected read metadata");
         let meta = meta.unwrap();
-        assert_eq!((meta.slot, meta.role), (crate::CredentialSlot::Secondary, role));
+        assert_eq!(
+            (business_slot(meta), business_role(meta)),
+            (crate::CredentialSlot::Secondary, role)
+        );
     }
     #[test]
     fn a_session_login_reports_its_session_generation_and_session_auth() {
@@ -369,8 +430,8 @@ mod sign_meta {
         let meta = e.sign_meta(task);
         assert!(meta.is_some(), "session login metadata");
         let meta = meta.unwrap();
-        assert_eq!(meta.owner, SignOwner::Session { generation });
-        assert_eq!(meta.role, CredentialRole::SessionAuth);
+        assert_eq!(business_owner(meta), SignOwner::Session { generation });
+        assert_eq!(business_role(meta), CredentialRole::SessionAuth);
     }
     #[test]
     fn a_stale_re_sign_moves_metadata_to_the_new_task_with_the_same_owner_and_deadline() {
@@ -386,11 +447,18 @@ mod sign_meta {
         let (second, renewed) = sign_task(&mut e, token, 5_000.5);
         assert_ne!(first, second);
         assert_ne!(receipt, renewed, "a new real receipt");
-        assert_eq!(e.sign_meta(first), None, "a superseded task has no metadata");
+        assert_eq!(
+            e.sign_meta(first),
+            None,
+            "a superseded task has no metadata"
+        );
         let after = e.sign_meta(second);
         assert!(after.is_some(), "current task metadata");
         let after = after.unwrap();
-        assert_eq!((after.owner, after.deadline_ms), (before.owner, before.deadline_ms));
+        assert_eq!(
+            (business_owner(after), after.deadline_ms),
+            (business_owner(before), before.deadline_ms)
+        );
     }
     #[test]
     fn a_completed_task_has_no_metadata() {
@@ -444,7 +512,10 @@ mod sign_meta {
         drain(&mut e);
         place(&mut e);
         assert_eq!(e.venue.queued, Some(Err(Error::Invalid)));
-        assert_eq!(e.venue.actions_before, e.venue.actions_after, "nothing queued");
+        assert_eq!(
+            e.venue.actions_before, e.venue.actions_after,
+            "nothing queued"
+        );
     }
 
     // Originals 11 and 12 (selected path): role/Context consistency, expiry.
@@ -452,7 +523,10 @@ mod sign_meta {
     fn refused(mut e: Engine<Signer>) {
         place(&mut e);
         assert_eq!(e.venue.queued, Some(Err(Error::Invalid)));
-        assert_eq!(e.venue.actions_before, e.venue.actions_after, "nothing queued");
+        assert_eq!(
+            e.venue.actions_before, e.venue.actions_after,
+            "nothing queued"
+        );
     }
     #[test]
     fn a_read_role_cannot_sign_a_mutation_context() {
@@ -653,8 +727,20 @@ mod sign_meta {
                     self.queue(cx, Operation::Mutation);
                 }
             }
-            fn on_response(&mut self, _: &mut Cx<'_, Option<Context>>, _: Option<Context>, _: Response<'_>) {}
-            fn on_request_failed(&mut self, _: &mut Cx<'_, Option<Context>>, _: Option<Context>, _: &str) {}
+            fn on_response(
+                &mut self,
+                _: &mut Cx<'_, Option<Context>>,
+                _: Option<Context>,
+                _: Response<'_>,
+            ) {
+            }
+            fn on_request_failed(
+                &mut self,
+                _: &mut Cx<'_, Option<Context>>,
+                _: Option<Context>,
+                _: &str,
+            ) {
+            }
             fn on_timer(&mut self, _: &mut Cx<'_, Option<Context>>, _: TimerId) {}
             fn guard_pending_placements(&self) -> bool {
                 true
@@ -722,7 +808,10 @@ mod sign_meta {
         fn the_selected_wrapper_refuses_a_nonce_recipe_before_any_work() {
             let e = nonced(Path::Selected);
             assert_eq!(e.venue.queued, Some(Err(Error::Invalid)));
-            assert!(e.venue.unchanged, "no ID, Bind, provider work or reservation");
+            assert!(
+                e.venue.unchanged,
+                "no ID, Bind, provider work or reservation"
+            );
         }
         #[test]
         fn a_nonce_recipe_reports_its_claims_role_and_keeps_it_across_stale_repair() {
@@ -732,9 +821,9 @@ mod sign_meta {
             let before = e.sign_meta(first);
             assert!(before.is_some(), "claim role recorded automatically");
             let before = before.unwrap();
-            assert_eq!(before.role, CredentialRole::Mutation);
+            assert_eq!(business_role(before), CredentialRole::Mutation);
             assert_eq!(
-                before.owner,
+                business_owner(before),
                 SignOwner::Managed {
                     request: token.attempt().request,
                     generation: token.attempt().generation,
@@ -755,8 +844,16 @@ mod sign_meta {
             assert!(after.is_some(), "the repaired task keeps its metadata");
             let after = after.unwrap();
             assert_eq!(
-                (after.owner, after.deadline_ms, after.role),
-                (before.owner, before.deadline_ms, before.role)
+                (
+                    business_owner(after),
+                    after.deadline_ms,
+                    business_role(after)
+                ),
+                (
+                    business_owner(before),
+                    before.deadline_ms,
+                    business_role(before)
+                )
             );
         }
         #[test]
