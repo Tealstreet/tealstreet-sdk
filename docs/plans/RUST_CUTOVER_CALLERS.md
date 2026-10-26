@@ -9927,8 +9927,10 @@ admitted). A venue opts in only when `reconcile_uncertain` starts a fresh read
 hang, which is why the default is off. While a symbol stays uncertain the engine
 re-asks the hook with backoff (1 s doubling to 30 s, restarted by a new seal)
 until a post-mark `orders_reconciled` clears it, so a failed reconcile read
-cannot leave the fence standing; hooks stay single-shot and must absorb re-asks
-without restarting a running fresh read. A venue may hold the fence to its
+cannot leave the fence standing; hooks stay single-shot. `Cx::reconcile_reask()`
+is true on a backoff re-ask with no new uncertain write since the last ask: the
+hook must then join any read already running or owed, never start or owe
+another (a slow read would otherwise never complete and release). A venue may hold the fence to its
 native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
 opts in. AsterDEX opts in: its hook starts an open-orders read at once, or, when a
 read is already in flight (which predates the seal and cannot clear the fence),
@@ -9937,7 +9939,8 @@ so a persistently malformed order row keeps that venue's placements refused
 (cancels by ID stay admitted) until the row parses. Phase B: the fence no longer needs a lock scope. On an opted-in venue whose
 placements or amends hold no scope (guard flags off: Binance x4, Bybit,
 Crypto.com, BingX, ApeX, Hyperliquid, Paradex), entry still refuses a fenced
-symbol, and every admitted placement or amend is marked with its symbols (all
+symbol (cancel-all as its `fence_uncertain_cancel_all` declares), and every
+admitted placement or amend is marked with its symbols (all
 symbols for an amend whose symbol is unknown). An Unknown outcome on that
 command (managed, single-Context or legacy `cx.request`) fences them and queues
 their reconcile; any other end drops the mark. Amend roots are marked too, so an
