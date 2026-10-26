@@ -774,7 +774,13 @@ impl AuthRecipe {
     /// The unsigned outbound a preparation signed for; apply refuses any other.
     fn unsigned(outbound: &Action) -> String {
         match outbound {
-            Action::Http(http) => format!("{}\n{:?}", http.url, http.headers),
+            Action::Http(http) => format!(
+                "{}\n{}\n{:?}\n{:?}",
+                http.method.as_str(),
+                http.url,
+                http.headers,
+                http.body
+            ),
             Action::WsSend { text, .. } => text.clone(),
             _ => String::new(),
         }
