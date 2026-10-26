@@ -677,6 +677,9 @@ impl BybitLinear {
 
     /// Cleanup only: the engine sealed and retired this generation.
     pub(crate) fn on_ordinary_retired(&mut self, owner: &HttpOwnerRetirement) {
+        // An engine-retired job may follow a new uncertain seal: never let the
+        // next reconcile read as a re-ask, whatever the callback order.
+        self.trading.settled += 1;
         let mut settled = Vec::new();
         self.trading.ordinary.retain(|id, entry| {
             let retired = owner.matches_preflight(&entry.preflight);
