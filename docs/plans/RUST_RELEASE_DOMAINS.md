@@ -1,7 +1,7 @@
 # Venue release domains: FIFO, release-paced REST (`release-domains`)
 
 Owner: claude-dazzy3 (overseer assignment, widened to Coinbase).
-Reviewers: codex-uufub4 (Plan core, nonce and release), codex-zs5e83.
+Reviewers: codex-uufub4 (Plan core, nonce and release), codex-zs5e83 (Coinbase owner; ruling: release-anchored 334 ms, one all-REST FIFO domain).
 Base: `feat/rust-rewrite` `b0ee0a9a4d5`. **Plan only; no source.**
 Consumers:
 - Hyperliquid trading (`RUST_HYPERLIQUID_TRADING_CONTEXT.md`, the
@@ -136,7 +136,39 @@ All use a registered 334 ms domain group.
      on the floor;
    - a second command's first call queues behind the first command's last;
    - `done_empty_plan` moves nothing.
-9. **GREEN controls:**
+9. **Mixed owners (Coinbase `AllRest`).** One domain interleaves:
+   - a public catalogue read (unsigned);
+   - a background daily/candle read;
+   - a command account read on the read key;
+   - a history page;
+   - a trading write;
+   - an amend's cancellation-proof read.
+
+   Each belongs to a different owner: command, background, Preflight and Plan
+   leg. The checks:
+   - Binds and releases come out in exact issuance order across owners;
+   - each release is at least 334 ms after the previous one;
+   - an unsigned public member waits its turn like a signed one.
+10. **Mixed-owner failure handoff.** Each is native's "refuses without spending
+    334", and each advances the head to the next owner's member with the floor
+    still at the last actual release:
+    - a signing or provenance refusal on a private member;
+    - a preparation failure on a write;
+    - root expiry of a Read root;
+    - retirement of a Plan owner;
+    - a caller cancel.
+
+    Two further cases:
+    - a later owner's member queued behind a retired owner is never stranded;
+    - one owner's cancel never removes another owner's members.
+11. **Delayed phases across owners:**
+    - a slow Prepare or sign on the head blocks later prepared members, which
+      hold Bind;
+    - a delayed Bind or Claim by the host shifts every later release by exactly
+      that delay and no more;
+    - a fast DATA cannot pull the next release before the floor;
+    - a slow DATA does not add a second gap.
+12. **GREEN controls:**
    - with the feature on and no declaration, nothing is held, stamped or paced;
    - with the feature off, serial nonzero pacing is still `Invalid`.
 
