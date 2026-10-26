@@ -204,6 +204,11 @@ slot or binding. HL's codec describe recomputes the native digests from it plus
 the trusted binding and requires byte-equality with the ENTIRE original work
 graph, not merely its final digest. Preserve task/preparation lifetime, with
 no global descriptor lookup, fake hash operation or second pending-task map.
+The 4 KiB carrier bound must be checked against supported native batch sizes:
+the present Place/Cancel builder has no explicit matching descriptor-size cap.
+Prove complete supported batches fit the chosen lossless descriptor, or obtain
+a shared-owner disposition before activation. Never silently truncate, split an
+atomic action, drop orders or add a smaller user-visible batch limit.
 
 The native setup-meta shape is already landed (#2199):
 SignKind::Setup { generation, operation: PublicAddress, slot }, serialized as
