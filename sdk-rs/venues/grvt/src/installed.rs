@@ -16,8 +16,11 @@ impl Installed {
     pub fn new(identities: Identities, facts: Option<SetupFacts>, public_data_only: bool) -> Self {
         let primary = identities.primary.filter(|identity| {
             !public_data_only
-                && (facts.is_some()
-                    || (identity.validate().is_ok() && identity.signing_ref().is_ok()))
+                && if facts.is_some() {
+                    identity.validate_credential().is_ok()
+                } else {
+                    identity.validate().is_ok() && identity.signing_ref().is_ok()
+                }
         });
         let login = facts
             .and_then(|facts| facts.primary_login())

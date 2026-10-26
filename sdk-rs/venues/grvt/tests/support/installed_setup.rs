@@ -216,3 +216,42 @@ fn unsigned_commands_do_not_borrow_a_signing_credential_and_signed_commands_neve
         }
     }
 }
+
+#[test]
+fn absent_or_empty_key_with_a_scalar_never_mints_an_empty_write_credential() {
+    use safe_cex_engine::signing::SignError;
+    for empty in [false, true] {
+        let key = if empty { r#""key":"","# } else { "" };
+        let setup = format!(r#"{{"primary":{{{key}"secret":"{:064x}"}}}}"#, 1);
+        let (_, identities, facts) =
+            LocalSigner::from_json_with_facts(setup, setup_policy(), false).unwrap();
+        let installed = Installed::new(identities, Some(facts), false);
+        assert!(installed.primary().is_none());
+        assert!(installed.write_credential().is_none());
+        for command in [
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![],
+            },
+            Command::AmendOrder {
+                command: 1,
+                id: "order".into(),
+                price: Some(2.),
+                amount: None,
+            },
+        ] {
+            assert_eq!(
+                installed.command_credential(&command),
+                Err(SignError::MissingKey)
+            );
+        }
+        if empty {
+            let policy = installed.session_policy().unwrap();
+            assert!(policy.credential.is_none());
+            assert!(policy.private_egress.is_some());
+        } else {
+            assert_eq!(facts.primary_key(), KeyPresence::Absent);
+            assert!(installed.session_policy().is_err());
+        }
+    }
+}
