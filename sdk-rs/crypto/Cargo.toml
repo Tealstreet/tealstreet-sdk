@@ -30,6 +30,7 @@ getrandom_04.workspace = true
 
 
 [features]
+address-nonce = ["safe-cex-engine/address-nonce", "secp256k1"]
 # zkLink pulls franklin-crypto; only ApeX Omni builds enable it.
 zklink = ["dep:franklin-crypto"]
 # Local provider arms. The primitive modules stay available to venues; only a

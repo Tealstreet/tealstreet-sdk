@@ -396,6 +396,25 @@ pub struct Pacing {
     pub minimum_gap_ms: f64,
 }
 
+/// One venue-wide FIFO of REST releases, each at least the registered group
+/// gap after the previous member's final release (docs/plans/RUST_RELEASE_DOMAINS.md).
+#[cfg(feature = "release-domains")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReleaseDomain {
+    pub pacing: Pacing,
+    pub members: DomainMembers,
+}
+
+/// Which managed requests a release domain orders.
+#[cfg(feature = "release-domains")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DomainMembers {
+    /// Every REST request: public and private, reads and writes.
+    AllRest,
+    /// Mutations only.
+    Mutations,
+}
+
 /// A flat declaration over primitive pacing groups, resolved at engine construction.
 #[derive(Clone, Copy, Debug)]
 pub struct PacingSet {
@@ -1946,6 +1965,12 @@ impl CommandWrites {
     pub(crate) fn inheriting(mut self, uncertain: bool) -> Self {
         self.inherited_uncertain |= uncertain;
         self
+    }
+
+    /// Mark a live journal maybe-sent; like `inheriting`, never clears.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn inherit_uncertain(&mut self) {
+        self.inherited_uncertain = true;
     }
 
     /// Seal exactly once. A caller's fallback text never chooses the outcome;

@@ -9178,6 +9178,27 @@ Follow-up (engine owner, fe7lgm): a granted plan resend can only be
 released from plan custody. A venue whose resend must wait on a venue
 condition therefore needs a serial-plan condition wait, as AsterDEX does here.
 A custody-preserving parked resend would remove that need.
+## AsterDEX managed sockets
+
+Both AsterDEX streams are engine-managed
+([RUST_ASTERDEX_SOCKET_ADOPTION.md](RUST_ASTERDEX_SOCKET_ADOPTION.md)).
+Callers see the same topics, opening order, ping cadence, idle and connect
+bounds, and book clearing on disconnect.
+
+Stricter than before:
+- Frames before open, after the idle deadline, or from a retired epoch are
+  dropped.
+- A duplicate open does not resubscribe or refresh again.
+- A late pong cannot revive an expired private stream.
+
+Interim, until Phase C: the venue owns listen-key acquisition. A create has a
+10 s deadline, and a failed create retries with the venue's 1 s to 30 s
+backoff, so the private stream reconnects instead of stalling. Phase C moves
+this into the engine.
+
+A refused public topic set raises a notice and keeps the feed serving its
+other topics.
+
 ## WOO engine-owned socket lifecycle
 
 WOO public and private feeds use the shared Engine epoch, supervision, auth and
@@ -9374,3 +9395,101 @@ issued epoch and its native socket reference exist before fallible interest
 staging, so a refusal retires that exact epoch and takes shared exponential
 backoff instead of permanently failing the feed. Controls saturate resources at
 the captured real retry and prove subsequent demand replay and private liveness.
+
+
+## Backpack snapshot-issued trigger repair
+
+Accepted managed account Orders snapshots publish under live Background DATA,
+then mint the existing cancel-then-place authority before retiring that Read.
+Discovery may use the installed Secondary; repair always uses the genuine
+installed native-ready Primary. Streams never mint. A missing Primary produces
+one local typed NoPrimary Warn per accepted snapshot, with no mint call or write;
+public-only or native-unready account state cannot start repair.
+
+Each physical cancel/place leg has its own 20-second Never policy, with no
+aggregate clock, fake Command or borrowed Read mutation authority. The placement
+successor is issued only inside the accepted cancel DATA delivery. Explicit
+finite zero baseline and cumulative fill are required for the full frozen size;
+partial, missing, invalid, decreasing, contradictory or later fill evidence
+suppresses replacement and prompts manual reconciliation. No remainder math is
+introduced. Raw per-ID evidence is independent of candidate eligibility and
+survives retained rows and Store rollback. These are intentional safety
+improvements over native automatic full-size replacement.
+
+Unsafe current stream or accepted REST evidence retires the exact held successor
+Context before any early return. Held Prepare/Bind then settles Some(NotSent),
+while released work remains Unknown. A successor never issued is place=None;
+the accepted cancel remains factual. Cleanup settles once and independent
+account observations and real command owners keep their own custody. Unknown
+subjects cannot be retired merely by a terminal-looking Store row.
+
+An accepted placement with a malformed financial row retains the original Store
+identity and publishes no fabricated replacement. It still fences older Orders
+reads before reconciliation. Existing native financial formatting and private
+socket authentication remain unchanged.
+## AsterDEX V3 configured signer mismatch (approved, adoption pending)
+
+The address-nonce consumer must refuse at trusted setup when the configured
+signer address differs from the selected signing key's verified public address,
+using a clear typed error that identifies the mismatch. Native currently sends
+the mismatched configured signer and fails at the venue; the approved change
+moves that refusal earlier and makes its reason precise. It must not silently
+substitute the derived address. Refusal is NotSent for only that slot's private
+address path, before business signing, with no auth-health latch; public work
+continues. It is neither a startup-wide failure nor repeated InvalidSubject on
+each request. Matching accounts and legitimately installed
+primary/read aliases retain their behavior. A native-versus-new original must
+pin both refusals before consumer source closes this gate. This is a recorded
+ruling, not an implemented or activated path. The generic nonce mint accepts
+no configured address and has no mismatch exception.
+
+
+### Address setup source: owned completion and claim-free access
+
+The address-nonce feature is opt-in and enables no venue in this PR. Setup accepts
+an exact PublicAddress result only after the original provider work and cleanup
+join within its frozen20s bound. Timeout/abort wrappers and remote responses alone
+cannot install a signer or unblock replacement. Missing owned-provider/host support
+refuses the address-dependent path before allocating a task, without an auth latch;
+public and claim-free work continue. An explicit pre-start reinitialization waits
+for true old-owner retirement, with no automatic retry. Both results and cleanup
+are retained across timeout and provider replacement.
+
+The shared address carrier also supports a claim-free consumer: GRVT can request
+the actual installed signer's address without declaring a nonce domain. This
+source adopts no GRVT request and changes no configured signer policy. Consumer
+adoption pins its warning-only option and exact actual signer before CreateOrder.
+Aster separately pins typed per-slot mismatch refusal and cold-instance replacement;
+HL separately accounts for its legacy prepared/released work. No nonce counter is
+reset and no possibly-sent mutation is replayed by setup or retirement.
+
+Native address-setup shutdown retains its independent cleanup owner before
+observer callbacks can escape. Observer panics propagate after actual cleanup
+joins. Cancelling or dropping the native run future transfers that same driver
+into the live Tokio runtime; cancellation is never retirement evidence, and the
+runtime must remain alive through the genuine join. Runtime teardown itself is
+not a resource-retirement report. Local setup handles retain only the derived
+20-byte public result, with scalar bytes staying in the installed store.
+
+The address setup public API stays additive when its feature is disabled. Its
+provider hooks and retirement variant have a measured default-off Bybit cost
+of437 bytes on the reviewed pair, explicitly accepted by the overseer. No
+consumer is enabled by this shared prerequisite; CI measures family sizes, and
+the current composed local combined must fit the14 MiB budget.
+
+Address-keyed nonce claims without the feature now refuse instead of accepting
+stable-id text as an address subject. No current adopter uses that unsupported
+path. The additive selection errors preserve typed missing/signing-not-configured
+and setup-capability refusals without adding an auth-health latch.
+### WEEX remaining inventory and identity custody
+
+WEEX keeps one immutable `Slots<Identity>` owner for selected reads, required
+Primary history, Mutation signing and private SessionAuth. The redundant venue
+identity container and per-history slot reconstruction are removed. Existing
+completeness filters, public-only suppression, primary-private eligibility,
+secondary read preference, wire bytes and all failure/outcome policy are retained.
+
+The remaining conservative request/signing/credential inventory describes managed
+failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
+identity options. This slice retains those rows and all checker rules; completion
+of the custody audit does not claim inventory zero or a new endpoint migration.

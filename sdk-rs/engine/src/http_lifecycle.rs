@@ -818,6 +818,20 @@ impl<P> Cx<'_, P> {
         if let Err(error) = self.io.core.http_pacing.check(context.pacing(), self.now) {
             return Err((pending, error));
         }
+        #[cfg(feature = "release-domains")]
+        if let Err(error) = self
+            .io
+            .core
+            .domain_admits(context.operation(), context.pacing(), {
+                #[cfg(feature = "http-mutation-barriers")]
+                let grouped = group.is_some();
+                #[cfg(not(feature = "http-mutation-barriers"))]
+                let grouped = false;
+                grouped
+            })
+        {
+            return Err((pending, error));
+        }
         #[cfg(feature = "dispatch-nonce")]
         let nonce_claim = match validate_nonce_recipe(
             step.as_deref(),
@@ -1023,6 +1037,12 @@ impl<P> Cx<'_, P> {
         )
         .expect("validated physical HTTP window");
         let preparation = lifecycle.preparation();
+        #[cfg(feature = "release-domains")]
+        self.io.core.domain_accept(
+            request,
+            lifecycle.context().operation(),
+            lifecycle.context().pacing(),
+        );
         self.io.core.managed_http.insert(
             request,
             Managed {
@@ -1347,6 +1367,8 @@ impl crate::engine::CoreIo<'_> {
         cancel: Option<Action>,
     ) -> Option<Managed> {
         let managed = self.core.managed_http.remove(&request)?;
+        #[cfg(feature = "release-domains")]
+        self.core.domain_advance(request);
         #[cfg(feature = "session-bearer")]
         self.core
             .bearer_parked
@@ -1528,14 +1550,18 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 }
-                self.io
-                    .core
-                    .actions
-                    .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
-                        preparation: token,
-                        permit,
-                        request,
-                    })));
+                let bind = Action::ManagedHttp(Box::new(HttpAction::Bind {
+                    preparation: token,
+                    permit,
+                    request,
+                }));
+                #[cfg(feature = "release-domains")]
+                let bind = self.io.core.domain_bind(token.attempt().request, bind);
+                #[cfg(not(feature = "release-domains"))]
+                let bind = Some(bind);
+                if let Some(bind) = bind {
+                    self.io.core.actions.push(bind);
+                }
             }
             Err(Error::State) => {} // Duplicate readiness cannot replace an issued permit.
             Err(error) => self.http_preparation_failed(
@@ -1639,8 +1665,17 @@ impl<V: Venue> Engine<V> {
     /// role was captured at admission. Descriptive only: it grants nothing.
     #[cfg(feature = "sign-meta")]
     pub fn sign_meta(&self, task: RequestId) -> Option<crate::sign_meta::SignMeta> {
+        let prepared = self.io.core.signing.prepared_task(task);
+        #[cfg(feature = "address-nonce")]
+        {
+            let setup = self.io.core.address_setup.current_meta(task);
+            debug_assert!(prepared.is_none() || setup.is_none());
+            if prepared.is_none() {
+                return setup;
+            }
+        }
         use crate::sign_meta::{SignKind, SignMeta};
-        let (request, deadline_ms) = self.io.core.signing.prepared_task(task)?;
+        let (request, deadline_ms) = prepared?;
         let managed = self.io.core.managed_http.get(&request)?;
         if managed.signing_attempt != Some(task) {
             return None;
@@ -1802,14 +1837,18 @@ impl<V: Venue> Engine<V> {
                     self.pump_mutation_group(now, request);
                     return;
                 }
-                self.io
-                    .core
-                    .actions
-                    .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
-                        preparation: token,
-                        permit,
-                        request: packet,
-                    })));
+                let bind = Action::ManagedHttp(Box::new(HttpAction::Bind {
+                    preparation: token,
+                    permit,
+                    request: packet,
+                }));
+                #[cfg(feature = "release-domains")]
+                let bind = self.io.core.domain_bind(request, bind);
+                #[cfg(not(feature = "release-domains"))]
+                let bind = Some(bind);
+                if let Some(bind) = bind {
+                    self.io.core.actions.push(bind);
+                }
             }
             (result, mut outbound) => {
                 if let Some(action) = outbound.as_mut() {
@@ -2054,6 +2093,20 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
+        #[cfg(feature = "address-nonce")]
+        if managed
+            .recipe
+            .as_ref()
+            .is_some_and(|recipe| !recipe.nonce_identity_current(&self.io.core.identities))
+        {
+            self.http_preparation_failed(
+                now,
+                preparation,
+                Error::Revoked,
+                crate::signing::SignError::InvalidRequest.venue_error(),
+            );
+            return Err(Error::Revoked);
+        }
         if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,
@@ -2315,6 +2368,10 @@ impl<V: Venue> Engine<V> {
             #[cfg(not(feature = "dispatch-nonce"))]
             let message = "HTTP request was not released";
             self.http_preparation_failed(now, preparation, error, VenueError::new(message));
+        }
+        #[cfg(feature = "release-domains")]
+        if matches!(result, Ok(Claim::Released(_))) {
+            self.io.core.domain_advance(request);
         }
         result
     }
