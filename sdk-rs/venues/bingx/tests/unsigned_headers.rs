@@ -1,6 +1,5 @@
-//! Static native codec compatibility plus an explicitly synthetic managed
-//! recipe. This does not admit BingX production managed or hosted requests.
-use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+//! An explicitly synthetic managed recipe attests BingX's public header
+//! declaration; the real vectors are pinned in keyless_public_context.rs.
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
     Credential, HttpAction, Operation, Policy, Prepared, RetryPolicy, Scope,
@@ -12,115 +11,7 @@ use safe_cex_engine::{
     Action, Command, CredentialSlot, Cx, DispatchContext, Method, Response, SignStep, SocketId,
     TimerId, Venue,
 };
-use safe_cex_venue_bingx::sign::{Credentials, Params, unsigned_headers};
-
-struct NativeProbe {
-    method: Method,
-    path: &'static str,
-    credentials: Option<Credentials>,
-}
-impl Venue for NativeProbe {
-    type Pending = ();
-    fn start(&mut self, cx: &mut Cx<'_, ()>) {
-        safe_cex_venue_bingx::stage(
-            cx,
-            self.credentials.as_ref(),
-            self.method,
-            self.path,
-            Params::new(),
-            None,
-            (),
-        );
-    }
-    fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
-    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), error: &str) {
-        panic!("{error}");
-    }
-    fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
-    fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
-    fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
-    fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
-    fn book(&self, _: &str) -> Option<&Book> {
-        None
-    }
-    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(std::iter::empty())
-    }
-}
-fn native_request(
-    method: Method,
-    path: &'static str,
-    signed: bool,
-) -> safe_cex_engine::HttpRequest {
-    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-        primary: Some(LocalIdentity {
-            key: Secret::new("fixture-primary".into()),
-            secret: Secret::new("fixture-signing-material".into()),
-            ..Default::default()
-        }),
-        ..Default::default()
-    })
-    .unwrap();
-    let mut engine = safe_cex_engine::test_support::seeded_engine(NativeProbe {
-        method,
-        path,
-        credentials: signed.then(|| Credentials {
-            primary: identities.primary.unwrap(),
-            read: None,
-        }),
-    });
-    engine
-        .set_signer(Some(std::sync::Arc::new(provider)))
-        .unwrap();
-    engine.start(12.);
-    let mut requests = engine
-        .drain_actions()
-        .filter_map(|action| match action {
-            Action::Http(http) => Some(http),
-            Action::Sign { .. } | Action::SignedOutbound { .. } => {
-                panic!("local provider must complete inline")
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(requests.len(), 1);
-    requests.pop().unwrap()
-}
-
-#[test]
-fn legacy_public_and_signed_vectors_keep_native_order_for_every_method_class() {
-    for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
-        let content = if method == Method::Post {
-            "application/json"
-        } else {
-            "application/json, charset=utf-8"
-        };
-        let public = vec![
-            ("X-SOURCE-KEY", "Tealstreet".into()),
-            ("Content-Type", content.into()),
-        ];
-        assert_eq!(native_request(method, "/native", false).headers, public);
-        let headers = native_request(method, "/openApi/user/auth/userDataStream", true).headers;
-        assert_eq!(
-            headers,
-            vec![
-                ("X-SOURCE-KEY", "Tealstreet".into()),
-                ("X-BX-APIKEY", "fixture-primary".into()),
-                ("Content-Type", content.into()),
-            ]
-        );
-        let headers = native_request(method, "/native", true).headers;
-        assert_eq!(
-            headers,
-            vec![
-                ("X-SOURCE-KEY", "Tealstreet".into()),
-                ("X-BX-APIKEY", "fixture-primary".into()),
-                ("Content-Type", content.into()),
-            ]
-        );
-    }
-}
+use safe_cex_venue_bingx::sign::unsigned_headers;
 
 struct SyntheticRecipe(Method);
 impl SignStep for SyntheticRecipe {
