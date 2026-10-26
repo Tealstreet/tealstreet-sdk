@@ -890,6 +890,10 @@ impl Venue for Okx {
     fn guard_pending_placements(&self) -> bool {
         true
     }
+    // reconcile_uncertain reads the uncertain symbols' orders at once.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
 
     fn capture_http_reconciliation(
         &self,

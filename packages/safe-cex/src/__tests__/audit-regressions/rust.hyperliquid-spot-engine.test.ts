@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RustEngineExchange, runsOnRustEngine } from '../../exchanges/rust/rust.exchange';
+import { runsOnRustEngine, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
 import { virtualClock } from '../../utils/virtualClock';
 
@@ -10,10 +10,10 @@ describe('spot-enabled Hyperliquid accounts run on the engine', () => {
   it('the spot toggle no longer routes any venue away from the engine', () => {
     expect(runsOnRustEngine('hyperliquid', { engine: 'rust' })).toBe(true);
     expect(runsOnRustEngine('hyperliquid', { engine: 'rust', enableSpotMarkets: true } as never)).toBe(true);
-    expect(runsOnRustEngine('hyperliquid', {})).toBe(false);
+    expect(runsOnRustEngine('hyperliquid', {})).toBe(true);
     expect(runsOnRustEngine('bybit', { engine: 'rust', enableSpotMarkets: true } as never)).toBe(true);
     expect(runsOnRustEngine('bitunix', { engine: 'rust', enableSpotMarkets: true } as never)).toBe(true);
-    expect(runsOnRustEngine('bitunix', {})).toBe(false);
+    expect(runsOnRustEngine('bitunix', {})).toBe(true);
   });
 
   it('createExchange builds the engine with or without spot markets', async () => {

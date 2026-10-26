@@ -18,6 +18,8 @@ fn ticker_failure_cannot_block_authenticated_account_snapshot() {
         .as_array_mut()
         .unwrap()
         .insert(0, serde_json::json!({"broken":true}));
+    // Skipped discovery rows log at Debug.
+    h.engine.set_log_level(safe_cex_engine::Level::Debug);
     h.respond("/v5/market/instruments-info", 200, &body.to_string());
     assert!(h.engine.store().loaded().markets);
     assert!(!h.engine.store().loaded().tickers);
@@ -156,6 +158,7 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
             .find(|row| row["symbol"] == "ETHUSDT")
             .unwrap();
         eth[filter][field] = bad.into();
+        h.engine.set_log_level(safe_cex_engine::Level::Debug);
         h.respond("/v5/market/instruments-info", 200, &body.to_string());
         assert!(h.engine.store().market("BTCUSDT").is_some());
         assert!(

@@ -1,5 +1,19 @@
 # CLAUDE.md - safe-cex Package
 
+The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
+SDK factories and workers have no TypeScript venue fallback; OUT names refuse
+with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
+and test-only replay/reference implementations remain independent dependencies.
+Historical Rust-adapter fixtures mock only beta admission through
+`__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
+the real refusal boundary. These fixtures confer no beta activation.
+Hosted-enabled beta names are Binance x4, Bybit x4, OKX x4, Bitget/USDC and
+Bitunix (#2262). Provider-mode eligibility still follows each declared remote
+policy, with no separate beta override.
+Rust option-query capabilities remain false until the loaded native record
+explicitly enables them; a generic wrapper method alone never advertises them.
+
+
 Core exchange integration library. See also exchange-specific `CLAUDE.md` files in `src/exchanges/*/`.
 
 > **CLAUDE.md is a living spec.** When you change non-obvious
@@ -146,9 +160,8 @@ The delegated provider initializes UTF-8 codecs only when provider work begins.
 Importing the native registry before its host installs TextEncoder/TextDecoder
 must remain supported; signing and frame I/O require those runtime codecs.
 
-Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
-both `createExchange` (including saved-account/public factories) and
-`ExchangeWorker`. Registry defaults remain independent of that opt-in.
+The beta registry always selects Rust in SDK factories and `ExchangeWorker`;
+`ExchangeOptions.engine` remains an accepted compatibility input only.
 `src/__tests__/cutover/*.wasm.test.ts` verifies the worker frame/store consumer
 contract for every `RUST_VENUES` name; actual native startup and independent
 binary lifecycle fixtures have separate evidence scopes. See phase 9 of

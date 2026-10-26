@@ -548,6 +548,8 @@ fn public_engine(credentials: bool) -> Engine<BitunixFutures> {
 #[test]
 fn a_malformed_public_row_does_not_starve_valid_market_or_ticker_peers() {
     let mut e = public_engine(false);
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     let market = pending_http(&mut e, 0., "trading_pairs");
     let pair: serde_json::Value = serde_json::from_str(PAIRS).unwrap();
     response(
