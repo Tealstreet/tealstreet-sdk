@@ -289,8 +289,22 @@ export interface SignRequest {
   operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
   context: { venue: string; method: string; host: string; path: string };
 }
+export type SigningScope = 'account' | 'balance' | 'orders' | 'positions' | 'settings';
+export type SigningRole = { readonly kind: 'read'; readonly scope: SigningScope | null }
+  | { readonly kind: 'primaryRead'; readonly reason: 'clientOrderLookup' | 'postUnknownOrderRead'
+    | 'degradedRead' | 'catalog' | 'history'; readonly scope: SigningScope | null }
+  | { readonly kind: 'mutation' | 'sessionAuth' };
+/** Immutable engine ownership captured at Action::Sign delivery. */
+export interface SignMeta {
+  readonly task: number;
+  readonly owner: Readonly<{ kind: 'managed'; request: number; generation: number }
+    | { kind: 'session'; generation: number }>;
+  readonly deadlineMs: number;
+  readonly slot: 'primary' | 'secondary';
+  readonly role: SigningRole;
+}
 /** Owns secrets. Atomic results are exact raw operation bytes; errors are never logged. */
-export type Signer = (request: SignRequest, context: { signal: AbortSignal }) => Promise<SignResult> | SignResult;
+export type Signer = (request: SignRequest, context: { signal: AbortSignal; meta?: SignMeta }) => Promise<SignResult> | SignResult;
 
 export interface EngineHostOptions {
   /** Transfer raw engine allocation ownership after successful construction.
@@ -425,6 +439,8 @@ export interface WasmEngineLike {
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
   signingPending?(attempt: number): boolean;
+  /** Optional engine ownership export; invalid or absent data retains the legacy context. */
+  signMeta?(attempt: number): string | undefined;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;

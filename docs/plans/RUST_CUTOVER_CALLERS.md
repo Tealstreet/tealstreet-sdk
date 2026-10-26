@@ -9206,3 +9206,19 @@ Every Bitrue HTTP request except trading now runs under engine-managed authority
 - **FetchLeverage join** (fe7lgm's D2 ruling). One Background snapshot serves every joined owner; each owner keeps its own root. Owners complete one tick after the snapshot, from a zero-delay venue timer: a delivery never completes another command's root. Result values are unchanged; this one-tick deferral is the caller-visible timing change. An owner that expired first gets its own Timeout and never blocks the others.
 - **B1 interim (deleted by B2).** While a protective census is pending, an order read's census result and its queue bookkeeping run one tick later from a zero-delay timer, in native order, because the census still completes a legacy trading command.
 - **Fixtures.** Tests drive managed reads through `prepared_actions`, take socket and request IDs from their actions, and read routes from the preparation intent.
+
+
+## Hosted signing ownership metadata
+
+EngineHost reads signMeta once for a current Action::Sign before the provider
+microtask. A provider may receive a deeply frozen meta beside its AbortSignal;
+the engine supplies task, genuine owner, raw absolute deadline, slot and role.
+This is local ownership metadata, not peer capability or a caller-selected ref.
+Legacy engines and invalid/ordinary-failing exports retain exactly {signal}.
+WASM traps and RangeError remain fatal with no callback or pending revival.
+The closed parser also drops impossible Session/role and Secondary/role pairs.
+These rules are pinned by 55 host controls; they change no request, retry,
+financial outcome or authentication latch. Negotiated v2 refuses missing
+ownership before transport; no route, timeout or method fabricates metadata.
+Setup ownership remains a distinct reviewed extension with its own negotiated
+owned-execution and retirement support, not a SessionAuth substitute.
