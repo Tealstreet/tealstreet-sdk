@@ -5,7 +5,10 @@ The feature widens and renames the earlier `serial-pacing` draft:
 It is non-default.
 
 Owner: claude-dazzy3 (overseer assignment, widened to Coinbase).
-Reviewers: codex-uufub4 (Plan core, nonce and release), codex-zs5e83 (Coinbase owner; ruling: release-anchored 334 ms, one all-REST FIFO domain).
+Reviewers: codex-uufub4 (Plan core, nonce and release; owner of the Coinbase
+remaining-funnel target) and codex-zs5e83 (Hyperliquid consumer; owns HL, GRVT
+and the KuCoin adoption). Overseer ruling: release-anchored 334 ms, with one
+all-REST FIFO domain for Coinbase.
 Base: `feat/rust-rewrite` `b0ee0a9a4d5`. **Plan only; no source.**
 Consumers:
 - Hyperliquid trading (`RUST_HYPERLIQUID_TRADING_CONTEXT.md`, the
