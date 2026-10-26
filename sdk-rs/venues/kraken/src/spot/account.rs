@@ -363,9 +363,7 @@ impl KrakenSpot {
         );
     }
     pub(super) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        if cx.reconcile_reask()
-            && (self.account.orders_reconcile || self.account.orders_flight)
-        {
+        if cx.reconcile_reask() && (self.account.orders_reconcile || self.account.orders_flight) {
             return;
         }
         self.account.orders_reconcile = true;
