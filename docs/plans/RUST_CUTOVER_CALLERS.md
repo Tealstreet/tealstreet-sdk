@@ -10190,3 +10190,14 @@ fixtures pin the single native expiry-plus-five-second timer and cleanup at
 that delivery; later cancel-all/stream callbacks preserve it without duplicate
 warnings, timers or caller terminals. The old delayed-cleanup oracle is
 superseded; runtime cleanup and financial row handling are unchanged.
+
+### Engine: settle-only condition wait for stream-proven writes
+
+Venue authors gain `serial_plan_settle_wait(plan, slot, context, bound_ms)`
+(feature `condition-waits`). After a write's accepted DATA it settles the call
+and parks the serial Plan with no next call; the venue releases it on exact
+stream proof and calls `done_plan`, or on expiry calls
+`inherit_plan_uncertainty` then `fail_plan`, so the caller sees Unknown with
+every accepted order ID and the scope stays fenced. It is never Done without
+proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
+grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).

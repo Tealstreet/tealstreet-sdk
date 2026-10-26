@@ -29,6 +29,9 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .validate_plan(plan, self.now)?;
         let serial = body.serial.as_ref().ok_or(Error::Invalid)?;
+        if serial.settled {
+            return Err(Error::Invalid);
+        }
         if serial.condition.is_some() {
             return Err(Error::State);
         }
@@ -52,6 +55,52 @@ impl<P> Cx<'_, P> {
         })
     }
 
+    /// Settle the current call and park with no next entry, for a venue whose
+    /// proof arrives only from its stream. Release readies the Plan for
+    /// `done_plan`; expiry fails it. Bounded and one-shot per Plan.
+    pub fn serial_plan_settle_wait(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        bound_ms: u32,
+    ) -> Result<ConditionWait, Error> {
+        if bound_ms == 0 {
+            return Err(Error::Invalid);
+        }
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        let serial = body.serial.as_ref().ok_or(Error::Invalid)?;
+        if serial.settled {
+            return Err(Error::Invalid);
+        }
+        if serial.condition.is_some() {
+            return Err(Error::State);
+        }
+        self.finish_plan_call(plan, slot, context)?;
+        let deadline = self.now + f64::from(bound_ms);
+        let serial = self
+            .io
+            .core
+            .request_contexts
+            .plan_body_mut(plan)?
+            .serial
+            .as_mut()
+            .expect("settled serial Plan");
+        serial.settled = true;
+        serial.waits += 1;
+        let wait = serial.waits;
+        serial.condition = Some((wait, deadline));
+        self.rearm_plan(plan);
+        Ok(ConditionWait {
+            plan: plan.clone(),
+            wait,
+        })
+    }
+
     /// From any callback. Only schedules the Plan's `on_http_plan_ready`, after
     /// the current callback returns; a handle releases once.
     pub fn release_condition_wait(&mut self, wait: &ConditionWait) -> Result<(), Error> {
@@ -65,10 +114,14 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         serial.condition = None;
-        let entry = &mut body.entries[0];
-        entry.parked = false;
-        entry.eligible_at = Some(now);
-        entry.notified = false;
+        if serial.settled {
+            serial.settle_ready = Some(now);
+        } else {
+            let entry = &mut body.entries[0];
+            entry.parked = false;
+            entry.eligible_at = Some(now);
+            entry.notified = false;
+        }
         self.rearm_plan(&wait.plan);
         Ok(())
     }
@@ -104,7 +157,9 @@ impl<V: Venue> Engine<V> {
             .core
             .request_contexts
             .plan_body(plan)
-            .is_ok_and(|body| body.entries[0].parked)
+            .is_ok_and(|body| {
+                body.entries[0].parked || body.serial.as_ref().is_some_and(|serial| serial.settled)
+            })
         {
             Cx {
                 now,
