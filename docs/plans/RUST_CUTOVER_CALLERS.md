@@ -9288,6 +9288,26 @@ its deadline before the next minute. It does not filter timers. The positional
 trading fixture only changes its0/10 seed release collector. Original financial
 payloads, assertions and clocks stay intact; all264 family controls pass locally.
 
+### Bitget history original Read custody
+
+History fills, orders, income and unsigned PublicTrades retain one genuine Read
+root and the original caller receipt across detection, promotion, windows, pages
+and native retry waits. Every physical page uses a fresh managed child, bounded
+by both the original receipt and 20 seconds from dequeue, including preparation,
+signing and queueing. Equality expires before response admission in either event
+order. Typed integrity, provider and local refusals fail with their original
+cause and consume no transport retry. Native response compatibility, including
+40085 on HTTP 408/5xx, still uses actual response bodies. Native three retries
+and strict incomplete failure remain; no prefix success or INCOMPLETE marker is
+introduced. Expiry removes only this owner’s parked work. The unrelated account
+completion remains the one Bitget legacy request site.
+
+Bitget malformed/non-UTF8 streamed envelopes keep native250/500/750ms response
+retries after exact delivery validation. They are distinct from typed Internal
+engine failures delivered through on_http_failed, which remain strict (including
+a non-streamed response body the engine cannot decode). No retry is authorized
+by error-message text.
+
 
 ### Kraken managed socket admission
 
