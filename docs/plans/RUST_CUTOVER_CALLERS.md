@@ -9940,3 +9940,12 @@ scheduled reconciliation. Repeated hook calls preserve that scheduled timer.
 Its native signing-expiry plus five-second lower bound remains authoritative:
 an early empty snapshot cannot prove that a late placement will not arrive.
 The engine owns re-asking; the hooks add no retry loop or write resend.
+
+### BingX uncertain-placement fence: Phase B prerequisite
+
+BingX opts into the uncertain-placement fence and joins an already current
+Primary reconciliation read when the engine re-asks. Its four-step managed
+control stays enabled and is assertion-RED on #2279 Phase A because BingX has
+no placement scope. Phase B must mark Unknown write facts independently of
+guard_pending_placements before this slice can qualify or land; this change
+does not enable that guard or claim the Phase A flag alone protects retries.
