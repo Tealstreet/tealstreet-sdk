@@ -646,3 +646,59 @@ fn genuine_address_claim_prepares_binds_and_releases_exact_nonce_with_calibrated
         assert!(nonces[1] > nonces[0]);
     }
 }
+
+#[test]
+fn prestart_support_can_be_installed_after_refusal_without_allocating_old_work() {
+    let mut e = engine(Some(&HYPERLIQUID_AGENT), AddressSetupSlots::Primary);
+    assert_eq!(
+        e.initialize_address_nonce(100.).unwrap(),
+        AddressSetupProgress::Ready
+    );
+    assert!(e.drain_actions().next().is_none());
+    e.set_address_setup_host_support(SetupHostSupport::OwnedPublicAddress1)
+        .unwrap();
+    assert_eq!(
+        e.reinitialize_address_nonce(100.).unwrap(),
+        AddressSetupProgress::Pending
+    );
+    let (id, work, _) = task(&mut e, CredentialSlot::Primary);
+    assert_eq!(id, RequestId(1));
+    e.handle(
+        101.,
+        Event::Signed {
+            attempt: id,
+            result: Ok(result(&work, 20)),
+        },
+    );
+    let t = token(&mut e);
+    assert!(e.address_setup_retired(t, 102.));
+    e.start(103.);
+    assert!(e.venue().observed);
+    assert!(
+        e.set_address_setup_host_support(SetupHostSupport::Unavailable)
+            .is_err()
+    );
+}
+#[test]
+fn nonfinite_timer_observation_keeps_immutable_timeout_armed() {
+    let mut e = external();
+    e.initialize_address_nonce(100.).unwrap();
+    let (id, _, mut timer) = task(&mut e, CredentialSlot::Primary);
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        e.handle(now, Event::TimerFired { timer });
+        timer = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => {
+                    assert_eq!(at_ms, 20_100.);
+                    Some(timer)
+                }
+                _ => None,
+            })
+            .expect("immutable bound remains armed");
+        assert!(e.sign_meta(id).is_some());
+    }
+    e.handle(20_100., Event::TimerFired { timer });
+    assert_eq!(e.sign_meta(id), None);
+    assert!(mint(&e).is_err());
+}

@@ -265,9 +265,10 @@ mod enabled {
             &mut self,
             support: SetupHostSupport,
         ) -> Result<(), VenueError> {
-            if self.started || self.io.core.address_setup.initialized {
+            if self.started {
                 return Err(SignError::InvalidRequest.venue_error());
             }
+            self.invalidate_address_setup()?;
             self.io.core.address_setup.support = support;
             Ok(())
         }
@@ -461,24 +462,25 @@ mod enabled {
                 let task = setup.tasks.remove(index);
                 core.timers.remove(&task.timer);
                 core.actions.push(Action::ClearTimer { timer: task.timer });
-                if !setup.sealed && task.generation == setup.generation && !setup.replacement {
-                    if let Some(identity) = identity_mut(&mut core.identities, task.slot) {
-                        identity.address =
-                            match task.result.unwrap_or(Err(SignError::InvalidResult)) {
-                                Ok(bytes) if now < task.deadline && !task.retiring => {
-                                    AddressCapability::Verified(VerifiedAddress {
-                                        bytes,
-                                        signing: task.signing,
-                                        slot: task.slot,
-                                        domain: setup.domain,
-                                        issuer: setup.issuer.as_ref().unwrap().clone(),
-                                        generation: setup.generation,
-                                    })
-                                }
-                                Err(error) => AddressCapability::Refused(error),
-                                _ => AddressCapability::Refused(SignError::TimedOut),
-                            };
-                    }
+                if !setup.sealed
+                    && task.generation == setup.generation
+                    && !setup.replacement
+                    && let Some(identity) = identity_mut(&mut core.identities, task.slot)
+                {
+                    identity.address = match task.result.unwrap_or(Err(SignError::InvalidResult)) {
+                        Ok(bytes) if now < task.deadline && !task.retiring => {
+                            AddressCapability::Verified(VerifiedAddress {
+                                bytes,
+                                signing: task.signing,
+                                slot: task.slot,
+                                domain: setup.domain,
+                                issuer: setup.issuer.as_ref().unwrap().clone(),
+                                generation: setup.generation,
+                            })
+                        }
+                        Err(error) => AddressCapability::Refused(error),
+                        _ => AddressCapability::Refused(SignError::TimedOut),
+                    };
                 }
             }
             if setup.replacement && setup.tasks.is_empty() && !setup.sealed {
@@ -592,15 +594,14 @@ mod enabled {
                 }
             }
             for slot in [CredentialSlot::Primary, CredentialSlot::Secondary] {
-                if core.address_setup.slots.contains(slot) {
-                    if let Some(identity) = identity_mut(&mut core.identities, slot) {
-                        if !matches!(
-                            identity.address,
-                            AddressCapability::Verified(_) | AddressCapability::Refused(_)
-                        ) {
-                            identity.address = AddressCapability::Refused(SignError::Unsupported);
-                        }
-                    }
+                if core.address_setup.slots.contains(slot)
+                    && let Some(identity) = identity_mut(&mut core.identities, slot)
+                    && !matches!(
+                        identity.address,
+                        AddressCapability::Verified(_) | AddressCapability::Refused(_)
+                    )
+                {
+                    identity.address = AddressCapability::Refused(SignError::Unsupported);
                 }
             }
         }
