@@ -65,7 +65,8 @@ address for mismatched configuration. Refuse only that slot's private address
 path, typed NotSent before business signing, without an auth-health latch;
 public work continues. The consumer reads the sealed verified address during
 trusted startup before enabling that private path. Do not fail all startup or
-defer this known failure into per-request InvalidSubject. Matching configurations and legitimately
+defer this known failure into per-request InvalidSubject. Matching
+configurations and legitimately
 installed alias slots retain their behavior. The consumer must pin native
 venue refusal versus the new earlier setup refusal with an original and record
 the timing/diagnostic change in CALLERS. The generic mint still accepts no
@@ -362,10 +363,13 @@ unknown-op behavior keeps its existing batch-tail completion semantics. Exact
 provider hooks, token/Action cloning, host integration and genuine join proofs
 remain source-review gates, not approved runtime code.
 
-Proposed non-default engine feature: `address-nonce = ["dispatch-nonce"]`.
-Gate the carrier field, subject strategy, declaration capture, setup handling
-and checks so ordinary builds retain their exact layout and code paths. This
-shared PR enables no venue dependency feature and adopts neither consumer.
+Proposed non-default engine feature:
+`address-nonce = ["dispatch-nonce", "sign-meta"]`. Gate runtime carrier fields,
+subject strategy, declaration capture and setup handling. Public retirement
+and selection-error variant sets stay unconditional, so Cargo unification
+cannot change the cases seen by dependent crates. Feature-off shipping equality
+must be measured, including any unused public-variant cost. This shared PR
+enables no venue dependency feature and adopts none of the consumers.
 Phase3 actual landing plus m26 and both consumer reviews precede source.
 
 At first source, merge the actual Rust landing tip. Measure paired default
