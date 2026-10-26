@@ -27,6 +27,9 @@ struct Probe {
     validated: usize,
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> Capabilities {
         self.inner.capabilities()

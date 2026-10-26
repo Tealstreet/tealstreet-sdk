@@ -627,7 +627,7 @@ impl<V: Venue> Engine<V> {
             self.flush_http_plans(now);
             self.finish_deferred_commands(now);
             #[cfg(feature = "managed-sockets")]
-            if self.io.managed_socket_active() {
+            if V::managed_sockets() && self.io.managed_socket_active() {
                 self.fence_socket_actions(now);
                 self.dispatch_actions(now);
                 self.drain_socket_frames(now);

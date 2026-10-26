@@ -437,6 +437,9 @@ impl crate::engine::CoreRef<'_> {
 
 impl<V: Venue> Engine<V> {
     pub(super) fn has_socket_work(&self) -> bool {
+        if !V::managed_sockets() {
+            return false;
+        }
         !self.io.core.socket_effects.is_empty()
             || !self.io.socket_proposals.is_empty()
             || self
