@@ -934,7 +934,8 @@ fn implemented(algorithm: Algorithm) -> bool {
         Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
         Algorithm::SchnorrDigest => cfg!(feature = "schnorr"),
         Algorithm::Secp256k1Digest => cfg!(feature = "secp256k1"),
-        Algorithm::Ed25519 | Algorithm::Es256 | Algorithm::StarkDigest => false,
+        Algorithm::StarkDigest => cfg!(feature = "stark"),
+        Algorithm::Ed25519 | Algorithm::Es256 => false,
     }
 }
 
@@ -2556,6 +2557,33 @@ mod tests {
         assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
     }
 
+    #[cfg(feature = "stark")]
+    #[test]
+    fn declared_stark_ref_signs_a_digest_that_verifies_against_its_public_key() {
+        use starknet_crypto::Felt;
+        let scalar = format!("{}{}", "0".repeat(62), "2a");
+        let (signer, key) = public_setup("starkDigest", &scalar);
+        let digest = vec![7u8; 32];
+        let request = public_request(serde_json::json!([
+            {"kind": "publicKey", "algorithm": "starkDigest", "key": key},
+            {"kind": "sign", "algorithm": "starkDigest", "key": key,
+             "payload": [{"kind": "bytes", "bytes": digest}]},
+        ]));
+        let result = signer.sign_now(&request).unwrap();
+        request.validate_result(&result).unwrap();
+        assert_eq!(result.values[1].len(), 64);
+        let felt = |bytes: &[u8]| Felt::from_bytes_be(&<[u8; 32]>::try_from(bytes).unwrap());
+        assert!(
+            starknet_crypto::verify(
+                &felt(&result.values[0]),
+                &felt(&digest),
+                &felt(&result.values[1][..32]),
+                &felt(&result.values[1][32..]),
+            )
+            .unwrap()
+        );
+    }
+
     #[cfg(feature = "secp256k1")]
     #[test]
     fn public_operations_keep_batch_order_beside_present_and_sign() {
@@ -3103,6 +3131,23 @@ mod tests {
         let (other, other_key) = public_setup("ed25519", SCALAR);
         assert_eq!(
             other.can_sign(&other_key, Algorithm::Secp256k1Digest),
+            Capability::Unsupported
+        );
+        assert_eq!(
+            other.can_sign(&other_key, Algorithm::StarkDigest),
+            Capability::Unsupported
+        );
+        let (stark, stark_key) = public_setup("starkDigest", SCALAR);
+        assert_eq!(
+            stark.can_sign(&stark_key, Algorithm::StarkDigest),
+            if cfg!(feature = "stark") {
+                Capability::Supported
+            } else {
+                Capability::Unsupported
+            }
+        );
+        assert_eq!(
+            stark.can_sign(&stark_key, Algorithm::Secp256k1Digest),
             Capability::Unsupported
         );
 
