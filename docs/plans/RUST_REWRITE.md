@@ -832,3 +832,4 @@ clears them. Flag bit 0 leaves collateral unspecified, preserving its independen
 absent-versus-empty contract. Writers without collateral insert an empty collateral table before
 this extension. Existing collateral-only and 32-byte balance frames retain their
 layout.
+
