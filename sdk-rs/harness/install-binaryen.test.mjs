@@ -99,6 +99,6 @@ test('the fixed release and bounded transport retries are shared by every Binary
   assert.match(action, /runner\.os.*runner\.arch.*hashFiles\('sdk-rs\/harness\/install-binaryen.sh'\)/);
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   assert.equal(workflow.split('uses: ./.github/actions/install-binaryen').length - 1, 5);
-  assert.equal(workflow.split("- '.github/actions/install-binaryen/**'").length - 1, 2);
+  assert.equal(workflow.split("- '.github/actions/install-binaryen/**'").length - 1, 1);
   assert.doesNotMatch(workflow, /run: bash sdk-rs\/harness\/install-binaryen\.sh/);
 });

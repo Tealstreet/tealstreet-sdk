@@ -6,6 +6,7 @@ mod identity;
 mod managed;
 pub mod paths;
 pub mod sign;
+mod socket_codec;
 mod trading;
 mod wire;
 
@@ -16,12 +17,12 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::selected_read::ReadRole;
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
+use socket_codec::Connection;
 use std::collections::HashMap;
 use wire::*;
 
@@ -126,26 +127,6 @@ enum List {
     Premium,
 }
 
-struct Connection {
-    socket: Option<SocketId>,
-    open: bool,
-    supervisor: Supervisor,
-}
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            supervisor: Supervisor::new(Config {
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(5_000.0),
-                backoff_base_ms: 1_000.0,
-                ..Config::default()
-            }),
-        }
-    }
-}
-
 #[derive(Default)]
 struct BookState {
     subscribers: u32,
@@ -167,7 +148,7 @@ pub struct Bingx {
     seed_rows_index: Vec<Option<usize>>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     seed_reported: Vec<bool>,
-    sequence: u64,
+    sequence: std::cell::Cell<u64>,
     retries: safe_cex_engine::startup::Backoff<List>,
     reread_stalls: u8,
     // A failed or empty funding read commits tickers without it and retries.
@@ -220,7 +201,7 @@ impl Bingx {
             seed_rows_index: Vec::new(),
             live_tickers: Default::default(),
             seed_reported: Vec::new(),
-            sequence: 0,
+            sequence: std::cell::Cell::new(0),
             retries: Default::default(),
             reread_stalls: 0,
             tickers_committed: false,
@@ -388,35 +369,11 @@ impl Bingx {
         self.tickers_committed = true;
     }
 
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(paths::PUBLIC_WS.to_owned())
-                    .channel(safe_cex_engine::SocketChannel::Public),
-            ),
-        );
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public.supervisor.connecting(cx);
-        }
-        self.public.open = false;
-    }
-
-    fn send_topic(&mut self, cx: &mut Cx<'_, Pending>, topic: &str, subscribe: bool) {
-        if !self.public.open {
-            return;
-        }
-        if let Some(socket) = self.public.socket {
-            self.sequence += 1;
-            cx.send(
-                socket,
-                format!(
-                    r#"{{"id":"{}","reqType":"{}","dataType":"{}"}}"#,
-                    self.sequence,
-                    if subscribe { "sub" } else { "unsub" },
-                    topic
-                ),
-            );
+    fn start_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct
+            && let Err(error) = self.connect_public(cx)
+        {
+            Self::socket_notice(cx, error);
         }
     }
 
@@ -443,23 +400,10 @@ impl Bingx {
         ))
     }
 
-    fn reconnect(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(socket) = self.public.socket.take() {
-            cx.close(socket)
-        }
-        self.public.open = false;
-        for state in self.books.values_mut() {
-            state.ready = false;
-            state.book.clear()
-        }
-        self.public.supervisor.retry(cx);
-    }
-
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         let Some(socket) = self.public.socket else {
             return;
         };
-        self.public.supervisor.received(cx.now);
         if text == "Ping" {
             cx.send(socket, "Pong");
             return;
@@ -689,6 +633,10 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    fn managed_sockets() -> bool {
+        true
+    }
+
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
@@ -718,10 +666,37 @@ impl Venue for Bingx {
         true
     }
 
+    fn socket_capabilities() -> safe_cex_engine::socket_lifecycle::SocketCapabilities {
+        safe_cex_engine::socket_lifecycle::SocketCapabilities { handoff: false }
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.socket_event(cx, event)
+    }
+    fn encode_socket_interests(
+        &self,
+        _store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.encode_interests(feed, subscribe, items, emit)
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(error) = self.config_error {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
+            return;
+        }
+        if let Err(error) = self.register_sockets(cx) {
+            Self::socket_notice(cx, error);
             return;
         }
         self.read(
@@ -738,34 +713,7 @@ impl Venue for Bingx {
             cx.store.set_positions(Vec::new());
         }
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account.handles_socket(socket) {
-            if let Some(c) = &self.credentials {
-                self.account.on_open(cx, c);
-            }
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = true;
-        self.public.supervisor.opened(cx);
-        self.send_topic(cx, "market.contracts", true);
-        let topics: Vec<_> = self
-            .books
-            .keys()
-            .filter_map(|s| self.topic_book(cx, s))
-            .chain(
-                self.candles
-                    .keys()
-                    .filter_map(|(s, i)| self.topic_candle(cx, s, *i)),
-            )
-            .collect();
-        for topic in topics {
-            self.send_topic(cx, &topic, true)
-        }
-        cx.send(socket, "Ping");
-    }
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account.handles_socket(socket) {
             if let Some(c) = &self.credentials {
@@ -776,15 +724,7 @@ impl Venue for Bingx {
             self.public_message(cx, text)
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.account.handles_socket(socket) {
-            if let Some(c) = &self.credentials {
-                self.account.on_close(cx, c);
-            }
-        } else if self.public.socket == Some(socket) {
-            self.reconnect(cx)
-        }
-    }
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Identity(_) | Pending::Metadata(_) => {}
@@ -1038,7 +978,7 @@ impl Venue for Bingx {
                 if let Some(c) = &self.credentials {
                     self.account.start(cx, c);
                 }
-                self.connect(cx);
+                self.start_public(cx);
                 self.read(
                     cx,
                     paths::DAILY,
@@ -1347,19 +1287,6 @@ impl Venue for Bingx {
                 ),
             };
             self.read(cx, path, pending);
-            return;
-        }
-        match self.public.supervisor.on_timer(cx, timer) {
-            Tick::Reconnect => self.connect(cx),
-            Tick::TimedOut(_) => self.reconnect(cx),
-            Tick::Ping => {
-                if self.public.open
-                    && let Some(socket) = self.public.socket
-                {
-                    cx.send(socket, "Ping");
-                }
-            }
-            Tick::Handled | Tick::Unhandled => {}
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -1397,26 +1324,8 @@ impl Venue for Bingx {
                 self.history
                     .query(cx, self.credentials.as_ref(), command, query)
             }
-            Command::SubscribeOrderBook { symbol } => {
-                let state = self.books.entry(symbol.clone()).or_default();
-                state.subscribers += 1;
-                if state.subscribers == 1
-                    && let Some(topic) = self.topic_book(cx, &symbol)
-                {
-                    self.send_topic(cx, &topic, true)
-                }
-            }
-            Command::UnsubscribeOrderBook { symbol } => {
-                if let Some(state) = self.books.get_mut(&symbol) {
-                    state.subscribers = state.subscribers.saturating_sub(1);
-                    if state.subscribers == 0 {
-                        self.books.remove(&symbol);
-                        if let Some(topic) = self.topic_book(cx, &symbol) {
-                            self.send_topic(cx, &topic, false)
-                        }
-                    }
-                }
-            }
+            Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
+            Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, symbol),
             Command::SubscribeCandles { symbol, interval } => {
                 if stream_interval(interval).is_none() {
                     cx.notice(
@@ -1426,25 +1335,10 @@ impl Venue for Bingx {
                     );
                     return;
                 }
-                let count = self.candles.entry((symbol.clone(), interval)).or_default();
-                *count += 1;
-                if *count == 1
-                    && let Some(topic) = self.topic_candle(cx, &symbol, interval)
-                {
-                    self.send_topic(cx, &topic, true)
-                }
+                self.subscribe_candles(cx, symbol, interval);
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval);
-                if let Some(count) = self.candles.get_mut(&key) {
-                    *count = count.saturating_sub(1);
-                    if *count == 0 {
-                        self.candles.remove(&key);
-                        if let Some(topic) = self.topic_candle(cx, &symbol, interval) {
-                            self.send_topic(cx, &topic, false)
-                        }
-                    }
-                }
+                self.unsubscribe_candles(cx, symbol, interval)
             }
             Command::FetchCandles {
                 command,
