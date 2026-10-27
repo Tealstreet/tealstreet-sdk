@@ -1518,7 +1518,7 @@ def git(*args):
 def previous_manifests(inventory=None, predecessor=None, merge_parents=False):
     """Request inventories may join parent bounds; other consumers keep per-ref bounds."""
     inventory = inventory or MANIFEST
-    base = os.environ.get('GITHUB_BASE_REF') or 'feat/rust-rewrite'
+    base = os.environ.get('GITHUB_BASE_REF') or 'master'
     parents = git('rev-list', '--parents', '-n', '1', 'HEAD').split()[1:]
     remote = f'refs/remotes/origin/{base}'
     refs = [('HEAD', ['HEAD'])]

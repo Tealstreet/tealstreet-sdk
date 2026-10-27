@@ -116,7 +116,7 @@ export function selectCi({ paths, manifests, full = false, documents = { paths: 
 }
 
 export function checkoutBase({ event, checkout, parents, tree, mergeTree }) {
-  if (event.pull_request?.base?.ref !== 'feat/rust-rewrite' ||
+  if (event.pull_request?.base?.ref !== 'master' ||
       event.pull_request.base.repo?.full_name !== 'Tealstreet/tealstreet-sdk' ||
       !/^[a-f0-9]{40}$/.test(checkout) || !/^[a-f0-9]{40}$/.test(tree) || parents.length !== 2 ||
       parents.some(parent => !/^[a-f0-9]{40}$/.test(parent)) ||

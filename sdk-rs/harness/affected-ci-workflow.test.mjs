@@ -9,7 +9,7 @@ const job = (text, name) => {
 };
 
 function check(text) {
-  assert.match(text, /push:\n    branches: \[feat\/rust-rewrite\]/);
+  assert.match(text, /push:\n    branches: \[master\]/);
   for (const name of ['gate', 'bitget-paired', 'cpu-plan', 'cpu-second', 'cpu-certify', 'cpu-final']) {
     const value = job(text, name);
     assert.match(value, /runs-on: ubuntu-latest/);
