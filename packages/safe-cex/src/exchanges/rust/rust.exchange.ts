@@ -102,6 +102,7 @@ import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { mapAsterDEXSignerSetup } from './asterdexSignerSetup';
 import { mapHyperliquidSignerSetup } from './hyperliquidSignerSetup';
+import { mapParadexSignerSetup } from './paradexSignerSetup';
 import { assertBetaAccount, BETA_VENUES, isBetaVenue } from './betaVenues';
 import {
   deriveBridgeConstruction,
@@ -553,6 +554,14 @@ export class RustEngineExchange extends BaseExchange {
         setupError = error;
       }
     }
+    let paradexSetup: ExchangeOptions | undefined;
+    if (bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'paradex') {
+      try { paradexSetup = mapParadexSignerSetup(options); }
+      catch (error) {
+        if (!(error instanceof ExchangeError)) throw error;
+        setupError = error;
+      }
+    }
     if (bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'asterdex') {
       try {
         aster = mapAsterDEXSignerSetup(options);
@@ -579,7 +588,8 @@ export class RustEngineExchange extends BaseExchange {
                   options.omniKeySeed || undefined,
                 )
               : new LocalSignerSetup(
-                  hyperliquidSetup ?? (deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options),
+                  hyperliquidSetup ?? paradexSetup
+                    ?? (deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options),
                   deriveSignerSetupPolicy(exchangeName),
                 )
         : undefined;

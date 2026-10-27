@@ -16,23 +16,20 @@ use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue, book::Boo
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
     pub paradex_address: Option<String>,
     pub subkey_address: Option<String>,
-    pub payload_signer: bool,
+    /// Trusted local setup's identity; its Stark public key is sealed there.
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
+    /// Setup derived the Stark key from an Ethereum key, so the account
+    /// address is the one that key derives.
+    pub ethereum_key: bool,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.subkey_address);
-    }
-}
 
 impl Options {
     fn private_enabled(&self) -> bool {
         !self.public_data_only
-            && self.key.as_deref().is_some_and(|s| !s.is_empty())
+            && self.credentials.is_some()
             && self
                 .paradex_address
                 .as_deref()
@@ -55,7 +52,7 @@ pub enum Pending {
 }
 
 pub struct Paradex {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     public: public::Public,
     account: account::Account,
     trading: trading::Trading,
@@ -64,9 +61,8 @@ pub struct Paradex {
 
 impl Paradex {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
-            account: account::Account::new((*options).clone()),
+            account: account::Account::new(options.clone()),
             trading: trading::Trading::default(),
             history: history::History,
             options,

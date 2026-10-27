@@ -2,6 +2,7 @@ use crate::{
     Pending,
     account::{Account, AmendTarget},
     sign::Credentials,
+    sign::dispatch::{Orders, Preimage, SignedBody},
     wire::StrictNumber as Number,
 };
 use safe_cex_engine::Level;
@@ -12,7 +13,7 @@ use safe_cex_engine::request_context::{Operation as HttpOperation, Policy, Retry
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
-    Response, VenueError,
+    Response, SignStep, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -37,6 +38,43 @@ struct Placement {
     signature_timestamp: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     client_id: Option<String>,
+}
+impl SignedBody for Placement {
+    fn preimage(&self) -> Preimage<'_> {
+        Preimage {
+            market: &self.market,
+            side: self.side,
+            kind: self.kind,
+            size: &self.size,
+            price: self.price.as_deref(),
+            id: None,
+        }
+    }
+    fn sign(&mut self, signature: String, timestamp: u64) {
+        self.signature = signature;
+        self.signature_timestamp = timestamp;
+    }
+}
+/// The frozen unsigned body and its dispatch-time Stark step.
+fn signed<T: SignedBody + 'static>(
+    account: &Account,
+    signer: &Credentials,
+    method: Method,
+    path: &str,
+    legs: Vec<T>,
+    batch: bool,
+) -> Result<(String, Box<dyn SignStep>), String> {
+    let step = Orders::new(
+        signer,
+        account.testnet(),
+        method,
+        format!("{}{path}", account.rest()),
+        format!("/v1{path}"),
+        legs,
+        batch,
+    )
+    .map_err(|_| "Paradex order body is invalid".to_owned())?;
+    Ok((step.unsigned_body().to_owned(), Box::new(step)))
 }
 fn placement_receipt(payload: &Placement) -> Option<OrderIdentityReceipt> {
     payload
@@ -71,7 +109,10 @@ enum Kind {
 }
 struct Operation {
     receipts: Vec<OrderIdentityReceipt>,
-    hash: Option<String>,
+    /// The write's dispatch-time Stark step. It keeps the field name of the
+    /// payload hash it replaced, so the legacy request sites stay unchanged
+    /// until PR-3 moves them to the funnel.
+    hash: Option<Box<dyn SignStep>>,
     method: Method,
     path: String,
     body: Option<String>,
@@ -138,7 +179,8 @@ struct Quote {
 }
 pub struct Request {
     progress: Option<(CommandId, Vec<OrderIdentityReceipt>)>,
-    hash: Option<String>,
+    /// As `Operation::hash`: the dispatch-time Stark step.
+    hash: Option<Box<dyn SignStep>>,
     job: u64,
     kind: Kind,
 }
@@ -148,7 +190,7 @@ impl Request {
             cx.command_progress(*command, receipts.clone());
         }
     }
-    pub(crate) fn take_signing_hash(&mut self) -> Option<String> {
+    pub(crate) fn take_signed(&mut self) -> Option<Box<dyn SignStep>> {
         self.hash.take()
     }
     pub(crate) fn amend_id(&self) -> Option<&str> {
@@ -217,11 +259,10 @@ fn client_id(cx: &Cx<'_, Pending>) -> Result<String, String> {
     safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
         .map(|id| format!("ts_{id}"))
 }
+/// An unsigned placement; its signature is drawn at dispatch.
 fn prepare(
     cx: &Cx<'_, Pending>,
     o: &PlaceOrderOpts,
-    signer: &Credentials,
-    now: u64,
     child: bool,
     execution: Option<f64>,
 ) -> Result<Placement, String> {
@@ -271,7 +312,6 @@ fn prepare(
     let size = num::format(o.amount);
     let price = matches!(kind, "LIMIT" | "STOP_LIMIT")
         .then(|| num::format(execution.or(o.price).expect("validated execution price")));
-    let signed = signer.order(now, &o.symbol, side(o.side), kind, &size, price.as_deref())?;
     Ok(Placement {
         market: o.symbol.clone(),
         side: side(o.side),
@@ -286,8 +326,8 @@ fn prepare(
         },
         flags: (o.reduce_only == Some(true) || stop).then_some(["REDUCE_ONLY"]),
         stp: (!child).then_some("EXPIRE_TAKER"),
-        signature: signed.signature,
-        signature_timestamp: signed.signature_timestamp,
+        signature: String::new(),
+        signature_timestamp: 0,
         client_id: if child {
             None
         } else {
@@ -344,37 +384,37 @@ fn place_operations(
     let signer = account
         .credentials()
         .ok_or("Paradex signer is not initialized")?;
-    if signer.is_delegated() && orders.len() > 1 {
-        return Err("Paradex batch orders are not supported with payloadSigner, which signs one order per request".into());
-    }
     let mut operations = VecDeque::new();
     let mut chunk = Vec::new();
-    fn flush(
-        chunk: &mut Vec<Placement>,
-        operations: &mut VecDeque<Operation>,
-        delegated: bool,
-    ) -> Result<(), String> {
-        if chunk.is_empty() {
-            return Ok(());
-        }
-        let expected = chunk.iter().map(|p| p.client_id.clone()).collect();
-        let receipts = chunk.iter().filter_map(placement_receipt).collect();
-        let body = serde_json::to_string(&*chunk).map_err(|e| e.to_string())?;
-        operations.push_back(Operation {
-            receipts,
-            hash: delegated.then(|| chunk[0].signature.clone()),
-            method: Method::Post,
-            path: "/orders/batch".into(),
-            body: Some(body),
-            kind: Kind::Place {
-                expected,
-                leg: None,
-                batch: true,
-            },
-        });
-        chunk.clear();
-        Ok(())
-    }
+    let flush =
+        |chunk: &mut Vec<Placement>, operations: &mut VecDeque<Operation>| -> Result<(), String> {
+            if chunk.is_empty() {
+                return Ok(());
+            }
+            let expected = chunk.iter().map(|p| p.client_id.clone()).collect();
+            let receipts = chunk.iter().filter_map(placement_receipt).collect();
+            let (body, step) = signed(
+                account,
+                signer,
+                Method::Post,
+                "/orders/batch",
+                std::mem::take(chunk),
+                true,
+            )?;
+            operations.push_back(Operation {
+                receipts,
+                hash: Some(step),
+                method: Method::Post,
+                path: "/orders/batch".into(),
+                body: Some(body),
+                kind: Kind::Place {
+                    expected,
+                    leg: None,
+                    batch: true,
+                },
+            });
+            Ok(())
+        };
     orders.iter().try_for_each(bracket_sides)?;
     for o in orders {
         let execution = if capped(o) {
@@ -397,21 +437,30 @@ fn place_operations(
             None
         };
         if native_batch(o) {
-            chunk.push(prepare(cx, o, signer, cx.now as u64, false, execution)?);
+            chunk.push(prepare(cx, o, false, execution)?);
             if chunk.len() == 10 {
-                flush(&mut chunk, &mut operations, signer.is_delegated())?;
+                flush(&mut chunk, &mut operations)?;
             }
             continue;
         }
-        flush(&mut chunk, &mut operations, signer.is_delegated())?;
-        let payload = prepare(cx, o, signer, cx.now as u64, false, execution)?;
+        flush(&mut chunk, &mut operations)?;
+        let payload = prepare(cx, o, false, execution)?;
         let expected = vec![payload.client_id.clone()];
+        let receipts = placement_receipt(&payload).into_iter().collect();
+        let (body, step) = signed(
+            account,
+            signer,
+            Method::Post,
+            "/orders",
+            vec![payload],
+            false,
+        )?;
         operations.push_back(Operation {
-            receipts: placement_receipt(&payload).into_iter().collect(),
-            hash: signer.is_delegated().then(|| payload.signature.clone()),
+            receipts,
+            hash: Some(step),
             method: Method::Post,
             path: "/orders".into(),
-            body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
+            body: Some(body),
             kind: Kind::Place {
                 expected,
                 leg: None,
@@ -436,26 +485,24 @@ fn place_operations(
                 child.stop_loss = None;
                 child.reduce_only = Some(true);
                 child.time_in_force = None;
-                let mut payload = prepare(cx, &child, signer, cx.now as u64, true, None)?;
+                let mut payload = prepare(cx, &child, true, None)?;
                 if kind == OrderType::StopLoss {
                     payload.kind = "STOP_LOSS_MARKET";
-                    let signed = signer.order(
-                        cx.now as u64,
-                        &o.symbol,
-                        side(child.side),
-                        payload.kind,
-                        &payload.size,
-                        None,
-                    )?;
-                    payload.signature = signed.signature;
-                    payload.signature_timestamp = signed.signature_timestamp;
                 }
+                let (body, step) = signed(
+                    account,
+                    signer,
+                    Method::Post,
+                    "/orders",
+                    vec![payload],
+                    false,
+                )?;
                 operations.push_back(Operation {
                     receipts: Vec::new(),
-                    hash: signer.is_delegated().then(|| payload.signature.clone()),
+                    hash: Some(step),
                     method: Method::Post,
                     path: "/orders".into(),
-                    body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
+                    body: Some(body),
                     kind: Kind::Place {
                         expected: vec![None],
                         leg: Some(leg),
@@ -465,7 +512,7 @@ fn place_operations(
             }
         }
     }
-    flush(&mut chunk, &mut operations, signer.is_delegated())?;
+    flush(&mut chunk, &mut operations)?;
     Ok(operations)
 }
 
@@ -1203,54 +1250,37 @@ impl Trading {
         {
             return Err("Paradex amendment size or price invalid".into());
         }
-        let signed = account
-            .credentials()
-            .ok_or("Paradex signer is not initialized")?
-            .modify(
-                cx.now as u64,
-                &raw.market,
-                &raw.side,
-                &raw.kind,
-                &num::format(size),
-                &num::format(price),
-                id,
-            )?;
-        #[derive(Serialize)]
-        struct Modify<'a> {
-            id: &'a str,
-            market: &'a str,
-            side: &'a str,
-            #[serde(rename = "type")]
-            kind: &'a str,
-            size: String,
-            price: String,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            trigger_price: Option<String>,
-            signature: String,
-            signature_timestamp: u64,
+        if id.is_empty() {
+            return Err("Cannot sign a Paradex amendment without an order ID".into());
         }
+        let signer = account
+            .credentials()
+            .ok_or("Paradex signer is not initialized")?;
+        let path = format!("/orders/{}", encode(id));
+        let (body, step) = signed(
+            account,
+            signer,
+            Method::Put,
+            &path,
+            vec![Modify {
+                id: id.into(),
+                market: raw.market.clone(),
+                side: raw.side.clone(),
+                kind: raw.kind.clone(),
+                size: num::format(size),
+                price: num::format(price),
+                trigger_price: trigger_price.map(num::format),
+                signature: String::new(),
+                signature_timestamp: 0,
+            }],
+            false,
+        )?;
         Ok(VecDeque::from([Operation {
             receipts: Vec::new(),
-            hash: account
-                .credentials()
-                .filter(|c| c.is_delegated())
-                .map(|_| signed.signature.clone()),
+            hash: Some(step),
             method: Method::Put,
-            path: format!("/orders/{}", encode(id)),
-            body: Some(
-                serde_json::to_string(&Modify {
-                    id,
-                    market: &raw.market,
-                    side: &raw.side,
-                    kind: &raw.kind,
-                    size: num::format(size),
-                    price: num::format(price),
-                    trigger_price: trigger_price.map(num::format),
-                    signature: signed.signature,
-                    signature_timestamp: signed.signature_timestamp,
-                })
-                .unwrap(),
-            ),
+            path,
+            body: Some(body),
             kind: Kind::Amend {
                 id: id.into(),
                 target: Box::new(AmendTarget::new(
@@ -1261,6 +1291,36 @@ impl Trading {
                 )?),
             },
         }]))
+    }
+}
+#[derive(Serialize)]
+struct Modify {
+    id: String,
+    market: String,
+    side: String,
+    #[serde(rename = "type")]
+    kind: String,
+    size: String,
+    price: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trigger_price: Option<String>,
+    signature: String,
+    signature_timestamp: u64,
+}
+impl SignedBody for Modify {
+    fn preimage(&self) -> Preimage<'_> {
+        Preimage {
+            market: &self.market,
+            side: &self.side,
+            kind: &self.kind,
+            size: &self.size,
+            price: Some(&self.price),
+            id: Some(&self.id),
+        }
+    }
+    fn sign(&mut self, signature: String, timestamp: u64) {
+        self.signature = signature;
+        self.signature_timestamp = timestamp;
     }
 }
 fn capped(order: &PlaceOrderOpts) -> bool {

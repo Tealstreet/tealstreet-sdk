@@ -30,13 +30,15 @@ const NETWORKS: [Network; 2] = [
 ];
 
 fn private(key: &str, network: &Network) -> (Harness, HttpRequest) {
-    let mut h = Harness::empty(Options {
-        testnet: network.testnet,
-        key: Some(key.into()),
-        paradex_address: Some("0x0123".into()),
-        subkey_address: Some("0x456".into()),
-        ..Options::default()
-    });
+    let mut h = Harness::keyed(
+        Options {
+            testnet: network.testnet,
+            paradex_address: Some("0x0123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Options::default()
+        },
+        key,
+    );
     h.reply("/markets", MARKETS);
     h.reply("summary", TICKERS);
     h.reply("/system/config", network.config);

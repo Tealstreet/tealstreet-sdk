@@ -16,10 +16,11 @@ use safe_cex_engine::request_context::{
     Context, Operation, Owner, Policy, RetryPolicy, Scope, Session, SessionBearer, SessionHeaders,
     SessionPolicy,
 };
+use safe_cex_engine::signing::Algorithm;
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Cx, Fill, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId, VenueError,
-    json::ArrayAt,
+    CredentialSlot, Cx, Fill, Method, Response, SignStep, SocketChannel, SocketId, TimerId,
+    VenueError, json::ArrayAt,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -167,7 +168,7 @@ struct Queued {
 }
 
 pub struct Account {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     started: bool,
     credentials: Option<Credentials>,
     token: Option<String>,
@@ -216,9 +217,14 @@ pub struct Account {
     pub(crate) excluded_perps: HashSet<String>,
 }
 
+/// The one dispatch-time signing attachment for `/auth` and every signed
+/// write; an interim legacy site until these requests move to the funnel.
+fn sign(cx: &mut Cx<'_, Pending>, request: safe_cex_engine::RequestId, step: Box<dyn SignStep>) {
+    cx.sign_http(request, step);
+}
+
 impl Account {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             started: false,
@@ -284,6 +290,9 @@ impl Account {
     }
     pub fn credentials(&self) -> Option<&Credentials> {
         self.credentials.as_ref()
+    }
+    pub(crate) fn testnet(&self) -> bool {
+        self.options.testnet
     }
     pub fn invalidate_order(&mut self, id: &str) {
         if let Some(row) = self.native.remove(id)
@@ -381,7 +390,7 @@ impl Account {
         self.started = true;
         cx.store.set_hedged(false);
         if self.options.public_data_only
-            || self.options.key.as_deref().is_none_or(str::is_empty)
+            || self.options.credentials.is_none()
             || self
                 .options
                 .paradex_address
@@ -578,18 +587,7 @@ impl Account {
             trade.report_progress(cx);
         }
         let signing = if let Pending::Trade(trade) = &mut request.pending {
-            trade.take_signing_hash().and_then(|signature| {
-                self.credentials
-                    .as_ref()?
-                    .payload_request(&signature)
-                    .map(|payload| {
-                        let field = format!(
-                            "\"signature\":{}",
-                            serde_json::to_string(&signature).expect("string serializable")
-                        );
-                        (payload, SignatureTarget::JsonField(field))
-                    })
-            })
+            trade.take_signed()
         } else {
             None
         };
@@ -623,17 +621,8 @@ impl Account {
         } else {
             cx.request(request.method, url, headers, request.body, request.pending)
         };
-        if let Some((payload, target)) = signing
-            && let Err(pending) = cx.sign_request(id, payload, target)
-        {
-            if let Pending::Trade(trade) = &pending
-                && let Some(id) = trade.amend_id()
-                && let Some(fence) = self.amend_fences.get_mut(id)
-            {
-                fence.sent = false;
-            }
-            self.failed
-                .push((pending, VenueError::new("Paradex signing queue is full")));
+        if let Some(step) = signing {
+            sign(cx, id, step);
         }
     }
     fn refresh(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -645,15 +634,12 @@ impl Account {
         };
         // An expiring JWT never binds again: Session reads park until the new one.
         self.token = None;
-        let signature = match credentials.auth(cx.now.max(0.) as u64) {
-            Ok(s) => s,
-            Err(error) => {
-                self.auth_failed(cx, &error);
-                return;
-            }
-        };
+        let signature = crate::sign::dispatch::Auth::new(
+            credentials,
+            self.options.testnet,
+            format!("{}/auth/{}", self.rest(), credentials.subkey()),
+        );
         self.auth_in_flight = true;
-        let payload = credentials.payload_request(&signature.signature);
         let id = cx.request(
             Method::Post,
             format!("{}/auth/{}", self.rest(), credentials.subkey()),
@@ -662,16 +648,7 @@ impl Account {
             Pending::Account(Request::Auth { started: cx.now }),
         );
         cx.route_request(id, safe_cex_engine::RequestRoute::Direct);
-        if let Some(payload) = payload
-            && let Err(pending) = cx.sign_request(
-                id,
-                payload,
-                SignatureTarget::Header("PARADEX-STARKNET-SIGNATURE"),
-            )
-        {
-            self.failed
-                .push((pending, VenueError::new("Paradex signing queue is full")));
-        }
+        sign(cx, id, Box::new(signature));
     }
     fn auth_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
         self.auth_in_flight = false;
@@ -1449,15 +1426,27 @@ impl Account {
                 let credentials = serde_json::from_str::<SystemConfig>(response.body)
                     .map_err(|_| "Invalid Paradex system config".to_owned())
                     .and_then(|config| {
-                        let constructor = if self.options.payload_signer {
-                            Credentials::delegated
-                        } else {
-                            Credentials::new
-                        };
-                        constructor(
-                            self.options.key.as_deref().unwrap_or_default(),
+                        // Only trusted local setup's sealed key, read under the
+                        // installed provider; any other provider has none.
+                        let signing = self
+                            .options
+                            .credentials
+                            .as_ref()
+                            .and_then(|identity| identity.signing_ref().ok())
+                            .ok_or("Paradex signing key is not installed")?
+                            .clone();
+                        let public = cx
+                            .verified_public_key(CredentialSlot::Primary, Algorithm::StarkDigest)
+                            .map_err(|_| {
+                                "Paradex signing key is not installed by trusted local setup"
+                                    .to_owned()
+                            })?;
+                        Credentials::new(
+                            signing,
+                            public,
                             self.options.paradex_address.as_deref().unwrap_or_default(),
                             self.options.subkey_address.as_deref().unwrap_or_default(),
+                            self.options.ethereum_key.then_some(self.options.testnet),
                             &config,
                         )
                     });

@@ -8,6 +8,11 @@ pub fn public_key(private_key: &Felt) -> Felt {
     starknet_crypto::get_public_key(private_key)
 }
 
+/// The public x of a big-endian private scalar, big-endian.
+pub fn public_key_bytes(private_key: &[u8; 32]) -> [u8; 32] {
+    public_key(&Felt::from_bytes_be(private_key)).to_bytes_be()
+}
+
 /// Stark curve `y^2 = x^3 + x + BETA` (alpha = 1), as starknet-curve.
 const BETA: Felt =
     Felt::from_hex_unchecked("0x6f21413efbe40de150e596d72f7a8c5609ad26c15c915c1f4cdfcb99cee9e89");
@@ -63,6 +68,17 @@ fn unsigned(input: &str) -> Result<U256, String> {
         return Err("Invalid Paradex field value".into());
     }
     U256::from_str_radix(digits, radix).map_err(|_| "Invalid Paradex field value".into())
+}
+
+/// A Paradex Stark private key as the venue always accepted it: `0x`/`0X` hex
+/// or decimal digits, `0 < k < n`. Big-endian.
+pub fn parse_stark_key(input: &str) -> Result<Zeroizing<[u8; 32]>, String> {
+    let value = unsigned(input).map_err(|_| "Invalid Paradex private key")?;
+    let order = U256::from_str_radix(CURVE_ORDER, 10).expect("curve order");
+    if value == U256::ZERO || value >= order {
+        return Err("Invalid Paradex private key".into());
+    }
+    Ok(Zeroizing::new(value.to_be_bytes::<32>()))
 }
 
 /// Paradex's EIP-712 `Constant("STARK Key")` digest for an Ethereum chain ID.

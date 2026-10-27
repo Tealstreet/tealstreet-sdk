@@ -4,7 +4,6 @@
 use safe_cex_venue_paradex::hosted::{
     DescriptorError, ParadexBinding, ParadexDescriptor, validate, validated_digests,
 };
-use safe_cex_venue_paradex::sign::{Credentials, SystemConfig};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -12,10 +11,7 @@ use serde_json::{Value, json};
 #[serde(rename_all = "camelCase")]
 struct Case {
     chain: String,
-    eth_chain: String,
-    key: String,
     address: String,
-    subkey: String,
     now: u64,
     short_auth: Hashed,
     orders: Vec<Vector>,
@@ -137,42 +133,6 @@ fn auth_create_and_modify_digests_equal_independent_starknet_js() {
         assert_eq!(
             single(&modify(case.now, "LIMIT", "12500.12345678", None), &case),
             vector(&case, "modify")
-        );
-    }
-}
-
-#[test]
-fn hosted_digests_equal_the_local_signing_preimage() {
-    for case in corpus() {
-        let config = SystemConfig {
-            starknet_chain_id: case.chain.clone(),
-            l1_chain_id: Some(case.eth_chain.clone()),
-            paraclear_account_hash: None,
-            paraclear_account_proxy_hash: None,
-        };
-        // The delegated signer returns the exact local preimage hash.
-        let local = Credentials::delegated("public", &case.address, &case.subkey, &config).unwrap();
-        assert!(
-            Credentials::new(&case.key, &case.address, &case.subkey, &config).is_ok(),
-            "the same corpus signs locally"
-        );
-        assert_eq!(
-            single(&auth(case.now), &case),
-            local.auth(case.now).unwrap().signature
-        );
-        assert_eq!(
-            single(&create("orders", order(case.now)), &case),
-            local
-                .order(
-                    case.now,
-                    "BTC-USD-PERP",
-                    "BUY",
-                    "LIMIT",
-                    "0.00000999",
-                    Some("0.00000999")
-                )
-                .unwrap()
-                .signature
         );
     }
 }

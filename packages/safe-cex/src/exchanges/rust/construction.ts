@@ -39,7 +39,7 @@ type Rule = {
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
   /** Family-specific trusted setup mapping, declared rather than name-matched. */
-  setupMapping?: 'asterdex' | 'apexomni' | 'lighter' | 'mexc' | 'hyperliquid';
+  setupMapping?: 'asterdex' | 'apexomni' | 'lighter' | 'mexc' | 'hyperliquid' | 'paradex';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 

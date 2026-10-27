@@ -5,14 +5,13 @@ use safe_cex_venue_paradex::Options;
 use support::*;
 fn options() -> Options {
     Options {
-        key: Some(format!("0x{}1", "0".repeat(63))),
         paradex_address: Some("0x0123".into()),
         subkey_address: Some("0x456".into()),
         ..Default::default()
     }
 }
 fn seed_with(options: Options) -> Harness {
-    let mut h = Harness::empty(options);
+    let mut h = Harness::keyed(options, STARK_KEY);
     h.reply("/markets", MARKETS);
     h.reply("summary", TICKERS);
     h.reply(
@@ -263,18 +262,27 @@ fn identity_auth_failure_settles_queued_queries_once_without_identity_http() {
 }
 #[test]
 fn identity_public_only_or_missing_required_credentials_fail_before_network() {
-    for opts in [
-        Options {
-            public_data_only: true,
-            ..options()
-        },
-        Options::default(),
-        Options {
-            subkey_address: None,
-            ..options()
-        },
+    for (opts, key) in [
+        (
+            Options {
+                public_data_only: true,
+                ..options()
+            },
+            Some(STARK_KEY),
+        ),
+        (Options::default(), None),
+        (
+            Options {
+                subkey_address: None,
+                ..options()
+            },
+            Some(STARK_KEY),
+        ),
     ] {
-        let mut h = Harness::empty(opts);
+        let mut h = match key {
+            Some(key) => Harness::keyed(opts, key),
+            None => Harness::empty(opts),
+        };
         h.pending.clear();
         h.actions.clear();
         ask(&mut h, 42);
@@ -284,7 +292,7 @@ fn identity_public_only_or_missing_required_credentials_fail_before_network() {
 }
 #[test]
 fn identity_before_native_auth_initialization_fails_visibly_without_polling_or_store_reset() {
-    let mut h = Harness::empty(options());
+    let mut h = Harness::keyed(options(), STARK_KEY);
     h.pending.clear();
     h.actions.clear();
     let before = h.e.account_snapshot_frame(h.now).to_vec();
@@ -292,63 +300,4 @@ fn identity_before_native_auth_initialization_fails_visibly_without_polling_or_s
     output(&mut h, 42, true).unwrap_err();
     assert!(h.pending.is_empty());
     assert_eq!(h.e.account_snapshot_frame(h.now), before);
-}
-
-#[test]
-fn identity_waits_for_delegated_auth_signer_then_uses_its_jwt_without_signing_the_read() {
-    let mut h = seed_with(Options {
-        key: Some("opaque-public-subkey".into()),
-        payload_signer: true,
-        ..options()
-    });
-    ask(&mut h, 42);
-    assert!(h.pending.is_empty());
-    let i = h
-        .actions
-        .iter()
-        .position(|a| matches!(a, Action::SignPayload { .. }))
-        .unwrap();
-    let Action::SignPayload {
-        request, payload, ..
-    } = h.actions.remove(i)
-    else {
-        unreachable!()
-    };
-    assert_eq!(payload.key, "opaque-public-subkey");
-    assert_eq!(payload.scheme, "stark");
-    h.e.handle(
-        h.now,
-        Event::PayloadSigned {
-            request,
-            signature: "actual-auth-signature",
-            headers: vec![],
-        },
-    );
-    h.collect();
-    let auth = h.take("/auth/");
-    assert_eq!(auth.route, Some(safe_cex_engine::RequestRoute::Direct));
-    assert!(
-        auth.headers
-            .iter()
-            .any(|(n, v)| *n == "PARADEX-STARKNET-SIGNATURE" && v == "actual-auth-signature")
-    );
-    h.respond(auth, 200, r#"{"jwt_token":"delegated-jwt"}"#);
-    let read = take(&mut h);
-    assert!(
-        read.headers
-            .iter()
-            .any(|(n, v)| *n == "Authorization" && v == "Bearer delegated-jwt")
-    );
-    let before = h.e.account_snapshot_frame(h.now).to_vec();
-    h.respond(read, 200, r#"{"account_number":"delegated-account"}"#);
-    assert_eq!(
-        output(&mut h, 42, false).unwrap(),
-        r#"{"userId":"delegated-account","affiliateId":null}"#
-    );
-    assert_eq!(h.e.account_snapshot_frame(h.now), before);
-    assert!(
-        !h.actions
-            .iter()
-            .any(|a| matches!(a, Action::SignPayload { .. }))
-    );
 }

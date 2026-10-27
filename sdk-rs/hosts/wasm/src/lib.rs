@@ -978,10 +978,10 @@ impl WasmEngine {
                     "Local signer setup is not supported for this venue yet",
                 ));
             }
-            let (signer, identities) = safe_cex_venues::local_signer_from_json_for_mode(
+            let (signer, identities) = safe_cex_venues::local_signer_from_capsule(
                 venue,
                 std::mem::take(&mut *input),
-                &options,
+                &mut options,
             )
             .map_err(construction_error)?;
             options.signing = Some(identities);

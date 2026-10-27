@@ -16,15 +16,18 @@ const SYMBOL: &str = "BTC /&-USD-PERP";
 const ROW: &str = r#"{"id":"trade-a","market":"BTC /&-USD-PERP","side":"BUY","price":"30000.12","size":"0.5","created_at":1681375176910}"#;
 
 fn engine(testnet: bool, private: bool) -> Engine<Paradex> {
-    let mut h = Harness::empty(Options {
+    let options = Options {
         testnet,
         public_data_only: !private,
-        // Existing delegated-signing fixture identifiers; no signing is needed here.
-        key: private.then(|| "opaque-public-subkey".into()),
         paradex_address: private.then(|| "0x123".into()),
         subkey_address: private.then(|| "0x456".into()),
-        payload_signer: private,
-    });
+        ..Options::default()
+    };
+    let mut h = if private {
+        Harness::keyed(options, support::STARK_KEY)
+    } else {
+        Harness::empty(options)
+    };
     h.reply("/markets", &MARKETS.replace("BTC-USD-PERP", SYMBOL));
     h.reply("summary", &TICKERS.replace("BTC-USD-PERP", SYMBOL));
     h.e.take_frame(NOW);

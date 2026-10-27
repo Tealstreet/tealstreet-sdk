@@ -533,7 +533,7 @@ impl Identity {
 
     /// The sealed public key while its ref is current and `installed`, the
     /// engine's provider, is the trusted local provider that sealed it.
-    pub(crate) fn verified_public_key(
+    pub fn verified_public_key(
         &self,
         algorithm: Algorithm,
         installed: Option<&Incarnation>,

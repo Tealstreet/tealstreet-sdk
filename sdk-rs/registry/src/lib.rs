@@ -50,6 +50,8 @@ pub mod hosted_signing;
 mod hyperliquid_setup;
 #[cfg(feature = "lighter")]
 mod lighter_setup;
+#[cfg(feature = "paradex")]
+mod paradex_setup;
 pub use construction::{
     BridgeConstruction, PublicMode, remote_signing_policy, signer_setup_policy,
     signer_setup_public_data_only,
@@ -729,6 +731,10 @@ pub fn prepare_local_signer_for(
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
         return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
     }
+    #[cfg(feature = "paradex")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
+        return paradex_setup::native(venue, options, signer_setup_policy_for(venue, options));
+    }
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::raw(options);
@@ -1035,6 +1041,28 @@ fn admit_json_setup(
     Ok((provider, identities))
 }
 
+/// Separate setup that may record its resolved facts on the account options,
+/// as Paradex's key form; every host's private-capsule path uses this.
+#[cfg(feature = "dispatch-signing")]
+pub fn local_signer_from_capsule(
+    venue: &str,
+    input: String,
+    options: &mut EngineOptions,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    #[cfg(feature = "paradex")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
+        let policy = signer_setup_policy_for(venue, options);
+        return paradex_setup::json(venue, input, policy, options);
+    }
+    local_signer_from_json_for_mode(venue, input, options)
+}
+
 /// Separate setup with the parsed account options: their public/private
 /// intent, before option stripping, and resolved setup facts such as AsterDEX's
 /// explicit API version.
@@ -1050,6 +1078,12 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    // Paradex records its key form on the options: `local_signer_from_capsule`.
+    #[cfg(feature = "paradex")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
+        drop(zeroize::Zeroizing::new(input));
+        return Err(invalid("Invalid Paradex local signer setup"));
+    }
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
         return hyperliquid_setup::json(
@@ -1480,22 +1514,30 @@ pub fn build_with_signer<T: Visit>(
             )
         }
         #[cfg(feature = "paradex")]
-        "paradex" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "paradex" => {
+            if options.key.is_some() || options.secret.is_some() || options.passphrase.is_some() {
+                return Err(invalid("Paradex signing material belongs in signer setup"));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() || identities.primary.is_some() && signer.is_none() {
+                return Err(invalid("Paradex requires its primary signing provider"));
+            }
+            let registered = identities.clone();
+            let mut engine = Engine::new(
                 Paradex::new(ParadexOptions {
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
                     paradex_address: options.paradex_address.take(),
                     subkey_address: options.subkey_address.take(),
-                    payload_signer: options.payload_signer,
+                    credentials: identities.primary,
+                    ethereum_key: options.paradex_ethereum_key,
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "apexomni")]
         "apexomni" => {
             // Injected refs need their provider and never travel beside raw
@@ -2428,6 +2470,11 @@ pub struct EngineOptions {
     pub subkey_address: Option<String>,
     #[serde(default)]
     pub payload_signer: bool,
+    /// Set only by trusted Paradex setup: its Stark key was derived from an
+    /// Ethereum key. Never parsed, so a caller cannot claim it.
+    #[cfg(feature = "paradex")]
+    #[serde(skip)]
+    pub(crate) paradex_ethereum_key: bool,
     #[cfg(any(
         feature = "backpack",
         feature = "bitrue",

@@ -11,14 +11,15 @@ use safe_cex_venue_paradex::{Options, Paradex};
 const NOW: f64 = 1_700_000_000_000.;
 const CONFIG: &str = r#"{"starknet_chain_id":"PRIVATE_SN_PARACLEAR_MAINNET"}"#;
 fn start(testnet: bool) -> (Engine<Paradex>, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Paradex::new(Options {
-        testnet,
-        key: Some("0x789".into()),
-        paradex_address: Some("0x123".into()),
-        subkey_address: Some("0x456".into()),
-        payload_signer: true,
-        ..Default::default()
-    }));
+    let mut e = support::engine(
+        Options {
+            testnet,
+            paradex_address: Some("0x123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Default::default()
+        },
+        Some(support::STARK_KEY),
+    );
     e.start(NOW);
     let markets = prepared_actions(&mut e, NOW)
         .into_iter()
