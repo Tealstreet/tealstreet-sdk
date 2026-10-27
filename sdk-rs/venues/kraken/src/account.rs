@@ -54,6 +54,7 @@ pub enum Scope {
 }
 pub struct Request {
     scope: Scope,
+    read_epoch: u64,
     revision: u64,
     settings_revision: u64,
     orders: SnapshotBuilder<String, Order>,
@@ -63,9 +64,10 @@ pub struct Request {
     valid: bool,
 }
 impl Request {
-    fn new(scope: Scope, revision: u64, settings_revision: u64) -> Self {
+    fn new(scope: Scope, revision: u64, settings_revision: u64, read_epoch: u64) -> Self {
         Self {
             scope,
+            read_epoch,
             revision,
             settings_revision,
             orders: SnapshotBuilder::default(),
@@ -656,6 +658,7 @@ impl Kraken {
                 scope,
                 revision,
                 self.account.settings_revision,
+                cx.order_read_epoch(),
             ));
             let result = if let Some(array) = array {
                 self.signed_streamed(
@@ -919,7 +922,7 @@ impl Kraken {
                     self.account.payloads.insert("open_orders".into(), cx.now);
                     self.account_schedule_heal(cx);
                 } else if let Some(raw) = msg.orders {
-                    let mut request = Request::new(Scope::Orders, 0, 0);
+                    let mut request = Request::new(Scope::Orders, 0, 0, 0);
                     let result = json::each::<&RawValue>(raw.get(), |item| {
                         self.account_order_item(cx, &mut request, item.get())
                     });
@@ -973,7 +976,7 @@ impl Kraken {
             }
             "open_positions" | "open_positions_snapshot" => {
                 if let Some(raw) = msg.positions {
-                    let mut request = Request::new(Scope::Positions, 0, 0);
+                    let mut request = Request::new(Scope::Positions, 0, 0, 0);
                     let result = json::each::<&RawValue>(raw.get(), |item| {
                         self.account_position_item(cx, &mut request, item.get(), true)
                     });
@@ -1431,7 +1434,7 @@ impl Kraken {
                     let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                     self.account_commit_orders(cx, orders, 0);
                     if clean {
-                        cx.orders_reconciled(None);
+                        cx.orders_reconciled_since(None, request.read_epoch);
                     }
                 }
             }

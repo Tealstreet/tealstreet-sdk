@@ -970,6 +970,7 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
         .find(|r| r.url.ends_with("OpenOrders"))
         .unwrap();
     assert_ne!(old.id, fresh.id);
+    reply(&mut e, &old, r#"{"error":[],"result":{"open":{}}}"#);
     e.handle(
         NOW,
         Event::Command(Command::CancelSymbolOrders {
@@ -981,6 +982,7 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:83, error}) if error.message.contains("uncertain") && error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     reply(&mut e, &fresh, r#"{"error":[],"result":{"open":{}}}"#);
+    reply(&mut e, &old, r#"{"error":[],"result":{"open":{}}}"#);
     e.handle(
         NOW,
         Event::Command(Command::CancelSymbolOrders {
@@ -1170,6 +1172,7 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
         .find(|r| r.url.ends_with("OpenOrders"))
         .unwrap();
     assert_ne!(old.id, fresh.id);
+    reply(&mut e, &old, r#"{"error":[],"result":{"open":{}}}"#);
     refused(
         &mut e,
         Command::PlaceOrders {
@@ -1179,6 +1182,7 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
         84,
     );
     reply(&mut e, &fresh, r#"{"error":[],"result":{"open":{}}}"#);
+    reply(&mut e, &old, r#"{"error":[],"result":{"open":{}}}"#);
     place(&mut e, 85);
     assert!(requests(&mut e).iter().any(|r| r.url.ends_with("AddOrder")));
 }

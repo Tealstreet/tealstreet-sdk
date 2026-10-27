@@ -23,6 +23,7 @@ pub enum Kind {
     },
     Orders {
         revision: u64,
+        read_epoch: u64,
     },
     Token {
         epoch: safe_cex_engine::socket_lifecycle::Epoch,
@@ -381,6 +382,7 @@ impl KrakenSpot {
             vec![],
             Kind::Orders {
                 revision: self.account.revision,
+                read_epoch: cx.order_read_epoch(),
             },
         );
     }
@@ -591,6 +593,7 @@ impl KrakenSpot {
         cx: &mut Cx<'_, Pending>,
         text: &str,
         revision: u64,
+        read_epoch: u64,
     ) -> Result<(), String> {
         let e: Open<'_> =
             serde_json::from_str(text).map_err(|_| "Kraken Spot missing open orders")?;
@@ -670,7 +673,7 @@ impl KrakenSpot {
             rows.retain(|o| !self.account.terminal.contains(&o.id));
             cx.store.set_orders(rows);
             if clean {
-                cx.orders_reconciled(None);
+                cx.orders_reconciled_since(None, read_epoch);
             }
         }
         Ok(())
@@ -723,9 +726,12 @@ impl KrakenSpot {
                 }
                 r
             }
-            Kind::Orders { revision } => {
+            Kind::Orders {
+                revision,
+                read_epoch,
+            } => {
                 self.account.orders_flight = false;
-                let result = self.orders_response(cx, text, *revision);
+                let result = self.orders_response(cx, text, *revision, *read_epoch);
                 if self.account.orders_reconcile {
                     self.orders_read(cx);
                 }
