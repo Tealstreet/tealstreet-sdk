@@ -25,6 +25,9 @@ fn read_policy() -> Policy {
     }
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         if let Some(callback) = self.outside {

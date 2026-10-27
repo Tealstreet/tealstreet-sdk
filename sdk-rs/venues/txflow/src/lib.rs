@@ -655,6 +655,9 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn managed_sockets() -> bool {
+        true
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
