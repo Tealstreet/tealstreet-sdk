@@ -36,6 +36,15 @@ class CredentialOnlyBans(unittest.TestCase):
         self.assertEqual(len(check.violations('registry/src/paradex_setup.rs', text)), 1)
         self.assertEqual(len(check.violations('venues/paradex/src/lib.rs', text)), 1)
 
+    def test_venues_read_a_sealed_key_only_through_cx(self):
+        direct = 'fn f(i: &Identity, s: &Provider) { i.public_key_sealed_by(Algorithm::StarkDigest, s.incarnation()); }\n'
+        self.assertEqual(check.violations('registry/src/paradex_setup.rs', direct), [])
+        self.assertEqual(check.violations('engine/src/engine.rs', direct), [])
+        self.assertEqual(len(check.violations('venues/paradex/src/account.rs', direct)), 1)
+        self.assertEqual(len(check.violations('hosts/wasm/src/lib.rs', direct)), 1)
+        via_cx = 'fn f(cx: &Cx<()>) { cx.verified_public_key(CredentialSlot::Primary, Algorithm::StarkDigest); }\n'
+        self.assertEqual(check.violations('venues/paradex/src/account.rs', via_cx), [])
+
     def test_only_the_local_provider_presents_an_incarnation(self):
         text = ('impl Signer for Wrap {\n    fn incarnation(&self) -> Option<&Incarnation> '
                 '{ self.0.incarnation() }\n}\n')

@@ -88,7 +88,7 @@ fn installed(
     );
     let identity = identities.primary.unwrap();
     let public = identity
-        .verified_public_key(Algorithm::StarkDigest, provider.incarnation())
+        .public_key_sealed_by(Algorithm::StarkDigest, provider.incarnation())
         .unwrap();
     let credentials = Credentials::new(
         identity.signing_ref().unwrap().clone(),

@@ -1749,7 +1749,7 @@ impl IoCore {
             .signer
             .as_deref()
             .and_then(|signer| signer.incarnation());
-        identity.verified_public_key(algorithm, installed)
+        identity.public_key_sealed_by(algorithm, installed)
     }
 }
 

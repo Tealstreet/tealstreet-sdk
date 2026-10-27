@@ -515,10 +515,7 @@ impl Identity {
         Ok(())
     }
 
-    fn verified_public_key_under(
-        &self,
-        installed: Option<&Incarnation>,
-    ) -> Result<&SealedPublicKey, SignError> {
+    fn sealed_under(&self, installed: Option<&Incarnation>) -> Result<&SealedPublicKey, SignError> {
         let signing = self.signing_ref()?;
         match &self.sealed_public_key {
             Some(sealed)
@@ -533,12 +530,12 @@ impl Identity {
 
     /// The sealed public key while its ref is current and `installed`, the
     /// engine's provider, is the trusted local provider that sealed it.
-    pub fn verified_public_key(
+    pub fn public_key_sealed_by(
         &self,
         algorithm: Algorithm,
         installed: Option<&Incarnation>,
     ) -> Result<[u8; 32], SignError> {
-        let sealed = self.verified_public_key_under(installed)?;
+        let sealed = self.sealed_under(installed)?;
         if sealed.algorithm == algorithm {
             Ok(sealed.bytes)
         } else {
@@ -1258,24 +1255,24 @@ mod sealed_public_key_tests {
         let a = Incarnation::fresh().unwrap();
         let identity = sealed(&a);
         assert_eq!(
-            identity.verified_public_key(Algorithm::StarkDigest, Some(&a)),
+            identity.public_key_sealed_by(Algorithm::StarkDigest, Some(&a)),
             Ok([7; 32])
         );
         assert_eq!(
             identity
                 .clone()
-                .verified_public_key(Algorithm::StarkDigest, Some(&a)),
+                .public_key_sealed_by(Algorithm::StarkDigest, Some(&a)),
             Ok([7; 32])
         );
         assert_eq!(
-            identity.verified_public_key(Algorithm::Secp256k1Digest, Some(&a)),
+            identity.public_key_sealed_by(Algorithm::Secp256k1Digest, Some(&a)),
             Err(SignError::Unsupported)
         );
         // Another provider under the same ref text, or none, never reads it.
         let b = Incarnation::fresh().unwrap();
         for installed in [Some(&b), None] {
             assert_eq!(
-                identity.verified_public_key(Algorithm::StarkDigest, installed),
+                identity.public_key_sealed_by(Algorithm::StarkDigest, installed),
                 Err(SignError::Unsupported)
             );
         }
@@ -1302,13 +1299,13 @@ mod sealed_public_key_tests {
         let copy: Identity =
             serde_json::from_str(&serde_json::to_string(&identity).unwrap()).unwrap();
         assert_eq!(
-            copy.verified_public_key(Algorithm::StarkDigest, Some(&a)),
+            copy.public_key_sealed_by(Algorithm::StarkDigest, Some(&a)),
             Err(SignError::Unsupported)
         );
         // Even the same ref text re-set clears it: A -> B -> A never resurrects.
         identity.set_signing_ref(Some(KeyRef("stark".into())));
         assert_eq!(
-            identity.verified_public_key(Algorithm::StarkDigest, Some(&a)),
+            identity.public_key_sealed_by(Algorithm::StarkDigest, Some(&a)),
             Err(SignError::Unsupported)
         );
         let mut unsigned = Identity::new(KeyRef("api".into()), None);

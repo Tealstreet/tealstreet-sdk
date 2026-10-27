@@ -83,8 +83,9 @@ renames it. `/auth` stays a legacy request with its `direct` route until PR-3.
   none, so no seal reads under it. Key and digest correctness does not rest on
   the token: every result is fully verified.
 - `Identity::seal_public_key` (trusted local setup only, bans-confined) and
-  `Identity::verified_public_key(algorithm, installed)`, plus
-  `Cx::verified_public_key(slot, algorithm)`. A seal reads only while its
+  `Identity::public_key_sealed_by(algorithm, installed)` (engine and the
+  registry's Paradex setup only, bans-confined), plus
+  `Cx::verified_public_key(slot, algorithm)`, the venue's only read. A seal reads only while its
   signing ref is current and the installed provider presents the incarnation
   that made it. Any `set_signing_ref` call clears it.
 - `LocalSigner` draws a fresh incarnation at construction and on every

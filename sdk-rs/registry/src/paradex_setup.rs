@@ -75,7 +75,7 @@ fn install(
     // The provider's sealed answer must be the key this setup computed itself.
     if let (Some(scalar), Some(identity)) = (scalar.as_ref(), identities.primary.as_ref()) {
         let expected = starknet::public_key_bytes(scalar);
-        if identity.verified_public_key(Algorithm::StarkDigest, signer.incarnation())
+        if identity.public_key_sealed_by(Algorithm::StarkDigest, signer.incarnation())
             != Ok(expected)
         {
             return Err(invalid(INVALID));
@@ -152,7 +152,7 @@ mod tests {
             .primary
             .as_ref()
             .unwrap()
-            .verified_public_key(Algorithm::StarkDigest, provider.incarnation())
+            .public_key_sealed_by(Algorithm::StarkDigest, provider.incarnation())
             .unwrap()
     }
 
