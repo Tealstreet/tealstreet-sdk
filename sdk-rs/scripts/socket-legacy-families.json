@@ -3,7 +3,6 @@
   "sourceRoots": {
     "apexomni": "venues/apexomni/src/",
     "binance": "venues/binance/src/",
-    "bingx": "venues/bingx/src/",
     "bitget": "venues/bitget/src/",
     "bitrue": "venues/bitrue/src/",
     "bitunix": "venues/bitunix/src/",

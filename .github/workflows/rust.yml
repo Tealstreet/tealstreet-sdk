@@ -33,23 +33,10 @@ on:
       - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
       - '.github/actions/install-binaryen/**'
+  # Unfiltered so "Rust / required coverage" always reports for branch protection;
+  # the scope job applies the push path list and skips coverage outside it.
   pull_request:
     branches: [master]
-    paths:
-      - 'sdk-rs/**'
-      - 'package.json'
-      - 'yarn.lock'
-      - 'tsconfig*.json'
-      - 'thirdparty/**'
-      - '.cargo/**'
-      - 'rust-toolchain*'
-      - 'packages/**'
-      - 'apps/cli/**'
-      - '.github/workflows/rust.yml'
-      - '.github/actions/prepare-yarn/**'
-      - '.github/actions/prefetch-cargo/**'
-      - '.github/actions/install-yarn/**'
-      - '.github/actions/install-binaryen/**'
 
 permissions:
   contents: read
@@ -77,7 +64,32 @@ defaults:
     working-directory: sdk-rs
 
 jobs:
+  scope:
+    name: Rust / scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.scope.outputs.relevant }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply the Rust path scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node sdk-rs/harness/ci-scope.mjs
+
   selection:
+    needs: scope
+    if: needs.scope.outputs.relevant == 'true'
     name: Rust / affected coverage
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1353,7 +1365,7 @@ jobs:
 
   result:
     name: Rust / required coverage
-    needs: [selection, bans, harness, native, wasm, families, combined, replay]
+    needs: [scope, selection, bans, harness, native, wasm, families, combined, replay]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1365,7 +1377,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Accept a change outside the Rust path scope
+        if: needs.scope.result == 'success' && needs.scope.outputs.relevant == 'false'
+        run: echo "No Rust-scoped paths changed; no Rust coverage required."
       - name: Require selected coverage and record landing fix ownership on red
+        if: needs.scope.result != 'success' || needs.scope.outputs.relevant != 'false'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CI_JOB_RESULTS: ${{ toJSON(needs) }}
