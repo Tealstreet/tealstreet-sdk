@@ -100,3 +100,8 @@ follow-up; the only current true declaration (Bitunix) links that feature.
 For HL, LocalSignerSetup.primaryComplete is false after the account key is
 removed from the private capsule. It is not signing readiness: canSign uses
 credentialPresence.secret; hosted guards and codecs do not admit HL.
+
+Legacy top-level options.passphrase remains accepted and ignored for both HL
+names. Trusted setup discards it before provider construction; it appears in
+neither retained options nor the provider capsule. Explicit provider-setup
+passphrases and secondary setup remain refused. No NX caller migration is needed.

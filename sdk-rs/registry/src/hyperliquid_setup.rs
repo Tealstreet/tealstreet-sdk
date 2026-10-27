@@ -35,8 +35,9 @@ pub(crate) fn native(
     options: &mut EngineOptions,
     policy: CredentialSetupPolicy,
 ) -> Result<(Provider, Identities), VenueError> {
+    drop(options.passphrase.take().map(Secret::new));
     let secret = options.secret.take().map(Secret::new);
-    if options.read_credentials.is_some() || options.passphrase.is_some() {
+    if options.read_credentials.is_some() {
         return Err(invalid(INVALID));
     }
     let primary = secret.map(|secret| LocalIdentity {
@@ -143,6 +144,35 @@ mod tests {
     }
 
     #[test]
+    fn legacy_top_level_passphrase_is_discarded_before_provider_setup() {
+        let scalar = format!("{}ab", "00".repeat(31));
+        for venue in ["hyperliquid", "hyperliquidspot"] {
+            let mut expected = None;
+            for passphrase in [None, Some(""), Some("ignored-passphrase-sentinel")] {
+                let mut options = options(&scalar);
+                options.passphrase = passphrase.map(str::to_owned);
+                let (provider, identities) =
+                    crate::prepare_local_signer_for(venue, &mut options).unwrap();
+                assert!(options.passphrase.is_none());
+                assert!(options.secret.is_none());
+                let actual = address(&provider, &identities).unwrap();
+                assert_eq!(*expected.get_or_insert_with(|| actual.clone()), actual);
+                let identity = identities.primary.unwrap();
+                assert!(identity.passphrase.is_none());
+                assert!(!format!("{identity:?}").contains("ignored-passphrase-sentinel"));
+            }
+            let mut invalid_options = options("invalid-scalar");
+            invalid_options.passphrase = Some("ignored-passphrase-sentinel".into());
+            let error = crate::prepare_local_signer_for(venue, &mut invalid_options)
+                .err()
+                .unwrap();
+            assert!(invalid_options.passphrase.is_none());
+            assert_eq!(error.message, INVALID);
+            assert!(!format!("{error:?}").contains("ignored-passphrase-sentinel"));
+        }
+    }
+
+    #[test]
     fn supplied_provider_key_and_secondary_are_not_a_scalar_only_backdoor() {
         let options = options("unused");
         for input in [
@@ -150,6 +180,8 @@ mod tests {
             json!({"primary":{"key":"","secret":"ab"}}),
             json!({"primary":{"key":" ","secret":"ab"}}),
             json!({"secondary":{"key":"read","secret":"ab"}}),
+            json!({"primary":{"secret":format!("{}ab", "00".repeat(31)),"passphrase":"ignored"}}),
+            json!({"secondary":{"passphrase":"ignored"}}),
         ] {
             let error =
                 crate::local_signer_from_json_for_mode("hyperliquid", input.to_string(), &options)

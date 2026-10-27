@@ -85,7 +85,9 @@ invalid input stays redacted. Native local trading uses the installed, engine-se
 Prepare/Bind/Claim for each serial physical call; hosted Hyperliquid remains
 unsupported. The private provider capsule omits the trusted trimSigning false
 default for feature-off decoders, while policy-derived true remains explicit
-and caller trimming metadata remains refused.
+and caller trimming metadata remains refused. Legacy top-level HL passphrases
+are consumed and ignored before provider construction; explicit provider
+passphrases and secondary setup remain refused.
 
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
