@@ -334,6 +334,8 @@ fn malformed_heal_row_keeps_its_known_order_while_the_rest_commits() {
 #[test]
 fn null_fields_and_one_bad_row_never_drop_sibling_fills() {
     let (mut e, socket) = ready(&list(&[]));
+    ws(&mut e, socket, 30.0, r#"{"op":"login","success":true}"#);
+    e.prepared(30.0).for_each(drop);
     e.take_frame(50.0);
     let nulls = r#"{"id":"f1","matchFillId":null,"orderId":"o1","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","fee":null,"token":null,"feeCurrency":null,"createdAt":1700000000123}"#;
     let order = r#"{"id":"o1","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"OPEN","size":"3","price":"100","clientOrderId":null,"clientId":null,"cancelReason":null,"timeInForce":null,"reduceOnly":null,"postOnly":null,"triggerPriceType":null,"openSlParam":null}"#;
@@ -401,6 +403,8 @@ fn account_rows_on_a_skipped_market_are_reported_once_as_hidden() {
 #[test]
 fn fill_without_order_id_is_still_emitted() {
     let (mut e, socket) = ready(&list(&[]));
+    ws(&mut e, socket, 30.0, r#"{"op":"login","success":true}"#);
+    e.prepared(30.0).for_each(drop);
     e.take_frame(50.0);
     let orphan = r#"{"id":"f9","orderId":null,"symbol":"BTC-USDT","side":"SELL","size":"0.25","price":"101","createdAt":1700000000200}"#;
     ws(

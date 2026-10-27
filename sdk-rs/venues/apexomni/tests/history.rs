@@ -38,6 +38,12 @@ fn seeded_socket() -> (TestEngine, safe_cex_engine::SocketId) {
 fn seeded() -> TestEngine {
     seeded_socket().0
 }
+fn opened_cache_socket() -> (TestEngine, safe_cex_engine::SocketId) {
+    let (mut engine, socket) = seeded_socket();
+    engine.handle(10.0, Event::WsOpened { socket });
+    engine.prepared(10.0).for_each(drop);
+    (engine, socket)
+}
 fn query(
     e: &mut TestEngine,
     order_id: Option<&str>,
@@ -303,7 +309,7 @@ fn unsupported_income_and_orders_match_base_empty_and_client_lookup_is_not_defin
 
 #[test]
 fn exhausted_rest_failures_reject_without_laundering_cache_then_rest_stays_authoritative() {
-    let (mut e, socket) = seeded_socket();
+    let (mut e, socket) = opened_cache_socket();
     ws(
         &mut e,
         socket,
@@ -361,7 +367,7 @@ fn anonymous_distinct_subsecond_executions_remain_distinct_without_inventing_ids
 
 #[test]
 fn anonymous_ws_cache_preserves_raw_execution_identity_across_second_precision_output() {
-    let (mut e, socket) = seeded_socket();
+    let (mut e, socket) = opened_cache_socket();
     ws(
         &mut e,
         socket,
@@ -388,7 +394,7 @@ fn anonymous_ws_cache_preserves_raw_execution_identity_across_second_precision_o
 
 #[test]
 fn same_second_ws_cache_uses_latest_execution_before_limit() {
-    let (mut e, socket) = seeded_socket();
+    let (mut e, socket) = opened_cache_socket();
     ws(
         &mut e,
         socket,
@@ -469,7 +475,7 @@ fn millisecond_bounds_are_inclusive_and_sort_raw_times_before_truncating_output(
 #[test]
 fn ws_and_synthetic_cache_filter_and_sort_using_original_milliseconds() {
     for synthetic in [false, true] {
-        let (mut e, socket) = seeded_socket();
+        let (mut e, socket) = opened_cache_socket();
         let contents = if synthetic {
             let orders = [456, 457, 123].map(|millis| format!(r#"{{"id":"order-{millis}","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"OPEN","size":"1","price":"100","cumSuccessFillSize":"1","updatedAt":{}}}"#, 1700000000000u64 + millis)).join(",");
             format!(r#"{{"orders":[{orders}]}}"#)
@@ -568,7 +574,7 @@ fn owned_rows(e: &mut TestEngine, expected_command: u32, now: f64) -> Vec<Row> {
     results.pop().unwrap()
 }
 fn cached() -> TestEngine {
-    let (mut e, socket) = seeded_socket();
+    let (mut e, socket) = opened_cache_socket();
     ws(
         &mut e,
         socket,
