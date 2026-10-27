@@ -1,6 +1,7 @@
 //! Mixed public/private websocket ownership follows engine policy across reconnects.
 mod support;
 use safe_cex_engine::command::{HostInput, decode_host_input};
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Command, Event, PublicFeedPolicy, SocketChannel, SocketId};
 use support::*;
 
@@ -81,7 +82,7 @@ fn non_direct_account_socket_retains_private_topics_and_skips_public_topics_on_r
         ] {
             engine.handle(2000., Event::Command(command));
         }
-        assert!(sends(engine.drain_actions().collect()).is_empty());
+        assert!(sends(prepared_now(&mut engine).into_iter().collect()).is_empty());
         assert!(engine.book("BTC-PERP").is_none());
         message(
             &mut engine,
@@ -105,10 +106,10 @@ fn non_direct_account_socket_retains_private_topics_and_skips_public_topics_on_r
         assert_eq!(engine.store().positions()[0].contracts, 3.);
         assert_eq!(engine.store().setting("BTC-PERP").unwrap().leverage, 8.);
         assert_eq!(engine.store().balance().used, 30.);
-        engine.drain_actions().for_each(drop);
+        prepared_now(&mut engine).into_iter().for_each(drop);
         engine.handle(4000., Event::WsClosed { socket, code: 1006 });
-        let timer = engine
-            .drain_actions()
+        let timer = prepared_now(&mut engine)
+            .into_iter()
             .find_map(|action| {
                 if let Action::SetTimer { timer, .. } = action {
                     Some(timer)
@@ -118,8 +119,8 @@ fn non_direct_account_socket_retains_private_topics_and_skips_public_topics_on_r
             })
             .unwrap();
         engine.handle(6000., Event::TimerFired { timer });
-        let replacement = engine
-            .drain_actions()
+        let replacement = prepared_now(&mut engine)
+            .into_iter()
             .find_map(|action| match action {
                 Action::WsConnect {
                     socket, channel, ..
@@ -137,7 +138,7 @@ fn non_direct_account_socket_retains_private_topics_and_skips_public_topics_on_r
                 socket: replacement,
             },
         );
-        assert_private_only(&sends(engine.drain_actions().collect()));
+        assert_private_only(&sends(prepared_now(&mut engine).into_iter().collect()));
     }
 }
 
@@ -200,8 +201,8 @@ fn shared_prices_cannot_mark_a_cold_private_account_loaded() {
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();
     engine.start(1000.);
-    let request = engine
-        .drain_actions()
+    let request = prepared_now(&mut engine)
+        .into_iter()
         .find_map(|action| {
             if let Action::Http(request) = action {
                 Some(request)
@@ -211,8 +212,8 @@ fn shared_prices_cannot_mark_a_cold_private_account_loaded() {
         })
         .unwrap();
     reply(&mut engine, &request, 200, META);
-    let request = engine
-        .drain_actions()
+    let request = prepared_now(&mut engine)
+        .into_iter()
         .find_map(|action| {
             if let Action::Http(request) = action {
                 Some(request)

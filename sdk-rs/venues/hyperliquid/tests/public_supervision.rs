@@ -1,4 +1,5 @@
 mod support;
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{
     Action, Command, Engine, Event, PublicFeedPolicy, SocketChannel, SocketId, TimerId,
 };
@@ -40,7 +41,7 @@ impl Harness {
     }
     fn collect(&mut self) {
         loop {
-            let actions: Vec<_> = self.e.drain_actions().collect();
+            let actions: Vec<_> = prepared_now(&mut self.e).into_iter().collect();
             if actions.is_empty() {
                 return;
             }

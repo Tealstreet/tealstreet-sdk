@@ -328,13 +328,7 @@ impl Hyperliquid {
             if read.streamed {
                 self.info(cx, read.body, ArrayAt::Root, read.request.pending());
             } else {
-                cx.request(
-                    Method::Post,
-                    format!("{}/info", self.rest()),
-                    vec![("Content-Type", "application/json".into())],
-                    Some(read.body),
-                    read.request.pending(),
-                );
+                self.info_read(cx, read.body, read.request.pending(), None);
             }
         }
     }
