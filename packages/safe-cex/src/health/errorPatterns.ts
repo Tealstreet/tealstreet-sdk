@@ -340,6 +340,13 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
       patterns: ['No portfolio with permissions found'],
     },
   ],
+  mexc: [
+    {
+      category: 'auth_permissions',
+      severity: 'critical',
+      patterns: ['Please enable API Key trading information write access'],
+    },
+  ],
   phemex: [
     {
       category: 'auth_invalid',

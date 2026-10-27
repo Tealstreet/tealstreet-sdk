@@ -89,6 +89,20 @@ struct CreateInfo<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
+struct GroupedInfo<'a> {
+    account_index: u64,
+    api_key_index: u8,
+    grouping_type: u8,
+    orders: &'a [OrderInfo],
+    expired_at: u64,
+    nonce: u64,
+    sig: &'a str,
+    #[serde(rename = "L2TxAttributes", skip_serializing_if = "Option::is_none")]
+    attributes: Option<Attributes>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
 struct CancelInfo<'a> {
     account_index: u64,
     api_key_index: u8,
@@ -328,6 +342,7 @@ impl Signer {
 
 enum Fields {
     Create(OrderInfo, Option<Attributes>),
+    Grouped(u8, Vec<OrderInfo>, Option<Attributes>),
     Cancel {
         market_id: u32,
         order_id: u64,
@@ -366,6 +381,7 @@ fn tx_input(
         Transaction::Create { .. } => 14,
         Transaction::Cancel { .. } => 15,
         Transaction::Leverage { .. } => 20,
+        Transaction::Grouped { .. } => 28,
     };
     let mut data = Vec::with_capacity(128);
     append_words(
@@ -384,6 +400,28 @@ fn tx_input(
             let order = OrderInfo::new(order, now_ms)?;
             order.append(&mut data);
             Fields::Create(order, attributes(*builder)?)
+        }
+        // Independent of the venue: each order's ten words, then the grouping
+        // type and Go's HashNToOne commitment over the per-order hashes.
+        Transaction::Grouped {
+            grouping,
+            orders,
+            builder,
+        } => {
+            if !matches!((*grouping, orders.len()), (1 | 2, 2) | (3, 3)) {
+                return Err("Lighter grouped orders do not match their grouping type".into());
+            }
+            let orders = orders
+                .iter()
+                .map(|order| OrderInfo::new(order, now_ms))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut words = Vec::new();
+            for order in &orders {
+                order.append(&mut words);
+            }
+            append_words(&mut data, &[(*grouping).into()]);
+            data.extend_from_slice(&safe_cex_crypto::lighter::grouped_orders_digest(&words)?);
+            Fields::Grouped(*grouping, orders, attributes(*builder)?)
         }
         Transaction::Cancel {
             market_id,
@@ -425,7 +463,7 @@ fn tx_input(
         }
     };
     let attrs = match &fields {
-        Fields::Create(_, attributes) => attributes.as_ref(),
+        Fields::Create(_, attributes) | Fields::Grouped(_, _, attributes) => attributes.as_ref(),
         _ => None,
     };
     let preimage = signing_preimage(&data, attrs)?;
@@ -457,6 +495,16 @@ impl TxInput {
                 account_index: account.account_index,
                 api_key_index: account.api_key_index,
                 order: &order,
+                expired_at,
+                nonce,
+                sig: &encoded,
+                attributes,
+            }),
+            Fields::Grouped(grouping, orders, attributes) => serde_json::to_string(&GroupedInfo {
+                account_index: account.account_index,
+                api_key_index: account.api_key_index,
+                grouping_type: grouping,
+                orders: &orders,
                 expired_at,
                 nonce,
                 sig: &encoded,

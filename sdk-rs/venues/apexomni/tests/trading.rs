@@ -156,6 +156,14 @@ fn place_with_id(
     );
     actions(e)
 }
+/// Requests other than the engine-owned reconcile read an Unknown write starts
+/// at once (the uncertain-placement fence opt-in); its own control pins that read.
+fn without_reconcile_read(requests: Vec<HttpRequest>) -> Vec<HttpRequest> {
+    requests
+        .into_iter()
+        .filter(|r| !r.url.ends_with("/v3/open-orders"))
+        .collect()
+}
 fn http(actions: Vec<Action>) -> Vec<HttpRequest> {
     actions
         .into_iter()
@@ -373,7 +381,10 @@ fn network_failure_does_not_retry_an_order_and_releases_fifo() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
     );
-    let second = http(actions).remove(0);
+    let requests = http(actions);
+    // The Unknown write's reconcile read starts at once, beside the next FIFO write.
+    assert!(requests.iter().any(|r| r.url.ends_with("/v3/open-orders")));
+    let second = without_reconcile_read(requests).remove(0);
     assert_eq!(form(&second)["clientOrderId"], "second");
 }
 
@@ -426,7 +437,7 @@ fn http_and_business_rejections_never_cancel_replace_or_retry_writes() {
                 },
             },
         );
-        assert!(requests(&mut e).is_empty());
+        assert!(without_reconcile_read(requests(&mut e)).is_empty());
     }
 }
 
@@ -453,7 +464,7 @@ fn virtual_cancellation_deduplicates_parent_and_never_retries_ambiguous_write() 
             error: "reset",
         },
     );
-    assert!(requests(&mut e).is_empty());
+    assert!(without_reconcile_read(requests(&mut e)).is_empty());
 }
 
 #[test]
@@ -559,9 +570,12 @@ fn amend_rechecks_remaining_when_its_fifo_turn_starts() {
             error: "lost placement response",
         },
     );
-    let cancel = requests(&mut e).remove(0);
+    let cancel = without_reconcile_read(requests(&mut e)).remove(0);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
+    assert_eq!(
+        form(&without_reconcile_read(requests(&mut e)).remove(0))["size"],
+        "2"
+    );
 }
 
 #[test]
@@ -652,7 +666,7 @@ fn fully_filled_parent_while_amend_is_queued_never_sends_cancellation() {
         action,
         Action::Notice(Notice::CommandFailed { command: 99, .. })
     )));
-    assert!(http(actions).is_empty());
+    assert!(without_reconcile_read(http(actions)).is_empty());
 }
 
 #[test]
@@ -1621,4 +1635,290 @@ fn delegated_provider_refusal_is_typed_not_sent_before_http() {
     let out = remote_actions(&mut e);
     assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
     assert_eq!(out.iter().filter(|action| matches!(action, Action::Notice(Notice::CommandFailed { command:43,error }) if error.kind == Some(safe_cex_engine::ErrorKind::InvalidInput) && error.outcome == Some(safe_cex_engine::Outcome::NotSent))).count(),1);
+}
+
+/// P1: an Unknown placement fences its symbol until a fresh order read proves
+/// what happened. ApeX has no placement scope, so this fence engages only with
+/// the engine's Phase B uncertainty marker (see RUST_CUTOVER_CALLERS.md).
+#[test]
+fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
+    fn place_at(
+        e: &mut TestEngine,
+        now: f64,
+        command: safe_cex_engine::CommandId,
+        client: &str,
+    ) -> Vec<Action> {
+        e.handle(
+            now,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![order(serde_json::json!({ "clientOrderId": client }))],
+            }),
+        );
+        actions(e)
+    }
+    fn order_writes(actions: &[Action]) -> usize {
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/order")))
+            .count()
+    }
+    fn refused_uncertain(actions: &[Action]) -> bool {
+        actions.iter().any(|a| {
+            matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
+                if error.message.contains("Placement outcome is uncertain"))
+        })
+    }
+    fn open_orders_read(actions: Vec<Action>) -> HttpRequest {
+        http(actions)
+            .into_iter()
+            .find(|r| r.url.ends_with("/v3/open-orders"))
+            .expect("an open-orders read")
+    }
+    const EMPTY: &str = r#"{"code":0,"data":[]}"#;
+
+    let (mut e, socket) = ready_with_socket();
+    // An orders read dispatched before the placement: a socket order delta arms
+    // the heal timer, whose read then stays in flight.
+    ws(
+        &mut e,
+        socket,
+        NOW + 5.0,
+        r#"{"topic":"ws_zk_accounts_v3","type":"delta","contents":{"orders":[{"id":"other","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"OPEN","size":"0.001","price":"50000"}]}}"#,
+    );
+    let heal = actions(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms >= NOW + 1_000.0 => Some(timer),
+            _ => None,
+        })
+        .expect("the order heal timer");
+    e.handle(NOW + 1_010.0, Event::TimerFired { timer: heal });
+    let stale = open_orders_read(actions(&mut e));
+
+    let write = http(place_at(&mut e, NOW + 1_020.0, 42, "first"))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/order"))
+        .expect("the placement write");
+    e.handle(
+        NOW + 1_030.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "connection reset after write",
+        },
+    );
+    actions(&mut e);
+
+    // Retry on the same symbol: refused NotSent, nothing posted.
+    let retry = place_at(&mut e, NOW + 1_040.0, 43, "retry");
+    assert!(
+        refused_uncertain(&retry),
+        "the retry must be refused while the placement is uncertain"
+    );
+    assert_eq!(order_writes(&retry), 0, "no write may leave while fenced");
+
+    // The stale read completes cleanly; it was dispatched before the mark.
+    response(&mut e, &stale, NOW + 1_050.0, EMPTY);
+    let after_stale = actions(&mut e);
+    let fresh = open_orders_read(after_stale);
+    let retry = place_at(&mut e, NOW + 1_060.0, 44, "retry-after-stale");
+    assert!(
+        refused_uncertain(&retry),
+        "a stale read must not release the fence"
+    );
+    assert_eq!(order_writes(&retry), 0);
+
+    // The owed fresh read releases it, and the retry places.
+    response(&mut e, &fresh, NOW + 1_070.0, EMPTY);
+    actions(&mut e);
+    let retry = place_at(&mut e, NOW + 1_080.0, 45, "retry-after-fresh");
+    assert!(
+        !refused_uncertain(&retry),
+        "a fresh clean read releases the fence"
+    );
+    assert_eq!(order_writes(&retry), 1, "the retry places once released");
+}
+
+/// The engine re-asks the hook while the placement stays uncertain; each re-ask must
+/// join the fresh read in flight, and that read's clean answer releases.
+#[test]
+fn engine_re_asks_join_the_fresh_read_in_flight_and_its_clean_answer_releases() {
+    const EMPTY: &str = r#"{"code":0,"data":[]}"#;
+    let (mut e, _) = ready_with_socket();
+    let mut timers: Vec<(safe_cex_engine::TimerId, f64)> = Vec::new();
+    let take = |e: &mut TestEngine, timers: &mut Vec<(safe_cex_engine::TimerId, f64)>| {
+        let actions = actions(e);
+        for action in &actions {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((*timer, *at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| t != timer),
+                _ => {}
+            }
+        }
+        actions
+    };
+    let advance = |e: &mut TestEngine,
+                   timers: &mut Vec<(safe_cex_engine::TimerId, f64)>,
+                   to: f64,
+                   out: &mut Vec<Action>| {
+        while let Some(i) = timers.iter().position(|(_, at)| *at <= to) {
+            let (timer, at) = timers.remove(i);
+            e.handle(at.max(e.now), Event::TimerFired { timer });
+            for action in actions(e) {
+                match &action {
+                    Action::SetTimer { timer, at_ms } => timers.push((*timer, *at_ms)),
+                    Action::ClearTimer { timer } => timers.retain(|(t, _)| t != timer),
+                    _ => {}
+                }
+                out.push(action);
+            }
+        }
+        e.now = e.now.max(to);
+    };
+    let open_orders = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/open-orders")))
+            .count()
+    };
+    let order_writes = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/order")))
+            .count()
+    };
+    let refused = |actions: &[Action]| {
+        actions.iter().any(|a| {
+            matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
+                if error.message.contains("Placement outcome is uncertain"))
+        })
+    };
+    let place =
+        |e: &mut TestEngine, now: f64, command: safe_cex_engine::CommandId, client: &str| {
+            e.handle(
+                now,
+                Event::Command(Command::PlaceOrders {
+                    command,
+                    orders: vec![order(serde_json::json!({ "clientOrderId": client }))],
+                }),
+            );
+        };
+
+    place(&mut e, NOW + 10.0, 42, "first");
+    let write = http(take(&mut e, &mut timers))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/order"))
+        .expect("the placement write");
+    e.handle(
+        NOW + 20.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "connection reset after write",
+        },
+    );
+    // The seal's ask starts the fresh read; it stays unanswered.
+    let fresh = http(take(&mut e, &mut timers))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the fresh reconcile read");
+
+    let mut now = NOW + 20.0;
+    for (i, wait) in [1_100.0, 2_100.0, 4_100.0].into_iter().enumerate() {
+        now += wait;
+        let mut fired = Vec::new();
+        advance(&mut e, &mut timers, now, &mut fired);
+        assert_eq!(
+            open_orders(&fired),
+            0,
+            "re-ask {i} must not replace the fresh read"
+        );
+        place(
+            &mut e,
+            now,
+            50 + i as safe_cex_engine::CommandId,
+            "held-retry",
+        );
+        let retry = take(&mut e, &mut timers);
+        assert!(
+            refused(&retry),
+            "the retry stays refused while the fresh read is held"
+        );
+        assert_eq!(order_writes(&retry), 0);
+    }
+
+    // The original fresh read answers clean: it releases, and the retry places.
+    response(&mut e, &fresh, now + 10.0, EMPTY);
+    take(&mut e, &mut timers);
+    place(&mut e, now + 20.0, 60, "released-retry");
+    let retry = take(&mut e, &mut timers);
+    assert!(!refused(&retry), "the held fresh read releases the fence");
+    assert_eq!(order_writes(&retry), 1, "the retry places once released");
+}
+
+/// Cancel-all on a symbol with an Unknown placement is refused NotSent until the
+/// fresh order read releases the fence (default `fence_uncertain_cancel_all`).
+#[test]
+fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() {
+    const EMPTY: &str = r#"{"code":0,"data":[]}"#;
+    let cancel_all = |e: &mut TestEngine, now: f64, command: safe_cex_engine::CommandId| {
+        e.handle(
+            now,
+            Event::Command(Command::CancelSymbolOrders {
+                command,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        actions(e)
+    };
+    let cancels = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/delete-open-orders")))
+            .count()
+    };
+    let (mut e, _) = ready_with_socket();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::PlaceOrders {
+            command: 42,
+            orders: vec![order(serde_json::json!({ "clientOrderId": "first" }))],
+        }),
+    );
+    let write = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/order"))
+        .expect("the placement write");
+    e.handle(
+        NOW + 20.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "connection reset after write",
+        },
+    );
+    let fresh = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the fresh reconcile read");
+
+    let fenced = cancel_all(&mut e, NOW + 30.0, 43);
+    assert!(
+        fenced.iter().any(
+            |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 43, error })
+            if error.message.contains("reconcile before cancel-all")
+                && error.outcome == Some(safe_cex_engine::Outcome::NotSent))
+        ),
+        "cancel-all is refused NotSent while the placement is uncertain"
+    );
+    assert_eq!(cancels(&fenced), 0, "nothing is cancelled while fenced");
+
+    response(&mut e, &fresh, NOW + 40.0, EMPTY);
+    actions(&mut e);
+    let released = cancel_all(&mut e, NOW + 50.0, 44);
+    assert!(
+        !released
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 44, .. }))),
+        "a fresh clean read releases cancel-all"
+    );
+    assert_eq!(cancels(&released), 1, "cancel-all is sent once released");
 }

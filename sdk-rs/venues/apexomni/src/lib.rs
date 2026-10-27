@@ -221,6 +221,15 @@ impl Venue for ApexOmni {
     fn guard_order_mutations(&self) -> bool {
         true
     }
+    // reconcile_uncertain starts a fresh open-orders read at once, or owes one.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    /// The engine asks once per uncertain seal and re-asks while fenced; the fresh
+    /// orders read reports through `orders_reconciled` after publication.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_uncertain_placement(cx);
+    }
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
