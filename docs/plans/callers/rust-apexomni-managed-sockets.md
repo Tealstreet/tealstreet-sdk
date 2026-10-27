@@ -54,7 +54,7 @@ ACK never populates it, and already-authenticated data follows the native path.
 Malformed first data cannot publish a valid subset or restart the auth deadline.
 The cap applies only to retained first-data proof, not authenticated row parsing.
 
-Fifteen production-binding controls cover exact-once proof
+Sixteen production-binding controls cover exact-once proof
 publication, revocation before Authenticated, old/new-epoch isolation, full-state
 nonfinite ingress, duplicate queued demand, real 512-credit admission pressure
 and byte-bounded subscription bursts with live-book retention and a healthy
@@ -93,3 +93,9 @@ pinned. No claim is made that Ready replay errors can reach venue refusal hooks.
 Private control classification borrows a typed header and RawValue contents;
 full row validation runs only for a first authentication proof. Authenticated
 rows retain their native decoder, including payloads beyond the retention cap.
+
+The full-model preflight also enforces MAX_INTERESTS before a feed is registered.
+The startup boundary control queues 8,191 distinct books before catalogue
+completion, refuses only the excess book because instrumentInfo.all owns the
+remaining slot, then proves the exact accepted topic set opens and publishes.
+Without that count guard the excess enters the model and the assertion is RED.

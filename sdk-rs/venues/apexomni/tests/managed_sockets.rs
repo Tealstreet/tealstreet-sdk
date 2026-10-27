@@ -1142,3 +1142,93 @@ fn full_replay_budget_refuses_only_the_new_demand_then_reconnects_and_reuses_rel
         [r#"{"op":"pong","args":["peer"]}"#]
     );
 }
+
+#[test]
+fn pre_catalogue_demand_reserves_the_instrument_topic_and_replays_at_the_exact_interest_limit() {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    engine.start(0.0);
+    let catalogue = support::requests(&mut engine, 0.0).remove(0);
+    let limit = safe_cex_engine::socket_lifecycle::MAX_INTERESTS;
+    for index in 0..limit - 1 {
+        let symbol = format!("LIMIT{index:04}");
+        engine.handle(
+            1.0,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: symbol.clone(),
+            }),
+        );
+        assert!(engine.book(&symbol).is_some());
+        assert!(
+            engine.prepared(1.0).next().is_none(),
+            "demand precedes the genuine feed"
+        );
+    }
+    engine.handle(
+        1.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "EXCESS".into(),
+        }),
+    );
+    assert!(
+        engine.book("EXCESS").is_none(),
+        "pre-feed demand must reserve instrumentInfo.all within MAX_INTERESTS"
+    );
+    let refused: Vec<_> = engine.prepared(1.0).collect();
+    assert!(refused.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(e)) if e.message.contains("Capacity"))));
+    assert!(
+        !refused
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. } | Action::WsSend { .. }))
+    );
+    support::response(&mut engine, &catalogue, 10.0, support::MARKETS);
+    let public = engine
+        .prepared(10.0)
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(20.0, Event::WsOpened { socket: public });
+    let actions: Vec<_> = engine.prepared(20.0).collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
+    #[derive(serde::Deserialize)]
+    struct Frame {
+        op: String,
+        #[serde(default)]
+        args: Vec<String>,
+    }
+    let mut actual = Vec::new();
+    for text in sends(actions, public) {
+        assert!(text.len() <= safe_cex_engine::socket_lifecycle::MAX_FRAME_BYTES);
+        let frame: Frame = serde_json::from_str(&text).unwrap();
+        if frame.op == "subscribe" {
+            assert!(frame.args.len() <= 50);
+            actual.extend(frame.args);
+        }
+    }
+    let mut expected: Vec<_> = (0..limit - 1)
+        .map(|index| format!("orderBook200.H.LIMIT{index:04}"))
+        .collect();
+    expected.push("instrumentInfo.all".into());
+    actual.sort();
+    expected.sort();
+    assert_eq!(
+        actual, expected,
+        "the exact admissible bound opens successfully"
+    );
+    engine.handle(
+        21.0,
+        Event::WsMessage {
+            socket: public,
+            text: TICK,
+        },
+    );
+    assert_eq!(engine.store().tickers()[0].last, 60000.0);
+}

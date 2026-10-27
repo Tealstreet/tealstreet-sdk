@@ -276,7 +276,10 @@ impl ApexOmni {
 }
 
 pub(super) fn validate_public_replay(items: &[Interest]) -> Result<(), SocketError> {
-    use safe_cex_engine::socket_lifecycle::{MAX_FRAMES, MAX_QUEUED_BYTES};
+    use safe_cex_engine::socket_lifecycle::{MAX_FRAMES, MAX_INTERESTS, MAX_QUEUED_BYTES};
+    if items.len() > MAX_INTERESTS {
+        return Err(SocketError::Capacity);
+    }
     // Replay queues include coverage keys and the native post-interest ping.
     let mut bytes = r#"{"op":"ping"}"#.len();
     let mut frames = 0;
