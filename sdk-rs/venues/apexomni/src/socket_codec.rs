@@ -8,6 +8,22 @@ use safe_cex_engine::socket_lifecycle::{
 };
 use safe_cex_engine::{Cx, Level, SocketChannel, SocketSpec, Store, VenueError};
 
+#[derive(serde::Deserialize)]
+struct ControlHeader<'a> {
+    #[serde(default, borrow)]
+    op: Option<std::borrow::Cow<'a, str>>,
+    #[serde(default, borrow)]
+    topic: Option<std::borrow::Cow<'a, str>>,
+    #[serde(default, borrow, rename = "type")]
+    kind: Option<std::borrow::Cow<'a, str>>,
+    #[serde(default)]
+    success: Option<bool>,
+    #[serde(default, borrow)]
+    ret_msg: Option<std::borrow::Cow<'a, str>>,
+    #[serde(default, borrow)]
+    contents: Option<&'a serde_json::value::RawValue>,
+}
+
 fn policy(private: bool) -> FeedPolicy {
     FeedPolicy {
         role: if private {
@@ -125,15 +141,15 @@ impl ApexOmni {
             return Control::Other;
         }
         self.proof.borrow_mut().take();
-        let Ok(message) = serde_json::from_str::<private_wire::Message<'_>>(text) else {
+        let Ok(message) = serde_json::from_str::<ControlHeader<'_>>(text) else {
             return Control::Other;
         };
-        if message.op == "login" {
+        if message.op.as_deref() == Some("login") {
             return match message.success {
                 Some(true) => Control::Auth(AuthEvidence::Accepted),
                 Some(false) => Control::Auth(AuthEvidence::Rejected(VenueError::new(format!(
                     "ApeX private socket rejected request: {}",
-                    message.ret_msg
+                    message.ret_msg.as_deref().unwrap_or("")
                 )))),
                 None => Control::Other,
             };
@@ -141,11 +157,13 @@ impl ApexOmni {
         // The slot lasts only until the synchronous Authenticated callback.
         if !authenticated
             && message.success != Some(false)
-            && message.topic == "ws_zk_accounts_v3"
-            && matches!(message.kind.as_ref(), "snapshot" | "delta")
+            && message.topic.as_deref() == Some("ws_zk_accounts_v3")
+            && matches!(message.kind.as_deref(), Some("snapshot" | "delta"))
             && text.len() <= safe_cex_engine::socket_lifecycle::MAX_QUEUED_BYTES
-            && message.contents.as_ref().is_some_and(|contents| {
-                self.private_auth_payload(store, contents, self.account.opened_at)
+            && message.contents.is_some_and(|raw| {
+                serde_json::from_str::<private_wire::Contents<'_>>(raw.get()).is_ok_and(
+                    |contents| self.private_auth_payload(store, &contents, self.account.opened_at),
+                )
             })
             && let Some(socket) = self.account.socket
         {
