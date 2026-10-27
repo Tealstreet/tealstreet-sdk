@@ -6,7 +6,7 @@ Base: SDK master 97cfa6d90a1; branch feat/rust-nonce-domain-handoff. Plan GO: cl
 
 2. Owned issuance and join. Add LegacyNonceIssuer, LegacyNoncePermit and a retained LegacyNonceWork future wrapper. Registration, permit acquisition and reservation use the existing NONCES mutex. Every owned prepared/queued/provider/transport operation retains its permit in the original work+cleanup future. The wrapper retires its private work record only when that original future is Ready, including settled errors. There is no public joined(bool), raw completion token or drop-as-join. Dropped/cancelled/unpolled owners remain outstanding and cannot authorize replacement. Hosts retain/poll the original wrapper independently of Engine lifetime. No user callback is run under the nonce lock.
 
-3. Fence and atomic takeover. A non-Clone/non-serializable NonceTakeover capability closes new source registration/reservation and target claim admission for the complete associated source set, under that same mutex. Existing permits may finish and report physical release, then join. Commit requires the exact fenced generation, current identity/association and zero outstanding owned work. In one locked transaction, import the maximum reserved and maximum released values across ALL sources AND the existing target; treat historically untracked reservations conservatively as released only after qualified owned-generation retirement. Preserve exhaustion, refuse partial imports, and permanently fence the retired legacy entries. No caller-supplied maxima. Raw old entry calls cannot silently supply owned retirement evidence. Their coverage gap, other processes/WASM memories and external issuers are explicit CALLERS boundaries; this PR does not activate a host rollout.
+3. Fence and atomic takeover. A non-Clone/non-serializable NonceTakeover capability closes new source registration/reservation and target claim admission for the complete associated source set, under that same mutex. Existing permits may finish and report physical release, then join. Commit requires the exact fenced generation, current identity/association and zero outstanding owned work. In one locked transaction, import the maximum reserved and maximum released values across ALL sources AND the existing target; conservatively include every tracked legacy reservation in the released floor only after its original owner joins. Historically untracked work refuses takeover. Preserve exhaustion, refuse partial imports, and permanently fence the retired legacy entries. No caller-supplied maxima. Raw old entry calls cannot silently supply owned retirement evidence. Their coverage gap, other processes/WASM memories and external issuers are explicit CALLERS boundaries; this PR does not activate a host rollout.
 
 4. Genuine claim flow. After commit, existing select_with_nonce -> NonceClaim -> reservation -> Prepare/sign/Bind -> final Claim is the sole target path. Validate the association epoch at mint, reserve, identity/current checks and final release so pre-fence claims cannot cross the transition. Concurrent source reserve/release, target reserve/release, fence and import serialize on NONCES; unrelated namespaces continue. No alias fallback or second allocator.
 
@@ -25,3 +25,42 @@ Execution after plan GO: implement shared types/store and discriminating control
 ## Source ownership pins
 
 Every outstanding target-domain owner joins too, including already released work. A target maximum cannot substitute for its original physical-resource retirement. Pre-fence prepared claims are epoch-refused before another release. Registration must precede owned work: historically raw, untracked reservations with no retained original generation refuse takeover; neither an empty new lease table nor a new generation proves old work quiescent. Raw legacy entry calls refuse once that namespace is fenced. This engine-only slice does not create retrospective drain evidence.
+
+
+## Implemented API flow (source review pending)
+
+`Engine::associate_legacy_nonce(slot, domain, algorithm)` asks the installed
+provider's default-refusing `legacy_nonce_association` hook for its exact decoded
+key bytes' digest. The request is engine-minted and the proof is request-bound;
+neither proof nor association exposes that digest. Only stable-subject domains
+are eligible. Providers must validate their own ref and algorithm before calling
+`LegacyNonceRequest::bind_key_bytes` on the borrowed installed key material.
+
+Register each old generation before work with `register_legacy_nonce_owner`
+(source) or `register_nonce_owner` (target). Move the returned `NonceOwner` into
+`run`, passing a factory for the original generation future that joins all of
+its prepared, provider and transport work plus cleanup. The wrapper drops the
+settled original future before acknowledging its owner. Future errors may retire
+resources; dropping or abandoning a Pending/unpolled wrapper never does. A
+source's `LegacyNonceIssuer::reserve` produces an opaque `LegacyNoncePermit`;
+its release method records only a high-water fact. It grants no order authority.
+
+The replacement Engine takes fresh provider associations, passes the complete
+source set to `fence_nonce_handoff`, waits for ALL source and target wrappers,
+then calls `commit_nonce_handoff`. Registration, reserve, release, fencing and
+import use the one nonce-store mutex. Raw old entry calls cannot pass a fenced
+namespace. The target's next owner is registered only AFTER commit, before new
+work. Its venue rebuilds from `Cx::nonce_identities` at start; construction
+clones never acquire the new owner capability. Existing managed admission,
+Prepare and final Claim recheck current identity, owner and epoch. Old Binds
+cannot be released after the fence, even if a cached signature was valid.
+A late original provider result also terminates without Bind or reprepare when
+its epoch is revoked; ordinary nonce supersession keeps its existing repair.
+
+`Verdict::NonceRefused` is ungated but has no venue adopter in this PR. It needs
+one exact native code, cannot be a status/unlisted/range refusal, produces
+InvalidInput/NotSent and grants no resend. Its effects-free result follows the
+existing command terminal path. Earlier Unknown wins, and this terminal never
+reports an order census. A census begun before a later uncertain mark remains
+unable to clear that fence. Known accepted prefixes retain the existing partial
+outcome. Serial refusal summaries retain whether an actual Rejected occurred.

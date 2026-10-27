@@ -25,6 +25,8 @@ pub(crate) struct ClaimAuthority {
     /// From the trusted identity's `credential_absent()`: nothing is presented.
     pub(crate) signing_only: bool,
     bound: AtomicBool,
+    epoch: Option<Arc<()>>,
+    owner: Option<Arc<super::handoff::Owner>>,
     #[cfg(feature = "address-nonce")]
     address: Option<crate::engine::address_nonce_setup::VerifiedAddress>,
 }
@@ -95,8 +97,23 @@ impl NonceClaim {
                     .map_err(|_| NonceSelectionError::InvalidSubject)?,
             )
         };
+        let owner = if address_domain {
+            None
+        } else {
+            identity.nonce_owner.clone()
+        };
+        let epoch = {
+            let store = NONCES
+                .get_or_init(Mutex::default)
+                .lock()
+                .map_err(|_| NonceSelectionError::InvalidSubject)?;
+            super::handoff::epoch(store.get(&(domain.name, subject.0)), owner.as_ref())
+                .map_err(|_| NonceSelectionError::InvalidSubject)?
+        };
         Ok(Self {
             authority: Arc::new(ClaimAuthority {
+                epoch,
+                owner,
                 domain,
                 subject: NonceSubject(subject),
                 #[cfg(feature = "address-nonce")]
@@ -122,16 +139,34 @@ pub(crate) struct NonceReservation {
     pub(crate) nonce: u64,
 }
 impl ClaimAuthority {
-    #[cfg(feature = "address-nonce")]
-    pub(crate) fn address_bound(&self) -> bool {
-        self.domain.subject == super::NonceSubjectStrategy::Address
-    }
-
     pub(crate) fn matches_identity(&self, identity: &Identity) -> bool {
         if identity.validate().is_err()
             || self.credential.reference != *identity.authority_ref()
             || self.signing_only != identity.credential_absent()
             || !identity.signing_ref().is_ok_and(|key| *key == self.signing)
+        {
+            return false;
+        }
+        let owner_current = if self.domain.subject == super::NonceSubjectStrategy::Address {
+            self.owner.is_none()
+        } else {
+            match (self.owner.as_ref(), identity.nonce_owner.as_ref()) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
+        };
+        if !owner_current
+            || !NONCES
+                .get_or_init(Mutex::default)
+                .lock()
+                .is_ok_and(|store| {
+                    super::handoff::current(
+                        store.get(&(self.domain.name, self.subject.0.0)),
+                        self.epoch.as_ref(),
+                        self.owner.as_ref(),
+                    )
+                })
         {
             return false;
         }
@@ -178,7 +213,14 @@ impl ClaimAuthority {
             super::NonceFloor::ProtocolMs { scale } => (protocol_now, scale),
         };
         let floor = super::floor(ms, scale, self.domain.limit)?;
-        let nonce = super::reserve(self.domain.name, self.subject.0.0, floor, self.domain.limit)?;
+        let nonce = super::reserve_claim(
+            self.domain.name,
+            self.subject.0.0,
+            floor,
+            self.domain.limit,
+            self.epoch.as_ref(),
+            self.owner.as_ref(),
+        )?;
         Ok(NonceReservation {
             authority: self.clone(),
             nonce,
@@ -186,11 +228,19 @@ impl ClaimAuthority {
     }
 }
 impl NonceReservation {
+    /// An epoch revocation is terminal; ordinary nonce supersession may reprepare.
     pub(crate) fn fresh(&self) -> Result<bool, NonceError> {
         let store = NONCES
             .get_or_init(Mutex::default)
             .lock()
             .map_err(|_| NonceError::Unavailable)?;
+        if !super::handoff::current(
+            store.get(&(self.authority.domain.name, self.authority.subject.0.0)),
+            self.authority.epoch.as_ref(),
+            self.authority.owner.as_ref(),
+        ) {
+            return Err(NonceError::InvalidClaim);
+        }
         Ok(store
             .get(&(self.authority.domain.name, self.authority.subject.0.0))
             .is_some_and(|state| {
@@ -205,6 +255,13 @@ impl NonceReservation {
             .get_or_init(Mutex::default)
             .lock()
             .map_err(|_| NonceError::Unavailable)?;
+        if !super::handoff::current(
+            store.get(&(self.authority.domain.name, self.authority.subject.0.0)),
+            self.authority.epoch.as_ref(),
+            self.authority.owner.as_ref(),
+        ) {
+            return Ok(false);
+        }
         let Some(state) = store.get_mut(&(self.authority.domain.name, self.authority.subject.0.0))
         else {
             return Err(NonceError::Unavailable);

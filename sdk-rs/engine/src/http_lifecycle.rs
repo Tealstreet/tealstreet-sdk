@@ -2099,11 +2099,12 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
-        #[cfg(feature = "address-nonce")]
-        if managed
-            .recipe
-            .as_ref()
-            .is_some_and(|recipe| !recipe.nonce_identity_current(&self.io.core.identities))
+        #[cfg(feature = "dispatch-nonce")]
+        if self.io.core.nonce_enabled
+            && managed
+                .recipe
+                .as_ref()
+                .is_some_and(|recipe| !recipe.nonce_identity_current(&self.io.core.identities))
         {
             self.http_preparation_failed(
                 now,
