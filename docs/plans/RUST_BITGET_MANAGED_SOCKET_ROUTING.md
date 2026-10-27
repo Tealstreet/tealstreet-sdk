@@ -64,6 +64,9 @@ Status: dazzy3 CLEARed the legacy seam shape at `71fbebd9739`. The legacy-path s
   - That event is host-only, enqueued after `connect` returns, and dropped for a stale socket.
   - **It is that socket's only terminal.** A host that emits it emits no open and no close for the socket. The engine treats it as that epoch's sole terminal, so there is never a double retire.
   - The driver turns it into `LifecycleEvent::RouteExhausted`. It is never a peer close.
+  - Landed in #2324 as `LifecycleEvent::Retired { reason: RetireReason::RouteExhausted }`:
+    no retry, no `ws.closed` count. #2324 first named it `RouteRefused`; the
+    rename keeps `RouteRefused` for the per-route pre-login refusal above.
   - The default handling is today's close-and-retry path, so venues that don't opt in are unchanged.
 - **The connect after exhaustion (dazzy3 B).** Any connect after `RouteExhausted` carries `reject_route = false`, and the host dials the last candidate: it stays where the walk ended, matching `WsDirectFallback`'s sticky choice. Native `SocketAttempts`, TS `WsDirectFallback` and the WASM pass-through agree on this. For Bitget, ruling 3 means no such connect happens: it stops. Venues on the default close-and-retry path use this rule.
   - REDs per host: refuse every route, then exhaustion with no dial, then the next connect dials the last candidate with no second exhaustion.
