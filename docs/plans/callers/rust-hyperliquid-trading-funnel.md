@@ -105,3 +105,8 @@ Legacy top-level options.passphrase remains accepted and ignored for both HL
 names. Trusted setup discards it before provider construction; it appears in
 neither retained options nor the provider capsule. Explicit provider-setup
 passphrases and secondary setup remain refused. No NX caller migration is needed.
+
+Hosted payload refusal is evaluated against intact options and the actual alias
+before local scalar decoding. Native setup still consumes and drops raw input
+before surfacing that fixed Unsupported/NotSent error; public-only intent keeps
+its existing setup path. This adds no hosted capability.

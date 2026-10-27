@@ -727,7 +727,7 @@ pub fn prepare_local_signer_for(
     let public_data_only = construction::signer_setup_public_data_only(options);
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
-        return hyperliquid_setup::native(options, signer_setup_policy_for(venue, options));
+        return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
     }
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
@@ -1052,7 +1052,12 @@ pub fn local_signer_from_json_for_mode(
 > {
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
-        return hyperliquid_setup::json(input, signer_setup_policy_for(venue, options), options);
+        return hyperliquid_setup::json(
+            venue,
+            input,
+            signer_setup_policy_for(venue, options),
+            options,
+        );
     }
     #[cfg(feature = "lighter")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {

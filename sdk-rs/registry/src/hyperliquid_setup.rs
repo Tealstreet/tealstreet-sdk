@@ -32,11 +32,14 @@ fn install(
 }
 
 pub(crate) fn native(
+    venue: &str,
     options: &mut EngineOptions,
     policy: CredentialSetupPolicy,
 ) -> Result<(Provider, Identities), VenueError> {
+    let payload_rule = crate::payload_signing_rules(venue, options, false);
     drop(options.passphrase.take().map(Secret::new));
     let secret = options.secret.take().map(Secret::new);
+    payload_rule?;
     if options.read_credentials.is_some() {
         return Err(invalid(INVALID));
     }
@@ -55,11 +58,13 @@ pub(crate) fn native(
 }
 
 pub(crate) fn json(
+    venue: &str,
     input: String,
     policy: CredentialSetupPolicy,
     options: &EngineOptions,
 ) -> Result<(Provider, Identities), VenueError> {
     let input = zeroize::Zeroizing::new(input);
+    crate::payload_signing_rules(venue, options, false)?;
     let setup = serde_json::from_str::<LocalSetup>(&input).map_err(|_| invalid(INVALID))?;
     install(setup, policy, options)
 }
@@ -169,6 +174,70 @@ mod tests {
             assert!(invalid_options.passphrase.is_none());
             assert_eq!(error.message, INVALID);
             assert!(!format!("{error:?}").contains("ignored-passphrase-sentinel"));
+        }
+    }
+
+    #[test]
+    fn hosted_refusal_precedes_scalar_decoding_without_changing_public_setup() {
+        let valid = format!("{}ab", "00".repeat(31));
+        for venue in ["hyperliquid", "hyperliquidspot"] {
+            for scalar in ["invalid-scalar-sentinel", valid.as_str()] {
+                let mut options = options(scalar);
+                options.payload_signer = true;
+                options.passphrase = Some("ignored-passphrase-sentinel".into());
+                let expected = VenueError::new(format!("Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."))
+                    .kind(safe_cex_engine::ErrorKind::Unsupported)
+                    .outcome(safe_cex_engine::Outcome::NotSent);
+                let error = crate::prepare_local_signer_for(venue, &mut options)
+                    .err()
+                    .unwrap();
+                assert_eq!(error, expected);
+                assert!(options.secret.is_none());
+                assert!(options.passphrase.is_none());
+                assert!(!format!("{error:?}").contains(scalar));
+                assert!(!format!("{error:?}").contains("ignored-passphrase-sentinel"));
+                let error = crate::local_signer_from_json_for_mode(
+                    venue,
+                    json!({"primary":{"secret":scalar}}).to_string(),
+                    &options,
+                )
+                .err()
+                .unwrap();
+                assert_eq!(error, expected);
+                assert!(!format!("{error:?}").contains(scalar));
+            }
+            let mut public = options(&valid);
+            public.payload_signer = true;
+            public.public_data_only = true;
+            let native = crate::prepare_local_signer_for(venue, &mut public);
+            assert!(native.is_ok());
+            assert!(
+                crate::local_signer_from_json_for_mode(
+                    venue,
+                    json!({"primary":{"secret":valid}}).to_string(),
+                    &public
+                )
+                .is_ok()
+            );
+            let mut invalid = options("invalid-scalar-sentinel");
+            assert_eq!(
+                crate::prepare_local_signer_for(venue, &mut invalid)
+                    .err()
+                    .unwrap()
+                    .message,
+                INVALID
+            );
+            assert_eq!(
+                crate::local_signer_from_json_for_mode(
+                    venue,
+                    json!({"primary":{"secret":"invalid-scalar-sentinel"}}).to_string(),
+                    &invalid
+                )
+                .err()
+                .unwrap()
+                .message,
+                INVALID
+            );
         }
     }
 
