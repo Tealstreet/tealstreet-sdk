@@ -107,6 +107,8 @@ neither retained options nor the provider capsule. Explicit provider-setup
 passphrases and secondary setup remain refused. No NX caller migration is needed.
 
 Hosted payload refusal is evaluated against intact options and the actual alias
-before local scalar decoding. Native setup still consumes and drops raw input
+before local scalar decoding. Before the provider is installed, public intent is
+publicMode.requested when present, otherwise publicDataOnly, matching Lighter
+setup rather than inferring eligibility from missing provider references. Native setup still consumes and drops raw input
 before surfacing that fixed Unsupported/NotSent error; public-only intent keeps
 its existing setup path. This adds no hosted capability.
