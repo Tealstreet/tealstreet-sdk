@@ -576,7 +576,7 @@ impl BinanceFutures {
             RetireReason::Authentication => "Binance socket authentication failed; reconnecting",
             RetireReason::Closed => "Binance socket closed; reconnecting",
             RetireReason::Stopped => "Binance socket stopped",
-            RetireReason::RouteRefused => "Binance socket refused on every route",
+            RetireReason::RouteExhausted => "Binance socket refused on every route",
         };
         cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
     }
