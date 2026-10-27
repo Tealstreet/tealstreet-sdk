@@ -42,8 +42,13 @@ fn install(
     policy: CredentialSetupPolicy,
     options: &mut EngineOptions,
 ) -> Result<(Provider, Identities), VenueError> {
-    let public = setup_public_mode(options);
-    let key = key.filter(|key| !key.is_empty() && !public);
+    // Explicit private intent without both public addresses keeps the
+    // registry's explicit-private refusal; the key is never parsed for it.
+    let addressed = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
+    let eligible = !setup_public_mode(options)
+        && addressed(&options.paradex_address)
+        && addressed(&options.subkey_address);
+    let key = key.filter(|key| !key.is_empty() && eligible);
     let ethereum = key.as_ref().is_some_and(|key| key.len() != 66);
     let scalar = key
         .map(|key| {
@@ -243,6 +248,26 @@ mod tests {
         legacy.passphrase = Some("ignored-passphrase-sentinel".into());
         crate::prepare_local_signer_for("paradex", &mut legacy).unwrap();
         assert!(legacy.secret.is_none() && legacy.passphrase.is_none() && legacy.key.is_none());
+    }
+
+    #[test]
+    fn missing_public_addresses_leave_the_explicit_private_refusal_first() {
+        for field in ["paradexAddress", "subkeyAddress"] {
+            let mut value = serde_json::to_value(json!({
+                "key": "not-a-key-sentinel",
+                "paradexAddress": "0x0123",
+                "subkeyAddress": "0x456",
+                "publicMode": {"requested": false},
+            }))
+            .unwrap();
+            value[field] = json!("");
+            let mut options: EngineOptions = serde_json::from_value(value).unwrap();
+            let (_, identities) = crate::prepare_local_signer_for("paradex", &mut options).unwrap();
+            assert!(
+                identities.primary.is_none() && options.key.is_none(),
+                "{field}"
+            );
+        }
     }
 
     #[test]
