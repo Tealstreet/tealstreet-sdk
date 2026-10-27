@@ -10240,6 +10240,39 @@ every accepted order ID and the scope stays fenced. It is never Done without
 proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
 grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).
 
+### BingX managed public and private sockets
+
+BingX registers both feeds with engine-owned epochs, deadlines, liveness and
+backoff. Duplicate/stale/nonfinite socket events cannot replay subscriptions,
+reset private keepalive, publish rows or retire a healthy sibling. Public
+subscriptions are canonical engine interests; private listen keys remain real
+managed Session HTTP operations, never replayable interests. Acquisition before
+any physical epoch uses the HTTP call's existing 20s bound and one 30s HTTP retry
+instead of a second socket supervisor's 10s watch. Socket retries remain solely
+engine-granted. Public retirement clears books before reconnect; asynchronous
+Capacity retains desired refs through native backoff, while invalid/permanent
+codec defects and inherited initial replay failures stop the affected feed.
+
+Order reads capture order_read_epoch at issuance and release through
+orders_reconciled_since only after clean current Store publication, preserving
+native revision/row guards. Real concurrent Unknown writes pin that an older
+Primary census cannot release a later mark. One catalogue fixture now delivers
+its actual first public Opened before live data; the key-timeout fixture resolves
+peer reads and drives the captured sole 20s HTTP deadline. Financial payloads
+and assertions are retained; that timeout observation is intentionally later.
+
+The two listen-key keepalive fixtures send timely genuine private Pongs during
+their 30-minute wait. A Pong delivered only after 30 minutes cannot rescue an
+already expired managed socket. Their original keepalive requests, header/body
+oracles and captured failure/retry deadlines remain unchanged.
+
+An invalid-clock delivery consumes the ordinary acquisition-retry timer but
+retains the owed retry and original finite not-before. A subsequent genuine
+finite account timer, lifecycle or live read callback rearms it once; the
+replacement wake still cannot send early. This avoids a permanently stranded
+private connection without scheduling nonfinite host timers or granting socket
+authority. Real NaN/both-infinity, finite-poll and duplicate-wake controls pin it.
+
 ### Paradex JWT reads on the Session bearer
 
 Paradex is the first `session-bearer` adopter. Its account snapshots

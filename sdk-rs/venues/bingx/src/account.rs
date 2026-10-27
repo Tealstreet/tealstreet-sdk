@@ -18,7 +18,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::request_context::{Session, SessionPolicy};
 use safe_cex_engine::selected_read::ReadRole;
 use safe_cex_engine::signing::Identity;
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::socket_lifecycle::{FeedId, LifecycleEvent, RetireReason, SocketError};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json::ArrayAt};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -35,8 +35,6 @@ const POLL_MS: f64 = 2_000.0;
 // oldest identity at a time; clearing all state would replay every terminal fill.
 const RETAINED_ORDERS: usize = 10_000;
 const RETAINED_EXECUTIONS: usize = 20_000;
-const PING_MS: f64 = 15_000.0;
-const SILENCE_MS: f64 = 45_000.0;
 const REPAIR_MS: f64 = 750.0;
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
@@ -67,6 +65,7 @@ pub enum Request {
     },
     OpenOrders {
         revision: u64,
+        read_epoch: u64,
         rows: Vec<Order>,
         metas: Vec<OrderMeta>,
         skipped: Vec<String>,
@@ -75,6 +74,11 @@ pub enum Request {
 }
 
 type OrderMeta = (Order, String, String, bool, String);
+
+struct KeyRetry {
+    timer: Option<TimerId>,
+    not_before: f64,
+}
 
 #[derive(Default)]
 pub struct Account {
@@ -89,8 +93,8 @@ pub struct Account {
     /// Listen-key create/keepalive owner; retiring it drops their outcomes.
     session: Option<Session>,
     socket: Option<SocketId>,
-    open: bool,
-    supervisor: Supervisor,
+    pub(super) feed: Option<FeedId>,
+    key_retry: Option<KeyRetry>,
     keepalive: Option<TimerId>,
     poll: Option<TimerId>,
     repair: Option<TimerId>,
@@ -299,8 +303,11 @@ impl Account {
         self.socket == Some(socket)
     }
     pub fn handles_timer(&self, timer: TimerId) -> bool {
-        self.supervisor.owns_timer(timer)
-            || [self.keepalive, self.poll, self.repair].contains(&Some(timer))
+        [self.keepalive, self.poll, self.repair].contains(&Some(timer))
+            || self
+                .key_retry
+                .as_ref()
+                .is_some_and(|retry| retry.timer == Some(timer))
     }
     pub fn bump_orders(&mut self) {
         self.orders_revision = self.orders_revision.wrapping_add(1);
@@ -361,11 +368,6 @@ impl Account {
         if std::mem::replace(&mut self.started, true) {
             return;
         }
-        self.supervisor = Supervisor::new(Config {
-            idle_timeout_ms: SILENCE_MS,
-            ping_interval_ms: Some(PING_MS),
-            ..Config::default()
-        });
         self.fetch_key(cx, credentials);
         self.fetch_mode(cx, credentials);
         self.fetch_balance(cx, credentials);
@@ -489,7 +491,6 @@ impl Account {
             return;
         }
         self.key_in_flight = true;
-        self.supervisor.connecting(cx);
         self.listen_key_write(
             cx,
             credentials,
@@ -589,6 +590,7 @@ impl Account {
             Params::new(),
             Request::OpenOrders {
                 revision: self.orders_revision,
+                read_epoch: cx.order_read_epoch(),
                 rows: Vec::new(),
                 metas: Vec::new(),
                 skipped: Vec::new(),
@@ -606,7 +608,9 @@ impl Account {
     }
 
     fn clear_private_timers(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.supervisor.cancel(cx);
+        if let Some(timer) = self.key_retry.take().and_then(|retry| retry.timer) {
+            cx.clear_timer(timer);
+        }
         if let Some(timer) = self.keepalive.take() {
             cx.clear_timer(timer);
         }
@@ -616,22 +620,45 @@ impl Account {
         self.epoch = self.epoch.wrapping_add(1);
         self.key_in_flight = false;
         self.key = None;
-        self.open = false;
         self.clear_private_timers(cx);
-        if let Some(socket) = self.socket.take() {
-            cx.close(socket);
-        }
+        self.socket = None;
         self.bump_orders();
         self.bump_positions();
     }
+    fn schedule_key_retry(&mut self, cx: &mut Cx<'_, Pending>) {
+        let at = cx.now + RETRY_MS;
+        if !cx.now.is_finite() || !at.is_finite() || at <= cx.now {
+            return;
+        }
+        if let Some(timer) = self.key_retry.take().and_then(|retry| retry.timer) {
+            cx.clear_timer(timer);
+        }
+        self.key_retry = Some(KeyRetry {
+            timer: Some(cx.set_timer(RETRY_MS)),
+            not_before: at,
+        });
+    }
+    fn resume_key_retry(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now.is_finite()
+            && let Some(retry) = &mut self.key_retry
+            && retry.timer.is_none()
+            && (retry.not_before - cx.now).is_finite()
+        {
+            retry.timer = Some(cx.set_timer((retry.not_before - cx.now).max(0.)));
+        }
+    }
     fn fresh_key(&mut self, cx: &mut Cx<'_, Pending>, _credentials: &Credentials) {
-        self.invalidate_private(cx);
-        self.supervisor.retry(cx);
+        if let Some(feed) = self.feed
+            && cx.socket_epoch(feed).is_some()
+        {
+            cx.retire_socket(feed, RetireReason::Closed);
+        } else {
+            self.invalidate_private(cx);
+            self.schedule_key_retry(cx);
+        }
     }
 
     pub fn on_open(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
-        self.open = true;
-        self.supervisor.opened(cx);
         if let Some(timer) = self.keepalive.take() {
             cx.clear_timer(timer);
         }
@@ -644,12 +671,23 @@ impl Account {
         self.bump_positions();
         self.reconcile(cx, credentials);
     }
-    pub fn on_close(&mut self, cx: &mut Cx<'_, Pending>, _credentials: &Credentials) {
-        // The parent only routes the current socket. Late callbacks cannot
-        // invalidate its replacement or install a second recovery timer.
-        self.socket = None;
-        self.invalidate_private(cx);
-        self.supervisor.retry(cx);
+    pub(super) fn socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+        credentials: &Credentials,
+    ) -> Result<(), SocketError> {
+        match event {
+            LifecycleEvent::Opened(epoch) if self.socket == Some(epoch.socket()) => {
+                self.on_open(cx, credentials)
+            }
+            LifecycleEvent::Retired { .. } => self.invalidate_private(cx),
+            LifecycleEvent::Reconnect(_) => self.fetch_key(cx, credentials),
+            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "Ping"),
+            _ => {}
+        }
+        self.resume_key_retry(cx);
+        Ok(())
     }
 
     pub fn on_timer(
@@ -658,26 +696,26 @@ impl Account {
         timer: TimerId,
         credentials: &Credentials,
     ) {
-        match self.supervisor.on_timer(cx, timer) {
-            Tick::Reconnect => {
+        if let Some(retry) = &mut self.key_retry
+            && retry.timer == Some(timer)
+        {
+            // The engine consumed this physical timer even at an invalid clock.
+            retry.timer = None;
+            if !cx.now.is_finite() {
+                return;
+            }
+            if cx.now < retry.not_before {
+                self.resume_key_retry(cx);
+            } else {
+                self.key_retry = None;
                 self.fetch_key(cx, credentials);
-                return;
             }
-            Tick::TimedOut(_) => {
-                self.fresh_key(cx, credentials);
-                return;
-            }
-            Tick::Ping => {
-                if self.open
-                    && let Some(socket) = self.socket
-                {
-                    cx.send(socket, "Ping");
-                }
-                return;
-            }
-            Tick::Handled => return,
-            Tick::Unhandled => {}
+            return;
         }
+        if !cx.now.is_finite() {
+            return;
+        }
+        self.resume_key_retry(cx);
         if self.keepalive == Some(timer) {
             self.keepalive = None;
             if let Some(key) = self.key.clone() {
@@ -896,6 +934,7 @@ impl Account {
         {
             return;
         }
+        self.resume_key_retry(cx);
         let is_key = matches!(
             request,
             Request::ListenKey { .. } | Request::Keepalive { .. }
@@ -940,15 +979,30 @@ impl Account {
                     return;
                 };
                 self.key = Some(key.into());
-                self.socket = Some(
-                    cx.connect(
-                        safe_cex_engine::SocketSpec::new(format!(
-                            "{}?listenKey={key}",
-                            crate::paths::PRIVATE_WS
-                        ))
-                        .channel(safe_cex_engine::SocketChannel::Private),
+                let Some(feed) = self.feed else {
+                    self.on_request_failed(
+                        cx,
+                        Request::ListenKey { epoch: self.epoch },
+                        "private feed not registered",
+                        credentials,
+                    );
+                    return;
+                };
+                match cx.connect_socket(
+                    feed,
+                    safe_cex_engine::SocketSpec::new(format!(
+                        "{}?listenKey={key}",
+                        crate::paths::PRIVATE_WS
+                    )),
+                ) {
+                    Ok(epoch) => self.socket = Some(epoch.socket()),
+                    Err(error) => self.on_request_failed(
+                        cx,
+                        Request::ListenKey { epoch: self.epoch },
+                        &format!("private socket admission: {error:?}"),
+                        credentials,
                     ),
-                );
+                }
             }
             Request::Keepalive { .. } => {
                 if let Some(timer) = self.keepalive.take() {
@@ -1072,6 +1126,7 @@ impl Account {
             }
             Request::OpenOrders {
                 revision,
+                read_epoch,
                 mut rows,
                 metas,
                 skipped,
@@ -1127,7 +1182,7 @@ impl Account {
                 cx.store.set_orders(rows);
                 if complete {
                     self.orders_snapshot_revision = Some(revision);
-                    cx.orders_reconciled(None);
+                    cx.orders_reconciled_since(None, read_epoch);
                 }
             }
         }
@@ -1172,7 +1227,7 @@ impl Account {
         match request {
             Request::ListenKey { .. } => {
                 self.invalidate_private(cx);
-                self.supervisor.retry_after(cx, RETRY_MS);
+                self.schedule_key_retry(cx);
             }
             Request::Keepalive { .. } => {
                 if let Some(timer) = self.keepalive.take() {
@@ -1192,7 +1247,6 @@ impl Account {
     }
 
     pub fn on_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str, credentials: &Credentials) {
-        self.supervisor.received(cx.now);
         if text == "Ping" {
             if let Some(socket) = self.socket {
                 cx.send(socket, "Pong");
@@ -1847,6 +1901,7 @@ mod sign_failure_owners {
             },
             2 => Request::OpenOrders {
                 revision: 1,
+                read_epoch: 0,
                 rows: vec![],
                 metas: vec![],
                 skipped: vec![],

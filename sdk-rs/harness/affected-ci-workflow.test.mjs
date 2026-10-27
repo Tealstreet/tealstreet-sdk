@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { RUST_SCOPE_PATTERNS } from './ci-scope.mjs';
 
 const source = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
 const job = (text, name) => {
@@ -10,6 +11,12 @@ const job = (text, name) => {
 
 function check(text) {
   assert.match(text, /push:\n    branches: \[master\]/);
+  const pushPaths = /^  push:\n    branches: \[master\]\n    paths:\n((?:      - '[^']+'\n)+)/m.exec(text);
+  assert(pushPaths, 'push path filter');
+  assert.deepEqual([...pushPaths[1].matchAll(/'([^']+)'/g)].map(match => match[1]), [...RUST_SCOPE_PATTERNS]);
+  assert.match(text, /^  pull_request:\n    branches: \[master\]\n\n/m);
+  assert.match(job(text, 'selection'), /needs: scope\n    if: needs.scope.outputs.relevant == 'true'/);
+  assert.match(job(text, 'result').match(/^    needs:.*$/m)[0], /\[scope, selection,/);
   for (const name of ['gate', 'bitget-paired', 'cpu-plan', 'cpu-second', 'cpu-certify', 'cpu-final']) {
     const value = job(text, name);
     assert.match(value, /runs-on: ubuntu-latest/);
