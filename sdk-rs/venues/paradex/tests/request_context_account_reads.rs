@@ -153,3 +153,18 @@ fn a_read_issued_with_a_stale_token_carries_the_refreshed_bearer() {
     h.respond(request, 200, r#"{"account_number":"42"}"#);
     assert!(h.result(74).is_ok());
 }
+
+#[test]
+fn a_jwt_that_is_not_header_safe_never_reaches_the_wire() {
+    let mut h = private();
+    h.now += 180_000.;
+    h.command(Command::FetchAccount { command: 75 });
+    h.reply("/auth/", r#"{"jwt_token":"jwt\r\nX-Injected: 1"}"#);
+    // The Bearer is refused at prepare, so the read waits instead of sending.
+    assert!(!h.pending.iter().any(|r| r.url.ends_with("/account")));
+    assert!(
+        !h.pending
+            .iter()
+            .any(|r| r.headers.iter().any(|(_, v)| v.contains("X-Injected")))
+    );
+}

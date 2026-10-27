@@ -10239,3 +10239,18 @@ stream proof and calls `done_plan`, or on expiry calls
 every accepted order ID and the scope stays fenced. It is never Done without
 proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
 grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).
+
+### Paradex JWT reads on the Session bearer
+
+Paradex is the first `session-bearer` adopter. Its account snapshots
+(margins, positions, balance, orders) and the `FetchAccount` identity read are
+managed Reads bound to the account's JWT Session; the engine copies
+`Authorization: Bearer <jwt>` only at prepare, before `Content-Type` and
+`Accept` as before. Caller-visible changes:
+- Each read has a 20 s window. A read still waiting for a late JWT, or never
+  answered, ends unsent at its window instead of holding the account cycle or
+  the command forever; the cycle moves on and the next poll reads again.
+- `FetchAccount` failures are typed: after a refused `/auth` (401/403) the
+  identity read fails `AuthInvalid`/`NotSent`, and the Session is retired.
+- A JWT that is not header-safe is never sent; reads wait for a valid one.
+Trading, history, leverage and `/auth` itself still use the legacy sender.
