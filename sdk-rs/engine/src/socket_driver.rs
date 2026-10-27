@@ -436,7 +436,7 @@ impl Driver {
         self.finish_ingress(cx, admission, ingress)
     }
 
-    /// Admitted like a close, but the host dialled nothing: retire as a refusal
+    /// Admitted like a close, but the host dialled nothing: retire as exhausted
     /// without retry, since no route is left. The feed stays down.
     pub(crate) fn route_exhausted<P>(
         &mut self,
@@ -448,7 +448,7 @@ impl Driver {
             return self.finish_ingress(cx, admission, Ingress::Close);
         };
         let effects = self
-            .retire(cx, epoch.feed(), RetireReason::RouteRefused, false)
+            .retire(cx, epoch.feed(), RetireReason::RouteExhausted, false)
             .into_iter()
             .collect();
         IngressResult { admission, effects }
@@ -834,6 +834,7 @@ mod tests {
                                 | RetireReason::Timeout(_)
                                 | RetireReason::Authentication
                                 | RetireReason::Stopped
+                                | RetireReason::RouteExhausted
                         ));
                         self.driver
                             .acknowledge_retirement(cx, *retirement, self.acknowledge, *retry)

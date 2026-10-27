@@ -633,7 +633,7 @@ impl<V: Venue> Engine<V> {
                             cx.io.core.health.count(log_code::WS_CLOSED);
                         }
                         // Nothing was dialled, so the transport close below must not count.
-                        if reason == RetireReason::RouteRefused {
+                        if reason == RetireReason::RouteExhausted {
                             cx.io.core.sockets.closed(retirement.epoch.socket(), true);
                         }
                         cx.close_socket_transport(retirement.epoch.socket());
@@ -1736,7 +1736,7 @@ mod tests {
         assert_eq!(e.io.core.health.ws_closed, 1);
     }
     #[test]
-    fn route_exhaustion_retires_as_a_refusal_not_a_close() {
+    fn route_exhaustion_retires_as_exhausted_not_a_close() {
         let (mut e, socket) = engine();
         e.drain_actions().for_each(drop);
         e.venue.events.clear();
@@ -1745,11 +1745,11 @@ mod tests {
             e.venue.events.iter().any(|event| matches!(
                 event,
                 LifecycleEvent::Retired {
-                    reason: RetireReason::RouteRefused,
+                    reason: RetireReason::RouteExhausted,
                     ..
                 }
             )),
-            "the venue must see the refusal: {:?}",
+            "the venue must see the exhaustion: {:?}",
             e.venue.events
         );
         assert_eq!(
