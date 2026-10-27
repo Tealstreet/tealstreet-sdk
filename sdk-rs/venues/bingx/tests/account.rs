@@ -1139,6 +1139,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
         .find(|(_, url)| !url.contains("listenKey="))
         .unwrap()
         .0;
+    h.event(Event::WsOpened { socket: public });
     h.event(Event::WsMessage {
         socket: public,
         text: r#"{"dataType":"market.contracts","data":{"contracts":[{"symbol":"BTC-USDT","tradePrice":"61000","fairPrice":"61001","indexPrice":"61002","fundingRate":"0.01"}]}}"#,
@@ -1489,14 +1490,20 @@ fn a_skip_warned_on_a_stale_snapshot_still_errors_once_its_copy_is_gone() {
 fn timed_out_key_acquisition_is_fenced_and_retried_after_backoff() {
     let mut h = Harness::new();
     let old = h.take(KEY);
-    // Private startup no longer waits for tickers, so the key deadline is the
-    // first 5s timer rather than the latest one.
-    let (timer, _) = *h
+    // Resolve peer requests so the remaining 20s deadline belongs to the key.
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(POSITIONS, 200, POSITION);
+    h.respond(BALANCE, 200, BALANCES);
+    h.respond(ORDERS, 200, OPEN);
+    let deadlines: Vec<_> = h
         .timers
         .iter()
-        .find(|(_, at)| *at == h.now + 5000.0)
-        .unwrap();
-    h.now += 10_000.0;
+        .copied()
+        .filter(|(_, at)| *at == h.now + 20_000.)
+        .collect();
+    assert_eq!(deadlines.len(), 1, "one actual key HTTP deadline");
+    let (timer, at) = deadlines[0];
+    h.now = at;
     h.event(Event::TimerFired { timer });
     let sockets = h.sockets.len();
     h.reply(old.id, 200, r#"{"listenKey":"late-retired"}"#);

@@ -147,7 +147,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Credentials and attribution | Retained plan/evidence | Changing credential selection, auth evidence, identity or broker routing. | [RUST_IDENTITY_ROUTING.md](RUST_IDENTITY_ROUTING.md) |
 | Crypto.com Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [venue-ports/CRYPTOCOM.md](venue-ports/CRYPTOCOM.md) |
 | Cutover tail | Scoped evidence ledger | Checking SDK-owned cutover repairs versus remaining caller-owned work. | [RUST_CUTOVER_TAIL_AUDIT.md](RUST_CUTOVER_TAIL_AUDIT.md) |
-| Downstream contracts | Current caller obligations | SDK/NX caller migration, deployment ordering and deletion prerequisites. | [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALLERS.md) |
+| Downstream contracts | Current caller obligations | SDK/NX caller migration, deployment ordering and deletion prerequisites. | [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALLERS.md) (before 2026-10-27) and [callers/](callers/README.md) (one file per change since) |
 | Execution and command state | Retained plan/evidence | Changing fill attribution, command outcomes or uncertain-order lifecycle. | [RUST_COMMAND_IDENTITIES.md](RUST_COMMAND_IDENTITIES.md) |
 | Execution and command state | Retained plan/evidence | Changing fill attribution, command outcomes or uncertain-order lifecycle. | [RUST_FILL_EXECUTION_ID.md](RUST_FILL_EXECUTION_ID.md) |
 | Execution and command state | Retained plan/evidence | Changing signed dead-man controls, UTC deadlines or uncertain-write ownership. | [RUST_HYPERLIQUID_SCHEDULE_CANCEL.md](RUST_HYPERLIQUID_SCHEDULE_CANCEL.md) |
@@ -514,3 +514,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | MEXC installed signing and private custody | Signing/private-read PR; trading custody follows separately | Before changing MEXC credential setup, identity mapping, REST/WS signing or private request owners. | [RUST_MEXC_INSTALLED_SIGNING.md](RUST_MEXC_INSTALLED_SIGNING.md) |
 | Lighter remaining request and signing funnel | Source reviewed; composed correctness qualification in progress | Before changing private reads, tier mutation, transaction admission, nonce retry or eager signing. | [RUST_LIGHTER_REMAINING_FUNNEL.md](RUST_LIGHTER_REMAINING_FUNNEL.md) |
+
+| BingX managed public/private sockets | Venue-only implementation and production-binding qualification | Before changing BingX socket epochs, listen-key recovery, interests or order-read epoch publication. | [RUST_BINGX_MANAGED_SOCKETS.md](RUST_BINGX_MANAGED_SOCKETS.md) |

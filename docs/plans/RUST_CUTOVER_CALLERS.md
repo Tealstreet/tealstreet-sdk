@@ -1,5 +1,9 @@
 # Phase 9: TypeScript caller inventory and deletion dependencies
 
+> **Closed to appends since 2026-10-27.** Record new caller obligations as one
+> file per change in [callers/](callers/README.md). Edit a section here only
+> when that obligation itself changes.
+
 Audited 2026-10-20 on the phase-9 readiness branch, against the repository's
 `packages/` and `apps/` source. This is an inventory and an ordered future
 migration plan. This change deletes no TypeScript venue. The authoritative
@@ -10240,13 +10244,68 @@ every accepted order ID and the scope stays fenced. It is never Done without
 proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
 grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).
 
+### BingX managed public and private sockets
 
-### HTTP Plan status-refusal scope
+BingX registers both feeds with engine-owned epochs, deadlines, liveness and
+backoff. Duplicate/stale/nonfinite socket events cannot replay subscriptions,
+reset private keepalive, publish rows or retire a healthy sibling. Public
+subscriptions are canonical engine interests; private listen keys remain real
+managed Session HTTP operations, never replayable interests. Acquisition before
+any physical epoch uses the HTTP call's existing 20s bound and one 30s HTTP retry
+instead of a second socket supervisor's 10s watch. Socket retries remain solely
+engine-granted. Public retirement clears books before reconnect; asynchronous
+Capacity retains desired refs through native backoff, while invalid/permanent
+codec defects and inherited initial replay failures stop the affected feed.
 
-The existing default-false status_exempt_refusal hook is consumed whenever
-http-plans is enabled, including complete Plans without serial-plans or
-session-bearer. Only fully received Unproven responses consult it; ordinary
-2xx and non-408 4xx retain their native codec path. The temporary exemption
-is scoped to the exact DATA callback and its write classification. A venue
-must declare its narrow parsed definitive-refusal predicate before using it.
-This prerequisite enables no venue override or transport retry by itself.
+Order reads capture order_read_epoch at issuance and release through
+orders_reconciled_since only after clean current Store publication, preserving
+native revision/row guards. Real concurrent Unknown writes pin that an older
+Primary census cannot release a later mark. One catalogue fixture now delivers
+its actual first public Opened before live data; the key-timeout fixture resolves
+peer reads and drives the captured sole 20s HTTP deadline. Financial payloads
+and assertions are retained; that timeout observation is intentionally later.
+
+The two listen-key keepalive fixtures send timely genuine private Pongs during
+their 30-minute wait. A Pong delivered only after 30 minutes cannot rescue an
+already expired managed socket. Their original keepalive requests, header/body
+oracles and captured failure/retry deadlines remain unchanged.
+
+An invalid-clock delivery consumes the ordinary acquisition-retry timer but
+retains the owed retry and original finite not-before. A subsequent genuine
+finite account timer, lifecycle or live read callback rearms it once; the
+replacement wake still cannot send early. This avoids a permanently stranded
+private connection without scheduling nonfinite host timers or granting socket
+authority. Real NaN/both-infinity, finite-poll and duplicate-wake controls pin it.
+
+### Paradex JWT reads on the Session bearer
+
+Paradex is the first `session-bearer` adopter. Its account snapshots
+(margins, positions, balance, orders) and the `FetchAccount` identity read are
+managed Reads bound to the account's JWT Session; the engine copies
+`Authorization: Bearer <jwt>` only at prepare, before `Content-Type` and
+`Accept` as before. Caller-visible changes:
+- Each read has a 20 s window. A read still waiting for a late JWT, or never
+  answered, ends unsent at its window instead of holding the account cycle or
+  the command forever; the cycle moves on and the next poll reads again.
+- `FetchAccount` failures are typed: after a refused `/auth` (401/403) the
+  identity read fails `AuthInvalid`/`NotSent`, and the Session is retired.
+- A JWT that is not header-safe is never sent; reads wait for a valid one.
+Trading, history, leverage and `/auth` itself still use the legacy sender.
+
+### Hyperliquid managed discovery and account reads
+
+Both Hyperliquid products issue discovery and background account/fee info calls
+through unsigned managed Prepare, Bind and Claim. Account reads mint their
+Context after the native weight queue admits the physical call. Streamed rows
+and terminal publication validate that exact Background Read delivery; success
+and every failure retire it before another retry can reuse its capacity.
+Successful reducers publish while their Context is valid; successor info calls
+are submitted after its retirement, so a saturated registry can reuse that slot.
+The physical call has a fixed 20-second bound across preparation and transport;
+later rows are discarded, including a previously valid streamed prefix. Native
+discovery backoff and account reconciliation remain responsible for fresh reads.
+Fixture transport now drives real managed release. Cached-read capacity tests
+finish bootstrap before installing their cache; the long streamed-cancel test
+keeps its non-resurrection assertion and additionally forbids expired new rows.
+Bootstrap fixtures also fire the genuine socket-handoff wake before expecting
+portfolio collateral reads; their balance and holdings assertions stay intact.

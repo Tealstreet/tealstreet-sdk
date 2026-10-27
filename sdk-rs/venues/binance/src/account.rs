@@ -13,6 +13,7 @@ use safe_cex_engine::model::{
     OrderStatus, OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType,
     TimeInForce,
 };
+use safe_cex_engine::socket_lifecycle::RetireReason;
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, json, num};
 use serde::Deserialize;
@@ -561,7 +562,7 @@ impl BinanceFutures {
         let account = &mut self.account;
         if account.listen_key_timer == Some(timer) {
             account.listen_key_timer = None;
-            if self.private.socket.is_none() && !self.private.supervisor.is_waiting() {
+            if self.private.idle() {
                 self.request_listen_key(cx);
             }
         } else if account.keepalive_timer == Some(timer) {
@@ -1751,11 +1752,9 @@ impl BinanceFutures {
                     });
                 }
             }
+            // The listen key is the stream's credential; the reconnect fetches a fresh one.
             Some("listenKeyExpired") => {
-                if let Some(socket) = self.private.socket {
-                    cx.close(socket);
-                    self.on_socket_closed(cx, Channel::Private, 4001);
-                }
+                self.retire(cx, Channel::Private, RetireReason::Authentication)
             }
             _ => {}
         }
@@ -2544,8 +2543,8 @@ impl BinanceFutures {
         cx.store.invalidate_order_snapshots();
     }
     fn next_spot_request_id(&mut self, prefix: &str) -> String {
-        let id = self.private.next_request_id;
-        self.private.next_request_id += 1;
+        let id = self.private.next_request_id.get();
+        self.private.next_request_id.set(id + 1);
         format!("{prefix}-{id}")
     }
     fn subscribe_spot_account(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -2602,10 +2601,7 @@ impl BinanceFutures {
             code::SUBSCRIPTION_REJECTED,
             format!("Binance Spot user-data subscription {reason}"),
         );
-        if let Some(socket) = self.private.socket {
-            cx.close(socket);
-            self.on_socket_closed(cx, Channel::Private, 4001);
-        }
+        self.retire(cx, Channel::Private, RetireReason::Authentication);
     }
     fn on_spot_user_event(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         let Ok(envelope) = serde_json::from_str::<SpotEnvelope<'_>>(text) else {
