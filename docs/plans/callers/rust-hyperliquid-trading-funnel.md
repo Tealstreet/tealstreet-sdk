@@ -139,8 +139,11 @@ row in a later census can clear one after 30 seconds. A replay after that cleanu
 can repeat the event; callers must not treat it as a second placement or resend.
 The existing browser EngineHost event action reaches handlers.onEvent, and the
 SDK RustEngineExchange.receiveEvent emits engine-event and writes warning/error
-logs with the event fields. No new NX wiring is required. Parent acceptance is
-not rewritten by the child's later lifecycle terminal, and no write is replayed.
+logs with the event fields. A user-visible NX failed-TP/SL display is unverified
+from this SDK mirror. Follow-up owner: NX account/order UI maintainers must
+confirm or wire that display from child_leg.failed; this is not a #2317 blocker.
+Parent acceptance is not rewritten by the child's later lifecycle terminal,
+and no write is replayed.
 
 Two native-construction refusal texts change deliberately under the cutover
 (344b557f068), with InvalidInput and no admitted engine in both cases. A legacy
