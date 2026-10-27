@@ -44,7 +44,7 @@ pub use safe_cex_venue_kraken::sign::hosted as kraken_hosted;
 #[cfg(feature = "asterdex")]
 mod asterdex_setup;
 mod construction;
-#[cfg(feature = "dispatch-signing")]
+#[cfg(feature = "hosted-signing")]
 pub mod hosted_signing;
 #[cfg(feature = "hyperliquid")]
 mod hyperliquid_setup;

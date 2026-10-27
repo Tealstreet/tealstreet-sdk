@@ -83,11 +83,11 @@ trait AnyEngine {
     fn failed(&self) -> bool {
         false
     }
-    #[cfg(feature = "dispatch-signing")]
+    #[cfg(feature = "hosted-signing")]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         None
     }
-    #[cfg(feature = "dispatch-signing")]
+    #[cfg(feature = "hosted-signing")]
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         (now, 0)
     }
@@ -216,11 +216,11 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.address_setup_retired_wire(token, now)
     }
 
-    #[cfg(feature = "dispatch-signing")]
+    #[cfg(feature = "hosted-signing")]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
     }
-    #[cfg(feature = "dispatch-signing")]
+    #[cfg(feature = "hosted-signing")]
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         Engine::signing_clock(self, now)
     }
@@ -760,19 +760,19 @@ pub struct WasmEngine {
     external_signer: bool,
     construction: String,
     inner: Box<dyn AnyEngine>,
-    #[cfg(feature = "dispatch-signing")]
+    #[cfg(feature = "hosted-signing")]
     hosted_identity: Option<(String, safe_cex_engine::signing::Identities)>,
-    #[cfg(feature = "dispatch-signing")]
+    #[cfg(feature = "hosted-signing")]
     hosted_captures:
         safe_cex_engine::signing_capture::Capture<safe_cex_venues::hosted_signing::OutputKind>,
 }
 
-#[cfg(feature = "dispatch-signing")]
+#[cfg(feature = "hosted-signing")]
 fn hosted_error(error: safe_cex_engine::signing::SignError) -> js_sys::Error {
     construction_error(error.venue_error())
 }
 
-#[cfg(feature = "dispatch-signing")]
+#[cfg(feature = "hosted-signing")]
 #[wasm_bindgen]
 impl WasmEngine {
     /// Clock capture only: does not start the venue or emit any action.
@@ -1006,7 +1006,7 @@ impl WasmEngine {
             }
             None
         };
-        #[cfg(feature = "dispatch-signing")]
+        #[cfg(feature = "hosted-signing")]
         let hosted_identity = (dispatch_signing
             && safe_cex_venues::hosted_signing::admitted(venue, &options))
         .then(|| {
@@ -1031,9 +1031,9 @@ impl WasmEngine {
             construction,
             dispatch_signing,
             external_signer,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
         })
     }
@@ -2552,9 +2552,9 @@ mod tests {
         let drains = Rc::new(Cell::new(0));
         let mut engine = WasmEngine {
             dispatch_signing: false,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             external_signer: false,
             construction: "{}".into(),
@@ -2838,9 +2838,9 @@ mod tests {
         let health: serde_json::Value = serde_json::from_str(
             &WasmEngine {
                 dispatch_signing: false,
-                #[cfg(feature = "dispatch-signing")]
+                #[cfg(feature = "hosted-signing")]
                 hosted_identity: None,
-                #[cfg(feature = "dispatch-signing")]
+                #[cfg(feature = "hosted-signing")]
                 hosted_captures: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
@@ -2866,9 +2866,9 @@ mod tests {
         ] {
             let mut engine = WasmEngine {
                 dispatch_signing: false,
-                #[cfg(feature = "dispatch-signing")]
+                #[cfg(feature = "hosted-signing")]
                 hosted_identity: None,
-                #[cfg(feature = "dispatch-signing")]
+                #[cfg(feature = "hosted-signing")]
                 hosted_captures: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
@@ -2891,9 +2891,9 @@ mod tests {
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
             dispatch_signing: false,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             external_signer: false,
             construction: "{}".into(),
@@ -2921,9 +2921,9 @@ mod tests {
     fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
         let mut legacy = WasmEngine {
             dispatch_signing: false,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             external_signer: false,
             construction: "{}".into(),
@@ -2931,9 +2931,9 @@ mod tests {
         };
         let mut bytes = WasmEngine {
             dispatch_signing: false,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
             external_signer: false,
             construction: "{}".into(),
