@@ -667,3 +667,7 @@ fn keys_overlap(a: Key, b: Key) -> bool {
 #[cfg(test)]
 #[path = "classify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "nonce_refusal_tests.rs"]
+mod nonce_refusal_tests;
