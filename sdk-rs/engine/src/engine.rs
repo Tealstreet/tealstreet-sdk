@@ -1795,6 +1795,26 @@ struct IoCore {
     socket_continuation_bytes: usize,
 }
 
+impl IoCore {
+    /// A trusted local seal, read only under the provider that sealed it.
+    fn verified_public_key(
+        &self,
+        slot: CredentialSlot,
+        algorithm: crate::signing::Algorithm,
+    ) -> Result<[u8; 32], crate::signing::SignError> {
+        let identity = match slot {
+            CredentialSlot::Primary => self.identities.primary.as_ref(),
+            CredentialSlot::Secondary => self.identities.secondary.as_ref(),
+        }
+        .ok_or(crate::signing::SignError::MissingKey)?;
+        let installed = self
+            .signer
+            .as_deref()
+            .and_then(|signer| signer.incarnation());
+        identity.verified_public_key(algorithm, installed)
+    }
+}
+
 struct Io<P> {
     core: IoCore,
     /// Managed close, installed by `Engine::new` only for venues that declare
@@ -2007,6 +2027,18 @@ impl<P> Io<P> {
     #[inline]
     fn core_ref(&self) -> CoreIoRef<'_> {
         CoreIoRef { core: &self.core }
+    }
+}
+
+impl<P> Cx<'_, P> {
+    /// The public key trusted local setup sealed for `slot`, read only while
+    /// the provider that sealed it is the one installed.
+    pub fn verified_public_key(
+        &self,
+        slot: CredentialSlot,
+        algorithm: crate::signing::Algorithm,
+    ) -> Result<[u8; 32], crate::signing::SignError> {
+        self.io.core.verified_public_key(slot, algorithm)
     }
 }
 
@@ -3921,6 +3953,15 @@ impl<V: Venue> Engine<V> {
         };
         self.io.core.identities = identities;
         Ok(())
+    }
+    /// The same read `Cx::verified_public_key` makes, for installation controls.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn verified_public_key(
+        &self,
+        slot: CredentialSlot,
+        algorithm: crate::signing::Algorithm,
+    ) -> Result<[u8; 32], crate::signing::SignError> {
+        self.io.core.verified_public_key(slot, algorithm)
     }
     pub fn identities(&self) -> &crate::signing::Identities {
         &self.io.core.identities

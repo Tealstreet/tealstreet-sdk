@@ -30,6 +30,19 @@ class CredentialOnlyBans(unittest.TestCase):
         self.assertEqual(check.violations('crypto/src/signer.rs', text), [])
         self.assertEqual(len(check.violations('registry/src/lib.rs', text)), 1)
 
+    def test_only_trusted_local_setup_seals_a_public_key(self):
+        text = 'fn f(i: &mut Identity) { i.seal_public_key(Algorithm::StarkDigest, [0; 32]); }\n'
+        self.assertEqual(check.violations('crypto/src/signer.rs', text), [])
+        self.assertEqual(len(check.violations('registry/src/paradex_setup.rs', text)), 1)
+        self.assertEqual(len(check.violations('venues/paradex/src/lib.rs', text)), 1)
+
+    def test_only_the_local_provider_presents_an_incarnation(self):
+        text = ('impl Signer for Wrap {\n    fn incarnation(&self) -> Option<&Incarnation> '
+                '{ self.0.incarnation() }\n}\n')
+        self.assertEqual(check.violations('crypto/src/signer.rs', text), [])
+        self.assertEqual(len(check.violations('hosts/wasm/src/lib.rs', text)), 1)
+        self.assertEqual(len(check.violations('venues/paradex/src/lib.rs', text)), 1)
+
     def test_owners_may_use_the_restricted_accessors(self):
         text = 'fn f(i: &mut Identity) { i.set_signing_ref(None); i.validate_credential(); }\n'
         self.assertEqual(check.violations('engine/src/signing.rs', text), [])
