@@ -2,6 +2,7 @@
 //! https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot
 mod support;
 use safe_cex_engine::model::*;
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Query, SocketChannel,
     SocketId, Venue,
@@ -1377,15 +1378,15 @@ fn shared_spot_prices_preserve_direct_private_valuation_cadence_and_raw_holdings
 fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
     let (mut e, _) = ready(true);
     let now = 2000.;
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     e.handle(
         now,
         Event::PollScaleChanged {
             scale: f64::INFINITY,
         },
     );
-    let stale: Vec<_> = e
-        .drain_actions()
+    let stale: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::ClearTimer { timer } => Some(timer),
             _ => None,
@@ -1401,7 +1402,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                 scale: interval / POLL_MS,
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = prepared_now(&mut e).into_iter().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         let timers: Vec<_> = actions
             .iter()
@@ -1418,12 +1419,16 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !prepared_now(&mut e)
+                .into_iter()
+                .any(|a| matches!(a, Action::Http(_)))
+        );
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    let mut pending: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -1443,7 +1448,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: f64::INFINITY,
         },
     );
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     for _ in 0..12 {
         if pending.is_empty() {
             break;
@@ -1461,7 +1466,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
+            pending.extend(prepared_now(&mut e).into_iter().filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
             }));
@@ -1474,8 +1479,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: 10_000. / POLL_MS,
         },
     );
-    let resumed: Vec<_> = e
-        .drain_actions()
+    let resumed: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -1681,7 +1686,7 @@ mod owned_nonpageable {
     fn history_has_owned_incomplete_coverage_even_with_cached_orders_and_error_log_level() {
         let (mut e, _) = placed();
 
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         let before = e.store().orders().to_vec();
         assert!(
             !before.is_empty(),
@@ -1692,7 +1697,10 @@ mod owned_nonpageable {
         for (index, query) in queries().into_iter().enumerate() {
             let command = 100 + index as u32;
             e.handle(5000., Event::Command(Command::Query { command, query }));
-            incomplete(&e.drain_actions().collect::<Vec<_>>(), command);
+            incomplete(
+                &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+                command,
+            );
             assert_eq!(e.store().orders(), before);
             assert_eq!(e.store().balance(), &balance);
         }
@@ -1701,7 +1709,7 @@ mod owned_nonpageable {
     #[test]
     fn public_trade_refusal_is_typed_not_sent_with_original_text_and_no_coverage() {
         let (mut e, _) = placed();
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         e.handle(
             5000.,
             Event::Command(Command::Query {
@@ -1712,7 +1720,7 @@ mod owned_nonpageable {
                 },
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = prepared_now(&mut e).into_iter().collect();
         let [
             Action::Notice(Notice::CommandFailed {
                 command: 200,
@@ -1733,7 +1741,7 @@ mod owned_nonpageable {
     #[test]
     fn lookup_miss_remains_nondefinitive_without_a_history_marker_or_io() {
         let (mut e, _) = placed();
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         e.handle(
             5000.,
             Event::Command(Command::Query {
@@ -1744,7 +1752,7 @@ mod owned_nonpageable {
                 },
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = prepared_now(&mut e).into_iter().collect();
         let [
             Action::Notice(Notice::CommandDone {
                 command: 300,
@@ -1759,7 +1767,7 @@ mod owned_nonpageable {
     #[test]
     fn existing_local_lookup_hit_stays_separate_from_unavailable_history() {
         let (mut e, _) = placed();
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         let cached = e.store().orders()[0].clone();
         let client_order_id = cached
             .client_order_id
@@ -1775,7 +1783,7 @@ mod owned_nonpageable {
                 },
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = prepared_now(&mut e).into_iter().collect();
         let [
             Action::Notice(Notice::CommandDone {
                 command: 400,
