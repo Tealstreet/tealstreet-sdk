@@ -1,6 +1,6 @@
 //! Managed socket boundaries and native work after final subscription handoff.
 use super::*;
-use crate::socket_driver::{CloseCause, ControlWork, Driver, Effect};
+use crate::socket_driver::{ControlWork, Driver, Effect};
 use crate::socket_lifecycle::{
     Admission, Control, ControlPolicy, EncodedBatch, Epoch, FeedId, FeedPolicy, Ingress, Interest,
     LifecycleEvent, MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, SocketError,
@@ -633,6 +633,10 @@ impl<V: Venue> Engine<V> {
                         {
                             cx.io.core.health.count(log_code::WS_CLOSED);
                         }
+                        // Nothing was dialled, so the transport close below must not count.
+                        if reason == RetireReason::RouteRefused {
+                            cx.io.core.sockets.closed(retirement.epoch.socket(), true);
+                        }
                         cx.close_socket_transport(retirement.epoch.socket());
                     }
                     let result = self.socket_native(
@@ -768,17 +772,13 @@ impl<V: Venue> Engine<V> {
                 }
             }
         }
-        let (socket, kind, cause) = match event {
+        let (socket, kind, close_code) = match event {
             Event::WsOpened { socket } => (*socket, Ingress::Open, None),
             Event::WsMessage { socket, .. } | Event::WsBinary { socket, .. } => {
                 (*socket, Ingress::Message, None)
             }
-            Event::WsClosed { socket, code } => {
-                (*socket, Ingress::Close, Some(CloseCause::Code(*code)))
-            }
-            Event::WsRouteExhausted { socket } => {
-                (*socket, Ingress::Close, Some(CloseCause::RouteExhausted))
-            }
+            Event::WsClosed { socket, code } => (*socket, Ingress::Close, Some(*code)),
+            Event::WsRouteExhausted { socket } => (*socket, Ingress::Close, None),
             _ => return false,
         };
         let admission = if kind == Ingress::Message {
@@ -796,8 +796,10 @@ impl<V: Venue> Engine<V> {
             }
             admission
         } else {
-            let result = self.socket_mutate(now, |d, cx| match cause {
-                Some(cause) => d.close(cx, socket, cause),
+            let exhausted = matches!(event, Event::WsRouteExhausted { .. });
+            let result = self.socket_mutate(now, |d, cx| match close_code {
+                _ if exhausted => d.route_exhausted(cx, socket),
+                Some(code) => d.close(cx, socket, code),
                 None => d.ingress(cx, socket, kind),
             });
             self.socket_enqueue(now, result.effects);
@@ -1733,6 +1735,43 @@ mod tests {
         );
         assert_eq!(e.io.core.health.reconnects, 1);
         assert_eq!(e.io.core.health.ws_closed, 1);
+    }
+    #[test]
+    fn route_exhaustion_retires_as_a_refusal_not_a_close() {
+        let (mut e, socket) = engine();
+        e.drain_actions().for_each(drop);
+        e.venue.events.clear();
+        e.handle(1., Event::WsRouteExhausted { socket });
+        assert!(
+            e.venue.events.iter().any(|event| matches!(
+                event,
+                LifecycleEvent::Retired {
+                    reason: RetireReason::RouteRefused,
+                    ..
+                }
+            )),
+            "the venue must see the refusal: {:?}",
+            e.venue.events
+        );
+        assert_eq!(
+            e.io.core.health.ws_closed, 0,
+            "nothing was dialled, so nothing closed"
+        );
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. } | Action::WsConnect { .. })),
+            "no route is left, so the engine must not schedule a reconnect"
+        );
+        e.handle(1., Event::WsRouteExhausted { socket });
+        assert_eq!(
+            e.venue
+                .events
+                .iter()
+                .filter(|event| matches!(event, LifecycleEvent::Retired { .. }))
+                .count(),
+            1,
+            "a stale exhaustion is not admitted twice"
+        );
     }
     #[test]
     fn managed_frames_reset_auth_health_per_event_and_keep_common_epilogue() {

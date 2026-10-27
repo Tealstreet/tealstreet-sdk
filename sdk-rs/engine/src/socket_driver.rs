@@ -37,15 +37,6 @@ pub(crate) enum Effect {
     Reconnect(FeedId),
 }
 
-/// Why the host ended a managed socket.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CloseCause {
-    /// The venue closed it with this code.
-    Code(u16),
-    /// The host ran out of routes; there is no venue close code.
-    RouteExhausted,
-}
-
 pub(crate) struct IngressResult {
     pub admission: Admission,
     pub effects: Vec<Effect>,
@@ -456,18 +447,33 @@ impl Driver {
         self.finish_ingress(cx, admission, ingress, None)
     }
 
+    /// The venue closed the socket with `code`; its declared floor bounds the retry.
     pub(crate) fn close<P>(
         &mut self,
         cx: &mut Cx<'_, P>,
         socket: SocketId,
-        cause: CloseCause,
+        code: u16,
     ) -> IngressResult {
         let admission = self.admit_ingress(cx.now, socket, Ingress::Close);
-        let close_code = match cause {
-            CloseCause::Code(code) => Some(code),
-            CloseCause::RouteExhausted => None,
+        self.finish_ingress(cx, admission, Ingress::Close, Some(code))
+    }
+
+    /// Admitted like a close, but the host dialled nothing: retire as a refusal
+    /// without retry, since no route is left. The feed stays down.
+    pub(crate) fn route_exhausted<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        socket: SocketId,
+    ) -> IngressResult {
+        let admission = self.admit_ingress(cx.now, socket, Ingress::Close);
+        let Admission::Current(epoch) = admission else {
+            return self.finish_ingress(cx, admission, Ingress::Close, None);
         };
-        self.finish_ingress(cx, admission, Ingress::Close, close_code)
+        let effects = self
+            .retire(cx, epoch.feed(), RetireReason::RouteRefused, false)
+            .into_iter()
+            .collect();
+        IngressResult { admission, effects }
     }
 
     /// Fresh lookup and time/expiry check at each ingress boundary. Expiry
@@ -922,7 +928,7 @@ mod tests {
             self.apply(cx, effects);
         }
         fn on_close(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, code: u16) {
-            let result = self.driver.close(cx, socket, CloseCause::Code(code));
+            let result = self.driver.close(cx, socket, code);
             self.apply(cx, result.effects);
         }
         fn on_timer(&mut self, cx: &mut Cx<'_, ()>, timer: TimerId) {

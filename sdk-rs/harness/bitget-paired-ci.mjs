@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { createGithubReader } from './cpu-cohort.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
+import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
 import { BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256, BITGET_MEASUREMENT_FILES, BITGET_CUMULATIVE_ANCHOR,
   assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
   combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
@@ -25,10 +26,11 @@ const write = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2
 
 /** Select from authenticated run/PR/commit APIs, never an input baseline flag.
  * The Git tree is recomputed before measuring, not accepted from the PR. */
-export async function selectBitgetPair({ reader, runId, root, gitRead = (...args) => git(root, ...args) }) {
-  const run = await reader.getRun(runId), jobs = await reader.listJobs(runId);
-  const candidates = jobs.filter(job => job.name === 'Rust / Bitget counterbalanced steady CPU');
-  insist(candidates.length === 1, 'missing/duplicate paired physical producer');
+export async function selectBitgetPair({ reader, runId, root, gitRead = (...args) => git(root, ...args), sleep }) {
+  const { run, selected: candidates } = await relistPhysicalJob(async () =>
+    ({ run: await reader.getRun(runId), jobs: await reader.listJobs(runId) }), 'Rust / Bitget counterbalanced steady CPU', { sleep });
+  insist(candidates.length === 1 && candidates[0].runner_id > 0,
+    `missing/duplicate paired physical producer; candidates ${physicalCandidateRows(candidates)}`);
   const checkoutSha = gitRead('rev-parse', 'HEAD'), checkoutTree = gitRead('rev-parse', 'HEAD^{tree}');
   let pull, landing, mergeTree;
   if (run.event === 'push' && run.head_branch === 'master') {

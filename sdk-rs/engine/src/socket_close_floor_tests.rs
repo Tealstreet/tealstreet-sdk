@@ -191,20 +191,14 @@ fn an_undeclared_close_code_keeps_the_ordinary_backoff() {
     }
 }
 
-/// Retirements that are not a venue close frame keep today's retry: route
-/// exhaustion is a Closed retirement on the ordinary backoff, an idle
-/// timeout retries on the backoff, and a stopped feed never retries. None
-/// takes a floor, not even one declared for the legacy exhaustion code.
+/// Retirements that are not a venue close frame take no floor, not even one
+/// declared for the legacy exhaustion code: an idle timeout retries on the
+/// backoff, route exhaustion is a terminal refusal with no reconnect and no
+/// close count, and a stopped feed never retries.
 #[test]
 fn route_exhaustion_timeouts_and_stops_keep_their_retry() {
-    let mut h = Harness::new(&[(crate::ROUTE_EXHAUSTED_CLOSE, 30_000.), (1013, 30_000.)]);
-    h.open();
-    let socket = h.socket.unwrap();
-    let delay = h.retire_with(Event::WsRouteExhausted { socket });
-    assert_backoff(0, delay);
-    assert_eq!(h.last_retirement(), (RetireReason::Closed, None));
-    h.reconnect(delay);
-
+    const FLOORS: &[(u16, f64)] = &[(crate::ROUTE_EXHAUSTED_CLOSE, 30_000.), (1013, 30_000.)];
+    let mut h = Harness::new(FLOORS);
     h.open();
     let opened = h.now;
     let before: Vec<TimerId> = h.timers.iter().map(|(t, _)| *t).collect();
@@ -220,9 +214,29 @@ fn route_exhaustion_timeouts_and_stops_keep_their_retry() {
         .map(|(_, at)| at - h.now)
         .collect();
     assert_eq!(retry.len(), 1, "one retry timer: {retry:?}");
-    assert_backoff(1, retry[0]);
+    assert_backoff(0, retry[0]);
     h.reconnect(retry[0]);
 
+    h.open();
+    let socket = h.socket.unwrap();
+    let closed = h.engine.io.core.health.ws_closed;
+    let before: Vec<TimerId> = h.timers.iter().map(|(t, _)| *t).collect();
+    h.event(Event::WsRouteExhausted { socket });
+    assert_eq!(h.last_retirement(), (RetireReason::RouteRefused, None));
+    assert!(
+        h.timers.iter().all(|(t, _)| before.contains(t)),
+        "an exhausted route arms no retry: {:?}",
+        h.timers
+    );
+    assert_eq!(h.engine.io.core.health.ws_closed, closed);
+    h.advance(h.now + 600_000.);
+    assert_eq!(
+        h.socket,
+        Some(socket),
+        "an exhausted route never reconnects"
+    );
+
+    let mut h = Harness::new(FLOORS);
     h.open();
     let feed = h.engine.venue.feed.unwrap();
     let mut cx = Cx {
@@ -282,8 +296,8 @@ fn a_floor_above_the_backoff_cap_still_holds() {
     assert_eq!(h.close(4000), 45_000.);
 }
 
-/// Only a venue close frame reports its code; every other retirement and the
-/// host's route exhaustion report none.
+/// Only a venue close frame reports its code; the host's route exhaustion
+/// reports none.
 #[test]
 fn retirement_reports_the_close_code_only_for_a_close_frame() {
     let mut h = Harness::new(&[]);
@@ -293,8 +307,8 @@ fn retirement_reports_the_close_code_only_for_a_close_frame() {
     h.reconnect(delay);
     h.open();
     let socket = h.socket.unwrap();
-    h.retire_with(Event::WsRouteExhausted { socket });
-    assert_eq!(h.last_retirement(), (RetireReason::Closed, None));
+    h.event(Event::WsRouteExhausted { socket });
+    assert_eq!(h.last_retirement(), (RetireReason::RouteRefused, None));
 }
 
 /// Malformed floors refuse the feed before it spends anything.
