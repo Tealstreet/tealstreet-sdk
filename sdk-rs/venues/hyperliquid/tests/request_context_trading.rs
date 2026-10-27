@@ -1210,7 +1210,7 @@ fn a_deferred_attachment_never_hides_another_child_failure() {
             orders[0].take_profit = Some(120.);
             let actions = command(&mut e, NOW, c);
             let request = native_release(&mut e, &actions);
-            let mut children = vec![json!({"error":child}), json!("waitingForFill")];
+            let mut children = [json!({"error":child}), json!("waitingForFill")];
             if deferred_first {
                 children.reverse();
             }
