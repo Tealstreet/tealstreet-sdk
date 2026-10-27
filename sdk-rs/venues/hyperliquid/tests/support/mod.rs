@@ -252,6 +252,7 @@ pub fn private_engine(mut options: Options, scalar: String, spot: bool) -> Engin
 
 /// Native packet oracle only: uses real Prepare/Bind/Claim, without claiming host resource cleanup.
 /// A prepared route can wait across calls while the engine holds its Bind for domain pacing.
+/// Only Stale may reprepare; every other Claim refusal fails the calling test.
 pub fn prepared_now<V: safe_cex_engine::Venue>(engine: &mut Engine<V>) -> Vec<Action> {
     use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
     let now = safe_cex_engine::test_support::dispatch_now(engine);
@@ -288,7 +289,18 @@ pub fn prepared_now<V: safe_cex_engine::Venue>(engine: &mut Engine<V>) -> Vec<Ac
                     Ok(Claim::WaitUntil(_)) => {
                         panic!("use the explicit held-Claim oracle for a host wait")
                     }
-                    Err(_) => {}
+                    Err(safe_cex_engine::request_context::Error::Stale) => {
+                        let repair: Vec<_> = engine.drain_actions().collect();
+                        assert!(repair.iter().any(|action| matches!(
+                            action,
+                            Action::ManagedHttp(action)
+                                if matches!(action.as_ref(), HttpAction::Prepare { preparation, .. }
+                                    if preparation.attempt().request == request.id
+                                        && engine.http_preparation_pending(*preparation))
+                        )), "stale Claim must emit its replacement Prepare");
+                        queue.extend(repair);
+                    }
+                    Err(error) => panic!("unexpected native packet Claim refusal: {error:?}"),
                 },
                 HttpAction::Cancel { .. } => {}
                 HttpAction::BindGroup { .. } => panic!("HL does not admit an atomic domain group"),
