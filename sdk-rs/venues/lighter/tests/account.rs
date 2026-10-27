@@ -22,7 +22,7 @@ fn account_bootstrap_resolves_identity_and_separates_settings() {
 }
 #[test]
 fn private_stream_subscribes_to_base_and_authenticated_orders() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let sent = e
         .drain_actions()
@@ -42,7 +42,7 @@ fn private_stream_subscribes_to_base_and_authenticated_orders() {
 }
 #[test]
 fn stale_account_snapshot_preserves_newer_position_close() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let held = requests(&mut e);
     message(
@@ -84,7 +84,7 @@ fn a_zero_size_stream_row_closes_both_long_and_short_net_positions() {
 }
 #[test]
 fn stale_order_snapshot_cannot_resurrect_a_stream_cancel() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let held = requests(&mut e);
     message(
@@ -154,7 +154,7 @@ fn reconnect_history_is_not_a_new_execution() {
 }
 #[test]
 fn failed_scoped_orders_keep_every_last_known_good_order() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let held = requests(&mut e);
     let all = held
@@ -195,7 +195,7 @@ fn failed_scoped_orders_keep_every_last_known_good_order() {
 }
 #[test]
 fn failed_account_reads_preserve_balance_positions_and_settings() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     let balance = e.store().balance().clone();
     let positions = e.store().positions().to_vec();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
@@ -253,7 +253,7 @@ fn successful_but_missing_or_malformed_private_lists_never_clear_state() {
         r#"{"code":"500","orders":[]}"#,
         r#"{"code":{},"orders":[]}"#,
     ] {
-        let (mut e, s) = ready();
+        let (mut e, s) = ready_unopened();
         e.handle(NOW + 1.0, Event::WsOpened { socket: s });
         let r = requests(&mut e)
             .into_iter()
@@ -269,7 +269,7 @@ fn wrong_principal_or_incomplete_account_snapshots_preserve_state() {
         r#"{"code":200,"accounts":[{"index":9,"total_asset_value":"0","available_balance":"0","positions":[]}]}"#,
         r#"{"code":200,"accounts":[{"index":718895}]}"#,
     ] {
-        let (mut e, s) = ready();
+        let (mut e, s) = ready_unopened();
         e.handle(NOW + 1.0, Event::WsOpened { socket: s });
         let r = requests(&mut e)
             .into_iter()
@@ -444,7 +444,7 @@ fn transaction_time_microseconds_prevents_late_position_and_order_regression() {
 }
 #[test]
 fn active_order_stream_does_not_starve_the_serialized_rest_balance() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let snapshot = requests(&mut e)
         .into_iter()
@@ -561,7 +561,7 @@ fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
 #[test]
 fn unmapped_owned_position_is_skipped_and_holds_balance_but_zero_rows_remain_legitimate() {
     for quantity in ["2", "0"] {
-        let (mut e, socket) = ready();
+        let (mut e, socket) = ready_unopened();
         let positions = e.store().positions().to_vec();
         let balance = e.store().balance().clone();
         e.handle(NOW + 1., Event::WsOpened { socket });
@@ -595,7 +595,7 @@ fn unmapped_owned_position_is_skipped_and_holds_balance_but_zero_rows_remain_leg
 #[test]
 fn unmapped_working_order_is_skipped_with_a_warning_and_terminal_unknown_rows_are_ignored() {
     for status in ["open", "canceled", "filled"] {
-        let (mut e, socket) = ready();
+        let (mut e, socket) = ready_unopened();
         let previous = e.store().orders().to_vec();
         e.handle(NOW + 1., Event::WsOpened { socket });
         let request = requests(&mut e)
@@ -1060,7 +1060,7 @@ fn a_socket_drop_after_pings_without_payloads_backfills_from_the_last_payload() 
 }
 #[test]
 fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
-    let (mut e, s) = ready();
+    let (mut e, mut s) = ready();
     let order = |id: u32, market: u32, kind: &str, price: &str| {
         format!(
             r#"{{"order_index":"{id}","market_id":{market},"status":"open","type":"{kind}","time_in_force":1,"is_ask":false,"initial_base_amount":"2","filled_base_amount":"0","remaining_base_amount":"2","price":"{price}"}}"#
@@ -1071,17 +1071,19 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
             r#"{{"market_id":{market},"position":"{size}","sign":1,"avg_entry_price":"100","unrealized_pnl":"0","initial_margin_fraction":1000,"margin_mode":0,"liquidation_price":"50"}}"#
         )
     };
-    let resync = |e: &mut safe_cex_engine::Engine<_>,
-                  now: f64,
-                  orders: &[String],
-                  positions: &[String]| {
-        e.handle(now, Event::WsOpened { socket: s });
+    // Each resync is a real reconnect; replies land when its socket opens.
+    let mut resync = |e: &mut safe_cex_engine::Engine<_>,
+                      now: f64,
+                      orders: &[String],
+                      positions: &[String]| {
+        let (socket, now) = reopen(e, s, now);
+        s = socket;
         let orders = format!(r#"{{"code":200,"orders":[{}]}}"#, orders.join(","));
         let account = format!(
             r#"{{"code":200,"accounts":[{{"index":718895,"collateral":"1000","total_asset_value":"1000","available_balance":"900","positions":[{}]}}]}}"#,
             positions.join(",")
         );
-        for r in requests(e) {
+        for r in requests_at(e, now) {
             let body = if r.url.contains("ActiveOrders") {
                 &orders
             } else {
@@ -1114,7 +1116,7 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     assert_eq!(e.store().positions().len(), 2);
     let logs = resync(
         &mut e,
-        NOW + 2.0,
+        NOW + 60_000.0,
         &[
             order(42, 1, "limit", "91"),
             order(43, 2, "limit", "bad"),
@@ -1153,7 +1155,7 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     );
     resync(
         &mut e,
-        NOW + 3.0,
+        NOW + 120_000.0,
         &[order(42, 1, "limit", "91")],
         &[position(1, "3")],
     );
@@ -1163,7 +1165,7 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
 }
 #[test]
 fn unknown_snapshot_order_type_is_never_invented_as_a_limit() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let r = requests(&mut e)
         .into_iter()
@@ -1187,7 +1189,7 @@ fn spot_rows_in_private_snapshots_are_skipped_silently_and_perp_rows_commit() {
         r#""order_book_details":["#,
         r#""order_book_details":[{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1"},"#,
     );
-    let (mut e, s) = ready_with_meta(options(), &meta);
+    let (mut e, s) = ready_unopened_meta(options(), &meta);
     assert!(e.store().market("ETH/USDC").is_none());
     e.handle(NOW + 1.0, Event::WsOpened { socket: s });
     let spot_order = r#"{"order_index":"77","market_id":2048,"status":"open","type":"limit","time_in_force":1,"is_ask":false,"initial_base_amount":"1","remaining_base_amount":"1","price":"10"}"#;
@@ -1264,14 +1266,14 @@ fn twap_and_liquidation_orders_map_alike_from_the_stream_and_rest() {
             Some(OrderType::Limit),
             "{kind}"
         );
-        e.handle(NOW + 2.0, Event::WsOpened { socket: s });
-        let r = requests(&mut e)
+        let (_, opened) = reopen(&mut e, s, NOW + 2.0);
+        let r = requests_at(&mut e, opened)
             .into_iter()
             .find(|r| r.url.contains("ActiveOrders"))
             .unwrap();
         reply_at(
             &mut e,
-            NOW + 3.0,
+            opened,
             &r,
             200,
             &format!(
@@ -1291,7 +1293,7 @@ fn twap_and_liquidation_orders_map_alike_from_the_stream_and_rest() {
 }
 #[test]
 fn skipped_position_row_with_only_a_market_id_keeps_the_stored_copy() {
-    let (mut e, socket) = ready();
+    let (mut e, socket) = ready_unopened();
     let mut market = e.store().market("ETH").unwrap().clone();
     market.id = "999".into();
     market.symbol = "SOL".into();
@@ -1330,7 +1332,7 @@ fn skipped_position_rows_keep_the_balance_updating() {
             None,
         ),
     ] {
-        let (mut e, socket) = ready();
+        let (mut e, socket) = ready_unopened();
         assert_eq!(e.store().balance().free, 900.0);
         e.handle(NOW + 1., Event::WsOpened { socket });
         let request = requests(&mut e)

@@ -7,9 +7,16 @@ use serde_json::{Value, json};
 use support::*;
 
 fn ready_unattributed() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
+    ready_with(unattributed())
+}
+/// The private socket's first open is the test's own resync.
+fn unopened_unattributed() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
+    ready_unopened_meta(unattributed(), META)
+}
+fn unattributed() -> Options {
     let mut options = options();
     options.testnet = true;
-    ready_with(options)
+    options
 }
 fn http(e: &mut Engine<Lighter>, path: &str) -> HttpRequest {
     let actions = safe_cex_engine::test_support::prepared_actions(e, NOW);
@@ -71,7 +78,11 @@ fn position_fraction_reads_percent_strings_and_tick_integers_on_rest_and_ws() {
         (json!(20.0), 5.0),
     ] {
         for websocket in [false, true] {
-            let (mut e, socket) = ready_unattributed();
+            let (mut e, socket) = if websocket {
+                ready_unattributed()
+            } else {
+                unopened_unattributed()
+            };
             if websocket {
                 message(
                     &mut e,
@@ -184,7 +195,7 @@ fn price_amend_recreates_only_unfilled_quantity_and_explicit_size_stays_requeste
 #[test]
 fn invalid_leverage_bounds_reject_setting_write_and_preserve_account_state() {
     for (min, max) in [(30.0, 20.0), (f64::NAN, 20.0), (1.0, 0.0)] {
-        let (mut e, socket) = ready_unattributed();
+        let (mut e, socket) = unopened_unattributed();
         let before_positions = e.store().positions().to_vec();
         let before_setting = e.store().setting("ETH").unwrap();
         e.store_mut().update_markets(|market| {

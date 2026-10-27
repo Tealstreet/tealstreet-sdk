@@ -108,13 +108,15 @@ fn flapping_private_socket_backs_off_although_each_attempt_opens() {
     }
 }
 
+// Managed sockets do not expose close codes, so 1013 no longer floors the
+// retry at 30 s; it takes the ordinary jittered backoff like any other close.
 #[test]
-fn try_again_later_close_waits_thirty_seconds() {
+fn try_again_later_close_takes_the_managed_backoff() {
     let mut rig = Rig::new();
-    assert_eq!(rig.close_and_retry_delay(1013), 30_000.0);
+    let delay = rig.close_and_retry_delay(1013);
+    assert!((750.0..=1_000.0).contains(&delay), "{delay}");
     let old = rig.socket;
-    assert!(connected(&rig.advance(NOW + 29_999.0)).is_none());
-    rig.reconnect(1.0);
+    rig.reconnect(delay);
     assert_ne!(rig.socket, old);
 }
 
