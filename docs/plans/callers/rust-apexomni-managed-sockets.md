@@ -75,10 +75,10 @@ native heal wake instead of the newly visible socket watchdog. All 269 existing
 assertion invocations and 100 raw literals in those two files remain unchanged;
 financial row bodies and their observation clocks are preserved.
 
-On source head fdc076f3789, seven scoped targets pass: 144 tests and two existing
-ignored remote-zkLink controls. This is local scoped evidence, not a full-family
-or current-tip CI claim. Current composed strict/fmt/bans, source review and PR
-family/replay qualification remain required before exact-tree auditor GO.
+On source head 80c50d39146, seven scoped targets pass: 145 tests and two existing
+ignored remote-zkLink controls. These results cover those seven local targets.
+Current composed strict/fmt/bans, source review and PR family/replay
+qualification remain required before exact-tree auditor GO.
 
 Public batches stop at both the native 50-topic maximum and 65,536 serialized
 bytes. Full projected demand is preflighted through the same encoder before any
