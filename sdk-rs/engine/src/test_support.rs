@@ -17,6 +17,9 @@ impl<V: Venue, F: FnMut(&mut V, &mut Cx<'_, V::Pending>)> ProbeVenue<V, F> {
 
 impl<V: Venue, F: FnMut(&mut V, &mut Cx<'_, V::Pending>)> Venue for ProbeVenue<V, F> {
     type Pending = V::Pending;
+    fn managed_sockets() -> bool {
+        V::managed_sockets()
+    }
     fn http_mutation_barriers() -> bool {
         V::http_mutation_barriers()
     }
