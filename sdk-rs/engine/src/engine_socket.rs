@@ -632,6 +632,10 @@ impl<V: Venue> Engine<V> {
                         {
                             cx.io.core.health.count(log_code::WS_CLOSED);
                         }
+                        // Nothing was dialled, so the transport close below must not count.
+                        if reason == RetireReason::RouteRefused {
+                            cx.io.core.sockets.closed(retirement.epoch.socket(), true);
+                        }
                         cx.close_socket_transport(retirement.epoch.socket());
                     }
                     let result = self.socket_native(
@@ -790,7 +794,14 @@ impl<V: Venue> Engine<V> {
             }
             admission
         } else {
-            let result = self.socket_mutate(now, |d, cx| d.ingress(cx, socket, kind));
+            let exhausted = matches!(event, Event::WsRouteExhausted { .. });
+            let result = self.socket_mutate(now, |d, cx| {
+                if exhausted {
+                    d.route_exhausted(cx, socket)
+                } else {
+                    d.ingress(cx, socket, kind)
+                }
+            });
             self.socket_enqueue(now, result.effects);
             result.admission
         };
@@ -1723,6 +1734,43 @@ mod tests {
         );
         assert_eq!(e.io.core.health.reconnects, 1);
         assert_eq!(e.io.core.health.ws_closed, 1);
+    }
+    #[test]
+    fn route_exhaustion_retires_as_a_refusal_not_a_close() {
+        let (mut e, socket) = engine();
+        e.drain_actions().for_each(drop);
+        e.venue.events.clear();
+        e.handle(1., Event::WsRouteExhausted { socket });
+        assert!(
+            e.venue.events.iter().any(|event| matches!(
+                event,
+                LifecycleEvent::Retired {
+                    reason: RetireReason::RouteRefused,
+                    ..
+                }
+            )),
+            "the venue must see the refusal: {:?}",
+            e.venue.events
+        );
+        assert_eq!(
+            e.io.core.health.ws_closed, 0,
+            "nothing was dialled, so nothing closed"
+        );
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. } | Action::WsConnect { .. })),
+            "no route is left, so the engine must not schedule a reconnect"
+        );
+        e.handle(1., Event::WsRouteExhausted { socket });
+        assert_eq!(
+            e.venue
+                .events
+                .iter()
+                .filter(|event| matches!(event, LifecycleEvent::Retired { .. }))
+                .count(),
+            1,
+            "a stale exhaustion is not admitted twice"
+        );
     }
     #[test]
     fn managed_frames_reset_auth_health_per_event_and_keep_common_epilogue() {
