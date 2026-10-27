@@ -1,11 +1,14 @@
 # Build the Rust-only beta bundle's wasm families from one exact SDK commit and
 # publish them as an immutable GitHub Release that tealstreet-next pins file by
-# file (scripts/rust-beta-wasm.pin.json). Manual only: the first publication
-# follows Sam's SDK master merge, on the overseer's instruction.
+# file (scripts/rust-beta-wasm.pin.json). Every master push touching sdk-rs/
+# publishes, so tealstreet-next's pin workflow finds a release for each import.
 # Design: docs/plans/RUST_BETA_BUNDLE.md (Build and CI).
 name: Rust beta wasm release
 
 on:
+  push:
+    branches: [master]
+    paths: ['sdk-rs/**']
   workflow_dispatch:
     inputs:
       sdk_sha:
@@ -30,24 +33,30 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       families: ${{ steps.roster.outputs.families }}
+      sdk_sha: ${{ steps.source.outputs.sdk_sha }}
+      tag: ${{ steps.source.outputs.tag }}
     steps:
       - name: Refuse anything but an exact commit and a tag that names it
+        id: source
         env:
-          SDK_SHA: ${{ inputs.sdk_sha }}
-          TAG: ${{ inputs.tag }}
+          SDK_SHA: ${{ inputs.sdk_sha || github.sha }}
+          TAG: ${{ inputs.tag || '' }}
         run: |
+          [ -n "$TAG" ] || TAG="rust-beta-wasm-${SDK_SHA:0:11}"
           [[ "$SDK_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sdk_sha must be a full commit SHA"; exit 1; }
           [[ "$TAG" =~ ^rust-beta-wasm-[0-9a-f]{11}$ ]] || { echo "tag must be rust-beta-wasm-<11 hex>"; exit 1; }
           [[ "$TAG" == "rust-beta-wasm-${SDK_SHA:0:11}" ]] || { echo "tag must name sdk_sha"; exit 1; }
+          echo "sdk_sha=$SDK_SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.sdk_sha }}
+          ref: ${{ steps.source.outputs.sdk_sha }}
           fetch-depth: 0
       # Before any SDK script runs: only reviewed, landed source is built or published.
       # Publication follows Sam's SDK master merge, so master is the only protected line.
       - name: Require sdk_sha on origin/master
         env:
-          SDK_SHA: ${{ inputs.sdk_sha }}
+          SDK_SHA: ${{ steps.source.outputs.sdk_sha }}
         run: |
           git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
           git merge-base --is-ancestor "$SDK_SHA" origin/master || {
@@ -60,7 +69,7 @@ jobs:
       - name: Require a fresh tag and release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
+        run: node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ steps.source.outputs.tag }}' '${{ steps.source.outputs.sdk_sha }}'
       - name: Read the 15 families from beta-venues.mjs
         id: roster
         run: |
@@ -84,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.sdk_sha }}
+          ref: ${{ needs.roster.outputs.sdk_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -137,7 +146,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.sdk_sha }}
+          ref: ${{ needs.roster.outputs.sdk_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -148,8 +157,8 @@ jobs:
           merge-multiple: true
       - name: Write the pin manifest tealstreet-next commits
         env:
-          SDK_SHA: ${{ inputs.sdk_sha }}
-          TAG: ${{ inputs.tag }}
+          SDK_SHA: ${{ needs.roster.outputs.sdk_sha }}
+          TAG: ${{ needs.roster.outputs.tag }}
           FAMILIES: ${{ needs.roster.outputs.families }}
           SOURCE: ${{ github.workspace }}
         working-directory: ${{ runner.temp }}/assets
@@ -188,13 +197,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
-          node sdk-rs/harness/beta-wasm-release-guard.mjs create "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
+          node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ needs.roster.outputs.tag }}' '${{ needs.roster.outputs.sdk_sha }}'
+          node sdk-rs/harness/beta-wasm-release-guard.mjs create "$GITHUB_REPOSITORY" '${{ needs.roster.outputs.tag }}' '${{ needs.roster.outputs.sdk_sha }}'
       - name: Publish the release on the verified tag
         env:
           GH_TOKEN: ${{ github.token }}
-          SDK_SHA: ${{ inputs.sdk_sha }}
-          TAG: ${{ inputs.tag }}
+          SDK_SHA: ${{ needs.roster.outputs.sdk_sha }}
+          TAG: ${{ needs.roster.outputs.tag }}
         working-directory: ${{ runner.temp }}/assets
         run: |
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \

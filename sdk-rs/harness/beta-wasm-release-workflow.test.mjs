@@ -1,6 +1,7 @@
-// Lint-level pins on .github/workflows/rust-beta-wasm-release.yml: it can only be
-// dispatched, it proves the source is on origin/master before any SDK script runs,
-// and nothing builds or publishes until that proof (and the roster) succeeded.
+// Lint-level pins on .github/workflows/rust-beta-wasm-release.yml: it runs only on
+// master pushes touching sdk-rs/ or by dispatch, it proves the source is on
+// origin/master before any SDK script runs, and nothing builds or publishes until
+// that proof (and the roster) succeeded.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -16,13 +17,21 @@ const job = (name) => {
   return next < 0 ? rest : rest.slice(0, next + 1);
 };
 
-test('the workflow can only be dispatched by hand', () => {
+test('the workflow runs only on master pushes touching sdk-rs/ or by hand', () => {
   const on = workflow.slice(workflow.indexOf('\non:\n'), workflow.indexOf('\npermissions:\n'));
-  assert.match(on, /^\non:\n {2}workflow_dispatch:\n/);
-  for (const trigger of ['push', 'pull_request', 'pull_request_target', 'schedule', 'workflow_run', 'release']) {
+  assert.match(on, /^\non:\n {2}push:\n {4}branches: \[master\]\n {4}paths: \['sdk-rs\/\*\*'\]\n {2}workflow_dispatch:\n/);
+  for (const trigger of ['pull_request', 'pull_request_target', 'schedule', 'workflow_run', 'release']) {
     assert.doesNotMatch(on, new RegExp(`\\n {2}${trigger}:`), trigger);
   }
   assert.match(workflow, /\npermissions:\n {2}contents: read\n/);
+});
+
+test('a push builds its own commit under the tag that names it', () => {
+  const roster = job('roster');
+  assert.match(roster, /SDK_SHA: \$\{\{ inputs\.sdk_sha \|\| github\.sha \}\}/);
+  assert.match(roster, /\[ -n "\$TAG" \] \|\| TAG="rust-beta-wasm-\$\{SDK_SHA:0:11\}"/);
+  assert.ok(roster.indexOf('tag must name sdk_sha') < roster.indexOf('echo "sdk_sha=$SDK_SHA"'), 'outputs only after validation');
+  for (const name of ['build', 'release']) assert.doesNotMatch(job(name), /\$\{\{ inputs\./, `${name} reads only roster outputs`);
 });
 
 test('the roster job proves sdk_sha is on origin/master before any SDK script runs', () => {
