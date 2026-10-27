@@ -168,3 +168,30 @@ fn a_jwt_that_is_not_header_safe_never_reaches_the_wire() {
             .any(|r| r.headers.iter().any(|(_, v)| v.contains("X-Injected")))
     );
 }
+
+#[test]
+fn a_parked_snapshot_read_ends_unsent_on_an_auth_refusal_and_the_cycle_rests() {
+    let mut h = private();
+    let poll = h.timer_at(h.now + 10_000.);
+    // The poll fires past the JWT refresh point: positions parks behind `/auth`.
+    h.now += 190_000.;
+    h.e.handle(h.now, Event::TimerFired { timer: poll });
+    h.collect();
+    assert!(!h.pending.iter().any(|r| r.url.ends_with("/positions")));
+    let from = h.actions.len();
+    let auth = h.take("/auth/");
+    h.respond(
+        auth,
+        401,
+        r#"{"error":"INVALID_SIGNATURE","message":"unknown subkey"}"#,
+    );
+    // Nothing private is sent after the refusal, and the chain does not hang:
+    // the cycle ends and waits for its next poll.
+    assert!(h.pending.is_empty(), "{:?}", h.pending);
+    assert!(
+        h.actions[from..]
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 10_000.)),
+        "the account cycle re-arms its poll"
+    );
+}

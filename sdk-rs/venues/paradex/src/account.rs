@@ -693,8 +693,15 @@ impl Account {
         self.token = None;
         self.refresh_at = 0.;
         if let Some(session) = self.session.take() {
-            // Fails every unreleased read bound to it NotSent.
-            let _ = cx.retire_session(&session);
+            // Fails every unreleased read bound to it NotSent. If the engine
+            // refuses, those reads still end at their own 20 s windows.
+            if cx.retire_session(&session).is_err() {
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    "Paradex could not retire its private session",
+                );
+            }
         }
         for queued in self.queue.drain(..) {
             self.failed.push((queued.pending, auth_rejected_error()));
@@ -1395,7 +1402,29 @@ impl Account {
             _ => {}
         }
     }
+    /// A snapshot read is applied first and its Context retired after, so the
+    /// published rows are those of a live read.
     pub fn on_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        let context = request.read_context().cloned();
+        if let Some(context) = &context
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            // A stale delivery belongs to a read that already ended.
+            let _ = cx.finish_http_context(context);
+            return;
+        }
+        self.apply_response(cx, request, response);
+        if let Some(context) = context {
+            // Already retired when the response failed through `on_failed`.
+            let _ = cx.finish_http_context(&context);
+        }
+    }
+    fn apply_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
@@ -1406,14 +1435,6 @@ impl Account {
         {
             let _ = cx.finish_http_context(context);
             return;
-        }
-        if let Some(context) = request.read_context() {
-            // A stale delivery belongs to a read that already ended.
-            let live = cx.validate_background_read_http_delivery(context).is_ok();
-            let _ = cx.finish_http_context(context);
-            if !live {
-                return;
-            }
         }
         if matches!(request, Request::Auth { .. }) && matches!(response.status, 401 | 403) {
             self.auth_rejected(cx);
@@ -1479,6 +1500,10 @@ impl Account {
                     self.auth_failed(cx, "Paradex authentication returned no JWT");
                     return;
                 };
+                if SessionHeaders::bearer(&token).is_err() {
+                    self.auth_failed(cx, "Paradex authentication returned an invalid JWT");
+                    return;
+                }
                 self.auth_in_flight = false;
                 if cx.now >= started + 300_000. {
                     self.token = None;
@@ -1490,8 +1515,10 @@ impl Account {
                 self.bearer_revision += 1;
                 self.refresh_at = started + AUTH_REFRESH_MS;
                 if let Some(session) = &self.session {
-                    // Wakes reads parked for this JWT; none waits through `session_wait`.
-                    drop(cx.session_ready(session));
+                    // Wakes reads parked for this JWT. Paradex never parks a
+                    // continuation through `session_wait`, so no waiter comes back.
+                    let waiters = cx.session_ready(session);
+                    debug_assert!(waiters.is_empty(), "Paradex has no session waiters");
                 }
                 while let Some(request) = self.queue.pop_front() {
                     self.dispatch(cx, request);
