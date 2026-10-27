@@ -31,13 +31,6 @@
     "934213ca9deb3f5105b2bec39197e680abd61a676093fdde84c9a0a8ac5be8e8": 1,
     "98824716f4df3bc3cd73aee7c1d7a31ca57a6f1791647a6539ee28074203b8b6": 1
   },
-  "venues/blofin/src/account.rs": {
-    "ecaa072182e97dfa7cd88a46aa5c1e61f416f3fbd9726b4ebf66a1387093df05": 1
-  },
-  "venues/blofin/src/lib.rs": {
-    "23b3e9939bcd241c677784173074726099fd82f1db03f61be1253da68284b203": 1,
-    "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2
-  },
   "venues/coinbase/src/account.rs": {
     "80d6da32d1ff894feb349435b11b1d16783adf7f241e52f37faea1214194f2e0": 1
   },
