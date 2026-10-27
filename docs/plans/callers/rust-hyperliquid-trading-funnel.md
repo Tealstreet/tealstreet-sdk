@@ -54,8 +54,12 @@ It adds no key, provider operation or signing algorithm to a request.
 
 The managed journal replaces three legacy projections explicitly. An HTTP
 401/403/429 without proven native refusal evidence is Unknown, without replay.
-A pending placement row without an oid is Unknown and reconciled rather than a
-successful empty result. Unlisted per-row errors are Unknown; a complete batch
+Only a waitingForFill attachment of an accepted parent folds into that parent
+using its real oid; independent native child oids remain real result IDs. A
+standalone zero-size, reduce-only positionTpsl is declared Setting before issue:
+waitingForTrigger succeeds with an empty ID result, without inventing a handle.
+Ordinary/fixed-size or unmatched ID-less placements remain Unknown and reconcile.
+No Spot contract is widened. Unlisted per-row errors are Unknown; a complete batch
 with accepted rows plus the documented PerpMargin refusal has structured IDs
 and no execution-uncertainty label (KnownPartial, outcome None). The literal
 `Insufficient margin to place order.` is the cited proof; generic text is not.
@@ -112,3 +116,35 @@ publicMode.requested when present, otherwise publicDataOnly, matching Lighter
 setup rather than inferring eligibility from missing provider references. Native setup still consumes and drops raw input
 before surfacing that fixed Unsupported/NotSent error; public-only intent keeps
 its existing setup path. This adds no hosted capability.
+
+Deferred acceptance is a deliberate correction of this PR's earlier conservative
+Unknown projection, matching the unchanged TS replay oracle. The command/wire
+shape freezes eligibility before issue; response rows cannot relabel a Place as
+a Setting. Physical row count and parent kind are validated before logical
+projection. A cited child error keeps KnownPartial and its real parent ID; an
+unlisted child error is PartialUnknown and fences continuation. Accepted
+full-position settings remain effective across a later refusal, even with no IDs.
+This also covers an amend's confirmed full-position replacement: its preissued
+Setting succeeds with the replacement cloid and no fabricated native order ID.
+
+A protective child that terminates before first appearing in the active store
+emits the existing child_leg.failed event once, correlated by symbol, native oid,
+clientOrderId and native status; already-stored terminal removal is unchanged.
+The existing browser EngineHost event action reaches handlers.onEvent, and the
+SDK RustEngineExchange.receiveEvent emits engine-event and writes warning/error
+logs with the event fields. No new NX wiring is required. Parent acceptance is
+not rewritten by the child's later lifecycle terminal, and no write is replayed.
+
+Two native-construction refusal texts change deliberately under the cutover
+(344b557f068), with InvalidInput and no admitted engine in both cases. A legacy
+HLSpot remoteSigning:true input with key:"" and invalid secret:"s" now fails
+trusted scalar setup as "Invalid Hyperliquid local signer setup", before the
+old generic "Rust engine private accounts require a local API key and secret;
+remote signing is unsupported" guard. Providerless injected HL/HLSpot references
+now fail as "Hyperliquid requires its primary signing provider", rather than
+"Injected signing is not supported for this venue yet". Native callers matching
+those exact legacy texts must use the typed InvalidInput category or the new
+fixed text; SDK beta hosted refusal remains Unsupported/NotSent. R1 corrections
+d179009c0ce and 7ccda342f32 separately put payloadSigner refusal ahead of scalar
+decoding and use explicit public intent before provider installation; they do
+not enable or infer an injected provider from opaque refs.

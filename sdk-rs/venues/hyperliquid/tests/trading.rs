@@ -145,7 +145,7 @@ fn bybit_controls_reject_the_whole_batch_before_any_write() {
 }
 
 #[test]
-fn full_position_stop_without_oid_is_unknown_and_reconciled() {
+fn full_position_stop_without_oid_is_an_accepted_setting() {
     let (mut e, _) = ready("disabled");
     e.handle(2000.0,Event::Command(Command::PlaceOrders{command:1,orders:vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"stop_market","side":"sell","price":80,"amount":2,"reduceOnly":true,"clientOrderId":"{CLOID}"}}"#))]}));
     let r = write(&mut e);
@@ -160,7 +160,13 @@ fn full_position_stop_without_oid_is_unknown_and_reconciled() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandDone { command: 1, result }) if result == "[]")));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     assert!(
         !actions
             .iter()
@@ -256,9 +262,25 @@ fn amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only() {
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
-    let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert_eq!(error.partial.unwrap().order_ids, ["9"]);
+    assert_eq!(b["action"]["grouping"], "positionTpsl");
+    assert_eq!(wire["s"], "0");
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    let result = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandDone { command: 2, result }) => {
+                Some(serde_json::from_str::<Value>(result).unwrap())
+            }
+            _ => None,
+        })
+        .expect("confirmed full-position replacement succeeds");
+    assert_eq!(result["orderIds"], serde_json::json!([]));
+    assert_eq!(result["clientOrderId"], wire["c"]);
+    assert!(e.store().order("9").is_none());
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandFailed { .. }) | Action::Http(_)
+    )));
 }
 #[test]
 fn malformed_cancel_ack_stops_replacement_and_keeps_original() {

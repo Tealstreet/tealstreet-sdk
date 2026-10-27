@@ -56,6 +56,47 @@ pub struct Request {
     context: safe_cex_engine::request_context::Context,
     command: CommandId,
     effect: Effect,
+    order_reply: OrderReply,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OrderReply {
+    Rows,
+    Attached,
+    FullPosition,
+}
+impl OrderReply {
+    fn for_action(action: &Action, spot: bool) -> Self {
+        let Action::Order {
+            orders, grouping, ..
+        } = action
+        else {
+            return Self::Rows;
+        };
+        if spot {
+            return Self::Rows;
+        }
+        match (*grouping, orders.as_slice()) {
+            ("positionTpsl", [order])
+                if order.r && order.s == "0" && matches!(order.t, WireType::Trigger { .. }) =>
+            {
+                Self::FullPosition
+            }
+            ("normalTpsl", [parent, children @ ..])
+                if !children.is_empty()
+                    && matches!(parent.t, WireType::Limit { .. })
+                    && children.iter().all(|child| {
+                        child.r
+                            && child.a == parent.a
+                            && child.b != parent.b
+                            && child.s == parent.s
+                            && matches!(child.t, WireType::Trigger { .. })
+                    }) =>
+            {
+                Self::Attached
+            }
+            _ => Self::Rows,
+        }
+    }
 }
 #[derive(Clone)]
 enum Effect {
@@ -947,7 +988,19 @@ impl Hyperliquid {
                             || matches!(s, Status::Error { .. })
                     })
             }
-            Effect::Place(records) => kind == "order" && statuses.len() == records.len(),
+            Effect::Place(records) => {
+                kind == "order"
+                    && statuses.len() == records.len()
+                    && (request.order_reply != OrderReply::Attached
+                        || matches!(
+                            statuses.first(),
+                            Some(
+                                Status::Resting { .. }
+                                    | Status::Filled { .. }
+                                    | Status::Error { .. }
+                            )
+                        ))
+            }
             Effect::Leverage { .. } => kind == "default" && statuses.is_empty(),
         };
         if !valid_shape {

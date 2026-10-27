@@ -1990,6 +1990,37 @@ impl Hyperliquid {
         let dex = self.dex_of(cx, &symbol).to_owned();
         *self.account.orders_revision.entry(dex).or_default() += 1;
         if terminal(&update.status) {
+            if update.status != "filled"
+                && cx.store.order(&id).is_none()
+                && row
+                    .cloid
+                    .as_deref()
+                    .and_then(|cloid| self.account.records.get(cloid))
+                    .is_some_and(|record| {
+                        record.order.symbol == symbol
+                            && record.order.reduce_only
+                            && matches!(
+                                record.order.kind,
+                                OrderType::StopLoss | OrderType::TakeProfit
+                            )
+                    })
+            {
+                let cloid = row.cloid.as_deref().unwrap();
+                cx.event(
+                    Level::Warn,
+                    code::CHILD_LEG_FAILED,
+                    format!(
+                        "Hyperliquid protective order {id} ({cloid}) {}",
+                        update.status
+                    ),
+                    vec![
+                        ("symbol", symbol.as_str().into()),
+                        ("orderId", id.as_str().into()),
+                        ("clientOrderId", cloid.into()),
+                        ("status", update.status.as_ref().into()),
+                    ],
+                );
+            }
             if update.status == "filled" {
                 self.amend_source_filled(&id);
             }

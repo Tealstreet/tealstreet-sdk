@@ -237,6 +237,10 @@ impl Hyperliquid {
             .map_err(|_| {
                 not_sent("Hyperliquid signing key is missing").kind(ErrorKind::AuthInvalid)
             })?;
+        let spot = self.spot
+            || matches!(&effect, Effect::Place(records)
+            if records.first().is_some_and(|record| self.spot_market(cx, &record.order.symbol)));
+        let order_reply = OrderReply::for_action(action, spot);
         let job = self.trading.active.as_mut().unwrap();
         let custody = job.custody.as_mut().unwrap();
         match custody.plan.as_ref() {
@@ -276,6 +280,9 @@ impl Hyperliquid {
                 &plan,
                 &slot,
                 match &effect {
+                    Effect::Place(_) if order_reply == OrderReply::FullPosition => {
+                        safe_cex_engine::classify::Intent::Setting
+                    }
                     Effect::ScheduleCancel | Effect::Leverage { .. } => {
                         safe_cex_engine::classify::Intent::Setting
                     }
@@ -298,6 +305,7 @@ impl Hyperliquid {
             effect,
             plan,
             context: context.clone(),
+            order_reply,
         });
         match cx.request_signed_managed(
             context,
@@ -513,6 +521,29 @@ impl Hyperliquid {
                 )
                 .map(drop);
         }
+        if request.order_reply == OrderReply::FullPosition
+            && matches!(statuses, [Status::Text(text)] if text == "waitingForTrigger")
+        {
+            return cx
+                .http_write_fact(
+                    &request.context,
+                    WriteFact::Accepted { order_ids: vec![] },
+                    None,
+                )
+                .map(drop);
+        }
+        if request.order_reply == OrderReply::Attached
+            && matches!(
+                statuses.first(),
+                Some(Status::Resting { .. } | Status::Filled { .. })
+            )
+            && statuses
+                .iter()
+                .skip(1)
+                .any(|status| matches!(status, Status::Text(text) if text == "waitingForFill"))
+        {
+            return self.report_attached_order(cx, request, statuses, message);
+        }
         let ids: Vec<_> = statuses
             .iter()
             .enumerate()
@@ -562,5 +593,57 @@ impl Hyperliquid {
             None,
         )
         .map(drop)
+    }
+
+    fn report_attached_order(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        statuses: &[Status],
+        message: &str,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        use safe_cex_engine::classify::{Native, NativeCode, Verdict, WriteFact};
+        let ids: Vec<_> = statuses
+            .iter()
+            .filter_map(|status| match status {
+                Status::Resting { resting } => Some(resting.oid.to_string()),
+                Status::Filled { filled } => Some(filled.oid.to_string()),
+                _ => None,
+            })
+            .collect();
+        let mut failure = None;
+        for (index, status) in statuses.iter().enumerate() {
+            let error = match status {
+                Status::Error { error } => error.as_str(),
+                Status::Text(text) if index > 0 && text == "waitingForFill" => continue,
+                Status::Text(_) => "Unknown Hyperliquid order status",
+                _ => continue,
+            };
+            let native = Native {
+                code: NativeCode::None,
+                message: error,
+            };
+            let fact = cx.classify_write(
+                &request.context,
+                &BATCH,
+                Some(&native),
+                if message.is_empty() { error } else { message },
+            )?;
+            let unknown = matches!(fact.verdict(), Verdict::Unknown(_));
+            if failure.is_none() || unknown {
+                failure = Some(fact);
+            }
+            if unknown {
+                break;
+            }
+        }
+        let fact = match failure {
+            Some(fact) => WriteFact::Failed {
+                fact: fact.with_order_ids(&ids),
+                known_effects: true,
+            },
+            None => WriteFact::Accepted { order_ids: ids },
+        };
+        cx.http_write_fact(&request.context, fact, None).map(drop)
     }
 }

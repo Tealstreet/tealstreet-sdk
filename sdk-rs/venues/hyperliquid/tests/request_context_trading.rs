@@ -691,7 +691,7 @@ fn delayed_prepare_expires_at_the_twenty_second_bound() {
     assert!(e.drain_actions().next().is_none());
 }
 #[test]
-fn native_order_wire_and_no_oid_trigger_are_preserved() {
+fn an_idless_status_on_an_ordinary_order_remains_unknown() {
     let (mut e, _) = boot();
     let a = command(&mut e, NOW, place(OWNER));
     let r = native_release(&mut e, &a);
@@ -1124,6 +1124,346 @@ fn native_two_row_reply(body: &str) -> (Engine<Probe>, Vec<Action>) {
 }
 
 #[test]
+fn deferred_attachment_returns_only_the_accepted_parent_id() {
+    let (e, actions) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":3001}},"waitingForFill"]}}}"#,
+    );
+    assert_eq!(results(&actions, OWNER), vec![Ok(r#"["3001"]"#.into())]);
+    assert_eq!(e.store().orders().len(), 1);
+    assert_eq!(e.store().order("3001").unwrap().id, "3001");
+    no_trade(&actions);
+}
+
+#[test]
+fn a_refused_attachment_keeps_the_real_parent_as_a_known_partial() {
+    let (e, actions) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":3001}},{"error":"Insufficient margin to place order."}]}}}"#,
+    );
+    let result = results(&actions, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["3001"]);
+    assert!(e.store().order("3001").is_some());
+    no_trade(&actions);
+}
+
+#[test]
+fn an_unlisted_child_failure_wins_over_a_cited_refusal_without_losing_the_parent() {
+    for errors in [
+        [
+            "Insufficient margin to place order.",
+            "unlisted child failure",
+        ],
+        [
+            "unlisted child failure",
+            "Insufficient margin to place order.",
+        ],
+    ] {
+        let (mut e, _) = boot();
+        let mut c = place(OWNER);
+        let Command::PlaceOrders { orders, .. } = &mut c else {
+            unreachable!()
+        };
+        orders[0].stop_loss = Some(80.);
+        orders[0].take_profit = Some(120.);
+        let actions = command(&mut e, NOW, c);
+        let request = native_release(&mut e, &actions);
+        let response = json!({"status":"ok","response":{"type":"order","data":{"statuses":[
+            {"resting":{"oid":3001}}, {"error":errors[0]}, {"error":errors[1]}
+        ]}}})
+        .to_string();
+        respond(&mut e, NOW + 1., &request, 200, &response);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let result = results(&actions, OWNER);
+        let error = result[0].as_ref().unwrap_err();
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["3001"]);
+        assert!(e.store().order("3001").is_some());
+        no_trade(&actions);
+    }
+}
+
+#[test]
+fn independent_native_child_ids_are_preserved_without_logical_id_invention() {
+    let (_, actions) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":3001}},{"resting":{"oid":3002}}]}}}"#,
+    );
+    assert_eq!(
+        results(&actions, OWNER),
+        vec![Ok(r#"["3001","3002"]"#.into())]
+    );
+}
+
+#[test]
+fn a_deferred_attachment_never_hides_another_child_failure() {
+    for (child, expected) in [
+        ("Insufficient margin to place order.", None),
+        ("unlisted child failure", Some(Outcome::Unknown)),
+    ] {
+        for deferred_first in [false, true] {
+            let (mut e, _) = boot();
+            let mut c = place(OWNER);
+            let Command::PlaceOrders { orders, .. } = &mut c else {
+                unreachable!()
+            };
+            orders[0].stop_loss = Some(80.);
+            orders[0].take_profit = Some(120.);
+            let actions = command(&mut e, NOW, c);
+            let request = native_release(&mut e, &actions);
+            let mut children = vec![json!({"error":child}), json!("waitingForFill")];
+            if deferred_first {
+                children.reverse();
+            }
+            let response = json!({"status":"ok","response":{"type":"order","data":{
+                "statuses":[{"resting":{"oid":3001}}, children[0], children[1]]
+            }}})
+            .to_string();
+            respond(&mut e, NOW + 1., &request, 200, &response);
+            let actions: Vec<_> = e.drain_actions().collect();
+            let result = results(&actions, OWNER);
+            let error = result[0].as_ref().unwrap_err();
+            assert_eq!(error.outcome, expected);
+            assert_eq!(error.partial.as_ref().unwrap().order_ids, ["3001"]);
+            assert!(e.store().order("3001").is_some());
+            no_trade(&actions);
+        }
+    }
+}
+
+#[test]
+fn a_deferred_attachment_requires_its_accepted_parent_in_the_parent_row() {
+    for statuses in [
+        json!(["waitingForFill", {"resting":{"oid":3001}}]),
+        json!([{"error":"Insufficient margin to place order."}, "waitingForFill"]),
+        json!([{"resting":{"oid":3001}}, "waitingForTrigger"]),
+    ] {
+        let body = json!({"status":"ok","response":{"type":"order","data":{
+            "statuses":statuses
+        }}})
+        .to_string();
+        let (_, actions) = native_two_row_reply(&body);
+        let result = results(&actions, OWNER);
+        assert_eq!(
+            result[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        no_trade(&actions);
+    }
+}
+
+#[test]
+fn a_fixed_size_trigger_does_not_gain_the_full_position_setting_contract() {
+    let (mut e, _) = boot();
+    let mut c = full_position_trigger(OWNER);
+    let Command::PlaceOrders { orders, .. } = &mut c else {
+        unreachable!()
+    };
+    orders[0].amount = 0.5;
+    let actions = command(&mut e, NOW, c);
+    let request = native_release(&mut e, &actions);
+    let wire: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(wire["action"]["grouping"], "na");
+    assert_eq!(wire["action"]["orders"][0]["s"], "0.5");
+    respond(
+        &mut e,
+        NOW + 1.,
+        &request,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(
+        results(&actions, OWNER)[0].as_ref().unwrap_err().outcome,
+        Some(Outcome::Unknown)
+    );
+    no_trade(&actions);
+}
+
+fn full_position_trigger(command: u32) -> Command {
+    Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(json!({
+                "symbol":"BTC-PERP", "type":"stop_market", "side":"sell",
+                "price":80, "amount":0, "reduceOnly":true,
+                "clientOrderId":"0x00000000000000000000000000000002"
+            }))
+            .unwrap(),
+        ],
+    }
+}
+
+#[test]
+fn deferred_full_position_trigger_succeeds_without_an_order_id() {
+    let (mut e, _) = boot();
+    let actions = command(&mut e, NOW, full_position_trigger(OWNER));
+    let request = native_release(&mut e, &actions);
+    let wire: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(wire["action"]["grouping"], "positionTpsl");
+    assert_eq!(wire["action"]["orders"][0]["s"], "0");
+    respond(
+        &mut e,
+        NOW + 1.,
+        &request,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(results(&actions, OWNER), vec![Ok("[]".into())]);
+    assert!(e.store().orders().is_empty());
+    no_trade(&actions);
+}
+
+fn deferred_child_terminal(status: &str) {
+    for materialized in [false, true] {
+        let (mut e, socket) = boot();
+        let mut c = place(OWNER);
+        let Command::PlaceOrders { orders, .. } = &mut c else {
+            unreachable!()
+        };
+        orders[0].stop_loss = Some(80.);
+        let actions = command(&mut e, NOW, c);
+        let request = native_release(&mut e, &actions);
+        let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        let cloid = body["action"]["orders"][1]["c"].as_str().unwrap();
+        respond(
+            &mut e,
+            NOW + 1.,
+            &request,
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":3001}},"waitingForFill"]}}}"#,
+        );
+        e.drain_actions().for_each(drop);
+        let row = json!({"coin":"BTC", "oid":3002, "cloid":cloid,
+            "side":"A", "limitPx":"90", "origSz":"1", "sz":"1",
+            "isTrigger":true, "triggerPx":"80", "reduceOnly":true,
+            "orderType":"Stop Market", "tif":""});
+        if materialized {
+            let text = json!({"channel":"orderUpdates", "data":[{"order":row,"status":"open"}]})
+                .to_string();
+            e.handle(
+                NOW + 2.,
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+            e.drain_actions().for_each(drop);
+            assert!(e.store().order("3002").is_some());
+        }
+        let text =
+            json!({"channel":"orderUpdates", "data":[{"order":row,"status":status}]}).to_string();
+        for delivery in 0..2 {
+            e.handle(
+                NOW + 3. + f64::from(delivery),
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            let terminal: Vec<_> = actions
+                .iter()
+                .filter_map(|action| match action {
+                    Action::Notice(Notice::Event(event))
+                        if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED =>
+                    {
+                        Some(event)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(terminal.len(), usize::from(!materialized && delivery == 0));
+            if let Some(event) = terminal.first() {
+                for (field, value) in [
+                    ("symbol", "BTC-PERP"),
+                    ("orderId", "3002"),
+                    ("clientOrderId", cloid),
+                    ("status", status),
+                ] {
+                    assert!(
+                        event
+                            .fields
+                            .contains(&(field, safe_cex_engine::log::Value::Str(value.into())))
+                    );
+                }
+            }
+            assert!(e.store().order("3002").is_none());
+            assert!(e.store().order("3001").is_some());
+            assert!(results(&actions, OWNER).is_empty());
+            no_trade(&actions);
+        }
+    }
+}
+
+#[test]
+fn deferred_child_rejection_is_correlated_once_before_materialization() {
+    deferred_child_terminal("perpMarginRejected");
+}
+
+#[test]
+fn deferred_child_cancel_is_correlated_once_before_materialization() {
+    deferred_child_terminal("canceled");
+}
+
+#[test]
+fn deferred_full_position_effect_allows_one_successor_and_survives_its_refusal() {
+    let (mut e, _) = boot();
+    let mut first = full_position_trigger(OWNER);
+    let Command::PlaceOrders { orders, .. } = &mut first else {
+        unreachable!()
+    };
+    let Command::PlaceOrders {
+        orders: following, ..
+    } = place(OWNER)
+    else {
+        unreachable!()
+    };
+    orders.extend(following);
+    let actions = command(&mut e, NOW, first);
+    let request = native_release(&mut e, &actions);
+    respond(
+        &mut e,
+        NOW + 1.,
+        &request,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(results(&actions, OWNER).is_empty());
+    let paced = prepare_for_pacing(&mut e, NOW + 1., &actions);
+    let timer = paced
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 334. => Some(*timer),
+            _ => None,
+        })
+        .expect("the accepted setting permits the next physical leg");
+    e.handle(NOW + 334., Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let following = native_release_at(&mut e, NOW + 334., &actions);
+    assert_ne!(following.id, request.id);
+    respond(
+        &mut e,
+        NOW + 335.,
+        &following,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let result = results(&actions, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.outcome, None);
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    no_trade(&actions);
+}
+
+#[test]
 fn native_mixed_refusal_scans_accepted_rows_after_the_first_error() {
     let (e, a) = native_two_row_reply(
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"first rejected"},{"resting":{"oid":901}}]}}}"#,
@@ -1201,7 +1541,7 @@ fn native_wrong_response_kind_cannot_publish_matching_rows() {
 }
 
 #[test]
-fn pending_rows_are_unknown_without_invented_order_ids() {
+fn unmatched_pending_rows_are_unknown_without_an_accepted_parent() {
     let (e, a) = native_two_row_reply(
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill","waitingForTrigger"]}}}"#,
     );

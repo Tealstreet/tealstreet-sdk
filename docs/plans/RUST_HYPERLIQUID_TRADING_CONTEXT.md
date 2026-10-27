@@ -137,8 +137,10 @@ both names and both native/private-capsule setup forms. The CI family and combin
 conformance paths run that same production-binding control.
 
 KnownPartial is the engine's deliberate accepted-plus-cited-refusal projection
-(outcome None with structured IDs). Unlisted errors and pending placement rows
-without an oid remain Unknown, without write replay. The changed legacy outcome
+(outcome None with structured IDs). Unlisted errors and unmatched placement rows without an oid remain Unknown,
+without write replay. Confirmed waitingForFill attachments fold into their
+accepted parent's real oid; a standalone zero-size reduce-only positionTpsl is
+predeclared Setting and may acknowledge waitingForTrigger with no oid. The changed legacy outcome
 oracles are disclosed in the caller fragment; prices, sizes, grouping, actual IDs
 and the no-third-send/no-retry predicates stay asserted. Native packet fixtures
 now drive real readiness and release-domain timers without firing call deadlines.
