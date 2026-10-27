@@ -101,6 +101,19 @@ fn an_expired_listen_key_retires_the_user_stream_for_authentication_and_resyncs_
     );
 }
 
+/// The reconnect notice names the venue's close code, as the legacy socket did.
+#[test]
+fn a_close_names_its_code_in_the_reconnect_notice() {
+    let mut h = Harness::new();
+    let socket = h.socket("/public/ws").unwrap();
+    h.event(Event::WsClosed { socket, code: 1013 });
+    assert!(
+        logged(&h, "Binance socket closed (1013); reconnecting"),
+        "{:?}",
+        h.logs
+    );
+}
+
 #[test]
 fn a_dropped_public_feed_replays_its_current_streams_once_on_reopen() {
     let mut h = Harness::new();

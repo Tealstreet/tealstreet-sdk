@@ -2334,6 +2334,10 @@ mod capability_tests;
 #[path = "socket_declaration_tests.rs"]
 mod declaration_tests;
 
+#[cfg(test)]
+#[path = "socket_close_floor_tests.rs"]
+mod close_floor_tests;
+
 #[cfg(all(test, feature = "socket-native-timing"))]
 #[path = "socket_native_timing_tests.rs"]
 mod native_timing_tests;
