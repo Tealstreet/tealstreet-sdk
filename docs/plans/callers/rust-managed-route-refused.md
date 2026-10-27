@@ -19,3 +19,9 @@ no `AuthFailure` lifecycle event; the venue sees `Retired { reason: RouteRefused
 Hosts are unchanged: they already honour `rejectRoute` and emit
 `WsRouteExhausted` on both paths. No NX or server obligation, and no deletion
 prerequisite.
+
+Route refusal is pre-login evidence: it acts only on `AuthMode::Required` or
+`Observe` feeds, and a refusal on a socket that already logged in is treated as
+an ordinary `Rejected` (an `AuthFailure` with the feed's recovery), never as a
+route change. The driver surfaces the venue's error as one Warn
+`AUTH_REJECTED` notice, "<error>; trying the next route", as TS does.

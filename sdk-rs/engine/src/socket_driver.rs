@@ -658,9 +658,14 @@ impl Driver {
             }
             AuthTransition::Failed {
                 epoch,
-                evidence: AuthEvidence::RouteRefused(_),
+                evidence: AuthEvidence::RouteRefused(error),
                 ..
             } => {
+                cx.notice(
+                    crate::log::Level::Warn,
+                    crate::log::code::AUTH_REJECTED,
+                    format!("{}; trying the next route", error.message),
+                );
                 let refusal = &mut self.runtime_mut(epoch.feed()).route_refusal;
                 refusal.skip_backoff = !refusal.streak;
                 refusal.streak = true;

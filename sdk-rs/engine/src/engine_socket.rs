@@ -1873,9 +1873,10 @@ mod tests {
         );
         assert!(reject);
         let (third_at, _, _) = refuse_and_redial(&mut e, third, second_at, "refused");
+        // Each later refusal counts a failure, so the backoff gap keeps growing.
         assert!(
-            third_at > second_at,
-            "the streak never returns to an immediate redial"
+            third_at - second_at > second_at - 20.,
+            "the streak's backoff grows: {second_at} then {third_at}"
         );
     }
     #[test]
@@ -1925,6 +1926,82 @@ mod tests {
             "a new streak's first refusal is immediate again"
         );
         assert!(reject);
+    }
+    #[test]
+    fn a_refusal_surfaces_the_venue_error_but_never_burns_a_logged_in_route() {
+        let (mut e, socket) = route_engine();
+        e.handle(10., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.handle(
+            10.,
+            Event::WsMessage {
+                socket,
+                text: "refused",
+            },
+        );
+        assert!(
+            e.drain_actions().any(|a| matches!(
+                a,
+                Action::Notice(Notice::Event(LogEvent { level: Level::Warn, ref message, .. }))
+                    if message == "egress refused; trying the next route"
+            )),
+            "the venue's refusal text reaches the user, as TS warns"
+        );
+
+        let (mut e, socket) = route_engine();
+        e.handle(10., Event::WsOpened { socket });
+        e.handle(
+            10.,
+            Event::WsMessage {
+                socket,
+                text: "login",
+            },
+        );
+        e.drain_actions().for_each(drop);
+        e.venue.events.clear();
+        e.handle(
+            11.,
+            Event::WsMessage {
+                socket,
+                text: "refused",
+            },
+        );
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::AuthFailure {
+                evidence: AuthEvidence::Rejected(_),
+                ..
+            }
+        )));
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::Authentication,
+                ..
+            }
+        )));
+        assert!(!e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::RouteRefused,
+                ..
+            }
+        )));
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(at, Event::TimerFired { timer });
+        assert!(
+            e.drain_actions().any(|a| matches!(
+                a,
+                Action::WsConnect { context: Some(ref c), .. } if !c.reject_route
+            )),
+            "a logged-in route is proven; the redial stays on it"
+        );
     }
     #[test]
     fn refusal_on_every_route_ends_in_route_exhausted() {

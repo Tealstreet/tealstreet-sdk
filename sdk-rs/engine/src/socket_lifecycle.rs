@@ -687,6 +687,12 @@ impl Lifecycle {
                 AuthTransition::Ignored
             };
         }
+        // This socket already logged in on this route, so the route works: a
+        // late refusal is an ordinary rejection and never burns the route.
+        let evidence = match evidence {
+            AuthEvidence::RouteRefused(error) if f.authenticated => AuthEvidence::Rejected(error),
+            evidence => evidence,
+        };
         if matches!(evidence, AuthEvidence::Accepted) {
             if f.authenticated {
                 // Positive evidence must still cancel a coalesced native login
