@@ -519,6 +519,72 @@ fn stale_rest_orders_cannot_resurrect_a_terminal_order() {
 }
 
 #[test]
+fn orders_snapshot_crossing_the_store_write_fence_does_not_publish() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    let read = h.take(ORDERS);
+    h.engine.store_mut().invalidate_order_snapshots();
+    h.reply(read.id, 200, r#"{"code":0,"data":[]}"#);
+    assert!(
+        h.engine.store().order(ORDER_ID).is_some(),
+        "a read issued before the Store write fence must not clear current orders"
+    );
+    let fresh = h.take(ORDERS);
+    h.reply(fresh.id, 200, r#"{"code":0,"data":[]}"#);
+    assert!(h.engine.store().orders().is_empty());
+}
+
+#[test]
+fn accepted_cancel_keeps_its_order_state_when_an_older_read_arrives() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    let read = h.take(ORDERS);
+    h.event(Event::Command(Command::CancelOrders {
+        command: 991,
+        ids: vec![ORDER_ID.into()],
+    }));
+    h.respond("/trade/order", 200, r#"{"code":0,"data":{}}"#);
+    assert_eq!(
+        h.engine.store().order(ORDER_ID).unwrap().status,
+        OrderStatus::Canceled
+    );
+    h.reply(read.id, 200, OPEN);
+    assert_eq!(
+        h.engine.store().order(ORDER_ID).unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        h.done
+            .iter()
+            .filter(|(id, result)| *id == 991 && result.is_ok())
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn an_uncrossed_orders_snapshot_still_publishes() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    let read = h.take(ORDERS);
+    h.reply(read.id, 200, r#"{"code":0,"data":[]}"#);
+    assert!(h.engine.store().orders().is_empty());
+}
+
+#[test]
+fn sibling_store_publication_does_not_invalidate_an_orders_read() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    let read = h.take(ORDERS);
+    h.engine.store_mut().set_orders(Vec::new());
+    h.reply(read.id, 200, OPEN);
+    assert_eq!(
+        h.engine.store().order(ORDER_ID).unwrap().status,
+        OrderStatus::Open
+    );
+}
+
+#[test]
 fn http_200_error_envelopes_and_malformed_snapshots_preserve_state() {
     let mut h = Harness::ready();
     h.poll_late(26000.0);

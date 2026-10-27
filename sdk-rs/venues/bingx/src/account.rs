@@ -19,7 +19,7 @@ use safe_cex_engine::request_context::{Session, SessionPolicy};
 use safe_cex_engine::selected_read::ReadRole;
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket_lifecycle::{FeedId, LifecycleEvent, RetireReason, SocketError};
-use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::store::{MarketSetting, OrderSnapshotToken, Store};
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json::ArrayAt};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -64,7 +64,8 @@ pub enum Request {
         unavailable: bool,
     },
     OpenOrders {
-        revision: u64,
+        owner: u64,
+        snapshot: OrderSnapshotToken,
         read_epoch: u64,
         rows: Vec<Order>,
         metas: Vec<OrderMeta>,
@@ -98,8 +99,8 @@ pub struct Account {
     keepalive: Option<TimerId>,
     poll: Option<TimerId>,
     repair: Option<TimerId>,
-    orders_revision: u64,
-    orders_snapshot_revision: Option<u64>,
+    orders_read_sequence: u64,
+    orders_witness: Option<OrderSnapshotToken>,
     positions_revision: u64,
     settings_revision: u64,
     balance_revision: u64,
@@ -309,8 +310,8 @@ impl Account {
                 .as_ref()
                 .is_some_and(|retry| retry.timer == Some(timer))
     }
-    pub fn bump_orders(&mut self) {
-        self.orders_revision = self.orders_revision.wrapping_add(1);
+    pub fn bump_orders(&mut self, store: &mut Store) {
+        store.invalidate_order_snapshots();
     }
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
@@ -572,7 +573,7 @@ impl Account {
         if cx.reconcile_reask() && self.orders_in_flight.is_some() {
             return;
         }
-        self.bump_orders();
+        self.bump_orders(cx.store);
         self.start_order_read(cx, credentials, Some(PrimaryReason::PostUnknownOrderRead));
     }
     /// A fence needs a new owner even if an older snapshot is still pending.
@@ -582,14 +583,33 @@ impl Account {
         credentials: &Credentials,
         primary: Option<PrimaryReason>,
     ) {
-        self.orders_in_flight = Some(self.orders_revision);
+        let Some(owner) = self.orders_read_sequence.checked_add(1) else {
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
+                "BingX order read ownership exhausted",
+            );
+            return;
+        };
+        let Some(snapshot) = cx.store.begin_orders_snapshot() else {
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
+                "BingX order snapshot fence exhausted",
+            );
+            return;
+        };
+        self.orders_read_sequence = owner;
+        self.orders_witness = None;
+        self.orders_in_flight = Some(owner);
         self.read_snapshot(
             cx,
             credentials,
             OPEN_ORDERS,
             Params::new(),
             Request::OpenOrders {
-                revision: self.orders_revision,
+                owner,
+                snapshot,
                 read_epoch: cx.order_read_epoch(),
                 rows: Vec::new(),
                 metas: Vec::new(),
@@ -622,7 +642,7 @@ impl Account {
         self.key = None;
         self.clear_private_timers(cx);
         self.socket = None;
-        self.bump_orders();
+        self.bump_orders(cx.store);
         self.bump_positions();
     }
     fn schedule_key_retry(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -667,7 +687,7 @@ impl Account {
             cx.send(socket, "Ping");
         }
         // Reconnects have a blind interval; any old snapshots are now stale.
-        self.bump_orders();
+        self.bump_orders(cx.store);
         self.bump_positions();
         self.reconcile(cx, credentials);
     }
@@ -1125,18 +1145,23 @@ impl Account {
                 }
             }
             Request::OpenOrders {
-                revision,
+                owner,
+                snapshot,
                 read_epoch,
                 mut rows,
                 metas,
                 skipped,
                 unavailable,
             } => {
-                if self.orders_in_flight == Some(revision) {
+                if self.orders_in_flight == Some(owner) {
                     self.orders_in_flight = None;
                 }
-                if revision != self.orders_revision {
-                    if self.orders_snapshot_revision != Some(self.orders_revision) {
+                if !cx.store.orders_snapshot_current(&snapshot) {
+                    if !self
+                        .orders_witness
+                        .as_ref()
+                        .is_some_and(|token| cx.store.orders_snapshot_current(token))
+                    {
                         self.fetch_orders(cx, credentials);
                     }
                     return;
@@ -1147,42 +1172,46 @@ impl Account {
                     }
                     return;
                 }
-                // Startup history is a baseline; later REST reads cannot consume live executions.
-                if !self.orders_seeded {
-                    for order in &rows {
-                        if order.filled
-                            > self.cumulative_fills.get(&order.id).copied().unwrap_or(0.0)
-                        {
-                            self.covered_history.insert(order.id.clone());
-                        }
-                        self.record_cumulative(&order.id, order.filled);
-                    }
-                }
-                self.orders_seeded = true;
                 let complete = skipped.is_empty();
-                self.observations.extend(metas);
-                // A malformed row never removes the known open order it names.
-                let unidentified = skipped.iter().any(String::is_empty);
-                let kept: Vec<_> = cx
-                    .store
-                    .orders()
-                    .iter()
-                    .filter(|o| {
-                        o.status == OrderStatus::Open
-                            && (unidentified || skipped.contains(&o.id))
-                            && !self.terminal_orders.contains_key(&o.id)
-                            && !rows.iter().any(|row| row.id == o.id)
-                    })
-                    .cloned()
-                    .collect();
-                log_snapshot_skips(cx, &mut self.skip_logged, "open order", &skipped, |id| {
-                    kept.iter().any(|o| id.is_empty() || o.id == id)
+                let mut kept_ids = Vec::new();
+                let committed = cx.store.commit_orders_snapshot([snapshot], |current| {
+                    // Startup history is a baseline; later REST reads cannot consume live executions.
+                    if !self.orders_seeded {
+                        for order in &rows {
+                            if order.filled
+                                > self.cumulative_fills.get(&order.id).copied().unwrap_or(0.0)
+                            {
+                                self.covered_history.insert(order.id.clone());
+                            }
+                            self.record_cumulative(&order.id, order.filled);
+                        }
+                    }
+                    self.orders_seeded = true;
+                    self.observations.extend(metas);
+                    // A malformed row never removes the known open order it names.
+                    let unidentified = skipped.iter().any(String::is_empty);
+                    let kept: Vec<_> = current
+                        .iter()
+                        .filter(|o| {
+                            o.status == OrderStatus::Open
+                                && (unidentified || skipped.contains(&o.id))
+                                && !self.terminal_orders.contains_key(&o.id)
+                                && !rows.iter().any(|row| row.id == o.id)
+                        })
+                        .cloned()
+                        .collect();
+                    kept_ids.extend(kept.iter().map(|order| order.id.clone()));
+                    rows.extend(kept);
+                    rows
                 });
-                rows.extend(kept);
-                cx.store.set_orders(rows);
-                if complete {
-                    self.orders_snapshot_revision = Some(revision);
-                    cx.orders_reconciled_since(None, read_epoch);
+                if committed {
+                    log_snapshot_skips(cx, &mut self.skip_logged, "open order", &skipped, |id| {
+                        kept_ids.iter().any(|kept| id.is_empty() || kept == id)
+                    });
+                    if complete {
+                        self.orders_witness = cx.store.begin_orders_snapshot();
+                        cx.orders_reconciled_since(None, read_epoch);
+                    }
                 }
             }
         }
@@ -1198,7 +1227,7 @@ impl Account {
         let owns_read = match &request {
             Request::Balance { revision, .. } => self.balance_in_flight == Some(*revision),
             Request::Positions { revision, .. } => self.positions_in_flight == Some(*revision),
-            Request::OpenOrders { revision, .. } => self.orders_in_flight == Some(*revision),
+            Request::OpenOrders { owner, .. } => self.orders_in_flight == Some(*owner),
             _ => true,
         };
         if owns_read {
@@ -1238,8 +1267,8 @@ impl Account {
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
-            Request::OpenOrders { revision, .. } => {
-                if self.orders_in_flight == Some(revision) {
+            Request::OpenOrders { owner, .. } => {
+                if self.orders_in_flight == Some(owner) {
                     self.orders_in_flight = None;
                 }
             }
@@ -1510,7 +1539,7 @@ impl Account {
             };
             // Financial preparation is pure: invalid evidence consumes no ID,
             // revision, quantity, terminal state or repair scheduling.
-            self.bump_orders();
+            self.bump_orders(cx.store);
             if let Some(identity) = identity {
                 self.first_execution(identity);
             }
@@ -1531,7 +1560,7 @@ impl Account {
             }
             self.record_cumulative(id, effective_filled);
         } else {
-            self.bump_orders();
+            self.bump_orders(cx.store);
         }
         if matches!(
             native.status.as_deref(),
@@ -1828,10 +1857,39 @@ mod sign_failure_owners {
     struct Probe {
         native: crate::Bingx,
         queued: Option<Request>,
+        kind: u8,
     }
     impl Venue for Probe {
         type Pending = Pending;
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+            self.queued = Some(match self.kind {
+                0 => Request::Balance {
+                    revision: 1,
+                    first: None,
+                    usdt: None,
+                    failed: false,
+                },
+                1 => Request::Positions {
+                    revision: 1,
+                    settings_stamp: Observation::default(),
+                    rows: vec![],
+                    settings: vec![],
+                    skipped: vec![],
+                    unavailable: false,
+                },
+                2 => Request::OpenOrders {
+                    owner: 1,
+                    snapshot: cx.store.begin_orders_snapshot().unwrap(),
+                    read_epoch: 0,
+                    rows: vec![],
+                    metas: vec![],
+                    skipped: vec![],
+                    unavailable: false,
+                },
+                3 => Request::ListenKey { epoch: 4 },
+                _ => Request::Keepalive { epoch: 4 },
+            });
+            cx.store.invalidate_order_snapshots();
             cx.set_timer(1.);
         }
         fn on_response(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {
@@ -1879,40 +1937,15 @@ mod sign_failure_owners {
         // Financial revisions may advance while the original reservation owns a read.
         a.balance_revision = 9;
         a.positions_revision = 9;
-        a.orders_revision = 9;
+        a.orders_read_sequence = 9;
         a.epoch = 5;
         a.key_in_flight = true;
         a.socket = Some(SocketId(44));
         a.keepalive = Some(TimerId(77));
-        let request = match kind {
-            0 => Request::Balance {
-                revision: 1,
-                first: None,
-                usdt: None,
-                failed: false,
-            },
-            1 => Request::Positions {
-                revision: 1,
-                settings_stamp: Observation::default(),
-                rows: vec![],
-                settings: vec![],
-                skipped: vec![],
-                unavailable: false,
-            },
-            2 => Request::OpenOrders {
-                revision: 1,
-                read_epoch: 0,
-                rows: vec![],
-                metas: vec![],
-                skipped: vec![],
-                unavailable: false,
-            },
-            3 => Request::ListenKey { epoch: 4 },
-            _ => Request::Keepalive { epoch: 4 },
-        };
         let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
             native,
-            queued: Some(request),
+            queued: None,
+            kind,
         });
         engine.start(1_000.);
         let timers: Vec<_> = engine
