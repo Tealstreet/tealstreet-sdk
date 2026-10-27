@@ -13,9 +13,9 @@ use safe_cex_engine::request_context::{CommandEntryError, Context, Operation, Re
 use safe_cex_engine::selected_read::{
     BackgroundReadError, CommandReadError, LocalRefusal, ReadPolicy, ReadRole, SelectedRead,
 };
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::socket_lifecycle::{FeedId, SocketError};
 use safe_cex_engine::store::Store;
-use safe_cex_engine::{Command, Cx, Fill, Response, SocketChannel, SocketId, TimerId, VenueError};
+use safe_cex_engine::{Command, Cx, Fill, Response, SocketId, TimerId, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -47,6 +47,7 @@ pub enum Request {
         rows: SnapshotBuilder<String, Position>,
     },
     Orders {
+        read_epoch: u64,
         generation: Option<u64>,
         revision: u64,
         rows: SnapshotBuilder<String, Order>,
@@ -158,18 +159,17 @@ struct Progress {
 
 #[derive(Default)]
 pub struct Account {
-    supervisor: Supervisor,
-    authenticated: bool,
+    pub(super) feed: Option<FeedId>,
+    pub(super) authenticated: bool,
     pub(crate) account_id: String,
     pub(crate) maker_fee: String,
     pub(crate) taker_fee: String,
     pub(crate) initialized: bool,
     pub(crate) recent_executions: Vec<Execution>,
     started: bool,
-    socket: Option<SocketId>,
-    open: bool,
-    opened_at: f64,
-    ping_at: f64,
+    pub(super) socket: Option<SocketId>,
+    pub(super) opened_at: f64,
+    pub(super) ping_at: f64,
     tick: Option<TimerId>,
     orders_heal: Option<TimerId>,
     positions_heal: Option<TimerId>,
@@ -181,7 +181,7 @@ pub struct Account {
     /// The orders read in flight started after every such ask, so it may release the fence.
     order_read_fresh: bool,
     snapshot: Option<Snapshot>,
-    generation: u64,
+    pub(super) generation: u64,
     revision: u64,
     position_versions: HashMap<String, (u64, f64, Position)>,
     leverage_versions: HashMap<String, (u64, f64, f64)>,
@@ -197,15 +197,7 @@ pub struct Account {
 
 impl Account {
     pub(crate) fn new() -> Self {
-        Self {
-            supervisor: Supervisor::new(Config {
-                auth_timeout_ms: Some(10_000.0),
-                idle_timeout_ms: 30_000.0,
-                ping_interval_ms: Some(5_000.0),
-                ..Config::default()
-            }),
-            ..Self::default()
-        }
+        Self::default()
     }
 
     pub(crate) fn note_leverage(&mut self, symbol: &str, leverage: f64, now: f64) {
@@ -617,7 +609,9 @@ impl ApexOmni {
             return;
         }
         cx.store.set_hedged(true);
-        self.connect_private(cx);
+        if let Err(error) = self.connect_private(cx) {
+            Self::socket_notice(cx, error);
+        }
         self.refresh_account(cx);
         self.account.tick = Some(cx.set_poll_timer(self.tick_interval()));
     }
@@ -629,42 +623,31 @@ impl ApexOmni {
             .unwrap_or(2000.0)
     }
 
-    fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
-        let host = if self.options.testnet {
-            "qa-quote.omni.apex.exchange"
-        } else {
-            "quote.omni.apex.exchange"
-        };
+    pub(super) fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) -> Result<(), SocketError> {
+        if !cx.now.is_finite() {
+            return Err(SocketError::InvalidTime);
+        }
         self.account.generation += 1;
         self.account.authenticated = false;
-        self.account.supervisor.connecting(cx);
-        self.account.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(format!(
-                    "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
-                    cx.now as u64, self.account.generation
-                ))
-                .channel(SocketChannel::Private),
-            ),
-        );
+        self.proof.borrow_mut().take();
+        self.connect_feed(cx, true)
     }
 
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.supervisor.opened(cx);
         let Some(identity) = self.options.identity.clone() else {
             cx.notice(
                 Level::Error,
                 code::CONFIG_INVALID,
                 "ApeX API key, signing key and passphrase are required",
             );
-            cx.close(socket);
-            self.account_close(cx, socket);
+            if let Some(feed) = self.account.feed {
+                cx.stop_socket_feed(feed);
+            }
             return true;
         };
-        self.account.open = true;
         self.account.opened_at = cx.now;
         // The provider signs the login at dispatch; it precedes the sends below.
         let host = if self.options.testnet {
@@ -691,39 +674,17 @@ impl ApexOmni {
         true
     }
 
-    pub(crate) fn account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+    pub(crate) fn account_close(&mut self, _cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
             return false;
         }
         self.account.socket = None;
-        self.account.open = false;
-        self.account.supervisor.retry(cx);
+        self.account.authenticated = false;
+        self.proof.borrow_mut().take();
         true
     }
 
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.account.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => (),
-            Tick::Reconnect => {
-                self.connect_private(cx);
-                return true;
-            }
-            Tick::Ping => {
-                if let Some(socket) = self.account.socket {
-                    cx.send(socket, r#"{"op":"ping"}"#);
-                    self.account.ping_at = cx.now;
-                }
-                return true;
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.account.socket {
-                    cx.close(socket);
-                    self.account_close(cx, socket);
-                }
-                return true;
-            }
-            Tick::Handled => return true,
-        }
         if self.account.tick == Some(timer) {
             self.account.tick = None;
             self.refresh_account(cx);
@@ -805,6 +766,7 @@ impl ApexOmni {
         self.account.orders_pending = true;
         self.account.order_read_fresh = std::mem::take(&mut self.account.reconcile_owed);
         let pending = Request::Orders {
+            read_epoch: cx.order_read_epoch(),
             generation,
             revision: self.account.revision,
             rows: SnapshotBuilder::default(),
@@ -1030,6 +992,7 @@ impl ApexOmni {
                 }
             }
             Request::Orders {
+                read_epoch,
                 generation,
                 revision,
                 rows,
@@ -1065,12 +1028,12 @@ impl ApexOmni {
                     }
                     // Released here only: this response's token certifies the orders read.
                     if self.commit_snapshot(cx) && release {
-                        cx.orders_reconciled(None);
+                        cx.orders_reconciled_since(None, read_epoch);
                     }
                 } else {
                     self.commit_orders(cx, rows, revision);
                     if release {
-                        cx.orders_reconciled(None);
+                        cx.orders_reconciled_since(None, read_epoch);
                     }
                 }
                 if self.account.reconcile_owed {
@@ -1362,7 +1325,6 @@ impl ApexOmni {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
             return true;
         };
@@ -1390,15 +1352,7 @@ impl ApexOmni {
                 rejected,
                 format!("ApeX private socket rejected request: {}", message.ret_msg),
             );
-            if message.op == "login" {
-                cx.close(socket);
-                self.account_close(cx, socket);
-            }
             return true;
-        }
-        if message.op == "login" && message.success == Some(true) {
-            self.account.authenticated = true;
-            self.account.supervisor.authenticated(cx);
         }
         if message.topic != "ws_zk_accounts_v3" {
             return true;
@@ -1406,12 +1360,8 @@ impl ApexOmni {
         let Some(contents) = message.contents else {
             return true;
         };
-        if !self.account.authenticated
-            && matches!(message.kind.as_ref(), "snapshot" | "delta")
-            && self.private_auth_payload(cx.store, &contents, cx.now)
-        {
-            self.account.authenticated = true;
-            self.account.supervisor.authenticated(cx);
+        if !self.account.authenticated {
+            return true;
         }
         let snapshot = message.kind == "snapshot";
         for (kind, skipped) in [
@@ -1523,7 +1473,12 @@ impl ApexOmni {
             .retain(|execution| execution.qty > 0.0);
     }
 
-    fn private_auth_payload(&self, store: &Store, contents: &wire::Contents<'_>, now: f64) -> bool {
+    pub(super) fn private_auth_payload(
+        &self,
+        store: &Store,
+        contents: &wire::Contents<'_>,
+        now: f64,
+    ) -> bool {
         let has_rows = contents.fills.is_some()
             || contents.orders.is_some()
             || contents.positions.is_some()
