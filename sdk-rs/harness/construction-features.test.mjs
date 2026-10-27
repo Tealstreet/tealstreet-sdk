@@ -14,6 +14,7 @@ const setupFeatures = {
   apexomni: ['dispatch-signing'],
   mexc: ['dispatch-signing'],
   lighter: ['dispatch-signing'],
+  hyperliquid: ['dispatch-signing', 'address-nonce'],
   asterdex: ['dispatch-signing', 'address-nonce', 'sign-meta'],
 };
 
@@ -58,6 +59,16 @@ test('feature guard rejects missing bootstrap, address setup and signing metadat
   assert.throws(() => checkFeatures({ family: [] }, 'family', { bridge: { dispatchSigning: true } }), /dispatch-signing/);
   assert.throws(() => checkFeatures({ family: [] }, 'family', { setupMapping: 'lighter' }), /dispatch-signing/);
   assert.throws(() => requiredFeatures({ setupMapping: 'new-mapping' }), /Unspecified setup mapping/);
+});
+
+test('Hyperliquid ScalarOnly setup requires isolated dispatch signing and address setup', () => {
+  const required = ['dispatch-signing', 'address-nonce'];
+  for (const missing of required) {
+    const graph = { hyperliquid: required.filter(feature => feature !== missing),
+      'dispatch-signing': [], 'address-nonce': [] };
+    assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquid), new RegExp(missing));
+    assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquidspot), new RegExp(missing));
+  }
 });
 
 test('feature guard follows transitive local features, without borrowing combined defaults', () => {
