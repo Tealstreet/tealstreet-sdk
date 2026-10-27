@@ -1294,6 +1294,9 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn managed_sockets() -> bool {
+        true
+    }
     // An Unknown placement fences its symbol until a fresh, clean open-orders
     // snapshot (`reconcile_orders`) proves what landed.
     fn fence_uncertain_placements(&self) -> bool {
