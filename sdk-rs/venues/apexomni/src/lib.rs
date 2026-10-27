@@ -7,6 +7,7 @@ mod public;
 mod public_wire;
 mod read;
 pub mod sign;
+mod socket_codec;
 mod trading;
 
 use read::Split;
@@ -46,6 +47,7 @@ pub struct ApexOmni {
     public: public::Public,
     account: account::Account,
     trading: trading::Trading,
+    proof: std::cell::RefCell<Option<(SocketId, String)>>,
     /// Successor reads a completing Background read queues after it retires.
     follow_ups: Vec<read::FollowUp>,
 }
@@ -132,6 +134,7 @@ impl ApexOmni {
             public: public::Public::default(),
             account: account::Account::new(),
             trading: trading::Trading::default(),
+            proof: std::cell::RefCell::new(None),
             follow_ups: Vec::new(),
         }
     }
@@ -168,6 +171,40 @@ impl ApexOmni {
 }
 
 impl Venue for ApexOmni {
+    fn managed_sockets() -> bool {
+        true
+    }
+    fn socket_capabilities() -> safe_cex_engine::socket_lifecycle::SocketCapabilities {
+        safe_cex_engine::socket_lifecycle::SocketCapabilities { handoff: false }
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.socket_event(cx, event)
+    }
+    fn socket_control(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        authenticated: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        self.classify_control(store, feed, authenticated, text)
+    }
+    fn encode_socket_interests(
+        &self,
+        _: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.encode_interests(feed, subscribe, items, emit)
+    }
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,
@@ -254,21 +291,13 @@ impl Venue for ApexOmni {
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         self.revalue_public_positions(cx);
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if !self.public_open(cx, socket) {
-            self.account_open(cx, socket);
-        }
-    }
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if !self.public_message(cx, socket, text) {
             self.account_message(cx, socket, text);
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if !self.public_close(cx, socket) {
-            self.account_close(cx, socket);
-        }
-    }
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         self.response(cx, pending, response);
     }

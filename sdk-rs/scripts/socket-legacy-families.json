@@ -1,7 +1,6 @@
 {
   "temporaryFeature": "managed-sockets",
   "sourceRoots": {
-    "apexomni": "venues/apexomni/src/",
     "bitget": "venues/bitget/src/",
     "bitrue": "venues/bitrue/src/",
     "bitunix": "venues/bitunix/src/",

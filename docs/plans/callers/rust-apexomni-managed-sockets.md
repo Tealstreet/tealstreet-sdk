@@ -45,3 +45,36 @@ First unchanged-runtime checkpoint: one working first-open subscription control
 and four assertion REDs (declaration, duplicate public/private Opened, pre-open
 ticker publication). The native private login/subscription/ping prefix is live
 in the private duplicate-open control. Source qualification is still pending.
+
+The candidate retains at most one private authentication proof, capped at 4 MiB.
+Only strictly validated first account data can populate it; Authenticated takes
+it before the native reducer runs at the actual callback clock. Retirement,
+replacement or subsequent private classification clears the slot. An ordinary
+ACK never populates it, and already-authenticated data follows the native path.
+Malformed first data cannot publish a valid subset or restart the auth deadline.
+The cap applies only to retained first-data proof, not authenticated row parsing.
+
+Twelve production-binding controls pass locally, including exact-once proof
+publication, revocation before Authenticated, old/new-epoch isolation, full-state
+nonfinite ingress, duplicate queued demand, real 512-credit admission pressure
+and encoded-frame Capacity recovery with a healthy private peer. Removing the
+epoch check or invoking the proof reducer twice makes the corresponding control
+assertion RED. The original first five bodies remain unchanged.
+
+ApeX orders use one context per census. The existing lost-write/stale-read/fresh-
+read control remains green with the captured first-issuance epoch. The core's
+same-context response token already protects that case: removing this additional
+epoch cap also remains green, so it is not claimed as a new runtime RED.
+
+Fixture changes supply the genuine first Opened in one local decimal-stream
+case and in the trading setup at its original catalogue observation. Trading's
+delegated-write provider now signs SessionAuth inline alongside GET reads; write
+signatures remain delegated. The stale-read control selects the exact emitted
+native heal wake instead of the newly visible socket watchdog. All 269 existing
+assertion invocations and 100 raw literals in those two files remain unchanged;
+financial row bodies and their observation clocks are preserved.
+
+On the initial composition, seven scoped targets pass: 141 tests and two existing
+ignored remote-zkLink controls. This is local scoped evidence, not a full-family
+or current-tip CI claim. Current composed strict/fmt/bans, source review and PR
+family/replay qualification remain required before exact-tree auditor GO.
