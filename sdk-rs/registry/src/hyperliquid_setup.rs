@@ -5,6 +5,15 @@ use safe_cex_engine::signing::{CredentialSetupPolicy, Identities, KeyPresence, P
 
 const INVALID: &str = "Invalid Hyperliquid local signer setup";
 
+// Same raw-intent rule as lighter_setup::setup_public_mode, before provider installation.
+fn setup_public_mode(options: &EngineOptions) -> bool {
+    options
+        .public_mode
+        .as_ref()
+        .and_then(|mode| mode.requested)
+        .unwrap_or(options.public_data_only)
+}
+
 fn install(
     setup: LocalSetup,
     policy: CredentialSetupPolicy,
@@ -36,7 +45,8 @@ pub(crate) fn native(
     options: &mut EngineOptions,
     policy: CredentialSetupPolicy,
 ) -> Result<(Provider, Identities), VenueError> {
-    let payload_rule = crate::payload_signing_rules(venue, options, false);
+    let public = setup_public_mode(options);
+    let payload_rule = crate::payload_signing_rules_in_mode(venue, options, false, public);
     drop(options.passphrase.take().map(Secret::new));
     let secret = options.secret.take().map(Secret::new);
     payload_rule?;
@@ -64,7 +74,7 @@ pub(crate) fn json(
     options: &EngineOptions,
 ) -> Result<(Provider, Identities), VenueError> {
     let input = zeroize::Zeroizing::new(input);
-    crate::payload_signing_rules(venue, options, false)?;
+    crate::payload_signing_rules_in_mode(venue, options, false, setup_public_mode(options))?;
     let setup = serde_json::from_str::<LocalSetup>(&input).map_err(|_| invalid(INVALID))?;
     install(setup, policy, options)
 }
@@ -238,6 +248,53 @@ mod tests {
                 .message,
                 INVALID
             );
+        }
+    }
+
+    #[test]
+    fn capsule_intent_is_checked_before_an_identity_is_installed() {
+        let valid = format!("{}ab", "00".repeat(31));
+        for venue in ["hyperliquid", "hyperliquidspot"] {
+            for requested in [false, true] {
+                let mut options: EngineOptions = serde_json::from_value(json!({
+                    "key":"public-account", "payloadSigner":true,
+                    "publicDataOnly":!requested, "publicMode":{"requested":requested}
+                }))
+                .unwrap();
+                assert!(options.secret.is_none());
+                assert!(options.signing.is_none());
+                if requested {
+                    assert!(crate::prepare_local_signer_for(venue, &mut options).is_ok());
+                    assert!(
+                        crate::local_signer_from_json_for_mode(
+                            venue,
+                            json!({"primary":{"secret":valid}}).to_string(),
+                            &options
+                        )
+                        .is_ok()
+                    );
+                } else {
+                    let expected = VenueError::new(format!("Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."))
+                        .kind(safe_cex_engine::ErrorKind::Unsupported)
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    assert_eq!(
+                        crate::prepare_local_signer_for(venue, &mut options)
+                            .err()
+                            .unwrap(),
+                        expected
+                    );
+                    assert_eq!(
+                        crate::local_signer_from_json_for_mode(
+                            venue,
+                            json!({"primary":{"secret":"invalid-scalar-sentinel"}}).to_string(),
+                            &options
+                        )
+                        .err()
+                        .unwrap(),
+                        expected
+                    );
+                }
+            }
         }
     }
 
