@@ -197,3 +197,23 @@ test('informational GraphQL errors and differing OIDs cannot change real checkou
     }
   });
 });
+
+test('run 40518541502: the paired producer is re-listed until GitHub lists it with its runner', async () => {
+  const relisted = async (...listings) => {
+    const x = fixture(), sleeps = [], producer = x.jobs[0];
+    x.context.reader.listJobs = async () => (listings.length > 1 ? listings.shift() : listings[0])(producer);
+    x.context.sleep = async ms => { sleeps.push(ms); };
+    return { x, sleeps, result: selectBitgetPair(x.context) };
+  };
+  for (const listings of [[p => [{ ...p, runner_id: 0 }], p => [{ ...p, runner_id: null }], p => [p]], [() => [], p => [p]]]) {
+    const { sleeps, result } = await relisted(...listings);
+    assert.equal((await result).runnerId, '40'); assert.deepEqual(sleeps, Array(listings.length - 1).fill(10_000));
+  }
+  const unassigned = await relisted(p => [{ ...p, runner_id: 0, status: 'in_progress' }]);
+  await assert.rejects(unassigned.result,
+    /missing\/duplicate paired physical producer; candidates \[\{"id":30,"name":"Rust \/ Bitget counterbalanced steady CPU","run_attempt":1,"runner_id":0,"status":"in_progress"\}\]/);
+  assert.equal(unassigned.sleeps.length, 6);
+  const duplicate = await relisted(p => [p, p]);
+  await assert.rejects(duplicate.result, /missing\/duplicate paired physical producer/);
+  assert.equal(duplicate.sleeps.length, 0);
+});
