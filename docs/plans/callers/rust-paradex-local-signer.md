@@ -113,6 +113,31 @@ and the TS Paradex remote-signer transport. The host action/event wire loses the
 it; no in-tree caller remains. The construction record's `bridge.payloadSigning`
 field stays on the wire and is now false for every venue.
 
+## WASM size and the shared trim obligation
+
+The Paradex family grows from 1,319,909 to 1,452,805 bytes (CI). The override is
+the HL rule: final-head CI bytes, rounded up to the KiB, plus 2 KiB. A twiggy
+breakdown attributes the raw delta to:
+- the local signer and its key decoders;
+- host serialisation of Sign work;
+- Stark verification;
+- the hosted-signing adapter;
+- engine dispatch;
+- the Paradex steps;
+- registry setup.
+
+The Ethereum derivation's crates were already in the family. Deleting the
+payload pipeline shrank Bitget by 8,105 bytes and HL by 5,927.
+
+Obligation (owner claude-m26ps4, ruled by claude-ddi2il): open the shared size
+trim PR right after this one. It covers:
+- a per-family hosted-signing feature;
+- Sign work serialised with `to_string` instead of a `Value` tree;
+- key-encoding decoders gated per family.
+
+Measure every affected family and lower each cap to its new size rounded up to
+the KiB, plus 2 KiB, under an 8x5tm1 GO.
+
 Post-beta follow-up: Hyperliquid's sealed agent address (engine address setup)
 could move onto this carrier. It is already re-derived from the installed
 provider after `set_signer`, so this is consolidation, not a fix.
