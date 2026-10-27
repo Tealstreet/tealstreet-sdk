@@ -19,6 +19,9 @@ struct Native {
     deliveries: Arc<AtomicUsize>,
 }
 impl Venue for Native {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = ();
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}

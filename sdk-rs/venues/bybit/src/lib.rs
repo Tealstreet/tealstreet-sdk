@@ -2386,6 +2386,9 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn managed_sockets() -> bool {
+        true
+    }
     // Bybit never hands work to a subscription release; its continuation paths compile out.
     fn socket_capabilities() -> SocketCapabilities {
         SocketCapabilities { handoff: false }

@@ -27,6 +27,9 @@ struct Native {
     signed_auth: bool,
 }
 impl Venue for Native {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         let policy = FeedPolicy {
