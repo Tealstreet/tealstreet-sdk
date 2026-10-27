@@ -388,8 +388,8 @@ test('Rust landing authority reads only the fixed ref and never caches its movin
   const calls = [];
   const reader = createGithubReader({ repository: 'Tealstreet/tealstreet-sdk', fetch: async url => {
     calls.push(url);
-    assert.equal(new URL(url).pathname, '/repos/Tealstreet/tealstreet-sdk/git/ref/heads/feat/rust-rewrite');
-    return jsonResponse({ ref: 'refs/heads/feat/rust-rewrite', object: { type: 'commit', sha: git(String(calls.length)) } });
+    assert.equal(new URL(url).pathname, '/repos/Tealstreet/tealstreet-sdk/git/ref/heads/master');
+    return jsonResponse({ ref: 'refs/heads/master', object: { type: 'commit', sha: git(String(calls.length)) } });
   } });
   assert.notDeepEqual(await reader.getRustLanding(), await reader.getRustLanding());
   assert.equal(calls.length, 2);

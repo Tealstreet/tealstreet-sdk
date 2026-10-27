@@ -13,7 +13,7 @@ const A = 'a'.repeat(40), B = 'b'.repeat(40), tree = 'c'.repeat(40), head = 'd'.
 const manifest = { schema: 1, failures: [] };
 const inputs = () => ({ run: { id: 10, run_attempt: 1, event: 'pull_request', head_sha: head,
   repository: { full_name: 'Tealstreet/tealstreet-sdk' } },
-pull: { number: 20, base: { sha: A, ref: 'feat/rust-rewrite', repo: { full_name: 'Tealstreet/tealstreet-sdk' } }, head: { sha: head } },
+pull: { number: 20, base: { sha: A, ref: 'master', repo: { full_name: 'Tealstreet/tealstreet-sdk' } }, head: { sha: head } },
 job: { id: 30, runner_id: 40, run_id: 10, run_attempt: 1, head_sha: head, name: 'Rust / Bitget counterbalanced steady CPU' },
 checkoutSha: B, checkoutTree: tree, mergeTree: tree,
 measurementFiles: Object.fromEntries(BITGET_MEASUREMENT_FILES.map(path => [path, 'e'.repeat(40)])) });
