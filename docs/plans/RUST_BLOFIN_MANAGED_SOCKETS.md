@@ -74,9 +74,9 @@ Qualification corrections and fixture contract:
   fixture files remain token-exact/in order. Original 224 PASS / 78 FAIL and later
   fixture/setup failures remain separate from candidate qualification.
 
-Local qualification of the corrected candidate: 311 PASS across 24 nonempty native
-targets, 0 FAIL/ignored/filtered; strict all-target clippy, package fmt and full bans
-pass. This is local evidence only. Publication, current-tip composition, fresh
+Local qualification of source correction 57521d79208: 316 PASS across 24 nonempty
+native targets, including 18 lifecycle controls, 0 FAIL/ignored/filtered; strict
+all-target clippy, package fmt and full bans pass. This is local evidence only. Publication, current-tip composition, fresh
 PR correctness/family/replay and exact-tree auditor GO remain required.
 
 CodeRabbit hold corrections are tested against the prior cb2adf6 runtime first.
