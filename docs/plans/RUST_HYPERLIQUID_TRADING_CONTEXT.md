@@ -117,6 +117,53 @@ Credential review: m26ps4; money/recipe/API review: 9czdjh and/or fe7lgm/dazzy3;
 every landing requires 8x5tm1's exact-tree GO. This API direction grants no source,
 size, hosted or live-credential clearance.
 
+## Local source qualification checkpoint
+
+The local cutover removes every HL runtime raw exchange request, numeric command
+terminal, agent-scalar holder and eager signature call. It uses the declared
+ScalarOnly local provider and the sealed installed identity for every physical
+successor. The engine owns each selected nonce claim, serial leg and journal.
+The original native sender/hash helpers remain test oracles and the disabled
+TxFlow consumer's dependency; HL runtime has no fallback to them.
+
+The current full native receipt is 359 PASS across 27 targets, including the
+38 production custody controls. The later scoped source qualification has
+38 custody, 37 trading and 3 security controls green. Crypto capability ON/OFF
+is pinned; unchanged AsterDEX and GRVT suites total 628 PASS. Strict clippy for
+HL/registry/crypto all targets passes. Final source reviews, composed reruns,
+final composed JS/WASM qualification, CI bytes and auditor GO remain required.
+Fresh unoptimized browser bindings already passed the actual EngineHost path for
+both names and both native/private-capsule setup forms. The CI family and combined
+conformance paths run that same production-binding control.
+
+KnownPartial is the engine's deliberate accepted-plus-cited-refusal projection
+(outcome None with structured IDs). Unlisted errors and pending placement rows
+without an oid remain Unknown, without write replay. The changed legacy outcome
+oracles are disclosed in the caller fragment; prices, sizes, grouping, actual IDs
+and the no-third-send/no-retry predicates stay asserted. Native packet fixtures
+now drive real readiness and release-domain timers without firing call deadlines.
+The read-only test-support clock accessor proves no host resource settlement.
+
+A settings write is marked at issue, so an engine-owned 503 seal cannot skip its
+native uncertainty guard. The existing reconcile hook joins the targeted read;
+its revision must follow the write before it can clear the mark. The connected
+stale-read/recovery control goes assertion RED when the issue mark is removed.
+A real joined failed address-setup execution leaves public reads available but
+refuses a private write before Prepare or provider signing.
+
+The source supports a fresh JS/WASM host, not warm legacy-owner replacement.
+Synchronous dispose cannot prove the original transport/provider promises joined.
+Replacement activation remains held until that external join and callback fence
+is genuinely demonstrated; a cold page teardown alone is not such evidence.
+Hosted signing and order_read_epoch adoption stay outside this change.
+
+The current request inventory has zero HL entries (15 removed in this slice;
+#2303 removed the first two). Pure enum predicates and explicit queued-read
+ownership remove the conservative non-call fragments without renaming receivers
+or weakening the checker. All 17 original signing fingerprints are removed;
+two new test-only startup JSON/policy fingerprints remain explicitly recorded
+as fixture inputs, not runtime signing debt. Their addition needs auditor GO.
+
 ## Historical original plan and controls
 
 Owner: codex-zs5e83. Native/recipe reviewer: codex-9czdjh (or codex-uufub4).

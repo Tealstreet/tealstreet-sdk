@@ -2,10 +2,10 @@
 //! Documented spot metadata shape: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot
 mod support;
 use safe_cex_engine::model::*;
-use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 use serde_json::Value;
+use support::prepared_now;
 use support::{META, STATE, kind, message, reply};
 
 /// UBTC is Unit-bridged (displays as BTC); UPUMP keeps its prefix because a native
@@ -26,7 +26,6 @@ struct Run {
 fn options(spot: bool) -> Options {
     Options {
         key: Some(KEY.into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some(KEY.into()),
         enable_spot_markets: spot,
         ..Options::default()
@@ -35,7 +34,7 @@ fn options(spot: bool) -> Options {
 
 /// Answers every read; `spot_meta` is the body for spotMetaAndAssetCtxs (`None`: HTTP 500).
 fn run(spot: bool, spot_meta: Option<&str>, spot_first: bool) -> Run {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(options(spot)));
+    let mut e = support::private_engine(options(spot), support::TEST_SECRET.into(), false);
     e.start(1000.0);
     let (mut socket, mut reads, mut sends) = (None, Vec::new(), Vec::new());
     let (mut logs, mut timers) = (Vec::new(), Vec::new());

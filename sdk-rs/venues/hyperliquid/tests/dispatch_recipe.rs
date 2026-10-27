@@ -266,6 +266,30 @@ fn provider_recipe_matches_native_signature_and_body_on_both_networks_and_vaults
                 serde_json::from_str::<serde_json::Value>(packet.body.as_deref().unwrap()).unwrap(),
                 expected
             );
+            #[derive(serde::Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct NativePayload<'a, A: serde::Serialize> {
+                action: &'a A,
+                nonce: u64,
+                signature: sign::Signature,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                vault_address: Option<&'a str>,
+            }
+            let native_body = serde_json::to_string(&NativePayload {
+                action: &action(),
+                nonce: work.receipt.nonce.unwrap(),
+                signature: sign::sign(
+                    &action(),
+                    expected["vaultAddress"].as_str(),
+                    work.receipt.nonce.unwrap(),
+                    !testnet,
+                    KEY,
+                )
+                .unwrap(),
+                vault_address: expected["vaultAddress"].as_str(),
+            })
+            .unwrap();
+            assert_eq!(packet.body.as_deref(), Some(native_body.as_str()));
             assert!(matches!(
                 e.claim_http(2000., permit),
                 Ok(Claim::Released(_))

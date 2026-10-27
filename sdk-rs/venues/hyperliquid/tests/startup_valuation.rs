@@ -1,8 +1,8 @@
 //! Funded unified/portfolio wallets cannot be valued from absent ticker prices.
 mod support;
-use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Engine, Event, PublicFeedPolicy};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+use support::prepared_now;
 use support::*;
 
 fn collateral() -> &'static str {
@@ -121,12 +121,15 @@ fn pending_live_collateral_fences_older_rest_and_uses_latest_position_pnl() {
 
 #[test]
 fn cold_portfolio_wallet_does_not_load_a_fabricated_zero_collateral_balance() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut engine = support::private_engine(
+        Options {
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        false,
+    );
     engine
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();

@@ -1,5 +1,7 @@
 //! Sequenced writes. A lost response reconciles account state; writes never retry.
+mod custody;
 mod schedule;
+pub(crate) use custody::PACING;
 
 use crate::{
     Builder, Hyperliquid, Pending,
@@ -19,8 +21,6 @@ pub struct Trading {
     queue: VecDeque<Job>,
     active: Option<Job>,
     inflight: bool,
-    write_at: Option<f64>,
-    pace: Option<TimerId>,
     builder_wait: Option<TimerId>,
     retry: Option<TimerId>,
     retry_step: usize,
@@ -28,6 +28,7 @@ pub struct Trading {
     uncertain_settings: HashSet<String>,
 }
 struct Job {
+    custody: Option<custody::Custody>,
     command: CommandId,
     steps: VecDeque<Step>,
     ids: Vec<String>,
@@ -51,9 +52,12 @@ enum Step {
     },
 }
 pub struct Request {
+    plan: safe_cex_engine::request_context::Plan,
+    context: safe_cex_engine::request_context::Context,
     command: CommandId,
     effect: Effect,
 }
+#[derive(Clone)]
 enum Effect {
     ScheduleCancel,
     Place(Vec<Placement>),
@@ -63,6 +67,14 @@ enum Effect {
         leverage: f64,
         isolated: bool,
     },
+}
+impl Effect {
+    fn is_cancel(&self) -> bool {
+        matches!(self, Self::Cancel(_))
+    }
+    fn is_schedule_control(&self) -> bool {
+        matches!(self, Self::ScheduleCancel)
+    }
 }
 #[derive(Clone, Serialize)]
 struct OrderWire {
@@ -188,7 +200,7 @@ impl Hyperliquid {
         let (command, steps) = match command {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = self.preflight(cx, &orders) {
-                    cx.fail(command, not_sent(error));
+                    cx.refuse_command(Operation::Mutation, not_sent(error));
                     return;
                 }
                 (command, orders.into_iter().map(Step::Place).collect())
@@ -205,7 +217,7 @@ impl Hyperliquid {
                 let orders = match orders {
                     Ok(orders) => orders,
                     Err(error) => {
-                        cx.fail(command, not_sent(error));
+                        cx.refuse_command(Operation::Mutation, not_sent(error));
                         return;
                     }
                 };
@@ -235,19 +247,19 @@ impl Hyperliquid {
                     .chain(self.trading.queue.iter())
                     .any(|job| job.amend_source.as_deref() == Some(id.as_str()))
                 {
-                    cx.fail(
-                        command,
+                    cx.refuse_command(
+                        Operation::Mutation,
                         not_sent("Hyperliquid order already has an amendment pending"),
                     );
                     return;
                 }
                 let Some(old) = cx.store.order(&id).cloned() else {
-                    cx.fail(command, not_sent("Order not found"));
+                    cx.refuse_command(Operation::Mutation, not_sent("Order not found"));
                     return;
                 };
                 if !matches!(old.status, OrderStatus::Open | OrderStatus::Creating) {
-                    cx.fail(
-                        command,
+                    cx.refuse_command(
+                        Operation::Mutation,
                         not_sent("Hyperliquid order is not available for amendment"),
                     );
                     return;
@@ -298,14 +310,14 @@ impl Hyperliquid {
                 let cloid = match mint_cloid(cx) {
                     Ok(c) => c,
                     Err(e) => {
-                        cx.fail(command, not_sent(e));
+                        cx.refuse_command(Operation::Mutation, not_sent(e));
                         return;
                     }
                 };
                 opts.client_order_id = Some(cloid.clone());
                 replacement = Some(cloid);
                 if let Err(error) = self.preflight(cx, std::slice::from_ref(&opts)) {
-                    cx.fail(command, not_sent(error));
+                    cx.refuse_command(Operation::Mutation, not_sent(error));
                     return;
                 }
                 amend_source = Some(id);
@@ -353,25 +365,20 @@ impl Hyperliquid {
             }
             _ => return,
         };
-        if self.options.public_data_only || self.options.secret.as_deref().is_none_or(str::is_empty)
-        {
-            cx.fail(
+        self.enqueue_trade(
+            cx,
+            Job {
+                custody: None,
                 command,
-                not_sent("Hyperliquid signing key is missing").kind(ErrorKind::AuthInvalid),
-            );
-            return;
-        }
-        self.trading.queue.push_back(Job {
-            command,
-            steps,
-            ids: Vec::new(),
-            replacement,
-            amend_source,
-            amend_filled: false,
-            builder_checked: false,
-            effective: false,
-        });
-        self.pump_trades(cx);
+                steps,
+                ids: Vec::new(),
+                replacement,
+                amend_source,
+                amend_filled: false,
+                builder_checked: false,
+                effective: false,
+            },
+        );
     }
     fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
         let mut seen = HashSet::new();
@@ -559,29 +566,25 @@ impl Hyperliquid {
         Ok((wires, grouping))
     }
     pub(crate) fn pump_trades(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.trading.inflight
-            || self.trading.builder_wait.is_some()
-            || self.trading.pace.is_some()
-        {
+        if self.trading.inflight || self.trading.builder_wait.is_some() {
             return;
         }
         if self.trading.active.is_none() {
             self.trading.active = self.trading.queue.pop_front();
         }
-        let Some(job) = self.trading.active.as_ref() else {
+        if self.trading.active.is_none() {
             return;
-        };
+        }
+        if !self.trade_entry_ready(cx) {
+            return;
+        }
+        let job = self.trading.active.as_ref().unwrap();
         if job.steps.is_empty() {
             self.finish_trade(cx, Ok(()));
             return;
         }
         if job.amend_filled {
             self.finish_trade(cx, Err(not_sent("Hyperliquid amendment source was filled")));
-            return;
-        }
-        if self.trading.write_at.is_some_and(|at| cx.now - at < 334.0) {
-            self.trading.pace =
-                Some(cx.set_timer(334.0 - (cx.now - self.trading.write_at.unwrap())));
             return;
         }
         if matches!(job.steps.front(), Some(Step::Cancel(_)))
@@ -600,12 +603,16 @@ impl Hyperliquid {
             && self.account.builder_approved.is_none()
             && !job.builder_checked;
         if needs_builder {
+            if let Err(error) = self.park_trade_builder(cx) {
+                self.finish_trade(cx, Err(error));
+                return;
+            }
             self.trading.active.as_mut().unwrap().builder_checked = true;
             self.check_builder(cx);
             self.trading.builder_wait = Some(cx.set_timer(8000.0));
             return;
         }
-        let command = job.command;
+
         let step = self
             .trading
             .active
@@ -626,48 +633,26 @@ impl Hyperliquid {
             self.pump_trades(cx);
             return;
         }
-        let nonce = match crate::sign::reserve_agent_nonce(
-            cx,
-            self.options.secret.as_deref().unwrap_or(""),
-        ) {
-            Ok(nonce) => nonce,
-            Err(error) => {
-                self.restore_cancel(cx, &effect);
-                self.finish_trade(cx, Err(not_sent(error)));
-                return;
-            }
-        };
-        let signature = match sign::sign(
-            &action,
-            self.options.vault.as_deref(),
-            nonce,
-            !self.options.testnet,
-            self.options.secret.as_deref().unwrap_or(""),
-        ) {
-            Ok(s) => s,
-            Err(error) => {
-                self.restore_cancel(cx, &effect);
-                self.finish_trade(cx, Err(not_sent(error)));
-                return;
-            }
-        };
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Payload<'a> {
-            action: &'a Action,
-            nonce: u64,
-            signature: sign::Signature,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            vault_address: Option<&'a str>,
+        if let Err(error) = self.submit_trade(cx, &action, effect) {
+            self.finish_trade(cx, Err(error));
         }
-        let body = serde_json::to_string(&Payload {
-            action: &action,
-            nonce,
-            signature,
-            vault_address: self.options.vault.as_deref(),
-        })
-        .unwrap();
-        if let Effect::Place(records) = &effect {
+    }
+    fn remember_trade_effect(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        _command: CommandId,
+        effect: &Effect,
+    ) {
+        if let Effect::Leverage { symbol, .. } = effect {
+            self.trading.uncertain_settings.insert(symbol.clone());
+            self.acknowledge_settings(cx, symbol);
+        }
+        if let Effect::Cancel(orders) = effect {
+            for order in orders {
+                cx.store.set_order_status(&order.id, OrderStatus::Canceling);
+            }
+        }
+        if let Effect::Place(records) = effect {
             for record in records {
                 if let Some(c) = &record.order.client_order_id {
                     self.account.records.insert(c.clone(), record.clone());
@@ -697,9 +682,14 @@ impl Hyperliquid {
         while self.account.preplacements.len() > 500 {
             self.account.preplacements.pop_front();
         }
-        self.trading.inflight = true;
-        self.trading.write_at = Some(cx.now);
-        if let Effect::Place(records) = &effect {
+    }
+    fn publish_trade_receipts(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        effect: &Effect,
+    ) {
+        if let Effect::Place(records) = effect {
             cx.command_progress(
                 command,
                 records
@@ -714,13 +704,6 @@ impl Hyperliquid {
                     .collect(),
             );
         }
-        cx.request(
-            Method::Post,
-            format!("{}/exchange", self.rest()),
-            vec![("Content-Type", "application/json".into())],
-            Some(body),
-            Pending::Trade(Request { command, effect }),
-        );
     }
     fn prepare_write(
         &self,
@@ -809,9 +792,6 @@ impl Hyperliquid {
                         })
                     })
                     .collect::<Result<Vec<_>, String>>()?;
-                for o in &orders {
-                    cx.store.set_order_status(&o.id, OrderStatus::Canceling);
-                }
                 Ok((Action::Cancel { cancels }, Effect::Cancel(orders)))
             }
             Step::Leverage {
@@ -868,7 +848,7 @@ impl Hyperliquid {
     pub(crate) fn builder_result(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(timer) = self.trading.builder_wait.take() {
             cx.clear_timer(timer);
-            self.pump_trades(cx);
+            self.release_trade_builder(cx);
         }
     }
     pub(crate) fn trade_response(
@@ -877,17 +857,29 @@ impl Hyperliquid {
         request: Request,
         result: Result<Response<'_>, &str>,
     ) {
-        if self
-            .trading
-            .active
-            .as_ref()
-            .is_none_or(|j| j.command != request.command)
-        {
+        if !self.trade_valid(cx, &request) {
             return;
         }
         self.trading.inflight = false;
-        if matches!(request.effect, Effect::ScheduleCancel) {
-            self.finish_trade(cx, schedule::reply(result));
+        if request.effect.is_schedule_control() {
+            let outcome = schedule::reply(result);
+            let reported = match &outcome {
+                Ok(()) => self.report_trade_batch(cx, &request, &[], "", false),
+                Err(error) => self.report_trade_failure(
+                    cx,
+                    &request,
+                    &ReplyError {
+                        message: error.message.clone(),
+                        uncertain: error.outcome != Some(Outcome::Rejected),
+                    },
+                    error.venue_message.as_deref(),
+                ),
+            };
+            if let Err(error) = reported {
+                self.finish_trade(cx, Err(error.venue_error()));
+                return;
+            }
+            self.finish_trade(cx, outcome);
             return;
         }
 
@@ -907,7 +899,7 @@ impl Hyperliquid {
             Ok(s) => s,
             Err(e) => {
                 if idempotent_cancel
-                    && matches!(&request.effect, Effect::Cancel(_))
+                    && request.effect.is_cancel()
                     && only_terminal_cancel(&e.message)
                 {
                     let count = if let Effect::Cancel(orders) = &request.effect {
@@ -920,10 +912,12 @@ impl Hyperliquid {
                         (0..count).map(|_| Status::Text("success".into())).collect(),
                     )
                 } else {
-                    self.restore_cancel(cx, &request.effect);
-                    if e.uncertain {
-                        self.mark_settings_uncertain(cx, &request.effect);
+                    if let Err(error) = self.report_trade_failure(cx, &request, &e, None) {
+                        self.finish_trade(cx, Err(error.venue_error()));
+                        return;
                     }
+                    self.restore_cancel(cx, &request.effect);
+                    self.mark_settings_uncertain(cx, &request.effect);
                     self.schedule_orders(cx);
                     let error = VenueError::new(e.message);
                     let rejected =
@@ -957,6 +951,8 @@ impl Hyperliquid {
             Effect::Leverage { .. } => kind == "default" && statuses.is_empty(),
         };
         if !valid_shape {
+            let _ =
+                cx.http_write_unproven(&request.context, "Invalid Hyperliquid command response");
             self.restore_cancel(cx, &request.effect);
             self.mark_settings_uncertain(cx, &request.effect);
             self.schedule_orders(cx);
@@ -976,11 +972,13 @@ impl Hyperliquid {
             }
             _ => true,
         });
-        let batch_error = if !errors.is_empty()
-            && !(idempotent_cancel
-                && matches!(&request.effect, Effect::Cancel(_))
+        let batch_error = if errors.is_empty()
+            || (idempotent_cancel
+                && request.effect.is_cancel()
                 && errors.iter().all(|e| only_terminal_cancel(e)))
         {
+            None
+        } else {
             Some(
                 VenueError::new(errors.join(", "))
                     .kind(ErrorKind::Rejected)
@@ -990,9 +988,17 @@ impl Hyperliquid {
                         Outcome::Rejected
                     }),
             )
-        } else {
-            None
         };
+        if let Err(error) = self.report_trade_batch(
+            cx,
+            &request,
+            &statuses,
+            &errors.join(", "),
+            idempotent_cancel,
+        ) {
+            self.finish_trade(cx, Err(error.venue_error()));
+            return;
+        }
         match request.effect {
             Effect::ScheduleCancel => unreachable!(),
             Effect::Place(records) => {
@@ -1079,6 +1085,7 @@ impl Hyperliquid {
                 leverage,
                 isolated,
             } => {
+                self.settings_reconciled(&symbol);
                 self.acknowledge_settings(cx, &symbol);
                 let margin = if isolated {
                     MarginType::Isolated
@@ -1130,6 +1137,17 @@ impl Hyperliquid {
             self.refresh_uncertain_settings(cx, symbol);
         }
     }
+    pub(crate) fn reconcile_settings(&mut self, cx: &mut Cx<'_, Pending>) {
+        for symbol in self
+            .trading
+            .uncertain_settings
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            self.refresh_uncertain_settings(cx, &symbol);
+        }
+    }
     pub(crate) fn settings_reconciled(&mut self, symbol: &str) {
         self.trading.uncertain_settings.remove(symbol);
     }
@@ -1157,11 +1175,11 @@ impl Hyperliquid {
                 {
                     error.outcome = Some(Outcome::Unknown);
                 }
-                cx.fail(job.command, error);
+                self.finish_trade_owner(cx, &job, Err(error));
                 self.pump_trades(cx);
                 return;
             }
-            let data = if let Some(client_order_id) = job.replacement {
+            let data = if let Some(client_order_id) = job.replacement.as_ref() {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Replacement {
@@ -1169,26 +1187,22 @@ impl Hyperliquid {
                     client_order_id: String,
                 }
                 serde_json::to_string(&Replacement {
-                    order_ids: job.ids,
-                    client_order_id,
+                    order_ids: job.ids.clone(),
+                    client_order_id: client_order_id.clone(),
                 })
                 .unwrap()
             } else {
                 serde_json::to_string(&job.ids).unwrap()
             };
-            cx.done(job.command, data);
+            self.finish_trade_owner(cx, &job, Ok(data));
         }
         self.pump_trades(cx);
     }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.trading.pace == Some(timer) {
-            self.trading.pace = None;
-            self.pump_trades(cx);
-        }
         if self.trading.builder_wait == Some(timer) {
             self.trading.builder_wait = None;
             self.account.builder_approved = Some(false);
-            self.pump_trades(cx);
+            self.release_trade_builder(cx);
         }
         if self.trading.retry == Some(timer) {
             self.trading.retry = None;

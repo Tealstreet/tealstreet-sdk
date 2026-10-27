@@ -45,3 +45,52 @@ only with the full cutover and its production-binding controls. Standalone
 native signing/vector helpers still consumed by the disabled TxFlow family are
 not an HL runtime fallback. Their separate deletion requires that consumer to
 migrate or disappear. order_read_epoch adoption follows in a separate slice.
+
+LocalSigner capability admission now reports Secp256k1Digest as supported when
+its existing secp256k1 arm is linked and the exact key passes declared-algorithm
+validation. This also affects AsterDEX and GRVT builds linking that arm; their
+native suites and crypto feature-on/off controls qualify this shared correction.
+It adds no key, provider operation or signing algorithm to a request.
+
+The managed journal replaces three legacy projections explicitly. An HTTP
+401/403/429 without proven native refusal evidence is Unknown, without replay.
+A pending placement row without an oid is Unknown and reconciled rather than a
+successful empty result. Unlisted per-row errors are Unknown; a complete batch
+with accepted rows plus the documented PerpMargin refusal has structured IDs
+and no execution-uncertainty label (KnownPartial, outcome None). The literal
+`Insufficient margin to place order.` is the cited proof; generic text is not.
+See https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses.
+The old SDK/native assertions for these projections are deliberately amended;
+order prices, sizes, grouping, accepted IDs and no-retry assertions remain.
+Preparation may start before the 334ms gap; the final release observes the gap.
+
+This cutover qualifies a fresh host with no legacy owner. Warm replacement of an
+old eager-signing engine is unsupported until its original provider/transport
+promises and cleanup have actually joined and retained callbacks/timers are
+fenced. The current synchronous dispose API does not expose that join, so abort,
+map clearing, delay, or browser teardown cannot authorize replacement. Joining
+already-sent work still leaves an uncertain result Unknown and reconciled.
+
+Settings writes are marked uncertain at issue. A definitive delivered success
+clears the mark; engine-owned unproven seals retain it. The existing reconcile
+hook starts or joins the native settings read. Read revisions prevent a
+pre-write snapshot from clearing a newer mark, including an in-flight read
+joined by a reconcile re-ask. The order-census fence remains independent.
+
+The former Sensitive options wrapper erased only public account data after the
+scalar holder was removed, so that wrapper and its erasure implementation are
+removed. Redacted Debug and the installed-options no-scalar controls remain.
+Two startup-unit-fixture inventory hits describe trusted LocalSigner setup JSON
+and policy metadata, not venue secret holders or eager signing calls. The final lexical request fragments are removed by moving builder/effect
+classification to pure enum predicates, with no Cx or issuing authority; the
+native callback uses those predicates. The queued-read struct is destructured
+at dispatch: its field named request was counted as a legacy member despite
+being an enum continuation. Neither field nor receiver is renamed. The error
+condition is expressed as the same empty-or-idempotent-success case.
+
+The local-provider capsule omits only the trusted trimSigning false default for
+both slots, so a standalone provider build without trimming can decode it. True
+is still serialized; caller trimSigning metadata stays refused at either value.
+The effective policy/readiness and scalar bytes are unchanged. The pre-existing
+native from_setup feature-off handling of a true policy is a credential-core
+follow-up; the only current true declaration (Bitunix) links that feature.

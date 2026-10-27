@@ -1,7 +1,6 @@
 //! Frozen exchange actions signed under a genuine selected, address-bound nonce claim.
 use super::{Signature, action_hash_encoded, agent_digest};
 use safe_cex_crypto::{ethereum, hex};
-use safe_cex_engine::nonce::{NonceClaim, NonceError};
 use safe_cex_engine::signing::{
     Algorithm, Context, Identity, KeyRef, Operation, PayloadPart, SignError, SignReceipt,
     SignRequest, SignResult,
@@ -14,7 +13,7 @@ const HEADERS: &[(&str, &str)] = &[("Content-Type", "application/json")];
 
 pub struct Exchange {
     signing: KeyRef,
-    claim: NonceClaim,
+    claim: safe_cex_engine::nonce::NonceClaim,
     address: [u8; 20],
     signer: String,
     json: Box<RawValue>,
@@ -26,7 +25,7 @@ pub struct Exchange {
 impl Exchange {
     pub fn new(
         identity: &Identity,
-        claim: NonceClaim,
+        claim: safe_cex_engine::nonce::NonceClaim,
         action: &impl Serialize,
         vault: Option<String>,
         testnet: bool,
@@ -77,7 +76,7 @@ impl Exchange {
     }
 }
 impl SignStep for Exchange {
-    fn nonce_claim(&self) -> Option<&NonceClaim> {
+    fn nonce_claim(&self) -> Option<&safe_cex_engine::nonce::NonceClaim> {
         Some(&self.claim)
     }
     fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
@@ -96,7 +95,8 @@ impl SignStep for Exchange {
         let nonce = dispatch
             .reserve_nonce(&self.claim)
             .map_err(|error| match error {
-                NonceError::InvalidTime | NonceError::InvalidClaim => SignError::InvalidRequest,
+                safe_cex_engine::nonce::NonceError::InvalidTime
+                | safe_cex_engine::nonce::NonceError::InvalidClaim => SignError::InvalidRequest,
                 _ => SignError::Unavailable,
             })?;
         let hash = action_hash_encoded(&self.encoded, self.vault.as_deref(), nonce)

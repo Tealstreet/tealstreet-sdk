@@ -96,14 +96,20 @@ mod tests {
 
     #[test]
     fn native_and_private_json_share_the_exact_scalar_decoder() {
-        let rows: serde_json::Value = serde_json::from_str(include_str!(
+        #[derive(serde::Deserialize)]
+        struct ScalarRow {
+            name: String,
+            scalar: String,
+            valid: bool,
+        }
+        let rows: Vec<ScalarRow> = serde_json::from_str(include_str!(
             "../../../packages/safe-cex/src/exchanges/rust/hyperliquid-signer-setup.golden.json"
         ))
         .unwrap();
         let mut expected = None;
         for venue in ["hyperliquid", "hyperliquidspot"] {
-            for row in rows.as_array().unwrap() {
-                let scalar = row["scalar"].as_str().unwrap();
+            for row in &rows {
+                let scalar = &row.scalar;
                 let mut options = options(scalar);
                 let key = options.key.clone();
                 let user = options.application_id.clone();
@@ -127,13 +133,8 @@ mod tests {
                     }
                 };
                 let native = result(native);
-                assert_eq!(
-                    native.is_some(),
-                    row["valid"].as_bool().unwrap(),
-                    "{}",
-                    row["name"]
-                );
-                assert_eq!(result(separate), native, "{}", row["name"]);
+                assert_eq!(native.is_some(), row.valid, "{}", row.name);
+                assert_eq!(result(separate), native, "{}", row.name);
                 if let Some(native) = native {
                     assert_eq!(*expected.get_or_insert_with(|| native.clone()), native);
                 }

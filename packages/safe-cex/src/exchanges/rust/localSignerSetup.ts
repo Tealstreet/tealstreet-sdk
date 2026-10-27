@@ -144,7 +144,8 @@ export class LocalSignerSetup {
     if (!credentials) throw new Error('Local signer setup has already been consumed or disposed');
     this.#credentials = undefined;
     try {
-      return new Constructor(venue, withReadCredentialsValid(optionsJson, this.readCredentialsValid), JSON.stringify(credentials));
+      return new Constructor(venue, withReadCredentialsValid(optionsJson, this.readCredentialsValid), JSON.stringify(credentials,
+        (key, value) => key === 'trimSigning' && value === false ? undefined : value));
     } finally {
       if (credentials.primary) {
         credentials.primary.key = undefined;

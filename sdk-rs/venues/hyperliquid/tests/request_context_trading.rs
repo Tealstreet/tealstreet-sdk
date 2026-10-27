@@ -1,4 +1,4 @@
-//! Original custody probes; raw compatibility is restricted to native wire/reply ingress.
+//! Production custody controls with real setup, native replies and Prepare/Bind/Claim.
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::Interval;
@@ -27,6 +27,50 @@ struct Probe {
     validated: usize,
 }
 impl Venue for Probe {
+    fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
+        self.inner.address_nonce_domain()
+    }
+    fn public_address_slots(&self) -> safe_cex_engine::AddressSetupSlots {
+        self.inner.public_address_slots()
+    }
+    fn dispatch_nonce() -> bool {
+        Hyperliquid::dispatch_nonce()
+    }
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    }
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        self.inner.http_pacing()
+    }
+    fn http_release_domain() -> Option<safe_cex_engine::request_context::ReleaseDomain> {
+        Hyperliquid::http_release_domain()
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.inner.on_http_preflight_ready(cx, owner);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.inner.on_http_plan_ready(cx, owner);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.inner.on_http_owner_retired_preflight(owner)
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<safe_cex_engine::request_context::ReconciliationData, Error> {
+        self.inner.capture_http_reconciliation(pending)
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -167,16 +211,21 @@ fn boot_with_builder(approval_ready: bool) -> (Engine<Probe>, SocketId) {
     static AGENT: AtomicU64 = AtomicU64::new(100);
     let scalar = format!("{:064x}", AGENT.fetch_add(1, Ordering::Relaxed));
     let address = safe_cex_crypto::ethereum::private_key_address(&scalar).unwrap();
+    let (provider, identities) = support::agent(&scalar);
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
         inner: Hyperliquid::new(Options {
             key: Some(address.clone()),
-            secret: Some(scalar),
+            credentials: identities.primary.clone(),
             application_id: Some(address),
             ..Options::default()
         }),
         peers: vec![],
         validated: 0,
     });
+    e.set_signer(Some(provider)).unwrap();
+    e.set_identities(identities).unwrap();
+    e.initialize_address_nonce(999.).unwrap();
+    assert!(e.address_nonce_setup_ready());
     e.start(1000.);
     let mut socket = None;
     for _ in 0..30 {
@@ -291,12 +340,7 @@ fn prep(actions: &[Action]) -> (Preparation, HttpRequest) {
 fn native_release(e: &mut Engine<Probe>, actions: &[Action]) -> HttpRequest {
     native_release_at(e, NOW, actions)
 }
-fn native_release_at(e: &mut Engine<Probe>, now: f64, actions: &[Action]) -> HttpRequest {
-    let raw = exchange(actions);
-    if !raw.is_empty() {
-        assert_eq!(raw.len(), 1);
-        return raw[0].clone();
-    }
+fn prepare_for_pacing(e: &mut Engine<Probe>, now: f64, actions: &[Action]) -> Vec<Action> {
     let (p, _) = prep(actions);
     e.http_prepared(
         now,
@@ -306,18 +350,51 @@ fn native_release_at(e: &mut Engine<Probe>, now: f64, actions: &[Action]) -> Htt
             expires_at: None,
         },
     );
-    let (permit, request) = e
-        .drain_actions()
-        .find_map(|a| match a {
-            Action::ManagedHttp(a) => match *a {
-                HttpAction::Bind {
-                    permit, request, ..
-                } => Some((permit, request)),
-                _ => None,
-            },
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(exchange(&actions).is_empty());
+    assert!(
+        !actions.iter().any(
+            |a| matches!(a, Action::ManagedHttp(a) if matches!(&**a, HttpAction::Bind { .. }))
+        )
+    );
+    actions
+}
+fn native_release_at(e: &mut Engine<Probe>, now: f64, actions: &[Action]) -> HttpRequest {
+    assert!(
+        exchange(actions).is_empty(),
+        "writes have no raw transport fallback"
+    );
+    let bound = actions.iter().find_map(|a| match a {
+        Action::ManagedHttp(a) => match &**a {
+            HttpAction::Bind {
+                permit, request, ..
+            } => Some((*permit, request.clone())),
             _ => None,
-        })
-        .expect("real Bind; signed adoption needs the actual provider fixture");
+        },
+        _ => None,
+    });
+    let (permit, request) = bound.unwrap_or_else(|| {
+        let (p, _) = prep(actions);
+        e.http_prepared(
+            now,
+            p,
+            Prepared {
+                id: p.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        e.drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => Some((permit, request)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("real signed Bind")
+    });
     assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
     request
 }
@@ -445,6 +522,7 @@ fn capacity(case: Case) {
         let mut settled: Vec<_> = e.drain_actions().collect();
         if matches!(case, Case::Amend) {
             assert!(results(&settled, OWNER).is_empty());
+            settled = prepare_for_pacing(&mut e, NOW + 1., &settled);
             let timer = settled
                 .iter()
                 .find_map(|a| match a {
@@ -634,7 +712,10 @@ fn native_order_wire_and_no_oid_trigger_are_preserved() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
     let a: Vec<_> = e.drain_actions().collect();
-    assert_eq!(results(&a, OWNER), vec![Ok("[]".into())]);
+    assert_eq!(
+        results(&a, OWNER)[0].as_ref().unwrap_err().outcome,
+        Some(Outcome::Unknown)
+    );
 }
 fn status_refusal(status: u16, outcome: Outcome) {
     let (mut e, _) = boot();
@@ -650,16 +731,16 @@ fn status_refusal(status: u16, outcome: Outcome) {
     assert!(e.drain_actions().next().is_none());
 }
 #[test]
-fn native_401_is_rejected_without_resend() {
-    status_refusal(401, Outcome::Rejected);
+fn unproven_http_401_is_unknown_without_resend() {
+    status_refusal(401, Outcome::Unknown);
 }
 #[test]
-fn native_403_is_rejected_without_resend() {
-    status_refusal(403, Outcome::Rejected);
+fn unproven_http_403_is_unknown_without_resend() {
+    status_refusal(403, Outcome::Unknown);
 }
 #[test]
-fn native_429_is_rejected_without_resend() {
-    status_refusal(429, Outcome::Rejected);
+fn unproven_http_429_is_unknown_without_resend() {
+    status_refusal(429, Outcome::Unknown);
 }
 #[test]
 fn native_408_is_unknown_without_resend() {
@@ -731,7 +812,7 @@ fn fifo_keeps_the_native_334_ms_queue_anchor() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert_eq!(results(&actions, OWNER), vec![Ok("[]".into())]);
-    no_trade(&actions);
+    let actions = prepare_for_pacing(&mut e, NOW + 2., &actions);
     let timer = actions
         .iter()
         .find_map(|a| match a {
@@ -973,6 +1054,7 @@ fn stale_old_reply_cannot_settle_the_next_fifo_owner() {
     respond(&mut e, NOW + 2., &r, 200, ACCEPT);
     let a: Vec<_> = e.drain_actions().collect();
     assert_eq!(results(&a, OWNER).len(), 1);
+    let a = prepare_for_pacing(&mut e, NOW + 2., &a);
     let timer = a
         .iter()
         .find_map(|a| match a {
@@ -1041,7 +1123,7 @@ fn native_all_rejected_rows_keep_the_full_ordered_diagnostic() {
     let error = result[0].as_ref().unwrap_err();
     assert_eq!(error.message, "first rejected, second rejected");
     assert_eq!(error.kind, Some(ErrorKind::Rejected));
-    assert_eq!(error.outcome, Some(Outcome::Rejected));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(e.store().orders().is_empty());
     no_trade(&a);
 }
@@ -1093,11 +1175,14 @@ fn native_wrong_response_kind_cannot_publish_matching_rows() {
 }
 
 #[test]
-fn native_waiting_rows_complete_without_invented_order_ids() {
+fn pending_rows_are_unknown_without_invented_order_ids() {
     let (e, a) = native_two_row_reply(
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill","waitingForTrigger"]}}}"#,
     );
-    assert_eq!(results(&a, OWNER), vec![Ok("[]".into())]);
+    assert_eq!(
+        results(&a, OWNER)[0].as_ref().unwrap_err().outcome,
+        Some(Outcome::Unknown)
+    );
     assert!(e.store().orders().is_empty());
     no_trade(&a);
 }
@@ -1155,6 +1240,7 @@ fn native_late_source_fill_keeps_the_confirmed_replacement_identity() {
     );
     let a: Vec<_> = e.drain_actions().collect();
     assert!(results(&a, OWNER).is_empty());
+    let a = prepare_for_pacing(&mut e, NOW + 1., &a);
     let timer = a
         .iter()
         .find_map(|action| match action {
@@ -1189,4 +1275,18 @@ fn native_late_source_fill_keeps_the_confirmed_replacement_identity() {
     assert_eq!(ids["clientOrderId"], cloid);
     assert!(e.store().order("10").is_some());
     no_trade(&a);
+}
+
+#[test]
+fn cited_margin_refusal_with_an_accepted_row_is_known_partial() {
+    let (e, actions) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":900}},{"error":"Insufficient margin to place order."}]}}}"#,
+    );
+    let terminal = results(&actions, OWNER);
+    assert_eq!(terminal.len(), 1);
+    let error = terminal[0].as_ref().unwrap_err();
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["900"]);
+    assert!(e.store().order("900").is_some());
+    no_trade(&actions);
 }

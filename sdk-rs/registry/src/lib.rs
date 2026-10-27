@@ -2176,11 +2176,24 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => {
+            if options.secret.is_some()
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Hyperliquid signing material belongs in signer setup",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() || identities.primary.is_some() && signer.is_none() {
+                return Err(invalid("Hyperliquid requires its primary signing provider"));
+            }
+            let registered = identities.clone();
             let config = HyperliquidOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key.take(),
-                secret: options.secret.take(),
+                credentials: identities.primary,
                 application_id: options.application_id.take(),
                 vault: options.vault.take(),
                 builder: options.hyperliquid_builder.take().map(|b| Builder {
@@ -2189,19 +2202,17 @@ pub fn build_with_signer<T: Visit>(
                 }),
                 enable_spot_markets: venue == "hyperliquid" && options.enable_spot_markets,
             };
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    if venue == "hyperliquidspot" {
-                        Hyperliquid::new_spot(config)
-                    } else {
-                        Hyperliquid::new(config)
-                    },
-                    entropy,
-                )?,
-            )
+            let mut engine = Engine::new(
+                if venue == "hyperliquidspot" {
+                    Hyperliquid::new_spot(config)
+                } else {
+                    Hyperliquid::new(config)
+                },
+                entropy,
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "okx")]
         "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {

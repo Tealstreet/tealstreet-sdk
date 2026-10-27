@@ -9,9 +9,9 @@ export const mapHyperliquidSignerSetup = (options: ExchangeOptions): ExchangeOpt
     const message = 'Invalid Hyperliquid local signer setup';
     throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
   }
+  const { key: _accountAddress, ...setup } = options;
   return {
-    ...options,
-    key: undefined,
+    ...setup,
     localSigner: { primary: { ...options.localSigner?.primary, secretEncoding: 'hex' } },
   } as ExchangeOptions;
 };

@@ -27,7 +27,7 @@ pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
-    pub secret: Option<String>,
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
     pub application_id: Option<String>,
     pub vault: Option<String>,
     pub builder: Option<Builder>,
@@ -35,12 +35,6 @@ pub struct Options {
     pub enable_spot_markets: bool,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-    }
-}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Builder {
@@ -149,7 +143,7 @@ struct Ladder {
     book: Book,
 }
 pub struct Hyperliquid {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     /// The standalone `hyperliquidspot` venue: spot is the whole product.
     spot: bool,
     /// Spot markets merged into the perp account (`enable_spot_markets`).
@@ -166,6 +160,7 @@ pub struct Hyperliquid {
     spot_tokens: HashMap<u32, String>,
     account: account::Account,
     trading: trading::Trading,
+    credentials: safe_cex_engine::credential_selection::Slots<safe_cex_engine::signing::Identity>,
     connection: Connection,
     books: HashMap<String, Ladder>,
     candles: HashMap<(String, Interval), usize>,
@@ -186,7 +181,11 @@ pub struct Hyperliquid {
 impl Hyperliquid {
     pub fn new(options: Options) -> Self {
         let spot_markets = options.enable_spot_markets;
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
+        let credentials = safe_cex_engine::credential_selection::Slots::new(
+            options.credentials.clone(),
+            None,
+            Default::default(),
+        );
         Self {
             options,
             spot: false,
@@ -198,6 +197,7 @@ impl Hyperliquid {
             spot_tokens: HashMap::new(),
             account: account::Account::default(),
             trading: trading::Trading::default(),
+            credentials,
             connection: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -216,7 +216,10 @@ impl Hyperliquid {
     }
     pub fn new_spot(mut options: Options) -> Self {
         options.public_data_only |= options.key.as_deref().is_none_or(str::is_empty)
-            || options.secret.as_deref().is_none_or(str::is_empty);
+            || options
+                .credentials
+                .as_ref()
+                .is_none_or(|identity| identity.signing_ref().is_err());
         Self {
             spot: true,
             spot_markets: false,
@@ -1051,6 +1054,7 @@ impl Venue for Hyperliquid {
 
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.reconcile_order_scopes(cx, symbols);
+        self.reconcile_settings(cx);
     }
 
     type Pending = Pending;
@@ -1067,26 +1071,93 @@ impl Venue for Hyperliquid {
             }
         }
     }
+    fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
+        Some(&safe_cex_engine::nonce::HYPERLIQUID_AGENT)
+    }
+    fn public_address_slots(&self) -> safe_cex_engine::AddressSetupSlots {
+        if self.options.public_data_only {
+            safe_cex_engine::AddressSetupSlots::None
+        } else {
+            safe_cex_engine::AddressSetupSlots::Primary
+        }
+    }
+    fn dispatch_nonce() -> bool {
+        true
+    }
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    }
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        &[trading::PACING]
+    }
+    fn http_release_domain() -> Option<safe_cex_engine::request_context::ReleaseDomain> {
+        Some(safe_cex_engine::request_context::ReleaseDomain {
+            pacings: &[trading::PACING],
+            members: safe_cex_engine::request_context::DomainMembers::Mutations,
+        })
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trade_preflight_ready(cx, owner);
+    }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if matches!(pending, Pending::Trade(_)) {
+            self.unproven_trade_evidence(response, evidence);
+        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        retired: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trade_owner_retired(retired)
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trade_plan_ready(cx, owner);
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.spot && !self.options.public_data_only {
-            let matches_wallet = self
-                .options
-                .secret
-                .as_deref()
+        self.credentials = safe_cex_engine::credential_selection::Slots::new(
+            cx.address_nonce_identities().primary.clone(),
+            None,
+            Default::default(),
+        );
+        if self.spot
+            && !self.options.public_data_only
+            && !self
+                .sealed_agent()
                 .zip(self.options.key.as_deref())
-                .is_some_and(|(secret, key)| {
-                    safe_cex_crypto::ethereum::private_key_address(secret)
-                        .is_ok_and(|wallet| wallet.eq_ignore_ascii_case(key))
-                });
-            if !matches_wallet {
-                cx.notice(
-                    safe_cex_engine::Level::Error,
-                    code::AUTH_REJECTED,
-                    "Hyperliquid spot invalid private key & wallet address pair",
-                );
-                cx.deactivate();
-                return;
-            }
+                .is_some_and(|(agent, key)| agent.eq_ignore_ascii_case(key))
+        {
+            cx.notice(
+                safe_cex_engine::Level::Error,
+                code::AUTH_REJECTED,
+                "Hyperliquid spot invalid private key & wallet address pair",
+            );
+            cx.deactivate();
+            return;
         }
         if self.spot {
             self.spot_meta(cx);
@@ -1257,7 +1328,7 @@ impl Venue for Hyperliquid {
                 }
             }
             Pending::Account(request) => {
-                let builder = matches!(request, account::Request::Builder);
+                let builder = request.is_builder();
                 self.account_response(cx, request, response);
                 if builder {
                     self.builder_result(cx);
@@ -1477,7 +1548,7 @@ impl Venue for Hyperliquid {
             }
             Pending::SpotMeta { .. } => self.startup.failed(cx, (String::new(), 0)),
             Pending::Account(request) => {
-                let builder = matches!(request, account::Request::Builder);
+                let builder = request.is_builder();
                 self.account_failed(cx, request, error);
                 if builder {
                     self.builder_result(cx);
@@ -1504,6 +1575,7 @@ impl Venue for Hyperliquid {
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, *read, error),
             Pending::ManagedCandles(read) => {
                 let _ = cx.fail_context(&read.context, error);
@@ -1513,6 +1585,7 @@ impl Venue for Hyperliquid {
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, *read, error),
             Pending::ManagedCandles(read) => {
                 let _ = cx.fail_context(&read.context, error);
