@@ -252,7 +252,7 @@ the earlier port failed the bans and is deleted.
 
 ## Plan
 
-Each phase ends with a commit on `feat/rust-rewrite` and green CI. Status is
+Each phase ends with a commit on `master` and green CI. Status is
 kept current in this section.
 
 ### 1. Clean slate — done
@@ -810,9 +810,9 @@ receive tested replacements.
 
 ## Branching
 
-All PRs target `feat/rust-rewrite`. Master receives one merge when the browser
-build is ready to ship. Nothing reaches master or the tealstreet-next mirror
-before then.
+All PRs target `master` (since 2026-10-27, after #2299 merged the rewrite). The
+former `feat/rust-rewrite` landing branch is retired. Copybara imports master
+into the tealstreet-next mirror, so every merge reaches that import.
 
 ### Optional collateral balances
 

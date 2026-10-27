@@ -321,7 +321,7 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
     getCommit: (commit) => { check(gitId(commit), 'invalid commit identity'); return get(`git/commits/${commit}`, false, true); },
     getRustLanding: () => {
       check(repository === 'Tealstreet/tealstreet-sdk', 'Rust landing ref requires the base repository');
-      return get('git/ref/heads/feat/rust-rewrite');
+      return get('git/ref/heads/master');
     },
     getPullBaseOid: async (number) => {
       check(repository === 'Tealstreet/tealstreet-sdk', 'Rust pull metadata requires the base repository');

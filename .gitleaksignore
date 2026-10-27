@@ -1,8 +1,8 @@
 # Public Binance HMAC documentation vector in a historical signing unit test:
 # https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
 # Exact commit/path/rule/line only; production source and future changes stay scanned.
-# 879fdc is a feat/rust-rewrite commit (pre-move path); keep this until that branch merges
-# into master, since CI scans the proposed master..landing range.
+# 879fdc is a pre-move commit that #2299 brought into master history; keep it for
+# any scan range that crosses that merge.
 879fdc74610ec6b2504c9faf8a8d8ffbaff576c7:sdk-rs/safe-cex-venue-binance/src/sign.rs:generic-api-key:103
 # Coinbase test sessions use the literal non-credential organizations/test/apiKeys/test.
 7109423877ec7595c9e7735bf2065f6a31ca494d:sdk-rs/venues/coinbase/tests/history.rs:generic-api-key:52
