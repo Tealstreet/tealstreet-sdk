@@ -69,8 +69,8 @@ it('the committed capability manifest is what every beta venue reports at runtim
   for (const name of [...BETA_VENUES].sort()) {
     const account = await loadCapabilities(name, { ...ACCOUNT_OPTIONS, ...CREDENTIAL_SHAPES[name] });
     const publicOnly = await loadCapabilities(name, { key: '', secret: '', publicDataOnly: true });
-    for (const axis of Object.keys(account) as Array<keyof ExchangeCapabilities>)
-      if (account[axis] !== publicOnly[axis]) credentialDependent.push(`${name}.${axis}`);
+    const axes = new Set([...Object.keys(account), ...Object.keys(publicOnly)]) as Set<keyof ExchangeCapabilities>;
+    for (const axis of axes) if (account[axis] !== publicOnly[axis]) credentialDependent.push(`${name}.${axis}`);
     generated[name] = account;
   }
   // An account-dependent axis would make the manifest describe one account, not the venue.
