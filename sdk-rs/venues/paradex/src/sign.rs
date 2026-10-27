@@ -1,5 +1,5 @@
 use alloy_primitives::U256;
-use safe_cex_crypto::{eip712, ethereum, sha256, starknet};
+use safe_cex_crypto::{ethereum, starknet};
 use serde::{Deserialize, Serialize};
 use starknet_crypto::{Felt, pedersen_hash};
 
@@ -443,60 +443,13 @@ fn account_address(public: Felt, proxy: Felt, calldata: &[Felt]) -> Felt {
     Felt::from_bytes_be(&address.to_be_bytes())
 }
 
-fn ethereum_digest(chain: &str) -> Result<[u8; 32], String> {
-    let chain = unsigned(chain).map_err(|_| "Invalid Paradex Ethereum chain ID")?;
-    // EIP712Domain(string name,string version,uint256 chainId), with no
-    // verifyingContract field. Each string occupies its hashed 32-byte word.
-    let mut domain = [0u8; 128];
-    domain[..32].copy_from_slice(&ethereum::keccak256(
-        b"EIP712Domain(string name,string version,uint256 chainId)",
-    ));
-    domain[32..64].copy_from_slice(&ethereum::keccak256(b"Paradex"));
-    domain[64..96].copy_from_slice(&ethereum::keccak256(b"1"));
-    domain[96..].copy_from_slice(&chain.to_be_bytes::<32>());
-    let mut constant = [0u8; 64];
-    constant[..32].copy_from_slice(&ethereum::keccak256(b"Constant(string action)"));
-    constant[32..].copy_from_slice(&ethereum::keccak256(b"STARK Key"));
-    Ok(eip712::hash_prehashed(
-        ethereum::keccak256(&domain),
-        ethereum::keccak256(&constant),
-    ))
-}
-
 fn derive_ethereum(key: &str, config: &SystemConfig) -> Result<(Felt, Felt, String), String> {
     let chain = config
         .l1_chain_id
         .as_deref()
         .ok_or("Missing Paradex Ethereum chain ID")?;
-    let digest = ethereum_digest(chain)?;
-    let seed = ethereum::sign_digest(&digest, key).map_err(|_| "Invalid Paradex Ethereum key")?;
-    let r = seed
-        .strip_prefix("0x")
-        .unwrap_or(&seed)
-        .get(..64)
-        .ok_or("Invalid Paradex Ethereum signature")?;
-    let mut r_bytes = [0u8; 32];
-    for (byte, pair) in r_bytes.iter_mut().zip(r.as_bytes().as_chunks::<2>().0) {
-        *byte = u8::from_str_radix(
-            std::str::from_utf8(pair).map_err(|_| "Invalid Paradex Ethereum signature")?,
-            16,
-        )
-        .map_err(|_| "Invalid Paradex Ethereum signature")?;
-    }
-    let order = U256::from_str_radix(CURVE_ORDER, 10).expect("curve order");
-    // 2^256 - (2^256 mod order), represented without overflowing U256.
-    let limit = U256::MAX - (U256::MAX % order);
-    let private = (0u32..)
-        .find_map(|index| {
-            let index_bytes = index.to_be_bytes();
-            let index_start = index_bytes.iter().position(|b| *b != 0).unwrap_or(3);
-            let mut material = r_bytes.to_vec();
-            material.extend_from_slice(&index_bytes[index_start..]);
-            let digest = U256::from_be_bytes(sha256(&material));
-            (digest < limit).then_some(digest % order)
-        })
-        .ok_or("Paradex key derivation failed")?;
-    let private = secret(&private.to_string())?;
+    let private = starknet::derive_from_ethereum(key, chain)?;
+    let private = Felt::from_bytes_be(&private);
     let public = starknet::public_key(&private);
     let implementation = felt(
         config
@@ -601,7 +554,7 @@ mod tests {
     #[test]
     fn fixed_eip712_digest_and_seed_match_independent_ethers() {
         for row in vectors().ethereum {
-            let digest = ethereum_digest(&row.chain).unwrap();
+            let digest = starknet::ethereum_key_digest(&row.chain).unwrap();
             assert_eq!(format!("0x{}", safe_cex_crypto::hex(&digest)), row.digest);
             assert_eq!(ethereum::sign_digest(&digest, &row.key).unwrap(), row.seed);
         }
@@ -615,7 +568,7 @@ mod tests {
             "1e3",
             "0x10000000000000000000000000000000000000000000000000000000000000000",
         ] {
-            let error = ethereum_digest(chain).unwrap_err();
+            let error = starknet::ethereum_key_digest(chain).unwrap_err();
             assert_eq!(error, "Invalid Paradex Ethereum chain ID");
         }
     }
