@@ -18,6 +18,7 @@ import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtime
 import { loadGateLedger } from './verify-gates.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { selectBitgetPair } from './bitget-paired-ci.mjs';
+import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
 import { assessBitgetPairedSteady, pairedSteadyAssessment, bitgetAnchorAuthority,
   combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
 
@@ -154,10 +155,10 @@ async function authenticateCase(context, evidence, producer, suite, role = 'firs
 }
 
 export async function currentPhysical(context, name) {
-  const { run, jobs } = context.inventory ? await evidenceInventory(context) :
-    { run: await context.reader.getRun(context.runId), jobs: await context.reader.listJobs(context.runId) };
-  const selected = jobs.filter((job) => job.name === name);
-  insist(run.run_attempt === 1 && selected.length === 1 && selected[0].run_attempt === 1 && selected[0].runner_id > 0, 'missing unique original physical job');
+  const { run, selected } = await relistPhysicalJob(async refresh => context.inventory ? evidenceInventory(context, refresh) :
+    { run: await context.reader.getRun(context.runId), jobs: await context.reader.listJobs(context.runId) }, name, { sleep: context.sleep });
+  insist(run.run_attempt === 1 && selected.length === 1 && selected[0].run_attempt === 1 && selected[0].runner_id > 0,
+    `missing unique original physical job; candidates ${physicalCandidateRows(selected)}`);
   return { run, job: selected[0] };
 }
 
