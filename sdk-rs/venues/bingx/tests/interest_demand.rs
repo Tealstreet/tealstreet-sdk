@@ -125,6 +125,8 @@ impl Venue for Probe {
         ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         if self.1.borrow().scenario == Scenario::PublicOpeningRefusal
+            && self.1.borrow().public_feed == Some(feed)
+            && !values.is_empty()
             && subscribe
             && values
                 .iter()
@@ -438,11 +440,22 @@ fn refused_public_opening_cannot_erase_a_later_admitted_book_change() {
         1
     );
     assert!(
-        h.e.venue().0.book("BTCUSDT").is_some(),
+        h.e.venue().0.books().any(|(symbol, _)| symbol == "BTCUSDT"),
         "refused opening must retain later admitted book demand"
     );
     assert!(
         !out.iter()
             .any(|a| matches!(a,Action::WsClose{socket}if *socket==private))
     );
+    assert!(
+        h.e.venue().0.book("BTCUSDT").is_none(),
+        "retired book data stays invalidated"
+    );
+    let peer = h.event(Event::WsMessage {
+        socket: private,
+        text: "Ping",
+    });
+    assert!(peer.iter().any(
+        |a| matches!(a, Action::WsSend { socket, text } if *socket == private && text == "Pong")
+    ));
 }

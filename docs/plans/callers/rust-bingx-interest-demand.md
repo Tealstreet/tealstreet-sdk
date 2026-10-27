@@ -23,3 +23,15 @@ native/strict/fmt/bans and current CI family/replay pass, reviewer CLEAR and
 8x5tm1 exact-tree GO. Record this obligation only in this fragment; no legacy
 inventory or shared-engine change is needed. 55ao7t confirmed no new beta API
 seam is required; internal engine coalescing would remain compatible.
+
+The authoritative master checkpoint has two working controls (pre-open demand
+and private-refusal isolation) and four intended assertion failures (pending
+distinct/duplicate changes, add/remove, remove/renew, and refused public opening).
+The opening-refusal control inspects retained demand through books(), while
+book() must remain unavailable because retirement invalidates data. Its first
+getter-based setup failure is kept separately from the corrected checkpoint.
+
+Local corrected qualification: 351 PASS across 25 nonempty BingX targets, zero
+failed/ignored/filtered, including all six new controls. Strict all-target clippy
+and package formatting pass. Full bans and fresh PR correctness/family/replay,
+reviewer CLEAR and exact-tree auditor GO remain publication/landing gates.
