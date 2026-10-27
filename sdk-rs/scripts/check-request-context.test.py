@@ -135,7 +135,7 @@ class RequestContextBan(unittest.TestCase):
             inventory.write_text(json.dumps(inherited))
             commit()
             tip = command('rev-parse', 'HEAD')
-            command('update-ref', 'refs/remotes/origin/feat/rust-rewrite', tip)
+            command('update-ref', 'refs/remotes/origin/master', tip)
             command('switch', 'topic')
             command('merge', '--no-ff', '--no-edit', 'master')
             event = repo / 'event.json'
@@ -146,7 +146,7 @@ class RequestContextBan(unittest.TestCase):
                 self.assertFalse(ban.check(inherited, inherited, previous))
                 self.assertIn(('merge parents', inherited), previous)
                 self.assertIn((tip, inherited), previous)
-                self.assertIn(('refs/remotes/origin/feat/rust-rewrite', inherited), previous)
+                self.assertIn(('refs/remotes/origin/master', inherited), previous)
                 # Current source must still match exactly; independent base
                 # limits and growth beyond every parent remain enforced.
                 self.assertTrue(ban.check(first, inherited, previous))
@@ -207,7 +207,7 @@ class RequestContextBan(unittest.TestCase):
                 first = ban.sites()
                 inventory.write_text(json.dumps(first))
                 commit()
-                command('update-ref', 'refs/remotes/origin/feat/rust-rewrite', 'HEAD')
+                command('update-ref', 'refs/remotes/origin/master', 'HEAD')
                 commit()
                 previous = ban.previous_manifests()
                 self.assertEqual(len(previous), 3)

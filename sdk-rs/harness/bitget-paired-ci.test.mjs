@@ -1,23 +1,23 @@
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 import { BITGET_CUMULATIVE_ANCHOR } from './bitget-paired-steady.mjs';
-import { selectBitgetPair } from './bitget-paired-ci.mjs';
+import { RETIRED_RUST_LANDING_TIP, selectBitgetPair } from './bitget-paired-ci.mjs';
 
 const A = 'a'.repeat(40), B = 'b'.repeat(40), H = 'c'.repeat(40), TREE = 'd'.repeat(40);
 function fixture() {
   const run = { id: 10, run_attempt: 1, head_sha: H, event: 'pull_request',
     repository: { full_name: 'Tealstreet/tealstreet-sdk' } };
   const pull = { number: 20, id: 21, state: 'open', head: { sha: H, repo: { url: 'https://api.github.com/repos/Tealstreet/tealstreet-sdk' } },
-    base: { sha: A, ref: 'feat/rust-rewrite', repo: { full_name: 'Tealstreet/tealstreet-sdk', url: 'https://api.github.com/repos/Tealstreet/tealstreet-sdk' } } };
+    base: { sha: A, ref: 'master', repo: { full_name: 'Tealstreet/tealstreet-sdk', url: 'https://api.github.com/repos/Tealstreet/tealstreet-sdk' } } };
   run.pull_requests = [structuredClone(pull)];
   const jobs = [{ id: 30, runner_id: 40, run_id: 10, run_attempt: 1, head_sha: H,
     name: 'Rust / Bitget counterbalanced steady CPU' }];
   const pulls = [pull], calls = [];
   const state = { checkout: { sha: B, tree: { sha: TREE }, parents: [{ sha: A }, { sha: H }] },
-    localParents: [A, H], firstParents: [A, BITGET_CUMULATIVE_ANCHOR], ancestor: true, landingTip: A, localLanding: A, mergeTree: TREE, origin: 'https://github.com/Tealstreet/tealstreet-sdk' };
+    localParents: [A, H], firstParents: [A, BITGET_CUMULATIVE_ANCHOR], ancestor: true, retiredLanded: true, retiredFirstParents: [RETIRED_RUST_LANDING_TIP, BITGET_CUMULATIVE_ANCHOR], landingTip: A, localLanding: A, mergeTree: TREE, origin: 'https://github.com/Tealstreet/tealstreet-sdk' };
   const reader = { getRun: async () => run, listJobs: async () => jobs,
-    getRustLanding: async () => ({ ref: 'refs/heads/feat/rust-rewrite',
-      url: 'https://api.github.com/repos/Tealstreet/tealstreet-sdk/git/refs/heads/feat/rust-rewrite', object: { type: 'commit', sha: state.landingTip } }),
+    getRustLanding: async () => ({ ref: 'refs/heads/master',
+      url: 'https://api.github.com/repos/Tealstreet/tealstreet-sdk/git/refs/heads/master', object: { type: 'commit', sha: state.landingTip } }),
     getPullBaseOid: async number => { assert.equal(number, 20); return pull.base.sha; },
     listCommitPulls: async sha => { assert.equal(sha, H); return pulls; },
     getPull: async number => { assert.equal(number, 20); return pull; },
@@ -30,8 +30,14 @@ function fixture() {
     if (args[0] === 'show') { assert.deepEqual(args, ['show', '-s', '--format=%P', B]); return state.localParents.join(' '); }
     if (args[0] === 'remote') { assert.deepEqual(args, ['remote', 'get-url', 'origin']); return state.origin; }
     if (args[0] === 'fetch') { assert.deepEqual(args, ['fetch', '--no-tags', 'origin',
-      'refs/heads/feat/rust-rewrite:refs/remotes/origin/feat/rust-rewrite']); return ''; }
-    if (args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/feat/rust-rewrite') return state.localLanding;
+      'refs/heads/master:refs/remotes/origin/master']); return ''; }
+    if (args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/master') return state.localLanding;
+    if (args[0] === 'merge-base' && args[2] === RETIRED_RUST_LANDING_TIP) {
+      assert.equal(args[3], state.landingTip);
+      if (!state.retiredLanded) throw new Error('not an ancestor');
+      return '';
+    }
+    if (args[0] === 'rev-list' && args[2] === RETIRED_RUST_LANDING_TIP) return state.retiredFirstParents.join('\n');
     if (args[0] === 'merge-base') {
       assert.deepEqual(args.slice(0,3), ['merge-base', '--is-ancestor', state.checkout.parents[0].sha]);
       assert.equal(args[3], state.landingTip);
@@ -46,6 +52,11 @@ function fixture() {
   return { run, pull, pulls, jobs, calls, state, context: { reader, runId: 10, root: '/fixture', gitRead } };
 }
 
+test('the anchor may sit on the retired landing chain that master merged', async () => {
+  const x = fixture(); x.state.firstParents = [A];
+  assert.equal((await selectBitgetPair(x.context)).baseline, A);
+});
+
 test('baseline comes from the authenticated checkout first parent on the actual landing chain', async () => {
   const x = fixture(), result = await selectBitgetPair(x.context);
   assert.equal(result.baseline, A); assert.equal(result.candidate, B); assert.equal(result.head, H);
@@ -54,7 +65,7 @@ test('baseline comes from the authenticated checkout first parent on the actual 
 
 test('ambiguous, stale, cross-branch or retried source/producer fails closed', async () => {
   for (const mutate of [x => x.pulls.push(x.pull), x => x.jobs.push(x.jobs[0]),
-    x => { x.pulls.length = 0; }, x => { x.pull.state = 'closed'; }, x => { x.pull.base.ref = 'master'; },
+    x => { x.pulls.length = 0; }, x => { x.pull.state = 'closed'; }, x => { x.pull.base.ref = 'feat/other'; },
     x => { x.pull.head.sha = A; }, x => { x.run.run_attempt = 2; }, x => { x.jobs[0].run_attempt = 2; },
     x => { x.run.pull_requests = []; },
     x => { x.context.gitRead = (...args) => args[0] === 'merge-tree' ? A : args[1] === 'HEAD' ? B : TREE; }]) {
@@ -71,15 +82,15 @@ test('a later target landing cannot silently move the original run baseline', as
 });
 
 test('landing push uses the authenticated actual first parent and exact landing tree', async () => {
-  const x = fixture(); x.run.event = 'push'; x.run.head_branch = 'feat/rust-rewrite';
+  const x = fixture(); x.run.event = 'push'; x.run.head_branch = 'master';
   x.context.gitRead = (...args) => args[1] === 'HEAD' ? H : TREE;
   x.context.reader.listCommitPulls = async () => { throw new Error('push must not select a PR baseline'); };
   const result = await selectBitgetPair(x.context);
   assert.equal(result.baseline, A); assert.equal(result.candidate, H);
 });
 
-test('master pushes cannot obtain a Rust paired certificate', async () => {
-  const x = fixture(); x.run.event = 'push'; x.run.head_branch = 'master';
+test('non-landing branch pushes cannot obtain a Rust paired certificate', async () => {
+  const x = fixture(); x.run.event = 'push'; x.run.head_branch = 'feat/other';
   await assert.rejects(selectBitgetPair(x.context), /Rust landing branch/);
 });
 
@@ -91,7 +102,10 @@ test('checkout API/local parents and trees, exact head and first-parent landing 
     ['wrong parent two', x => { x.state.checkout.parents[1].sha = A; x.state.localParents[1] = A; }, /checkout API\/local/],
     ['wrong tree', x => { x.state.checkout.tree.sha = A; }, /checkout API\/local/],
     ['ancestor reachable only through a merged branch', x => { x.state.firstParents = [H]; }, /actual first-parent/],
-    ['fixed anchor is not on the live first-parent chain', x => { x.state.firstParents = [A]; }, /fixed cumulative anchor/],
+    ['fixed anchor is on neither the live nor the retired first-parent chain', x => {
+      x.state.firstParents = [A]; x.state.retiredFirstParents = [RETIRED_RUST_LANDING_TIP]; }, /fixed cumulative anchor/],
+    ['retired landing tip is not under the live landing', x => {
+      x.state.firstParents = [A]; x.state.retiredLanded = false; }, /not an ancestor/],
     ['not a live-target ancestor', x => { x.state.ancestor = false; }, /not an ancestor/],
     ['single-parent checkout', x => { x.state.checkout.parents.pop(); x.state.localParents.pop(); }, /checkout API\/local/],
     ['API and local parents disagree', x => { x.state.localParents[0] = H; }, /checkout API\/local/],
@@ -103,7 +117,7 @@ test('checkout API/local parents and trees, exact head and first-parent landing 
     ['landing ref from a fork repository', x => {
       const old = x.context.reader.getRustLanding;
       x.context.reader.getRustLanding = async () => ({ ...await old(),
-        url: 'https://api.github.com/repos/fork/tealstreet-sdk/git/refs/heads/feat/rust-rewrite' });
+        url: 'https://api.github.com/repos/fork/tealstreet-sdk/git/refs/heads/master' });
     }, /ref from the base repository/],
     ['API and local landing ref disagree', x => { x.state.localLanding = H; }, /API and local current Rust landing ref/],
     ['pull base repository is foreign', x => { x.pull.base.repo.full_name = 'fork/tealstreet-sdk'; }, /exact open PR/],
@@ -140,10 +154,10 @@ test('real run 40238038972 uses checkout base 035948 even though both metadata b
   x.context.gitRead = (...args) => {
     x.calls.push(args);
     if (args[0] === 'rev-parse') return args[1] === 'HEAD' ? checkout :
-      args[1] === 'refs/remotes/origin/feat/rust-rewrite' ? x.state.landingTip : actualTree;
+      args[1] === 'refs/remotes/origin/master' ? x.state.landingTip : actualTree;
     if (args[0] === 'remote') return 'https://github.com/Tealstreet/tealstreet-sdk.git';
     if (args[0] === 'show') return `${landed} ${head}`;
-    if (args[0] === 'fetch') { assert.equal(args[3], 'refs/heads/feat/rust-rewrite:refs/remotes/origin/feat/rust-rewrite'); return ''; }
+    if (args[0] === 'fetch') { assert.equal(args[3], 'refs/heads/master:refs/remotes/origin/master'); return ''; }
     if (args[0] === 'merge-base') { assert.equal(args[3], x.state.landingTip); return ''; }
     if (args[0] === 'rev-list') { assert.equal(args[2], x.state.landingTip); return `${x.state.landingTip}\n${landed}\n${stale}\n${BITGET_CUMULATIVE_ANCHOR}`; }
     assert.deepEqual(args.slice(0, 2), ['merge-tree', '--write-tree']);
