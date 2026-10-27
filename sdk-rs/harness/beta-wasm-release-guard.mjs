@@ -48,20 +48,36 @@ export const createAndVerifyTag = async ({ api, repo, tag, sha }) => {
   if (target !== sha) throw new Error(`tag ${tag} names ${target}, not the source ${sha}`);
 };
 
+const REQUIRED_JOB = 'Rust / required coverage';
+
 /** A set RUST_BETA_HOLD variable stops every release, naming why. */
 export const assertNotHeld = (hold) => {
   if (hold?.trim()) throw new Error(`beta wasm releases are held: ${hold.trim()}`);
 };
 
-/** `sha` must have a successful Rust SDK push run on master; anything else refuses. */
+/**
+ * `sha` must have a completed Rust SDK master push run whose "Rust / required coverage"
+ * job (the correctness aggregate branch protection requires) succeeded. CPU
+ * certification is non-blocking, so its noise must not stop a release.
+ */
 export const assertCertified = async ({ api, repo, sha }) => {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('source must be a full commit SHA');
   const { status, json } = await api('GET', `/repos/${repo}/actions/workflows/rust.yml/runs?head_sha=${sha}&event=push&branch=master&per_page=20`);
   if (status !== 200) throw new Error(`Rust SDK run lookup returned HTTP ${status}`);
-  const runs = (json?.workflow_runs ?? []).filter((run) => run.head_sha === sha && run.head_branch === 'master' && run.event === 'push');
-  if (!runs.some((run) => run.status === 'completed' && run.conclusion === 'success')) {
-    throw new Error(`no successful Rust SDK master push run for ${sha}; refusing to publish uncertified source`);
+  const runs = (json?.workflow_runs ?? []).filter((run) => run.head_sha === sha && run.head_branch === 'master' && run.event === 'push' && run.status === 'completed');
+  for (const run of runs) {
+    for (let page = 1; page <= 5; page += 1) {
+      const jobs = await api('GET', `/repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100&page=${page}`);
+      if (jobs.status !== 200) throw new Error(`Rust SDK jobs lookup returned HTTP ${jobs.status}`);
+      const required = (jobs.json?.jobs ?? []).find((job) => job.name === REQUIRED_JOB);
+      if (required) {
+        if (required.status === 'completed' && required.conclusion === 'success') return;
+        break;
+      }
+      if ((jobs.json?.jobs ?? []).length < 100) break;
+    }
   }
+  throw new Error(`no Rust SDK master push run for ${sha} with ${REQUIRED_JOB} success; refusing to publish uncertified source`);
 };
 
 /** The tag of a published beta release whose pin carries `fingerprint`, or undefined. */

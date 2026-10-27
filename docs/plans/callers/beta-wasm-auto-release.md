@@ -1,7 +1,8 @@
 # Automatic beta wasm release and pin
 
-Change: `rust-beta-wasm-release.yml` publishes after every successful Rust SDK
-master push run whose `sdk-rs/` inputs have no release yet. tealstreet-next
+Change: `rust-beta-wasm-release.yml` publishes after every Rust SDK master push run
+whose `Rust / required coverage` passed (CPU certification does not gate it) and
+whose `sdk-rs/` inputs have no release yet. tealstreet-next
 `rust-beta-wasm-pin.yml` lands the matching pin by PR once its CI passes. This
 is a release-lane change: an SDK master merge now reaches the NX beta bundle
 without a hand-dispatched release.

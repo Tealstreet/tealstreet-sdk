@@ -1,8 +1,8 @@
 # Build the Rust-only beta bundle's wasm families from one exact SDK commit and
 # publish them as an immutable GitHub Release that tealstreet-next pins file by
-# file (scripts/rust-beta-wasm.pin.json). It runs after each successful Rust SDK
-# master push run and publishes when that commit's sdk-rs/ inputs are new, so
-# tealstreet-next's pin workflow finds a release for each import. RUST_BETA_HOLD
+# file (scripts/rust-beta-wasm.pin.json). It runs after each Rust SDK master push
+# run whose required coverage passed, and publishes when that commit's sdk-rs/
+# inputs are new, so tealstreet-next's pin workflow finds a release for each import. RUST_BETA_HOLD
 # (a repository variable holding the reason) stops every release while set.
 # Design: docs/plans/RUST_BETA_BUNDLE.md (Build and CI).
 name: Rust beta wasm release
@@ -37,11 +37,11 @@ env:
 jobs:
   roster:
     name: Beta wasm roster
-    # Automatic runs only follow a successful Rust SDK push run on master.
+    # Automatic runs follow a Rust SDK push run on master; the certified guard then
+    # requires its required coverage job, so non-blocking CPU noise cannot stop a release.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
+      (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
     outputs:
@@ -79,7 +79,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Require no hold and a successful Rust SDK master push run for sdk_sha
+      - name: Require no hold and Rust / required coverage success on master for sdk_sha
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

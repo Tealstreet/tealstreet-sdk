@@ -1,5 +1,5 @@
 // Lint-level pins on .github/workflows/rust-beta-wasm-release.yml: it runs only
-// after a successful Rust SDK master push run or by dispatch, it proves the source
+// after a Rust SDK master push run (certified by its required coverage) or by dispatch, it proves the source
 // is on origin/master before any SDK script runs, honours RUST_BETA_HOLD, and nothing
 // builds or publishes until those proofs (and the roster) succeeded.
 import assert from 'node:assert/strict';
@@ -17,7 +17,7 @@ const job = (name) => {
   return next < 0 ? rest : rest.slice(0, next + 1);
 };
 
-test('the workflow runs only after a Rust SDK run on master, or by hand', () => {
+test('the workflow runs only after a Rust SDK push run on master, or by hand', () => {
   const on = workflow.slice(workflow.indexOf('\non:\n'), workflow.indexOf('\npermissions:\n'));
   assert.match(on, /^\non:\n {2}workflow_run:\n {4}workflows: \[Rust SDK\]\n {4}types: \[completed\]\n {4}branches: \[master\]\n {2}workflow_dispatch:\n/);
   for (const trigger of ['push', 'pull_request', 'pull_request_target', 'schedule', 'release']) {
@@ -25,7 +25,8 @@ test('the workflow runs only after a Rust SDK run on master, or by hand', () => 
   }
   assert.match(workflow, /\npermissions:\n {2}contents: read\n/);
   const roster = job('roster');
-  for (const condition of ["github.event.workflow_run.conclusion == 'success'", "github.event.workflow_run.event == 'push'",
+  assert.doesNotMatch(roster, /workflow_run\.conclusion/, 'CPU-only reds must not suppress a release; certified decides');
+  for (const condition of ["github.event.workflow_run.event == 'push'",
     "github.event.workflow_run.head_branch == 'master'"]) assert.ok(roster.includes(condition), condition);
 });
 
