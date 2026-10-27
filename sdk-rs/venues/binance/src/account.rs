@@ -85,6 +85,8 @@ struct PositionsJoin {
 struct OrdersJoin {
     generation: u32,
     token: safe_cex_engine::OrderSnapshotToken,
+    /// Order-uncertainty epoch before the first read: a census spans one or two contexts.
+    epoch: u64,
     native_orders: Vec<(String, String, u64, f64)>,
     native_strategies: Vec<(String, String, u64)>,
     regular: Option<Vec<Order>>,
@@ -481,6 +483,7 @@ impl BinanceFutures {
         self.account.orders = Some(OrdersJoin {
             generation,
             token,
+            epoch: cx.order_read_epoch(),
             native_orders: Vec::new(),
             native_strategies: Vec::new(),
             regular: None,
@@ -1495,11 +1498,9 @@ impl BinanceFutures {
         {
             self.account.orders_stale = true;
             self.schedule_orders_refresh(cx);
-        } else if clean && !(self.account.orders_owed && !(self.is_spot() || self.is_inverse())) {
+        } else if clean {
             // Published and fully mapped: this read may resolve an uncertain placement.
-            // Each half of a two-read census pins its own read token, so one owed a
-            // successor may have begun before the write and leaves release to it.
-            cx.orders_reconciled(None);
+            cx.orders_reconciled_since(None, join.epoch);
         }
     }
 
