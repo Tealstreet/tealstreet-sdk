@@ -54,7 +54,7 @@ ACK never populates it, and already-authenticated data follows the native path.
 Malformed first data cannot publish a valid subset or restart the auth deadline.
 The cap applies only to retained first-data proof, not authenticated row parsing.
 
-Sixteen production-binding controls cover exact-once proof
+Seventeen production-binding controls cover exact-once proof
 publication, revocation before Authenticated, old/new-epoch isolation, full-state
 nonfinite ingress, duplicate queued demand, real 512-credit admission pressure
 and byte-bounded subscription bursts with live-book retention and a healthy
@@ -99,3 +99,10 @@ The startup boundary control queues 8,191 distinct books before catalogue
 completion, refuses only the excess book because instrumentInfo.all owns the
 remaining slot, then proves the exact accepted topic set opens and publishes.
 Without that count guard the excess enters the model and the assertion is RED.
+
+History cache fixtures now use an explicit local private Opened at the original
+catalogue observation (10), draining genuine opening work before their unchanged
+financial frames at 15. Shared seed/query/response/ws helpers stay unchanged.
+A separate production-binding control pins pre-open private proof/ACK messages
+as full-state/action inert, actual login/subscriptions/ping on Opened, no retained
+proof leakage through a later ACK, and subsequent finite data publication.

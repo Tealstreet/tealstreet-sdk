@@ -1232,3 +1232,44 @@ fn pre_catalogue_demand_reserves_the_instrument_topic_and_replays_at_the_exact_i
     );
     assert_eq!(engine.store().tickers()[0].last, 60000.0);
 }
+
+#[test]
+fn private_data_before_open_is_inert_and_cannot_leak_a_proof_through_a_later_ack() {
+    let (mut engine, _, private) = connecting(true);
+    let socket = private.unwrap();
+    let before = engine.snapshot_frame(100.0).to_vec();
+    for text in [PROOF, r#"{"op":"login","success":true}"#] {
+        engine.handle(19.0, Event::WsMessage { socket, text });
+        assert_eq!(engine.snapshot_frame(100.0), before);
+        assert!(engine.prepared(19.0).next().is_none());
+    }
+    engine.handle(20.0, Event::WsOpened { socket });
+    let opening = sends(engine.prepared(20.0).collect(), socket);
+    assert!(opening[0].contains(r#""op":"login""#));
+    assert_eq!(
+        opening[1],
+        r#"{"op":"subscribe","args":["ws_zk_accounts_v3","ws_user_v1","ws_notify_v1"]}"#
+    );
+    assert_eq!(opening[2], r#"{"op":"ping"}"#);
+    engine.handle(
+        21.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","success":true}"#,
+        },
+    );
+    engine.prepared(21.0).for_each(drop);
+    assert!(
+        engine.store().orders().is_empty(),
+        "the pre-open proof cannot survive the actual login ACK"
+    );
+    engine.handle(
+        22.0,
+        Event::WsMessage {
+            socket,
+            text: PROOF,
+        },
+    );
+    assert_eq!(engine.store().orders().len(), 1);
+    assert_eq!(engine.store().orders()[0].last_update, 22.0);
+}
