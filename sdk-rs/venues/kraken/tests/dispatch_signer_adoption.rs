@@ -495,6 +495,35 @@ impl Venue for SpotDeliveryProbe {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.venue.capabilities()
     }
+    fn socket_control(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        authenticated: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        self.venue.socket_control(store, feed, authenticated, text)
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.venue.on_socket_event(cx, event)
+    }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.venue
+            .encode_socket_interests(store, feed, subscribe, items, emit)
+    }
     fn start(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>) {
         self.venue.start(cx);
     }
@@ -811,10 +840,98 @@ fn private_boundary<V: Venue>(engine: &mut Engine<V>) -> Vec<(HttpRequest, bool)
 }
 fn is_private_http(request: &HttpRequest) -> bool {
     request.url.contains("/0/private/")
+        || request.url.contains("/api/history/")
         || request.url.contains("/accounts")
         || request.url.contains("/openorders")
         || request.url.contains("/openpositions")
         || request.url.contains("/leveragepreferences")
+        || request.url.contains("/sendorder")
+        || request.url.contains("/cancelorder")
+        || request.url.contains("/batchorder")
+        || request.url.contains("/editorder")
+}
+
+fn assert_private_preparation(boundary: &[(HttpRequest, bool)], path: &str) {
+    let requests: Vec<_> = boundary
+        .iter()
+        .filter(|(request, _)| request.url.contains(path))
+        .collect();
+    assert_eq!(requests.len(), 1, "the production path must be reached");
+    let (request, prepared) = requests[0];
+    assert!(prepared, "private work escaped before host preparation");
+    assert!(request.signer_headers.is_empty());
+    for (name, _) in &request.headers {
+        assert!(
+            !["apikey", "authent", "nonce", "api-key", "api-sign"]
+                .contains(&name.to_ascii_lowercase().as_str()),
+            "private preparation already contains authentication"
+        );
+    }
+}
+
+#[test]
+fn futures_mutation_waits_for_host_preparation() {
+    let (mut engine, provider, _, _) = futures(true);
+    let before = provider.count();
+    engine.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 73,
+            orders: vec![
+                serde_json::from_value(serde_json::json!({
+                    "symbol": "PF_XBTUSD", "type": "limit", "side": "buy",
+                    "amount": 1, "price": 100
+                }))
+                .unwrap(),
+            ],
+        }),
+    );
+    let boundary = private_boundary(&mut engine);
+    assert_private_preparation(&boundary, "/derivatives/api/v3/sendorder");
+    assert_eq!(provider.count(), before, "held preparation invoked signing");
+}
+
+#[test]
+fn spot_mutation_waits_for_host_preparation() {
+    let (mut engine, provider, _) = spot(false);
+    let before = provider.count();
+    engine.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 74,
+            orders: vec![
+                serde_json::from_value(serde_json::json!({
+                    "symbol": "XBT/USD", "type": "limit", "side": "buy",
+                    "amount": 0.1, "price": 100
+                }))
+                .unwrap(),
+            ],
+        }),
+    );
+    let boundary = private_boundary(&mut engine);
+    assert_private_preparation(&boundary, "/0/private/AddOrder");
+    assert_eq!(provider.count(), before, "held preparation invoked signing");
+}
+
+#[test]
+fn futures_history_waits_for_host_preparation() {
+    let (mut engine, provider, _, _) = futures(true);
+    let before = provider.count();
+    engine.handle(
+        NOW,
+        Event::Command(Command::Query {
+            command: 75,
+            query: Query::OrderHistory {
+                symbol: None,
+                from_ms: Some(NOW - 60_000.),
+                to_ms: Some(NOW),
+                limit: None,
+            },
+        }),
+    );
+    let boundary = private_boundary(&mut engine);
+    assert_private_preparation(&boundary, "/api/history/v3/orders");
+    assert_eq!(provider.count(), before, "held preparation invoked signing");
 }
 #[test]
 fn futures_ordinary_private_send_waits_for_host_preparation() {
