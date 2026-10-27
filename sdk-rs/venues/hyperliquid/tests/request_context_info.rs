@@ -247,54 +247,79 @@ fn real_perps_spot_and_testnet_catalogues_require_prepare_bind_and_claim() {
 
 #[test]
 fn actual_private_bootstrap_info_reads_are_unsigned_managed_calls() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
-    engine.start(NOW);
-    let mut seen = HashSet::new();
-    for _ in 0..20 {
-        let actions = release(&mut engine, false);
-        if actions.is_empty() {
-            break;
-        }
-        for action in actions {
-            match action {
-                Action::Http(request) => {
-                    let kind = support::kind(&request);
-                    seen.insert(kind.clone());
-                    let body = match kind.as_str() {
-                        "metaAndAssetCtxs" => support::META,
-                        "perpDexs" => "[null]",
-                        "userAbstraction" => r#""disabled""#,
-                        "maxBuilderFee" => "30",
-                        "userFees" => r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
-                        "clearinghouseState" => support::STATE,
-                        "frontendOpenOrders" => "[]",
-                        other => panic!("unexpected native request {other}"),
-                    };
-                    reply(&mut engine, &request, body);
+    for portfolio in [false, true] {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            secret: Some(
+                "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+            ),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        }));
+        engine.start(NOW);
+        let mut seen = HashSet::new();
+        for _ in 0..20 {
+            let actions = release(&mut engine, false);
+            if actions.is_empty() {
+                break;
+            }
+            for action in actions {
+                match action {
+                    Action::Http(request) => {
+                        let kind = support::kind(&request);
+                        seen.insert(kind.clone());
+                        let body = match kind.as_str() {
+                            "metaAndAssetCtxs" => support::META,
+                            "perpDexs" => "[null]",
+                            "userAbstraction" => {
+                                if portfolio {
+                                    r#""portfolioMargin""#
+                                } else {
+                                    r#""disabled""#
+                                }
+                            }
+                            "maxBuilderFee" => "30",
+                            "userFees" => r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
+                            "clearinghouseState" => support::STATE,
+                            "frontendOpenOrders" => "[]",
+                            "spotClearinghouseState" => {
+                                r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"#
+                            }
+                            other => panic!("unexpected native request {other}"),
+                        };
+                        reply(&mut engine, &request, body);
+                    }
+                    Action::WsConnect { socket, .. } => {
+                        engine.handle(NOW, Event::WsOpened { socket })
+                    }
+                    Action::SetTimer { timer, at_ms } if at_ms == NOW => {
+                        engine.handle(at_ms, Event::TimerFired { timer })
+                    }
+                    _ => {}
                 }
-                Action::WsConnect { socket, .. } => engine.handle(NOW, Event::WsOpened { socket }),
-                _ => {}
             }
         }
+        for kind in [
+            "metaAndAssetCtxs",
+            "perpDexs",
+            "userAbstraction",
+            "maxBuilderFee",
+            "userFees",
+            "clearinghouseState",
+            "frontendOpenOrders",
+        ] {
+            assert!(seen.contains(kind), "real bootstrap must issue {kind}");
+        }
+        assert_eq!(engine.store().positions().len(), 1);
+        assert_eq!(
+            engine.store().balance().total,
+            if portfolio { 1_100. } else { 1_000. }
+        );
+        if portfolio {
+            assert!(seen.contains("spotClearinghouseState"));
+            assert_eq!(engine.store().balance().free, 1_050.);
+        }
     }
-    for kind in [
-        "metaAndAssetCtxs",
-        "perpDexs",
-        "userAbstraction",
-        "maxBuilderFee",
-        "userFees",
-        "clearinghouseState",
-        "frontendOpenOrders",
-    ] {
-        assert!(seen.contains(kind), "real bootstrap must issue {kind}");
-    }
-    assert_eq!(engine.store().positions().len(), 1);
-    assert_eq!(engine.store().balance().total, 1_000.);
 }
 
 #[test]

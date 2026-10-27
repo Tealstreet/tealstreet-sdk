@@ -80,7 +80,12 @@ fn run(spot: bool, spot_meta: Option<&str>, spot_first: bool) -> Run {
                 }
                 Action::WsSend { text, .. } => sends.push(text),
                 Action::Notice(Notice::Event(event)) => logs.push(event.message),
-                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::SetTimer { timer, at_ms } => {
+                    timers.push((timer, at_ms));
+                    if at_ms == 1000.0 {
+                        e.handle(at_ms, Event::TimerFired { timer });
+                    }
+                }
                 _ => {}
             }
         }

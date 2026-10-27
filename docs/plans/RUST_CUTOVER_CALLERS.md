@@ -10255,3 +10255,5 @@ discovery backoff and account reconciliation remain responsible for fresh reads.
 Fixture transport now drives real managed release. Cached-read capacity tests
 finish bootstrap before installing their cache; the long streamed-cancel test
 keeps its non-resurrection assertion and additionally forbids expired new rows.
+Bootstrap fixtures also fire the genuine socket-handoff wake before expecting
+portfolio collateral reads; their balance and holdings assertions stay intact.

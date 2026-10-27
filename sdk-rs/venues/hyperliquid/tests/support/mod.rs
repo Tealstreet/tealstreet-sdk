@@ -115,6 +115,9 @@ fn ready_identity_policy(
                     e.handle(1000.0, Event::WsOpened { socket: s });
                 }
                 Action::WsSend { text, .. } => subscriptions.push(text),
+                Action::SetTimer { timer, at_ms } if at_ms == 1000.0 => {
+                    e.handle(at_ms, Event::TimerFired { timer });
+                }
                 _ => {}
             }
         }
