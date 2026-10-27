@@ -21,9 +21,9 @@ fixed errors without the scalar. Spot validates its configured agent against the
 engine-proved address; perps keep the configured-agent mismatch warning.
 
 Every write waits for real Prepare, provider completion, Bind and final Claim.
-The command root is serial and unbounded; each physical call has an unchanged
-20-second bound that preparation or pacing cannot renew. A 334ms mutation-only
-FIFO gap starts at actual release rather than eager queueing. Reads do not join
+The command root is serial and unbounded; each physical call has a
+20-second bound that includes preparation and cannot be renewed by pacing.
+A 334ms mutation-only FIFO gap starts at actual release rather than eager queueing. Reads do not join
 that FIFO. Builder readiness keeps its existing eight-second limit. Callers must
 not treat a preparation or a provider result as evidence that a write was sent.
 

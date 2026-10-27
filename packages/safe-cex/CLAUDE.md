@@ -76,6 +76,14 @@ public L1 lookup metadata is captured before stripping credentials. The resolved
 Account/API index and installed signing ref bind the transaction/auth recipes.
 Schnorr activation and eager-holder removal ship together in the venue cutover.
 
+Hyperliquid local trading setup maps only the agent scalar to a trusted
+ScalarOnly primary, with required secp256k1Digest and byte-exact hex input.
+The public key/applicationId/vault account fields stay separate. SDK and native
+setup share the Rust decoder: 0x and 0X prefixes are accepted, while surrounding
+space, NEL and BOM refuse. The legacy SDK's 0X refusal is deliberately widened;
+invalid input stays redacted. The provider recipe checkpoint alone does not
+activate the native trading funnel; hosted Hyperliquid remains unsupported.
+
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
 `stableId` per primary/secondary identity. It is consumed with passphrases through

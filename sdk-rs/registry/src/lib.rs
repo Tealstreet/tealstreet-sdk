@@ -46,6 +46,8 @@ mod asterdex_setup;
 mod construction;
 #[cfg(feature = "dispatch-signing")]
 pub mod hosted_signing;
+#[cfg(feature = "hyperliquid")]
+mod hyperliquid_setup;
 #[cfg(feature = "lighter")]
 mod lighter_setup;
 pub use construction::{
@@ -723,6 +725,10 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "hyperliquid")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
+        return hyperliquid_setup::native(options, signer_setup_policy_for(venue, options));
+    }
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::raw(options);
@@ -1044,6 +1050,10 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    #[cfg(feature = "hyperliquid")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
+        return hyperliquid_setup::json(input, signer_setup_policy_for(venue, options), options);
+    }
     #[cfg(feature = "lighter")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
         let mut input = zeroize::Zeroizing::new(input);
