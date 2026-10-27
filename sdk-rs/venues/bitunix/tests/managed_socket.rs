@@ -27,6 +27,10 @@ struct H {
 impl H {
     /// A keyed account with markets loaded; no socket is open yet.
     fn start() -> Self {
+        Self::start_with(support::PAIRS, support::TICKERS)
+    }
+    /// `start` over a caller's catalogue and ticker seed.
+    fn start_with(pairs: &str, tickers: &str) -> Self {
         let mut h = Self {
             engine: support::engine(support::Options {
                 key: Some("replay-key".into()),
@@ -41,9 +45,9 @@ impl H {
         };
         h.engine.start(h.now);
         h.collect();
-        h.reply("trading_pairs", support::PAIRS);
+        h.reply("trading_pairs", pairs);
         if h.requests.iter().any(|r| r.url.contains("/tickers")) {
-            h.reply("/tickers", support::TICKERS);
+            h.reply("/tickers", tickers);
         }
         h
     }
@@ -244,4 +248,102 @@ fn private_open_pings_then_logs_in() {
     let login = frames.iter().position(|t| t.contains(r#""op":"login""#));
     assert!(ping.is_some() && login.is_some(), "{frames:?}");
     assert!(ping < login, "the ping precedes the login: {frames:?}");
+}
+
+// Source-phase pins (8x5tm1 GO condition 3; dazzy3 pin 1 for D1).
+
+/// The public shards keep the legacy cadence (lib.rs: 20-symbol chunks, one
+/// frame per 250 ms queue timer): the first frame at open, then one per 250 ms,
+/// and the same again after a reconnect.
+#[test]
+fn public_shards_send_twenty_symbol_frames_250_ms_apart_and_again_on_reopen() {
+    let rows: Vec<_> = (0..45)
+        .map(|i| format!(r#"{{"symbol":"T{i}USDT","base":"T{i}","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"}}"#))
+        .collect();
+    let pairs = format!(r#"{{"code":0,"data":[{}]}}"#, rows.join(","));
+    let tickers = r#"{"code":0,"data":[{"symbol":"T0USDT","last":"1","open":"1","markPrice":"1","baseVol":"1","quoteVol":"1"}]}"#;
+    let mut h = H::start_with(&pairs, tickers);
+    let ticker_shard = |h: &H| {
+        h.sockets
+            .iter()
+            .rev()
+            .filter(|(_, url)| url.contains("/public/"))
+            .map(|(s, _)| *s)
+            .collect::<Vec<_>>()
+    };
+    let shards = ticker_shard(&h);
+    assert_eq!(shards.len(), 2, "a ticker and a price shard for 45 markets");
+    let socket = shards[0];
+    let frames = |h: &H, socket: SocketId| -> Vec<usize> {
+        h.sent
+            .iter()
+            .filter(|(s, t)| *s == socket && t.contains(r#""op":"subscribe""#))
+            .map(|(_, t)| {
+                serde_json::from_str::<serde_json::Value>(t).unwrap()["args"]
+                    .as_array()
+                    .unwrap()
+                    .len()
+            })
+            .collect()
+    };
+    let paced = |h: &mut H, socket: SocketId| {
+        let opened = h.now;
+        h.open(socket);
+        assert_eq!(frames(h, socket), [20], "one frame in the open tick");
+        for (step, expected) in [(250.0, vec![20, 20]), (500.0, vec![20, 20, 5])] {
+            let due: Vec<_> = h
+                .timers
+                .iter()
+                .filter(|(_, at)| *at == opened + step)
+                .map(|(t, _)| *t)
+                .collect();
+            assert!(!due.is_empty(), "a pacing timer at +{step}");
+            h.now = opened + step;
+            for timer in due {
+                h.event(Event::TimerFired { timer });
+            }
+            assert_eq!(frames(h, socket), expected, "at +{step}");
+        }
+    };
+    paced(&mut h, socket);
+    // Reconnect: the replacement shard socket paces its replay identically.
+    h.now += 1.0;
+    let before: Vec<_> = h.timers.iter().map(|(t, _)| *t).collect();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = *h
+        .timers
+        .iter()
+        .filter(|(t, _)| !before.contains(t))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("the shard's reconnect backoff");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let replacement = h
+        .sockets
+        .iter()
+        .rev()
+        .find(|(s, url)| url.contains("/public/") && !shards.contains(s))
+        .expect("the shard reconnects")
+        .0;
+    h.sent.retain(|(s, _)| *s != replacement);
+    paced(&mut h, replacement);
+}
+
+/// D1 under `AuthMode::Observe`, as legacy: there is no login deadline, and a
+/// private frame is reduced before any login answer arrives.
+#[test]
+fn private_login_has_no_deadline_and_frames_reduce_before_its_answer() {
+    let mut h = H::account();
+    let socket = h.private();
+    let private_connects = |h: &H| {
+        h.sockets
+            .iter()
+            .filter(|(_, url)| url.contains("/private/"))
+            .count()
+    };
+    // Past any login bound (Config's connect deadline is 10 s), still current.
+    h.now += 30_000.0;
+    h.message(socket, &order("before-login"));
+    assert!(h.engine.store().order("before-login").is_some());
+    assert_eq!(private_connects(&h), 1, "no login timeout reconnect");
 }

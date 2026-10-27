@@ -561,6 +561,18 @@ fn host_pause_blocks_healthy_keys_initial_continuations_ticks_and_lost_read_repa
 #[test]
 fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
     let (mut e, initial) = started(true);
+    // A live private session: opened promptly, then silent until its first pong.
+    let socket = initial
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/private/") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(0.0, Event::WsOpened { socket });
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     let mut r = http(&initial, "get_pending_positions");
     let mut now = 100.0;
     for nominal in [1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0, 30000.0] {
@@ -593,13 +605,23 @@ fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
     );
     assert_eq!(auth(&recovered).last().unwrap().2, AuthOutcome::Accepted);
     // Opening the private socket starts a fresh read, without resetting failures itself.
-    let socket = initial
-        .iter()
+    // The live session closes and the engine reconnects; the test follows the new socket.
+    e.handle(now + 1.0, Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| match a {
-            Action::WsConnect { socket, url, .. } if url.contains("/private/") => Some(*socket),
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
         })
-        .unwrap();
+        .expect("the private reconnect backoff");
+    let socket = fired(&mut e, timer, at)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/private/") => Some(socket),
+            _ => None,
+        })
+        .expect("the private reconnect");
+    let now = at;
     e.handle(now + 1.0, Event::WsOpened { socket });
     let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()

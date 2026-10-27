@@ -237,7 +237,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Sockets and host routing | Retained plan/evidence | Changing connection supervision, authentication, recovery, routing or clocks. | [RUST_BITUNIX_HOST_CLOCK.md](RUST_BITUNIX_HOST_CLOCK.md) |
 | Sockets and host routing | Retained plan/evidence | Changing connection supervision, authentication, recovery, routing or clocks. | [RUST_BITUNIX_LOGIN_CONTROLS.md](RUST_BITUNIX_LOGIN_CONTROLS.md) |
 | Sockets and host routing | Retained plan/evidence | Changing connection supervision, authentication, recovery, routing or clocks. | [RUST_BITUNIX_SOCKET_LIFECYCLE.md](RUST_BITUNIX_SOCKET_LIFECYCLE.md) |
-| Bitunix managed sockets | Plan in review | Before changing Bitunix socket feeds, the private login lifecycle or the socket inventories. | [RUST_BITUNIX_MANAGED_SOCKETS.md](RUST_BITUNIX_MANAGED_SOCKETS.md) |
+| Bitunix managed sockets | Source in review | Before changing Bitunix socket feeds, the private login lifecycle or the socket inventories. | [RUST_BITUNIX_MANAGED_SOCKETS.md](RUST_BITUNIX_MANAGED_SOCKETS.md) |
 | Sockets and host routing | Retained plan/evidence | Changing connection supervision, authentication, recovery, routing or clocks. | [RUST_SOCKET_SUPERVISOR.md](RUST_SOCKET_SUPERVISOR.md) |
 | TxFlow Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [TXFLOW_RUST_PORT.md](TXFLOW_RUST_PORT.md) |
 | Venue findings lane C | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_VENUES_C.md](RUST_VENUES_C.md) |

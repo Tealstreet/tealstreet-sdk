@@ -25,8 +25,8 @@ Every Bitunix feed moves from the venue `Supervisor` and `cx.connect` to engine-
 | Feed | Auth | Traffic | Timings | Notes |
 | --- | --- | --- | --- | --- |
 | Futures (`ws-futures`) | None | AnyText | 10 s connect, 15 s ping, 45 s idle | `Invalidation::Required`: books clear and `book_changed` fires before retry. Book and candle interests are encoded as native `sub`/`unsub` frames. |
-| Public shards (`{channel}:{start}`, one per 300 markets) | None | AnyText | as Futures | One feed per shard. Native 20-topic batches go out at `subscription_interval_ms: 250`. Retiring a shard does not clear books. |
-| Private (`/private/`) | Required | TextAfterFirstPong | 10 s connect, 15 s ping, 45 s idle after the first pong | On `Opened`: `{"op":"ping"}`, then `send_signed(WsLogin)`. `socket_control`: `true` is Accepted, `false` is Rejected, and a missing, null or wrong-type result is Malformed. `recovery: RetrySameSocket { delay_ms: 2000 }` replaces the venue `login_retry`. |
+| Public shards (`{channel}:{start}`, one per 300 markets) | None | AnyText | as Futures | One feed per shard. Native 20-symbol batches go out at `subscription_interval_ms: 250`, the legacy cadence: 20-symbol chunks and a 250 ms queue timer (`lib.rs` on_open and on_timer before this PR). Retiring a shard does not clear books. Pinned by `public_shards_send_twenty_symbol_frames_250_ms_apart_and_again_on_reopen`. |
+| Private (`/private/`) | Observe | TextAfterFirstPong | 10 s connect, 15 s ping, 45 s idle after the first pong | On `Ready`: `{"op":"ping"}`, then `send_signed(WsLogin)`. `socket_control`: `true` is Accepted, `false` is Rejected, and a missing, null or wrong-type result is Malformed. `recovery: RetrySameSocket { delay_ms: 2000 }` replaces the venue `login_retry`. |
 
 The `recover` routing flag (true after a timeout, false after an ordinary close) comes from the retired epoch's reason and rides the reconnect's spec context, as today. The `WsLogin` recipe is unchanged.
 
@@ -59,7 +59,17 @@ Controls, passing on both trees:
 
 ## Decisions for review
 
-- **D1, private auth mode.** `AuthMode::Required` with `RetrySameSocket { delay_ms: 2000 }`, as Phemex does, so the engine owns the login deadline and the same-socket retry. The pre-login ping is a plain `send` on the live, unauthenticated epoch. The alternative is Bybit's `AuthMode::None` with a venue-run login, which keeps the venue retry timer.
+- **D1, private auth mode: `AuthMode::Observe` (changed from the plan's `Required`).** Observe opens straight to Ready: no login deadline and no gating of private frames, which is exactly the legacy session. Login evidence still drives `RetrySameSocket { delay_ms: 2000 }`, so the engine owns the retry. `Required` would add a 10 s login deadline and hold frames until acceptance, a tightening this PR does not claim. Each outcome:
+
+  | Outcome | Engine | Venue | Legacy |
+  | --- | --- | --- | --- |
+  | Accepted (`result: true`) | cancels a pending retry | nothing | same |
+  | Rejected (`result: false`) | one 2 s same-socket retry, latched | Error `AUTH_REJECTED` with the legacy text | same |
+  | Malformed (missing, null or wrong type) | one 2 s same-socket retry, latched | Warn `STREAM_MALFORMED`, no auth claim | same |
+  | No answer | no deadline; the socket stays current | nothing | same: legacy had no login deadline |
+  | Close or retire mid-login | the retry is dropped with its epoch (`socket_driver` cancels `login_retry` on retire) | the replacement logs in on its own Ready | same: legacy dropped `login_retry` in `retire` |
+
+  The pre-login ping is a plain `send` on a Ready epoch: under Observe, `opened` moves the feed to Ready, and `admit_checked` admits `Send` on Ready. The control `private_open_pings_then_logs_in` pins the order. Pinned by `login_controls.rs` (malformed, explicit refusal, latching, retired retry) and `private_login_has_no_deadline_and_frames_reduce_before_its_answer`.
 - **D2, the first-pong gate.** `TrafficPolicy::TextAfterFirstPong` with a 45 s idle reproduces "silent until the first pong, then 45 s". It is pinned by `private_heartbeat_preserves_legacy_silent_sessions` and `private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic`.
 - **D3, books.** Every Bitunix depth frame is a full snapshot, so no snapshot barrier is registered; futures uses `Invalidation::Required`.
 

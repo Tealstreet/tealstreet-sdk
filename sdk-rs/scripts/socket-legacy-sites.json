@@ -37,15 +37,6 @@
     "0475f44498bf8f410ab3f5462c53165c158d9ce148a1418da60b65170fec7af2": 1,
     "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2
   },
-  "venues/bitunix/src/account.rs": {
-    "d3ff4d8d59b5040cd7b76d9b8b89ca55c5ea4676235643eba634d9a1046ba835": 1
-  },
-  "venues/bitunix/src/lib.rs": {
-    "54bd560952427c77ee6a5a67e8d348abc4b7b0c7d4f643294773a068adad53be": 1,
-    "5debfe587130d6dea27f32c4c93cdf4a25ea5614f3f5c0c00708e59ff45b9b43": 1,
-    "934213ca9deb3f5105b2bec39197e680abd61a676093fdde84c9a0a8ac5be8e8": 1,
-    "98824716f4df3bc3cd73aee7c1d7a31ca57a6f1791647a6539ee28074203b8b6": 1
-  },
   "venues/blofin/src/account.rs": {
     "ecaa072182e97dfa7cd88a46aa5c1e61f416f3fbd9726b4ebf66a1387093df05": 1
   },
