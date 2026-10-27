@@ -31,9 +31,10 @@ configured class hashes, as before; the supplied address is still only checked
 to be nonzero. A direct Stark key keeps the supplied account address and needs
 no Ethereum chain or class hashes.
 
-Only trusted local setup provides the key. Engine options carry no key, and a
-private account built from injected references, an external, hosted or wrapped
-provider, or a transported identity refuses private work.
+Only trusted local setup provides the key. Engine options carry no key. A
+private account built from injected references or a transported identity has no
+seal and refuses private work, and so does one whose provider presents no
+incarnation, which is the default for every external or hosted provider.
 
 ## Where the sealed key travels
 
@@ -41,8 +42,8 @@ Trusted setup seals the provider's own Stark public key on the engine identity,
 bound to that provider's incarnation. The seal is never serialized.
 
 - Native host (`build`, `build_with_signer`): setup and build run in process,
-  so the seal travels in process. An external signer refuses private Paradex
-  (expected; hosted is post-beta).
+  so the seal travels in process. An ordinary external signer presents no
+  incarnation and refuses private Paradex (expected; hosted is post-beta).
 - WASM worker: the WasmEngine constructor runs capsule setup and build in the
   worker, so the seal travels in process.
 - NX and SDK forwarding: only public options JSON and the private capsule
@@ -78,10 +79,15 @@ renames it. `/auth` stays a legacy request with its `direct` route until PR-3.
 ## Shared engine and crypto API
 
 - `signing::Incarnation` and `Signer::incarnation()`, which defaults to `None`.
-  It is a default method, so no host changes. Only `LocalSigner` returns one,
-  enforced by `check-credential-only.py`; any wrapper or external provider has
-  none, so no seal reads under it. Key and digest correctness does not rest on
-  the token: every result is fully verified.
+  It is a default method, so no host changes. The incarnation is an issuer
+  capability, not an attestation of the provider's concrete type. Ordinary
+  providers present none, so no seal reads under them. In-tree, only
+  `LocalSigner` implements it (`check-credential-only.py`). A provider that
+  forwards the issuing `LocalSigner`'s incarnation (an approved same-issuer
+  wrapper) can present it; the bans cannot reach out-of-tree Rust implementations.
+  Key and digest correctness never rests on the token: every result must fully
+  verify under the sealed public key, so a signature by any other key refuses
+  before a body binds.
 - `Identity::seal_public_key` (trusted local setup only, bans-confined) and
   `Identity::public_key_sealed_by(algorithm, installed)` (engine and the
   registry's Paradex setup only, bans-confined), plus
