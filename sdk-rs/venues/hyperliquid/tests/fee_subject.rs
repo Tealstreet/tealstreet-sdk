@@ -1,5 +1,6 @@
 //! SDK master dd9cae4: fees belong to the trading account, never the agent.
 mod support;
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Engine, HttpRequest};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 use support::{META, kind, reply};
@@ -13,7 +14,7 @@ fn startup(options: Options) -> (Engine<Hyperliquid>, Vec<HttpRequest>) {
     engine.start(1000.);
     let mut requests = Vec::new();
     for _ in 0..8 {
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
         if actions.is_empty() {
             return (engine, requests);
         }
@@ -120,8 +121,8 @@ fn empty_or_missing_application_id_resolves_the_agent_before_requesting_fees() {
             200,
             &format!(r#"{{"role":"agent","data":{{"user":"{MASTER}"}}}}"#),
         );
-        let fees = engine
-            .drain_actions()
+        let fees = prepared_now(&mut engine)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) if kind(&request) == "userFees" => Some(request),
                 _ => None,

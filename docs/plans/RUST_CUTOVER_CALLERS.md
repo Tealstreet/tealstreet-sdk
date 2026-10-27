@@ -10239,3 +10239,17 @@ stream proof and calls `done_plan`, or on expiry calls
 every accepted order ID and the scope stays fenced. It is never Done without
 proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
 grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).
+
+### Hyperliquid managed discovery and account reads
+
+Both Hyperliquid products issue discovery and background account/fee info calls
+through unsigned managed Prepare, Bind and Claim. Account reads mint their
+Context after the native weight queue admits the physical call. Streamed rows
+and terminal publication validate that exact Background Read delivery; success
+and every failure retire it before another retry can reuse its capacity.
+The physical call has a fixed 20-second bound across preparation and transport;
+later rows are discarded, including a previously valid streamed prefix. Native
+discovery backoff and account reconciliation remain responsible for fresh reads.
+Fixture transport now drives real managed release. Cached-read capacity tests
+finish bootstrap before installing their cache; the long streamed-cancel test
+keeps its non-resurrection assertion and additionally forbids expired new rows.

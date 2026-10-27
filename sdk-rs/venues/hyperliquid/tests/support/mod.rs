@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 pub const META: &str = r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"ETH","szDecimals":4,"maxLeverage":50}]},[{"midPx":"100","markPx":"100","oraclePx":"100","prevDayPx":"90"},{"midPx":"200","markPx":"200","oraclePx":"200"}]]"#;
@@ -95,7 +96,7 @@ fn ready_identity_policy(
     let mut socket = None;
     let mut subscriptions = Vec::new();
     for _ in 0..20 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
         if actions.is_empty() {
             break;
         }
@@ -127,8 +128,8 @@ pub fn message(e: &mut Engine<Hyperliquid>, s: SocketId, now: f64, text: &str) {
 /// Drive a real close, its native retry, accepted replacement and handoff wake.
 pub fn reconnect(e: &mut Engine<Hyperliquid>, socket: SocketId, now: f64) -> (SocketId, f64) {
     e.handle(now, Event::WsClosed { socket, code: 1006 });
-    let (retry, at) = e
-        .drain_actions()
+    let (retry, at) = prepared_now(e)
+        .into_iter()
         .find_map(|action| match action {
             Action::SetTimer { timer, at_ms } if at_ms > now && at_ms <= now + 16000.0 => {
                 Some((timer, at_ms))
@@ -137,8 +138,8 @@ pub fn reconnect(e: &mut Engine<Hyperliquid>, socket: SocketId, now: f64) -> (So
         })
         .expect("native bounded reconnect backoff");
     e.handle(at, Event::TimerFired { timer: retry });
-    let replacement = e
-        .drain_actions()
+    let replacement = prepared_now(e)
+        .into_iter()
         .find_map(|action| match action {
             Action::WsConnect { socket, .. } => Some(socket),
             _ => None,
@@ -151,7 +152,7 @@ pub fn reconnect(e: &mut Engine<Hyperliquid>, socket: SocketId, now: f64) -> (So
             socket: replacement,
         },
     );
-    let batch: Vec<_> = e.drain_actions().collect();
+    let batch: Vec<_> = prepared_now(e).into_iter().collect();
     assert!(
         !batch.iter().any(|action| matches!(action, Action::Http(_))),
         "refresh must wait for handoff"
@@ -179,7 +180,8 @@ pub trait Plain {
 impl<V: safe_cex_engine::Venue> Plain for safe_cex_engine::Engine<V> {
     fn drain_plain(&mut self) -> std::vec::IntoIter<safe_cex_engine::Action> {
         use safe_cex_engine::{Action, Notice};
-        self.drain_actions()
+        prepared_now(self)
+            .into_iter()
             .map(|a| match a {
                 Action::Notice(Notice::CommandFailed { command, error }) => {
                     Action::Notice(Notice::CommandFailed {
@@ -198,7 +200,8 @@ pub fn failures<V: safe_cex_engine::Venue>(
     e: &mut safe_cex_engine::Engine<V>,
 ) -> Vec<safe_cex_engine::VenueError> {
     use safe_cex_engine::{Action, Notice};
-    e.drain_actions()
+    prepared_now(e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
             _ => None,

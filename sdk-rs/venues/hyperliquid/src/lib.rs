@@ -112,6 +112,7 @@ pub enum Pending {
         index: u32,
     },
     ManagedCandles(Box<ManagedCandleRead>),
+    ManagedInfo(Box<ManagedInfoRead>),
     SocketRefresh {
         mode_ready: bool,
     },
@@ -122,6 +123,10 @@ pub struct ManagedCandleRead {
     context: Context,
     candles: Vec<Candle>,
     valid: bool,
+}
+pub struct ManagedInfoRead {
+    context: Context,
+    pending: Pending,
 }
 #[derive(Default)]
 struct Connection {
@@ -209,10 +214,10 @@ impl Hyperliquid {
             ..Self::new(options)
         }
     }
-    fn spot_meta(&self, cx: &mut Cx<'_, Pending>) {
+    fn spot_meta(&mut self, cx: &mut Cx<'_, Pending>) {
         self.spot_meta_attempt(cx, 0);
     }
-    fn spot_meta_attempt(&self, cx: &mut Cx<'_, Pending>, attempt: u8) {
+    fn spot_meta_attempt(&mut self, cx: &mut Cx<'_, Pending>, attempt: u8) {
         self.info(
             cx,
             "{\"type\":\"spotMetaAndAssetCtxs\"}".into(),
@@ -352,20 +357,59 @@ impl Hyperliquid {
             "wss://api-ui.hyperliquid.xyz/ws"
         }
     }
-    fn info(&self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
-        cx.request_streamed_body(
+    fn info(&mut self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
+        self.info_read(cx, body, pending, Some(at));
+    }
+    fn info_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        body: String,
+        pending: Pending,
+        streamed: Option<ArrayAt>,
+    ) {
+        let context = match cx.http_context(
+            safe_cex_engine::request_context::Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.on_request_failed(cx, pending, &error.read_venue_error().message);
+                return;
+            }
+        };
+        let pending = Pending::ManagedInfo(Box::new(ManagedInfoRead {
+            context: context.clone(),
+            pending,
+        }));
+        match cx.request_managed_with_headers(
+            context,
+            None,
             Method::Post,
             format!("{}/info", self.rest()),
-            vec![("Content-Type", "application/json".into())],
+            &[("Content-Type", "application/json")],
             Some(body),
-            at,
             pending,
-        );
+        ) {
+            Ok(id) => {
+                if let Some(at) = streamed {
+                    cx.stream_response(id, at);
+                }
+            }
+            Err((pending, error)) => {
+                self.on_request_failed(cx, pending, &error.read_venue_error().message);
+            }
+        }
     }
-    fn meta(&self, cx: &mut Cx<'_, Pending>, dex: String, offset: u32) {
+    fn meta(&mut self, cx: &mut Cx<'_, Pending>, dex: String, offset: u32) {
         self.meta_attempt(cx, dex, offset, 0);
     }
-    fn meta_attempt(&self, cx: &mut Cx<'_, Pending>, dex: String, offset: u32, attempt: u8) {
+    fn meta_attempt(&mut self, cx: &mut Cx<'_, Pending>, dex: String, offset: u32, attempt: u8) {
         #[derive(Serialize)]
         struct Read<'a> {
             r#type: &'static str,
@@ -1105,6 +1149,15 @@ impl Venue for Hyperliquid {
             return;
         }
         match pending {
+            Pending::ManagedInfo(read) => {
+                if cx
+                    .validate_background_read_http_delivery(&read.context)
+                    .is_ok()
+                {
+                    self.on_response(cx, read.pending, response);
+                    let _ = cx.finish_http_context(&read.context);
+                }
+            }
             Pending::SocketRefresh { .. } => {}
             Pending::SpotMeta {
                 meta,
@@ -1314,6 +1367,14 @@ impl Venue for Hyperliquid {
                 *stage = stage.saturating_add(1);
             }
             Pending::Account(request) => self.account_item(cx, request, item),
+            Pending::ManagedInfo(read) => {
+                if cx
+                    .validate_background_read_http_delivery(&read.context)
+                    .is_ok()
+                {
+                    self.on_item(cx, &mut read.pending, item);
+                }
+            }
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Meta {
@@ -1378,6 +1439,10 @@ impl Venue for Hyperliquid {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::ManagedInfo(read) => {
+                let _ = cx.finish_http_context(&read.context);
+                self.on_request_failed(cx, read.pending, error);
+            }
             Pending::SocketRefresh { .. } => {}
             Pending::ManagedCandles(read) => {
                 let _ = cx.fail_context(&read.context, error);
