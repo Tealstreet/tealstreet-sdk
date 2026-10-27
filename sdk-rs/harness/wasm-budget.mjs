@@ -46,7 +46,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // (at most +4 KiB over the pre-fence tip). Bybit fence opt-in (#2291): CI 1,452,035,
 // rounded up to 1419 KiB. Engine settle-only condition wait (#2274): CI 40359589419 Bitget
 // 1,488,071, rounded up to 1454 KiB (shared engine growth, <=2 KiB pre-approval).
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_410_048, krakenspot: 1_410_048 });
+// #2309 run 40467597908, job 122069099302: CI Kraken/Spot 1,410,076 (+337 B ungated verdict surface).
+// Rounded to 1,411,072 (+1 KiB) under the <=2 KiB shared-code rule.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_411_072, krakenspot: 1_411_072 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
