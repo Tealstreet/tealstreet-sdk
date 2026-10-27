@@ -1475,6 +1475,16 @@ impl<V: Venue> Engine<V> {
             .is_some_and(|managed| managed.lifecycle.expects_preparation(token))
     }
 
+    /// The call is parked on its Session until the venue announces a Bearer.
+    #[cfg(all(feature = "session-bearer", any(test, feature = "test-support")))]
+    pub(crate) fn http_bearer_parked(&self, request: crate::RequestId) -> bool {
+        self.io
+            .core
+            .bearer_parked
+            .iter()
+            .any(|(_, parked)| *parked == request)
+    }
+
     /// Preparation is a host resource, never evidence of transport dispatch.
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         self.assert_live();

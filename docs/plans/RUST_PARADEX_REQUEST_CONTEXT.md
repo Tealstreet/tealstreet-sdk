@@ -471,3 +471,23 @@ caller and full-map reviews are CLEAN on this actual integration; architecture
 No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
+
+## Slice: JWT reads on the Session bearer (2026-10-27, claude-m26ps4)
+
+On master `97cfa6d90a1`. Paradex links `session-bearer` and opens one Session
+when its credentials are set. Account snapshots (4) and identity (3) become
+managed Reads bound to it (`Account::read`, `request_managed_with_headers`
+plus `stream_response`); `session_bearer`/`session_bearer_revision` answer
+from the cached JWT. A refresh clears the JWT, so bound reads park; a new JWT
+bumps the revision and announces `session_ready`. A refused `/auth` retires
+the Session. Snapshot Contexts are validated and finished before their
+response is applied; identity completes through `done_context`/`fail_context`
+on `admit_http_command`, including its no-credential branch.
+
+Shared changes (engine): `SessionHeaders::bearer`, and the immediate test
+fixture leaves Session-parked calls parked. Request inventory: Paradex 24 -> 17
+(account 8 -> 4, identity 3 -> 0). RED `c7cc35cd9cd`: three assertion REDs (no
+read window x2, untyped auth refusal), two controls. Adapted: account.rs
+`delayed_jwt_response...` (the boot margins read now ends at its window while
+the JWT is 300 s late; the next read carries the fresh JWT) and
+`periodic_account_policy...` (drives managed reads with `prepared_actions`).
