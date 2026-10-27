@@ -102,6 +102,16 @@ struct Runtime {
     snapshot_pending: bool,
     #[cfg(feature = "socket-native-timing")]
     initial_payload_timeout: Option<f64>,
+    route_refusal: RouteRefusal,
+}
+
+/// A route-refusal streak lasts until a login succeeds. Only its first refusal
+/// redials at once, so a host that ignores `reject_route` stays backoff-paced.
+#[derive(Default)]
+struct RouteRefusal {
+    streak: bool,
+    skip_backoff: bool,
+    reject_next: bool,
 }
 
 #[derive(Default)]
@@ -148,6 +158,13 @@ impl Driver {
 
     /// Called before allocating/queuing the physical connection. begin repeats
     /// this check so a caller cannot accidentally bypass it.
+    /// The next connect after a route refusal asks the host for another route.
+    pub(crate) fn take_reject_route(&mut self, feed: FeedId) -> bool {
+        self.runtimes
+            .get_mut(feed.index())
+            .is_some_and(|runtime| std::mem::take(&mut runtime.route_refusal.reject_next))
+    }
+
     pub(crate) fn preflight_begin(&self, feed: FeedId, now: f64) -> Result<(), SocketError> {
         self.state.can_begin(feed)?;
         if !self.valid_time(feed, now) {
@@ -192,6 +209,7 @@ impl Driver {
             snapshot_pending: false,
             #[cfg(feature = "socket-native-timing")]
             initial_payload_timeout: None,
+            route_refusal: RouteRefusal::default(),
         });
         Ok(feed)
     }
@@ -447,6 +465,7 @@ impl Driver {
         let Admission::Current(epoch) = admission else {
             return self.finish_ingress(cx, admission, Ingress::Close);
         };
+        self.runtime_mut(epoch.feed()).route_refusal = RouteRefusal::default();
         let effects = self
             .retire(cx, epoch.feed(), RetireReason::RouteExhausted, false)
             .into_iter()
@@ -624,6 +643,7 @@ impl Driver {
                 reopened,
             } => {
                 let runtime = self.runtime_mut(epoch.feed());
+                runtime.route_refusal = RouteRefusal::default();
                 if let Some(timer) = runtime.login_retry.take() {
                     cx.clear_timer(timer);
                 }
@@ -635,6 +655,19 @@ impl Driver {
                     effects.push(Effect::Ready { epoch, reopened });
                 }
                 effects
+            }
+            AuthTransition::Failed {
+                epoch,
+                evidence: AuthEvidence::RouteRefused(_),
+                ..
+            } => {
+                let refusal = &mut self.runtime_mut(epoch.feed()).route_refusal;
+                refusal.skip_backoff = !refusal.streak;
+                refusal.streak = true;
+                refusal.reject_next = true;
+                self.retire(cx, epoch.feed(), RetireReason::RouteRefused, true)
+                    .into_iter()
+                    .collect()
             }
             AuthTransition::Failed {
                 epoch,
@@ -714,10 +747,15 @@ impl Driver {
             return Err(SocketError::InvalidTime);
         }
         self.state.retired(retirement.epoch, acknowledged)?;
+        let runtime = self.runtime_mut(retirement.epoch.feed());
+        let skip_backoff = std::mem::take(&mut runtime.route_refusal.skip_backoff);
         if acknowledged && retry && self.state.awaiting_retry(retirement.epoch.feed()) {
-            self.runtime_mut(retirement.epoch.feed())
-                .supervisor
-                .retry(cx);
+            let supervisor = &mut self.runtime_mut(retirement.epoch.feed()).supervisor;
+            if skip_backoff {
+                supervisor.retry_now(cx);
+            } else {
+                supervisor.retry(cx);
+            }
         }
         Ok(())
     }
@@ -835,6 +873,7 @@ mod tests {
                                 | RetireReason::Authentication
                                 | RetireReason::Stopped
                                 | RetireReason::RouteExhausted
+                                | RetireReason::RouteRefused
                         ));
                         self.driver
                             .acknowledge_retirement(cx, *retirement, self.acknowledge, *retry)

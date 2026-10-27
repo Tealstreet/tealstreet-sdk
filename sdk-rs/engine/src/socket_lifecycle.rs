@@ -157,6 +157,8 @@ pub enum AuthEvidence {
     Progress,
     Rejected(VenueError),
     Malformed,
+    /// The venue refused this route's egress before login; another may work.
+    RouteRefused(VenueError),
 }
 #[derive(Clone, Debug)]
 pub enum Control {
@@ -175,6 +177,8 @@ pub enum RetireReason {
     Stopped,
     /// A `reject_route` connect found no route left; nothing was dialled.
     RouteExhausted,
+    /// The venue refused this route; the next connect asks for another.
+    RouteRefused,
 }
 
 #[derive(Clone, Debug)]
