@@ -407,7 +407,7 @@ impl Trading {
         cx: &mut Cx<'_, Pending>,
         credentials: Option<&Credentials>,
         command: Command,
-        on_entry: impl FnOnce(),
+        on_entry: impl FnOnce(&mut Cx<'_, Pending>),
     ) -> bool {
         self.settle_retired(cx);
         if !matches!(
@@ -498,7 +498,7 @@ impl Trading {
                         .map(|(plan, slot)| (plan, Some(slot)))
                 };
                 if let Some((plan, next)) = admitted {
-                    on_entry();
+                    on_entry(cx);
                     self.retain_open_orders(cx.store);
                     self.jobs.insert(
                         id,
@@ -514,7 +514,7 @@ impl Trading {
                 }
             }
             Err(error) => {
-                on_entry();
+                on_entry(cx);
                 entry.reject(cx, not_sent(error).kind(ErrorKind::InvalidInput));
             }
         }
