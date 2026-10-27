@@ -294,7 +294,8 @@ fn queued_census_retains_its_creation_epoch(spot: bool) {
     let mut builders = 0;
     for action in actions {
         if let Action::Http(request) = action {
-            assert_eq!(kind(&request), "maxBuilderFee");
+            let request_kind = kind(&request);
+            assert_eq!(request_kind, "maxBuilderFee");
             builders += 1;
             reply(&mut engine, &request, 2000., "30");
         }
