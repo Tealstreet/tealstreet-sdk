@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| BloFin managed public/private sockets | Plan and production-binding originals; one venue PR | Before changing authenticated login custody, public interest recovery or full order-census epoch | [RUST_BLOFIN_MANAGED_SOCKETS.md](RUST_BLOFIN_MANAGED_SOCKETS.md) |
 | Address-keyed dispatch nonce domains | Plan directions CLEAR; local originals checkpoint | Before extending #2093 claims to verified Aster V3 signer and Hyperliquid agent subjects; no non-adopter growth or consumer activation implied | [RUST_ADDRESS_NONCE_DOMAINS.md](RUST_ADDRESS_NONCE_DOMAINS.md) |
 | Per-venue engine feature gating | Plan; Phase 1 managed-sockets, Phase 2 barriers; no source | Before adding a per-venue engine feature, or changing how Engine<V> reaches managed-socket or barrier code. | [RUST_ENGINE_FEATURE_GATING.md](RUST_ENGINE_FEATURE_GATING.md) |
 | WEEX depth and socket custody | Plan/native/API CLEAR; first19 originals13RED/6GREEN local; source held | Remaining Depth observations and both native socket lifecycles; truthful inventory residue disposition and fixed size gates | [RUST_WEEX_DEPTH_SOCKET_CONTEXT.md](RUST_WEEX_DEPTH_SOCKET_CONTEXT.md) |
