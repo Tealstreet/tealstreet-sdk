@@ -106,7 +106,6 @@ impl Blofin {
             self.public.feed
         }
         .ok_or(SocketError::NotPermitted)?;
-        cx.set_socket_interests(feed, self.desired_interests(cx.store, private, None))?;
         let url = match (self.options.testnet, private) {
             (true, true) => "wss://demo-trading-openapi.blofin.com/ws/private",
             (true, false) => "wss://demo-trading-openapi.blofin.com/ws/public",
@@ -119,6 +118,14 @@ impl Blofin {
             self.account.connection.socket = Some(epoch.socket());
         } else {
             self.public.socket = Some(epoch.socket());
+        }
+        match cx.set_socket_interests(feed, self.desired_interests(cx.store, private, None)) {
+            Ok(_) => (),
+            Err(SocketError::Capacity) if !private => {
+                Self::socket_notice(cx, SocketError::Capacity);
+                cx.retire_socket(feed, RetireReason::Closed);
+            }
+            Err(error) => return Err(error),
         }
         Ok(())
     }
@@ -418,7 +425,7 @@ impl Blofin {
             if overhead + raw.len() > 4096 {
                 return Err(SocketError::Capacity);
             }
-            serde_json::from_str::<serde_json::Value>(raw)
+            serde_json::from_str::<&serde_json::value::RawValue>(raw)
                 .map_err(|_| SocketError::InvalidInterest)?;
             if length + raw.len() + usize::from(!args.is_empty()) > 4096 {
                 emit(EncodedBatch {

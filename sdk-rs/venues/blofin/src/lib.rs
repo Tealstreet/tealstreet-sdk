@@ -1026,9 +1026,7 @@ impl Venue for Blofin {
             return;
         }
         self.settle_retired_trade(cx);
-        if self.account_timer(cx, timer) {
-            return;
-        }
+        self.account_timer(cx, timer);
     }
 
     fn on_venue_action(

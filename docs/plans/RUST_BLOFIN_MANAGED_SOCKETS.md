@@ -50,3 +50,31 @@ changes are explicitly documented. Remove only BloFin's three fingerprint rows
 No request/signing/credential inventory changes. Local scoped tests/strict/fmt/
 bans, reviewer CLEAR, fresh correctness/CI family/replay and auditor GO gate it.
 No local family matrix or combined build under the venue speed policy.
+
+Qualification corrections and fixture contract:
+
+- Public reconnect installs its replacement epoch before fallible interest
+  admission. Real proposal-credit exhaustion retires that epoch through Closed,
+  emits no connect/frame, keeps private alive and recovers desired subscriptions.
+  The original pre-epoch ordering failed the captured512-credit control. JSON
+  argument validation uses RawValue syntax validation, preserving escaped native
+  arguments without a JSON tree or gate exception.
+- Financial fixtures explicitly open and acknowledge private only at their local
+  setup sites. Constructors/seed/ws do not implicitly open. Three test wrappers
+  forward the actual managed socket API; the login timestamp fixture starts at
+  its original1700000000123.875 observation. Public candle liveness uses genuine
+  pongs without altering financial payloads.
+- Two account terminal-memory/regressive-snapshot fixtures replace a duplicate
+  login ACK reread trigger with real Close/captured backoff/newConnect/Open,
+  retaining their original ACK and financial rows at the new observation.
+  Default replies stay at current observation; explicit respond_at is unchanged.
+  Trading pause controls select their real350/1000ms delay from the actual
+  response observation, rather than an obsolete absolute timestamp.
+- Existing676assertion invocations and342raw payload literals in the ten adapted
+  fixture files remain token-exact/in order. Original224PASS78FAIL and later
+  fixture/setup failures remain separate from candidate qualification.
+
+Local qualification of the corrected candidate:311PASS across24nonempty native
+targets,0FAIL/ignored/filtered; strict all-target clippy, package fmt and full bans
+pass. This is local evidence only. Publication, current-tip composition, fresh
+PR correctness/family/replay and exact-tree auditor GO remain required.

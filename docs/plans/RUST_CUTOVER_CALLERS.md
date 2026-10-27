@@ -10292,3 +10292,10 @@ keeping revision and uncertainty-generation guards. A later-page token never
 freshens a pre-mark census. HTTP selection, trading and financial reducers are
 outside this slice. Existing fixture lifecycle setup changes, when necessary,
 are recorded in the plan and preserve their financial assertions and payloads.
+
+BloFin reconnect proposal pressure installs and retires a genuine replacement
+epoch before backoff, with no exposed connect/frame and no private-peer loss.
+Fixture adaptations explicitly establish private auth locally. Two account
+reread fixtures use actual reconnect instead of duplicate ACK; trading pauses
+use response-relative captured timers. Financial assertions/raw payloads remain
+intact; observation clocks follow their genuine new socket/timer events.

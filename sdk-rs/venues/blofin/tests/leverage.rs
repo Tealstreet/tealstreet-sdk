@@ -4,6 +4,7 @@ use support::*;
 
 fn flat() -> Harness {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"positions"},"data":[]}"#);
     h.e.store_mut()

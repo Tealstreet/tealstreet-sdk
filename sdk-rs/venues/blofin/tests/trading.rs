@@ -107,6 +107,7 @@ fn lost_placement_response_is_never_retried() {
 #[test]
 fn successful_envelope_does_not_hide_mismatched_or_failed_cancel_rows() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     seed_order(&mut h, "123", "");
@@ -144,6 +145,7 @@ fn successful_envelope_does_not_hide_mismatched_or_failed_cancel_rows() {
 #[test]
 fn already_gone_cancel_only_removes_correlated_identity() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     seed_order(&mut h, "123", "");
@@ -163,6 +165,7 @@ fn already_gone_cancel_only_removes_correlated_identity() {
 #[test]
 fn rejected_cancel_prevents_amend_replacement() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     h.handle(
@@ -185,6 +188,7 @@ fn rejected_cancel_prevents_amend_replacement() {
 #[test]
 fn conditional_amend_preserves_nested_protection_and_native_execution_provenance() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","algoId":"77","orderType":"trigger","side":"buy","size":"3","triggerPrice":"61000","orderPrice":"60900","triggerPriceType":"mark","marginMode":"isolated","positionSide":"long","state":"live","attachAlgoOrders":[{"tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"mark"}]}]}"#);
     h.handle(
@@ -207,7 +211,7 @@ fn conditional_amend_preserves_nested_protection_and_native_execution_provenance
         .rev()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a
-                && *at_ms == 350.0
+                && *at_ms == h.now + 350.0
             {
                 Some(*timer)
             } else {
@@ -215,7 +219,8 @@ fn conditional_amend_preserves_nested_protection_and_native_execution_provenance
             }
         })
         .unwrap();
-    h.handle(350.0, Event::TimerFired { timer });
+    let at = h.now + 350.0;
+    h.handle(at, Event::TimerFired { timer });
     h.collect();
     let r = h.take("order-algo");
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
@@ -303,11 +308,12 @@ fn grouped_normal_batches_keep_their_own_native_receipt_slices() {
         .iter()
         .rev()
         .find_map(|action| match action {
-            Action::SetTimer { timer, at_ms } if *at_ms == 350. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 350. => Some(*timer),
             _ => None,
         })
         .unwrap();
-    h.handle(350., Event::TimerFired { timer });
+    let at = h.now + 350.;
+    h.handle(at, Event::TimerFired { timer });
     h.collect();
     let second = h.take("batch-orders");
     let payload: serde_json::Value = serde_json::from_str(second.body.as_deref().unwrap()).unwrap();
@@ -358,6 +364,7 @@ fn tiny_partial_protection_and_negative_amend_do_not_become_full_position() {
 #[test]
 fn full_position_combination_preserves_sibling_trigger_reference() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","state":"live"}]}"#);
     place(
@@ -374,7 +381,7 @@ fn full_position_combination_preserves_sibling_trigger_reference() {
         .rev()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a
-                && *at_ms == 1000.0
+                && *at_ms == h.now + 1000.0
             {
                 Some(*timer)
             } else {
@@ -382,7 +389,8 @@ fn full_position_combination_preserves_sibling_trigger_reference() {
             }
         })
         .unwrap();
-    h.handle(1000.0, Event::TimerFired { timer });
+    let at = h.now + 1000.0;
+    h.handle(at, Event::TimerFired { timer });
     h.collect();
     let r = h.take("order-tpsl");
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
@@ -398,6 +406,7 @@ fn full_position_combination_preserves_sibling_trigger_reference() {
 #[test]
 fn cancel_one_combined_leg_recreates_only_its_sibling() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","slTriggerPrice":"55000","slOrderPrice":"54900","slTriggerPriceType":"mark","state":"live"}]}"#);
     h.handle(
@@ -418,7 +427,7 @@ fn cancel_one_combined_leg_recreates_only_its_sibling() {
         .rev()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a
-                && *at_ms == 1000.0
+                && *at_ms == h.now + 1000.0
             {
                 Some(*timer)
             } else {
@@ -426,7 +435,8 @@ fn cancel_one_combined_leg_recreates_only_its_sibling() {
             }
         })
         .unwrap();
-    h.handle(1000.0, Event::TimerFired { timer });
+    let at = h.now + 1000.0;
+    h.handle(at, Event::TimerFired { timer });
     h.collect();
     let r = h.take("order-tpsl");
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
@@ -438,6 +448,7 @@ fn cancel_one_combined_leg_recreates_only_its_sibling() {
 #[test]
 fn normal_amend_preserves_brackets_before_fallback_children_exist() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(
         &mut h,
@@ -464,7 +475,7 @@ fn normal_amend_preserves_brackets_before_fallback_children_exist() {
         .rev()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a
-                && *at_ms == 350.0
+                && *at_ms == h.now + 350.0
             {
                 Some(*timer)
             } else {
@@ -472,7 +483,8 @@ fn normal_amend_preserves_brackets_before_fallback_children_exist() {
             }
         })
         .unwrap();
-    h.handle(350.0, Event::TimerFired { timer });
+    let at = h.now + 350.0;
+    h.handle(at, Event::TimerFired { timer });
     h.collect();
     h.reply("order-detail", r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"0"}}"#);
     let r = h.take("batch-orders");
@@ -617,7 +629,7 @@ fn editing_inline_virtual_protection_preserves_parent_remainder_despite_child_am
         .rev()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a
-                && *at_ms == 350.0
+                && *at_ms == h.now + 350.0
             {
                 Some(*timer)
             } else {
@@ -625,7 +637,8 @@ fn editing_inline_virtual_protection_preserves_parent_remainder_despite_child_am
             }
         })
         .unwrap();
-    h.handle(350.0, Event::TimerFired { timer });
+    let at = h.now + 350.0;
+    h.handle(at, Event::TimerFired { timer });
     h.collect();
     h.reply("order-detail", r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"4"}}"#);
     let r = h.take("batch-orders");
@@ -701,16 +714,18 @@ fn resume_cancel(h: &mut Harness) {
         .iter()
         .rev()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 350.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 350.0 => Some(*timer),
             _ => None,
         })
         .unwrap();
-    h.handle(350.0, Event::TimerFired { timer });
+    let at = h.now + 350.0;
+    h.handle(at, Event::TimerFired { timer });
     h.collect();
 }
 #[test]
 fn already_gone_amend_aborts_without_a_replacement() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     amend_normal(&mut h);
@@ -732,6 +747,7 @@ fn replacement_requires_exact_canceled_detail_with_unchanged_fill_quantity() {
         r#"{"code":"500","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"0"}}"#,
     ] {
         let mut h = Harness::new();
+        h.open_private();
         h.seed();
         seed_order(&mut h, "12", "");
         amend_normal(&mut h);
@@ -762,6 +778,7 @@ fn replacement_requires_exact_canceled_detail_with_unchanged_fill_quantity() {
 #[test]
 fn stable_final_cancel_detail_allows_only_the_remaining_replacement() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", r#", "filledSize":"4""#);
     amend_normal(&mut h);
@@ -780,6 +797,7 @@ fn stable_final_cancel_detail_allows_only_the_remaining_replacement() {
 #[test]
 fn filled_stream_during_cancel_pause_aborts_before_the_detail_or_replacement() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     amend_normal(&mut h);
@@ -795,6 +813,7 @@ fn filled_stream_during_cancel_pause_aborts_before_the_detail_or_replacement() {
 #[test]
 fn failed_final_detail_read_is_not_retried_and_never_places() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     amend_normal(&mut h);
@@ -915,6 +934,7 @@ fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
 #[test]
 fn fill_arriving_during_final_detail_read_blocks_a_stale_detail_replacement() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     amend_normal(&mut h);
@@ -936,6 +956,7 @@ fn rest_cancel_tombstone_survives_snapshot_then_delayed_live_replay() {
         r#"{"code":"1","data":[{"orderId":"12","code":"1000"}]}"#,
     ] {
         let mut h = Harness::new();
+        h.open_private();
         h.seed();
         seed_order(&mut h, "12", "");
         h.handle(
@@ -969,6 +990,7 @@ fn rest_cancel_tombstone_survives_snapshot_then_delayed_live_replay() {
 fn successful_cancel_ack_cannot_downgrade_an_intervening_filled_status() {
     use safe_cex_engine::model::OrderStatus;
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     h.handle(
@@ -1325,6 +1347,7 @@ fn closed_position_restores_account_margin_default_before_next_order() {
     for rest in [false, true] {
         for explicit_zero in [false, true] {
             let mut h = Harness::new();
+            h.open_private();
             h.seed();
             h.handle(
                 1.0,
@@ -1518,6 +1541,7 @@ fn multi_position_mode_refusal_explains_how_to_continue() {
 fn margin_type_change_warns_while_orders_are_open() {
     for open in [false, true] {
         let mut h = Harness::new();
+        h.open_private();
         h.modes();
         h.reply("account/positions", r#"{"code":"0","data":[]}"#);
         h.reply(

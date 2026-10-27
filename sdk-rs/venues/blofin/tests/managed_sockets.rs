@@ -355,3 +355,698 @@ fn nonfinite_public_and_private_ingress_leave_full_store_and_actions_unchanged()
         }
     }
 }
+
+#[test]
+fn unauthenticated_financial_frames_cannot_publish_and_current_ack_enables_them() {
+    let mut h = Harness::new();
+    h.seed();
+    let socket = h.private;
+    event(&mut h, 0., Event::WsOpened { socket });
+    let before = h.e.snapshot_frame(100.).to_vec();
+    let row = r#"{"arg":{"channel":"account"},"data":{"totalEquity":"777"}}"#;
+    assert!(event(&mut h, 1., Event::WsMessage { socket, text: row }).is_empty());
+    assert_eq!(h.e.snapshot_frame(100.), before);
+    event(
+        &mut h,
+        2.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"event":"login","code":"0"}"#,
+        },
+    );
+    event(&mut h, 3., Event::WsMessage { socket, text: row });
+    assert_eq!(h.e.store().balance().total, 776.5);
+    assert_ne!(h.e.snapshot_frame(100.), before);
+}
+#[test]
+fn genuine_interest_count_refusal_rolls_back_new_refs_and_preserves_the_peer() {
+    use safe_cex_engine::Command;
+    let mut h = Harness::new();
+    let public = public(&h);
+    let private = h.private;
+    event(&mut h, 0., Event::WsOpened { socket: public });
+    event(&mut h, 0., Event::WsOpened { socket: private });
+    event(
+        &mut h,
+        0.,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"event":"login","code":"0"}"#,
+        },
+    );
+    let original = h.e.store().markets().to_vec();
+    let mut markets = original.clone();
+    for n in 1..4096 {
+        let mut m = original[0].clone();
+        m.symbol = format!("S{n}USDT");
+        m.id = format!("S{n}-USDT");
+        markets.push(m);
+    }
+    h.e.store_mut().set_markets(markets);
+    let refused = event(
+        &mut h,
+        1.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert!(sends(&refused, public).is_empty());
+    assert!(refused.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(e)) if e.message.contains("Capacity"))));
+    assert!(
+        refused
+            .iter()
+            .all(|a| !matches!(a, Action::WsClose { .. } | Action::WsConnect { .. }))
+    );
+    assert_eq!(
+        sends(
+            &event(
+                &mut h,
+                2.,
+                Event::WsMessage {
+                    socket: private,
+                    text: "ping"
+                }
+            ),
+            private
+        ),
+        vec!["pong"]
+    );
+    h.e.store_mut().set_markets(original);
+    let recovered = event(
+        &mut h,
+        3.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert_eq!(
+        topics(&recovered, public).len(),
+        2,
+        "refusal must not leave phantom refs"
+    );
+}
+#[test]
+fn real_queued_byte_pressure_invalidates_books_and_recovers_demand_without_retiring_private() {
+    use safe_cex_engine::{Command, model::Interval};
+    let mut h = Harness::new();
+    let public = public(&h);
+    let private = h.private;
+    event(&mut h, 0., Event::WsOpened { socket: public });
+    event(&mut h, 0., Event::WsOpened { socket: private });
+    event(
+        &mut h,
+        0.,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"event":"login","code":"0"}"#,
+        },
+    );
+    let original = h.e.store().markets()[0].clone();
+    let mut markets = vec![original.clone()];
+    for n in 1..3999 {
+        let mut m = original.clone();
+        m.symbol = format!("S{n}USDT");
+        m.id = format!("{}-{n}-USDT", "A".repeat(215));
+        markets.push(m);
+    }
+    h.e.store_mut().set_markets(markets.clone());
+    let established = event(
+        &mut h,
+        1.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert_eq!(
+        topics(&established, public).len(),
+        7998,
+        "two original ticker interests were already active"
+    );
+    assert!(
+        sends(&established, public)
+            .iter()
+            .all(|frame| frame.len() <= 4096)
+    );
+    event(
+        &mut h,
+        2.,
+        Event::WsMessage {
+            socket: public,
+            text: r#"{"arg":{"channel":"books","instId":"BTC-USDT"},"action":"snapshot","data":[{"seqId":"1","bids":[["99","1"]],"asks":[["101","1"]]}]}"#,
+        },
+    );
+    assert!(!h.e.book("BTCUSDT").unwrap().is_empty());
+    for m in &mut markets[1..] {
+        m.id.replace_range(..1, "B");
+    }
+    h.e.store_mut().set_markets(markets);
+    let pressure = event(
+        &mut h,
+        3.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: Interval::M1,
+        }),
+    );
+    assert!(
+        pressure
+            .iter()
+            .any(|a| matches!(a, Action::WsClose {socket} if *socket == public))
+    );
+    assert!(
+        pressure
+            .iter()
+            .all(|a| !matches!(a, Action::WsClose {socket} if *socket == private))
+    );
+    assert!(h.e.book("BTCUSDT").is_none_or(|book| book.is_empty()));
+    assert!(pressure.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(e)) if e.message.contains("Capacity"))));
+    let retry: Vec<_> = pressure
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (753. ..=1003.).contains(at_ms) => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(retry.len(), 1);
+    assert_eq!(
+        sends(
+            &event(
+                &mut h,
+                4.,
+                Event::WsMessage {
+                    socket: private,
+                    text: "ping"
+                }
+            ),
+            private
+        ),
+        vec!["pong"]
+    );
+    let connected = event(&mut h, retry[0].1, Event::TimerFired { timer: retry[0].0 });
+    let current = connected
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(current, public);
+    let replay = event(&mut h, retry[0].1, Event::WsOpened { socket: current });
+    let active = topics(&replay, current);
+    assert_eq!(active.len(), 8001);
+    assert_eq!(
+        active
+            .iter()
+            .filter(|(_, channel, _)| channel == "candle1m")
+            .count(),
+        1
+    );
+    assert!(
+        sends(&replay, current)
+            .iter()
+            .all(|frame| frame.len() <= 4096)
+    );
+    assert!(event(&mut h, retry[0].1, Event::WsOpened { socket: public }).is_empty());
+}
+
+use safe_cex_engine::{Command, Cx, Engine, Response, TimerId, VenueError};
+use safe_cex_venue_blofin::Options;
+#[derive(Default)]
+struct PressureTrace {
+    old: Option<SocketId>,
+    public: Option<safe_cex_engine::socket_lifecycle::FeedId>,
+    retired: Vec<SocketId>,
+    armed: bool,
+}
+struct ProposalPressure(Blofin, std::rc::Rc<std::cell::RefCell<PressureTrace>>);
+impl Venue for ProposalPressure {
+    fn managed_sockets() -> bool {
+        <Blofin as Venue>::managed_sockets()
+    }
+    fn socket_capabilities() -> safe_cex_engine::socket_lifecycle::SocketCapabilities {
+        <Blofin as Venue>::socket_capabilities()
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        use safe_cex_engine::socket_lifecycle::LifecycleEvent;
+        {
+            let mut trace = self.1.borrow_mut();
+            if let LifecycleEvent::Retired { epoch, .. } = &event
+                && (trace.public == Some(epoch.feed()) || trace.old == Some(epoch.socket()))
+            {
+                trace.public = Some(epoch.feed());
+                trace.retired.push(epoch.socket());
+            }
+            if let LifecycleEvent::Reconnect(feed) = &event
+                && trace.public == Some(*feed)
+                && trace.armed
+            {
+                trace.armed = false;
+                for _ in 0..safe_cex_engine::socket_lifecycle::MAX_FEEDS {
+                    cx.set_socket_interests(*feed, vec![])
+                        .expect("actual proposal credit");
+                }
+            }
+        }
+        self.0.on_socket_event(cx, event)
+    }
+    fn socket_control(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        authenticated: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        self.0.socket_control(store, feed, authenticated, text)
+    }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        values: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.0
+            .encode_socket_interests(store, feed, subscribe, values, emit)
+    }
+
+    type Pending = <Blofin as Venue>::Pending;
+    fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
+        self.0.start(cx);
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, Self::Pending>, _: SocketId) {}
+    fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, text: &str) {
+        self.0.on_message(cx, socket, text);
+    }
+    fn on_close(&mut self, _: &mut Cx<'_, Self::Pending>, _: SocketId, _: u16) {}
+    fn on_item(&mut self, cx: &mut Cx<'_, Self::Pending>, pending: &mut Self::Pending, item: &str) {
+        self.0.on_item(cx, pending, item);
+    }
+    fn on_response(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        response: Response<'_>,
+    ) {
+        self.0.on_response(cx, pending, response);
+    }
+    fn on_request_failed(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: &str,
+    ) {
+        self.0.on_request_failed(cx, pending, error);
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.0.on_sign_error(cx, pending, error);
+    }
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        status: u16,
+        headers: &str,
+        error: &str,
+    ) {
+        self.0
+            .on_stream_malformed(cx, pending, status, headers, error);
+    }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        response: Response<'_>,
+    ) {
+        self.0.on_stream_error(cx, pending, response);
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId) {
+        self.0.on_timer(cx, timer);
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command) {
+        self.0.on_command(cx, command);
+    }
+    fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+
+fn pressure_actions(e: &mut Engine<ProposalPressure>, now: f64, event: Event<'_>) -> Vec<Action> {
+    e.handle(now, event);
+    safe_cex_engine::test_support::prepared_actions(e, now)
+}
+fn retry(actions: &[Action], now: f64) -> (TimerId, f64) {
+    let retries: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > now && *at_ms <= now + 2000. => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(retries.len(), 1, "one genuine backoff: {actions:?}");
+    retries[0]
+}
+#[test]
+fn reconnect_proposal_capacity_retires_the_replacement_and_recovers_desired_work() {
+    let (signer, identities) = safe_cex_crypto::signer::LocalSigner::from_json(
+        r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#.into(),
+    )
+    .unwrap();
+    let trace = std::rc::Rc::new(std::cell::RefCell::new(PressureTrace::default()));
+    let mut e = safe_cex_engine::test_support::seeded_engine(ProposalPressure(
+        Blofin::new(Options {
+            identities: identities.clone(),
+            ..Options::default()
+        }),
+        trace.clone(),
+    ));
+    e.set_signer(Some(std::sync::Arc::new(signer))).unwrap();
+    e.set_identities(identities).unwrap();
+    e.start(0.);
+    let mut startup = vec![];
+    for body in [support::INSTRUMENT, r#"{"code":"0","data":[]}"#] {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
+        let request = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r.id),
+                _ => None,
+            })
+            .unwrap();
+        startup.extend(actions);
+        e.handle(
+            0.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+    startup.extend(safe_cex_engine::test_support::prepared_actions(&mut e, 0.));
+    let socket = |private: bool| {
+        startup
+            .iter()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, url, .. }
+                    if url.ends_with(if private { "/private" } else { "/public" }) =>
+                {
+                    Some(*socket)
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    let old = socket(false);
+    let private = socket(true);
+    pressure_actions(&mut e, 0., Event::WsOpened { socket: old });
+    pressure_actions(&mut e, 0., Event::WsOpened { socket: private });
+    pressure_actions(
+        &mut e,
+        0.,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"event":"login","code":"0"}"#,
+        },
+    );
+    trace.borrow_mut().old = Some(old);
+    trace.borrow_mut().armed = true;
+    let closed = pressure_actions(
+        &mut e,
+        1.,
+        Event::WsClosed {
+            socket: old,
+            code: 1006,
+        },
+    );
+    let (timer, at) = retry(&closed, 1.);
+    let failed = pressure_actions(&mut e, at, Event::TimerFired { timer });
+    let retired = trace.borrow().retired.clone();
+    assert_eq!(
+        retired.len(),
+        2,
+        "replacement must retire through Closed, not permanently stop: {failed:?}"
+    );
+    let replacement = retired[1];
+    assert_ne!(replacement, old);
+    assert!(
+        !failed
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. } | Action::WsSend { .. }))
+    );
+    assert_eq!(
+        failed
+            .iter()
+            .filter(|a| matches!(a, Action::WsClose { socket } if *socket == replacement))
+            .count(),
+        1
+    );
+    let (next, next_at) = retry(&failed, at);
+    for stale in [old, replacement] {
+        assert!(pressure_actions(&mut e, at, Event::WsOpened { socket: stale }).is_empty());
+    }
+    let peer = pressure_actions(
+        &mut e,
+        at,
+        Event::WsMessage {
+            socket: private,
+            text: "ping",
+        },
+    );
+    assert_eq!(sends(&peer, private), vec!["pong"]);
+    let connected = pressure_actions(&mut e, next_at, Event::TimerFired { timer: next });
+    let current = connected
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(current, replacement);
+    assert_ne!(current, old);
+    let opened = pressure_actions(&mut e, next_at, Event::WsOpened { socket: current });
+    assert_eq!(topics(&opened, current).len(), 2);
+    assert!(sends(&opened, current).contains(&"ping"));
+    assert!(pressure_actions(&mut e, next_at, Event::TimerFired { timer: next }).is_empty());
+}
+
+struct LoginGate {
+    inner: std::sync::Arc<safe_cex_crypto::signer::LocalSigner>,
+    parked: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+impl safe_cex_engine::signing::Signer for LoginGate {
+    fn sign(
+        &self,
+        request: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        if self.parked.load(std::sync::atomic::Ordering::SeqCst) {
+            Box::pin(std::future::pending())
+        } else {
+            self.inner.sign(request)
+        }
+    }
+    fn immediate(&self) -> bool {
+        !self.parked.load(std::sync::atomic::Ordering::SeqCst) && self.inner.immediate()
+    }
+    fn sign_ready(
+        &self,
+        request: &safe_cex_engine::signing::SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
+        (!self.parked.load(std::sync::atomic::Ordering::SeqCst))
+            .then(|| self.inner.sign_ready(request))
+            .flatten()
+    }
+}
+fn gated_engine(
+    policy: safe_cex_engine::PublicFeedPolicy,
+) -> (
+    Engine<Blofin>,
+    Vec<Action>,
+    std::sync::Arc<safe_cex_crypto::signer::LocalSigner>,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let (provider, identities) = safe_cex_crypto::signer::LocalSigner::from_json(
+        r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#.into(),
+    )
+    .unwrap();
+    let provider = std::sync::Arc::new(provider);
+    let parked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
+        identities: identities.clone(),
+        ..Options::default()
+    }));
+    e.set_signer(Some(std::sync::Arc::new(LoginGate {
+        inner: provider.clone(),
+        parked: parked.clone(),
+    })))
+    .unwrap();
+    e.set_identities(identities).unwrap();
+    e.set_public_feed_policy(policy).unwrap();
+    e.start(0.);
+    let mut startup = vec![];
+    for body in [support::INSTRUMENT, r#"{"code":"0","data":[]}"#] {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
+        let request = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r.id),
+                _ => None,
+            })
+            .unwrap();
+        startup.extend(actions);
+        e.handle(
+            0.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+    startup.extend(safe_cex_engine::test_support::prepared_actions(&mut e, 0.));
+    (e, startup, provider, parked)
+}
+#[test]
+fn suppressed_public_still_opens_authenticates_and_serves_the_real_private_peer() {
+    let (mut e, actions, _, _) = gated_engine(safe_cex_engine::PublicFeedPolicy::Shared);
+    let sockets: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsConnect { socket, url, .. } => Some((*socket, url.as_str())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sockets.len(), 1);
+    assert!(sockets[0].1.ends_with("/private"));
+    let socket = sockets[0].0;
+    e.handle(0., Event::WsOpened { socket });
+    let opened = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
+    assert_eq!(
+        sends(&opened, socket)
+            .iter()
+            .filter(|s| s.contains("\"op\":\"login\""))
+            .count(),
+        1
+    );
+    e.handle(
+        0.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"event":"login","code":"0"}"#,
+        },
+    );
+    let ready = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
+    assert_eq!(
+        sends(&ready, socket)
+            .iter()
+            .filter(|s| s.contains("subscribe"))
+            .count(),
+        4
+    );
+    e.handle(
+        1.,
+        Event::WsMessage {
+            socket,
+            text: "ping",
+        },
+    );
+    assert_eq!(
+        sends(
+            &safe_cex_engine::test_support::prepared_actions(&mut e, 1.),
+            socket
+        ),
+        vec!["pong"]
+    );
+}
+#[test]
+fn a_retired_real_parked_login_cannot_release_into_its_replacement_epoch() {
+    use safe_cex_engine::signing::Signer;
+    let (mut e, actions, provider, parked) =
+        gated_engine(safe_cex_engine::PublicFeedPolicy::Direct);
+    let socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    parked.store(true, std::sync::atomic::Ordering::SeqCst);
+    e.handle(1., Event::WsOpened { socket });
+    let held: Vec<_> = e.drain_actions().collect();
+    assert!(sends(&held, socket).is_empty(), "ping must wait for login");
+    let (attempt, work) = held
+        .iter()
+        .find_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((*attempt, work)),
+            _ => None,
+        })
+        .expect("actual parked installed-provider login");
+    let result = provider.sign_ready(work).unwrap();
+    e.handle(2., Event::WsClosed { socket, code: 1006 });
+    let closed: Vec<_> = e.drain_actions().collect();
+    let (timer, at) = retry(&closed, 2.);
+    let before = e.snapshot_frame(100.).to_vec();
+    e.handle(3., Event::Signed { attempt, result });
+    assert!(e.drain_actions().next().is_none());
+    assert_eq!(e.snapshot_frame(100.), before);
+    parked.store(false, std::sync::atomic::Ordering::SeqCst);
+    e.handle(at, Event::TimerFired { timer });
+    let connected = safe_cex_engine::test_support::prepared_actions(&mut e, at);
+    let current = connected
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(current, socket);
+    e.handle(at, Event::WsOpened { socket: current });
+    let opened = safe_cex_engine::test_support::prepared_actions(&mut e, at);
+    let sends = sends(&opened, current);
+    let login = sends
+        .iter()
+        .position(|s| s.contains("\"op\":\"login\""))
+        .unwrap();
+    let ping = sends.iter().position(|s| *s == "ping").unwrap();
+    assert!(login < ping);
+    let frame: serde_json::Value = serde_json::from_str(sends[login]).unwrap();
+    assert_eq!(
+        frame["args"][0]["timestamp"].as_u64(),
+        Some(at.floor() as u64)
+    );
+    assert!(sends.iter().all(|s| !s.contains("subscribe")));
+    e.handle(
+        at,
+        Event::WsMessage {
+            socket: current,
+            text: r#"{"event":"login","code":"0"}"#,
+        },
+    );
+    let ready = safe_cex_engine::test_support::prepared_actions(&mut e, at);
+    assert_eq!(topics(&ready, current).len(), 4);
+}

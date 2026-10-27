@@ -178,6 +178,16 @@ fn candles_use_documented_volume_and_request_window() {
         }),
     );
     e.drain_actions().for_each(drop);
+    for now in [10_000., 20_000., 30_000., 40_000., 50_000.] {
+        e.handle(
+            now,
+            Event::WsMessage {
+                socket: s,
+                text: "pong",
+            },
+        );
+        e.drain_actions().for_each(drop);
+    }
     e.handle(60_000.0,Event::WsMessage {socket:s,text:r#"{"arg":{"channel":"candle1m","instId":"BTC-USDT"},"data":[["60000","99","102","98","100","9","10","42"]]}"#});
     assert!(e.take_frame(60_000.0).is_some());
     e.handle(60_001.0,Event::WsMessage {socket:s,text:r#"{"arg":{"channel":"books5","instId":"BTC-USDT"},"data":{"ts":"60001","bids":[["99","1"]],"asks":[["101","1"]]}}"#});

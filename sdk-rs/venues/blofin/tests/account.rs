@@ -58,6 +58,7 @@ fn startup_authenticates_and_loads_account_atomically() {
 #[test]
 fn cumulative_fills_emit_execution_deltas_and_prices_once() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.e.take_frame(0.0);
     let event = |qty: &str, average: &str, state: &str| {
@@ -82,6 +83,7 @@ fn cumulative_fills_emit_execution_deltas_and_prices_once() {
 #[test]
 fn stale_rest_cannot_reopen_a_filled_order() {
     let mut h = Harness::new();
+    h.open_private();
     h.modes();
     let old = h.take("orders-pending");
     h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"1","filledSize":"1","averagePrice":"60000","state":"filled"}]}"#);
@@ -94,6 +96,7 @@ fn stale_rest_cannot_reopen_a_filled_order() {
 #[test]
 fn failed_later_page_preserves_last_known_orders() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"original","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}]}"#);
     h.handle(10_000.0, Event::TimerFired { timer: h.tick });
@@ -109,6 +112,7 @@ fn failed_later_page_preserves_last_known_orders() {
 #[test]
 fn position_closure_keeps_settings_and_blank_liquidation_preserves_display() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     let partial = POSITION
         .replace("\"leverage\":\"20\"", "\"leverage\":\"\"")
@@ -130,6 +134,7 @@ fn position_closure_keeps_settings_and_blank_liquidation_preserves_display() {
 #[test]
 fn stale_balance_snapshot_cannot_overwrite_newer_account_push() {
     let mut h = Harness::new();
+    h.open_private();
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.ws(r#"{"arg":{"channel":"account"},"data":{"totalEquity":"1234"}}"#);
@@ -236,6 +241,7 @@ fn first_terminal_frames_prevent_later_open_rows_for_normal_and_algo_orders() {
 fn regressive_partial_preserves_remaining_and_still_honors_terminal_status() {
     use safe_cex_engine::model::OrderStatus;
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.e.take_frame(0.0);
     h.ws(&order_event("123", "4", "partially_filled"));
@@ -274,6 +280,7 @@ fn regressive_partial_preserves_remaining_and_still_honors_terminal_status() {
 #[test]
 fn terminal_memory_survives_empty_reconciliation_and_filters_stale_snapshots() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(&order_event("123", "4", "partially_filled"));
     h.ws(&order_event("123", "10", "filled"));
@@ -289,6 +296,7 @@ fn terminal_memory_survives_empty_reconciliation_and_filters_stale_snapshots() {
     assert!(h.e.store().orders().is_empty());
     h.ws(&order_event("123", "0", "live"));
     assert!(h.e.store().orders().is_empty());
+    h.reconnect_private();
     h.ws(r#"{"event":"login","code":"0","msg":""}"#);
     h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","filledSize":"0","state":"live","tpTriggerPrice":"65000"}]}"#);
     for path in [
@@ -304,6 +312,7 @@ fn terminal_memory_survives_empty_reconciliation_and_filters_stale_snapshots() {
 #[test]
 fn terminal_memory_is_bounded_to_the_last_500_distinct_mapped_ids() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     for id in 0..501 {
         h.ws(&order_event(&id.to_string(), "0", "canceled"));
@@ -319,6 +328,7 @@ fn terminal_memory_is_bounded_to_the_last_500_distinct_mapped_ids() {
 #[test]
 fn regressive_reconciliation_preserves_filled_and_native_remaining() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(&order_event("123", "4", "partially_filled"));
     h.handle(10_000.0, Event::TimerFired { timer: h.tick });
@@ -340,6 +350,7 @@ fn regressive_reconciliation_preserves_filled_and_native_remaining() {
 #[test]
 fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(&order_event("123", "4", "partially_filled"));
     h.handle(10_000.0, Event::TimerFired { timer: h.tick });
@@ -352,6 +363,7 @@ fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
         h.reply(path, r#"{"code":"0","data":[]}"#);
     }
     assert!(h.e.store().orders().is_empty());
+    h.reconnect_private();
     h.ws(r#"{"event":"login","code":"0","msg":""}"#);
     h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","filledSize":"2","state":"partially_filled","tpTriggerPrice":"65000"}]}"#);
     for path in [
@@ -772,6 +784,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
 #[test]
 fn pre_session_order_replay_seeds_execution_baseline_without_emitting_history() {
     let mut h = Harness::new_at(1000.0);
+    h.open_private();
     h.seed();
     let event = |quantity, time| {
         order_event("123", quantity, "partially_filled").replace(
@@ -794,6 +807,7 @@ fn pre_session_order_replay_seeds_execution_baseline_without_emitting_history() 
 fn startup_rest_partial_seeds_history_but_later_rest_cannot_consume_stream_fills() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
@@ -901,6 +915,7 @@ fn startup_ws_before_rest_emits_only_the_proven_suffix_at_its_execution_price() 
     const START: f64 = 1_700_000_000_000.0;
     for terminal in [false, true] {
         let mut h = Harness::new_at(START);
+        h.open_private();
         h.modes();
         let first = startup_execution(
             "123",
@@ -952,6 +967,7 @@ fn startup_ws_before_rest_emits_only_the_proven_suffix_at_its_execution_price() 
 fn startup_rest_already_covering_live_progress_establishes_a_quiet_reporting_baseline() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     let first = startup_execution(
         "123",
@@ -1006,6 +1022,7 @@ fn startup_rest_already_covering_live_progress_establishes_a_quiet_reporting_bas
 fn startup_unknown_terminal_prefix_is_quiet_but_proven_new_filled_order_is_live() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     let old = startup_execution("old", 6, 120, START - 100.0, START + 1.0, "filled");
     h.handle(
@@ -1055,6 +1072,7 @@ fn startup_unknown_terminal_prefix_is_quiet_but_proven_new_filled_order_is_live(
 fn failed_startup_page_cannot_release_early_executions_or_seed_a_partial_census() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     let first = startup_execution(
         "123",
@@ -1115,6 +1133,7 @@ fn failed_startup_page_cannot_release_early_executions_or_seed_a_partial_census(
 fn startup_missing_quote_basis_does_not_invent_a_suffix_price() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     let first = startup_execution(
         "123",
@@ -1164,6 +1183,7 @@ fn startup_missing_quote_basis_does_not_invent_a_suffix_price() {
 fn startup_multiple_buffered_executions_keep_their_individual_suffix_prices() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     for (qty, avg, time) in [(6, 120, START + 1.0), (8, 130, START + 2.0)] {
         let event = startup_execution("123", qty, avg, START - 100.0, time, "partially_filled");
@@ -1224,6 +1244,7 @@ fn startup_bounded_tracker_never_replays_an_evicted_unknown_prefix() {
 fn delayed_unknown_startup_terminal_seeds_once_then_post_ready_suffix_is_live() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     finish_startup_orders(&mut h, START + 10.0);
     h.e.take_frame(START + 10.0);
@@ -1272,6 +1293,7 @@ fn delayed_unknown_startup_terminal_seeds_once_then_post_ready_suffix_is_live() 
 fn proven_new_order_reporting_survives_rest_ahead_during_startup() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     let first = startup_execution("123", 2, 100, START + 1.0, START + 2.0, "partially_filled");
     h.handle(
@@ -1317,6 +1339,7 @@ fn first_old_order_after_empty_startup_census_never_assumes_a_zero_prefix() {
     const START: f64 = 1_700_000_000_000.0;
     for state in ["partially_filled", "filled"] {
         let mut h = Harness::new_at(START);
+        h.open_private();
         h.modes();
         finish_startup_orders(&mut h, START + 10.0);
         h.e.take_frame(START + 10.0);
@@ -1368,6 +1391,7 @@ fn first_old_order_after_empty_startup_census_never_assumes_a_zero_prefix() {
 fn post_ready_missing_quote_gap_is_visible_and_later_proven_suffix_continues_once() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     startup_reply_at(&mut h, "orders-pending", &startup_orders(4, 0), START + 1.0);
     finish_startup_orders(&mut h, START + 2.0);
@@ -1434,6 +1458,7 @@ fn missing_or_zero_creation_time_does_not_prove_an_unknown_order_is_new() {
     const START: f64 = 1_700_000_000_000.0;
     for omitted in [false, true] {
         let mut h = Harness::new_at(START);
+        h.open_private();
         h.modes();
         finish_startup_orders(&mut h, START + 1.0);
         h.e.take_frame(START + 1.0);
@@ -1460,6 +1485,7 @@ fn missing_or_zero_creation_time_does_not_prove_an_unknown_order_is_new() {
 fn explicit_unfilled_socket_order_proves_zero_prefix_without_creation_time() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     finish_startup_orders(&mut h, START + 1.0);
     h.e.take_frame(START + 1.0);
@@ -1492,6 +1518,7 @@ fn unpriceable_live_quote_preserves_the_proven_basis_visibly_and_next_quote_reco
     const START: f64 = 1_700_000_000_000.0;
     for (known_average, invalid_average) in [(100, 0), (100, 50), (150, 100)] {
         let mut h = Harness::new_at(START);
+        h.open_private();
         h.modes();
         startup_reply_at(
             &mut h,
@@ -1566,6 +1593,7 @@ fn unpriceable_live_quote_preserves_the_proven_basis_visibly_and_next_quote_reco
 fn decreasing_quote_cannot_price_the_next_execution_from_the_rejected_value() {
     const START: f64 = 1_700_000_000_000.0;
     let mut h = Harness::new_at(START);
+    h.open_private();
     h.modes();
     startup_reply_at(
         &mut h,
@@ -1608,6 +1636,7 @@ fn unknown_startup_quote_recovery(evict: bool) {
     const START: f64 = 1_700_000_000_000.0;
     for (known_average, invalid_average) in [(100, 50), (150, 100)] {
         let mut h = Harness::new_at(START);
+        h.open_private();
         h.modes();
         for (qty, average, offset) in [(4, known_average, 1.0), (6, invalid_average, 2.0)] {
             let event =
@@ -1678,6 +1707,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
     const START: f64 = 1_700_000_000_000.0;
     for (known_average, invalid_average) in [(100, 0), (100, 50), (150, 100)] {
         let mut h = Harness::new_at(START);
+        h.open_private();
         h.modes();
         startup_reply_at(
             &mut h,
@@ -1756,7 +1786,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
 fn websocket_login_timestamp_is_an_integer_matching_signed_bytes() {
     use base64::Engine as _;
     use safe_cex_crypto::{Encoding, hmac_sha256};
-    let mut h = Harness::new();
+    let mut h = Harness::new_at(1_700_000_000_123.875);
     h.handle(1_700_000_000_123.875, Event::WsOpened { socket: h.private });
     h.collect();
     let login = h
@@ -1788,6 +1818,7 @@ fn websocket_login_timestamp_is_an_integer_matching_signed_bytes() {
 #[test]
 fn null_filled_size_cannot_close_a_known_order_and_valid_siblings_continue() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(&order_event("123", "0", "live"));
     let bad = r#"{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","price":"60000","filledSize":null,"averagePrice":"100","state":"filled"}"#;
@@ -1814,6 +1845,7 @@ fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
 #[test]
 fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    h.open_private();
     let (retry, at) = new_timer(&h.actions)
         .filter(|(_, at)| jittered(*at, 1000.0))
         .expect("partial catalogue retry");
@@ -2154,6 +2186,7 @@ fn row_report_position_decode_rearms_only_its_key_before_a_later_failed_row() {
 #[test]
 fn row_report_once_does_not_upgrade_after_the_retained_position_is_removed() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     let bad = POSITION.replace("\"positions\":\"4\"", "\"positions\":null");
     poll(&mut h, 10_000.0, &bad, "");
@@ -2190,6 +2223,7 @@ fn prefix_overflow_event(quantity: &str, average: &str) -> String {
 
 fn known_live_prefix_for_price_overflow() -> Harness {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.e.take_frame(0.0);
     h.ws(&prefix_overflow_event("1", "1"));
