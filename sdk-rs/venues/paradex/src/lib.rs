@@ -51,7 +51,7 @@ pub enum Pending {
     Trade(trading::Request),
     History(history::Request),
     PublicTrades(history::public_trades::Request),
-    Identity(safe_cex_engine::CommandId),
+    Identity(safe_cex_engine::request_context::Context),
 }
 
 pub struct Paradex {
@@ -129,6 +129,14 @@ impl Venue for Paradex {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    // Private reads bind the account's JWT Session; the engine copies the Bearer
+    // only at prepare and re-prepares when the JWT moves before release.
+    fn session_bearer(&self, generation: u64) -> safe_cex_engine::request_context::SessionBearer {
+        self.account.session_bearer(generation)
+    }
+    fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
+        self.account.session_bearer_revision(generation)
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.account.reconcile_orders(cx);
         self.failures(cx);
@@ -181,7 +189,7 @@ impl Venue for Paradex {
                 return;
             }
             Pending::PublicTrades(read) => history::public_trades::response(cx, read, response),
-            Pending::Identity(command) => self.identity_response(cx, command, response),
+            Pending::Identity(context) => self.identity_response(cx, context, response),
             Pending::Public(request) => {
                 self.public_response(cx, request, response);
                 if cx.store.loaded().markets {
@@ -260,6 +268,7 @@ impl Venue for Paradex {
                 let _ = cx.fail_context(&context, error);
             }
             Pending::PublicTrades(read) => history::public_trades::failed(cx, read, error),
+            Pending::Identity(context) => self.identity_failed(cx, context, error),
             Pending::Public(request) if request.is_command_candle() => {
                 request.reject_command_candle(cx, error);
                 self.failures(cx);
@@ -294,6 +303,7 @@ impl Venue for Paradex {
     ) {
         match pending {
             Pending::PublicTrades(read) => history::public_trades::failed(cx, read, error),
+            Pending::Identity(context) => self.identity_failed(cx, context, error),
             Pending::Public(request) if request.is_command_candle() => {
                 self.command_candles_failed(cx, request, error);
                 self.failures(cx);
@@ -365,7 +375,9 @@ impl Paradex {
             Pending::PublicTrades(read) => {
                 history::public_trades::failed(cx, read, safe_cex_engine::VenueError::new(error))
             }
-            Pending::Identity(command) => self.identity_failed(cx, command, error),
+            Pending::Identity(context) => {
+                self.identity_failed(cx, context, safe_cex_engine::VenueError::new(error))
+            }
             Pending::Public(request) => self.public_failed(cx, request, error),
             Pending::Account(request) => self.account.on_failed(cx, request, error),
             Pending::Trade(request) => {
@@ -390,6 +402,7 @@ impl Paradex {
                     Pending::History(request) => {
                         self.history.on_rejected(cx, request, &error.message)
                     }
+                    Pending::Identity(context) => self.identity_failed(cx, context, error),
                     other => self.dispatch_failed(cx, other, &error.message),
                 }
             }

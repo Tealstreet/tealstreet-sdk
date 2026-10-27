@@ -111,7 +111,10 @@ fn spot_subscription_hmac_is_raw_sorted_parameters_and_ids_are_correlated() {
 #[test]
 fn spot_balance_events_are_partial_and_stale_snapshots_do_not_roll_them_back() {
     let mut h = spot();
-    h.now += 30_000.0;
+    // Live traffic inside each 20 s idle window keeps the stream's epoch current.
+    h.now += 15_000.0;
+    h.message("ws-api/v3", r#"{"id":"unrelated","status":200}"#);
+    h.now += 15_000.0;
     let health = h.timers.iter().find(|(_, at)| *at == 4000.0).unwrap().0;
     h.event(Event::TimerFired { timer: health });
     let read = h.take("/api/v3/account");

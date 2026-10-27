@@ -194,6 +194,10 @@ pub fn prepared_actions<V: Venue>(engine: &mut Engine<V>, now: f64) -> Vec<Actio
             queue.push_front(action);
         }
     }
+    // A Session-parked call keeps its prepared route until the venue's announce
+    // re-prepares it, which a later call drives as a fresh preparation.
+    #[cfg(feature = "session-bearer")]
+    resources.retain(|request, _| !engine.http_bearer_parked(*request));
     assert!(
         resources.is_empty(),
         "parked external signing is unsupported by the immediate fixture"

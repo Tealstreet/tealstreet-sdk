@@ -238,6 +238,12 @@ impl SessionHeaders {
         }
     }
 
+    /// `Authorization: Bearer <token>`; the formatted value is wiped on refusal
+    /// and on drop like any `SecretHeaderValue`.
+    pub fn bearer(token: &str) -> Result<Self, Error> {
+        SecretHeaderValue::new(format!("Bearer {token}")).map(Self::authorization)
+    }
+
     pub fn placed(mut self, placement: SessionPlacement) -> Self {
         self.placement = placement;
         self
