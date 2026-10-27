@@ -1,11 +1,17 @@
 # Build the Rust-only beta bundle's wasm families from one exact SDK commit and
 # publish them as an immutable GitHub Release that tealstreet-next pins file by
-# file (scripts/rust-beta-wasm.pin.json). Manual only: the first publication
-# follows Sam's SDK master merge, on the overseer's instruction.
+# file (scripts/rust-beta-wasm.pin.json). It runs after each Rust SDK master push
+# run whose required coverage passed, and publishes when that commit's sdk-rs/
+# inputs are new, so tealstreet-next's pin workflow finds a release for each import. RUST_BETA_HOLD
+# (a repository variable holding the reason) stops every release while set.
 # Design: docs/plans/RUST_BETA_BUNDLE.md (Build and CI).
 name: Rust beta wasm release
 
 on:
+  workflow_run:
+    workflows: [Rust SDK]
+    types: [completed]
+    branches: [master]
   workflow_dispatch:
     inputs:
       sdk_sha:
@@ -24,30 +30,47 @@ concurrency:
   group: rust-beta-wasm-release
   cancel-in-progress: false
 
+env:
+  RUST_BETA_HOLD: ${{ vars.RUST_BETA_HOLD }}
+  WASM_BINDGEN_VERSION: 0.2.129
+
 jobs:
   roster:
     name: Beta wasm roster
+    # Automatic runs follow a Rust SDK push run on master; the certified guard then
+    # requires its required coverage job, so non-blocking CPU noise cannot stop a release.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
     outputs:
       families: ${{ steps.roster.outputs.families }}
+      sdk_sha: ${{ steps.source.outputs.sdk_sha }}
+      tag: ${{ steps.source.outputs.tag }}
+      publish: ${{ steps.inputs.outputs.publish }}
     steps:
       - name: Refuse anything but an exact commit and a tag that names it
+        id: source
         env:
-          SDK_SHA: ${{ inputs.sdk_sha }}
-          TAG: ${{ inputs.tag }}
+          SDK_SHA: ${{ inputs.sdk_sha || github.event.workflow_run.head_sha }}
+          TAG: ${{ inputs.tag || '' }}
         run: |
+          [ -n "$TAG" ] || TAG="rust-beta-wasm-${SDK_SHA:0:11}"
           [[ "$SDK_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sdk_sha must be a full commit SHA"; exit 1; }
           [[ "$TAG" =~ ^rust-beta-wasm-[0-9a-f]{11}$ ]] || { echo "tag must be rust-beta-wasm-<11 hex>"; exit 1; }
           [[ "$TAG" == "rust-beta-wasm-${SDK_SHA:0:11}" ]] || { echo "tag must name sdk_sha"; exit 1; }
+          echo "sdk_sha=$SDK_SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.sdk_sha }}
+          ref: ${{ steps.source.outputs.sdk_sha }}
           fetch-depth: 0
       # Before any SDK script runs: only reviewed, landed source is built or published.
       # Publication follows Sam's SDK master merge, so master is the only protected line.
       - name: Require sdk_sha on origin/master
         env:
-          SDK_SHA: ${{ inputs.sdk_sha }}
+          SDK_SHA: ${{ steps.source.outputs.sdk_sha }}
         run: |
           git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
           git merge-base --is-ancestor "$SDK_SHA" origin/master || {
@@ -56,11 +79,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # Only an authenticated 404 is absence; an existing tag or release, or any API error, fails.
-      - name: Require a fresh tag and release
+      - name: Require no hold and Rust / required coverage success on master for sdk_sha
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
+        run: |
+          node sdk-rs/harness/beta-wasm-release-guard.mjs held
+          node sdk-rs/harness/beta-wasm-release-guard.mjs certified "$GITHUB_REPOSITORY" '${{ steps.source.outputs.sdk_sha }}'
+      # Unchanged sdk-rs/ inputs already have a release; publishing again only adds volume.
+      - name: Publish only new sdk-rs inputs
+        id: inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fingerprint=$(node --input-type=module -e "
+            const { betaWasmInputs } = await import('./sdk-rs/harness/beta-wasm-inputs.mjs');
+            console.log(betaWasmInputs('.', { wasmBindgen: process.env.WASM_BINDGEN_VERSION, wasmOpt: 'required', profile: 'release', target: 'wasm32-unknown-unknown' }).fingerprint);")
+          existing=$(node sdk-rs/harness/beta-wasm-release-guard.mjs published "$GITHUB_REPOSITORY" "$fingerprint")
+          if [ -n "$existing" ]; then
+            echo "sdk-rs inputs $fingerprint are already published as $existing"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Only an authenticated 404 is absence; an existing tag or release, or any API error, fails.
+      - name: Require a fresh tag and release
+        if: steps.inputs.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ steps.source.outputs.tag }}' '${{ steps.source.outputs.sdk_sha }}'
       - name: Read the 15 families from beta-venues.mjs
         id: roster
         run: |
@@ -72,6 +118,7 @@ jobs:
   build:
     name: Beta wasm family (${{ matrix.family }})
     needs: roster
+    if: needs.roster.outputs.publish == 'true'
     strategy:
       fail-fast: true
       matrix:
@@ -79,12 +126,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      WASM_BINDGEN_VERSION: 0.2.129
       SAFE_CEX_WASM_OPT: required
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.sdk_sha }}
+          ref: ${{ needs.roster.outputs.sdk_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -129,15 +175,14 @@ jobs:
   release:
     name: Publish beta wasm release
     needs: [roster, build]
+    if: needs.roster.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      WASM_BINDGEN_VERSION: 0.2.129
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.sdk_sha }}
+          ref: ${{ needs.roster.outputs.sdk_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -148,8 +193,8 @@ jobs:
           merge-multiple: true
       - name: Write the pin manifest tealstreet-next commits
         env:
-          SDK_SHA: ${{ inputs.sdk_sha }}
-          TAG: ${{ inputs.tag }}
+          SDK_SHA: ${{ needs.roster.outputs.sdk_sha }}
+          TAG: ${{ needs.roster.outputs.tag }}
           FAMILIES: ${{ needs.roster.outputs.families }}
           SOURCE: ${{ github.workspace }}
         working-directory: ${{ runner.temp }}/assets
@@ -188,13 +233,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
-          node sdk-rs/harness/beta-wasm-release-guard.mjs create "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
+          node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ needs.roster.outputs.tag }}' '${{ needs.roster.outputs.sdk_sha }}'
+          node sdk-rs/harness/beta-wasm-release-guard.mjs create "$GITHUB_REPOSITORY" '${{ needs.roster.outputs.tag }}' '${{ needs.roster.outputs.sdk_sha }}'
       - name: Publish the release on the verified tag
         env:
           GH_TOKEN: ${{ github.token }}
-          SDK_SHA: ${{ inputs.sdk_sha }}
-          TAG: ${{ inputs.tag }}
+          SDK_SHA: ${{ needs.roster.outputs.sdk_sha }}
+          TAG: ${{ needs.roster.outputs.tag }}
         working-directory: ${{ runner.temp }}/assets
         run: |
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \

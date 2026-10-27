@@ -1,8 +1,13 @@
 // Tag custody for the Rust beta wasm release. Only an authenticated 404 counts as
 // absent (any other API answer fails), and the tag is created, then read back and
 // peeled to the exact source commit, before any release is published under it.
-//   node sdk-rs/harness/beta-wasm-release-guard.mjs fresh   <owner/repo> <tag> <sha>
-//   node sdk-rs/harness/beta-wasm-release-guard.mjs create  <owner/repo> <tag> <sha>
+// A release also needs no hold, a successful Rust SDK master push run for its commit,
+// and inputs no earlier release already carries.
+//   RUST_BETA_HOLD=<reason> node sdk-rs/harness/beta-wasm-release-guard.mjs held
+//   node sdk-rs/harness/beta-wasm-release-guard.mjs fresh     <owner/repo> <tag> <sha>
+//   node sdk-rs/harness/beta-wasm-release-guard.mjs create    <owner/repo> <tag> <sha>
+//   node sdk-rs/harness/beta-wasm-release-guard.mjs certified <owner/repo> <sha>
+//   node sdk-rs/harness/beta-wasm-release-guard.mjs published <owner/repo> <fingerprint>
 import { pathToFileURL } from 'node:url';
 
 /** `api(method, path, body?)` resolves to `{ status, json }`; it never throws for an HTTP status. */
@@ -43,6 +48,53 @@ export const createAndVerifyTag = async ({ api, repo, tag, sha }) => {
   if (target !== sha) throw new Error(`tag ${tag} names ${target}, not the source ${sha}`);
 };
 
+const REQUIRED_JOB = 'Rust / required coverage';
+
+/** A set RUST_BETA_HOLD variable stops every release, naming why. */
+export const assertNotHeld = (hold) => {
+  if (hold?.trim()) throw new Error(`beta wasm releases are held: ${hold.trim()}`);
+};
+
+/**
+ * `sha` must have a completed Rust SDK master push run whose "Rust / required coverage"
+ * job (the correctness aggregate branch protection requires) succeeded. CPU
+ * certification is non-blocking, so its noise must not stop a release.
+ */
+export const assertCertified = async ({ api, repo, sha }) => {
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('source must be a full commit SHA');
+  const { status, json } = await api('GET', `/repos/${repo}/actions/workflows/rust.yml/runs?head_sha=${sha}&event=push&branch=master&per_page=20`);
+  if (status !== 200) throw new Error(`Rust SDK run lookup returned HTTP ${status}`);
+  const runs = (json?.workflow_runs ?? []).filter((run) => run.head_sha === sha && run.head_branch === 'master' && run.event === 'push' && run.status === 'completed');
+  for (const run of runs) {
+    for (let page = 1; page <= 5; page += 1) {
+      const jobs = await api('GET', `/repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100&page=${page}`);
+      if (jobs.status !== 200) throw new Error(`Rust SDK jobs lookup returned HTTP ${jobs.status}`);
+      const required = (jobs.json?.jobs ?? []).find((job) => job.name === REQUIRED_JOB);
+      if (required) {
+        if (required.status === 'completed' && required.conclusion === 'success') return;
+        break;
+      }
+      if ((jobs.json?.jobs ?? []).length < 100) break;
+    }
+  }
+  throw new Error(`no Rust SDK master push run for ${sha} with ${REQUIRED_JOB} success; refusing to publish uncertified source`);
+};
+
+/** The tag of a published beta release whose pin carries `fingerprint`, or undefined. */
+export const publishedFingerprint = async ({ api, repo, fingerprint, fetchImpl = fetch }) => {
+  const { status, json } = await api('GET', `/repos/${repo}/releases?per_page=30`);
+  if (status !== 200) throw new Error(`release listing returned HTTP ${status}`);
+  for (const release of json ?? []) {
+    if (release.draft || !/^rust-beta-wasm-[0-9a-f]{11}$/.test(release.tag_name ?? '')) continue;
+    const asset = release.assets?.find((candidate) => candidate.name === 'rust-beta-wasm.pin.json');
+    if (!asset) continue;
+    const response = await fetchImpl(asset.browser_download_url, { redirect: 'follow' });
+    if (!response.ok) throw new Error(`${release.tag_name} pin returned HTTP ${response.status}`);
+    if ((await response.json()).inputs?.fingerprint === fingerprint) return release.tag_name;
+  }
+  return undefined;
+};
+
 const githubApi = (token) => async (method, path, body) => {
   const response = await fetch(`https://api.github.com${path}`, {
     method,
@@ -59,13 +111,17 @@ const githubApi = (token) => async (method, path, body) => {
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const [mode, repo, tag, sha] = process.argv.slice(2);
+  const [mode, repo, ...args] = process.argv.slice(2);
   const token = process.env.GH_TOKEN;
   try {
+    assertNotHeld(process.env.RUST_BETA_HOLD);
+    if (mode === 'held') process.exit(0);
     if (!token) throw new Error('GH_TOKEN is required; an unauthenticated 404 is not proof of absence');
     const api = githubApi(token);
-    if (mode === 'fresh') await assertFreshTag({ api, repo, tag });
-    else if (mode === 'create') await createAndVerifyTag({ api, repo, tag, sha });
+    if (mode === 'fresh') await assertFreshTag({ api, repo, tag: args[0] });
+    else if (mode === 'create') await createAndVerifyTag({ api, repo, tag: args[0], sha: args[1] });
+    else if (mode === 'certified') await assertCertified({ api, repo, sha: args[0] });
+    else if (mode === 'published') console.log((await publishedFingerprint({ api, repo, fingerprint: args[0] })) ?? '');
     else throw new Error(`unknown mode ${mode}`);
   } catch (error) {
     console.error(`beta wasm release guard: ${error.message}`);
