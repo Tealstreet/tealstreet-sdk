@@ -47,10 +47,11 @@ impl Hyperliquid {
         }
         let selected = self.credentials.select(CredentialRole::Mutation);
         let authority = match selected {
-            Ok((selection, identity))
-                if !self.options.public_data_only
-                    && identity.verified_signing_address().is_ok() =>
-            {
+            Ok((selection, identity)) if !self.options.public_data_only => {
+                if let Err(error) = identity.verified_signing_address() {
+                    cx.refuse_command(Operation::Mutation, error.venue_error());
+                    return;
+                }
                 selection.authority(identity)
             }
             _ => {

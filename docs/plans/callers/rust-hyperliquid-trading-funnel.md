@@ -94,3 +94,7 @@ is still serialized; caller trimSigning metadata stays refused at either value.
 The effective policy/readiness and scalar bytes are unchanged. The pre-existing
 native from_setup feature-off handling of a true policy is a credential-core
 follow-up; the only current true declaration (Bitunix) links that feature.
+
+For HL, LocalSignerSetup.primaryComplete is false after the account key is
+removed from the private capsule. It is not signing readiness: canSign uses
+credentialPresence.secret; hosted guards and codecs do not admit HL.

@@ -796,33 +796,59 @@ fn duplicate_owner_preserves_the_retained_peer() {
 }
 
 #[test]
-fn fifo_keeps_the_native_334_ms_queue_anchor() {
+fn fifo_waits_334_ms_after_a_delayed_successful_final_claim() {
     let (mut e, _) = boot();
     let first = command(&mut e, NOW, leverage(OWNER));
-    let r = native_release(&mut e, &first);
+    let (preparation, _) = prep(&first);
+    e.http_prepared(
+        NOW,
+        preparation,
+        Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let bound: Vec<_> = e.drain_actions().collect();
     let queued = command(&mut e, NOW + 1., leverage(OWNER + 1));
     no_trade(&queued);
     assert!(results(&queued, OWNER + 1).is_empty());
+    let first_claim_at = NOW + 500.;
+    let r = native_release_at(&mut e, first_claim_at, &bound);
     respond(
         &mut e,
-        NOW + 2.,
+        first_claim_at + 1.,
         &r,
         200,
         r#"{"status":"ok","response":{"type":"default"}}"#,
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert_eq!(results(&actions, OWNER), vec![Ok("[]".into())]);
-    let actions = prepare_for_pacing(&mut e, NOW + 2., &actions);
+    let actions = prepare_for_pacing(&mut e, first_claim_at + 1., &actions);
     let timer = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 334. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == first_claim_at + 334. => Some(*timer),
             _ => None,
         })
-        .expect("native queue-time 334 ms pacing");
-    e.handle(NOW + 334., Event::TimerFired { timer });
+        .expect("334 ms pacing starts at the actual final Claim");
+    e.handle(first_claim_at + 333., Event::TimerFired { timer });
+    let early: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !early.iter().any(
+            |a| matches!(a, Action::ManagedHttp(a) if matches!(&**a, HttpAction::Bind { .. }))
+        )
+    );
+    assert!(exchange(&early).is_empty());
+    let timer = early
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == first_claim_at + 334. => Some(*timer),
+            _ => None,
+        })
+        .expect("early wake preserves the final-release deadline");
+    e.handle(first_claim_at + 334., Event::TimerFired { timer });
     let actions: Vec<_> = e.drain_actions().collect();
-    let second = native_release_at(&mut e, NOW + 334., &actions);
+    let second = native_release_at(&mut e, first_claim_at + 334., &actions);
     assert_eq!(
         serde_json::from_str::<Value>(second.body.as_deref().unwrap()).unwrap()["action"]["type"],
         "updateLeverage"

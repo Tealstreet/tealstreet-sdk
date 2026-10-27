@@ -331,6 +331,12 @@ fn malformed_or_changed_provider_results_never_bind_a_body() {
             }
             _ => unreachable!(),
         }
+        if case == 3 {
+            assert_eq!(
+                work.validate_result(&result),
+                Err(safe_cex_engine::signing::SignError::InvalidResult)
+            );
+        }
         assert!(answer(&mut e, attempt, result).is_none(), "case {case}");
     }
 }

@@ -33,7 +33,7 @@ fn installed_options_retain_only_refs_and_public_account_configuration() {
 #[test]
 fn failed_engine_owned_address_derivation_cannot_admit_a_private_write() {
     use safe_cex_engine::signing::*;
-    use safe_cex_engine::{Action, Command, Event, Notice, Outcome, VenueAction};
+    use safe_cex_engine::{Action, Command, Event, Notice, VenueAction};
     use std::{
         sync::Arc,
         task::{Context, Poll},
@@ -119,7 +119,7 @@ fn failed_engine_owned_address_derivation_cannot_admit_a_private_write() {
         }),
     );
     let actions = support::prepared_now(&mut engine);
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 77, error }) if error.outcome == Some(Outcome::NotSent))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 77, error }) if *error == SignError::InvalidResult.venue_error())));
     assert!(
         !actions
             .iter()
