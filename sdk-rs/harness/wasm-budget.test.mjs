@@ -100,6 +100,7 @@ test('only the declared venue families carry overrides, and only for the venue p
 test('Paradex local Stark signing carries its measured family budget', () => {
   // #2330: CI Rust run 40542060055, job 'wasm family (paradex)' 122328548446, measured
   // 1452805 bytes (master 1319909); ceil KiB plus 2 KiB. The breakdown is in the PR body.
+  // Interim: trims and lower in m26ps4 follow-up.
   assert.equal(WASM_VENUE_OVERRIDES.paradex, 1421 * 1024);
   assert.equal(wasmBudgetError(1_452_805, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(1_455_104, 'venue', 'paradex'), undefined);
