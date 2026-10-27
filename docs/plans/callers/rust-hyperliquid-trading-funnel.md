@@ -127,11 +127,16 @@ full-position settings remain effective across a later refusal, even with no IDs
 This also covers an amend's confirmed full-position replacement: its preissued
 Setting succeeds with the replacement cloid and no fabricated native order ID.
 
-A protective child that terminates before first appearing in the active store
+A protective order that fails before first appearing in the active store
 emits the existing child_leg.failed event, correlated by symbol, native oid,
 clientOrderId and native status; already-stored terminal removal is unchanged.
 The native private row must identify a reduce-only trigger with a supported
 Stop/Take-Profit type, a mapped symbol, a nonzero oid and a nonempty cloid.
+This is a shape-based match, not proof of a parent or SDK ownership; standalone
+full-position protective settings can emit it too. Only the closed native
+rejection and venue-forced cancellation statuses emit the event. Plain canceled,
+siblingFilledCanceled, filled and scheduledCancel do not. No parent or cancel
+cause is inferred, and consumers must preserve the native status in UI copy.
 No expiring placement record is required. Duplicate terminals are suppressed by
 the existing oid tombstone before it is updated. This is bounded deduplication:
 a complete census prunes tombstones older than 120 seconds, and a confirmed open
@@ -152,7 +157,8 @@ trusted scalar setup as "Invalid Hyperliquid local signer setup", before the
 old generic "Rust engine private accounts require a local API key and secret;
 remote signing is unsupported" guard. Providerless injected HL/HLSpot references
 now fail as "Hyperliquid requires its primary signing provider", rather than
-"Injected signing is not supported for this venue yet". Native callers matching
+"Injected signing is not supported for this venue yet", for malformed or complete
+refs alike when no provider exists. Native callers matching
 those exact legacy texts must use the typed InvalidInput category or the new
 fixed text; SDK beta hosted refusal remains Unsupported/NotSent. R1 corrections
 d179009c0ce and 7ccda342f32 separately put payloadSigner refusal ahead of scalar

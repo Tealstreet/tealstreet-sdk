@@ -1314,7 +1314,7 @@ fn deferred_full_position_trigger_succeeds_without_an_order_id() {
     no_trade(&actions);
 }
 
-fn deferred_child_terminal(status: &str, expire_record: bool) {
+fn deferred_child_terminal(status: &str, expire_record: bool, failed_leg: bool) {
     for materialized in [false, true] {
         let (mut e, socket) = boot();
         let mut c = place(OWNER);
@@ -1407,7 +1407,10 @@ fn deferred_child_terminal(status: &str, expire_record: bool) {
                     _ => None,
                 })
                 .collect();
-            assert_eq!(terminal.len(), usize::from(!materialized && delivery == 0));
+            assert_eq!(
+                terminal.len(),
+                usize::from(failed_leg && !materialized && delivery == 0)
+            );
             if let Some(event) = terminal.first() {
                 for (field, value) in [
                     ("symbol", "BTC-PERP"),
@@ -1458,19 +1461,31 @@ fn deferred_child_terminal(status: &str, expire_record: bool) {
 
 #[test]
 fn deferred_child_rejection_is_correlated_once_before_materialization() {
-    deferred_child_terminal("perpMarginRejected", false);
+    deferred_child_terminal("perpMarginRejected", false, true);
 }
 
 #[test]
-fn deferred_child_cancel_is_correlated_once_before_materialization() {
-    deferred_child_terminal("canceled", false);
+fn deferred_child_venue_forced_cancel_is_correlated_once_before_materialization() {
+    deferred_child_terminal("marginCanceled", false, true);
 }
 
 #[test]
 fn deferred_child_terminal_survives_record_expiry() {
-    for status in ["perpMarginRejected", "canceled"] {
-        deferred_child_terminal(status, true);
+    for status in ["perpMarginRejected", "marginCanceled"] {
+        deferred_child_terminal(status, true, true);
     }
+}
+
+#[test]
+fn normal_protective_terminal_user_cancel_is_not_a_failed_leg() {
+    deferred_child_terminal("canceled", false, false);
+    deferred_child_terminal("canceled", true, false);
+}
+
+#[test]
+fn normal_protective_terminal_sibling_fill_cancel_is_not_a_failed_leg() {
+    deferred_child_terminal("siblingFilledCanceled", false, false);
+    deferred_child_terminal("siblingFilledCanceled", true, false);
 }
 
 #[test]
@@ -1486,7 +1501,7 @@ fn native_protective_terminal_evidence_does_not_need_a_placement_record() {
             "coin":"BTC","oid":3002,"cloid":CLOID,"side":"A","sz":"1",
             "origSz":"1","limitPx":"90","triggerPx":"80",
             "reduceOnly":true,"isTrigger":true,"orderType":kind
-        },"status":"canceled"}]})
+        },"status":"perpMarginRejected"}]})
         .to_string();
         for delivery in 0..2 {
             e.handle(
@@ -1529,8 +1544,9 @@ fn incomplete_or_ordinary_terminal_rows_do_not_report_a_failed_protective_child(
             "sz":"1","origSz":"1","limitPx":"90","triggerPx":"80",
             "reduceOnly":true,"isTrigger":true,"orderType":"Stop Market"});
         row[field] = value;
-        let text = json!({"channel":"orderUpdates","data":[{"order":row,"status":"canceled"}]})
-            .to_string();
+        let text =
+            json!({"channel":"orderUpdates","data":[{"order":row,"status":"perpMarginRejected"}]})
+                .to_string();
         e.handle(
             NOW,
             Event::WsMessage {
@@ -1543,6 +1559,82 @@ fn incomplete_or_ordinary_terminal_rows_do_not_report_a_failed_protective_child(
             Action::Notice(Notice::Event(event))
                 if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED)));
         no_trade(&actions);
+    }
+}
+
+#[test]
+fn native_protective_failure_statuses_form_a_closed_set() {
+    for (failed, statuses) in [
+        (
+            true,
+            &[
+                "rejected",
+                "tickRejected",
+                "minTradeNtlRejected",
+                "perpMarginRejected",
+                "reduceOnlyRejected",
+                "badAloPxRejected",
+                "iocCancelRejected",
+                "badTriggerPxRejected",
+                "marketOrderNoLiquidityRejected",
+                "positionIncreaseAtOpenInterestCapRejected",
+                "positionFlipAtOpenInterestCapRejected",
+                "tooAggressiveAtOpenInterestCapRejected",
+                "openInterestIncreaseRejected",
+                "insufficientSpotBalanceRejected",
+                "oracleRejected",
+                "perpMaxPositionRejected",
+                "marginCanceled",
+                "vaultWithdrawalCanceled",
+                "openInterestCapCanceled",
+                "selfTradeCanceled",
+                "reduceOnlyCanceled",
+                "delistedCanceled",
+                "liquidatedCanceled",
+            ][..],
+        ),
+        (
+            false,
+            &[
+                "filled",
+                "canceled",
+                "siblingFilledCanceled",
+                "scheduledCancel",
+                "open",
+                "triggered",
+                "FooRejected",
+                "FooCanceled",
+            ][..],
+        ),
+    ] {
+        for status in statuses {
+            let (mut e, socket) = boot();
+            let text = json!({"channel":"orderUpdates","data":[{"order":{
+                "coin":"BTC","oid":3002,"cloid":CLOID,"side":"A","sz":"1",
+                "origSz":"1","limitPx":"90","triggerPx":"80",
+                "reduceOnly":true,"isTrigger":true,"orderType":"Stop Market"
+            },"status":status}]})
+            .to_string();
+            e.handle(
+                NOW,
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|action| matches!(action,
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED))
+                    .count(),
+                usize::from(failed),
+                "{status}"
+            );
+            no_trade(&actions);
+        }
     }
 }
 

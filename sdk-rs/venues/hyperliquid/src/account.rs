@@ -1990,7 +1990,7 @@ impl Hyperliquid {
         let dex = self.dex_of(cx, &symbol).to_owned();
         *self.account.orders_revision.entry(dex).or_default() += 1;
         if terminal(&update.status) {
-            if update.status != "filled"
+            if failed_protective_status(&update.status)
                 && cx.store.order(&id).is_none()
                 && !self.account.suppressed.contains_key(&id)
                 && row.oid != 0
@@ -2408,4 +2408,35 @@ pub(crate) fn terminal(status: &str) -> bool {
         || status == "rejected"
         || status.ends_with("Canceled")
         || status.ends_with("Rejected")
+}
+
+// Closed failure statuses; user, sibling-fill and scheduled cancels are normal.
+// https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#query-order-status-by-oid-or-cloid
+fn failed_protective_status(status: &str) -> bool {
+    matches!(
+        status,
+        "rejected"
+            | "tickRejected"
+            | "minTradeNtlRejected"
+            | "perpMarginRejected"
+            | "reduceOnlyRejected"
+            | "badAloPxRejected"
+            | "iocCancelRejected"
+            | "badTriggerPxRejected"
+            | "marketOrderNoLiquidityRejected"
+            | "positionIncreaseAtOpenInterestCapRejected"
+            | "positionFlipAtOpenInterestCapRejected"
+            | "tooAggressiveAtOpenInterestCapRejected"
+            | "openInterestIncreaseRejected"
+            | "insufficientSpotBalanceRejected"
+            | "oracleRejected"
+            | "perpMaxPositionRejected"
+            | "marginCanceled"
+            | "vaultWithdrawalCanceled"
+            | "openInterestCapCanceled"
+            | "selfTradeCanceled"
+            | "reduceOnlyCanceled"
+            | "delistedCanceled"
+            | "liquidatedCanceled"
+    )
 }
