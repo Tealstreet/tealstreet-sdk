@@ -616,7 +616,7 @@ impl Venue for BitunixFutures {
             cx.notice(
                 Level::Error,
                 code::CONFIG_INVALID,
-                safe_cex_engine::ReadCredentials::status(false).unwrap_err(),
+                safe_cex_engine::READ_CREDENTIALS_INVALID,
             );
             return;
         }
