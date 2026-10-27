@@ -994,6 +994,7 @@ impl BybitLinear {
             RetireReason::Authentication => "Bybit socket authentication failed; reconnecting",
             RetireReason::Closed => "Bybit socket closed; reconnecting",
             RetireReason::Stopped => "Bybit socket stopped",
+            RetireReason::RouteRefused => "Bybit socket refused on every route",
         };
         cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
     }

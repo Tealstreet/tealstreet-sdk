@@ -173,6 +173,8 @@ pub enum RetireReason {
     Timeout(Timeout),
     Authentication,
     Stopped,
+    /// A `reject_route` connect found no route left; nothing was dialled.
+    RouteRefused,
 }
 
 #[derive(Clone, Debug)]
