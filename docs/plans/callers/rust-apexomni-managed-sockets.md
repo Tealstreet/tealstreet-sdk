@@ -54,10 +54,11 @@ ACK never populates it, and already-authenticated data follows the native path.
 Malformed first data cannot publish a valid subset or restart the auth deadline.
 The cap applies only to retained first-data proof, not authenticated row parsing.
 
-Twelve production-binding controls pass locally, including exact-once proof
+Thirteen production-binding controls cover exact-once proof
 publication, revocation before Authenticated, old/new-epoch isolation, full-state
 nonfinite ingress, duplicate queued demand, real 512-credit admission pressure
-and encoded-frame Capacity recovery with a healthy private peer. Removing the
+and encoded-frame Capacity recovery with live-book invalidation and a healthy
+private peer, plus the exact retained-proof bound and one-over refusal. Removing the
 epoch check or invoking the proof reducer twice makes the corresponding control
 assertion RED. The original first five bodies remain unchanged.
 

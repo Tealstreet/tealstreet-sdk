@@ -325,19 +325,6 @@ impl Venue for Probe {
                         self.0.on_command(cx, command);
                     }
                 }
-                Scenario::Pressure => {
-                    if !self.1.borrow().pressure_used {
-                        self.1.borrow_mut().pressure_used = true;
-                        for index in 0..20 {
-                            self.0.on_command(
-                                cx,
-                                Command::SubscribeOrderBook {
-                                    symbol: hostile_symbol(index),
-                                },
-                            );
-                        }
-                    }
-                }
                 Scenario::Credits if !self.1.borrow().pressure_used => {
                     self.1.borrow_mut().pressure_used = true;
                     let feed = cx
@@ -449,7 +436,21 @@ impl Venue for Probe {
         self.0.on_timer(cx, timer);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command) {
+        let pressure = self.1.borrow().scenario == Scenario::Pressure
+            && !self.1.borrow().pressure_used
+            && matches!(&command, Command::SetTickerSymbols { .. });
         self.0.on_command(cx, command);
+        if pressure {
+            self.1.borrow_mut().pressure_used = true;
+            for index in 0..20 {
+                self.0.on_command(
+                    cx,
+                    Command::SubscribeOrderBook {
+                        symbol: hostile_symbol(index),
+                    },
+                );
+            }
+        }
     }
     fn book(&self, symbol: &str) -> Option<&safe_cex_engine::book::Book> {
         self.0.book(symbol)
@@ -746,7 +747,27 @@ fn valid_key_encoded_frame_pressure_retires_once_and_recovers_without_losing_the
     engine.handle(20.0, Event::WsOpened { socket: private });
     engine.prepared(20.0).for_each(drop);
     engine.handle(21.0, Event::WsOpened { socket: public });
-    let actions: Vec<_> = engine.prepared(21.0).collect();
+    engine.prepared(21.0).for_each(drop);
+    engine.handle(22.0, Event::Command(add_book()));
+    engine.prepared(22.0).for_each(drop);
+    engine.handle(
+        23.0,
+        Event::WsMessage {
+            socket: public,
+            text: BOOK_SNAPSHOT,
+        },
+    );
+    engine.prepared(23.0).for_each(drop);
+    assert!(!engine.book("BTCUSDT").unwrap().is_empty());
+    engine.handle(
+        24.0,
+        Event::Command(Command::SetTickerSymbols { symbols: vec![] }),
+    );
+    let actions: Vec<_> = engine.prepared(24.0).collect();
+    assert!(
+        engine.book("BTCUSDT").unwrap().is_empty(),
+        "Capacity retirement invalidates live book data"
+    );
     assert_eq!(
         actions
             .iter()
@@ -762,7 +783,7 @@ fn valid_key_encoded_frame_pressure_retires_once_and_recovers_without_losing_the
     let retries: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms > 21.0 && *at_ms <= 1021.0 => {
+            Action::SetTimer { timer, at_ms } if *at_ms > 24.0 && *at_ms <= 1024.0 => {
                 Some((*timer, *at_ms))
             }
             _ => None,
@@ -771,15 +792,13 @@ fn valid_key_encoded_frame_pressure_retires_once_and_recovers_without_losing_the
     assert_eq!(retries.len(), 1);
     for index in 0..20 {
         engine.handle(
-            22.0,
+            25.0,
             Event::Command(Command::UnsubscribeOrderBook {
                 symbol: hostile_symbol(index),
             }),
         );
-        engine.prepared(22.0).for_each(drop);
+        engine.prepared(25.0).for_each(drop);
     }
-    engine.handle(23.0, Event::Command(add_book()));
-    engine.prepared(23.0).for_each(drop);
     let (retry, at) = retries[0];
     engine.handle(at, Event::TimerFired { timer: retry });
     let replacement = engine
@@ -806,12 +825,77 @@ fn valid_key_encoded_frame_pressure_retires_once_and_recovers_without_losing_the
     engine.handle(
         at + 1.0,
         Event::WsMessage {
+            socket: public,
+            text: BOOK_SNAPSHOT,
+        },
+    );
+    assert!(engine.book("BTCUSDT").unwrap().is_empty());
+    assert!(engine.prepared(at + 1.0).next().is_none());
+    engine.handle(
+        at + 2.0,
+        Event::WsMessage {
+            socket: replacement,
+            text: BOOK_SNAPSHOT,
+        },
+    );
+    assert!(!engine.book("BTCUSDT").unwrap().is_empty());
+    engine.prepared(at + 2.0).for_each(drop);
+    engine.handle(
+        at + 3.0,
+        Event::WsMessage {
             socket: private,
             text: r#"{"op":"ping","args":["peer"]}"#,
         },
     );
     assert_eq!(
-        sends(engine.prepared(at + 1.0).collect(), private),
+        sends(engine.prepared(at + 3.0).collect(), private),
         [r#"{"op":"pong","args":["peer"]}"#]
     );
+}
+
+const BOOK_SNAPSHOT: &str = r#"{"topic":"orderBook200.H.BTCUSDT","type":"snapshot","data":{"a":[["60003","3"]],"b":[["59999","1"]],"u":10}}"#;
+
+#[test]
+fn retained_first_proof_accepts_the_exact_bound_and_refuses_one_over_without_caching_it() {
+    let bound = safe_cex_engine::socket_lifecycle::MAX_QUEUED_BYTES;
+    for extra in [0, 1] {
+        let (mut engine, _, private) = connecting(true);
+        let socket = private.unwrap();
+        engine.handle(20.0, Event::WsOpened { socket });
+        engine.prepared(20.0).for_each(drop);
+        let mut proof = PROOF.to_owned();
+        proof.push_str(&" ".repeat(bound + extra - proof.len()));
+        assert_eq!(proof.len(), bound + extra);
+        engine.handle(
+            21.0,
+            Event::WsMessage {
+                socket,
+                text: &proof,
+            },
+        );
+        engine.prepared(21.0).for_each(drop);
+        assert_eq!(engine.store().orders().len(), usize::from(extra == 0));
+        if extra == 1 {
+            engine.handle(
+                22.0,
+                Event::WsMessage {
+                    socket,
+                    text: r#"{"op":"login","success":true}"#,
+                },
+            );
+            engine.prepared(22.0).for_each(drop);
+            assert!(
+                engine.store().orders().is_empty(),
+                "ordinary ACK retains no oversized proof"
+            );
+            engine.handle(
+                23.0,
+                Event::WsMessage {
+                    socket,
+                    text: PROOF,
+                },
+            );
+            assert_eq!(engine.store().orders().len(), 1);
+        }
+    }
 }
