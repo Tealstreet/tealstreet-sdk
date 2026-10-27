@@ -183,7 +183,7 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot',
     };
     setRustEngineTransport(() => transport);
     let signatures = 0;
-    for (const secret of name.startsWith('lighter') ? ['local'] : ['', 'local']) {
+    for (const secret of name.startsWith('lighter') || name === 'hyperliquidspot' ? ['local'] : ['', 'local']) {
       const exchange = new RustEngineExchange(name, {
         key: 'key', secret, apiKeyIndex: '2', testnet: true,
         payloadSigner: async () => { signatures++; return { signature: 'unexpected' }; },
