@@ -1,3 +1,4 @@
+mod support;
 use safe_cex_engine::{Action, Event, Response};
 use safe_cex_venue_paradex::{Options, Paradex};
 
@@ -76,12 +77,14 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
 
 #[test]
 fn private_start_is_independent_of_ticker_seed_responses() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Paradex::new(Options {
-        key: Some(format!("0x{}1", "0".repeat(63))),
-        paradex_address: Some("0x0123".into()),
-        subkey_address: Some("0x456".into()),
-        ..Options::default()
-    }));
+    let mut engine = support::engine(
+        Options {
+            paradex_address: Some("0x0123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Options::default()
+        },
+        Some(support::STARK_KEY),
+    );
     engine.start(0.0);
     let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
         .into_iter()

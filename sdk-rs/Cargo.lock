@@ -4049,7 +4049,6 @@ dependencies = [
  "serde",
  "serde_json",
  "starknet-crypto",
- "zeroize",
 ]
 
 [[package]]

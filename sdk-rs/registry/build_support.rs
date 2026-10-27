@@ -46,6 +46,7 @@ enum SetupMapping {
     ApexOmni,
     Lighter,
     Hyperliquid,
+    Paradex,
 }
 
 #[derive(Default, Deserialize)]

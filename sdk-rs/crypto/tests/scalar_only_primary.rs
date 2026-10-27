@@ -90,7 +90,23 @@ fn every_other_policy_keeps_todays_refusal_and_a_missing_scalar_is_never_absent(
 }
 
 #[test]
-fn scalar_only_is_primary_secp256k1_and_required_signing_only() {
+fn a_stark_scalar_only_primary_installs_an_absent_credential() {
+    let policy: CredentialSetupPolicy = serde_json::from_str(
+        r#"{"primary":{"secretEncoding":"hex","signingAlgorithm":"starkDigest","source":"scalarOnly"}}"#,
+    )
+    .unwrap();
+    let scalar = format!("{}2a", "0".repeat(62));
+    let (_, ids, facts) = setup(policy, serde_json::json!({"secret": scalar})).unwrap();
+    assert_eq!(facts.primary_key(), KeyPresence::Absent);
+    let identity = ids.primary.unwrap();
+    assert!(identity.credential_absent());
+    assert_eq!(identity.credential_ref(), None);
+    assert_eq!(identity.validate(), Ok(()));
+    assert!(identity.signing_ref().is_ok());
+}
+
+#[test]
+fn scalar_only_is_primary_secp256k1_or_stark_and_required_signing_only() {
     for policy in [
         r#"{"primary":{"source":"scalarOnly"}}"#,
         r#"{"primary":{"secretEncoding":"hex","signingAlgorithm":"ed25519","source":"scalarOnly"}}"#,
@@ -98,6 +114,9 @@ fn scalar_only_is_primary_secp256k1_and_required_signing_only() {
             "signing":"optional","source":"scalarOnly"}}"#,
         r#"{"primary":{"secretEncoding":"hex","signingAlgorithm":"secp256k1Digest"},
             "secondary":{"source":"scalarOnly"}}"#,
+        r#"{"primary":{"secretEncoding":"hex","signingAlgorithm":"starkDigest",
+            "signing":"optional","source":"scalarOnly"}}"#,
+        r#"{"primary":{"secretEncoding":"hex","signingAlgorithm":"schnorrDigest","source":"scalarOnly"}}"#,
     ] {
         let policy: CredentialSetupPolicy = serde_json::from_str(policy).unwrap();
         assert!(matches!(

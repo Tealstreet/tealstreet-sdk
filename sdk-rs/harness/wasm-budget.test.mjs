@@ -14,7 +14,7 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 });
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
-  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot']);
+  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex']);
   assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_391 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
@@ -95,6 +95,16 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue', 'okx'), /exceeds 1343488/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue'), /exceeds 1343488/);
   assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bitget'), /exceeds 16777216/);
+});
+
+test('Paradex local Stark signing carries its measured family budget', () => {
+  // #2330: CI Rust run 40542060055, job 'wasm family (paradex)' 122328548446, measured
+  // 1452805 bytes (master 1319909); ceil KiB plus 2 KiB. The breakdown is in the PR body.
+  // Interim: trims and lower in m26ps4 follow-up.
+  assert.equal(WASM_VENUE_OVERRIDES.paradex, 1421 * 1024);
+  assert.equal(wasmBudgetError(1_452_805, 'venue', 'paradex'), undefined);
+  assert.equal(wasmBudgetError(1_455_104, 'venue', 'paradex'), undefined);
+  assert.match(wasmBudgetError(1_455_105, 'venue', 'paradex'), /exceeds 1455104/);
 });
 
 test('the approved combined ceiling accepts 16 MiB exactly and rejects the next byte', () => {

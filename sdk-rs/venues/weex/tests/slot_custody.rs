@@ -144,10 +144,7 @@ fn public_only_does_not_promote_secondary_into_private_history_eligibility() {
         let actions = ask(&mut engine, income);
         assert!(!actions.iter().any(|action| matches!(
             action,
-            Action::Http(_)
-                | Action::ManagedHttp(_)
-                | Action::Sign { .. }
-                | Action::SignPayload { .. }
+            Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
         )));
         assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 7, result }) if result == "[]")).count(), 1);
     }

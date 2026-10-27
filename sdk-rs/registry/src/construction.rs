@@ -45,6 +45,7 @@ pub enum SetupMapping {
     ApexOmni,
     Lighter,
     Hyperliquid,
+    Paradex,
 }
 
 struct BridgeRule {

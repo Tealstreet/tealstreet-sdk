@@ -32,7 +32,7 @@ fn release<V: Venue>(engine: &mut Engine<V>, testnet: bool) -> Vec<Action> {
     let mut result = Vec::new();
     while let Some(action) = queue.pop_front() {
         match action {
-            Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. } => {
+            Action::Http(_) | Action::Sign { .. } => {
                 panic!("info read bypassed unsigned managed preparation")
             }
             Action::ManagedHttp(action) => match *action {

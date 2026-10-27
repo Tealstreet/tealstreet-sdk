@@ -1303,7 +1303,6 @@ fn rest_query_success_and_failure_leave_sbe_book_sequence_and_account_unchanged(
             Action::WsConnect { .. }
                 | Action::WsClose { .. }
                 | Action::SetTimer { .. }
-                | Action::SignPayload { .. }
                 | Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
         )));
         assert_eq!(
