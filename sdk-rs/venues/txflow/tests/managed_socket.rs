@@ -773,6 +773,9 @@ struct Pressure {
 }
 
 impl Venue for Pressure {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = safe_cex_venue_txflow::Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.inner.capabilities()

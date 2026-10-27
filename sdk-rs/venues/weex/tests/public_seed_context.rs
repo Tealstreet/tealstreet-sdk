@@ -55,6 +55,9 @@ impl Probe {
     }
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.inner.capabilities()

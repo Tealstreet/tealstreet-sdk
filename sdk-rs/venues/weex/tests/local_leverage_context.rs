@@ -24,6 +24,9 @@ struct Probe {
     roots: Vec<Context>,
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> Capabilities {
         self.venue.capabilities()

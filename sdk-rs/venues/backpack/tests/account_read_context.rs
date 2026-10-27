@@ -226,6 +226,9 @@ impl Audit {
     }
 }
 impl Venue for Audit {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         let timer = cx.set_timer(60_000.);
