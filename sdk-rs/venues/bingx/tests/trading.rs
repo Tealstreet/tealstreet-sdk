@@ -132,7 +132,7 @@ impl Venue for TestVenue {
         }
         let entries = &mut self.admitted_entries;
         self.trading
-            .command(cx, Some(&self.credentials), command, || *entries += 1);
+            .command(cx, Some(&self.credentials), command, |_| *entries += 1);
     }
     fn book(&self, _: &str) -> Option<&Book> {
         None
