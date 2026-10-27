@@ -447,7 +447,7 @@ fn private_reconnect_hands_subscriptions_off_before_account_refresh() {
         })
         .unwrap();
     engine.handle(wake.1, Event::TimerFired { timer: wake.0 });
-    actions.extend(prepared_now(&mut engine).into_iter());
+    actions.extend(prepared_now(&mut engine));
     let refresh = actions
         .iter()
         .position(|a| matches!(a, Action::Http(_)))
@@ -595,7 +595,7 @@ fn mode_after_open_clears_its_timer_then_hands_private_topics_off_before_spot_re
         })
         .unwrap();
     engine.handle(2001.0, Event::TimerFired { timer: wake });
-    actions.extend(prepared_now(&mut engine).into_iter());
+    actions.extend(prepared_now(&mut engine));
     let (read_index, read) = actions
         .iter()
         .enumerate()
@@ -699,7 +699,7 @@ fn retired_mode_handoff_never_starts_its_spot_read() {
         "old-epoch wake cannot consume the due work before its fresh handoff"
     );
     engine.handle(at, Event::TimerFired { timer: fresh });
-    released.extend(prepared_now(&mut engine).into_iter());
+    released.extend(prepared_now(&mut engine));
     let reads: Vec<_> = released
         .iter()
         .filter_map(|a| match a {
@@ -845,7 +845,7 @@ fn refused_mode_handoff_recovers_its_spot_refresh_after_capacity_is_freed() {
     let markets = engine.store().markets().iter().take(2).cloned().collect();
     engine.store_mut().set_markets(markets);
     engine.handle(2002.0, Event::WsClosed { socket, code: 1006 });
-    refused.extend(prepared_now(&mut engine).into_iter());
+    refused.extend(prepared_now(&mut engine));
     let (retry, at) = refused
         .iter()
         .find_map(|a| match a {
@@ -879,7 +879,7 @@ fn refused_mode_handoff_recovers_its_spot_refresh_after_capacity_is_freed() {
         })
         .unwrap();
     engine.handle(at, Event::TimerFired { timer: wake });
-    released.extend(prepared_now(&mut engine).into_iter());
+    released.extend(prepared_now(&mut engine));
     let read = released
         .iter()
         .find_map(|a| match a {

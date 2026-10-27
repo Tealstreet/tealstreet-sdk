@@ -595,7 +595,7 @@ fn owned_history_concurrent_markers_never_cross_queries() {
     let mut actions = Vec::new();
     for (command, request) in pending.into_iter().rev() {
         reply(&mut e, &request, 503, "unavailable");
-        actions.extend(prepared_now(&mut e).into_iter());
+        actions.extend(prepared_now(&mut e));
         assert_eq!(
             owned_partial(&actions, command)[0]["id"],
             command.to_string()
