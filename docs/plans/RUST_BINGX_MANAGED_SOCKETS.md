@@ -43,3 +43,19 @@ wire literals and account-read/trading behavior. Any fixture clock/setup changes
 are explicit. Native correctness, strict clippy, fmt, bans, CI family/replay
 records and auditor GO gate landing. No local family or combined build unless
 required by a new ruling. Inventory changes remove only migrated BingX sites.
+
+## Local checkpoints
+
+The original real-binding controls produced 2 working sibling/suppression tests
+and 2 intended duplicate-Opened assertion failures. An earlier fixture version
+first failed to compile on the wrong policy enum name, then failed before the
+private duplicate assertion because its startup Orders request remained held;
+those setup failures are not counted as regression RED evidence.
+
+The candidate's nine lifecycle controls pass, including a real 2,100-book
+metadata remap that exceeds transactional frame capacity. The public book is
+invalidated, private Ping/Pong survives, and engine retry recovers all retained
+books plus the new candle interest. The key-acquisition retry control drives
+its actual early/rearmed/equality/duplicate timers and rejects a retired key
+answer before accepting a newly issued key. Current-source full native, strict,
+fmt, bans, immutable source review and master PR CI remain separate gates.

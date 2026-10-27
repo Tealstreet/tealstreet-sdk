@@ -43,7 +43,7 @@ impl Harness {
             let orders = h.request("/trade/openOrders");
             h.reply(&orders, r#"{"code":0,"data":[]}"#);
         }
-        h.actions.clear();
+        h.actions.retain(|a| matches!(a, Action::Http(_)));
         h
     }
     fn collect(&mut self) {
@@ -176,5 +176,346 @@ fn retiring_public_does_not_retire_private_and_old_open_is_inert() {
             private
         ),
         vec!["Pong"]
+    );
+}
+
+fn fire(h: &mut Harness, timer: safe_cex_engine::TimerId, at: f64) -> Vec<Action> {
+    h.now = at;
+    h.engine.handle(at, Event::TimerFired { timer });
+    h.collect();
+    std::mem::take(&mut h.actions)
+}
+fn retry(actions: &[Action], now: f64) -> (safe_cex_engine::TimerId, f64) {
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (750. ..=1000.).contains(&(*at_ms - now)) => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(timers.len(), 1, "one genuine engine backoff");
+    timers[0]
+}
+#[test]
+fn private_reconnect_gets_a_fresh_key_and_old_socket_cannot_revive() {
+    let mut h = Harness::new(true, false);
+    let public = h.public.unwrap();
+    let old = h.private.unwrap();
+    h.event(Event::WsOpened { socket: public });
+    h.event(Event::WsOpened { socket: old });
+    let retired = h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    let (timer, at) = retry(&retired, h.now);
+    assert!(
+        retired
+            .iter()
+            .all(|a| !matches!(a,Action::Http(r) if r.url.contains("userDataStream")))
+    );
+    assert!(h.event(Event::WsOpened { socket: old }).is_empty());
+    assert_eq!(
+        sends(
+            &h.event(Event::WsMessage {
+                socket: public,
+                text: "Ping"
+            }),
+            public
+        ),
+        vec!["Pong"]
+    );
+    let reconnect = fire(&mut h, timer, at);
+    assert!(
+        reconnect
+            .iter()
+            .all(|a| !matches!(a, Action::WsConnect { .. }))
+    );
+    h.actions = reconnect;
+    let key = h.request("userDataStream");
+    assert_eq!(key.method, safe_cex_engine::Method::Post);
+    h.reply(&key, r#"{"listenKey":"key-two"}"#);
+    let current = h.private.unwrap();
+    assert_ne!(old, current);
+    h.actions.clear();
+    assert_eq!(
+        sends(&h.event(Event::WsOpened { socket: current }), current),
+        vec!["Ping"]
+    );
+    assert!(
+        h.event(Event::WsClosed {
+            socket: old,
+            code: 1006
+        })
+        .is_empty()
+    );
+    assert!(
+        h.event(Event::WsMessage {
+            socket: old,
+            text: "listenKeyExpired"
+        })
+        .is_empty()
+    );
+    assert_eq!(
+        sends(
+            &h.event(Event::WsMessage {
+                socket: current,
+                text: "Ping"
+            }),
+            current
+        ),
+        vec!["Pong"]
+    );
+    assert!(fire(&mut h, timer, at + 100.).is_empty());
+}
+#[test]
+fn current_interests_and_refcounts_survive_reconnect_without_replaying_removed_books() {
+    use safe_cex_engine::{Command, model::Interval};
+    let mut h = Harness::new(false, false);
+    let old = h.public.unwrap();
+    for _ in 0..2 {
+        h.event(Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }));
+    }
+    h.event(Event::Command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: Interval::M1,
+    }));
+    let opened = h.event(Event::WsOpened { socket: old });
+    let depth = |s: &str| s.contains("market.depth.");
+    assert_eq!(sends(&opened, old).iter().filter(|s| depth(s)).count(), 1);
+    assert!(
+        h.event(Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTCUSDT".into()
+        }))
+        .is_empty()
+    );
+    let retired = h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    let (timer, at) = retry(&retired, h.now);
+    h.event(Event::Command(Command::UnsubscribeOrderBook {
+        symbol: "BTCUSDT".into(),
+    }));
+    let next = fire(&mut h, timer, at);
+    let current = h.public.unwrap();
+    assert_ne!(current, old);
+    assert_eq!(
+        next.iter()
+            .filter(|a| matches!(a, Action::WsConnect { .. }))
+            .count(),
+        1
+    );
+    let opened = h.event(Event::WsOpened { socket: current });
+    assert_eq!(
+        sends(&opened, current).iter().filter(|s| depth(s)).count(),
+        0
+    );
+    assert!(
+        sends(&opened, current)
+            .iter()
+            .any(|s| s.contains("market.kline."))
+    );
+    let subscribed = h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "BTCUSDT".into(),
+    }));
+    assert_eq!(
+        sends(&subscribed, current)
+            .iter()
+            .filter(|s| depth(s))
+            .count(),
+        1
+    );
+    assert!(h.event(Event::WsOpened { socket: old }).is_empty());
+}
+#[test]
+fn nonfinite_socket_deliveries_preserve_full_store_and_current_epoch() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = Harness::new(false, false);
+        let socket = h.public.unwrap();
+        let daily = h.request("/quote/ticker");
+        h.reply(&daily,r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#);
+        let premium = h.request("/quote/premiumIndex");
+        h.reply(&premium,r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#);
+        h.actions.clear();
+        h.event(Event::WsOpened { socket });
+        let before = h.engine.snapshot_frame(100.).to_vec();
+        for event in [
+            Event::WsOpened { socket },
+            Event::WsMessage {
+                socket,
+                text: r#"{"dataType":"market.contracts","data":{"contracts":[{"symbol":"BTC-USDT","tradePrice":"99999"}]}}"#,
+            },
+            Event::WsClosed { socket, code: 1006 },
+        ] {
+            h.engine.handle(now, event);
+            let actions: Vec<_> = h.engine.drain_actions().collect();
+            assert!(
+                actions.is_empty(),
+                "nonfinite ingress produces no work: {actions:?}"
+            );
+            assert_eq!(h.engine.snapshot_frame(100.), before);
+        }
+        assert_eq!(
+            sends(
+                &h.event(Event::WsMessage {
+                    socket,
+                    text: "Ping"
+                }),
+                socket
+            ),
+            vec!["Pong"]
+        );
+    }
+}
+#[test]
+fn real_valid_interest_frame_pressure_retires_only_public_and_recovers_desired_demand() {
+    use safe_cex_engine::{Command, model::Interval};
+    let mut h = Harness::new(true, false);
+    let public = h.public.unwrap();
+    let private = h.private.unwrap();
+    let template = h.engine.store().markets()[0].clone();
+    let mut markets = vec![template.clone()];
+    for i in 0..2100 {
+        let mut m = template.clone();
+        m.symbol = format!("COIN{i}USDT");
+        m.id = format!("COIN{i}-USDT");
+        markets.push(m);
+    }
+    h.engine.store_mut().set_markets(markets);
+    h.event(Event::WsOpened { socket: public });
+    h.event(Event::WsOpened { socket: private });
+    for i in 0..2100 {
+        let sent = h.event(Event::Command(Command::SubscribeOrderBook {
+            symbol: format!("COIN{i}USDT"),
+        }));
+        assert_eq!(sends(&sent, public).len(), 1);
+    }
+    h.event(Event::WsMessage {socket:public,text:r#"{"dataType":"market.depth.COIN0-USDT.step0.level100","data":{"bids":[{"price":"10","volume":"2"}],"asks":[{"price":"11","volume":"3"}]}}"#});
+    assert_eq!(h.engine.book("COIN0USDT").unwrap().bids(), [(10., 2.)]);
+    let mut changed = h.engine.store().markets().to_vec();
+    for m in &mut changed[1..] {
+        m.id = format!("remapped-{}", m.id);
+    }
+    h.engine.store_mut().set_markets(changed);
+    let pressure = h.event(Event::Command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: Interval::M1,
+    }));
+    assert!(
+        pressure
+            .iter()
+            .any(|a| matches!(a,Action::WsClose{socket} if *socket==public))
+    );
+    assert!(
+        pressure
+            .iter()
+            .all(|a| !matches!(a,Action::WsClose{socket} if *socket==private))
+    );
+    assert!(pressure.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(e)) if e.message.contains("Capacity"))));
+    assert!(h.engine.book("COIN0USDT").is_none());
+    let (timer, at) = retry(&pressure, h.now);
+    assert_eq!(
+        sends(
+            &h.event(Event::WsMessage {
+                socket: private,
+                text: "Ping"
+            }),
+            private
+        ),
+        vec!["Pong"]
+    );
+    fire(&mut h, timer, at);
+    let current = h.public.unwrap();
+    assert_ne!(current, public);
+    let opened = h.event(Event::WsOpened { socket: current });
+    let frames = sends(&opened, current);
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|s| s.contains("market.depth.remapped-"))
+            .count(),
+        2100
+    );
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|s| s.contains("market.kline."))
+            .count(),
+        1
+    );
+    assert_eq!(frames.iter().filter(|s| **s == "Ping").count(), 1);
+    assert!(h.event(Event::WsOpened { socket: public }).is_empty());
+}
+
+#[test]
+fn acquisition_retry_uses_its_captured_not_before_and_rejects_late_key_results() {
+    let mut h = Harness::new(true, false);
+    let old = h.private.unwrap();
+    h.event(Event::WsOpened { socket: old });
+    let closed = h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    let (reconnect, at) = retry(&closed, h.now);
+    h.actions = fire(&mut h, reconnect, at);
+    let first = h.request("userDataStream");
+    let failed = h.event(Event::HttpFailed {
+        request: first.id,
+        error: "key service unavailable",
+    });
+    let owed: Vec<_> = failed
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 30_000. => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(owed.len(), 1);
+    h.actions.clear();
+    h.reply(&first, r#"{"listenKey":"late-retired-key"}"#);
+    assert!(
+        h.actions.is_empty(),
+        "retired acquisition cannot connect or rearm"
+    );
+    let (early, bound) = owed[0];
+    let actions = fire(&mut h, early, bound - 1.);
+    assert!(actions.iter().all(|a| !matches!(
+        a,
+        Action::Http(_) | Action::ManagedHttp(_) | Action::WsConnect { .. }
+    )));
+    let rearmed: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == bound => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rearmed.len(), 1);
+    assert_ne!(rearmed[0], early);
+    assert!(fire(&mut h, early, bound - 0.5).is_empty());
+    h.actions = fire(&mut h, rearmed[0], bound);
+    let fresh = h.request("userDataStream");
+    assert_ne!(fresh.id, first.id);
+    assert_eq!(
+        h.actions
+            .iter()
+            .filter(|a| matches!(a,Action::Http(r) if r.url.contains("userDataStream")))
+            .count(),
+        0
+    );
+    h.reply(&fresh, r#"{"listenKey":"key-after-bound"}"#);
+    let current = h.private.unwrap();
+    assert_ne!(current, old);
+    h.actions.clear();
+    assert!(fire(&mut h, rearmed[0], bound + 0.5).is_empty());
+    assert_eq!(
+        sends(&h.event(Event::WsOpened { socket: current }), current),
+        vec!["Ping"]
     );
 }
