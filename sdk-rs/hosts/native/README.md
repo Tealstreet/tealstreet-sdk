@@ -63,27 +63,11 @@ feed identities isolate sockets that share a role and URL. Other decoded venue
 messages reset the silent streak. The native TLS WebSocket upgrade uses
 HTTP/1.1; Tealstreet upgrade and REST headers come from the resolved policy.
 
-Paradex delegated signing keeps the private subkey outside the engine. Set
-`Options.payload_signer = true` and configure the host callback alongside routing:
-
-```rust,ignore
-use safe_cex_native::PayloadSigner;
-let signer: PayloadSigner = Arc::new(move |request| {
-    let account_context = account_context.clone();
-    Box::pin(async move {
-        // request carries exchangeName, the public key and the StarkNet message hash.
-        account_context.sign_payload(request).await
-    })
-});
-let transport = NetworkTransport::with_routing(plan, tokens).with_payload_signer(signer);
-```
-
-The host returns a signature event before the engine emits HTTP. Signer headers
-travel with that exact request; fixed venue authentication headers take precedence.
-Signing and HTTP share one 20-second deadline, and late signer answers cannot
-resume a failed request. An unconfigured callback fails before network I/O.
-Paradex JWT generation follows the TS raw-fetch path and always goes direct;
-ordinary order requests retain the resolved account route.
+Paradex signs through its trusted local Stark provider: `build` consumes the
+account key in trusted setup and seals the provider's public key. There is no
+delegated payload-signing callback; a private Paradex account with an external
+signer refuses. Paradex `/auth` always goes direct; ordinary requests retain the
+resolved account route.
 
 # Network frame server
 

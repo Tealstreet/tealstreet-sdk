@@ -87,7 +87,6 @@ pub fn engine_with(options: Options, key: Option<&str>, deferred: bool) -> Engin
 pub enum ReceiptTrace {
     Progress(u32, Vec<safe_cex_engine::OrderIdentityReceipt>),
     Http(safe_cex_engine::RequestId),
-    Sign(safe_cex_engine::RequestId),
 }
 pub struct Harness {
     pub e: Engine<Paradex>,
@@ -161,9 +160,6 @@ impl Harness {
         for a in safe_cex_engine::test_support::prepared_actions(&mut self.e, self.now) {
             match &a {
                 Action::Http(r) => self.receipt_trace.push(ReceiptTrace::Http(r.id)),
-                Action::SignPayload { request, .. } => {
-                    self.receipt_trace.push(ReceiptTrace::Sign(*request))
-                }
                 Action::Notice(Notice::CommandProgress { command, receipts }) => self
                     .receipt_trace
                     .push(ReceiptTrace::Progress(*command, receipts.clone())),

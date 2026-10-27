@@ -99,9 +99,7 @@ impl Harness {
                 Action::RetireAddressSetup { .. } => {
                     panic!("unexpected address setup retirement")
                 }
-                Action::Sign { .. }
-                | Action::SignedOutbound { .. }
-                | Action::SignPayload { .. } => {
+                Action::Sign { .. } | Action::SignedOutbound { .. } => {
                     panic!("delegated signing is unsupported in the bitget test harness")
                 }
                 Action::Http(r) => {

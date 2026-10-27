@@ -115,7 +115,6 @@ import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigni
 import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
 import { mapMEXCSignerSetup } from './mexcSignerSetup';
-import { paradexSigningTransport } from './paradex.signing';
 import {
   IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
   inProcessPortPair,
@@ -894,17 +893,12 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    let transport = createEngineTransport(
+    const transport = createEngineTransport(
       this.name,
       this.options,
       (transportFactory ?? synchronizedEngineTransport)(),
       this.signerSetup,
     );
-    if (this.bridgeConstruction.payloadSigning) {
-      transport = paradexSigningTransport(this.options, transport);
-      if (this.options.payloadSigner)
-        transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
-    }
     const engine = constructEngine(
       WasmEngine,
       this.name,

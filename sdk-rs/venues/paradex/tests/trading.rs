@@ -1341,7 +1341,7 @@ fn public_rest_book_refusal_does_not_invalidate_or_refresh_existing_jwt() {
     assert!(h.pending.is_empty());
     assert!(!h.actions.iter().any(|a| matches!(
         a,
-        Action::SignPayload { .. } | Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
+        Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
     )));
     assert_eq!(
         (

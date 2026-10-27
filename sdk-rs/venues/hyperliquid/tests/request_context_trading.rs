@@ -404,10 +404,11 @@ fn no_trade(actions: &[Action]) {
         "shared refusal precedes native exchange"
     );
     assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(&**a, HttpAction::Prepare { .. } | HttpAction::Bind { .. } | HttpAction::BindGroup { .. }))));
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::Sign { .. } | Action::SignPayload { .. } | Action::SignedOutbound { .. }
-    )));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::SignedOutbound { .. }))
+    );
 }
 fn one_error(actions: &[Action], kind: ErrorKind, outcome: Outcome) {
     let r = results(actions, OWNER);

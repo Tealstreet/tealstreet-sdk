@@ -56,10 +56,9 @@ fn ask(
 
 fn preparation(actions: &[Action]) -> (Preparation, HttpRequest) {
     assert!(
-        !actions.iter().any(|a| matches!(
-            a,
-            Action::Http(_) | Action::SignPayload { .. } | Action::Sign { .. }
-        )),
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. })),
         "public history must await managed preparation without legacy HTTP or signing"
     );
     actions
@@ -146,7 +145,7 @@ fn results(actions: &[Action], owner: u32) -> Vec<Result<String, VenueError>> {
 fn only_retirement(actions: &[Action], token: Preparation) {
     for action in actions {
         match action {
-            Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. } => {
+            Action::Http(_) | Action::Sign { .. } => {
                 panic!("single public page cannot send or sign another request")
             }
             Action::ManagedHttp(action) => assert!(
@@ -407,7 +406,6 @@ fn initial_capacity_denial_also_precedes_missing_market_empty_completion() {
                 | Action::ManagedHttp(_)
                 | Action::SetTimer { .. }
                 | Action::Sign { .. }
-                | Action::SignPayload { .. }
         )));
         no_marker(&actions);
     }

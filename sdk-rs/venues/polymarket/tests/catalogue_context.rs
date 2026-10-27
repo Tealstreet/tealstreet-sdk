@@ -102,7 +102,6 @@ fn no_command_or_sign(a: &[Action]) {
         a,
         Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
             | Action::Sign { .. }
-            | Action::SignPayload { .. }
     )));
 }
 

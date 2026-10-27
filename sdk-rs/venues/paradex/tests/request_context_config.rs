@@ -83,7 +83,7 @@ fn preparation(actions: &[Action]) -> (Preparation, HttpRequest) {
         .expect("managed config Prepare")
 }
 fn private_effects(actions: &[Action]) -> usize {
-    actions.iter().filter(|a|matches!(a,Action::WsConnect{channel:Some(SocketChannel::Private),..}|Action::SignPayload{..}) || matches!(a,Action::Http(r) if r.url.contains("/auth/")||r.url.ends_with("/account/margin"))).count()
+    actions.iter().filter(|a|matches!(a,Action::WsConnect{channel:Some(SocketChannel::Private),..}) || matches!(a,Action::Http(r) if r.url.contains("/auth/")||r.url.ends_with("/account/margin"))).count()
 }
 fn reply(e: &mut Engine<Paradex>, now: f64, r: &HttpRequest, body: &str) -> Vec<Action> {
     e.handle(
