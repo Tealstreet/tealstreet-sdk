@@ -1,6 +1,7 @@
 //! Fee tiers belong to the trading account, independently of its API signer.
 mod support;
 
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, TimerId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 
@@ -49,7 +50,9 @@ impl Fees {
 
     fn pump(&mut self) {
         for _ in 0..30 {
-            let actions = self.engine.drain_actions().collect::<Vec<_>>();
+            let actions = prepared_now(&mut self.engine)
+                .into_iter()
+                .collect::<Vec<_>>();
             if actions.is_empty() {
                 return;
             }

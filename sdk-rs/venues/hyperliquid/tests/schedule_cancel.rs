@@ -1,4 +1,5 @@
 //! Absolute account-wide deadlines are signed controls, never local cancels.
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{
     Action, Engine, ErrorKind, Event, HttpRequest, Notice, Outcome, Response, Venue,
 };
@@ -19,7 +20,7 @@ fn command(e: &mut Engine<Hyperliquid>, owner: u32, extra: &str, now: f64) -> Ve
     let command = safe_cex_engine::command::decode_command(&json)
         .expect("standalone scheduleCancel JSON admission");
     e.handle(now, Event::Command(command));
-    e.drain_actions().collect()
+    prepared_now(e).into_iter().collect()
 }
 fn write(actions: Vec<Action>) -> HttpRequest {
     assert_eq!(
@@ -55,7 +56,7 @@ fn reply(
             },
         },
     );
-    e.drain_actions().collect()
+    prepared_now(e).into_iter().collect()
 }
 fn failed(actions: &[Action], owner: u32, outcome: Outcome) {
     let errors: Vec<_> = actions
@@ -207,7 +208,7 @@ fn proven_refusal_and_lost_response_have_distinct_owned_outcomes_without_retry()
             error: "lost response",
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = prepared_now(&mut e).into_iter().collect();
     failed(&actions, 8, Outcome::Unknown);
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {error,..}) if error.kind==Some(ErrorKind::Network))));
     assert!(
@@ -233,7 +234,7 @@ fn queued_deadline_is_rechecked_before_signing_and_next_owner_progresses() {
         .unwrap();
     assert_eq!(at, NOW + 334.0);
     e.handle(at, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = prepared_now(&mut e).into_iter().collect();
     failed(&actions, 8, Outcome::NotSent);
     let next = write(actions);
     let actions = reply(&mut e, &next, 200, OK, at + 1.0);
@@ -257,7 +258,7 @@ fn nonfinite_typed_deadlines_cannot_turn_into_clear_actions() {
                 },
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = prepared_now(&mut e).into_iter().collect();
         failed(&actions, 7, Outcome::NotSent);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     }
@@ -277,7 +278,7 @@ fn refused_malformed_and_lost_replies_release_the_next_owner_once() {
                     error: "lost",
                 },
             );
-            e.drain_actions().collect()
+            prepared_now(&mut e).into_iter().collect()
         } else {
             reply(
                 &mut e,
@@ -308,7 +309,7 @@ fn refused_malformed_and_lost_replies_release_the_next_owner_once() {
             })
             .unwrap();
         e.handle(at, Event::TimerFired { timer });
-        let next = write(e.drain_actions().collect());
+        let next = write(prepared_now(&mut e).into_iter().collect());
         assert!(reply(&mut e, &r, 200, OK, at + 1.0).is_empty());
         let actions = reply(&mut e, &next, 200, OK, at + 2.0);
         assert_eq!(
