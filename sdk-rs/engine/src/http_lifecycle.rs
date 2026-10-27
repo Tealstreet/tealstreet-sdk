@@ -2099,7 +2099,7 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
-        #[cfg(feature = "dispatch-nonce")]
+        #[cfg(any(feature = "address-nonce", feature = "nonce-handoff"))]
         if self.io.core.nonce_enabled
             && managed
                 .recipe

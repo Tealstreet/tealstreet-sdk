@@ -2,7 +2,7 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 #[path = "address_nonce_setup.rs"]
 pub(crate) mod address_nonce_setup;
-#[cfg(feature = "dispatch-nonce")]
+#[cfg(feature = "nonce-handoff")]
 #[path = "nonce_handoff_core.rs"]
 pub(crate) mod nonce_handoff_core;
 #[cfg(feature = "address-nonce")]
@@ -1743,7 +1743,7 @@ struct IoCore {
     signing: crate::signing_dispatch::Dispatch,
     protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
-    #[cfg(feature = "dispatch-nonce")]
+    #[cfg(feature = "nonce-handoff")]
     nonce_handoff_issuer: Option<std::sync::Arc<()>>,
     /// Trusted-construction refs per slot, used only for capability admission.
     identities: crate::signing::Identities,
@@ -1894,7 +1894,7 @@ impl Default for IoCore {
             signing: Default::default(),
             protocol_clock: Default::default(),
             signer: None,
-            #[cfg(feature = "dispatch-nonce")]
+            #[cfg(feature = "nonce-handoff")]
             nonce_handoff_issuer: None,
             identities: Default::default(),
             host_algorithms: None,
@@ -3873,7 +3873,7 @@ impl<V: Venue> Engine<V> {
         }
         #[cfg(feature = "address-nonce")]
         self.invalidate_address_setup()?;
-        #[cfg(feature = "dispatch-nonce")]
+        #[cfg(feature = "nonce-handoff")]
         self.invalidate_nonce_handoff();
         self.io.core.signer = signer;
         Ok(())
@@ -3907,7 +3907,7 @@ impl<V: Venue> Engine<V> {
             }
             identities
         };
-        #[cfg(feature = "dispatch-nonce")]
+        #[cfg(feature = "nonce-handoff")]
         let identities = {
             self.invalidate_nonce_handoff();
             let mut identities = identities;

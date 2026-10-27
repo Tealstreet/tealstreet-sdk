@@ -388,7 +388,7 @@ pub struct Identity {
     #[cfg(feature = "address-nonce")]
     #[serde(skip)]
     pub(crate) address: crate::engine::address_nonce_setup::AddressCapability,
-    #[cfg(feature = "dispatch-nonce")]
+    #[cfg(feature = "nonce-handoff")]
     #[serde(skip)]
     pub(crate) nonce_owner: Option<Arc<crate::nonce::handoff::Owner>>,
 }
@@ -405,7 +405,7 @@ impl Identity {
             credential_absent: false,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
-            #[cfg(feature = "dispatch-nonce")]
+            #[cfg(feature = "nonce-handoff")]
             nonce_owner: None,
         }
     }
@@ -449,7 +449,7 @@ impl Identity {
     #[inline]
     pub fn set_signing_ref(&mut self, signing: Option<KeyRef>) {
         self.signing = signing;
-        #[cfg(feature = "dispatch-nonce")]
+        #[cfg(feature = "nonce-handoff")]
         {
             self.nonce_owner = None;
         }
@@ -1205,7 +1205,7 @@ mod setup_field_policy_tests {
             credential_absent: false,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
-            #[cfg(feature = "dispatch-nonce")]
+            #[cfg(feature = "nonce-handoff")]
             nonce_owner: None,
         }
     }
@@ -1262,7 +1262,7 @@ mod setup_field_policy_tests {
                 credential_absent: false,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
-                #[cfg(feature = "dispatch-nonce")]
+                #[cfg(feature = "nonce-handoff")]
                 nonce_owner: None,
             }),
             secondary: Some(identity("secondary", None)),
@@ -1285,7 +1285,7 @@ mod setup_field_policy_tests {
                 credential_absent: false,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
-                #[cfg(feature = "dispatch-nonce")]
+                #[cfg(feature = "nonce-handoff")]
                 nonce_owner: None,
             }),
         };

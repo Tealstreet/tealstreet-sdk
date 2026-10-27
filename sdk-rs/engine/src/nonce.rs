@@ -12,7 +12,7 @@ pub(crate) struct NonceState {
     pub(crate) reserved: u64,
     #[cfg(feature = "dispatch-nonce")]
     pub(crate) released: Option<u64>,
-    #[cfg(feature = "dispatch-nonce")]
+    #[cfg(feature = "nonce-handoff")]
     pub(crate) tracking: Option<Box<handoff::Tracking>>,
 }
 pub(crate) type NonceMap = HashMap<(&'static str, [u8; 32]), NonceState>;
@@ -168,13 +168,13 @@ pub(crate) fn reserve(
     if nonce > limit {
         return Err(NonceError::Exhausted);
     }
-    #[cfg(feature = "dispatch-nonce")]
+    #[cfg(feature = "nonce-handoff")]
     handoff::raw(state)?;
     state.reserved = nonce;
     Ok(nonce)
 }
 
-#[cfg(feature = "dispatch-nonce")]
+#[cfg(feature = "nonce-handoff")]
 pub(crate) fn reserve_claim(
     domain: &'static str,
     key: [u8; 32],

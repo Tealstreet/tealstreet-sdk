@@ -12,11 +12,11 @@ Base: SDK master 97cfa6d90a1; branch feat/rust-nonce-domain-handoff. Plan GO: cl
 
 5. Invalid-nonce refusal. Add a distinct classifier verdict for definitive nonce refusal, producing NotSent and NEVER RefusedResend. Existing transport/408/5xx uncertainty precedence and earlier root effects/Unknown remain intact. The consumer supplies its exact documented native-code row in its adoption PR; this shared PR contains no Kraken/venue table and authorizes no mutation replay.
 
-Files: engine/src/nonce.rs and new nonce_handoff.rs/tests; nonce_claim.rs; signing.rs (inert default provider hook/types); engine.rs/trusted initializer; classify.rs/classify_tests.rs and affected exhaustive matches; genuine managed-dispatch production-binding controls; RUST_CUTOVER_CALLERS.md plus short handoff plan. Runtime mechanism remains behind dispatch-nonce; public trait additions are unconditional defaults and appended after existing hooks.
+Files: engine/src/nonce.rs and new nonce_handoff.rs/tests; nonce_claim.rs; signing.rs (inert default provider hook/types); engine.rs/trusted initializer; classify.rs/classify_tests.rs and affected exhaustive matches; genuine managed-dispatch production-binding controls; RUST_CUTOVER_CALLERS.md plus short handoff plan. Runtime ownership, association, fence and takeover machinery sits behind the default-off `nonce-handoff` engine feature, which implies `dispatch-nonce`. No venue or host enables it in this PR. Public trait additions remain unconditional defaults appended after existing hooks.
 
 Scope: the LocalSigner/crypto implementation is EXCLUDED. This PR adds only the default-refusing provider contract. The real decoded-key-store hook requires its own signing/credential plan and GO before Kraken activation; native/WASM/worker ownership forwarding also remains an adoption gate. No venue tables or host rollout ship here.
 
-Additional GO conditions: commit classifier originals before its source change; cover transport/408/5xx and earlier Unknown precedence. NotSent follows the existing terminal path and cannot clear another uncertain placement or certify a stale census. Every failed takeover preserves both floors and the entire fence phase. CALLERS changes append boundaries only. Report non-adopter family byte deltas, including any ungated classifier cost; use CI family measurements and one combined measurement. First-consumer CLEAR from 9czdjh and exact-tree auditor GO on green correctness remain required.
+Additional GO conditions: commit classifier originals before its source change; cover transport/408/5xx and earlier Unknown precedence. NotSent follows the existing terminal path and cannot clear another uncertain placement or certify a stale census. Every failed takeover preserves both floors and the entire fence phase. CALLERS changes append boundaries only. Report non-adopter family byte deltas, including the ungated classifier/default-hook surface; use CI family measurements and one combined measurement. First-consumer CLEAR from 9czdjh and exact-tree auditor GO on green correctness remain required.
 
 Verification: held actual owner blocks takeover despite response/timeout/drop; successful real join permits exactly one commit; concurrent reserve/release imports both maxima and higher target floors; two source digests; forged/mismatched/stale/foreign association and stale claim refusal; counter overflow and failed transaction leaves floors unchanged; real managed Prepare/Bind/Claim after takeover uses a nonce strictly above every imported reservation; definitive invalid-nonce response -> NotSent/no resend, uncertain statuses stay Unknown. Scoped engine checks on/off and feature-unified downstream hook implementation; strict clippy/fmt/bans, one combined measurement and CI correctness/family records. CARGO_BUILD_JOBS=2, one cargo at a time.
 
@@ -64,3 +64,22 @@ existing command terminal path. Earlier Unknown wins, and this terminal never
 reports an order census. A census begun before a later uncertain mark remains
 unable to clear that fence. Known accepted prefixes retain the existing partial
 outcome. Serial refusal summaries retain whether an actual Rejected occurred.
+
+
+## Auditor-directed dormant feature boundary
+
+The initial dispatch-nonce-gated source measured CI Kraken1,412,211 bytes against
+its1,410,048 cap. The proposed3KiB raise is withdrawn: it exceeds the shared2KiB
+pre-approval and5% of the1,343,488 base. At8x5tm1's direction, `nonce-handoff`
+now gates tracking/owner/epoch storage, the trusted initializer and all handoff
+runtime. Ordinary dispatch-nonce keeps its previous reservation and address-only
+identity checks; only a reviewed activation will opt Kraken into owned takeover.
+Provider hook/types stay unconditional and default-refusing. The classifier
+verdict and common NotSent projection remain ungated, with no venue adopter.
+
+CI feature-mode qualification explicitly exercises owned takeover both without
+order-locks and with order-locks/serial-plans. Existing family feature closures
+remain controls for the dormant state. Remeasure only the ruling-required Kraken
+slice locally, use CI for the full family record, and retain the already measured
+combined result at its actual source pin. Any final cap is set only from measured
+bytes rounded to KiB and gets the required auditor disposition.

@@ -159,9 +159,13 @@ pub(crate) struct Pending {
     pub(crate) nonce_repairs: u8,
 }
 impl Pending {
-    #[cfg(feature = "dispatch-nonce")]
+    #[cfg(any(feature = "address-nonce", feature = "nonce-handoff"))]
     pub(crate) fn nonce_identity_current(&self, identities: &crate::signing::Identities) -> bool {
         self.nonce_claim.as_ref().is_none_or(|claim| {
+            #[cfg(not(feature = "nonce-handoff"))]
+            if !claim.address_bound() {
+                return true;
+            }
             let identity = match claim.selection.slot() {
                 crate::CredentialSlot::Primary => identities.primary.as_ref(),
                 crate::CredentialSlot::Secondary => identities.secondary.as_ref(),
@@ -550,7 +554,7 @@ impl Dispatch {
         identities: &crate::signing::Identities,
     ) -> Result<SignRequest, SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
-        #[cfg(feature = "dispatch-nonce")]
+        #[cfg(any(feature = "address-nonce", feature = "nonce-handoff"))]
         if !p.nonce_identity_current(identities) {
             return Err(SignError::InvalidRequest);
         }
@@ -765,6 +769,7 @@ impl Dispatch {
                     drop(result);
                     return Some(Completion::NonceStale(p));
                 }
+                #[cfg(feature = "nonce-handoff")]
                 Err(crate::nonce::NonceError::InvalidClaim) => {
                     return Some(Completion::Failed(p, SignError::InvalidRequest));
                 }

@@ -25,7 +25,9 @@ pub(crate) struct ClaimAuthority {
     /// From the trusted identity's `credential_absent()`: nothing is presented.
     pub(crate) signing_only: bool,
     bound: AtomicBool,
+    #[cfg(feature = "nonce-handoff")]
     epoch: Option<Arc<()>>,
+    #[cfg(feature = "nonce-handoff")]
     owner: Option<Arc<super::handoff::Owner>>,
     #[cfg(feature = "address-nonce")]
     address: Option<crate::engine::address_nonce_setup::VerifiedAddress>,
@@ -97,11 +99,13 @@ impl NonceClaim {
                     .map_err(|_| NonceSelectionError::InvalidSubject)?,
             )
         };
+        #[cfg(feature = "nonce-handoff")]
         let owner = if address_domain {
             None
         } else {
             identity.nonce_owner.clone()
         };
+        #[cfg(feature = "nonce-handoff")]
         let epoch = {
             let store = NONCES
                 .get_or_init(Mutex::default)
@@ -112,7 +116,9 @@ impl NonceClaim {
         };
         Ok(Self {
             authority: Arc::new(ClaimAuthority {
+                #[cfg(feature = "nonce-handoff")]
                 epoch,
+                #[cfg(feature = "nonce-handoff")]
                 owner,
                 domain,
                 subject: NonceSubject(subject),
@@ -139,6 +145,11 @@ pub(crate) struct NonceReservation {
     pub(crate) nonce: u64,
 }
 impl ClaimAuthority {
+    #[cfg(all(feature = "address-nonce", not(feature = "nonce-handoff")))]
+    pub(crate) fn address_bound(&self) -> bool {
+        self.address.is_some()
+    }
+
     pub(crate) fn matches_identity(&self, identity: &Identity) -> bool {
         if identity.validate().is_err()
             || self.credential.reference != *identity.authority_ref()
@@ -147,6 +158,7 @@ impl ClaimAuthority {
         {
             return false;
         }
+        #[cfg(feature = "nonce-handoff")]
         let owner_current = if self.domain.subject == super::NonceSubjectStrategy::Address {
             self.owner.is_none()
         } else {
@@ -156,6 +168,7 @@ impl ClaimAuthority {
                 _ => false,
             }
         };
+        #[cfg(feature = "nonce-handoff")]
         if !owner_current
             || !NONCES
                 .get_or_init(Mutex::default)
@@ -213,6 +226,7 @@ impl ClaimAuthority {
             super::NonceFloor::ProtocolMs { scale } => (protocol_now, scale),
         };
         let floor = super::floor(ms, scale, self.domain.limit)?;
+        #[cfg(feature = "nonce-handoff")]
         let nonce = super::reserve_claim(
             self.domain.name,
             self.subject.0.0,
@@ -221,6 +235,8 @@ impl ClaimAuthority {
             self.epoch.as_ref(),
             self.owner.as_ref(),
         )?;
+        #[cfg(not(feature = "nonce-handoff"))]
+        let nonce = super::reserve(self.domain.name, self.subject.0.0, floor, self.domain.limit)?;
         Ok(NonceReservation {
             authority: self.clone(),
             nonce,
@@ -234,6 +250,7 @@ impl NonceReservation {
             .get_or_init(Mutex::default)
             .lock()
             .map_err(|_| NonceError::Unavailable)?;
+        #[cfg(feature = "nonce-handoff")]
         if !super::handoff::current(
             store.get(&(self.authority.domain.name, self.authority.subject.0.0)),
             self.authority.epoch.as_ref(),
@@ -255,6 +272,7 @@ impl NonceReservation {
             .get_or_init(Mutex::default)
             .lock()
             .map_err(|_| NonceError::Unavailable)?;
+        #[cfg(feature = "nonce-handoff")]
         if !super::handoff::current(
             store.get(&(self.authority.domain.name, self.authority.subject.0.0)),
             self.authority.epoch.as_ref(),
