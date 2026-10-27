@@ -16,7 +16,6 @@ use safe_cex_engine::selected_read::{
     AdmittedRead, BackgroundReadError, LocalRefusal, ReadPolicy, ReadRequest, ReadRole,
     SelectedRead,
 };
-use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::rate_limit_pause_ms;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -87,8 +86,7 @@ struct Execution {
 
 #[derive(Default)]
 pub(crate) struct Account {
-    pub(crate) supervisor: Supervisor,
-    authenticated: bool,
+    pub(super) authenticated: bool,
     pub connection: Connection,
     pub margin: Option<MarginType>,
     pub mode_loaded: bool,
@@ -157,15 +155,7 @@ impl Account {
         }
     }
     pub(crate) fn new() -> Self {
-        Self {
-            supervisor: Supervisor::new(Config {
-                auth_timeout_ms: Some(10_000.0),
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(5_000.0),
-                ..Config::default()
-            }),
-            ..Self::default()
-        }
+        Self::default()
     }
 
     fn remember_terminal(&mut self, id: &str) {
@@ -226,6 +216,7 @@ pub enum Request {
         /// A Primary-signed reconcile snapshot: only it may clear an order fence.
         reconcile: bool,
         uncertainty_generation: u64,
+        read_epoch: u64,
         failed: bool,
     },
 }
@@ -584,7 +575,9 @@ impl Blofin {
             return;
         }
         self.account.session_started = cx.now;
-        self.private_connect(cx);
+        if let Err(error) = self.connect_feed(cx, true) {
+            Self::socket_notice(cx, error);
+        }
         self.account.tick = Some(cx.set_poll_timer(10_000.0));
         self.read_setting(cx, StartupRead::Margin);
         self.read_setting(cx, StartupRead::Mode);
@@ -672,7 +665,9 @@ impl Blofin {
         if let Some((timer, _)) = self.account.retry.take() {
             cx.clear_timer(timer);
         }
-        self.account.supervisor.cancel(cx);
+        if let Some(feed) = self.account.connection.feed {
+            cx.stop_socket_feed(feed);
+        }
         self.account.authenticated = false;
         self.account.connection.open = false;
         if let Some(socket) = self.account.connection.socket.take() {
@@ -696,24 +691,14 @@ impl Blofin {
             "wss://openapi.blofin.com/ws/private"
         }
     }
-    fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.startup_rejected {
-            return;
-        }
-        let url = self.private_url();
-        self.account.connection.socket = Some(cx.connect(
-            safe_cex_engine::SocketSpec::new(url).channel(safe_cex_engine::SocketChannel::Private),
-        ));
-        self.account.authenticated = false;
-        self.account.supervisor.connecting(cx);
-    }
     /// The login signs through the provider with the Primary, as every
     /// private request does; a refusal latches the role and the engine closes.
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        self.account.supervisor.opened(cx);
         let Some(primary) = self.options.identities.primary.clone() else {
             cx.close(socket);
-            self.private_close(cx, socket);
+            if let Some(feed) = self.account.connection.feed {
+                cx.stop_socket_feed(feed);
+            }
             return;
         };
         cx.send_signed(
@@ -727,6 +712,30 @@ impl Blofin {
         self.account.connection.open = true;
 
         cx.send(socket, "ping");
+    }
+    pub(super) fn private_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.authenticated = true;
+        if self.account.margin.is_some() && self.account.mode_loaded {
+            self.refresh_account(cx);
+            self.refresh_orders(cx, 1);
+        }
+    }
+    pub(super) fn private_auth_failure(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        if !self.account.authenticated
+            && !(cx.store.loaded().balance && cx.store.loaded().orders)
+            && error.venue_code.as_deref() != Some("152409")
+            && let Some(kind) = error.venue_code.as_deref().and_then(key_rejection)
+        {
+            let error = rejection(
+                "API key login",
+                error.venue_code.as_deref().unwrap_or_default(),
+                error.venue_message.as_deref().unwrap_or_default(),
+                kind,
+            );
+            self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid);
+            return;
+        }
+        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, error.message);
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.account_busy || !self.signed() {
@@ -784,6 +793,7 @@ impl Blofin {
                 revision: self.account.orders_revision,
                 reconcile,
                 uncertainty_generation: self.account.uncertainty_generation,
+                read_epoch: cx.order_read_epoch(),
                 failed: false,
             },
         );
@@ -1483,6 +1493,7 @@ impl Blofin {
                 revision,
                 reconcile,
                 uncertainty_generation,
+                read_epoch,
                 failed: false,
             } => {
                 if page_rows > 0 {
@@ -1501,6 +1512,7 @@ impl Blofin {
                                 revision,
                                 reconcile,
                                 uncertainty_generation,
+                                read_epoch,
                                 failed: true,
                             },
                             "BloFin pending order pagination did not advance",
@@ -1521,6 +1533,7 @@ impl Blofin {
                             revision,
                             reconcile,
                             uncertainty_generation,
+                            read_epoch,
                             failed: false,
                         },
                     );
@@ -1539,6 +1552,7 @@ impl Blofin {
                             revision,
                             reconcile,
                             uncertainty_generation,
+                            read_epoch,
                             failed: false,
                         },
                     );
@@ -1682,7 +1696,7 @@ impl Blofin {
                             && uncertainty_generation == self.account.uncertainty_generation
                         {
                             self.account.reconcile_owed = false;
-                            cx.orders_reconciled(None);
+                            cx.orders_reconciled_since(None, read_epoch);
                         } else if reconcile {
                             self.account.reconcile_owed = true;
                         }
@@ -1742,7 +1756,6 @@ impl Blofin {
         socket: SocketId,
         text: &str,
     ) {
-        self.account.supervisor.received(cx.now);
         if text == "pong" {
             return;
         }
@@ -1753,49 +1766,7 @@ impl Blofin {
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
-        // BloFin answers a refused login with `event: "error"` (60009 or a 1524xx code).
-        // A socket 152409 reconnects with a fresh signature, like 60009.
-        let login_failed = (message.event == "login" && message.code != "0")
-            || (message.event == "error" && !self.account.authenticated);
-        if login_failed {
-            // Before the account is ready a refused key cannot recover by reconnecting.
-            if !self.account.authenticated
-                && !(cx.store.loaded().balance && cx.store.loaded().orders)
-                && message.code != "152409"
-                && let Some(kind) = key_rejection(&message.code)
-            {
-                let error = rejection("API key login", &message.code, &message.msg, kind);
-                self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid);
-                return;
-            }
-            cx.notice(
-                Level::Error,
-                code::STREAM_UNAVAILABLE,
-                format!("BloFin login rejected: {}", message.code),
-            );
-            cx.close(socket);
-            self.private_close(cx, socket);
-            return;
-        }
-        if message.event == "login" {
-            if self.account.authenticated {
-                return;
-            }
-            self.account.authenticated = true;
-            self.account.supervisor.authenticated(cx);
-            for channel in ["account", "positions", "orders", "orders-algo"] {
-                cx.send(
-                    socket,
-                    format!("{{\"op\":\"subscribe\",\"args\":[{{\"channel\":\"{channel}\"}}]}}"),
-                );
-            }
-            if self.account.margin.is_some() && self.account.mode_loaded {
-                self.refresh_account(cx);
-                self.refresh_orders(cx, 1);
-            }
-            return;
-        }
-        if !message.event.is_empty() {
+        if !message.event.is_empty() || !self.account.authenticated {
             return;
         }
         match message.arg.channel.as_ref() {
@@ -2213,37 +2184,7 @@ impl Blofin {
         fill.amount = prepared.amount();
         cx.fill(fill);
     }
-    pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account.connection.socket != Some(socket) {
-            return;
-        }
-        let c = &mut self.account.connection;
-        c.socket = None;
-        c.open = false;
-        self.account.supervisor.retry(cx);
-    }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.account.supervisor.on_timer(cx, timer) {
-            SocketTick::Unhandled => (),
-            SocketTick::Reconnect => {
-                self.private_connect(cx);
-                return true;
-            }
-            SocketTick::Ping => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.send(socket, "ping");
-                }
-                return true;
-            }
-            SocketTick::TimedOut(_) => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.close(socket);
-                    self.private_close(cx, socket);
-                }
-                return true;
-            }
-            SocketTick::Handled => return true,
-        }
         if let Some(read) = self.account.startup.on_timer(timer) {
             self.read_setting(cx, read);
             return true;

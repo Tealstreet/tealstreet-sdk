@@ -4,6 +4,7 @@ mod closed;
 #[path = "sign/dispatch.rs"]
 pub mod dispatch_signing;
 mod history;
+mod socket_codec;
 mod trading;
 mod wire;
 use safe_cex_engine::Level;
@@ -12,7 +13,6 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
-use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketId, TimerId,
@@ -60,6 +60,8 @@ pub enum Pending {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
+    feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
+    pending: Option<(u64, socket_codec::Change)>,
 }
 #[derive(Default)]
 struct DepthState {
@@ -83,7 +85,6 @@ pub struct Blofin {
     malformed_markets: HashSet<String>,
     reread_stalls: u8,
     live_tickers: safe_cex_engine::startup::LiveTickers,
-    public_supervisor: Supervisor,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, Interval), CandleState>,
 }
@@ -92,11 +93,6 @@ struct Topic<'a> {
     channel: &'a str,
     #[serde(rename = "instId")]
     inst_id: &'a str,
-}
-#[derive(Serialize)]
-struct Subscription<'a> {
-    op: &'a str,
-    args: &'a [Topic<'a>],
 }
 fn interval(value: Interval) -> Option<&'static str> {
     use Interval::*;
@@ -166,13 +162,6 @@ impl Blofin {
             malformed_markets: HashSet::new(),
             reread_stalls: 0,
             live_tickers: Default::default(),
-            public_supervisor: Supervisor::new(Config {
-                connect_timeout_ms: 20_000.0,
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(5_000.0),
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
             books: HashMap::new(),
             candles: HashMap::new(),
         }
@@ -183,30 +172,6 @@ impl Blofin {
         } else {
             "https://openapi.blofin.com"
         }
-    }
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        let url = if self.options.testnet {
-            "wss://demo-trading-openapi.blofin.com/ws/public"
-        } else {
-            "wss://openapi.blofin.com/ws/public"
-        };
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public_supervisor.connecting(cx);
-        }
-        self.public.socket = Some(cx.connect(
-            safe_cex_engine::SocketSpec::new(url).channel(safe_cex_engine::SocketChannel::Public),
-        ));
-    }
-    fn public_close(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = None;
-        self.public.open = false;
-        for state in self.books.values_mut() {
-            state.sequence = None;
-            state.book.clear();
-            state.resync = false;
-        }
-        self.public_supervisor.retry(cx);
     }
     fn read_policy() -> Policy {
         Policy {
@@ -322,7 +287,9 @@ impl Blofin {
                 if refresh {
                     return;
                 }
-                self.connect(cx);
+                if let Err(error) = self.connect_feed(cx, false) {
+                    Self::socket_notice(cx, error);
+                }
                 self.read(
                     cx,
                     "/api/v1/market/tickers",
@@ -356,91 +323,6 @@ impl Blofin {
                 other,
                 VenueError::new("Malformed BloFin response"),
             ),
-        }
-    }
-    fn topics(&self, cx: &mut Cx<'_, Pending>, op: &str, topics: &[Topic<'_>]) {
-        let Some(socket) = self.public.socket.filter(|_| self.public.open) else {
-            return;
-        };
-        let overhead = serde_json::to_string(&Subscription { op, args: &[] })
-            .unwrap()
-            .len();
-        let mut start = 0;
-        let mut length = overhead;
-        // Measure each topic once; serializing every growing prefix is quadratic.
-        for (end, topic) in topics.iter().enumerate() {
-            let size = serde_json::to_string(topic).unwrap().len();
-            if length + size + usize::from(end > start) > 4096 && end > start {
-                cx.send(
-                    socket,
-                    serde_json::to_string(&Subscription {
-                        op,
-                        args: &topics[start..end],
-                    })
-                    .unwrap(),
-                );
-                start = end;
-                length = overhead;
-            }
-            length += size + usize::from(end > start);
-        }
-        if start < topics.len() {
-            cx.send(
-                socket,
-                serde_json::to_string(&Subscription {
-                    op,
-                    args: &topics[start..],
-                })
-                .unwrap(),
-            );
-        }
-    }
-    fn subscription(&self, cx: &mut Cx<'_, Pending>, op: &str, symbol: &str, channels: &[&str]) {
-        if let Some(market) = cx.store.market(symbol) {
-            let id = market.id.clone();
-            self.topics(
-                cx,
-                op,
-                &channels
-                    .iter()
-                    .map(|channel| Topic {
-                        channel,
-                        inst_id: &id,
-                    })
-                    .collect::<Vec<_>>(),
-            );
-        }
-    }
-    fn subscribe_all(&self, cx: &mut Cx<'_, Pending>) {
-        let ids: Vec<_> = cx.store.markets().iter().map(|m| m.id.clone()).collect();
-        let topics: Vec<_> = ids
-            .iter()
-            .flat_map(|id| {
-                [
-                    Topic {
-                        channel: "tickers",
-                        inst_id: id,
-                    },
-                    Topic {
-                        channel: "funding-rate",
-                        inst_id: id,
-                    },
-                ]
-            })
-            .collect();
-        self.topics(cx, "subscribe", &topics);
-        for symbol in self.books.keys() {
-            self.subscription(cx, "subscribe", symbol, &["books", "books5"]);
-        }
-        for (symbol, i) in self.candles.keys() {
-            if let Some(bar) = interval(*i) {
-                self.subscription(
-                    cx,
-                    "subscribe",
-                    symbol,
-                    &[&format!("candle{bar}"), "books5"],
-                );
-            }
         }
     }
     fn ticker(&mut self, cx: &mut Cx<'_, Pending>, row: &Tick<'_>, funding: bool) {
@@ -525,8 +407,7 @@ impl Blofin {
             let request = !state.resync;
             state.resync = true;
             if request {
-                self.subscription(cx, "unsubscribe", symbol, &["books"]);
-                self.subscription(cx, "subscribe", symbol, &["books"]);
+                self.repair_book_interest(cx, symbol);
             }
             return;
         }
@@ -627,6 +508,40 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn managed_sockets() -> bool {
+        true
+    }
+    fn socket_capabilities() -> safe_cex_engine::socket_lifecycle::SocketCapabilities {
+        safe_cex_engine::socket_lifecycle::SocketCapabilities { handoff: false }
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.socket_event(cx, event)
+    }
+    fn socket_control(
+        &self,
+        _: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        _: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        self.classify_control(feed, text)
+    }
+    fn encode_socket_interests(
+        &self,
+        _: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        interests: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.encode_interests(feed, subscribe, interests, emit)
+    }
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
@@ -714,6 +629,10 @@ impl Venue for Blofin {
             cx.startup_failed(VenueError::new(error).kind(ErrorKind::InvalidInput));
             return;
         }
+        if let Err(error) = self.register_sockets(cx) {
+            Self::socket_notice(cx, error);
+            return;
+        }
         self.read(
             cx,
             "/api/v1/market/instruments",
@@ -723,19 +642,7 @@ impl Venue for Blofin {
             },
         );
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account.connection.socket == Some(socket) {
-            self.private_open(cx, socket);
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = true;
-        self.public_supervisor.opened(cx);
-        self.subscribe_all(cx);
-        cx.send(socket, "ping");
-    }
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account.connection.socket == Some(socket) {
             self.private_message(cx, socket, text);
@@ -744,7 +651,6 @@ impl Venue for Blofin {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public_supervisor.received(cx.now);
         if text == "pong" {
             return;
         }
@@ -811,16 +717,7 @@ impl Venue for Blofin {
             _ => {}
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.account.connection.socket == Some(socket) {
-            self.private_close(cx, socket);
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public_close(cx);
-    }
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Managed(_, pending) => self.on_item(cx, pending, item),
@@ -1132,22 +1029,8 @@ impl Venue for Blofin {
         if self.account_timer(cx, timer) {
             return;
         }
-        match self.public_supervisor.on_timer(cx, timer) {
-            SocketTick::Reconnect => self.connect(cx),
-            SocketTick::Ping => {
-                if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
-                    cx.send(socket, "ping");
-                }
-            }
-            SocketTick::TimedOut(_) => {
-                if let Some(socket) = self.public.socket {
-                    cx.close(socket);
-                }
-                self.public_close(cx);
-            }
-            SocketTick::Handled | SocketTick::Unhandled => {}
-        }
     }
+
     fn on_venue_action(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1166,67 +1049,26 @@ impl Venue for Blofin {
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
             Command::SetTickerSymbols { .. } => {}
-            Command::SubscribeOrderBook { symbol } => {
-                let state = self.books.entry(symbol.clone()).or_default();
-                state.subscribers += 1;
-                if state.subscribers == 1 {
-                    self.subscription(cx, "subscribe", &symbol, &["books", "books5"]);
-                }
-            }
-            Command::UnsubscribeOrderBook { symbol } => {
-                if let Some(state) = self.books.get_mut(&symbol) {
-                    state.subscribers = state.subscribers.saturating_sub(1);
-                    if state.subscribers == 0 {
-                        self.books.remove(&symbol);
-                        self.subscription(cx, "unsubscribe", &symbol, &["books"]);
-                        if !self.candles.keys().any(|(s, _)| *s == symbol) {
-                            self.subscription(cx, "unsubscribe", &symbol, &["books5"]);
-                        }
-                    }
-                }
-            }
+            Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
+            Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, symbol),
             Command::SubscribeCandles {
                 symbol,
                 interval: i,
             } => {
-                let Some(bar) = interval(i) else {
+                if interval(i).is_none() {
                     cx.notice(
                         Level::Error,
                         code::COMMAND_UNSUPPORTED,
                         i.unsupported("BloFin"),
                     );
-                    return;
-                };
-                let state = self.candles.entry((symbol.clone(), i)).or_default();
-                state.subscribers += 1;
-                if state.subscribers == 1 {
-                    self.subscription(
-                        cx,
-                        "subscribe",
-                        &symbol,
-                        &[&format!("candle{bar}"), "books5"],
-                    );
+                } else {
+                    self.subscribe_candles(cx, symbol, i);
                 }
             }
             Command::UnsubscribeCandles {
                 symbol,
                 interval: i,
-            } => {
-                if let Some(state) = self.candles.get_mut(&(symbol.clone(), i))
-                    && let Some(bar) = interval(i)
-                {
-                    state.subscribers = state.subscribers.saturating_sub(1);
-                    if state.subscribers == 0 {
-                        self.candles.remove(&(symbol.clone(), i));
-                        self.subscription(cx, "unsubscribe", &symbol, &[&format!("candle{bar}")]);
-                        if !self.books.contains_key(&symbol)
-                            && !self.candles.keys().any(|(s, _)| *s == symbol)
-                        {
-                            self.subscription(cx, "unsubscribe", &symbol, &["books5"]);
-                        }
-                    }
-                }
-            }
+            } => self.unsubscribe_candles(cx, symbol, i),
             Command::FetchCandles {
                 command: _,
                 symbol,
