@@ -1174,6 +1174,8 @@ Ordinary managed auth observation now supplies the new read-only Store argument;
 late reconciliation remains silent. Owner requires the late-reconciliation
 follow-on to converge the broad revision with the snapshot epoch or document
 why both are necessary, rather than retaining two unexplained mechanisms.
+Resolved by documentation: both stay, for the reasons and controls in
+[RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md).
 
 Header policy review also found the same preexisting bypass in legacy client-ID
 lookup. Its single factory call is cleared by the history owner; completion and
