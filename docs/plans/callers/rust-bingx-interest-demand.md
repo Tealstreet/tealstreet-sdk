@@ -33,5 +33,5 @@ getter-based setup failure is kept separately from the corrected checkpoint.
 
 Local corrected qualification: 351 PASS across 25 nonempty BingX targets, zero
 failed/ignored/filtered, including all six new controls. Strict all-target clippy
-and package formatting pass. Full bans and fresh PR correctness/family/replay,
-reviewer CLEAR and exact-tree auditor GO remain publication/landing gates.
+and package formatting pass; full bans also pass. Fresh PR correctness/family/
+replay, reviewer CLEAR and exact-tree auditor GO remain landing gates.
