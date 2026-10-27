@@ -407,12 +407,12 @@ impl Venue for ManagedProbe {
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
         pending: Self::Pending,
-        response: Response<'_>,
+        _response: Response<'_>,
     ) {
         use crate::{classify::*, request_context::Operation};
         if pending.operation() == Operation::Read {
             #[cfg(feature = "order-locks")]
-            if response.body == "clean" {
+            if _response.body == "clean" {
                 cx.orders_reconciled(None);
             }
             cx.finish_http_context(&pending).unwrap();
