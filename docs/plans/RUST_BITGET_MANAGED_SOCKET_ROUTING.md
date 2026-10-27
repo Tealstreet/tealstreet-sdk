@@ -63,11 +63,13 @@ Status: dazzy3 CLEARed the legacy seam shape at `71fbebd9739`. The legacy-path s
   - When a `reject_route` connect has no candidate left, the host does not dial. It emits `Event::WsRouteExhausted { socket }`.
   - That event is host-only, enqueued after `connect` returns, and dropped for a stale socket.
   - **It is that socket's only terminal.** A host that emits it emits no open and no close for the socket. The engine treats it as that epoch's sole terminal, so there is never a double retire.
-  - The driver turns it into `LifecycleEvent::RouteExhausted`. It is never a peer close.
-  - Landed in #2324 as `LifecycleEvent::Retired { reason: RetireReason::RouteExhausted }`:
-    no retry, no `ws.closed` count. #2324 first named it `RouteRefused`; the
-    rename keeps `RouteRefused` for the per-route pre-login refusal above.
-  - The default handling is today's close-and-retry path, so venues that don't opt in are unchanged.
+  - On the managed path the driver retires the epoch as
+    `LifecycleEvent::Retired { reason: RetireReason::RouteExhausted }` (landed in
+    #2324): never a peer close, no retry and no `ws.closed` count. #2324 first
+    named it `RouteRefused`; the rename keeps `RouteRefused` for the per-route
+    pre-login refusal above.
+  - On the legacy path, a venue that does not opt in through `route_exhaustion()`
+    keeps today's close-and-retry handling.
 - **The connect after exhaustion (dazzy3 B).** Any connect after `RouteExhausted` carries `reject_route = false`, and the host dials the last candidate: it stays where the walk ended, matching `WsDirectFallback`'s sticky choice. Native `SocketAttempts`, TS `WsDirectFallback` and the WASM pass-through agree on this. For Bitget, ruling 3 means no such connect happens: it stops. Venues on the default close-and-retry path use this rule.
   - REDs per host: refuse every route, then exhaustion with no dial, then the next connect dials the last candidate with no second exhaustion.
 - **One host contract on both paths.** `rejectRoute` plus `WsRouteExhausted` is the same host contract on the legacy and managed paths; only the producer differs. Adoption later moves only the evidence source, not the hosts or the event.
