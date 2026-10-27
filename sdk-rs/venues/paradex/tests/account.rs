@@ -605,11 +605,19 @@ fn delayed_jwt_response_cannot_dispatch_private_requests_after_its_expiry() {
         1
     );
     h.reply("/auth/", r#"{"jwt_token":"fresh"}"#);
+    // The boot margins read outlived its 20 s window while the JWT was late, so
+    // it ends unsent; the cycle's next private read carries the fresh JWT.
+    assert!(!h.pending.iter().any(|r| r.url.ends_with("/account/margin")));
     assert!(
-        h.take("/account/margin")
+        h.take("/positions")
             .headers
             .iter()
             .any(|(n, v)| *n == "Authorization" && v == "Bearer fresh")
+    );
+    assert!(
+        !h.pending
+            .iter()
+            .any(|r| r.headers.iter().any(|(_, v)| v.contains("already-expired")))
     );
 }
 
@@ -1079,8 +1087,9 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    // Account reads are managed: the shared fixture prepares and releases them.
+    let mut pending: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, due)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -1122,10 +1131,14 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
-                Action::Http(r) => Some(r),
-                _ => None,
-            }));
+            pending.extend(
+                safe_cex_engine::test_support::prepared_actions(&mut e, due + 1.)
+                    .into_iter()
+                    .filter_map(|a| match a {
+                        Action::Http(r) => Some(r),
+                        _ => None,
+                    }),
+            );
         }
     }
     assert!(pending.is_empty(), "all fixture account reads complete");

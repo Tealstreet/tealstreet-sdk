@@ -12,7 +12,10 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, TimeInForce,
 };
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
+use safe_cex_engine::request_context::{
+    Context, Operation, Owner, Policy, RetryPolicy, Scope, Session, SessionBearer, SessionHeaders,
+    SessionPolicy,
+};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Cx, Fill, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId, VenueError,
@@ -25,6 +28,11 @@ const MAX_QUEUED: usize = 256;
 const RETAINED: usize = 20_000;
 const POLL_MS: f64 = 10_000.;
 const AUTH_REFRESH_MS: f64 = 180_000.;
+/// The Session bundle (`Authorization: Bearer`) goes first, as native requests sent it.
+const READ_HEADERS: &[(&str, &str)] = &[
+    ("Content-Type", "application/json"),
+    ("Accept", "application/json"),
+];
 
 pub enum Request {
     Config(Context),
@@ -32,11 +40,13 @@ pub enum Request {
         started: f64,
     },
     Margins {
+        context: Context,
         revision: u64,
         rows: Vec<(String, f64)>,
         boot: bool,
     },
     Positions {
+        context: Context,
         revision: u64,
         started: f64,
         rows: Vec<Position>,
@@ -44,10 +54,12 @@ pub enum Request {
         cycle: bool,
     },
     Balance {
+        context: Context,
         revision: u64,
         cycle: bool,
     },
     Orders {
+        context: Context,
         token: safe_cex_engine::OrderSnapshotToken,
         rows: Vec<NativeOrder>,
         seen: HashSet<String>,
@@ -55,6 +67,19 @@ pub enum Request {
         invalid: bool,
         cycle: bool,
     },
+}
+
+impl Request {
+    /// The managed Background read this snapshot belongs to.
+    fn read_context(&self) -> Option<&Context> {
+        match self {
+            Self::Margins { context, .. }
+            | Self::Positions { context, .. }
+            | Self::Balance { context, .. }
+            | Self::Orders { context, .. } => Some(context),
+            Self::Config(_) | Self::Auth { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -146,6 +171,10 @@ pub struct Account {
     started: bool,
     credentials: Option<Credentials>,
     token: Option<String>,
+    /// The JWT Session every private read binds; one generation per account.
+    session: Option<Session>,
+    /// Moves on every JWT set within the Session generation (the Bearer revision).
+    bearer_revision: u64,
     refresh_at: f64,
     auth_in_flight: bool,
     /// A definitive credential refusal; terminal until the account is rebuilt.
@@ -195,6 +224,8 @@ impl Account {
             started: false,
             credentials: None,
             token: None,
+            session: None,
+            bearer_revision: 0,
             refresh_at: 0.,
             auth_in_flight: false,
             auth_rejected: false,
@@ -451,6 +482,97 @@ impl Account {
         self.queue.push_back(request);
         self.refresh(cx);
     }
+    /// A private GET bound to the JWT Session: the engine attaches the current
+    /// Bearer at prepare and parks the read while the JWT is refreshing.
+    pub(crate) fn read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        context: Context,
+        path: &str,
+        at: Option<ArrayAt>,
+        pending: Pending,
+    ) {
+        if self.auth_rejected {
+            self.failed.push((pending, auth_rejected_error()));
+            return;
+        }
+        let Some(session) = self.session.clone() else {
+            self.failed.push((
+                pending,
+                VenueError::new("Paradex private authentication is not ready"),
+            ));
+            return;
+        };
+        match cx.request_managed_with_headers(
+            context,
+            Some(&session),
+            Method::Get,
+            format!("{}{path}", self.rest()),
+            READ_HEADERS,
+            None,
+            pending,
+        ) {
+            Ok(id) => {
+                if let Some(at) = at {
+                    cx.stream_response(id, at);
+                }
+            }
+            Err((pending, error)) => {
+                self.failed.push((
+                    pending,
+                    VenueError::new(format!("Paradex read preparation refused: {error:?}")),
+                ));
+                return;
+            }
+        }
+        if self.token.is_none() || cx.now >= self.refresh_at {
+            self.refresh(cx);
+        }
+    }
+    /// A Background read Context for the account cycle.
+    fn background_context(&mut self, cx: &mut Cx<'_, Pending>) -> Option<Context> {
+        let context = cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        );
+        if context.is_err() {
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                "Paradex account read lifecycle is unavailable",
+            );
+        }
+        context.ok()
+    }
+    fn serves(&self, generation: u64) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.owner() == Owner::Session { generation })
+    }
+    pub(crate) fn session_bearer(&self, generation: u64) -> SessionBearer {
+        let Some(token) = self.token.as_deref().filter(|_| self.serves(generation)) else {
+            return SessionBearer::NotReady;
+        };
+        match SessionHeaders::bearer(token) {
+            Ok(headers) => SessionBearer::Ready {
+                headers,
+                revision: self.bearer_revision,
+            },
+            Err(_) => SessionBearer::NotReady,
+        }
+    }
+    pub(crate) fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
+        (self.token.is_some() && self.serves(generation)).then_some(self.bearer_revision)
+    }
+    pub(crate) fn is_auth_rejected(&self) -> bool {
+        self.auth_rejected
+    }
     fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, mut request: Queued) {
         if let Pending::Trade(trade) = &request.pending {
             trade.report_progress(cx);
@@ -521,6 +643,8 @@ impl Account {
         let Some(credentials) = &self.credentials else {
             return;
         };
+        // An expiring JWT never binds again: Session reads park until the new one.
+        self.token = None;
         let signature = match credentials.auth(cx.now.max(0.) as u64) {
             Ok(s) => s,
             Err(error) => {
@@ -568,6 +692,17 @@ impl Account {
         self.auth_rejected = true;
         self.token = None;
         self.refresh_at = 0.;
+        if let Some(session) = self.session.take() {
+            // Fails every unreleased read bound to it NotSent. If the engine
+            // refuses, those reads still end at their own 20 s windows.
+            if cx.retire_session(&session).is_err() {
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    "Paradex could not retire its private session",
+                );
+            }
+        }
         for queued in self.queue.drain(..) {
             self.failed.push((queued.pending, auth_rejected_error()));
         }
@@ -1035,13 +1170,17 @@ impl Account {
             return;
         }
         self.margins_busy = true;
-        self.request(
+        let Some(context) = self.background_context(cx) else {
+            self.margins_ended(cx, boot);
+            return;
+        };
+        self.read(
             cx,
-            Method::Get,
-            "/account/margin".into(),
-            None,
+            context.clone(),
+            "/account/margin",
             Some(ArrayAt::Field("configs")),
             Pending::Account(Request::Margins {
+                context,
                 revision: self.margins_revision,
                 rows: vec![],
                 boot,
@@ -1056,13 +1195,17 @@ impl Account {
             return;
         }
         self.positions_busy = true;
-        self.request(
+        let Some(context) = self.background_context(cx) else {
+            self.positions_ended(cx, cycle);
+            return;
+        };
+        self.read(
             cx,
-            Method::Get,
-            "/positions".into(),
-            None,
+            context.clone(),
+            "/positions",
             Some(ArrayAt::Field("results")),
             Pending::Account(Request::Positions {
+                context,
                 revision: self.positions_revision,
                 started: cx.now,
                 rows: vec![],
@@ -1076,13 +1219,17 @@ impl Account {
             return;
         }
         self.balance_busy = true;
-        self.request(
+        let Some(context) = self.background_context(cx) else {
+            self.balance_ended(cx, cycle);
+            return;
+        };
+        self.read(
             cx,
-            Method::Get,
-            "/account".into(),
-            None,
+            context.clone(),
+            "/account",
             None,
             Pending::Account(Request::Balance {
+                context,
                 revision: self.balance_revision,
                 cycle,
             }),
@@ -1118,13 +1265,17 @@ impl Account {
             return;
         };
         self.orders_busy = true;
-        self.request(
+        let Some(context) = self.background_context(cx) else {
+            self.orders_ended(cx, cycle);
+            return;
+        };
+        self.read(
             cx,
-            Method::Get,
-            "/orders".into(),
-            None,
+            context.clone(),
+            "/orders",
             Some(ArrayAt::Field("results")),
             Pending::Account(Request::Orders {
+                context,
                 token,
                 rows: vec![],
                 seen: HashSet::new(),
@@ -1251,7 +1402,29 @@ impl Account {
             _ => {}
         }
     }
+    /// A snapshot read is applied first and its Context retired after, so the
+    /// published rows are those of a live read.
     pub fn on_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        let context = request.read_context().cloned();
+        if let Some(context) = &context
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            // A stale delivery belongs to a read that already ended.
+            let _ = cx.finish_http_context(context);
+            return;
+        }
+        self.apply_response(cx, request, response);
+        if let Some(context) = context {
+            // Already retired when the response failed through `on_failed`.
+            let _ = cx.finish_http_context(&context);
+        }
+    }
+    fn apply_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
@@ -1288,6 +1461,18 @@ impl Account {
                             &config,
                         )
                     });
+                let credentials = credentials.and_then(|credentials| {
+                    let session = cx
+                        .open_session(SessionPolicy {
+                            credential: None,
+                            // `/auth` stays outside the Session: it only attaches the JWT.
+                            repeat_safe: false,
+                            private_egress: None,
+                        })
+                        .map_err(|_| "Paradex private session is unavailable".to_owned())?;
+                    self.session = Some(session);
+                    Ok(credentials)
+                });
                 match credentials {
                     Ok(credentials) => {
                         self.credentials = Some(credentials);
@@ -1315,6 +1500,10 @@ impl Account {
                     self.auth_failed(cx, "Paradex authentication returned no JWT");
                     return;
                 };
+                if SessionHeaders::bearer(&token).is_err() {
+                    self.auth_failed(cx, "Paradex authentication returned an invalid JWT");
+                    return;
+                }
                 self.auth_in_flight = false;
                 if cx.now >= started + 300_000. {
                     self.token = None;
@@ -1323,7 +1512,14 @@ impl Account {
                     return;
                 }
                 self.token = Some(token);
+                self.bearer_revision += 1;
                 self.refresh_at = started + AUTH_REFRESH_MS;
+                if let Some(session) = &self.session {
+                    // Wakes reads parked for this JWT. Paradex never parks a
+                    // continuation through `session_wait`, so no waiter comes back.
+                    let waiters = cx.session_ready(session);
+                    debug_assert!(waiters.is_empty(), "Paradex has no session waiters");
+                }
                 while let Some(request) = self.queue.pop_front() {
                     self.dispatch(cx, request);
                 }
@@ -1333,6 +1529,7 @@ impl Account {
                 revision,
                 rows,
                 boot,
+                ..
             } => {
                 self.margins_busy = false;
                 if revision == self.margins_revision {
@@ -1355,6 +1552,7 @@ impl Account {
                 rows,
                 coverage,
                 cycle,
+                ..
             } => {
                 self.positions_busy = false;
                 if revision == self.positions_revision {
@@ -1398,7 +1596,9 @@ impl Account {
                     self.balance(cx, true);
                 }
             }
-            Request::Balance { revision, cycle } => {
+            Request::Balance {
+                revision, cycle, ..
+            } => {
                 if revision == self.balance_revision
                     && !self.balance_message_inner(cx, response.body, false)
                 {
@@ -1511,39 +1711,46 @@ impl Account {
         mapped
     }
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        if let Some(context) = request.read_context() {
+            let _ = cx.finish_http_context(context);
+        }
         match request {
             Request::Config(context) => {
                 let _ = cx.finish_http_context(&context);
                 self.config_failed(cx, error);
             }
             Request::Auth { .. } => self.auth_failed(cx, error),
-            Request::Margins { boot, .. } => {
-                self.margins_busy = false;
-                if boot {
-                    self.positions(cx, true);
-                } else if self.poll.is_none() {
-                    self.poll = Some(cx.set_poll_timer(POLL_MS));
-                }
-            }
-            Request::Positions { cycle, .. } => {
-                self.positions_busy = false;
-                if cycle {
-                    self.balance(cx, true);
-                }
-            }
-            Request::Balance { cycle, .. } => {
-                self.balance_busy = false;
-                if cycle {
-                    self.orders(cx, true);
-                }
-            }
-            Request::Orders { cycle, .. } => {
-                self.orders_busy = false;
-                self.owed_orders(cx);
-                if cycle {
-                    self.margins(cx, false);
-                }
-            }
+            Request::Margins { boot, .. } => self.margins_ended(cx, boot),
+            Request::Positions { cycle, .. } => self.positions_ended(cx, cycle),
+            Request::Balance { cycle, .. } => self.balance_ended(cx, cycle),
+            Request::Orders { cycle, .. } => self.orders_ended(cx, cycle),
+        }
+    }
+    fn margins_ended(&mut self, cx: &mut Cx<'_, Pending>, boot: bool) {
+        self.margins_busy = false;
+        if boot {
+            self.positions(cx, true);
+        } else if self.poll.is_none() {
+            self.poll = Some(cx.set_poll_timer(POLL_MS));
+        }
+    }
+    fn positions_ended(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
+        self.positions_busy = false;
+        if cycle {
+            self.balance(cx, true);
+        }
+    }
+    fn balance_ended(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
+        self.balance_busy = false;
+        if cycle {
+            self.orders(cx, true);
+        }
+    }
+    fn orders_ended(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
+        self.orders_busy = false;
+        self.owed_orders(cx);
+        if cycle {
+            self.margins(cx, false);
         }
     }
     fn order_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
@@ -2240,7 +2447,7 @@ fn raw_rows(text: &str) -> Result<Vec<&serde_json::value::RawValue>, serde_json:
     }
 }
 
-fn auth_rejected_error() -> VenueError {
+pub(crate) fn auth_rejected_error() -> VenueError {
     VenueError::new("Paradex rejected the account credentials")
         .kind(safe_cex_engine::ErrorKind::AuthInvalid)
         .outcome(safe_cex_engine::Outcome::NotSent)
