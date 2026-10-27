@@ -148,7 +148,10 @@ fn first_valid_account_data_authenticates_and_publishes_exactly_once() {
     let watch = engine
         .prepared(20.0)
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == 5020.0 => Some(timer),
+            Action::SetTimer {
+                timer,
+                at_ms: 5020.0,
+            } => Some(timer),
             _ => None,
         })
         .expect("actual authentication watchdog");
@@ -335,27 +338,25 @@ impl Venue for Probe {
                         }
                     }
                 }
-                Scenario::Credits => {
-                    if !self.1.borrow().pressure_used {
-                        self.1.borrow_mut().pressure_used = true;
-                        let feed = cx
-                            .socket_epoch(self.1.borrow().public_feed.expect("captured real feed"))
-                            .unwrap()
-                            .feed();
-                        for _ in 0..511 {
-                            cx.set_socket_interests(
-                                feed,
-                                vec![Interest::from_wire_args("instrumentInfo.all")],
-                            )
-                            .unwrap();
-                        }
-                        self.0.on_command(
-                            cx,
-                            Command::SubscribeOrderBook {
-                                symbol: "REFUSED".into(),
-                            },
-                        );
+                Scenario::Credits if !self.1.borrow().pressure_used => {
+                    self.1.borrow_mut().pressure_used = true;
+                    let feed = cx
+                        .socket_epoch(self.1.borrow().public_feed.expect("captured real feed"))
+                        .unwrap()
+                        .feed();
+                    for _ in 0..511 {
+                        cx.set_socket_interests(
+                            feed,
+                            vec![Interest::from_wire_args("instrumentInfo.all")],
+                        )
+                        .unwrap();
                     }
+                    self.0.on_command(
+                        cx,
+                        Command::SubscribeOrderBook {
+                            symbol: "REFUSED".into(),
+                        },
+                    );
                 }
                 _ => {}
             }
