@@ -388,6 +388,9 @@ pub struct Identity {
     #[cfg(feature = "address-nonce")]
     #[serde(skip)]
     pub(crate) address: crate::engine::address_nonce_setup::AddressCapability,
+    #[cfg(feature = "nonce-handoff")]
+    #[serde(skip)]
+    pub(crate) nonce_owner: Option<Arc<crate::nonce::handoff::Owner>>,
 }
 impl Identity {
     #[inline]
@@ -402,6 +405,8 @@ impl Identity {
             credential_absent: false,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
+            #[cfg(feature = "nonce-handoff")]
+            nonce_owner: None,
         }
     }
 
@@ -444,6 +449,10 @@ impl Identity {
     #[inline]
     pub fn set_signing_ref(&mut self, signing: Option<KeyRef>) {
         self.signing = signing;
+        #[cfg(feature = "nonce-handoff")]
+        {
+            self.nonce_owner = None;
+        }
         #[cfg(feature = "address-nonce")]
         {
             self.address = Default::default();
@@ -1095,6 +1104,13 @@ pub trait Signer: ProviderBounds {
     ) -> Option<Box<dyn OwnedSetupExecution>> {
         None
     }
+    /// Trusted setup only: prove the legacy digest from this exact installed key.
+    fn legacy_nonce_association(
+        &self,
+        _request: crate::nonce::handoff::LegacyNonceRequest,
+    ) -> Result<crate::nonce::handoff::LegacyNonceProof, SignError> {
+        Err(SignError::Unsupported)
+    }
 }
 pub type Provider = Arc<dyn Signer>;
 
@@ -1189,6 +1205,8 @@ mod setup_field_policy_tests {
             credential_absent: false,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
+            #[cfg(feature = "nonce-handoff")]
+            nonce_owner: None,
         }
     }
 
@@ -1244,6 +1262,8 @@ mod setup_field_policy_tests {
                 credential_absent: false,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
+                #[cfg(feature = "nonce-handoff")]
+                nonce_owner: None,
             }),
             secondary: Some(identity("secondary", None)),
         };
@@ -1265,6 +1285,8 @@ mod setup_field_policy_tests {
                 credential_absent: false,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
+                #[cfg(feature = "nonce-handoff")]
+                nonce_owner: None,
             }),
         };
         let original = ids.clone();

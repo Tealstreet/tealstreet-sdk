@@ -1372,6 +1372,7 @@ struct StreamedWrites {
     ids: Vec<String>,
     settled: usize,
     refused: usize,
+    sent_refusal: bool,
     effects: bool,
     retained: Vec<(RequestId, VenueError, RejectionReports)>,
     retained_bytes: usize,
@@ -2042,6 +2043,11 @@ impl CommandWrites {
                 });
         #[cfg(feature = "serial-plans")]
         let all_rejected = all_rejected && !self.streamed().is_some_and(|stream| stream.effects);
+        let all_not_sent = all_rejected && self.attempts.iter()
+            .filter(|a| a.released && self.terminal(a))
+            .all(|a| matches!(&a.result, Some(WriteResult::Rejected(e)) if e.outcome == Some(Outcome::NotSent)));
+        #[cfg(feature = "serial-plans")]
+        let all_not_sent = all_not_sent && !self.streamed().is_some_and(|s| s.sent_refusal);
         let error = |a: &WriteAttempt| match &a.result {
             Some(
                 WriteResult::Rejected(error)
@@ -2094,6 +2100,8 @@ impl CommandWrites {
             Some(Outcome::NotSent)
         } else if uncertain || overflow {
             Some(Outcome::Unknown)
+        } else if all_not_sent {
+            Some(Outcome::NotSent)
         } else if all_rejected {
             Some(Outcome::Rejected)
         } else {
@@ -2382,6 +2390,7 @@ impl CommandWrites {
                                 stream.effects |= !partial.order_ids.is_empty();
                                 stream.ids.extend(partial.order_ids);
                             }
+                            stream.sent_refusal |= error.outcome != Some(Outcome::NotSent);
                             stream.refused += 1;
                             let bytes = error.message.len()
                                 + error.venue_code.as_ref().map_or(0, String::len)

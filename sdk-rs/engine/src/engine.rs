@@ -2,6 +2,9 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 #[path = "address_nonce_setup.rs"]
 pub(crate) mod address_nonce_setup;
+#[cfg(feature = "nonce-handoff")]
+#[path = "nonce_handoff_core.rs"]
+pub(crate) mod nonce_handoff_core;
 #[cfg(feature = "address-nonce")]
 pub use address_nonce_setup::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
 pub use address_nonce_setup::{AddressSetupSlots, SetupRetirement};
@@ -1740,6 +1743,8 @@ struct IoCore {
     signing: crate::signing_dispatch::Dispatch,
     protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
+    #[cfg(feature = "nonce-handoff")]
+    nonce_handoff_issuer: Option<std::sync::Arc<()>>,
     /// Trusted-construction refs per slot, used only for capability admission.
     identities: crate::signing::Identities,
     /// Algorithms a host-fulfilled (Action::Sign) signer declared at install.
@@ -1889,6 +1894,8 @@ impl Default for IoCore {
             signing: Default::default(),
             protocol_clock: Default::default(),
             signer: None,
+            #[cfg(feature = "nonce-handoff")]
+            nonce_handoff_issuer: None,
             identities: Default::default(),
             host_algorithms: None,
             dispatch_now: 0.,
@@ -3866,6 +3873,8 @@ impl<V: Venue> Engine<V> {
         }
         #[cfg(feature = "address-nonce")]
         self.invalidate_address_setup()?;
+        #[cfg(feature = "nonce-handoff")]
+        self.invalidate_nonce_handoff();
         self.io.core.signer = signer;
         Ok(())
     }
@@ -3895,6 +3904,18 @@ impl<V: Venue> Engine<V> {
                 .flatten()
             {
                 identity.address = Default::default();
+            }
+            identities
+        };
+        #[cfg(feature = "nonce-handoff")]
+        let identities = {
+            self.invalidate_nonce_handoff();
+            let mut identities = identities;
+            for id in [&mut identities.primary, &mut identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                id.nonce_owner = None;
             }
             identities
         };
