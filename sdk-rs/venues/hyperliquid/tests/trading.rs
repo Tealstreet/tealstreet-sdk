@@ -1,6 +1,7 @@
 //! Command contract cases derived from the official exchange endpoint shapes.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::Value;
@@ -1428,7 +1429,11 @@ fn schedule_control_shares_ordinary_write_queue_and_nonce_without_settings_mutat
         safe_cex_engine::command::decode_command(r#"{"op":"scheduleCancel","command":72}"#)
             .unwrap();
     e.handle(2001.0, Event::Command(schedule));
-    assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        !prepared_now(&mut e)
+            .into_iter()
+            .any(|a| matches!(a, Action::Http(_)))
+    );
     reply(
         &mut e,
         &first,

@@ -1,5 +1,6 @@
 //! Documented userFillsByTime, userFunding, historicalOrders and recentTrades shapes.
 mod support;
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Query};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::Value;
@@ -58,8 +59,8 @@ fn reply_at(e: &mut Engine<Hyperliquid>, now: f64, r: &HttpRequest, status: u16,
     );
 }
 fn result(e: &mut Engine<Hyperliquid>) -> Value {
-    let result = e
-        .drain_actions()
+    let result = prepared_now(e)
+        .into_iter()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
                 Some(result)
@@ -168,7 +169,7 @@ fn rolling_order_retention_marker_owns_its_result_before_done_at_error_only_leve
     assert_eq!(kind(&request), "historicalOrders");
     let rows: Vec<_> = (1..=2000).map(|id| format!(r#"{{"order":{{"coin":"BTC","oid":{id},"side":"B","limitPx":"90","origSz":"2","sz":"0","orderType":"Limit","timestamp":2000}},"status":"filled","statusTimestamp":2000}}"#)).collect();
     reply(&mut e, &request, 200, &format!("[{}]", rows.join(",")));
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = prepared_now(&mut e).into_iter().collect();
     let (index, event) = actions
         .iter()
         .enumerate()
@@ -270,7 +271,8 @@ fn failed_or_malformed_history_never_resolves_as_empty_success() {
         let r = read(&mut e);
         reply(&mut e, &r, status, body);
         assert!(
-            e.drain_actions()
+            prepared_now(&mut e)
+                .into_iter()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
         );
     }
@@ -382,7 +384,7 @@ fn full_overlap_page_is_incomplete_instead_of_an_empty_success() {
     reply(&mut e, &r, 200, &repeated);
     // Superseded strict-failure contract: admitted rows now survive with owned
     // incompleteness; this must still never become an empty complete result.
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let rows = owned_partial(&actions, 1);
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert_eq!(rows[0]["id"], "1");
@@ -492,7 +494,7 @@ fn owned_history_first_and_zero_eligible_failures_reject_typed() {
             request = read(&mut e);
         }
         reply(&mut e, &request, 503, "unavailable");
-        owned_first_failure(&e.drain_actions().collect::<Vec<_>>(), 1);
+        owned_first_failure(&prepared_now(&mut e).into_iter().collect::<Vec<_>>(), 1);
     }
 }
 #[test]
@@ -535,7 +537,7 @@ fn owned_history_later_failures_keep_only_validated_pages() {
                 );
             }
         }
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
         let rows = owned_partial(&actions, 1);
         assert_eq!(rows.as_array().unwrap().len(), 1, "{terminal}");
         assert_eq!(rows[0]["id"], "1", "failed-page prefix must not leak");
@@ -564,7 +566,7 @@ fn owned_history_income_retains_fills_when_funding_fails() {
     let funding = read(&mut e);
     assert_eq!(kind(&funding), "userFunding");
     reply(&mut e, &funding, 503, "unavailable");
-    let rows = owned_partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+    let rows = owned_partial(&prepared_now(&mut e).into_iter().collect::<Vec<_>>(), 1);
     assert_eq!(rows.as_array().unwrap().len(), 2);
     assert!(rows.as_array().unwrap().iter().all(|r| r["tradeId"] == "1"));
 }
@@ -593,7 +595,7 @@ fn owned_history_concurrent_markers_never_cross_queries() {
     let mut actions = Vec::new();
     for (command, request) in pending.into_iter().rev() {
         reply(&mut e, &request, 503, "unavailable");
-        actions.extend(e.drain_actions());
+        actions.extend(prepared_now(&mut e));
         assert_eq!(
             owned_partial(&actions, command)[0]["id"],
             command.to_string()
@@ -614,7 +616,7 @@ fn owned_history_full_inclusive_stall_preserves_accepted_rows() {
         200,
         &format!("[{}]", vec![fill(1); 2000].join(",")),
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let rows = owned_partial(&actions, 1);
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
@@ -653,7 +655,7 @@ fn owned_history_page_cap_keeps_page_200_but_no_request_201() {
         }
         if positive_pages == 199 {
             reply_at(&mut e, now, &request, 200, "[]");
-            let actions = e.drain_actions().collect::<Vec<_>>();
+            let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
             assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
             let data = actions
                 .iter()
@@ -664,7 +666,7 @@ fn owned_history_page_cap_keeps_page_200_but_no_request_201() {
                 .unwrap();
             assert_eq!(serde_json::from_str::<Vec<Value>>(data).unwrap().len(), 199);
         } else {
-            let actions = e.drain_actions().collect::<Vec<_>>();
+            let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
             assert_eq!(owned_partial(&actions, 1).as_array().unwrap().len(), 200);
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         }
@@ -701,7 +703,7 @@ fn owned_history_zero_income_rows_cannot_authorize_partial_recovery() {
         } else {
             reply(&mut e, &request, 503, "unavailable");
         }
-        owned_first_failure(&e.drain_actions().collect::<Vec<_>>(), 1);
+        owned_first_failure(&prepared_now(&mut e).into_iter().collect::<Vec<_>>(), 1);
     }
 }
 #[test]
@@ -745,7 +747,7 @@ fn owned_history_income_keeps_the_first_gap_through_funding_failure() {
         );
     }
     reply_at(&mut e, now, &request, 503, "later funding failure");
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     assert_eq!(owned_partial(&actions, 1).as_array().unwrap().len(), 400);
     let message = actions
         .iter()
@@ -859,7 +861,7 @@ fn owned_history_full_inclusive_gap_survives_both_funding_outcomes() {
             let final_probe = read(&mut e);
             reply(&mut e, &final_probe, 200, "[]");
         }
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
         let rows = owned_partial(&actions, 1);
         assert_eq!(
             rows.as_array().unwrap().len(),
