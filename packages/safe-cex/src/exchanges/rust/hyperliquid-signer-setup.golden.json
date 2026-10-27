@@ -1,0 +1,86 @@
+[
+  {
+    "name": "plain",
+    "scalar": "00000000000000000000000000000000000000000000000000000000000000ab",
+    "valid": true,
+    "legacySdkValid": true
+  },
+  {
+    "name": "lower-prefix",
+    "scalar": "0x00000000000000000000000000000000000000000000000000000000000000ab",
+    "valid": true,
+    "legacySdkValid": true
+  },
+  {
+    "name": "upper-prefix",
+    "scalar": "0X00000000000000000000000000000000000000000000000000000000000000ab",
+    "valid": true,
+    "legacySdkValid": false
+  },
+  {
+    "name": "upper-hex",
+    "scalar": "00000000000000000000000000000000000000000000000000000000000000AB",
+    "valid": true,
+    "legacySdkValid": true
+  },
+  {
+    "name": "ascii-leading",
+    "scalar": " 00000000000000000000000000000000000000000000000000000000000000ab",
+    "valid": false,
+    "legacySdkValid": false
+  },
+  {
+    "name": "ascii-trailing",
+    "scalar": "00000000000000000000000000000000000000000000000000000000000000ab ",
+    "valid": false,
+    "legacySdkValid": false
+  },
+  {
+    "name": "nel-leading",
+    "scalar": "\u008500000000000000000000000000000000000000000000000000000000000000ab",
+    "valid": false,
+    "legacySdkValid": false
+  },
+  {
+    "name": "nel-trailing",
+    "scalar": "00000000000000000000000000000000000000000000000000000000000000ab\u0085",
+    "valid": false,
+    "legacySdkValid": false
+  },
+  {
+    "name": "bom-leading",
+    "scalar": "\ufeff00000000000000000000000000000000000000000000000000000000000000ab",
+    "valid": false,
+    "legacySdkValid": false
+  },
+  {
+    "name": "bom-trailing",
+    "scalar": "00000000000000000000000000000000000000000000000000000000000000ab\ufeff",
+    "valid": false,
+    "legacySdkValid": false
+  },
+  {
+    "name": "bad-hex",
+    "scalar": "not-a-scalar",
+    "valid": false,
+    "legacySdkValid": false
+  },
+  {
+    "name": "short",
+    "scalar": "ab",
+    "valid": false,
+    "legacySdkValid": false
+  },
+  {
+    "name": "zero",
+    "scalar": "0000000000000000000000000000000000000000000000000000000000000000",
+    "valid": false,
+    "legacySdkValid": false
+  },
+  {
+    "name": "order",
+    "scalar": "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+    "valid": false,
+    "legacySdkValid": false
+  }
+]

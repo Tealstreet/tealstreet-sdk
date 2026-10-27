@@ -64,7 +64,7 @@ binance = ["dep:safe-cex-venue-binance", "dispatch-signing"]
 kucoin = ["dep:safe-cex-venue-kucoin"]
 kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
 bybit = ["dep:safe-cex-venue-bybit", "dispatch-signing"]
-hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
+hyperliquid = ["dep:safe-cex-venue-hyperliquid", "address-nonce", "dep:serde_json"]
 okx = ["dep:safe-cex-venue-okx", "dispatch-signing"]
 orderly = ["dep:safe-cex-venue-orderly", "dispatch-signing", "safe-cex-crypto/ed25519"]
 

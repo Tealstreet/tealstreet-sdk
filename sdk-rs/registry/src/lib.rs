@@ -46,6 +46,8 @@ mod asterdex_setup;
 mod construction;
 #[cfg(feature = "dispatch-signing")]
 pub mod hosted_signing;
+#[cfg(feature = "hyperliquid")]
+mod hyperliquid_setup;
 #[cfg(feature = "lighter")]
 mod lighter_setup;
 pub use construction::{
@@ -723,6 +725,10 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "hyperliquid")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
+        return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
+    }
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::raw(options);
@@ -1044,6 +1050,15 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    #[cfg(feature = "hyperliquid")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
+        return hyperliquid_setup::json(
+            venue,
+            input,
+            signer_setup_policy_for(venue, options),
+            options,
+        );
+    }
     #[cfg(feature = "lighter")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
         let mut input = zeroize::Zeroizing::new(input);
@@ -2166,11 +2181,24 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => {
+            if options.secret.is_some()
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Hyperliquid signing material belongs in signer setup",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() || identities.primary.is_some() && signer.is_none() {
+                return Err(invalid("Hyperliquid requires its primary signing provider"));
+            }
+            let registered = identities.clone();
             let config = HyperliquidOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key.take(),
-                secret: options.secret.take(),
+                credentials: identities.primary,
                 application_id: options.application_id.take(),
                 vault: options.vault.take(),
                 builder: options.hyperliquid_builder.take().map(|b| Builder {
@@ -2179,19 +2207,17 @@ pub fn build_with_signer<T: Visit>(
                 }),
                 enable_spot_markets: venue == "hyperliquid" && options.enable_spot_markets,
             };
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    if venue == "hyperliquidspot" {
-                        Hyperliquid::new_spot(config)
-                    } else {
-                        Hyperliquid::new(config)
-                    },
-                    entropy,
-                )?,
-            )
+            let mut engine = Engine::new(
+                if venue == "hyperliquidspot" {
+                    Hyperliquid::new_spot(config)
+                } else {
+                    Hyperliquid::new(config)
+                },
+                entropy,
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "okx")]
         "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
