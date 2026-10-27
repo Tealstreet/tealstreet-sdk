@@ -11,8 +11,6 @@ use safe_cex_engine::socket_lifecycle::{
 pub(super) struct Connection {
     pub(super) feed: Option<FeedId>,
     pub(super) socket: Option<SocketId>,
-    pub(super) open: bool,
-    pending: Option<(u64, Change)>,
     opening: Option<u64>,
 }
 enum Change {
@@ -134,20 +132,12 @@ impl Bingx {
         }
     }
     fn change_interests(&mut self, cx: &mut Cx<'_, Pending>, change: Change) {
-        if !self.public.open {
+        let Some(feed) = self.public.feed else {
             self.commit_change(change);
             return;
-        }
-        let result = if self.public.pending.is_some() {
-            Err(SocketError::Capacity)
-        } else {
-            self.public
-                .feed
-                .ok_or(SocketError::NotPermitted)
-                .and_then(|feed| cx.set_socket_interests(feed, self.topics(cx, Some(&change))))
         };
-        match result {
-            Ok(proposal) => self.public.pending = Some((proposal, change)),
+        match cx.set_socket_interests(feed, self.topics(cx, Some(&change))) {
+            Ok(_) => self.commit_change(change),
             Err(error) => Self::socket_notice(cx, error),
         }
     }
@@ -224,19 +214,9 @@ impl Bingx {
         match event {
             LifecycleEvent::Ready { epoch, .. } => {
                 self.public.socket = Some(epoch.socket());
-                self.public.open = true;
                 self.public.opening = Some(cx.set_socket_interests(feed, self.topics(cx, None))?);
             }
             LifecycleEvent::InterestsCommitted { proposal, .. } => {
-                if self
-                    .public
-                    .pending
-                    .as_ref()
-                    .is_some_and(|(p, _)| *p == proposal)
-                {
-                    let (_, change) = self.public.pending.take().expect("matching proposal");
-                    self.commit_change(change);
-                }
                 if self.public.opening == Some(proposal) {
                     self.public.opening = None;
                     cx.send_after_socket_interests(feed, "Ping".into())?;
@@ -244,11 +224,7 @@ impl Bingx {
             }
             LifecycleEvent::Retired { .. } => {
                 self.public.socket = None;
-                self.public.open = false;
                 self.public.opening = None;
-                if let Some((_, change)) = self.public.pending.take() {
-                    self.commit_change(change);
-                }
                 for (symbol, b) in &mut self.books {
                     b.ready = false;
                     b.book.clear();
@@ -261,16 +237,12 @@ impl Bingx {
                 error: SocketError::Capacity,
                 ..
             } => {
-                if let Some((_, change)) = self.public.pending.take() {
-                    self.commit_change(change);
-                }
                 Self::socket_notice(cx, SocketError::Capacity);
                 if cx.socket_epoch(feed).is_some() {
                     cx.retire_socket(feed, RetireReason::Closed);
                 }
             }
             LifecycleEvent::InterestsRefused { error, .. } => {
-                self.public.pending = None;
                 return Err(error);
             }
             _ => {}
