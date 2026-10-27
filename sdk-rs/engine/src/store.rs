@@ -35,7 +35,10 @@ pub struct Store {
     ticker_revision: u64,
     ticker_by_symbol: HashMap<Box<str>, u32>,
     orders: Vec<Order>,
+    /// Broad late-ACK fence: every row change advances it. Kept separate from
+    /// the snapshot fence by docs/plans/RUST_ORDER_FENCE_DOMAINS.md.
     orders_revision: u64,
+    /// Selective read fence: only `invalidate_order_snapshots` advances it.
     order_snapshot_epoch: Epoch,
     #[cfg(feature = "repair-mutations")]
     snapshot_begins: u64,
@@ -472,6 +475,7 @@ impl Store {
         self.orders.iter().find(|order| order.id == id)
     }
 
+    /// Late-ACK reconciliation only; logical reads use `begin_orders_snapshot`.
     pub(crate) fn orders_revision(&self) -> u64 {
         self.orders_revision
     }

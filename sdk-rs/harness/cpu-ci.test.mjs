@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle, restorePairedRawOutputs } from './cpu-ci.mjs';
+import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle, restorePairedRawOutputs, currentPhysical } from './cpu-ci.mjs';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -177,4 +177,29 @@ test('only a registered runtime artifact receives the runtime transport bound', 
   for (const name of ['strict-replay-bybit', 'cpu-cohort-bybit', 'cpu-second-bybit', 'cpu-plan', 'cpu-final'])
     await exercise(name, 'artifact');
   for (const name of ['cpu-runtime-bybit-extra', 'cpu-runtime-', 'cpu-runtime-unknown']) await exercise(name, null);
+});
+
+test('run 40518541502: the physical producer is re-listed until GitHub records its runner', async () => {
+  const name = 'Rust / replay measurement (bitget)', run = { id: 7, run_attempt: 1 };
+  const row = runner_id => ({ id: 30, name, run_attempt: 1, runner_id, status: 'in_progress' });
+  const physical = (...listings) => {
+    const sleeps = [], reader = { getRun: async () => run, listJobs: async () => listings.length > 1 ? listings.shift() : listings[0] };
+    return { sleeps, context: { runId: 7, reader, sleep: async ms => { sleeps.push(ms); } } };
+  };
+  for (const listings of [[[row(0)], [row(null)], [row(40)]], [[], [row(40)]]]) {
+    const x = physical(...listings), { job } = await currentPhysical(x.context, name);
+    assert.equal(job.runner_id, 40); assert.deepEqual(x.sleeps, Array(listings.length - 1).fill(10_000));
+  }
+  const unassigned = physical([row(0)]);
+  await assert.rejects(currentPhysical(unassigned.context, name),
+    /missing unique original physical job; candidates \[\{"id":30,"name":"Rust \/ replay measurement \(bitget\)","run_attempt":1,"runner_id":0,"status":"in_progress"\}\]/);
+  assert.equal(unassigned.sleeps.length, 6);
+  const absent = physical([]);
+  await assert.rejects(currentPhysical(absent.context, name), /candidates \[\]/);
+  assert.equal(absent.sleeps.length, 6);
+  for (const listing of [[row(40), row(41)], [{ ...row(40), run_attempt: 2 }]]) {
+    const x = physical(listing);
+    await assert.rejects(currentPhysical(x.context, name), /missing unique original physical job/);
+    assert.equal(x.sleeps.length, 0);
+  }
 });

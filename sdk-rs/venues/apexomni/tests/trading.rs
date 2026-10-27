@@ -108,6 +108,13 @@ fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, Socke
             _ => None,
         })
         .collect::<Vec<_>>();
+    e.handle(
+        NOW + 1.0,
+        Event::WsOpened {
+            socket: socket.unwrap(),
+        },
+    );
+    e.drain_actions().for_each(drop);
     for request in reads {
         response(
             &mut e,
@@ -1390,16 +1397,15 @@ fn late_cancel_ack_preserves_uncertainty_without_bypassing_native_read_fences() 
     }
 }
 
-/// A remote HMAC signer for writes. Account reads (GET), which the venue now
-/// signs through the provider too, answer inline from the local fixture so
-/// startup completes; writes wait for the remote reply.
+/// A remote HMAC signer for writes. Account reads and SessionAuth answer
+/// inline from the installed fixture; mutation signatures await a remote reply.
 struct DelegatedHmac(Arc<dyn Signer>);
 impl Signer for DelegatedHmac {
     fn sign(&self, _: SignRequest) -> SignFuture {
         Box::pin(std::future::pending())
     }
     fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
-        (work.context.method == "GET")
+        (matches!(work.context.method.as_str(), "GET" | "WS"))
             .then(|| self.0.sign_ready(work))
             .flatten()
     }
@@ -1689,7 +1695,7 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     let heal = actions(&mut e)
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms >= NOW + 1_000.0 => Some(timer),
+            Action::SetTimer { timer, at_ms } if at_ms == NOW + 1_005.0 => Some(timer),
             _ => None,
         })
         .expect("the order heal timer");
