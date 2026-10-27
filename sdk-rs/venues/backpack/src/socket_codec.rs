@@ -54,6 +54,7 @@ fn policy(role: SocketChannel) -> FeedPolicy {
         traffic: TrafficPolicy::AnyText,
         controls: ControlPolicy::Native,
         subscription_interval_ms: 0.0,
+        close_floors: &[],
     }
 }
 

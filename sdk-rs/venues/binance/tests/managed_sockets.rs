@@ -123,7 +123,7 @@ fn a_dropped_public_feed_replays_its_current_streams_once_on_reopen() {
         code: 1006,
     });
     assert!(
-        logged(&h, "Binance socket closed; reconnecting"),
+        logged(&h, "Binance socket closed (1006); reconnecting"),
         "{:?}",
         h.logs
     );

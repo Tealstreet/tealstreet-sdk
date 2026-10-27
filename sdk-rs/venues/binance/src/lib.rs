@@ -455,6 +455,7 @@ impl BinanceFutures {
             controls: ControlPolicy::None,
             invalidation: Invalidation::Required,
             subscription_interval_ms: if paced { SPOT_SUBSCRIBE_PACE_MS } else { 0.0 },
+            close_floors: &[],
         }
     }
 
@@ -559,6 +560,7 @@ impl BinanceFutures {
         cx: &mut Cx<'_, Pending>,
         channel: Channel,
         reason: RetireReason,
+        close_code: Option<u16>,
     ) {
         let connection = self.connection(channel);
         connection.socket = None;
@@ -568,14 +570,19 @@ impl BinanceFutures {
             self.reset_spot_subscription(cx);
             self.account.resync_orders_on_open = true;
         }
-        let message = match reason {
-            RetireReason::Timeout(Timeout::Idle) => {
-                "Binance socket closed (idle timeout); reconnecting"
+        let message = match (reason, close_code) {
+            (RetireReason::Closed, Some(code)) => {
+                format!("Binance socket closed ({code}); reconnecting")
             }
-            RetireReason::Timeout(_) => "Binance socket timed out; reconnecting",
-            RetireReason::Authentication => "Binance socket authentication failed; reconnecting",
-            RetireReason::Closed => "Binance socket closed; reconnecting",
-            RetireReason::Stopped => "Binance socket stopped",
+            (RetireReason::Timeout(Timeout::Idle), _) => {
+                "Binance socket closed (idle timeout); reconnecting".into()
+            }
+            (RetireReason::Timeout(_), _) => "Binance socket timed out; reconnecting".into(),
+            (RetireReason::Authentication, _) => {
+                "Binance socket authentication failed; reconnecting".into()
+            }
+            (RetireReason::Closed, None) => "Binance socket closed; reconnecting".into(),
+            (RetireReason::Stopped, _) => "Binance socket stopped".into(),
         };
         cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
     }
@@ -1501,7 +1508,9 @@ impl Venue for BinanceFutures {
                 self.connection(channel).parked = false;
                 self.open_feed(cx, channel);
             }
-            LifecycleEvent::Retired { reason, .. } => self.on_socket_retired(cx, channel, reason),
+            LifecycleEvent::Retired {
+                reason, close_code, ..
+            } => self.on_socket_retired(cx, channel, reason, close_code),
             // A refused set is reported; the feed keeps serving its other streams.
             LifecycleEvent::InterestsRefused {
                 error: SocketError::InvalidInterest,

@@ -29,10 +29,21 @@ pub(crate) enum Effect {
         retirement: Retirement,
         reason: RetireReason,
         retry: bool,
+        /// The venue's close code; its declared floor bounds the retry.
+        close_code: Option<u16>,
     },
     Ping(Epoch),
     RetryLogin(Epoch),
     Reconnect(FeedId),
+}
+
+/// Why the host ended a managed socket.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CloseCause {
+    /// The venue closed it with this code.
+    Code(u16),
+    /// The host ran out of routes; there is no venue close code.
+    RouteExhausted,
 }
 
 pub(crate) struct IngressResult {
@@ -70,6 +81,11 @@ impl TimeBounds {
             Some(c.backoff_cap_ms),
             c.auth_timeout_ms,
             c.ping_interval_ms,
+            policy
+                .close_floors
+                .iter()
+                .map(|(_, floor)| *floor)
+                .reduce(f64::max),
             (policy.subscription_interval_ms != 0.).then_some(policy.subscription_interval_ms),
             match policy.recovery {
                 AuthRecovery::Reconnect => None,
@@ -337,6 +353,7 @@ impl Driver {
                 retirement,
                 reason: RetireReason::Stopped,
                 retry: false,
+                close_code: None,
             })
     }
 
@@ -347,7 +364,7 @@ impl Driver {
         }
         retired
             .into_iter()
-            .map(|r| self.finish_retirement(cx, r, RetireReason::Stopped, false))
+            .map(|r| self.finish_retirement(cx, r, RetireReason::Stopped, false, None))
             .collect()
     }
 
@@ -402,6 +419,7 @@ impl Driver {
         retirement: Retirement,
         reason: RetireReason,
         retry: bool,
+        close_code: Option<u16>,
     ) -> Effect {
         self.cancel_runtime(cx, retirement.epoch.feed());
         // Engine consumes this effect by canceling signing/closing the physical
@@ -412,6 +430,7 @@ impl Driver {
             retirement,
             reason,
             retry,
+            close_code,
         }
     }
 
@@ -423,7 +442,7 @@ impl Driver {
         retry: bool,
     ) -> Option<Effect> {
         let retirement = self.state.retire(feed)?;
-        Some(self.finish_retirement(cx, retirement, reason, retry))
+        Some(self.finish_retirement(cx, retirement, reason, retry, None))
     }
 
     pub(crate) fn ingress<P>(
@@ -432,8 +451,23 @@ impl Driver {
         socket: SocketId,
         ingress: Ingress,
     ) -> IngressResult {
+        debug_assert!(ingress != Ingress::Close, "a close carries its cause");
         let admission = self.admit_ingress(cx.now, socket, ingress);
-        self.finish_ingress(cx, admission, ingress)
+        self.finish_ingress(cx, admission, ingress, None)
+    }
+
+    pub(crate) fn close<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        socket: SocketId,
+        cause: CloseCause,
+    ) -> IngressResult {
+        let admission = self.admit_ingress(cx.now, socket, Ingress::Close);
+        let close_code = match cause {
+            CloseCause::Code(code) => Some(code),
+            CloseCause::RouteExhausted => None,
+        };
+        self.finish_ingress(cx, admission, Ingress::Close, close_code)
     }
 
     /// Fresh lookup and time/expiry check at each ingress boundary. Expiry
@@ -463,6 +497,7 @@ impl Driver {
         cx: &mut Cx<'_, P>,
         admission: Admission,
         ingress: Ingress,
+        close_code: Option<u16>,
     ) -> IngressResult {
         let mut effects = Vec::new();
         match admission {
@@ -472,6 +507,7 @@ impl Driver {
                     retirement,
                     RetireReason::Timeout(timeout),
                     true,
+                    None,
                 ));
             }
             Admission::Current(epoch) if ingress == Ingress::Open => {
@@ -489,8 +525,14 @@ impl Driver {
                 }
             }
             Admission::Current(epoch) if ingress == Ingress::Close => {
-                if let Some(retired) = self.retire(cx, epoch.feed(), RetireReason::Closed, true) {
-                    effects.push(retired);
+                if let Some(retirement) = self.state.retire(epoch.feed()) {
+                    effects.push(self.finish_retirement(
+                        cx,
+                        retirement,
+                        RetireReason::Closed,
+                        true,
+                        close_code,
+                    ));
                 }
             }
             _ => {}
@@ -576,6 +618,7 @@ impl Driver {
                         cx,
                         Admission::Expired(retirement, timeout),
                         Ingress::Message,
+                        None,
                     )
                     .effects;
             }
@@ -675,6 +718,7 @@ impl Driver {
                         retirement,
                         RetireReason::Authentication,
                         false,
+                        None,
                     ));
                 }
                 effects
@@ -688,10 +732,14 @@ impl Driver {
         retirement: Retirement,
         acknowledged: bool,
         retry: bool,
+        close_code: Option<u16>,
     ) -> Result<(), SocketError> {
-        if acknowledged && retry {
-            self.state.policy(retirement.epoch.feed())?;
-        }
+        let floor = if acknowledged && retry {
+            let policy = self.state.policy(retirement.epoch.feed())?;
+            close_code.map_or(0., |code| policy.close_floor(code))
+        } else {
+            0.
+        };
         if acknowledged && retry && !self.valid_time(retirement.epoch.feed(), cx.now) {
             return Err(SocketError::InvalidTime);
         }
@@ -699,7 +747,7 @@ impl Driver {
         if acknowledged && retry && self.state.awaiting_retry(retirement.epoch.feed()) {
             self.runtime_mut(retirement.epoch.feed())
                 .supervisor
-                .retry(cx);
+                .retry_after(cx, floor);
         }
         Ok(())
     }
@@ -804,6 +852,7 @@ mod tests {
                         retirement,
                         reason,
                         retry,
+                        close_code,
                     } => {
                         assert!(!self.driver.state.current(retirement.epoch));
                         // The probe has no managed Io registry. Production
@@ -818,7 +867,13 @@ mod tests {
                                 | RetireReason::Stopped
                         ));
                         self.driver
-                            .acknowledge_retirement(cx, *retirement, self.acknowledge, *retry)
+                            .acknowledge_retirement(
+                                cx,
+                                *retirement,
+                                self.acknowledge,
+                                *retry,
+                                *close_code,
+                            )
                             .unwrap();
                     }
                     Effect::Reconnect(feed) => self.connect(cx, *feed),
@@ -866,8 +921,8 @@ mod tests {
             };
             self.apply(cx, effects);
         }
-        fn on_close(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, _code: u16) {
-            let result = self.driver.ingress(cx, socket, Ingress::Close);
+        fn on_close(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, code: u16) {
+            let result = self.driver.close(cx, socket, CloseCause::Code(code));
             self.apply(cx, result.effects);
         }
         fn on_timer(&mut self, cx: &mut Cx<'_, ()>, timer: TimerId) {
@@ -999,6 +1054,7 @@ mod tests {
             controls: crate::socket_lifecycle::ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
         }
     }
     fn bitunix() -> FeedPolicy {

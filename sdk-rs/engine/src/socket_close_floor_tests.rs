@@ -3,10 +3,25 @@ use super::*;
 use crate::socket::{Config, Timeout};
 use crate::socket_lifecycle::{AuthMode, AuthRecovery, Invalidation, TrafficPolicy};
 
-#[derive(Default)]
 struct Feed {
+    declared: FeedPolicy,
+    registered: Option<Result<FeedId, SocketError>>,
     feed: Option<FeedId>,
     retired: Vec<LifecycleEvent>,
+}
+
+impl Feed {
+    fn floors(close_floors: &'static [(u16, f64)]) -> Self {
+        Self {
+            declared: FeedPolicy {
+                close_floors,
+                ..policy()
+            },
+            registered: None,
+            feed: None,
+            retired: Vec::new(),
+        }
+    }
 }
 
 fn policy() -> FeedPolicy {
@@ -20,6 +35,7 @@ fn policy() -> FeedPolicy {
         controls: ControlPolicy::None,
         invalidation: Invalidation::None,
         subscription_interval_ms: 0.,
+        close_floors: &[],
     }
 }
 
@@ -29,7 +45,11 @@ impl Venue for Feed {
     }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
-        let feed = cx.register_socket_feed(policy()).unwrap();
+        let registered = cx.register_socket_feed(self.declared.clone());
+        self.registered = Some(registered);
+        let Ok(feed) = registered else {
+            return;
+        };
         self.feed = Some(feed);
         cx.connect_socket(feed, "wss://floor.test").unwrap();
     }
@@ -72,9 +92,9 @@ struct Harness {
 }
 
 impl Harness {
-    fn new() -> Self {
+    fn new(close_floors: &'static [(u16, f64)]) -> Self {
         let mut h = Self {
-            engine: crate::test_support::seeded_engine(Feed::default()),
+            engine: crate::test_support::seeded_engine(Feed::floors(close_floors)),
             now: 0.,
             socket: None,
             timers: Vec::new(),
@@ -139,9 +159,11 @@ impl Harness {
         self.advance(until);
         assert_ne!(self.socket, old, "the retry reconnects");
     }
-    fn last_reason(&self) -> RetireReason {
+    fn last_retirement(&self) -> (RetireReason, Option<u16>) {
         match self.engine.venue.retired.last() {
-            Some(LifecycleEvent::Retired { reason, .. }) => *reason,
+            Some(LifecycleEvent::Retired {
+                reason, close_code, ..
+            }) => (*reason, *close_code),
             other => panic!("no retirement: {other:?}"),
         }
     }
@@ -159,34 +181,38 @@ fn assert_backoff(attempt: i32, delay: f64) {
 /// and each such close counts one failure.
 #[test]
 fn an_undeclared_close_code_keeps_the_ordinary_backoff() {
-    let mut h = Harness::new();
+    let mut h = Harness::new(&[(4000, 30_000.)]);
     for attempt in 0..4 {
         h.open();
         let delay = h.close(1013);
         assert_backoff(attempt, delay);
-        assert_eq!(h.last_reason(), RetireReason::Closed);
+        assert_eq!(h.last_retirement(), (RetireReason::Closed, Some(1013)));
         h.reconnect(delay);
     }
 }
 
 /// Retirements that are not a venue close frame keep today's retry: route
 /// exhaustion is a Closed retirement on the ordinary backoff, an idle
-/// timeout retries on the backoff, and a stopped feed never retries.
+/// timeout retries on the backoff, and a stopped feed never retries. None
+/// takes a floor, not even one declared for the legacy exhaustion code.
 #[test]
 fn route_exhaustion_timeouts_and_stops_keep_their_retry() {
-    let mut h = Harness::new();
+    let mut h = Harness::new(&[(crate::ROUTE_EXHAUSTED_CLOSE, 30_000.), (1013, 30_000.)]);
     h.open();
     let socket = h.socket.unwrap();
     let delay = h.retire_with(Event::WsRouteExhausted { socket });
     assert_backoff(0, delay);
-    assert_eq!(h.last_reason(), RetireReason::Closed);
+    assert_eq!(h.last_retirement(), (RetireReason::Closed, None));
     h.reconnect(delay);
 
     h.open();
     let opened = h.now;
     let before: Vec<TimerId> = h.timers.iter().map(|(t, _)| *t).collect();
     h.advance(opened + 60_000.);
-    assert_eq!(h.last_reason(), RetireReason::Timeout(Timeout::Idle));
+    assert_eq!(
+        h.last_retirement(),
+        (RetireReason::Timeout(Timeout::Idle), None)
+    );
     let retry: Vec<f64> = h
         .timers
         .iter()
@@ -207,10 +233,100 @@ fn route_exhaustion_timeouts_and_stops_keep_their_retry() {
     cx.stop_socket_feed(feed);
     h.engine.process_socket_work(h.now);
     h.collect();
-    assert_eq!(h.last_reason(), RetireReason::Stopped);
+    assert_eq!(h.last_retirement(), (RetireReason::Stopped, None));
     assert!(
         h.timers.is_empty(),
         "a stopped feed arms nothing: {:?}",
         h.timers
     );
+}
+
+/// A declared close waits its floor even though the jittered backoff is
+/// shorter, and still counts a failure for the next ordinary close.
+#[test]
+fn a_declared_close_code_waits_its_floor() {
+    let mut h = Harness::new(&[(1013, 30_000.)]);
+    h.open();
+    let old = h.socket;
+    assert_eq!(h.close(1013), 30_000.);
+    assert_eq!(h.last_retirement(), (RetireReason::Closed, Some(1013)));
+    h.advance(h.now + 29_999.);
+    assert_eq!(h.socket, old, "no reconnect before the floor");
+    h.reconnect(1.);
+    h.open();
+    let delay = h.close(1006);
+    assert_backoff(1, delay);
+}
+
+/// The retry waits for the longer of the floor and the jittered backoff.
+#[test]
+fn a_floor_below_the_backoff_yields_to_it() {
+    let mut h = Harness::new(&[(1013, 5_000.)]);
+    for attempt in 0..3 {
+        h.open();
+        let delay = h.close(1013);
+        assert_eq!(delay, 5_000., "attempt {attempt}");
+        h.reconnect(delay);
+    }
+    h.open();
+    let delay = h.close(1013);
+    assert_backoff(3, delay);
+    assert!(delay > 5_000., "{delay}");
+}
+
+/// A floor is not bounded by the backoff cap.
+#[test]
+fn a_floor_above_the_backoff_cap_still_holds() {
+    let mut h = Harness::new(&[(4000, 45_000.)]);
+    h.open();
+    assert_eq!(h.close(4000), 45_000.);
+}
+
+/// Only a venue close frame reports its code; every other retirement and the
+/// host's route exhaustion report none.
+#[test]
+fn retirement_reports_the_close_code_only_for_a_close_frame() {
+    let mut h = Harness::new(&[]);
+    h.open();
+    let delay = h.close(4001);
+    assert_eq!(h.last_retirement(), (RetireReason::Closed, Some(4001)));
+    h.reconnect(delay);
+    h.open();
+    let socket = h.socket.unwrap();
+    h.retire_with(Event::WsRouteExhausted { socket });
+    assert_eq!(h.last_retirement(), (RetireReason::Closed, None));
+}
+
+/// Malformed floors refuse the feed before it spends anything.
+#[test]
+fn invalid_close_floors_are_refused_at_registration() {
+    const INVALID: [&[(u16, f64)]; 7] = [
+        &[(1013, 1_000.), (1013, 2_000.)],
+        &[(1013, 0.)],
+        &[(1013, -1.)],
+        &[(1013, f64::NAN)],
+        &[(999, 1_000.)],
+        &[(5000, 1_000.)],
+        &[(1013, 600_001.)],
+    ];
+    for floors in INVALID {
+        let mut engine = crate::test_support::seeded_engine(Feed::floors(floors));
+        let ids = engine.io.core.next_id;
+        engine.start(0.);
+        assert_eq!(
+            engine.venue.registered,
+            Some(Err(SocketError::InvalidPolicy)),
+            "{floors:?}"
+        );
+        assert_eq!(engine.io.core.next_id, ids, "{floors:?}");
+        assert!(engine.io.core.socket_driver.state.feeds().is_empty());
+        assert!(
+            engine
+                .drain_actions()
+                .all(|a| !matches!(a, Action::WsConnect { .. } | Action::SetTimer { .. }))
+        );
+    }
+    let mut h = Harness::new(&[(1000, 600_000.), (4999, 1.)]);
+    h.open();
+    assert_eq!(h.close(1000), 600_000.);
 }

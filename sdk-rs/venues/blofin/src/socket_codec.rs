@@ -43,6 +43,7 @@ fn policy(private: bool) -> FeedPolicy {
             Invalidation::Required
         },
         subscription_interval_ms: 0.,
+        close_floors: &[],
     }
 }
 fn interest(channel: &str, id: &str) -> Interest {

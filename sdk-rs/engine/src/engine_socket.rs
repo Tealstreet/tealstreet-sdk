@@ -1,6 +1,6 @@
 //! Managed socket boundaries and native work after final subscription handoff.
 use super::*;
-use crate::socket_driver::{ControlWork, Driver, Effect};
+use crate::socket_driver::{CloseCause, ControlWork, Driver, Effect};
 use crate::socket_lifecycle::{
     Admission, Control, ControlPolicy, EncodedBatch, Epoch, FeedId, FeedPolicy, Ingress, Interest,
     LifecycleEvent, MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, SocketError,
@@ -604,6 +604,7 @@ impl<V: Venue> Engine<V> {
                     retirement,
                     reason,
                     retry,
+                    close_code,
                 } = effect
                 {
                     if V::socket_capabilities().handoff {
@@ -639,13 +640,14 @@ impl<V: Venue> Engine<V> {
                         LifecycleEvent::Retired {
                             epoch: retirement.epoch,
                             reason,
+                            close_code,
                         },
                     );
                     if let Err(error) = result {
                         self.socket_refused(now, "invalidation", error);
                     }
                     if let Err(error) = self.socket_mutate(now, |d, cx| {
-                        d.acknowledge_retirement(cx, retirement, result.is_ok(), retry)
+                        d.acknowledge_retirement(cx, retirement, result.is_ok(), retry, close_code)
                     }) {
                         self.socket_refused(now, "retirement", error);
                     }
@@ -766,13 +768,16 @@ impl<V: Venue> Engine<V> {
                 }
             }
         }
-        let (socket, kind) = match event {
-            Event::WsOpened { socket } => (*socket, Ingress::Open),
+        let (socket, kind, cause) = match event {
+            Event::WsOpened { socket } => (*socket, Ingress::Open, None),
             Event::WsMessage { socket, .. } | Event::WsBinary { socket, .. } => {
-                (*socket, Ingress::Message)
+                (*socket, Ingress::Message, None)
             }
-            Event::WsClosed { socket, .. } | Event::WsRouteExhausted { socket } => {
-                (*socket, Ingress::Close)
+            Event::WsClosed { socket, code } => {
+                (*socket, Ingress::Close, Some(CloseCause::Code(*code)))
+            }
+            Event::WsRouteExhausted { socket } => {
+                (*socket, Ingress::Close, Some(CloseCause::RouteExhausted))
             }
             _ => return false,
         };
@@ -781,7 +786,8 @@ impl<V: Venue> Engine<V> {
             let admission = self.io.core.socket_driver.admit_ingress(now, socket, kind);
             self.assert_live();
             if matches!(admission, Admission::Expired(..)) {
-                let result = self.socket_mutate(now, |d, cx| d.finish_ingress(cx, admission, kind));
+                let result =
+                    self.socket_mutate(now, |d, cx| d.finish_ingress(cx, admission, kind, None));
                 self.socket_enqueue(now, result.effects);
             } else if self.io.core.socket_effects.len() > MAX_EFFECTS {
                 // Empty publication still owns exhaustion cleanup at this
@@ -790,7 +796,10 @@ impl<V: Venue> Engine<V> {
             }
             admission
         } else {
-            let result = self.socket_mutate(now, |d, cx| d.ingress(cx, socket, kind));
+            let result = self.socket_mutate(now, |d, cx| match cause {
+                Some(cause) => d.close(cx, socket, cause),
+                None => d.ingress(cx, socket, kind),
+            });
             self.socket_enqueue(now, result.effects);
             result.admission
         };
@@ -1263,6 +1272,7 @@ mod tests {
             controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
         }
     }
     impl Venue for Probe {

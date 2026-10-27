@@ -105,6 +105,7 @@ impl Woo {
                     Invalidation::Required
                 },
                 subscription_interval_ms: 0.,
+                close_floors: &[],
             })?;
             if private {
                 self.account.connection.feed = Some(feed);

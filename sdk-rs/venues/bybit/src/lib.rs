@@ -946,6 +946,7 @@ impl BybitLinear {
                     controls: ControlPolicy::Native,
                     invalidation: Invalidation::Required,
                     subscription_interval_ms: SUBSCRIBE_PACE_MS,
+                    close_floors: &[],
                 });
                 match registered {
                     Ok(feed) => {
@@ -974,6 +975,7 @@ impl BybitLinear {
         cx: &mut Cx<'_, Pending>,
         channel: Channel,
         reason: RetireReason,
+        close_code: Option<u16>,
     ) {
         let connection = self.connection(channel);
         connection.socket = None;
@@ -986,14 +988,19 @@ impl BybitLinear {
             }
             self.select_category(category);
         }
-        let message = match reason {
-            RetireReason::Timeout(Timeout::Idle) => {
-                "Bybit socket closed (idle timeout); reconnecting"
+        let message = match (reason, close_code) {
+            (RetireReason::Closed, Some(code)) => {
+                format!("Bybit socket closed ({code}); reconnecting")
             }
-            RetireReason::Timeout(_) => "Bybit socket timed out; reconnecting",
-            RetireReason::Authentication => "Bybit socket authentication failed; reconnecting",
-            RetireReason::Closed => "Bybit socket closed; reconnecting",
-            RetireReason::Stopped => "Bybit socket stopped",
+            (RetireReason::Timeout(Timeout::Idle), _) => {
+                "Bybit socket closed (idle timeout); reconnecting".into()
+            }
+            (RetireReason::Timeout(_), _) => "Bybit socket timed out; reconnecting".into(),
+            (RetireReason::Authentication, _) => {
+                "Bybit socket authentication failed; reconnecting".into()
+            }
+            (RetireReason::Closed, None) => "Bybit socket closed; reconnecting".into(),
+            (RetireReason::Stopped, _) => "Bybit socket stopped".into(),
         };
         cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
     }
@@ -2616,7 +2623,9 @@ impl Venue for BybitLinear {
             }
             LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), r#"{"op":"ping"}"#),
             LifecycleEvent::Reconnect(_) => self.open_feed(cx, channel),
-            LifecycleEvent::Retired { reason, .. } => self.on_socket_retired(cx, channel, reason),
+            LifecycleEvent::Retired {
+                reason, close_code, ..
+            } => self.on_socket_retired(cx, channel, reason, close_code),
             LifecycleEvent::InterestsRefused { error, .. } => return Err(error),
             _ => {}
         }
