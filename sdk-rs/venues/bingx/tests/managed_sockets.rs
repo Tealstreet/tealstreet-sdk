@@ -519,3 +519,126 @@ fn acquisition_retry_uses_its_captured_not_before_and_rejects_late_key_results()
         vec!["Ping"]
     );
 }
+
+#[test]
+fn nonfinite_acquisition_retry_recovers_once_on_a_finite_poll_at_its_original_bound() {
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = Harness::new(true, true);
+        for (path, body) in [
+            (
+                "/positionSide/dual",
+                r#"{"code":0,"data":{"dualSidePosition":false}}"#,
+            ),
+            ("/user/positions", r#"{"code":0,"data":[]}"#),
+            (
+                "/user/balance",
+                r#"{"code":0,"data":[{"asset":"USDT","balance":"1000","availableMargin":"1000","usedMargin":"0","unrealizedProfit":"0"}]}"#,
+            ),
+            (
+                "/quote/ticker",
+                r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#,
+            ),
+            (
+                "/quote/premiumIndex",
+                r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#,
+            ),
+        ] {
+            let request = h.request(path);
+            h.reply(&request, body);
+        }
+        let old = h.private.unwrap();
+        h.event(Event::WsOpened { socket: old });
+        let closed = h.event(Event::WsClosed {
+            socket: old,
+            code: 1006,
+        });
+        let (reconnect, at) = retry(&closed, h.now);
+        h.actions = fire(&mut h, reconnect, at);
+        let key = h.request("userDataStream");
+        let failed = h.event(Event::HttpFailed {
+            request: key.id,
+            error: "key unavailable",
+        });
+        let bound = h.now + 30_000.;
+        let owed: Vec<_> = failed
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == bound => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(owed.len(), 1);
+        let changed = h.event(Event::PollScaleChanged { scale: 1.5 });
+        let poll_at = h.now + 3_000.;
+        let polls: Vec<_> = changed
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == poll_at => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(polls.len(), 1);
+        let before = h.engine.snapshot_frame(100.).to_vec();
+        assert!(fire(&mut h, owed[0], invalid).is_empty());
+        assert_eq!(h.engine.snapshot_frame(100.), before);
+        assert!(fire(&mut h, owed[0], poll_at - 1.).is_empty());
+        let recovered = fire(&mut h, polls[0], poll_at);
+        assert!(recovered.iter().all(|a| !matches!(a,
+            Action::Http(r) if r.url.contains("userDataStream"))));
+        let wakes: Vec<_> = recovered
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == bound => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            wakes.len(),
+            1,
+            "finite poll must rearm the consumed retry: {recovered:?}"
+        );
+        assert_ne!(wakes[0], owed[0]);
+        let next_poll: Vec<_> = recovered
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == poll_at + 3_000. => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(next_poll.len(), 1);
+        let again = fire(&mut h, next_poll[0], poll_at + 3_000.);
+        assert!(again.iter().all(|a| !matches!(a,
+            Action::SetTimer { at_ms, .. } if *at_ms == bound)));
+        assert!(again.iter().all(|a| !matches!(a,
+            Action::Http(r) if r.url.contains("userDataStream"))));
+        let early = fire(&mut h, wakes[0], bound - 1.);
+        let current: Vec<_> = early
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == bound => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(current.len(), 1);
+        assert!(early.iter().all(|a| !matches!(
+            a,
+            Action::Http(_) | Action::ManagedHttp(_) | Action::WsConnect { .. }
+        )));
+        assert!(fire(&mut h, wakes[0], bound - 0.5).is_empty());
+        h.actions = fire(&mut h, current[0], bound);
+        let fresh = h.request("userDataStream");
+        assert_ne!(fresh.id, key.id);
+        assert!(h.actions.iter().all(|a| !matches!(a,
+            Action::Http(r) if r.url.contains("userDataStream"))));
+        h.actions.clear();
+        assert!(fire(&mut h, current[0], bound + 0.5).is_empty());
+        h.reply(&fresh, r#"{"listenKey":"finite-recovery"}"#);
+        let socket = h.private.unwrap();
+        assert_ne!(socket, old);
+        h.actions.clear();
+        assert_eq!(
+            sends(&h.event(Event::WsOpened { socket }), socket),
+            vec!["Ping"]
+        );
+    }
+}

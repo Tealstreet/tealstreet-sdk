@@ -59,3 +59,15 @@ books plus the new candle interest. The key-acquisition retry control drives
 its actual early/rearmed/equality/duplicate timers and rejects a retired key
 answer before accepting a newly issued key. Current-source full native, strict,
 fmt, bans, immutable source review and master PR CI remain separate gates.
+
+The source review found that an ordinary acquisition-retry timer is consumed
+before a nonfinite venue callback. A real captured-timer regression reproduced
+the resulting lost wake. Retry custody now retains its original finite bound
+separately from the optional physical timer. Nonfinite delivery clears only the
+consumed identity; the next genuine finite account timer, lifecycle or live
+read callback rearms once at max(original bound, current time). No key request
+is sent before the bound, and no timer is scheduled from a nonfinite clock.
+All three nonfinite deliveries, a finite poll with public sockets suppressed,
+idempotent rearming, early/equality/duplicate wakes and new-key connection are
+covered. The core owner confirmed this existing-API composition; no engine seam
+is added. Original failure and corrected execution remain separate log evidence.

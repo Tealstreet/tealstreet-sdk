@@ -75,6 +75,11 @@ pub enum Request {
 
 type OrderMeta = (Order, String, String, bool, String);
 
+struct KeyRetry {
+    timer: Option<TimerId>,
+    not_before: f64,
+}
+
 #[derive(Default)]
 pub struct Account {
     /// Configured keys, built once; reads choose among them by role.
@@ -89,7 +94,7 @@ pub struct Account {
     session: Option<Session>,
     socket: Option<SocketId>,
     pub(super) feed: Option<FeedId>,
-    key_retry: Option<(TimerId, f64)>,
+    key_retry: Option<KeyRetry>,
     keepalive: Option<TimerId>,
     poll: Option<TimerId>,
     repair: Option<TimerId>,
@@ -299,7 +304,10 @@ impl Account {
     }
     pub fn handles_timer(&self, timer: TimerId) -> bool {
         [self.keepalive, self.poll, self.repair].contains(&Some(timer))
-            || self.key_retry.is_some_and(|(id, _)| id == timer)
+            || self
+                .key_retry
+                .as_ref()
+                .is_some_and(|retry| retry.timer == Some(timer))
     }
     pub fn bump_orders(&mut self) {
         self.orders_revision = self.orders_revision.wrapping_add(1);
@@ -600,7 +608,7 @@ impl Account {
     }
 
     fn clear_private_timers(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some((timer, _)) = self.key_retry.take() {
+        if let Some(timer) = self.key_retry.take().and_then(|retry| retry.timer) {
             cx.clear_timer(timer);
         }
         if let Some(timer) = self.keepalive.take() {
@@ -622,10 +630,22 @@ impl Account {
         if !cx.now.is_finite() || !at.is_finite() || at <= cx.now {
             return;
         }
-        if let Some((timer, _)) = self.key_retry.take() {
+        if let Some(timer) = self.key_retry.take().and_then(|retry| retry.timer) {
             cx.clear_timer(timer);
         }
-        self.key_retry = Some((cx.set_timer(RETRY_MS), at));
+        self.key_retry = Some(KeyRetry {
+            timer: Some(cx.set_timer(RETRY_MS)),
+            not_before: at,
+        });
+    }
+    fn resume_key_retry(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now.is_finite()
+            && let Some(retry) = &mut self.key_retry
+            && retry.timer.is_none()
+            && (retry.not_before - cx.now).is_finite()
+        {
+            retry.timer = Some(cx.set_timer((retry.not_before - cx.now).max(0.)));
+        }
     }
     fn fresh_key(&mut self, cx: &mut Cx<'_, Pending>, _credentials: &Credentials) {
         if let Some(feed) = self.feed
@@ -666,6 +686,7 @@ impl Account {
             LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "Ping"),
             _ => {}
         }
+        self.resume_key_retry(cx);
         Ok(())
     }
 
@@ -675,20 +696,26 @@ impl Account {
         timer: TimerId,
         credentials: &Credentials,
     ) {
-        if !cx.now.is_finite() {
-            return;
-        }
-        if let Some((id, at)) = self.key_retry
-            && id == timer
+        if let Some(retry) = &mut self.key_retry
+            && retry.timer == Some(timer)
         {
-            if cx.now < at {
-                self.key_retry = Some((cx.set_timer(at - cx.now), at));
+            // The engine consumed this physical timer even at an invalid clock.
+            retry.timer = None;
+            if !cx.now.is_finite() {
+                return;
+            }
+            if cx.now < retry.not_before {
+                self.resume_key_retry(cx);
             } else {
                 self.key_retry = None;
                 self.fetch_key(cx, credentials);
             }
             return;
         }
+        if !cx.now.is_finite() {
+            return;
+        }
+        self.resume_key_retry(cx);
         if self.keepalive == Some(timer) {
             self.keepalive = None;
             if let Some(key) = self.key.clone() {
@@ -907,6 +934,7 @@ impl Account {
         {
             return;
         }
+        self.resume_key_retry(cx);
         let is_key = matches!(
             request,
             Request::ListenKey { .. } | Request::Keepalive { .. }

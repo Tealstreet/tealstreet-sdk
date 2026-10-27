@@ -10265,3 +10265,10 @@ The two listen-key keepalive fixtures send timely genuine private Pongs during
 their 30-minute wait. A Pong delivered only after 30 minutes cannot rescue an
 already expired managed socket. Their original keepalive requests, header/body
 oracles and captured failure/retry deadlines remain unchanged.
+
+An invalid-clock delivery consumes the ordinary acquisition-retry timer but
+retains the owed retry and original finite not-before. A subsequent genuine
+finite account timer, lifecycle or live read callback rearms it once; the
+replacement wake still cannot send early. This avoids a permanently stranded
+private connection without scheduling nonfinite host timers or granting socket
+authority. Real NaN/both-infinity, finite-poll and duplicate-wake controls pin it.
