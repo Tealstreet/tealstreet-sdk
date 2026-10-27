@@ -10309,7 +10309,3 @@ finish bootstrap before installing their cache; the long streamed-cancel test
 keeps its non-resurrection assertion and additionally forbids expired new rows.
 Bootstrap fixtures also fire the genuine socket-handoff wake before expecting
 portfolio collateral reads; their balance and holdings assertions stay intact.
-
-### Bitunix fence on engine primitives (item 3)
-
-Bitunix's uncertain-placement fence now uses the engine's `cx.reconcile_reask()` and `order_read_epoch`/`orders_reconciled_since` instead of venue bookkeeping. Each census slot records its dispatch epoch, and the release reports from the earlier slot's epoch. One deliberate change: a definitive write between two engine re-asks no longer restarts the census. The paid slots are kept and the owed census is joined; the store snapshot gate still drops any census begun before that write, so it cannot release. A re-ask with nothing owed starts a fresh census pair. Callers need no change. The Bitunix guards of record are the per-slot serial floor and the store snapshot gate; the epoch is defense in depth with no independent mutation pin, because a census begun before a placement can never commit.
