@@ -909,7 +909,7 @@ impl Venue for Bingx {
                         if let Some(scope) = request.settings_scope() {
                             cx.store.invalidate_metadata(scope);
                         }
-                        account.bump_orders();
+                        account.bump_orders(cx.store);
                         account.bump_positions();
                         if request.accepts_placement(response) {
                             account.accept_placed_response(cx, response.body);
@@ -1416,11 +1416,11 @@ impl Venue for Bingx {
                 let account = &mut self.account;
                 if !self
                     .trading
-                    .command(cx, self.credentials.as_ref(), other, || {
+                    .command(cx, self.credentials.as_ref(), other, |cx| {
                         if changes_settings {
                             account.settings_changed();
                         }
-                        account.bump_orders();
+                        account.bump_orders(cx.store);
                         account.bump_positions();
                     })
                 {
