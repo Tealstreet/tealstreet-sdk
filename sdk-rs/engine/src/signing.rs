@@ -41,7 +41,7 @@ pub struct IdentitySetupPolicy {
 }
 
 /// `Required` keeps today's behaviour exactly. `ScalarOnly` (primary only,
-/// declared `Secp256k1Digest`) lets trusted local setup install a signing-only
+/// declared `Secp256k1Digest` or `StarkDigest`) lets trusted local setup install a signing-only
 /// primary whose credential is explicitly absent; injected identities never are.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -286,8 +286,10 @@ impl CredentialSetupPolicy {
         let Some(policy) = self.primary.filter(|policy| scalar_only(Some(*policy))) else {
             return Ok(());
         };
-        if policy.signing_algorithm != Some(Algorithm::Secp256k1Digest)
-            || !policy.signing.is_required()
+        if !matches!(
+            policy.signing_algorithm,
+            Some(Algorithm::Secp256k1Digest | Algorithm::StarkDigest)
+        ) || !policy.signing.is_required()
         {
             return Err(SignError::InvalidRequest);
         }
