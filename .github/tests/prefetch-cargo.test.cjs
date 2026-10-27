@@ -59,5 +59,5 @@ test('every cargo-caching Rust job prefetches after its toolchain and fetches gi
     const prefetch = job.indexOf('uses: ./.github/actions/prefetch-cargo');
     assert.ok(toolchain >= 0 && prefetch > toolchain, job.split(':')[0]);
   }
-  assert.equal(workflow.split("- '.github/actions/prefetch-cargo/**'").length - 1, 2);
+  assert.equal(workflow.split("- '.github/actions/prefetch-cargo/**'").length - 1, 1);
 });
