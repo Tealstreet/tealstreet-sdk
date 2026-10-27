@@ -35,6 +35,7 @@ fn documented_null_protection_fields_do_not_reject_rest_order_snapshot() {
 #[test]
 fn documented_null_unused_tpsl_fields_preserve_active_protection() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"700","orderType":null,"triggerPrice":null,"orderPrice":null,"side":"sell","size":"-1","tpTriggerPrice":"65000","tpOrderPrice":null,"slTriggerPrice":null,"slOrderPrice":null,"slTriggerPriceType":null,"state":"live"}]}"#);
     assert_eq!(h.e.store().orders().len(), 1);
@@ -46,6 +47,7 @@ fn documented_null_unused_tpsl_fields_preserve_active_protection() {
 #[test]
 fn null_position_metadata_reuses_known_leverage_and_liquidation_price() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     let row = POSITION
         .replace("\"leverage\":\"20\"", "\"leverage\":null")
@@ -66,6 +68,7 @@ fn null_position_metadata_reuses_known_leverage_and_liquidation_price() {
 #[test]
 fn malformed_ws_order_row_retains_known_order_and_processes_valid_sibling() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     let good = r#"{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","side":"buy","size":"1","price":"60000","state":"live"}"#;
     h.ws(&format!(
@@ -85,6 +88,7 @@ fn malformed_ws_order_row_retains_known_order_and_processes_valid_sibling() {
 #[test]
 fn malformed_ws_position_row_preserves_its_symbol_and_totals_while_processing_valid_sibling() {
     let mut h = Harness::with_instruments(&two_instruments());
+    h.open_private();
     h.seed();
     let old_balance = h.e.store().balance().clone();
     let bad = POSITION.replace("\"positions\":\"4\"", "\"positions\":null");
@@ -129,6 +133,8 @@ fn malformed_ws_ticker_row_retains_known_ticker_and_processes_valid_sibling() {
             _ => None,
         })
         .unwrap();
+    h.handle(0., Event::WsOpened { socket });
+    h.collect();
     h.handle(1.0, Event::WsMessage {
         socket,
         text: r#"{"arg":{"channel":"tickers"},"data":[{"instId":"BTC-USDT","last":null},{"instId":"ETH-USDT","last":"3000","open24h":"2500","bidPrice":"2999","askPrice":"3001"}]}"#,
@@ -143,6 +149,7 @@ fn malformed_ws_ticker_row_retains_known_ticker_and_processes_valid_sibling() {
 #[test]
 fn valid_unloaded_position_rows_still_contribute_to_account_totals() {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     let unloaded = POSITION.replace("BTC-USDT", "UNLOADED-USDT");
     h.ws(&format!(
@@ -157,6 +164,7 @@ fn valid_unloaded_position_rows_still_contribute_to_account_totals() {
 fn websocket_balance_pnl_rounds_raw_sum_to_cents_not_market_price_precision() {
     let instruments = INSTRUMENT.replace("\"tickSize\":\"0.1\"", "\"tickSize\":\"1\"");
     let mut h = Harness::with_instruments(&instruments);
+    h.open_private();
     h.seed();
     let row = POSITION.replace("\"unrealizedPnl\":\"0.5\"", "\"unrealizedPnl\":\"1.23\"");
     h.ws(&format!(

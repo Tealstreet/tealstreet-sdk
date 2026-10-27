@@ -115,6 +115,7 @@ impl Harness {
         h.tick = h
             .actions
             .iter()
+            .rev()
             .find_map(|a| match a {
                 Action::SetTimer { timer, at_ms } if *at_ms == now + 10_000.0 => Some(*timer),
                 _ => None,
@@ -212,16 +213,16 @@ impl Harness {
         self.respond(r, body);
     }
     pub fn respond(&mut self, r: HttpRequest, body: &str) {
-        let start = self.start;
-        self.respond_at(r, body, start);
+        let now = self.now.max(self.start);
+        self.respond_at(r, body, now);
     }
     pub fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
         self.respond_status_at(r, 200, body, now);
     }
     #[allow(dead_code)]
     pub fn respond_status(&mut self, r: HttpRequest, status: u16, body: &str) {
-        let start = self.start;
-        self.respond_status_at(r, status, body, start);
+        let now = self.now.max(self.start);
+        self.respond_status_at(r, status, body, now);
     }
     fn respond_status_at(&mut self, r: HttpRequest, status: u16, body: &str, now: f64) {
         self.e.handle(
@@ -236,6 +237,67 @@ impl Harness {
             },
         );
         self.collect_at(now);
+    }
+    /// Explicit lifecycle setup for fixtures that exercise private stream rows.
+    #[allow(dead_code)]
+    pub fn open_private(&mut self) {
+        let now = self.now;
+        self.handle(
+            now,
+            Event::WsOpened {
+                socket: self.private,
+            },
+        );
+        self.collect();
+        self.handle(
+            now,
+            Event::WsMessage {
+                socket: self.private,
+                text: r#"{"event":"login","code":"0"}"#,
+            },
+        );
+        self.collect();
+    }
+    /// Reconnect through the exact emitted backoff; the caller supplies its ACK.
+    #[allow(dead_code)]
+    pub fn reconnect_private(&mut self) {
+        let begin = self.actions.len();
+        self.handle(
+            self.now,
+            Event::WsClosed {
+                socket: self.private,
+                code: 1006,
+            },
+        );
+        self.collect();
+        let (timer, at) = self.actions[begin..]
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms }
+                    if *at_ms > self.now && *at_ms <= self.now + 1000. =>
+                {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .expect("actual private backoff");
+        let begin = self.actions.len();
+        self.handle(at, Event::TimerFired { timer });
+        self.collect();
+        self.private = self.actions[begin..]
+            .iter()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
+                _ => None,
+            })
+            .expect("actual replacement private connection");
+        self.handle(
+            at,
+            Event::WsOpened {
+                socket: self.private,
+            },
+        );
+        self.collect();
     }
     pub fn modes(&mut self) {
         self.reply(
@@ -268,7 +330,7 @@ impl Harness {
     pub fn ws(&mut self, text: &str) {
         self.now = self.now.max(1.0);
         self.e.handle(
-            1.0,
+            self.now,
             Event::WsMessage {
                 socket: self.private,
                 text,
