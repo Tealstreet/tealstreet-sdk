@@ -8411,17 +8411,15 @@ mod request_route_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "order-locks"))]
 mod signing_tests {
     use super::*;
-    #[cfg(feature = "order-locks")]
     #[derive(Default)]
     struct SigningVenue {
         signing_failures: Vec<(u32, String)>,
         transport_failures: Vec<(u32, String)>,
         responses: Vec<(u32, Option<u64>)>,
     }
-    #[cfg(feature = "order-locks")]
     impl Venue for SigningVenue {
         fn guard_order_mutations(&self) -> bool {
             true
@@ -8451,7 +8449,6 @@ mod signing_tests {
         }
     }
 
-    #[cfg(feature = "order-locks")]
     #[test]
     fn duplicate_unsupported_symbol_amend_cannot_complete_or_release_an_existing_mutation() {
         let mut engine = crate::test_support::seeded_engine(SigningVenue::default());
