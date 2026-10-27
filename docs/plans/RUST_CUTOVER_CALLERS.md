@@ -10272,3 +10272,7 @@ finite account timer, lifecycle or live read callback rearms it once; the
 replacement wake still cannot send early. This avoids a permanently stranded
 private connection without scheduling nonfinite host timers or granting socket
 authority. Real NaN/both-infinity, finite-poll and duplicate-wake controls pin it.
+
+### Bitunix fence on engine primitives (item 3)
+
+Bitunix's uncertain-placement fence now uses the engine's `cx.reconcile_reask()` and `order_read_epoch`/`orders_reconciled_since` instead of venue bookkeeping. Each census slot records its dispatch epoch, and the release reports from the earlier slot's epoch. One deliberate change: a definitive write between two engine re-asks no longer restarts the census. The paid slots are kept and the owed census is joined; the store snapshot gate still drops any census begun before that write, so it cannot release. A re-ask with nothing owed starts a fresh census pair. Callers need no change.
