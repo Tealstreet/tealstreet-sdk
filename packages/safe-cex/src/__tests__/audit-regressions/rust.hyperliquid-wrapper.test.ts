@@ -75,7 +75,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
     httpFailed: noActions,
     timer: noActions,
   };
-  const construct = vi.fn(function (_venue: string, _options: string) {
+  const construct = vi.fn(function (_venue: string, _options: string, _setup?: string) {
     return engine;
   });
   const load = vi.fn(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
@@ -136,12 +136,11 @@ describe('Rust Hyperliquid wrapper', () => {
     });
     await exchange.start();
     expect(construct).toHaveBeenCalledOnce();
-    const [venue, json] = construct.mock.calls[0];
+    const [venue, json, capsule] = construct.mock.calls[0];
     expect(venue).toBe('hyperliquid');
-    // The options blob is uniform across venues; these are the fields this venue reads.
+    // Public account configuration and private provider material use separate arguments.
     expect(JSON.parse(json)).toMatchObject({
       key: 'api-wallet',
-      secret: 'private-key',
       applicationId: 'master-wallet',
       vault: 'vault-wallet',
       hyperliquidBuilder,
@@ -152,6 +151,10 @@ describe('Rust Hyperliquid wrapper', () => {
       publicFeed: { mode: 'direct' },
       accountStartup: true,
     });
+    expect(JSON.parse(json)).not.toHaveProperty('secret');
+    expect(json).not.toContain('private-key');
+    expect(exchange.options).not.toHaveProperty('secret');
+    expect(JSON.parse(capsule!)).toEqual({ primary: { secret: 'private-key', secretEncoding: 'hex' } });
   });
 
   it.each([

@@ -170,7 +170,7 @@ it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
     }, 'Rust Paradex private accounts require a key, Paradex address and subkey address'),
 );
 
-it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
+it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
   'compiled native payload refusal on %s keeps startup and validation classification before I/O', async (name) => {
     setWasmEngineLoader(loadNodeEngine);
     const requests: string[] = [];
@@ -183,7 +183,7 @@ it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lig
     };
     setRustEngineTransport(() => transport);
     let signatures = 0;
-    for (const secret of name.startsWith('lighter') ? ['local'] : ['', 'local']) {
+    for (const secret of name.startsWith('lighter') || name === 'hyperliquidspot' ? ['local'] : ['', 'local']) {
       const exchange = new RustEngineExchange(name, {
         key: 'key', secret, apiKeyIndex: '2', testnet: true,
         payloadSigner: async () => { signatures++; return { signature: 'unexpected' }; },

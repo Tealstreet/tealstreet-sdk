@@ -60,6 +60,11 @@ pub fn prepared_now<V: Venue>(engine: &mut Engine<V>) -> Vec<Action> {
     prepared_actions(engine, now)
 }
 
+/// The latest event time, for native drivers that prepare after handle.
+pub fn dispatch_now<V: Venue>(engine: &Engine<V>) -> f64 {
+    engine.dispatch_now()
+}
+
 /// Immediate fake routes for native venue fixtures. Physical HTTP is returned
 /// only after prepare, bind and the engine's final synchronous release claim.
 /// Delayed pacing/routes and delegated signing deliberately remain unsupported.

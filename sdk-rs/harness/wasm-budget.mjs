@@ -6,8 +6,8 @@ import { parseArgs } from 'node:util';
 
 // Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
-// total package size; Sam approved the combined 14 MiB ceiling on 2026-10-26.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_064 });
+// total package size; Sam raised the combined ceiling to 16 MiB on 2026-10-27.
+export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_216 });
 // #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB);
 // #2224 serial call pacing: CI 1,482,920, +1 KiB under the 2 KiB shared-code rule.
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
@@ -48,7 +48,10 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // 1,488,071, rounded up to 1454 KiB (shared engine growth, <=2 KiB pre-approval).
 // #2309 run 40467597908, job 122069099302: CI Kraken/Spot 1,410,076 (+337 B ungated verdict surface).
 // Rounded to 1,411,072 (+1 KiB) under the <=2 KiB shared-code rule.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_411_072, krakenspot: 1_411_072 });
+// #2317 final HL/HLSpot: CI run 40506842978, job 122199595636 measures 1,418,513 B.
+// ddi2il rule: ceil KiB + 2 KiB = 1388 KiB; required correction and breakdown in PR.
+// One linked secp256k1/keccak implementation; dependency features and combined cap unchanged.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ hyperliquid: 1_421_312, hyperliquidspot: 1_421_312, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_411_072, krakenspot: 1_411_072 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {

@@ -248,14 +248,15 @@ fn real_perps_spot_and_testnet_catalogues_require_prepare_bind_and_claim() {
 #[test]
 fn actual_private_bootstrap_info_reads_are_unsigned_managed_calls() {
     for portfolio in [false, true] {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
-            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-            secret: Some(
-                "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
-            ),
-            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-            ..Options::default()
-        }));
+        let mut engine = support::private_engine(
+            Options {
+                key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+                application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+                ..Options::default()
+            },
+            "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+            false,
+        );
         engine.start(NOW);
         let mut seen = HashSet::new();
         for _ in 0..20 {

@@ -5,7 +5,7 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
   assert.equal(WASM_BUDGETS.venue, 1_343_488);
-  assert.equal(WASM_BUDGETS.combined, 14 * 1024 * 1024);
+  assert.equal(WASM_BUDGETS.combined, 16 * 1024 * 1024);
   for (const profile of Object.keys(WASM_BUDGETS)) {
     assert.equal(wasmBudgetError(WASM_BUDGETS[profile], profile), undefined);
     assert.match(wasmBudgetError(WASM_BUDGETS[profile] + 1, profile), /exceeds/);
@@ -14,7 +14,7 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 });
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
-  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit', 'kraken', 'krakenspot']);
+  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot']);
   assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_391 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
@@ -73,6 +73,13 @@ test('only the declared venue families carry overrides, and only for the venue p
     assert.equal(wasmBudgetError(1_411_072, 'venue', venue), undefined);
     assert.match(wasmBudgetError(1_411_073, 'venue', venue), /exceeds 1411072/);
   }
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1388 * 1024);
+    assert.equal(wasmBudgetError(1_415_086, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(1_418_513, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(1_421_312, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_421_313, 'venue', venue), /exceeds 1421312/);
+  }
   assert.equal(WASM_VENUE_OVERRIDES.bybit, 1419 * 1024);
   assert.equal(wasmBudgetError(1_446_912, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(1_446_915, 'venue', 'bybit'), undefined);
@@ -84,17 +91,17 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_452_035, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(1_453_056, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(1_453_057, 'venue', 'bybit'), /exceeds 1453056/);
-  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bybit'), /exceeds 14680064/);
+  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bybit'), /exceeds 16777216/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue', 'okx'), /exceeds 1343488/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue'), /exceeds 1343488/);
-  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bitget'), /exceeds 14680064/);
+  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bitget'), /exceeds 16777216/);
 });
 
-test('the approved combined ceiling accepts 14 MiB exactly and rejects the next byte', () => {
+test('the approved combined ceiling accepts 16 MiB exactly and rejects the next byte', () => {
   for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
-    assert.equal(wasmBudgetError(14_680_063, 'combined', venue), undefined);
-    assert.equal(wasmBudgetError(14_680_064, 'combined', venue), undefined);
-    assert.equal(wasmBudgetError(14_680_065, 'combined', venue), 'combined wasm 14680065 exceeds 14680064 bytes');
+    assert.equal(wasmBudgetError(16_777_215, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(16_777_216, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(16_777_217, 'combined', venue), 'combined wasm 16777217 exceeds 16777216 bytes');
   }
 });
 

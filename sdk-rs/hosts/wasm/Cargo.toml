@@ -74,7 +74,7 @@ binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing"]
 kucoin = ["safe-cex-venues/kucoin", "text-ingress"]
 kucoinspot = ["safe-cex-venues/kucoinspot", "text-ingress", "safe-cex-engine/command-kucoinspot"]
 bybit = ["safe-cex-venues/bybit", "text-ingress", "dispatch-signing"]
-hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress"]
+hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress", "dispatch-signing", "address-nonce"]
 okx = ["safe-cex-venues/okx", "text-ingress", "dispatch-signing"]
 orderly = ["safe-cex-venues/orderly", "text-ingress"]
 

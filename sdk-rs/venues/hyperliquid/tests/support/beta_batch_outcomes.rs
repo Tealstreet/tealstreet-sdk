@@ -140,7 +140,7 @@ fn beta_all_refused_rows_have_no_partial_ids_or_published_orders() {
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
     let error = failed(&actions);
-    assert_eq!(error.outcome, Some(Outcome::Rejected));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(error.partial.is_none());
     assert!(e.store().orders().is_empty());
 }

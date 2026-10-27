@@ -341,7 +341,13 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
             r#"{"remoteSigning":true,"key":"k"}"#,
             r#"{"remoteSigning":true,"key":"","secret":"s"}"#,
         ] {
-            assert_eq!(rejected(venue, options), message, "{venue} {options}");
+            let expected = if venue == "hyperliquidspot"
+                && options == r#"{"remoteSigning":true,"key":"","secret":"s"}"# {
+                "Invalid Hyperliquid local signer setup"
+            } else {
+                message
+            };
+            assert_eq!(rejected(venue, options), expected, "{venue} {options}");
         }
         // Incomplete credentials without a remote signer build a public account, as before
         // (Orderly's own rules still apply to its private accounts).
@@ -763,13 +769,26 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
 
 #[test]
 fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
-    for venue in ["hyperliquid", "orderly"] {
+    for (venue, expected) in [
+        (
+            "hyperliquid",
+            "Hyperliquid requires its primary signing provider",
+        ),
+        (
+            "hyperliquidspot",
+            "Hyperliquid requires its primary signing provider",
+        ),
+        (
+            "orderly",
+            "Injected signing is not supported for this venue yet",
+        ),
+    ] {
         assert_eq!(
             rejected(
                 venue,
                 r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}},"remoteSigning":true,"publicMode":{"requested":false}}"#
             ),
-            "Injected signing is not supported for this venue yet"
+            expected
         );
     }
 }

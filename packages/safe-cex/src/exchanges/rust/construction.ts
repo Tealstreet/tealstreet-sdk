@@ -12,6 +12,7 @@ export type SigningAlgorithm = 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkD
 export type IdentitySetupPolicy = {
   trimCredential?: boolean; trimSigning?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
   signingAlgorithm?: SigningAlgorithm;
+  source?: 'required' | 'scalarOnly';
   /** Credential-only primaries (no signing ref); omitted means required, today's behaviour. */
   signing?: 'optional';
 };
@@ -38,7 +39,7 @@ type Rule = {
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
   /** Family-specific trusted setup mapping, declared rather than name-matched. */
-  setupMapping?: 'asterdex' | 'apexomni' | 'lighter' | 'mexc';
+  setupMapping?: 'asterdex' | 'apexomni' | 'lighter' | 'mexc' | 'hyperliquid';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 

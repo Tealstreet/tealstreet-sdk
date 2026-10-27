@@ -1,11 +1,11 @@
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, Outcome, Response, Venue,
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+use support::prepared_now;
 
 const SPOT_META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"1","markPx":"1","prevDayPx":"1","dayNtlVlm":"100"}]]"#;
 
@@ -26,16 +26,10 @@ fn response(engine: &mut Engine<Hyperliquid>, now: f64, request: &HttpRequest, b
 fn boot(spot: bool) -> (Engine<Hyperliquid>, HttpRequest) {
     let options = Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Options::default()
     };
-    let venue = if spot {
-        Hyperliquid::new_spot(options)
-    } else {
-        Hyperliquid::new(options)
-    };
-    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+    let mut engine = support::private_engine(options, support::TEST_SECRET.into(), spot);
     engine.start(1_000.0);
     let mut old_read = None;
     for _ in 0..20 {
