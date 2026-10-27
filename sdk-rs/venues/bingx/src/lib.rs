@@ -633,6 +633,10 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    fn managed_sockets() -> bool {
+        true
+    }
+
     fn fence_uncertain_placements(&self) -> bool {
         true
     }

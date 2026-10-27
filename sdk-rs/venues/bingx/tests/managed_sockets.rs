@@ -101,6 +101,10 @@ fn sends(actions: &[Action], socket: SocketId) -> Vec<&str> {
         .collect()
 }
 #[test]
+fn bingx_declares_managed_sockets_for_the_production_binding() {
+    assert!(<Bingx as safe_cex_engine::Venue>::managed_sockets());
+}
+#[test]
 fn duplicate_public_open_does_not_replay_or_reset_supervision() {
     let mut h = Harness::new(false, false);
     let socket = h.public.unwrap();

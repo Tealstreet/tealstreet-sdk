@@ -71,3 +71,10 @@ All three nonfinite deliveries, a finite poll with public sockets suppressed,
 idempotent rearming, early/equality/duplicate wakes and new-key connection are
 covered. The core owner confirmed this existing-API composition; no engine seam
 is added. Original failure and corrected execution remain separate log evidence.
+
+Master #2200 adds the static managed_sockets declaration. The composed BingX
+binding opts in explicitly; a production-binding assertion and the existing
+real feed/epoch controls pin registration and runtime delivery. The merge is
+automatic and all incoming engine and other-venue edits are retained. Earlier
+qualification remains scoped to ac560 on master97c; the composed source is
+qualified separately before the next push.
