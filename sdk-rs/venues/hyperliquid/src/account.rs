@@ -19,6 +19,7 @@ pub enum Request {
         settings_revision: u64,
     },
     Orders {
+        epoch: u64,
         dex: String,
         revision: u64,
         orders: Vec<Order>,
@@ -597,6 +598,7 @@ impl Hyperliquid {
             "frontendOpenOrders",
             (!dex.is_empty()).then_some(dex),
             Request::Orders {
+                epoch: cx.order_read_epoch(),
                 dex: dex.into(),
                 revision,
                 orders: Vec::new(),
@@ -869,6 +871,7 @@ impl Hyperliquid {
                 }
             }
             Request::Orders {
+                epoch,
                 dex,
                 revision,
                 orders,
@@ -924,10 +927,10 @@ impl Hyperliquid {
                         .map(|market| market.symbol.clone())
                         .collect();
                     for symbol in symbols {
-                        cx.orders_reconciled(Some(&symbol));
+                        cx.orders_reconciled_since(Some(&symbol), epoch);
                     }
                     if dex.is_empty() && self.dex_names.is_empty() && self.discovery_settled() {
-                        cx.orders_reconciled(None);
+                        cx.orders_reconciled_since(None, epoch);
                     }
                 }
                 self.account

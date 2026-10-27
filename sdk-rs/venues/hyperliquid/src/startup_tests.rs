@@ -11,7 +11,7 @@ const SPOT_META: &str = r#"{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{
 fn tuple(meta: &str, contexts: &str) -> String {
     format!("[{meta},{contexts}]")
 }
-fn reply(e: &mut Engine<Hyperliquid>, req: &HttpRequest, at: f64, body: &str) {
+fn reply<V: Venue>(e: &mut Engine<V>, req: &HttpRequest, at: f64, body: &str) {
     e.handle(
         at,
         Event::HttpResponse {
@@ -57,6 +57,13 @@ fn retry(actions: &[Action], sent: f64, nominal: f64) -> TimerId {
     retry_timer(actions, sent, nominal).expect("public context backoff")
 }
 fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
+    connect_venue(spot, private, |venue| venue)
+}
+fn connect_venue<V: Venue>(
+    spot: bool,
+    private: bool,
+    wrap: impl FnOnce(Hyperliquid) -> V,
+) -> Engine<V> {
     let policy = serde_json::from_str(r#"{"primary":{"source":"scalarOnly","signingAlgorithm":"secp256k1Digest","secretEncoding":"hex"}}"#).unwrap();
     let (provider, identities, _) = safe_cex_crypto::signer::LocalSigner::from_json_with_facts(
         if private { r#"{"primary":{"secret":"0123456789012345678901234567890123456789012345678901234567890123"}}"# } else { "{}" }.into(), policy, false,
@@ -70,11 +77,11 @@ fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
         application_id: private.then(|| "0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Default::default()
     };
-    let mut e = safe_cex_engine::test_support::seeded_engine(if spot {
+    let mut e = safe_cex_engine::test_support::seeded_engine(wrap(if spot {
         Hyperliquid::new_spot(options)
     } else {
         Hyperliquid::new(options)
-    });
+    }));
     e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
     e.set_identities(identities).unwrap();
     e.initialize_address_nonce(999.).unwrap();
@@ -729,3 +736,6 @@ fn market_found_by_a_discovery_retry_gets_a_seeded_setting() {
     assert_eq!(setting.leverage, 20.0);
     assert_eq!(setting.margin_type, Some(MarginType::Cross));
 }
+
+#[path = "order_read_epoch_tests.rs"]
+mod order_read_epoch;
