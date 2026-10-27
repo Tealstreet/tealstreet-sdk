@@ -514,3 +514,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | MEXC installed signing and private custody | Signing/private-read PR; trading custody follows separately | Before changing MEXC credential setup, identity mapping, REST/WS signing or private request owners. | [RUST_MEXC_INSTALLED_SIGNING.md](RUST_MEXC_INSTALLED_SIGNING.md) |
 | Lighter remaining request and signing funnel | Source reviewed; composed correctness qualification in progress | Before changing private reads, tier mutation, transaction admission, nonce retry or eager signing. | [RUST_LIGHTER_REMAINING_FUNNEL.md](RUST_LIGHTER_REMAINING_FUNNEL.md) |
+
+| BingX managed public/private sockets | Venue-only implementation and production-binding qualification | Before changing BingX socket epochs, listen-key recovery, interests or order-read epoch publication. | [RUST_BINGX_MANAGED_SOCKETS.md](RUST_BINGX_MANAGED_SOCKETS.md) |

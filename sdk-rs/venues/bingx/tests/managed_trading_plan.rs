@@ -916,3 +916,63 @@ fn absent_cancel_fences_cancel_all_until_the_primary_signed_snapshot() {
     );
     assert_fence_clears_only_on_the_primary_snapshot(&mut e, &actions);
 }
+
+#[test]
+fn an_order_read_epoch_cannot_clear_a_later_concurrent_unknown_write() {
+    let mut e = engine();
+    place(&mut e, 1);
+    let first = packet(&collect(&mut e, START));
+    let mut second_orders = orders(1);
+    second_orders[0].client_order_id = Some("epoch-second".into());
+    e.handle(
+        START + 0.5,
+        Event::Command(Command::PlaceOrders {
+            command: COMMAND + 1,
+            orders: second_orders,
+        }),
+    );
+    let second = packet(&collect(&mut e, START + 0.5));
+    e.handle(
+        START + 1.,
+        Event::HttpFailed {
+            request: first.id,
+            error: "first unknown",
+        },
+    );
+    let after_first = collect(&mut e, START + 1.);
+    let old = order_reads(&after_first);
+    assert_eq!(old.len(), 1);
+    e.handle(
+        START + 2.,
+        Event::HttpFailed {
+            request: second.id,
+            error: "later unknown",
+        },
+    );
+    let after_second = collect(&mut e, START + 2.);
+    let fresh = order_reads(&after_second);
+    assert_eq!(fresh.len(), 1);
+    assert_ne!(old[0].id, fresh[0].id);
+    assert_eq!(api_key(&old[0]), "primary-key");
+    assert_eq!(api_key(&fresh[0]), "primary-key");
+    respond(
+        &mut e,
+        &old[0],
+        START + 3.,
+        200,
+        r#"{"code":0,"data":{"orders":[]}}"#,
+    );
+    let refused = cancel_all(&mut e, COMMAND + 2, START + 4.);
+    assert!(fenced(&refused, COMMAND + 2));
+    assert!(!cancel_all_sent(&refused));
+    respond(
+        &mut e,
+        &fresh[0],
+        START + 5.,
+        200,
+        r#"{"code":0,"data":{"orders":[]}}"#,
+    );
+    let admitted = cancel_all(&mut e, COMMAND + 3, START + 6.);
+    assert!(!fenced(&admitted, COMMAND + 3));
+    assert!(cancel_all_sent(&admitted));
+}

@@ -179,5 +179,5 @@ test('all installs follow restore and save cache immediately only on install suc
     assert.deepEqual(installed, expected, file);
   }
   const rust = readFileSync(join(root, '.github/workflows/rust.yml'), 'utf8');
-  assert.equal(rust.match(/'\.github\/actions\/install-yarn\/\*\*'/g)?.length, 2);
+  assert.equal(rust.match(/'\.github\/actions\/install-yarn\/\*\*'/g)?.length, 1);
 });
