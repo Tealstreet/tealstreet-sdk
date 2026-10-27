@@ -933,10 +933,8 @@ fn implemented(algorithm: Algorithm) -> bool {
         Algorithm::HmacSha512 => cfg!(feature = "hmac-sha512"),
         Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
         Algorithm::SchnorrDigest => cfg!(feature = "schnorr"),
-        Algorithm::Ed25519
-        | Algorithm::Es256
-        | Algorithm::Secp256k1Digest
-        | Algorithm::StarkDigest => false,
+        Algorithm::Secp256k1Digest => cfg!(feature = "secp256k1"),
+        Algorithm::Ed25519 | Algorithm::Es256 | Algorithm::StarkDigest => false,
     }
 }
 
@@ -3094,6 +3092,20 @@ mod tests {
             Capability::Unsupported
         );
         let (wallet, key) = public_setup("secp256k1Digest", SCALAR);
+        assert_eq!(
+            wallet.can_sign(&key, Algorithm::Secp256k1Digest),
+            if cfg!(feature = "secp256k1") {
+                Capability::Supported
+            } else {
+                Capability::Unsupported
+            }
+        );
+        let (other, other_key) = public_setup("ed25519", SCALAR);
+        assert_eq!(
+            other.can_sign(&other_key, Algorithm::Secp256k1Digest),
+            Capability::Unsupported
+        );
+
         assert_eq!(
             wallet.can_sign(&key, Algorithm::HmacSha256),
             Capability::Unsupported
