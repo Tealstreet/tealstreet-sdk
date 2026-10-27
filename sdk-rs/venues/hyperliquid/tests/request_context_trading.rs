@@ -844,17 +844,41 @@ fn builder_hold(reply_ready: bool) {
     let actions = command(&mut e, NOW, place(OWNER));
     assert!(exchange(&actions).is_empty());
     assert!(results(&actions, OWNER).is_empty());
-    let read = actions
+    let preparation = actions
         .iter()
         .find_map(|a| match a {
-            Action::Http(r)
-                if !r.url.ends_with("/exchange") && support::kind(r) == "maxBuilderFee" =>
-            {
-                Some(r.clone())
-            }
+            Action::ManagedHttp(action) => match &**action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if support::kind(request) == "maxBuilderFee" => Some(*preparation),
+                _ => None,
+            },
             _ => None,
         })
         .expect("native builder prerequisite");
+    e.http_prepared(
+        NOW,
+        preparation,
+        Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let (permit, read) = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind {
+                    permit, request, ..
+                } if support::kind(&request) == "maxBuilderFee" => Some((permit, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("builder read binds its prepared route");
+    assert!(matches!(e.claim_http(NOW, permit), Ok(Claim::Released(_))));
     let timer = actions
         .iter()
         .find_map(|a| match a {

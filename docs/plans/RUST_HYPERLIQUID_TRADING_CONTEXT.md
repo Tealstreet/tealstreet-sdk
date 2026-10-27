@@ -21,6 +21,14 @@ secondary is installed. Existing caller metadata is validated normally; stableId
 is not synthesized and is not required by the address-keyed nonce domain.
 A native/TS golden binds identical setup JSON, including prefixed/unprefixed
 hex, absent key and an ordinary nonempty-key negative. Invalid setup refuses.
+The measured legacy scalar parser does not trim: ASCII space, NEL and BOM
+around the scalar all refuse. Goldens retain that byte-exact policy. Native
+accepts 0X as well as 0x; the old SDK Wallet rejects 0X. The provider cutover
+uses the native hex decoder consistently on both trusted setup paths, preserving
+the same proven scalar rather than changing its bytes. Invalid hex, length,
+zero or out-of-range scalars yield fixed errors, never echoed input. Options,
+Debug and notices expose no scalar. Failed engine-owned address setup grants no
+private Mutation authority; no venue or TS derivation substitutes for its proof.
 
 The venue Options replaces its raw secret with an installed Identity reference.
 Trusted registry helpers install the provider and identities before host-owned
@@ -52,6 +60,10 @@ prepared stamp and decimal nonce. Apply validates the complete request/result/
 receipt/header graph, exact 20-byte address, low-s signature and recovery over
 the origin-computed digest to the sealed address before publishing the body.
 Stale preparation repeats real work; no eager signature/body cache survives.
+Every distinct physical successor mints a fresh selected Claim; stale repair
+remains engine-owned. Legacy handoff must cancel/fence late host release and
+join the actual old work before starting the new engine; dispose/map clearing
+or a shared reserved maximum alone does not prove that boundary.
 
 Each real command owns a WriteAfterReads Preflight with no read credential and
 the selected write authority. Early refusals use the real command-entry API,
