@@ -1,14 +1,17 @@
 # Build the Rust-only beta bundle's wasm families from one exact SDK commit and
 # publish them as an immutable GitHub Release that tealstreet-next pins file by
-# file (scripts/rust-beta-wasm.pin.json). Every master push touching sdk-rs/
-# publishes, so tealstreet-next's pin workflow finds a release for each import.
+# file (scripts/rust-beta-wasm.pin.json). It runs after each successful Rust SDK
+# master push run and publishes when that commit's sdk-rs/ inputs are new, so
+# tealstreet-next's pin workflow finds a release for each import. RUST_BETA_HOLD
+# (a repository variable holding the reason) stops every release while set.
 # Design: docs/plans/RUST_BETA_BUNDLE.md (Build and CI).
 name: Rust beta wasm release
 
 on:
-  push:
+  workflow_run:
+    workflows: [Rust SDK]
+    types: [completed]
     branches: [master]
-    paths: ['sdk-rs/**']
   workflow_dispatch:
     inputs:
       sdk_sha:
@@ -27,19 +30,30 @@ concurrency:
   group: rust-beta-wasm-release
   cancel-in-progress: false
 
+env:
+  RUST_BETA_HOLD: ${{ vars.RUST_BETA_HOLD }}
+  WASM_BINDGEN_VERSION: 0.2.129
+
 jobs:
   roster:
     name: Beta wasm roster
+    # Automatic runs only follow a successful Rust SDK push run on master.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
     outputs:
       families: ${{ steps.roster.outputs.families }}
       sdk_sha: ${{ steps.source.outputs.sdk_sha }}
       tag: ${{ steps.source.outputs.tag }}
+      publish: ${{ steps.inputs.outputs.publish }}
     steps:
       - name: Refuse anything but an exact commit and a tag that names it
         id: source
         env:
-          SDK_SHA: ${{ inputs.sdk_sha || github.sha }}
+          SDK_SHA: ${{ inputs.sdk_sha || github.event.workflow_run.head_sha }}
           TAG: ${{ inputs.tag || '' }}
         run: |
           [ -n "$TAG" ] || TAG="rust-beta-wasm-${SDK_SHA:0:11}"
@@ -65,8 +79,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Require no hold and a successful Rust SDK master push run for sdk_sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node sdk-rs/harness/beta-wasm-release-guard.mjs held
+          node sdk-rs/harness/beta-wasm-release-guard.mjs certified "$GITHUB_REPOSITORY" '${{ steps.source.outputs.sdk_sha }}'
+      # Unchanged sdk-rs/ inputs already have a release; publishing again only adds volume.
+      - name: Publish only new sdk-rs inputs
+        id: inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fingerprint=$(node --input-type=module -e "
+            const { betaWasmInputs } = await import('./sdk-rs/harness/beta-wasm-inputs.mjs');
+            console.log(betaWasmInputs('.', { wasmBindgen: process.env.WASM_BINDGEN_VERSION, wasmOpt: 'required', profile: 'release', target: 'wasm32-unknown-unknown' }).fingerprint);")
+          existing=$(node sdk-rs/harness/beta-wasm-release-guard.mjs published "$GITHUB_REPOSITORY" "$fingerprint")
+          if [ -n "$existing" ]; then
+            echo "sdk-rs inputs $fingerprint are already published as $existing"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
       # Only an authenticated 404 is absence; an existing tag or release, or any API error, fails.
       - name: Require a fresh tag and release
+        if: steps.inputs.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ steps.source.outputs.tag }}' '${{ steps.source.outputs.sdk_sha }}'
@@ -81,6 +118,7 @@ jobs:
   build:
     name: Beta wasm family (${{ matrix.family }})
     needs: roster
+    if: needs.roster.outputs.publish == 'true'
     strategy:
       fail-fast: true
       matrix:
@@ -88,7 +126,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      WASM_BINDGEN_VERSION: 0.2.129
       SAFE_CEX_WASM_OPT: required
     steps:
       - uses: actions/checkout@v7
@@ -138,11 +175,10 @@ jobs:
   release:
     name: Publish beta wasm release
     needs: [roster, build]
+    if: needs.roster.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      WASM_BINDGEN_VERSION: 0.2.129
     steps:
       - uses: actions/checkout@v7
         with:

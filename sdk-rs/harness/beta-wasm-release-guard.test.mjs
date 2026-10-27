@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assertFreshTag, createAndVerifyTag } from './beta-wasm-release-guard.mjs';
+import { assertCertified, assertFreshTag, assertNotHeld, createAndVerifyTag, publishedFingerprint } from './beta-wasm-release-guard.mjs';
 
 const REPO = 'Tealstreet/tealstreet-sdk';
 const TAG = 'rust-beta-wasm-aaaaaaaaaaa';
@@ -74,4 +74,42 @@ test('a refused or failed tag creation never proceeds', async () => {
     await assert.rejects(createAndVerifyTag({ api, repo: REPO, tag: TAG, sha: SHA }), new RegExp(`HTTP ${status}`));
   }
   await assert.rejects(createAndVerifyTag({ api: fakeApi({}).api, repo: REPO, tag: TAG, sha: 'main' }), /full commit SHA/);
+});
+
+test('a set hold stops the release and names its reason; an empty one does not', () => {
+  assert.throws(() => assertNotHeld('BingX interest fix pending'), /held: BingX interest fix pending/);
+  for (const hold of [undefined, '', '  ']) assertNotHeld(hold);
+});
+
+const runsPath = `/repos/${REPO}/actions/workflows/rust.yml/runs?head_sha=${SHA}&event=push&branch=master&per_page=20`;
+const run = (overrides) => ({ head_sha: SHA, head_branch: 'master', event: 'push', status: 'completed', conclusion: 'success', ...overrides });
+
+test('only a successful Rust SDK master push run for the exact commit certifies it', async () => {
+  const ok = fakeApi({ [`GET ${runsPath}`]: { status: 200, json: { workflow_runs: [run({ conclusion: 'failure' }), run()] } } });
+  await assertCertified({ api: ok.api, repo: REPO, sha: SHA });
+  for (const runs of [[], [run({ conclusion: 'failure' })], [run({ status: 'in_progress', conclusion: null })],
+    [run({ head_sha: OTHER })], [run({ head_branch: 'feat/x' })], [run({ event: 'pull_request' })]]) {
+    const { api } = fakeApi({ [`GET ${runsPath}`]: { status: 200, json: { workflow_runs: runs } } });
+    await assert.rejects(assertCertified({ api, repo: REPO, sha: SHA }), /no successful Rust SDK master push run/);
+  }
+  const error = fakeApi({ [`GET ${runsPath}`]: { status: 502, json: null } });
+  await assert.rejects(assertCertified({ api: error.api, repo: REPO, sha: SHA }), /HTTP 502/);
+});
+
+test('a release whose pin already carries the fingerprint is found, so the same inputs publish once', async () => {
+  const releases = [
+    { tag_name: 'rust-beta-wasm-ccccccccccc', draft: true, assets: [{ name: 'rust-beta-wasm.pin.json', browser_download_url: 'u/c' }] },
+    { tag_name: 'exchange-mcp-v1', assets: [{ name: 'rust-beta-wasm.pin.json', browser_download_url: 'u/x' }] },
+    { tag_name: 'rust-beta-wasm-bbbbbbbbbbb', assets: [{ name: 'rust-beta-wasm.pin.json', browser_download_url: 'u/b' }] },
+    { tag_name: TAG, assets: [{ name: 'rust-beta-wasm.pin.json', browser_download_url: 'u/a' }] },
+  ];
+  const pins = { 'u/b': { inputs: { fingerprint: 'old' } }, 'u/a': { inputs: { fingerprint: 'new' } } };
+  const fetched = [];
+  const fetchImpl = async (url) => { fetched.push(url); return Response.json(pins[url]); };
+  const { api } = fakeApi({ [`GET /repos/${REPO}/releases?per_page=30`]: { status: 200, json: releases } });
+  assert.equal(await publishedFingerprint({ api, repo: REPO, fingerprint: 'new', fetchImpl }), TAG);
+  assert.deepEqual(fetched, ['u/b', 'u/a'], 'drafts and foreign tags are never read');
+  assert.equal(await publishedFingerprint({ api, repo: REPO, fingerprint: 'none', fetchImpl }), undefined);
+  const error = fakeApi({ [`GET /repos/${REPO}/releases?per_page=30`]: { status: 403, json: null } });
+  await assert.rejects(publishedFingerprint({ api: error.api, repo: REPO, fingerprint: 'new', fetchImpl }), /HTTP 403/);
 });
