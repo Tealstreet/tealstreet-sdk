@@ -10273,6 +10273,21 @@ replacement wake still cannot send early. This avoids a permanently stranded
 private connection without scheduling nonfinite host timers or granting socket
 authority. Real NaN/both-infinity, finite-poll and duplicate-wake controls pin it.
 
+### Paradex JWT reads on the Session bearer
+
+Paradex is the first `session-bearer` adopter. Its account snapshots
+(margins, positions, balance, orders) and the `FetchAccount` identity read are
+managed Reads bound to the account's JWT Session; the engine copies
+`Authorization: Bearer <jwt>` only at prepare, before `Content-Type` and
+`Accept` as before. Caller-visible changes:
+- Each read has a 20 s window. A read still waiting for a late JWT, or never
+  answered, ends unsent at its window instead of holding the account cycle or
+  the command forever; the cycle moves on and the next poll reads again.
+- `FetchAccount` failures are typed: after a refused `/auth` (401/403) the
+  identity read fails `AuthInvalid`/`NotSent`, and the Session is retired.
+- A JWT that is not header-safe is never sent; reads wait for a valid one.
+Trading, history, leverage and `/auth` itself still use the legacy sender.
+
 ### BloFin managed public and private sockets
 
 Both feeds declare managed_sockets and register before either connects. Managed
