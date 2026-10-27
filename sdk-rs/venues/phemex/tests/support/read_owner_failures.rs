@@ -442,6 +442,9 @@ struct Pressure {
     paused: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Venue for Pressure {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.venue.start(cx);

@@ -423,6 +423,10 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn managed_sockets() -> bool {
+        true
+    }
+
     fn fence_uncertain_placements(&self) -> bool {
         true
     }

@@ -740,6 +740,9 @@ fn interval(i: Interval, stream: bool) -> bool {
     matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
+    fn managed_sockets() -> bool {
+        true
+    }
     fn on_socket_event(
         &mut self,
         cx: &mut Cx<'_, Pending>,

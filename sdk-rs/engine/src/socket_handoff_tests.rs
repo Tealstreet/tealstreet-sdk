@@ -16,6 +16,9 @@ struct Probe {
     repeat: bool,
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = usize;
     fn start(&mut self, cx: &mut Cx<'_, usize>) {
         let feed = cx

@@ -610,6 +610,9 @@ struct Pressure {
     peers: Vec<Context>,
 }
 impl Venue for Pressure {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.inner.capabilities()
@@ -754,6 +757,9 @@ impl RetirementPressure {
     }
 }
 impl Venue for RetirementPressure {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.inner.capabilities()
