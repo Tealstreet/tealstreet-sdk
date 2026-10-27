@@ -697,13 +697,11 @@ fn terminal_events_cannot_be_undone_by_delayed_creates_or_cached_rest() {
 }
 #[test]
 fn signature_headers_cover_sorted_query_and_exact_body() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
-            key: Some("key".into()),
-            secret: Some("secret".into()),
-            ..Default::default()
-        }),
-    );
+    let mut e = support::engine(support::Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Default::default()
+    });
     e.start(0.0);
     let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
         .into_iter()
@@ -735,10 +733,14 @@ fn signature_headers_cover_sorted_query_and_exact_body() {
         ))
     );
     assert!(r.body.is_none());
-    assert!(!e.drain_actions().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
-    )));
+    assert!(
+        !safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+            ))
+    );
 }
 
 fn balance_request(
@@ -840,7 +842,9 @@ fn older_replaced_balance_and_pre_mode_ack_reads_cannot_restore_old_state() {
             },
         },
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         12203.0,
         Event::HttpResponse {
@@ -892,7 +896,9 @@ fn private_heartbeat_preserves_legacy_silent_sessions() {
         })
         .unwrap();
     e.handle(at, Event::TimerFired { timer: retry });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let socket = actions
         .iter()
         .find_map(|a| {
@@ -913,7 +919,8 @@ fn private_heartbeat_preserves_legacy_silent_sessions() {
         .unwrap();
     e.handle(50_000.0, Event::TimerFired { timer });
     assert!(
-        !e.drain_actions()
+        !safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
             .any(|a| matches!(a,Action::WsClose {socket:s} if s==socket))
     );
 }
@@ -1068,13 +1075,11 @@ fn live_fill_price_and_amount_drop_binary_noise() {
 
 /// Starts without sockets, answering every startup read; returns the timers set.
 fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, f64)>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
-            key: Some("key".into()),
-            secret: Some("secret".into()),
-            ..Default::default()
-        }),
-    );
+    let mut e = support::engine(support::Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Default::default()
+    });
     e.start(0.0);
     let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
         .into_iter()
@@ -1130,7 +1135,8 @@ fn fire_account_tick(
         .copied()
         .expect("account tick scheduled");
     e.handle(at, Event::TimerFired { timer });
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             Action::SetTimer { timer, at_ms } => {
@@ -1222,7 +1228,9 @@ fn failed_or_malformed_symbol_settings_read_retries_without_interest_bypassing_b
             },
         },
     );
-    let pending: Vec<_> = e.drain_actions().collect();
+    let pending: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         subscribe_candles_settings_read(&mut e, Interval::M5).is_none(),
         "interest must not bypass failed-read backoff"
@@ -1249,7 +1257,9 @@ fn failed_or_malformed_symbol_settings_read_retries_without_interest_bypassing_b
             error: "network down",
         },
     );
-    let pending: Vec<_> = e.drain_actions().collect();
+    let pending: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         subscribe_candles_settings_read(&mut e, Interval::M15).is_none(),
         "interest must not bypass second failure's backoff"

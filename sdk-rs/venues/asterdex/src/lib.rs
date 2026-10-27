@@ -14,19 +14,25 @@ mod wire;
 use Options as VenueOptions;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
-use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::{CredentialRole, Selection, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::signing::Identity;
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::socket::Config;
+use safe_cex_engine::socket_lifecycle::{
+    AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
+    Interest as SocketInterest, Invalidation, LifecycleEvent, MAX_FRAME_BYTES, SocketCapabilities,
+    SocketError, TrafficPolicy,
+};
 use safe_cex_engine::{
-    Command, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue, VenueError,
-    json, num,
+    Command, CredentialSlot, Cx, ErrorKind, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue, VenueError, json, num,
 };
 use serde_json::value::RawValue;
 use sign::Version;
+use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use wire::*;
 
@@ -124,26 +130,42 @@ pub enum Pending {
     },
 }
 
-struct Connection {
-    socket: Option<SocketId>,
-    open: bool,
-    supervisor: Supervisor,
-    next_request_id: u64,
-}
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            supervisor: Supervisor::new(Config {
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(5_000.0),
-                backoff_base_ms: 500.0,
-                ..Config::default()
-            }),
-            next_request_id: 0,
-        }
+/// Both feeds keep the legacy supervisor timings: 20 s idle, 5 s protocol ping.
+fn feed_policy(role: SocketChannel, backoff_base_ms: f64) -> FeedPolicy {
+    FeedPolicy {
+        role,
+        supervision: Config {
+            idle_timeout_ms: 20_000.0,
+            ping_interval_ms: Some(5_000.0),
+            backoff_base_ms,
+            ..Config::default()
+        },
+        // The listen key in the URL is the private credential; neither feed logs in.
+        auth: AuthMode::None,
+        recovery: AuthRecovery::Reconnect,
+        permanent_refusal_group: None,
+        traffic: TrafficPolicy::AnyText,
+        controls: ControlPolicy::None,
+        invalidation: Invalidation::Required,
+        subscription_interval_ms: 0.0,
     }
+}
+
+fn socket_failed(cx: &mut Cx<'_, Pending>, error: SocketError) {
+    cx.notice(
+        Level::Error,
+        code::SUBSCRIPTION_REJECTED,
+        format!("AsterDEX socket admission failed: {error:?}"),
+    );
+}
+
+#[derive(Default)]
+struct Connection {
+    feed: Option<FeedId>,
+    /// The current epoch's socket, from connect until retirement.
+    socket: Option<SocketId>,
+    /// Subscribe frame ids; never reset, so ids stay unique across reconnects.
+    next_request_id: Cell<u64>,
 }
 
 #[derive(Default)]
@@ -153,17 +175,15 @@ struct BookState {
     last_id: Option<u64>,
 }
 
-/// One slot's provider refs and the V3 API wallet that signs for it.
-#[derive(Clone)]
-struct Slot {
-    identity: Identity,
-    signer: Option<String>,
-}
-
 pub struct AsterDex {
     options: Options,
     version: Version,
-    credentials: Slots<Slot>,
+    credentials: Slots<Identity>,
+    /// N1: a slot whose configured V3 wallet differs from the address its
+    /// signing key proved at setup is refused, never silently re-addressed.
+    signer_mismatch: [Option<String>; 2],
+    /// `start` latched the V3 slots from the engine's sealed identities.
+    signing_sealed: bool,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
@@ -179,30 +199,44 @@ pub struct AsterDex {
     interest_fallback: VecDeque<String>,
 }
 
+fn slot_index(slot: CredentialSlot) -> usize {
+    match slot {
+        CredentialSlot::Primary => 0,
+        CredentialSlot::Secondary => 1,
+    }
+}
+
 fn nonempty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 impl AsterDex {
-    pub fn new(options: Options) -> Self {
-        let slot = |identity: &Option<Identity>, signer: &Option<String>| {
-            // An incomplete identity cannot sign, as before setup moved here.
-            identity
-                .clone()
-                .filter(|id| id.validate().is_ok())
-                .map(|identity| Slot {
-                    identity,
-                    signer: nonempty(signer.as_deref()).map(str::to_owned),
-                })
-        };
-        // A read key keeps signing reads even for public-data-only accounts.
-        let credentials = Slots::new(
-            slot(&options.credentials, &options.signer_address)
-                .filter(|_| !options.public_data_only),
-            slot(&options.read_credentials, &options.read_signer_address),
+    /// Signing slots with today's filters: an incomplete identity cannot
+    /// sign, and a read key keeps signing reads for public-data-only accounts.
+    fn slots(
+        options: &Options,
+        primary: Option<Identity>,
+        secondary: Option<Identity>,
+    ) -> Slots<Identity> {
+        let valid = |identity: Option<Identity>| identity.filter(|id| id.validate().is_ok());
+        Slots::new(
+            valid(primary).filter(|_| !options.public_data_only),
+            valid(secondary),
             SlotPolicy::default(),
+        )
+    }
+
+    pub fn new(options: Options) -> Self {
+        // Construction clones answer presence only; V3 signs with the
+        // engine's sealed identities, installed at start.
+        let credentials = Self::slots(
+            &options,
+            options.credentials.clone(),
+            options.read_credentials.clone(),
         );
         Self {
+            signer_mismatch: [None, None],
+            signing_sealed: false,
             urls: Urls::new(options.testnet),
             version: options.api_version.unwrap_or_default(),
             options,
@@ -231,26 +265,113 @@ impl AsterDex {
         if self.options.api_version.is_none() {
             return Some("Aster signing requires a resolved API version".into());
         }
-        let (_, primary) = self.credentials.select(CredentialRole::Mutation).ok()?;
-        self.auth(primary).err()
+        let (selection, _) = self.credentials.select(CredentialRole::Mutation).ok()?;
+        self.v3_fields(selection.slot()).err()
     }
 
-    /// The recipe contract for one selected slot.
-    fn auth(&self, slot: &Slot) -> Result<sign::Auth, String> {
+    fn configured_signer(&self, slot: CredentialSlot) -> Option<&str> {
+        nonempty(match slot {
+            CredentialSlot::Primary => self.options.signer_address.as_deref(),
+            CredentialSlot::Secondary => self.options.read_signer_address.as_deref(),
+        })
+    }
+
+    /// The V3 main wallet, after checking the slot's configured wallet fields.
+    fn v3_fields(&self, slot: CredentialSlot) -> Result<String, String> {
         if self.version == Version::V1 {
-            return Ok(sign::Auth::V1);
+            return Ok(String::new());
         }
         let user = nonempty(self.options.user_address.as_deref());
-        let (Some(user), Some(signer)) = (user, slot.signer.as_deref()) else {
+        let (Some(user), Some(signer)) = (user, self.configured_signer(slot)) else {
             return Err("Missing required Aster v3 auth fields: Main Wallet Address, API Wallet Address, and Generated Private Key".into());
         };
         safe_cex_crypto::ethereum::get_address(user)?;
         safe_cex_crypto::ethereum::get_address(signer)?;
-        Ok(sign::Auth::V3 {
-            user: user.into(),
-            signer: signer.into(),
-            nonce: sign::interim_nonce(),
-        })
+        Ok(user.into())
+    }
+
+    /// Checks a role's signing contract without reserving a nonce. A mismatch
+    /// is a configuration refusal, never an authentication failure.
+    fn check_signing(&self, role: CredentialRole) -> Result<(), (String, ErrorKind)> {
+        let (selection, _) = self.credentials.select(role).map_err(|_| {
+            (
+                "Missing required Aster credentials".to_owned(),
+                ErrorKind::AuthInvalid,
+            )
+        })?;
+        if let Some(error) = &self.signer_mismatch[slot_index(selection.slot())] {
+            return Err((error.clone(), ErrorKind::InvalidInput));
+        }
+        self.v3_fields(selection.slot())
+            .map(drop)
+            .map_err(|error| (error, ErrorKind::AuthInvalid))
+    }
+
+    /// The selected identity and its recipe contract. V3 mints a nonce claim
+    /// against the wallet address the slot's signing key proved at setup.
+    fn signing(&self, role: CredentialRole) -> Result<(Selection, Identity, sign::Auth), String> {
+        self.check_signing(role).map_err(|(error, _)| error)?;
+        let (selection, identity) = self
+            .credentials
+            .select(role)
+            .map_err(|_| "Missing required Aster credentials".to_owned())?;
+        if self.version == Version::V1 {
+            return Ok((selection, identity.clone(), sign::Auth::V1));
+        }
+        let user = self.v3_fields(selection.slot())?;
+        let (selection, identity, claim) = self
+            .credentials
+            .select_with_nonce(role, &safe_cex_engine::nonce::ASTERDEX_V3)
+            .map_err(|error| error.sign_error().to_string())?;
+        Ok((selection, identity.clone(), sign::Auth::V3 { user, claim }))
+    }
+
+    /// Rebuilds V3 slots from the sealed identities and records any slot
+    /// whose configured wallet differs from the address its key proved.
+    /// Before start, setup may still be initialized or reinitialized, so each
+    /// call reads the engine's current identities; only `start` latches them.
+    fn seal_signing(&mut self, cx: &mut Cx<'_, Pending>, at_start: bool) {
+        if self.version != Version::V3 || self.signing_sealed {
+            return;
+        }
+        self.signing_sealed = at_start;
+        self.signer_mismatch = [None, None];
+        let sealed = cx.address_nonce_identities().clone();
+        self.credentials = Self::slots(
+            &self.options,
+            sealed.primary.clone(),
+            sealed.secondary.clone(),
+        );
+        for (slot, identity) in [
+            (CredentialSlot::Primary, &sealed.primary),
+            (CredentialSlot::Secondary, &sealed.secondary),
+        ] {
+            let (Some(identity), Some(configured)) = (identity, self.configured_signer(slot))
+            else {
+                continue;
+            };
+            let (Ok(configured), Ok(proved)) = (
+                safe_cex_crypto::ethereum::get_address(configured),
+                identity.verified_signing_address(),
+            ) else {
+                continue;
+            };
+            let Ok(proved) = safe_cex_crypto::ethereum::get_address(&format!(
+                "0x{}",
+                safe_cex_crypto::hex(&proved)
+            )) else {
+                continue;
+            };
+            if configured != proved {
+                let error = format!(
+                    "Aster V3 API wallet address {configured} does not match the signing key's address {proved}"
+                );
+                if at_start {
+                    cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
+                }
+                self.signer_mismatch[slot_index(slot)] = Some(error);
+            }
+        }
     }
 
     pub fn is_private(&self) -> bool {
@@ -303,50 +424,96 @@ impl AsterDex {
         );
     }
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.connect_public(cx);
+        self.ensure_public_feed(cx);
     }
 
-    fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.public.socket.is_some() {
+    /// Registers the public feed once and connects it when it has no epoch.
+    /// Suppressed public feeds never register, so they never churn retries.
+    fn ensure_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.public_feed_policy() != PublicFeedPolicy::Direct {
             return;
         }
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public.supervisor.connecting(cx);
+        let feed = match self.public.feed {
+            Some(feed) if cx.socket_epoch(feed).is_some() => return,
+            Some(feed) => feed,
+            None => match cx.register_socket_feed(feed_policy(SocketChannel::Public, 500.0)) {
+                Ok(feed) => {
+                    self.public.feed = Some(feed);
+                    self.sync_public_interests(cx);
+                    feed
+                }
+                Err(error) => return socket_failed(cx, error),
+            },
+        };
+        match cx.connect_socket(feed, self.urls.public_ws) {
+            Ok(epoch) => self.public.socket = Some(epoch.socket()),
+            Err(error) => socket_failed(cx, error),
         }
-        self.public.socket = Some(cx.connect(
-            safe_cex_engine::SocketSpec::new(self.urls.public_ws).channel(SocketChannel::Public),
-        ));
-        self.public.open = false;
     }
 
-    fn close_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = None;
-        self.public.open = false;
-        for (symbol, state) in &mut self.books {
-            state.book.clear();
-            state.last_id = None;
-            cx.book_changed(symbol);
-        }
-        self.public.supervisor.retry(cx);
+    /// The desired public topics; the engine replays them on every open and
+    /// encodes only the deltas while connected.
+    fn public_interests(&self) -> Vec<SocketInterest> {
+        let mut topics = vec!["!ticker@arr".to_owned(), "!markPrice@arr@1s".to_owned()];
+        topics.extend(
+            self.books
+                .keys()
+                .map(|symbol| format!("{}@depth20@100ms", symbol.to_ascii_lowercase())),
+        );
+        topics.extend(
+            self.candles.keys().map(|(symbol, interval)| {
+                format!("{}@kline_{interval}", symbol.to_ascii_lowercase())
+            }),
+        );
+        topics
+            .into_iter()
+            .map(SocketInterest::from_wire_args)
+            .collect()
     }
 
-    fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, method: &str, topics: &[String]) {
-        let (Some(socket), true) = (self.public.socket, self.public.open) else {
+    fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(feed) = self.public.feed else {
             return;
         };
-        if topics.is_empty() {
-            return;
+        if let Err(error) = cx.set_socket_interests(feed, self.public_interests()) {
+            socket_failed(cx, error);
         }
-        self.public.next_request_id += 1;
-        let params = serde_json::to_string(topics).unwrap_or_default();
-        cx.send(
-            socket,
-            format!(
-                "{{\"method\":\"{method}\",\"params\":{params},\"id\":{}}}",
-                self.public.next_request_id
-            ),
-        );
+    }
+
+    fn public_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        match event {
+            LifecycleEvent::Opened(epoch) => {
+                self.public.socket = Some(epoch.socket());
+                for state in self.books.values_mut() {
+                    state.last_id = None;
+                }
+                // Sent before the engine replays the subscriptions, as legacy did.
+                cx.send(
+                    epoch.socket(),
+                    "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}",
+                );
+            }
+            LifecycleEvent::Ping(epoch) => {
+                cx.send(epoch.socket(), r#"{"id":-1,"method":"LIST_SUBSCRIPTIONS"}"#)
+            }
+            LifecycleEvent::Reconnect(_) => self.ensure_public_feed(cx),
+            LifecycleEvent::Retired { .. } => {
+                self.public.socket = None;
+                for (symbol, state) in &mut self.books {
+                    state.book.clear();
+                    state.last_id = None;
+                    cx.book_changed(symbol);
+                }
+            }
+            // A refused set is reported; the feed keeps serving its other topics.
+            LifecycleEvent::InterestsRefused { error, .. } => socket_failed(cx, error),
+            _ => {}
+        }
+        Ok(())
     }
 
     fn request_interest(&mut self, cx: &mut Cx<'_, Pending>, initial: bool, symbol: Option<&str>) {
@@ -682,6 +849,18 @@ impl Venue for AsterDex {
         true
     }
 
+    // reconcile_uncertain starts a fresh open-orders read at once.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+
+    /// The engine asks at each uncertain seal and re-asks with backoff while
+    /// fenced; a call starts one read or joins the owed requery, and the clean
+    /// accepted read reports through `orders_reconciled`.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_orders(cx);
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -696,52 +875,135 @@ impl Venue for AsterDex {
         }
     }
 
+    fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
+        (self.version == Version::V3).then_some(&safe_cex_engine::nonce::ASTERDEX_V3)
+    }
+
+    /// Only slots that sign V3 gain address setup; a public-data-only
+    /// primary never signs.
+    fn public_address_slots(&self) -> safe_cex_engine::AddressSetupSlots {
+        use safe_cex_engine::AddressSetupSlots;
+        match (self.version, self.options.public_data_only) {
+            (Version::V1, _) => AddressSetupSlots::None,
+            (Version::V3, true) => AddressSetupSlots::Secondary,
+            (Version::V3, false) => AddressSetupSlots::Both,
+        }
+    }
+
+    fn dispatch_nonce() -> bool {
+        true
+    }
+
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    }
+
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Configured fields are checked first; sealing then binds the slots.
         if let Some(error) = self.signing_config_error() {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
+        self.seal_signing(cx, true);
         self.start_requests(cx);
     }
 
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.on_account_open(cx, socket) {
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = true;
-        self.public.supervisor.opened(cx);
-        cx.send(socket, "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}");
-        let mut topics = vec!["!ticker@arr".to_owned(), "!markPrice@arr@1s".to_owned()];
-        for (symbol, state) in &mut self.books {
-            state.last_id = None;
-            topics.push(format!("{}@depth20@100ms", symbol.to_ascii_lowercase()));
-        }
-        for (symbol, interval) in self.candles.keys() {
-            topics.push(format!("{}@kline_{interval}", symbol.to_ascii_lowercase()));
-        }
-        self.subscribe(cx, "SUBSCRIBE", &topics);
-    }
+    // Both feeds are engine-managed: opens, closes and liveness arrive as socket events.
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
 
+    /// The engine delivers only frames of an open, current, unexpired epoch.
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.on_account_message(cx, socket, text) {
             return;
         }
         if self.public.socket == Some(socket) {
-            self.public.supervisor.received(cx.now);
             self.on_public_frame(cx, text);
         }
     }
 
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.on_account_close(cx, socket) {
-            return;
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+
+    fn socket_capabilities() -> SocketCapabilities {
+        // No AsterDEX work waits on a subscription release; continuations compile out.
+        SocketCapabilities { handoff: false }
+    }
+
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        let feed = match &event {
+            LifecycleEvent::Opened(epoch)
+            | LifecycleEvent::Ready { epoch, .. }
+            | LifecycleEvent::Authenticated { epoch, .. }
+            | LifecycleEvent::AuthFailure { epoch, .. }
+            | LifecycleEvent::Retired { epoch, .. }
+            | LifecycleEvent::Ping(epoch)
+            | LifecycleEvent::RetryLogin(epoch) => epoch.feed(),
+            LifecycleEvent::Reconnect(feed)
+            | LifecycleEvent::InterestsCommitted { feed, .. }
+            | LifecycleEvent::InterestsRefused { feed, .. } => *feed,
+        };
+        if self.account_feed() == Some(feed) {
+            self.account_socket_event(cx, event)
+        } else if self.public.feed == Some(feed) {
+            self.public_socket_event(cx, event)
+        } else {
+            Err(SocketError::Stale)
         }
-        if self.public.socket == Some(socket) {
-            self.close_public(cx);
+    }
+
+    /// One `{"method","params","id"}` frame per batch, split only to stay under
+    /// the engine's frame bound; the private feed carries no interests.
+    fn encode_socket_interests(
+        &self,
+        _store: &safe_cex_engine::Store,
+        feed: FeedId,
+        subscribe: bool,
+        interests: &[SocketInterest],
+        emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+    ) -> Result<(), SocketError> {
+        if self.public.feed != Some(feed) || interests.is_empty() {
+            return Ok(());
         }
+        let method = if subscribe {
+            "SUBSCRIBE"
+        } else {
+            "UNSUBSCRIBE"
+        };
+        let mut start = 0;
+        while start < interests.len() {
+            let mut end = start + 1;
+            let frame = |chunk: &[SocketInterest], id: u64| {
+                let params: Vec<&str> = chunk.iter().map(|i| i.wire_args.as_ref()).collect();
+                format!(
+                    "{{\"method\":\"{method}\",\"params\":{},\"id\":{id}}}",
+                    serde_json::to_string(&params).unwrap_or_default()
+                )
+            };
+            let id = self
+                .public
+                .next_request_id
+                .get()
+                .checked_add(1)
+                .ok_or(SocketError::Capacity)?;
+            while end < interests.len()
+                && frame(&interests[start..=end], id).len() <= MAX_FRAME_BYTES
+            {
+                end += 1;
+            }
+            self.public.next_request_id.set(id);
+            emit(EncodedBatch {
+                text: frame(&interests[start..end], id),
+                covered_keys: interests[start..end]
+                    .iter()
+                    .map(|i| i.key.clone())
+                    .collect(),
+            })?;
+            start = end;
+        }
+        Ok(())
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -1086,21 +1348,6 @@ impl Venue for AsterDex {
         {
             return;
         }
-        match self.public.supervisor.on_timer(cx, timer) {
-            Tick::Reconnect => self.connect_public(cx),
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.public.socket {
-                    cx.close(socket);
-                }
-                self.close_public(cx);
-            }
-            Tick::Ping => {
-                if let Some(socket) = self.public.socket {
-                    cx.send(socket, r#"{"id":-1,"method":"LIST_SUBSCRIPTIONS"}"#);
-                }
-            }
-            Tick::Handled | Tick::Unhandled => {}
-        }
         if self.interest_timer == Some(timer) {
             self.interest_timer = None;
             self.request_interest(cx, false, None);
@@ -1142,11 +1389,7 @@ impl Venue for AsterDex {
                 let state = self.books.entry(symbol.clone()).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
-                    self.subscribe(
-                        cx,
-                        "SUBSCRIBE",
-                        &[format!("{}@depth20@100ms", symbol.to_ascii_lowercase())],
-                    );
+                    self.sync_public_interests(cx);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1154,11 +1397,7 @@ impl Venue for AsterDex {
                     state.subscribers -= 1;
                     if state.subscribers == 0 {
                         self.books.remove(&symbol);
-                        self.subscribe(
-                            cx,
-                            "UNSUBSCRIBE",
-                            &[format!("{}@depth20@100ms", symbol.to_ascii_lowercase())],
-                        );
+                        self.sync_public_interests(cx);
                     }
                 }
             }
@@ -1174,11 +1413,7 @@ impl Venue for AsterDex {
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1 {
-                    self.subscribe(
-                        cx,
-                        "SUBSCRIBE",
-                        &[format!("{}@kline_{interval}", symbol.to_ascii_lowercase())],
-                    );
+                    self.sync_public_interests(cx);
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
@@ -1187,11 +1422,7 @@ impl Venue for AsterDex {
                     *count -= 1;
                     if *count == 0 {
                         self.candles.remove(&key);
-                        self.subscribe(
-                            cx,
-                            "UNSUBSCRIBE",
-                            &[format!("{}@kline_{}", key.0.to_ascii_lowercase(), key.1)],
-                        );
+                        self.sync_public_interests(cx);
                     }
                 }
             }

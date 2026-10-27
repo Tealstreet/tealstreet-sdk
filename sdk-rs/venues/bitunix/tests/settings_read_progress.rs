@@ -7,18 +7,16 @@ use safe_cex_engine::{
 use support::*;
 const SETTINGS: &str = r#"{"code":0,"data":{"leverage":50,"marginMode":"CROSS"}}"#;
 fn ready(secondary: bool) -> (TestEngine, SocketId) {
-    let e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
-            key: Some("replay-key".into()),
-            secret: Some("replay-secret".into()),
-            read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
-                key: "read-key".into(),
-                secret: "read-secret".into(),
-                passphrase: None,
-            }),
-            ..Default::default()
+    let e = support::engine(support::Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
+            key: "read-key".into(),
+            secret: "read-secret".into(),
+            passphrase: None,
         }),
-    );
+        ..Default::default()
+    });
     let (mut e, socket) = startup_with_engine(e);
     let mut markets = e.store().markets().to_vec();
     let mut eth = markets[0].clone();
@@ -50,7 +48,9 @@ fn begin(e: &mut TestEngine) -> HttpRequest {
             interval: Interval::M1,
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     settings(&actions)
 }
 fn notify(e: &mut TestEngine, socket: SocketId, at: f64, symbol: &str) {
@@ -64,7 +64,9 @@ fn notify(e: &mut TestEngine, socket: SocketId, at: f64, symbol: &str) {
             text: &text,
         },
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .for_each(drop);
 }
 fn answer(e: &mut TestEngine, r: &HttpRequest, at: f64, body: &str) -> Vec<Action> {
     e.handle(
@@ -78,7 +80,9 @@ fn answer(e: &mut TestEngine, r: &HttpRequest, at: f64, body: &str) -> Vec<Actio
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn auth(actions: &[Action]) -> Vec<(CredentialSlot, AuthOutcome)> {
     actions
@@ -107,7 +111,9 @@ fn timer_between(actions: &[Action], lo: f64, hi: f64) -> (TimerId, f64) {
 }
 fn fire(e: &mut TestEngine, timer: TimerId, at: f64) -> Vec<Action> {
     e.handle(at, Event::TimerFired { timer });
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 #[test]
 fn current_flat_settings_and_scoped_auth_advance_across_same_or_other_symbol_notifications() {
@@ -179,7 +185,9 @@ fn failed_settings_attempts_still_increase_backoff_during_position_notifications
                     error: "settings network unavailable",
                 },
             );
-            e.drain_actions().collect()
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect()
         } else {
             answer(&mut e, &r, 200.0, r#"{"code":0,"data":{"leverage":0}}"#)
         };
@@ -225,7 +233,9 @@ fn accepted_settings_writes_keep_the_fence_while_unproved_writes_leave_the_read_
                 },
             };
             e.handle(150.0, Event::Command(command));
-            let actions: Vec<_> = e.drain_actions().collect();
+            let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect();
             let write = actions
                 .iter()
                 .find_map(|a| match a {
@@ -241,7 +251,9 @@ fn accepted_settings_writes_keep_the_fence_while_unproved_writes_leave_the_read_
                         error: "lost settings ACK",
                     },
                 );
-                e.drain_actions().collect()
+                safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .collect()
             } else {
                 answer(
                     &mut e,
@@ -262,7 +274,12 @@ fn accepted_settings_writes_keep_the_fence_while_unproved_writes_leave_the_read_
                 )
             )));
             notify(&mut e, socket, 250.0, "BTCUSDT");
-            let actions = answer(&mut e, &old, 300.0, SETTINGS);
+            let mut actions = answer(&mut e, &old, 300.0, SETTINGS);
+            // An unproved symbol write holds its scope and re-reads at once:
+            // that fresh read supersedes the older one and carries the store.
+            if kind != "mode" && matches!(result, "malformed" | "transport") {
+                actions = answer(&mut e, &settings(&complete), 301.0, SETTINGS);
+            }
             if result == "accepted" {
                 let expected = match kind {
                     "leverage" => (30.0, Some(MarginType::Cross)),

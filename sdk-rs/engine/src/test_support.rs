@@ -17,6 +17,9 @@ impl<V: Venue, F: FnMut(&mut V, &mut Cx<'_, V::Pending>)> ProbeVenue<V, F> {
 
 impl<V: Venue, F: FnMut(&mut V, &mut Cx<'_, V::Pending>)> Venue for ProbeVenue<V, F> {
     type Pending = V::Pending;
+    fn http_mutation_barriers() -> bool {
+        V::http_mutation_barriers()
+    }
     fn start(&mut self, cx: &mut Cx<'_, V::Pending>) {
         (self.start)(&mut self.venue, cx);
     }
@@ -44,6 +47,14 @@ pub fn http_requests<V: Venue>(engine: &mut Engine<V>) -> Vec<HttpRequest> {
             _ => None,
         })
         .collect()
+}
+
+/// `prepared_actions` at the latest handled event's time: managed requests
+/// leave only through preparation, so fixtures that drained after `handle`
+/// prepare at that same instant.
+pub fn prepared_now<V: Venue>(engine: &mut Engine<V>) -> Vec<Action> {
+    let now = engine.dispatch_now();
+    prepared_actions(engine, now)
 }
 
 /// Immediate fake routes for native venue fixtures. Physical HTTP is returned

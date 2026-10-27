@@ -3,7 +3,6 @@ mod support;
 use safe_cex_engine::{
     AccountReadScope, Action, AuthOutcome, CredentialSlot, Event, HttpRequest, Notice, Response,
 };
-use safe_cex_venue_bitunix::{BitunixFutures, Options};
 use support::*;
 fn http(actions: &[Action], path: &str) -> HttpRequest {
     actions
@@ -33,7 +32,9 @@ fn answer(
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn auth(actions: &[Action]) -> Vec<(CredentialSlot, AccountReadScope, AuthOutcome)> {
     actions
@@ -52,7 +53,7 @@ fn started(secondary: bool) -> (TestEngine, Vec<Action>) {
     started_at(secondary, 0.0)
 }
 fn started_at(secondary: bool, now: f64) -> (TestEngine, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
@@ -60,8 +61,8 @@ fn started_at(secondary: bool, now: f64) -> (TestEngine, Vec<Action>) {
             secret: "read-secret".into(),
             passphrase: None,
         }),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(now);
     let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
     let markets = http(&actions, "/trading_pairs");
@@ -201,7 +202,9 @@ fn a_private_rate_pause_cannot_be_bypassed_by_the_balance_tick() {
         .expect("balance tick");
     for now in [500.0, 1000.0, 1500.0, 2000.0] {
         e.handle(now, Event::TimerFired { timer });
-        let current: Vec<_> = e.drain_actions().collect();
+        let current: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         assert!(
             !current
                 .iter()
@@ -262,7 +265,9 @@ fn secondary_refusal_then_current_recovery_has_only_its_scoped_evidence() {
     assert!(!failed.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event))if event.code==safe_cex_engine::log::code::AUTH_REJECTED)),"legacy auth diagnostic would invent primary/account failure in SDK");
     let (timer, at) = retry(&failed, 100.0);
     e.handle(at, Event::TimerFired { timer });
-    let current: Vec<_> = e.drain_actions().collect();
+    let current: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let r = http(&current, "get_pending_positions");
     let recovered = answer(&mut e, &r, at + 1.0, 200, "", POSITIONS);
     assert_eq!(
@@ -283,7 +288,9 @@ fn settings(e: &mut TestEngine, now: f64, symbol: &str) -> HttpRequest {
             interval: safe_cex_engine::model::Interval::M1,
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     http(&actions, "/get_leverage_margin_mode")
 }
 #[test]
@@ -327,7 +334,9 @@ fn settings_symbols_do_not_heal_each_other_and_empty_margin_mode_preserves_exist
     );
     let (timer, at) = retry(&failed, 200.0);
     e.handle(at, Event::TimerFired { timer });
-    let current: Vec<_> = e.drain_actions().collect();
+    let current: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let btc = http(&current, "/get_leverage_margin_mode");
     let recovered = answer(
         &mut e,
@@ -358,14 +367,17 @@ fn settings_symbols_do_not_heal_each_other_and_empty_margin_mode_preserves_exist
         }),
     );
     assert!(
-        !e.drain_actions()
+        !safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
             .any(|a| matches!(a,Action::Http(r)if r.url.contains("/get_leverage_margin_mode")))
     );
 }
 
 fn fired(e: &mut TestEngine, timer: safe_cex_engine::TimerId, at: f64) -> Vec<Action> {
     e.handle(at, Event::TimerFired { timer });
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn private_gets(actions: &[Action]) -> Vec<&HttpRequest> {
     actions
@@ -506,7 +518,9 @@ fn host_pause_blocks_healthy_keys_initial_continuations_ticks_and_lost_read_repa
             interval: safe_cex_engine::model::Interval::M1,
         }),
     );
-    let interested: Vec<_> = e.drain_actions().collect();
+    let interested: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         !private_gets(&interested)
             .iter()
@@ -587,7 +601,9 @@ fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
         })
         .unwrap();
     e.handle(now + 1.0, Event::WsOpened { socket });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let r = http(&actions, "get_pending_positions");
     let failed = answer(&mut e, &r, now + 2.0, 200, "", r#"{"code":10004}"#);
     retry(&failed, now + 2.0);
@@ -603,7 +619,9 @@ fn malformed_regular_recovery_and_valid_tpsl_cannot_heal_regular_refusal() {
             text: r#"{"ch":"order","data":{}}"#,
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let timer = actions
         .iter()
         .find_map(|a| match a {
@@ -774,7 +792,9 @@ fn owned_preflight_during_a_malformed_rate_pause_fails_once_not_sent_and_never_r
             text: r#"{"ch":"position","data":{}}"#,
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let timer = actions
         .iter()
         .find_map(|a| match a {
@@ -801,7 +821,9 @@ fn owned_preflight_during_a_malformed_rate_pause_fails_once_not_sent_and_never_r
             orders: vec![order],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let errors: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {

@@ -38,12 +38,10 @@ fn retry(e: &mut Engine<Blofin>) -> RequestId {
 }
 #[test]
 fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
-    let mut e = trusted::trusted_engine(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("pass".into()),
-        ..Options::default()
-    });
+    let mut e = trusted::trusted_engine_with(
+        Options::default(),
+        Some(trusted::Keys::new("key", "secret", "pass")),
+    );
     e.start(0.);
     let request = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
         .into_iter()
@@ -52,6 +50,8 @@ fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
             _ => None,
         })
         .unwrap();
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     reply(
         &mut e,
         request,

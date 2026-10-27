@@ -6,6 +6,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 import { prepareCollection, beforeCpuCase, afterCpuCase, readSourceTree, selectCollectionRuntimeInputs, resetCollectionCache, capturePublicRaw } from './cpu-collection.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
 import { performanceOrder } from './performance-policy.mjs';
@@ -263,4 +264,50 @@ test('shallow PR checkout refuses absent tested parents and single-parent commit
     const { options } = shallowPullRequest(t, value);
     assert.throws(() => prepareCollection(options), /measured PR checkout not bound to tested head/);
   }
+});
+
+// Exercise the shell, recorder and collector; only the measurement child is
+// scripted, so this checks invocation rather than CPU acceptance.
+test('actual post-merge workflow invocation enters and completes the real collector with explicit nine pairs', t => {
+  const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  const measured = /^  gate:\n([\s\S]*?)(?=^  bitget-paired:)/m.exec(workflow)[1];
+  const publicCommands = measured.split('\n').filter(line => line.includes('rust:gate:record') && line.includes('-public.jsonl.gz'));
+  assert.equal(publicCommands.length, 11);
+  for (const command of publicCommands) assert.match(command, / --runs 9$/);
+  const options = fixture(t, 'bitget');
+  const gate = `import fs from 'node:fs'; import path from 'node:path';
+    const write = ${write.toString()};
+    const performanceOrder = ${performanceOrder.toString()};
+    const reportFixture = ${reportFixture.toString()};
+    const state = JSON.parse(fs.readFileSync(process.env.CPU_COLLECTION_STATE));
+    const claim = state.claims.find(item => item.key === state.active.key);
+    const result = reportFixture(state, claim);
+    fs.copyFileSync(result.reportPath, process.argv[process.argv.indexOf('--report') + 1]);`;
+  write(options.root, 'sdk-rs/harness/gate.mjs', gate);
+  git(options.root, 'add', 'sdk-rs/harness/gate.mjs'); git(options.root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'scripted child report');
+  options.run.head_sha = options.job.head_sha = git(options.root, 'rev-parse', 'HEAD');
+  const state = prepareCollection(options), claim = state.claims[0];
+  const bin = path.join(path.dirname(options.root), 'bin'); fs.mkdirSync(bin);
+  const record = fileURLToPath(new URL('./record-gate.mjs', import.meta.url));
+  write(path.dirname(options.root), 'bin/corepack', `#!${process.execPath}\nconst c = require('node:child_process').spawnSync(process.execPath, [${JSON.stringify(record)}, ...process.argv.slice(5)], {stdio:'inherit'}); process.exit(c.status ?? 2);\n`);
+  fs.chmodSync(path.join(bin, 'corepack'), 0o755);
+  const command = publicCommands.find(line => line.includes('matrix.venue')).trim().replace(/^run: /, '')
+    .replaceAll('${{ matrix.venue }}', 'bitget').replaceAll('${{ matrix.books }}', claim.case.books);
+  const invoke = value => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', value], {
+    cwd: options.root, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`,
+      CPU_COLLECTION_STATE: state.statePath, RUST_REPLAY_CORRECTNESS_ONLY: 'false', RUST_REPLAY_PUBLIC_RUNS: '9' },
+  });
+  for (const mutant of [command.replace(' --runs 9', ''), command.replace(' --runs 9', ' --runs 7')]) {
+    const refused = invoke(mutant);
+    assert.notEqual(refused.status, 0); assert.match(refused.stderr, /public case\/hash\/runs differ/);
+    assert.equal(JSON.parse(fs.readFileSync(state.statePath)).active, null);
+  }
+  const accepted = invoke(command);
+  assert.equal(accepted.status, 0, accepted.stderr);
+  const complete = JSON.parse(fs.readFileSync(state.statePath));
+  assert.equal(complete.active, null); assert.equal(complete.records.length, 1);
+  const evidence = JSON.parse(fs.readFileSync(complete.records[0].evidencePath));
+  assert.equal(evidence.report.runs, 9); assert.equal(evidence.raw.length, 20);
+  const ledger = fs.readFileSync(path.join(options.root, 'sdk-rs/harness/out/ci/ledger.jsonl'), 'utf8').trim().split('\n');
+  assert.equal(ledger.length, 1); assert.equal(JSON.parse(ledger[0]).exitCode, 0);
 });

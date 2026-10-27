@@ -18,6 +18,7 @@ import { ExchangeDependentPostprocessor } from './ExchangeDependentPostprocessor
 import { DisplayedMarginPostprocessor } from './DisplayedMarginPostprocessor';
 import { MessageHandlerStatsPostprocessor } from './MessageHandlerStatsPostprocessor';
 import { OrdersRiskProfilePostprocessor } from './OrdersRiskProfilePostprocessor';
+import { TwapOrderEnrichmentPostprocessor } from './TwapOrderEnrichmentPostprocessor';
 import { TwapPostprocessor } from './TwapPostprocessor';
 
 export const independentPostprocessors: (typeof BasePostprocessor)[] = [
@@ -26,6 +27,7 @@ export const independentPostprocessors: (typeof BasePostprocessor)[] = [
   DisplayedPositionsPostprocessor,
   DisplayedMarginPostprocessor,
   ChaserOrderEnrichmentPostprocessor,
+  TwapOrderEnrichmentPostprocessor,
   OrdersRiskProfilePostprocessor,
 ];
 

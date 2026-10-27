@@ -3,7 +3,8 @@ mod support;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{Error, HttpAction, Preparation};
 use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, Notice, VenueAction, VenueError};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use support::{META, NOW, reply_at};
 
 #[derive(Clone, Copy)]
@@ -13,12 +14,12 @@ enum Cached {
     Tier,
 }
 fn engine(robinhood: bool, testnet: bool) -> Engine<Lighter> {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut engine = support::engine(Options {
         public_data_only: true,
         robinhood,
         testnet,
         ..Options::default()
-    }));
+    });
     engine
         .store_mut()
         .update_setting("ETH", |setting| setting.leverage = 7.5);
@@ -116,6 +117,19 @@ fn started(robinhood: bool, testnet: bool) -> Engine<Lighter> {
         })
         .unwrap();
     reply_at(&mut engine, NOW, &request, 200, META);
+    for action in safe_cex_engine::test_support::prepared_actions(&mut engine, NOW) {
+        if let Action::Http(request) = action
+            && request.url.ends_with("exchangeStats")
+        {
+            reply_at(
+                &mut engine,
+                NOW,
+                &request,
+                200,
+                r#"{"code":200,"order_book_stats":[]}"#,
+            );
+        }
+    }
     engine.drain_actions().for_each(drop);
     engine
         .store_mut()

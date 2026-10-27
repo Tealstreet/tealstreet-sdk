@@ -5,13 +5,14 @@ use safe_cex_engine::request_context::{Claim, Error, HttpAction, Preparation, Pr
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Notice, Outcome, TimerId, VenueError,
 };
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use support::{META, NOW, reply_at};
 
 const CANDLES: &str = r#"{"code":200,"c":[{"t":2000,"o":"2","h":"3","l":"1","c":"2","v":"4"},{"t":1000,"o":"1","h":"2","l":"1","c":"2","v":"3"}]}"#;
 
 fn started(options: Options) -> (Engine<Lighter>, TimerId) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options));
+    let mut engine = support::engine(options);
     engine.start(NOW);
     let metadata = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
         .into_iter()
@@ -21,8 +22,8 @@ fn started(options: Options) -> (Engine<Lighter>, TimerId) {
         })
         .unwrap();
     reply_at(&mut engine, NOW, &metadata, 200, META);
-    let poll = engine
-        .drain_actions()
+    let poll = support::finish_startup_tickers(&mut engine, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms == NOW + 2_000. => Some(timer),
             _ => None,

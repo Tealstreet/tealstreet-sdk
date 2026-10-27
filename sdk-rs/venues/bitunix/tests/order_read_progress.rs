@@ -85,7 +85,9 @@ fn protection_seed() -> Vec<String> {
 fn seeded() -> (TestEngine, SocketId) {
     let (mut e, socket) = startup();
     refresh(&mut e, socket, 1000.0, &regular_seed(), &protection_seed());
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     assert!(e.store().order("A__tp").is_some());
     assert!(e.store().order("P__position-1__sl").is_some());
     (e, socket)
@@ -153,7 +155,9 @@ fn newer_ws_families_survive_stale_rest_while_healthy_peers_advance() {
                 assert_eq!(e.store().order("P__position-1__tp").unwrap().price, 95.0);
                 assert_eq!(e.store().order("P__position-1__tp").unwrap().amount, 0.02);
                 assert!(e.store().order("P__position-1__sl").is_some());
-                e.drain_actions().for_each(drop);
+                safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .for_each(drop);
                 e.handle(
                     4600.0,
                     Event::Command(safe_cex_engine::Command::AmendOrder {
@@ -434,12 +438,11 @@ fn unknown_sparse_execution_gets_rest_metadata_without_consuming_its_pending_fil
 }
 
 fn initial_halves() -> (TestEngine, SocketId, Vec<HttpRequest>) {
-    use safe_cex_venue_bitunix::{BitunixFutures, Options};
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(0.0);
     let mut halves = Vec::new();
     let mut private = None;
@@ -615,7 +618,7 @@ fn overlap_coverage_overflow_holds_only_its_endpoint_and_emits_one_diagnostic() 
                     &row,
                 );
             }
-            let diagnostics=e.drain_actions().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event))if event.code == safe_cex_engine::log::code::SNAPSHOT_DISCARDED)).count();
+            let diagnostics=safe_cex_engine::test_support::prepared_now(&mut e).into_iter().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event))if event.code == safe_cex_engine::log::code::SNAPSHOT_DISCARDED)).count();
             assert_eq!(diagnostics, 1);
             finish(
                 &mut e,
@@ -659,7 +662,9 @@ fn partial_cancel_ack_fences_older_rest_before_the_error_exit() {
         4200.0,
         r#"{"code":0,"data":{"successList":[{"orderId":"A"}],"failureList":[{"orderId":"B","errorMsg":"cancel rejected"}]}}"#,
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(actions.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandFailed { command: 601, .. })
@@ -728,7 +733,9 @@ fn snapshot_crossing_write_cleanup_cannot_resurrect_an_optimistic_order() {
                 },
             );
         }
-        e.drain_actions().for_each(drop);
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .for_each(drop);
         assert!(e.store().order(&creating.id).is_none());
         finish(
             &mut e,
@@ -856,14 +863,18 @@ fn owned_read_crossing_partial_cancel_ack_neither_publishes_stale_rows_nor_appro
         r#"{"code":0,"data":{"successList":[{"orderId":"A"}],"failureList":[{"orderId":"B","errorMsg":"cancel rejected"}]}}"#,
     );
     assert_eq!(e.store().order("A").unwrap().status, OrderStatus::Canceled);
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     answer(
         &mut e,
         owned.id,
         3400.0,
         &body(&[regular("A", 999, true), regular("B", 250, false)], false),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -904,7 +915,9 @@ fn exhaustion_between_initial_halves_never_publishes_native_or_store_snapshot_ro
         );
         assert!(!e.store().loaded().orders);
         safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
-        e.drain_actions().for_each(drop);
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .for_each(drop);
         let second = halves.remove(0);
         answer(
             &mut e,
@@ -921,10 +934,14 @@ fn exhaustion_between_initial_halves_never_publishes_native_or_store_snapshot_ro
         );
         assert!(!e.store().loaded().orders);
         assert!(e.store().orders().is_empty());
-        assert!(!e.drain_actions().any(|action| matches!(
-            action,
-            Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
-        )));
+        assert!(
+            !safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .any(|action| matches!(
+                    action,
+                    Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
+                ))
+        );
         ws(
             &mut e,
             socket,

@@ -8,23 +8,33 @@ inventory reuses. Neither confers managed retry, release or outcome guarantees.
 """
 import collections
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
 import re
 import subprocess
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = 'scripts/request-legacy-sites.json'
 TEST_MANIFEST = 'scripts/request-legacy-test-sites.json'
+ENGINE_LIB = 'engine/src/lib.rs'
+# Engine and workspace-macro sources the crate-wide proof reads; never a fixture root.
+ENGINE_SOURCES = pathlib.Path(__file__).resolve().parents[1]
+SUPER_GLOB = ['use', 'super', '::', '*', ';']
+# Prelude macros trusted where the same scope proof shows no definition, import or
+# glob can shadow them; none can introduce a textual macro or an import.
+STD_MACROS = {'matches', 'format', 'assert', 'assert_eq', 'assert_ne', 'vec', 'panic', 'unreachable'}
 METHODS = {'request', 'request_streamed', 'request_streamed_body', 'sign_http', 'done', 'fail'}
 IDENT = re.compile(r'[A-Za-z_][A-Za-z_0-9]*')
 RAW = re.compile(r'(?:br|cr|r)(\#*)"')
 CHAR = re.compile(r"(?:b)?'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F_]+\}|.)|[^'\\\r\n])'")
 
 
-def tokens(source):
-    """Keep literal bytes atomic; ignore nested comments and formatting."""
+def tokens(source, positions=False):
+    """Keep literal bytes atomic; ignore nested comments and formatting.
+    With `positions`, each token is a (text, source offset) pair."""
     result = []
     i = 0
     while i < len(source):
@@ -72,7 +82,7 @@ def tokens(source):
                 i = match.end()
             else:
                 i += 2 if source.startswith('::', i) else 1
-            result.append(source[start:i])
+            result.append((source[start:i], start) if positions else source[start:i])
     return result
 
 
@@ -625,6 +635,24 @@ def use_items(stream):
     return result
 
 
+def without_own_crate_alias(stream, source_dir):
+    """`extern crate self as <this package>;` names only the crate itself and imports
+    no macro (`#[macro_use]` stays a hazard token), so it is no ancestor hazard."""
+    try:
+        package = tomllib.loads((source_dir.parent / 'Cargo.toml').read_text())['package']['name']
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return stream
+    alias = ['extern', 'crate', 'self', 'as', package.replace('-', '_'), ';']
+    kept, i = [], 0
+    while i < len(stream):
+        if stream[i:i + 6] == alias:
+            i += 6
+            continue
+        kept.append(stream[i])
+        i += 1
+    return kept
+
+
 def source_macro_hazard(stream, ancestor=False):
     if any(token in {'macro_rules', 'macro_use', 'macro_export', 'macro'} for token in stream):
         return True
@@ -665,9 +693,11 @@ def plain_module_links(path, stream, sources):
 class MacroImportProof:
     """Read-only, single-hop source proofs; unknown module graphs stay opaque."""
 
-    def __init__(self, sources, tracked):
+    def __init__(self, sources, tracked, engine_tracked=frozenset()):
         self.sources = sources
         self.tracked = tracked
+        self.engine_tracked = engine_tracked
+        self.engine_root_cache = {}
         self.streams = {path: tokens(source) for path, source in sources.items()}
         self.links = {path: plain_module_links(path, stream, sources)
                       for path, stream in self.streams.items()}
@@ -690,7 +720,7 @@ class MacroImportProof:
         if len(chains) != 1 or path not in self.tracked:
             return lambda index: None
         root, names, parents = chains[0]
-        if any(parent not in self.tracked or source_macro_hazard(self.streams[parent], True)
+        if any(parent not in self.tracked or self.ancestor_hazard(parent, root.parent)
                for parent in parents):
             return lambda index: None
         chain_proof = [{'path': str(item.relative_to(ROOT.resolve())),
@@ -698,7 +728,47 @@ class MacroImportProof:
                                              + b'\0' + self.sources[item].encode()).hexdigest()}
                        for item in (*parents, path)]
 
+        def namespace(file, module):
+            """Glob proofs for the module-level uses of `module` in `file`, else None."""
+            stream = self.streams[file]
+            modules, scopes = module_ranges(stream), brace_ranges(stream)
+            proofs = []
+            for start, end in use_items(stream):
+                if enclosing_module(modules, start) != module or \
+                        {a for a, _ in scopes if a < start < _} != set(module):
+                    continue  # Block-scoped uses never enter a module namespace.
+                part = stream[start:end]
+                if any(token.removeprefix('r#') in STD_MACROS for token in part):
+                    return None
+                if '*' in part:
+                    proof = super_glob(file, module) if part == SUPER_GLOB else glob_proof(part, start)
+                    if proof is None:
+                        return None
+                    proofs.append(proof)
+            return proofs
+
+        def super_glob(file, module):
+            """`use super::*;` names everything the parent module holds, its own
+            imports and globs included, so the parent namespace must be proven too."""
+            if module:
+                parent, parent_module = file, module[:-1]
+            else:
+                lineage = (*parents, path)
+                at = lineage.index(file)
+                if at == 0:
+                    return None
+                parent, parent_module = lineage[at - 1], ()
+            imports = namespace(parent, parent_module)
+            if imports is None:
+                return None
+            return {'super': str(parent.relative_to(ROOT.resolve())),
+                    'module_scope': list(parent_module), 'imports': imports}
+
         def glob_proof(part, index):
+            if part == SUPER_GLOB:
+                return super_glob(path, enclosing_module(module_ranges(self.streams[path]), index))
+            if part[:2] == ['use', 'safe_cex_engine']:
+                return self.engine_glob_proof(root, part)
             if part[:2] != ['use', 'crate'] or len(part) != 7 \
                     or part[2] != '::' or part[4:] != ['::', '*', ';']:
                 return None
@@ -710,7 +780,13 @@ class MacroImportProof:
             if target not in self.tracked or names[:1] == (target_name,):
                 return None
             stream = self.streams[target]
-            if source_macro_hazard(stream) or 'mod' in stream:
+            # Private `#[cfg(test)]` modules are absent from the production module
+            # graph and export nothing through the glob.
+            tests = test_ranges(stream)
+            if source_macro_hazard(stream) or any(
+                    token == 'mod' and (not any(a <= i < b for a, b in tests)
+                                        or stream[i - 1:i] in (['pub'], [')']))
+                    for i, token in enumerate(stream)):
                 return None
             # Re-exports with every visibility spelling are excluded.
             for start, _ in use_items(stream):
@@ -729,6 +805,81 @@ class MacroImportProof:
 
         return lambda index: macro_imports_at(self.streams[path], index, glob_proof, chain_proof)
 
+    def scope(self):
+        if not hasattr(self, '_scope'):
+            spec = importlib.util.spec_from_file_location(
+                'rust_scope', pathlib.Path(__file__).with_name('rust_scope.py'))
+            self._scope = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(self._scope)
+        return self._scope
+
+    def ancestor_hazard(self, parent, source_dir):
+        """An ancestor's top-level invocation may install textual macros, except a
+        workspace macro proven to expand only to `impl` blocks, in a crate whose
+        root proof shows `safe_cex_crypto` is the workspace dependency."""
+        stream = without_own_crate_alias(self.streams[parent], source_dir)
+        if not source_macro_hazard(stream, True):
+            return False
+        if source_macro_hazard(stream):
+            return True
+        braces = brace_ranges(stream)
+        for i, token in enumerate(stream):
+            if stream[i + 1:i + 2] != ['!'] or any(a < i < b for a, b in braces):
+                continue
+            workspace = stream[max(0, i - 2):i] == ['safe_cex_crypto', '::'] \
+                and stream[i - 3:i - 2] != ['::'] \
+                and self.scope().impl_only_macro(ENGINE_SOURCES, 'safe_cex_crypto', token)
+            if not workspace:
+                return True
+        return not self.engine_root_proven(source_dir)
+
+    def engine_root_proven(self, source_dir):
+        """Whether the crate binds no local `safe_cex_engine` (item, alias, module or
+        generated name) and every glob and generator in it is closed, so the root of
+        `use safe_cex_engine::...` is the dependency."""
+        if source_dir not in self.engine_root_cache:
+            scope = self.scope()
+            streams = {path: stream for path, stream in self.streams.items()
+                       if source_dir in path.parents}
+            self.engine_root_cache[source_dir] = not scope.crate_refusals(
+                ENGINE_SOURCES, streams, {'safe_cex_engine'})
+        return self.engine_root_cache[source_dir]
+
+    def engine_glob_proof(self, root, part):
+        """`use safe_cex_engine::<module>::*;` from the workspace engine imports only
+        that module's `pub` items; a macro can enter that namespace solely by a
+        top-level `pub use` (exported macros live at the crate root)."""
+        if len(part) != 7 or part[2] != '::' or part[4:] != ['::', '*', ';'] \
+                or not IDENT.fullmatch(part[3]):
+            return None
+        # The root proof parses both Cargo manifests for the engine dependency.
+        engine_lib = (ROOT / ENGINE_LIB).resolve()
+        if engine_lib not in self.engine_tracked or not self.engine_root_proven(root.parent):
+            return None
+        lib_stream = tokens(engine_lib.read_text())
+        if source_macro_hazard(lib_stream, True):
+            return None
+        targets = plain_module_links(engine_lib, lib_stream, self.engine_tracked).get(part[3], [])
+        if len(targets) != 1 or targets[0] is None:
+            return None
+        target = targets[0]
+        source = target.read_text()
+        stream = tokens(source)
+        if source_macro_hazard(stream):
+            return None
+        depth = brace_ranges(stream)
+        top = lambda i: not any(a < i < b for a, b in depth)
+        for start, _ in use_items(stream):
+            if top(start) and start and stream[start - 1] in {'pub', ')'}:
+                return None
+        if any(stream[i + 1:i + 2] == ['!'] and top(i) for i in range(len(stream))):
+            return None
+        return {'crate': 'safe_cex_engine', 'module': part[3],
+                'declaration': ['pub', 'mod', part[3], ';'],
+                'path': str(target.relative_to(ROOT.resolve())),
+                'blob': hashlib.sha1(b'blob ' + str(len(source.encode())).encode()
+                                     + b'\0' + source.encode()).hexdigest()}
+
 
 def macro_imports_at(stream, index, resolve_glob=None, chain=None):
     modules = module_ranges(stream)
@@ -738,14 +889,14 @@ def macro_imports_at(stream, index, resolve_glob=None, chain=None):
     if any(token in {'macro_use', 'macro_export', 'macro'} for token in stream):
         return None
     for i, token in enumerate(stream):
-        if token == 'macro_rules' and [t.removeprefix('r#') for t in stream[i + 2:i + 3]] in [['matches'], ['format']]:
+        if token == 'macro_rules' and stream[i + 2:i + 3] and stream[i + 2].removeprefix('r#') in STD_MACROS:
             return None
     # Unknown invocations may introduce textual macros or imports without arguments.
     for at, token in enumerate(stream):
         if stream[at + 1:at + 2] != ['!'] or stream[at + 2:at + 3] not in [['('], ['{'], ['[']]:
             continue
         scope = enclosing_module(modules, at)
-        if scope == invocation_module and token in {'matches', 'format'} \
+        if scope == invocation_module and token in STD_MACROS \
                 and (not at or stream[at - 1] not in {'::', '.'}):
             continue
         if invocation_module[:len(scope)] != scope:
@@ -760,10 +911,12 @@ def macro_imports_at(stream, index, resolve_glob=None, chain=None):
         if not all(a < index < b for a, b in enclosing):
             continue
         part = stream[start:end]
-        if any(token.removeprefix('r#') in {'matches', 'format'} for token in part):
+        if any(token.removeprefix('r#') in STD_MACROS for token in part):
             return None
         if '*' in part:
-            if enclosing or resolve_glob is None or (proof := resolve_glob(part, start)) is None:
+            # A glob is proven only at module level (file scope or an inline module).
+            module_level = {a for a, _ in enclosing} == set(invocation_module)
+            if not module_level or resolve_glob is None or (proof := resolve_glob(part, start)) is None:
                 return None
             proofs.append(proof)
     return {'mod_chain': chain or [], 'imports': proofs,
@@ -958,10 +1111,25 @@ def data_macro_proof(stream, index, end, imports):
         return False
 
     def rebound(name):
-        if any(bound == name and body <= start < body_end and (start, stop) != (body, body_end)
+        # Block items are visible across their whole block, so an item or
+        # import binding the name refuses wherever it sits in the body.
+        for i in range(body + 1, body_end - 1):
+            if stream[i] in {'const', 'static', 'struct'}:
+                k = i + 1 + (stream[i + 1] == 'mut')
+                if stream[k].removeprefix('r#') == name:
+                    return True
+            if stream[i] == 'use':
+                stop = i
+                while stop < body_end and stream[stop] != ';':
+                    stop += 1
+                if name in [token.removeprefix('r#') for token in stream[i + 1:stop]]:
+                    return True
+        # Other bindings scope forward: only a construct that starts before the
+        # macro can rebind the name the macro reads.
+        if any(bound == name and body <= start < index and (start, stop) != (body, body_end)
                for bound, _, start, stop in found):
             return True
-        for i in range(body + 1, body_end):
+        for i in range(body + 1, index):
             if closure_bar(stream, i):
                 closing = i + 1
                 while closing < body_end and stream[closing] != '|':
@@ -1046,6 +1214,91 @@ def data_macro_proof(stream, index, end, imports):
             'out_of_scope_bindings': excluded_bindings}
 
 
+def pattern_macro_proof(stream, index, end, imports, found, bound=frozenset()):
+    """`matches!(scrutinee, pattern [if guard])` whose every METHODS-named token is a
+    struct-pattern shorthand binding of this or an enclosing `matches!`, read only
+    as `name.field` in a guard. Guards may nest further proven `matches!`; nothing
+    may carry a Cx binding, call a closure, open a block or invoke another macro."""
+    if stream[index] != 'matches' or index and stream[index - 1] in {'::', '.'}:
+        return None
+    if stream[index + 2] != '(' or imports is None:
+        return None
+    arguments = list(range(index + 3, end - 1))
+
+    def top_level(positions, token):
+        depth = 0
+        for k in positions:
+            if depth == 0 and stream[k] == token:
+                return k
+            depth += (stream[k] in {'(', '[', '{'}) - (stream[k] in {')', ']', '}'})
+        return None
+
+    comma = top_level(arguments, ',')
+    if comma is None:
+        return None
+    guard_at = top_level(range(comma + 1, end - 1), 'if')
+    scrutinee = range(index + 3, comma)
+    pattern = range(comma + 1, guard_at if guard_at is not None else end - 1)
+    guard = range(guard_at + 1, end - 1) if guard_at is not None else range(0)
+    # A lone scrutinee name matched against an `Enum::Variant` path is that enum,
+    # never the `Cx` struct; any other possibly-Cx token refuses the proof.
+    head = [stream[k] for k in range(comma + 1, min(comma + 5, end - 1))]
+    typed_by_pattern = len(scrutinee) == 1 and len(head) >= 3 and IDENT.fullmatch(head[0]) \
+        and head[0] not in {CX, 'Self'} and head[1] == '::' and IDENT.fullmatch(head[2]) \
+        and head[3:4] in ([], ['('], ['{'], ['|'], ['if'])
+    if any(innermost(found, stream[k], k) is not None and innermost(found, stream[k], k)[0] in POSSIBLY_CX
+           for k in arguments if IDENT.fullmatch(stream[k])
+           and not (typed_by_pattern and k in scrutinee)):
+        return None
+    if any(stream[k] in {'!', '|', 'let', ';', '$'} or stream[k].removeprefix('r#') in METHODS
+           for k in scrutinee):
+        return None
+    names = set(bound)
+    for k in pattern:
+        token = stream[k]
+        if token in {'!', '$', '@'} or token.startswith('r#'):
+            return None
+        if token in METHODS:
+            opener = next((j for j in range(k - 1, comma, -1) if stream[j] in {'{', '('}
+                           and group_end(stream, j) > k), None)
+            if opener is None or stream[opener] != '{' or stream[k - 1] not in {'{', ','} \
+                    or stream[k + 1] not in {',', '}'}:
+                return None
+            names.add(token)
+    nested = []
+    k = guard.start
+    while k < guard.stop:
+        token = stream[k]
+        if token == 'matches' and stream[k + 1:k + 3] == ['!', '('] and stream[k - 1] not in {'::', '.'}:
+            inner_end = group_end(stream, k + 2)
+            proof = pattern_macro_proof(stream, k, inner_end, imports, found, names)
+            if proof is None:
+                return None
+            nested.append(proof)
+            k = inner_end
+            continue
+        if token in {'|', 'let', ';', '{', '$'} or token.startswith('r#') \
+                or token == '!' and stream[k + 1:k + 2] != ['=']:
+            return None
+        # A binding is only read as `name.field`: never called, assigned or passed.
+        if token in METHODS:
+            after = k + 3
+            while stream[after:after + 1] == [')']:
+                after += 1
+            if token not in names or stream[k - 1] in {'.', '::'} or stream[k + 1:k + 2] != ['.'] \
+                    or not IDENT.fullmatch(stream[k + 2]) or stream[k + 2] in METHODS \
+                    or stream[after:after + 1] in (['('], ['::']):
+                return None
+        if token == '=' and not (stream[k + 1:k + 2] == ['='] and stream[k + 2:k + 3] != ['=']
+                                 or stream[k - 1] in {'=', '!', '<', '>'} and stream[k + 1:k + 2] != ['=']):
+            return None
+        k += 1
+    if not names - set(bound) and not nested and not any(stream[k] in METHODS for k in guard):
+        return None
+    return {'macro': 'matches', 'pattern_bindings': sorted(names - set(bound)),
+            'nested': nested, 'import_scope': imports}
+
+
 def context_fingerprints(source, index_of=None, macro_scope=None, removed=None):
     """(prod, test) fingerprints of legacy calls on a resolved Cx binding.
 
@@ -1111,7 +1364,8 @@ def context_fingerprints(source, index_of=None, macro_scope=None, removed=None):
             if any(i + 3 <= at < end for at in counted) or (
                     escaped(i) and any(t.removeprefix('r#') in METHODS for t in stream[i + 3:end])):
                 imports = macro_scope(i) if macro_scope is not None else macro_imports_at(stream, i)
-                proof = data_macro_proof(stream, i, end, imports)
+                proof = data_macro_proof(stream, i, end, imports) or pattern_macro_proof(
+                    stream, i, end, imports, found)
                 if not any(i + 3 <= at < end for at in counted) and proof is not None:
                     if removed is not None:
                         removed.append({'tokens': stream[i:end], 'proof': proof,
@@ -1181,9 +1435,10 @@ def request_sites(removed=None):
                              if 'target' not in path.relative_to(ROOT).parts])
     try:
         tracked = {(ROOT / path).resolve() for path in git('ls-files', '--', 'venues').splitlines()}
+        engine_tracked = {(ROOT / path).resolve() for path in git('ls-files', '--', 'engine/src').splitlines()}
     except subprocess.CalledProcessError:
-        tracked = set()  # No tracked declaration proof: retain conservative rows.
-    macro_proofs = MacroImportProof(sources, tracked)
+        tracked = engine_tracked = set()  # No tracked declaration proof: retain conservative rows.
+    macro_proofs = MacroImportProof(sources, tracked, engine_tracked)
     prod, test = {}, {}
     for path, source in sources.items():
         relative = str(path.relative_to(root))
@@ -1235,6 +1490,16 @@ def subset(counts, baseline):
     return all(count <= baseline.get(digest, 0) for digest, count in counts.items())
 
 
+def maximum_manifest(manifests):
+    result = {}
+    for value in manifests:
+        for path, counts in value.items():
+            inherited = result.setdefault(path, {})
+            for digest, count in counts.items():
+                inherited[digest] = max(inherited.get(digest, 0), count)
+    return result
+
+
 def check(current, allowed, previous):
     failures = []
     if current != allowed:
@@ -1250,12 +1515,19 @@ def git(*args):
     return subprocess.run(['git', '-C', str(ROOT), *args], text=True, capture_output=True, check=True).stdout
 
 
-def previous_manifests(inventory=None, predecessor=None):
-    """Per-ref baselines; a ref without `inventory` is bounded by `predecessor`."""
+def previous_manifests(inventory=None, predecessor=None, merge_parents=False):
+    """Request inventories may join parent bounds; other consumers keep per-ref bounds."""
     inventory = inventory or MANIFEST
     base = os.environ.get('GITHUB_BASE_REF') or 'feat/rust-rewrite'
     parents = git('rev-list', '--parents', '-n', '1', 'HEAD').split()[1:]
-    refs = ['HEAD', *parents, f'refs/remotes/origin/{base}']
+    remote = f'refs/remotes/origin/{base}'
+    refs = [('HEAD', ['HEAD'])]
+    if parents:
+        if merge_parents:
+            refs.append(('merge parents' if len(parents) > 1 else parents[0], parents))
+        else:
+            refs.extend((parent, [parent]) for parent in parents)
+    refs.append((remote, [remote]))
     if event_file := os.environ.get('GITHUB_EVENT_PATH'):
         event = json.loads(pathlib.Path(event_file).read_text())
         if 'pull_request' in event:
@@ -1263,25 +1535,30 @@ def previous_manifests(inventory=None, predecessor=None):
             exact = event['pull_request']['base']['sha']
             if not re.fullmatch(r'[a-f0-9]{40}', exact):
                 raise ValueError('invalid event base commit')
-            refs.append(exact)
+            refs.append((exact, [exact]))
     previous = []
-    for ref in refs:
-        # A missing ref is not a missing manifest. CI must fetch history first.
-        git('rev-parse', '--verify', f'{ref}^{{commit}}')
-        for name in [inventory, predecessor]:
-            path = git('rev-parse', '--show-prefix').strip() + name if name else None
-            if path and path in git('ls-tree', '--full-name', '--name-only', ref, '--', name).splitlines():
-                previous.append((ref, manifest(git('show', f'{ref}:{path}'))))
-                break
+    for label, group in refs:
+        found = []
+        for ref in group:
+            # A missing ref is not a missing manifest. CI must fetch history first.
+            git('rev-parse', '--verify', f'{ref}^{{commit}}')
+            for name in [inventory, predecessor]:
+                path = git('rev-parse', '--show-prefix').strip() + name if name else None
+                if path and path in git('ls-tree', '--full-name', '--name-only', ref, '--', name).splitlines():
+                    found.append(manifest(git('show', f'{ref}:{path}')))
+                    break
+        if found:
+            previous.append((label, maximum_manifest(found) if len(found) > 1 else found[0]))
     return previous
 
 
 def main():
     try:
         prod, test = request_sites()
-        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests())
+        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests(merge_parents=True))
         failures += ['test inventory: ' + failure for failure in check(
-            test, manifest((ROOT / TEST_MANIFEST).read_text()), previous_manifests(TEST_MANIFEST, MANIFEST))]
+            test, manifest((ROOT / TEST_MANIFEST).read_text()),
+            previous_manifests(TEST_MANIFEST, MANIFEST, merge_parents=True))]
     except InventoryRefusal as refusal:
         failures = [f'cannot verify legacy inventory: {refusal}']
     except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError) as error:

@@ -15,10 +15,10 @@ use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::selected_read::ReadRole;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, RequestId, Response, SocketId, TimerId,
-    Venue, num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
@@ -58,6 +58,15 @@ pub enum Pending {
     Metadata(Box<account::MetadataLeg>),
 }
 
+impl Pending {
+    pub(crate) fn into_trade(self) -> Option<trading::Request> {
+        match self {
+            Self::Trade(request) => Some(request),
+            _ => None,
+        }
+    }
+}
+
 /// A signed request kept re-signable, so a signature rejection is resent once.
 pub struct Signed {
     inner: Pending,
@@ -72,64 +81,6 @@ impl Signed {
     fn context(&self) -> Option<&safe_cex_engine::request_context::Context> {
         self.custody.as_ref().map(managed::Custody::context)
     }
-}
-
-/// Signs and sends a request; signed requests can be re-signed after a 100001.
-pub(crate) fn issue(
-    cx: &mut Cx<'_, Pending>,
-    credentials: Option<&Credentials>,
-    method: Method,
-    path: &'static str,
-    params: Params,
-    at: Option<ArrayAt>,
-    pending: Pending,
-) -> RequestId {
-    let pending = if credentials.is_some() && sign::signs(path) {
-        Pending::Signed(Box::new(Signed {
-            inner: pending,
-            method,
-            path,
-            params: params.clone(),
-            at,
-            resent: false,
-            custody: None,
-        }))
-    } else {
-        pending
-    };
-    stage(cx, credentials, method, path, params, at, pending)
-}
-
-/// Stage native intent; only shared dispatch can materialize credentials.
-/// This is the one temporary legacy provider staging site.
-pub fn stage<P>(
-    cx: &mut Cx<'_, P>,
-    credentials: Option<&Credentials>,
-    method: Method,
-    path: &'static str,
-    params: Params,
-    at: Option<safe_cex_engine::json::ArrayAt>,
-    pending: P,
-) -> safe_cex_engine::RequestId {
-    let recipe = credentials.map(|c| {
-        sign::dispatch::Http::new(c.identity(method).clone(), method, path, params.clone())
-    });
-    let (url, headers, body) = params.render(
-        method,
-        path,
-        vec![(
-            sign::unsigned_headers(method)[0].0,
-            sign::unsigned_headers(method)[0].1.into(),
-        )],
-    );
-    let id = match at {
-        Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
-        None => cx.request(method, url, headers, body, pending),
-    };
-    if let Some(recipe) = recipe {
-        cx.sign_http(id, Box::new(recipe));
-    }
-    id
 }
 
 pub(crate) fn signature_rejected(body: &str) -> bool {
@@ -357,61 +308,22 @@ impl Bingx {
                 },
                 pending,
                 safe_cex_engine::request_context::Scope::Background,
-                None,
+                ReadRole::Read { scope: None },
             ) {
                 self.on_sign_error(cx, *pending, error);
             }
-        } else {
-            issue(
-                cx,
-                None,
-                Method::Get,
-                path,
-                Params::new(),
-                Some(ArrayAt::EnvelopeField("data")),
-                pending,
-            );
-        }
-    }
-
-    fn resend(&self, cx: &mut Cx<'_, Pending>, signed: Signed) {
-        cx.notice(
-            Level::Warn,
-            code::REQUEST_FAILED,
-            "BingX rejected a request signature; re-signing it once",
-        );
-        let Signed {
-            inner,
-            method,
-            path,
-            params,
-            at,
-            ..
-        } = signed;
-        let scope = match &inner {
-            Pending::Account(request) => account::auth_scope(request),
-            _ => None,
-        };
-        let pending = Pending::Signed(Box::new(Signed {
-            inner,
-            method,
-            path,
-            params: params.clone(),
-            at,
-            resent: true,
-            custody: None,
-        }));
-        let id = stage(
+        } else if let Err((pending, error)) = managed::public(
             cx,
-            self.credentials.as_ref(),
-            method,
-            path,
-            params,
-            at,
+            managed::Read {
+                method: Method::Get,
+                path,
+                params: Params::new(),
+                at: Some(ArrayAt::EnvelopeField("data")),
+            },
             pending,
-        );
-        if let (Some(scope), Some(credentials)) = (scope, self.credentials.as_ref()) {
-            account::tag_read(cx, id, method, credentials, scope);
+            safe_cex_engine::request_context::Scope::Background,
+        ) {
+            self.on_sign_error(cx, *pending, error);
         }
     }
 
@@ -777,6 +689,10 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
@@ -872,7 +788,15 @@ impl Venue for Bingx {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Identity(_) | Pending::Metadata(_) => {}
-            Pending::Signed(signed) => self.on_item(cx, &mut signed.inner, item),
+            Pending::Signed(signed) => {
+                if signed
+                    .context()
+                    .is_some_and(|context| cx.validate_http_context(context).is_err())
+                {
+                    return;
+                }
+                self.on_item(cx, &mut signed.inner, item);
+            }
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history.on_item(cx, request, item),
@@ -1007,12 +931,14 @@ impl Venue for Bingx {
         }
         let pending = match pending {
             Pending::Signed(signed) => {
+                if signed
+                    .context()
+                    .is_some_and(|context| cx.validate_http_context(context).is_err())
+                {
+                    return;
+                }
                 if !signed.resent && signature_rejected(response.body) {
-                    if signed.context().is_some() {
-                        self.resend_managed(cx, *signed);
-                    } else {
-                        self.resend(cx, *signed);
-                    }
+                    self.resend_managed(cx, *signed);
                 } else {
                     let context = signed.context().cloned();
                     match (&context, signed.inner) {
@@ -1030,25 +956,32 @@ impl Venue for Bingx {
                 return;
             }
             Pending::Trade(request) => {
-                if request.changes_settings() {
-                    self.account.settings_changed();
-                }
-                if let Some(scope) = request.settings_scope() {
-                    cx.store.invalidate_metadata(scope);
-                }
-                self.account.bump_orders();
-                self.account.bump_positions();
-                let reconcile = (request.changes_settings() || request.reconciles_orders())
-                    && success(response).is_ok();
-                let accepted = request.accepts_placement(response);
-                self.trading
-                    .on_response(cx, self.credentials.as_ref(), request, response);
-                if accepted {
-                    self.account.accept_placed_response(cx, response.body);
-                }
-                if reconcile && let Some(c) = &self.credentials {
-                    self.account.reconcile(cx, c);
-                }
+                let account = &mut self.account;
+                self.trading.on_response(
+                    cx,
+                    self.credentials.as_ref(),
+                    request,
+                    response,
+                    |cx, request| {
+                        if request.changes_settings() {
+                            account.settings_changed();
+                        }
+                        if let Some(scope) = request.settings_scope() {
+                            cx.store.invalidate_metadata(scope);
+                        }
+                        account.bump_orders();
+                        account.bump_positions();
+                        if request.accepts_placement(response) {
+                            account.accept_placed_response(cx, response.body);
+                        }
+                        if (request.changes_settings() || request.reconciles_orders())
+                            && success(response).is_ok()
+                            && let Some(credentials) = &self.credentials
+                        {
+                            account.reconcile(cx, credentials);
+                        }
+                    },
+                );
                 self.observe_orders(cx);
                 return;
             }
@@ -1170,14 +1103,6 @@ impl Venue for Bingx {
                     );
                 }
             }
-            Pending::Candles {
-                command,
-                rows,
-                valid: true,
-            } => match candle_data(rows) {
-                Ok(data) => cx.done(command, data),
-                Err(error) => cx.fail(command, error),
-            },
             pending => self.on_request_failed(cx, pending, "malformed BingX list row"),
         }
     }
@@ -1189,11 +1114,7 @@ impl Venue for Bingx {
     ) {
         match pending {
             Pending::Signed(signed) if !signed.resent && signature_rejected(response.body) => {
-                if signed.context().is_some() {
-                    self.resend_managed(cx, *signed);
-                } else {
-                    self.resend(cx, *signed);
-                }
+                self.resend_managed(cx, *signed);
             }
             Pending::Signed(signed) => {
                 if signed.context().is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
@@ -1220,6 +1141,55 @@ impl Venue for Bingx {
                     response.body
                 ),
             ),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Identity(read) => self.identity_failed(cx, read, error),
+            Pending::History(request) => self.history.on_http_failed(cx, request, error),
+            Pending::Trade(request) => {
+                self.trading
+                    .on_sign_failed(cx, self.credentials.as_ref(), request, error)
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.trading.retired(owner);
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
+        if let Some(credentials) = &self.credentials {
+            self.account.reconcile_orders(cx, credentials);
+        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if matches!(pending, Pending::Trade(_)) {
+            trading::evidence(response.body, evidence);
         }
     }
     fn on_sign_error(
@@ -1260,18 +1230,6 @@ impl Venue for Bingx {
             }
             // Provider refusal is typed and is never venue-auth evidence.
             Pending::Metadata(leg) => account::fail_metadata_plan(cx, &leg, error),
-            pending => self.on_request_failed(cx, pending, &error.message),
-        }
-    }
-    fn on_http_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        pending: Pending,
-        error: safe_cex_engine::VenueError,
-    ) {
-        match pending {
-            Pending::Identity(read) => self.identity_failed(cx, read, error),
-            Pending::History(request) => self.history.on_http_failed(cx, request, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
@@ -1323,9 +1281,10 @@ impl Venue for Bingx {
                 }
                 return;
             }
+            // Only a refused read admission leaves candles without custody.
             Pending::Candles { command, .. } => {
                 cx.command_error(command, error);
-                cx.fail(command, error);
+                refuse_candle_query(cx, error);
                 return;
             }
             Pending::Markets { .. } => self.retry_list(cx, List::Markets),
@@ -1535,26 +1494,42 @@ impl Venue for Bingx {
                         },
                         pending,
                         safe_cex_engine::request_context::Scope::Command(command),
-                        None,
+                        ReadRole::Read { scope: None },
                     ) {
                         self.on_sign_error(cx, *pending, error);
                     }
-                } else {
-                    issue(
-                        cx,
-                        None,
-                        Method::Get,
-                        paths::KLINES,
+                } else if let Err((pending, error)) = managed::public(
+                    cx,
+                    managed::Read {
+                        method: Method::Get,
+                        path: paths::KLINES,
                         params,
-                        Some(ArrayAt::EnvelopeField("data")),
-                        pending,
-                    );
+                        at: Some(ArrayAt::EnvelopeField("data")),
+                    },
+                    pending,
+                    safe_cex_engine::request_context::Scope::Command(command),
+                ) {
+                    self.on_sign_error(cx, *pending, error);
                 }
             }
             other => {
-                self.account.bump_orders();
-                self.account.bump_positions();
-                if !self.trading.command(cx, self.credentials.as_ref(), other) {
+                let changes_settings = matches!(
+                    &other,
+                    Command::SetLeverage { .. }
+                        | Command::SetMarginType { .. }
+                        | Command::SetPositionMode { .. }
+                );
+                let account = &mut self.account;
+                if !self
+                    .trading
+                    .command(cx, self.credentials.as_ref(), other, || {
+                        if changes_settings {
+                            account.settings_changed();
+                        }
+                        account.bump_orders();
+                        account.bump_positions();
+                    })
+                {
                     cx.notice(
                         Level::Warn,
                         code::COMMAND_UNSUPPORTED,

@@ -1,16 +1,16 @@
 ---
 title: V2 Shutdown and IP Whitelist Migration
-description: Draft guide for moving V2 users to V3 and helping V3 users update exchange IP whitelists.
+description: Guide for moving V2 users to V3 and helping V3 users update exchange IP whitelists before the AWS shutdown.
 sidebar_position: 2
 hide_title: false
-draft: true
+draft: false
 hide_table_of_contents: false
 ---
 
-:::caution Draft placeholder
-This page is being prepared before the migration window opens. Final dates,
-Tealstreet IP addresses, and exchange screenshots will be added after the new
-infrastructure fleet is ready.
+:::caution Action required before October 30
+Tealstreet is moving from the old AWS infrastructure to a new Vultr fleet in
+Tokyo. If your exchange API keys use Tealstreet IP whitelisting, update them to
+include the new IP addresses before the AWS shutdown on October 30, 2026.
 :::
 
 <!-- :::note Temporary migration page
@@ -19,8 +19,8 @@ Retire it 30-60 days after the migration is complete, once support confirms the
 old Tealstreet IPs are no longer needed.
 ::: -->
 
-Tealstreet is moving legacy infrastructure to a new setup. Most users only need
-to know which path applies to them:
+Tealstreet is moving legacy infrastructure from AWS to a new Vultr Tokyo fleet.
+Most users only need to know which path applies to them:
 
 - If you still use the old V2 terminal, move to V3 and add your exchange
   accounts there.
@@ -52,24 +52,23 @@ Tealstreet IP whitelist option, follow
 If your exchange key does not use Tealstreet IP whitelisting, this migration
 should not require an exchange-side whitelist edit.
 
-<!-- ## Migration timeline
+## Migration timeline
 
 | Item | Status |
 | --- | --- |
-| Announcement date | `[add date]` |
-| New Tealstreet IP list available | `[add date]` |
-| Overlap window | `[add start and end dates]` |
-| Final V2 shutdown | `[add date]` |
-| Old AWS IPs retired | `[add date after grace period]` |
+| New Tealstreet IP list available | Available now |
+| Migration window | Now through October 30, 2026 |
+| Final V2 shutdown | October 30, 2026 |
+| Old AWS IPs retired | October 30, 2026 |
 
 During the overlap window, keep both the old and new Tealstreet IPs on your
 exchange API key when the exchange allows it. Do not remove the old IPs until
-Tealstreet announces that the cutover is complete. -->
+Tealstreet announces that the cutover is complete.
 
 ## V2 user - move to V3
 
-V2 is being retired. To keep trading on Tealstreet, create or use a V3 account
-and add your exchange API keys there.
+V2 is being retired on October 30, 2026. To keep trading on Tealstreet, create
+or use a V3 account and add your exchange API keys there.
 
 ### Before you start
 
@@ -131,9 +130,9 @@ Tealstreet routing.
 ### What changes
 
 Tealstreet is replacing the old AWS IP addresses used by the Tealstreet Network
-with new Tealstreet IP addresses. For a short overlap window, both sets should
-work. After the migration window closes, keys that still allow only the old IPs
-may stop connecting through Tealstreet.
+with a simplified Vultr Tokyo fleet. For a short overlap window, both sets
+should work. After the AWS shutdown on October 30, keys that still allow only
+the old AWS IPs may stop connecting through Tealstreet.
 
 Cloud sync can help make your Tealstreet API key list available on every device
 while you work through this migration. It does not edit the exchange API key or
@@ -142,18 +141,51 @@ exchange account.
 
 ### IP list
 
-The final IP list will be added after the new fleet is ready.
+Add the full new Tealstreet IP list anywhere your exchange asks for the
+Tealstreet Network, TS Network, or Tealstreet IP whitelist.
 
-| Region or role | Old Tealstreet IPs | New Tealstreet IPs |
-| --- | --- | --- |
-| Japan / Tokyo routing | `[add old AWS IPs]` | `[add new IPs]` |
-| Singapore routing | `[add old AWS IPs]` | `[add new IPs]` |
-| WebSocket or proxy routing | `[add old AWS IPs]` | `[add new IPs]` |
-| Exchange-specific extras | `[add old AWS IPs]` | `[add new IPs]` |
+Going forward, Tealstreet Network routing uses one region instead of split
+Japan and Singapore routing. Add the single Tokyo list below; there are no
+separate Singapore, proxy, or exchange-specific IP blocks to add.
+
+#### New Tealstreet IPs, Vultr Tokyo fleet
+
+- `167.179.112.217`
+- `45.63.121.235`
+- `45.77.135.138`
+- `108.61.162.122`
+- `149.28.30.214`
+- `108.160.129.108`
+- `45.77.27.69`
+- `45.76.52.241`
+- `108.61.247.61`
+
+#### Old Tealstreet IPs, AWS fleet
+
+These are the old AWS IPs that Tealstreet is retiring. Your exchange may show
+some or all of these Japan and Singapore IPs on existing API keys.
+
+##### Old Japan region IPs
+
+- `18.178.14.27`
+- `35.75.147.201`
+- `35.78.132.227`
+- `54.238.24.246`
+- `54.65.38.58`
+
+##### Old Singapore region IPs
+
+- `13.215.143.179`
+- `54.169.98.78`
+- `18.139.171.87`
+- `52.76.105.51`
+- `13.251.151.220`
+- `54.179.219.84`
+- `18.139.81.245`
 
 When Tealstreet shows both old and new blocks in the API key form, copy the new
 Tealstreet IP list for your exchange. Keep the old list in place until the
-published retirement date when the exchange allows both lists.
+October 30 shutdown when the exchange allows both lists.
 
 ### Update each exchange key
 
@@ -188,7 +220,7 @@ cannot keep both the old and new Tealstreet IPs at the same time:
 - Avoid making the change while you are actively managing a position only
   through Tealstreet.
 
-## Exchange screenshot placeholders
+<!-- ## Exchange screenshot placeholders
 
 Support will add exchange-specific screenshots as demand surfaces.
 
@@ -201,6 +233,7 @@ Support will add exchange-specific screenshots as demand surfaces.
 | Coinbase | API key allowed IP screen |
 | OKX | Third-party app selector or IP whitelist screen |
 | WOO X | API whitelist edit screen |
+-->
 
 ## Troubleshooting
 

@@ -1,3 +1,8 @@
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>(), true);
+});
+
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { BaseExchange } from '../exchanges/base';
 

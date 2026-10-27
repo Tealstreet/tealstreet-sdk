@@ -144,8 +144,19 @@ pub(crate) const ASTER: CodeTable = CodeTable {
     ],
     success: &[Key::Int(200)],
     unlisted: Verdict::Refused(ErrorKind::Rejected),
-    status: &[],
+    status: ASTER_STATUS,
 };
+
+/// Aster's fapi documents Binance's statuses: 4XX for malformed requests, 418 an
+/// IP auto-ban and 429 a rate limit. A bare edge 403 may be another block, so it
+/// is a plain refusal. They apply only where no native code was parsed.
+const ASTER_STATUS: &[(u16, Verdict)] = &[
+    (400, Verdict::Refused(ErrorKind::InvalidInput)),
+    (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+    (403, Verdict::Refused(ErrorKind::Rejected)),
+    (418, Verdict::Refused(ErrorKind::RateLimited)),
+    (429, Verdict::Refused(ErrorKind::RateLimited)),
+];
 
 /// Only while a write still has its single resend: V1 -1022 and -1021.
 pub(crate) const ASTER_RESEND: CodeTable = CodeTable {
@@ -163,7 +174,7 @@ pub(crate) const ASTER_RESEND: CodeTable = CodeTable {
     ],
     success: &[Key::Int(200)],
     unlisted: Verdict::Refused(ErrorKind::Rejected),
-    status: &[],
+    status: ASTER_STATUS,
 };
 enum Call {
     Place {
@@ -541,15 +552,10 @@ impl AsterDex {
             })
             .and_then(|mut job| {
                 // Validate the shared auth shape before reserving any split step.
-                if let Some(step) = job.steps.front() {
-                    let valid = self
-                        .credentials
-                        .select(step.call.role())
-                        .map_err(|_| "Missing required Aster credentials".to_owned())
-                        .and_then(|(_, slot)| self.auth(slot).map(drop));
-                    if let Err(error) = valid {
-                        return Err((VenueError::new(error).kind(ErrorKind::AuthInvalid), prune_on_refusal));
-                    }
+                if let Some(step) = job.steps.front()
+                    && let Err((error, kind)) = self.check_signing(step.call.role())
+                {
+                    return Err((VenueError::new(error).kind(kind), prune_on_refusal));
                 }
                 job.reserved_places = job
                     .steps
@@ -606,7 +612,7 @@ impl AsterDex {
             .credentials
             .select(CredentialRole::Mutation)
             .ok()
-            .map(|(selection, slot)| selection.credential(slot.identity.credential.clone()));
+            .map(|(selection, identity)| selection.credential(identity.credential.clone()));
         let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
             read_credential: None,
@@ -657,7 +663,7 @@ impl AsterDex {
             .credentials
             .select(CredentialRole::Mutation)
             .ok()
-            .map(|(selection, slot)| selection.credential(slot.identity.credential.clone()));
+            .map(|(selection, identity)| selection.credential(identity.credential.clone()));
         // A job with no native step sends nothing: it ends on its preflight.
         if job.steps.is_empty() {
             let _ = match job.error {
@@ -679,7 +685,7 @@ impl AsterDex {
             return;
         };
         let policy = SerialPolicy {
-            credential,
+            credential: Some(credential),
             pacing: None,
             refusals_complete: true,
         };
@@ -932,6 +938,8 @@ impl AsterDex {
             };
             return;
         }
+        // A status-only refusal takes its kind and outcome from the table's status rows.
+        let mut status_error = None;
         if let Some(leg) = leg.filter(|_| !reported) {
             let _ = match &outcome {
                 _ if replied && !(was_place && placed.is_none()) => cx.http_write_fact(
@@ -941,20 +949,26 @@ impl AsterDex {
                     },
                     None,
                 ),
-                Err((code, message)) if !transport && !unproven && !replied && *code != 0 => {
+                Err((code, message)) if !transport && !unproven && !replied => {
                     let native = Native {
                         code: NativeCode::Int(*code),
                         message,
                     };
-                    match cx.classify_write(leg, &ASTER, Some(&native), message.clone()) {
-                        Ok(fact) => cx.http_write_fact(
-                            leg,
-                            WriteFact::Failed {
-                                fact,
-                                known_effects: false,
-                            },
-                            None,
-                        ),
+                    let native = (*code != 0).then_some(&native);
+                    match cx.classify_write(leg, &ASTER, native, message.clone()) {
+                        Ok(fact) => {
+                            if native.is_none() {
+                                status_error = Some(fact.error().clone());
+                            }
+                            cx.http_write_fact(
+                                leg,
+                                WriteFact::Failed {
+                                    fact,
+                                    known_effects: false,
+                                },
+                                None,
+                            )
+                        }
                         Err(error) => Err(error),
                     }
                 }
@@ -1000,7 +1014,7 @@ impl AsterDex {
                 Ok(()) => job.successes += 1,
                 Err((code, message)) => {
                     cx.command_error(command, message.clone());
-                    let mut error = failure(code, message);
+                    let mut error = status_error.unwrap_or_else(|| failure(code, message));
                     // An earlier leg that may have executed keeps the command unknown.
                     if unproven
                         || job
@@ -1406,9 +1420,11 @@ fn empty_order() -> PlaceOrderOpts {
 /// One native step: a Mutation with its one classified V1 -1022 resend.
 pub(crate) fn serial() -> SerialCall {
     SerialCall {
+        auth: Default::default(),
         operation: Operation::Mutation,
         timeout_ms: 20_000,
         attempts: 2,
+        pacing: None,
     }
 }
 

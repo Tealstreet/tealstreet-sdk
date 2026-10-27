@@ -16,6 +16,8 @@ pub enum PrimaryReason {
     DegradedRead,
     Catalog,
     History,
+    /// Verifying the trading key's own capabilities before private startup.
+    KeyPermissions,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +105,11 @@ impl Selection {
             slot: self.slot,
             reference,
         }
+    }
+
+    /// Request-context credential naming this identity's authority ref.
+    pub fn authority(&self, identity: &crate::signing::Identity) -> Credential {
+        self.credential(identity.authority_ref().clone())
     }
 
     /// Apply egress and evidence to a request issued on the non-managed path.
@@ -254,6 +261,7 @@ mod tests {
             PrimaryReason::DegradedRead,
             PrimaryReason::Catalog,
             PrimaryReason::History,
+            PrimaryReason::KeyPermissions,
         ] {
             let role = PrimaryRead {
                 reason,

@@ -254,7 +254,7 @@ export class EngineDisposedError extends Error {
 
 export type SignAlgorithm = 'hmacSha256' | 'hmacSha512' | 'sha256SecretSuffix' | 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest' | 'zkLinkContract';
 export type SignPart = { kind: 'bytes'; bytes: number[] } | { kind: 'credential'; key: string }
-  | { kind: 'result'; index: number; encoding: 'raw' | 'hex' | 'base64' | 'base64Hex' };
+  | { kind: 'result'; index: number; encoding: 'raw' | 'hex' | 'base64' | 'base64Hex' | 'evmHex' };
 export interface SigningIdentity {
   credential: string; signing: string; passphrase?: string;
   /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
@@ -267,6 +267,9 @@ export interface LocalIdentityMetadata {
   stableId?: string;
   secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
   trimCredential?: boolean;
+  /** Trim the signing-key text once at trusted setup. The SDK sets it only from
+   * the family's declared policy; caller metadata cannot. */
+  trimSigning?: boolean;
 }
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */
 export interface LocalSignerMetadata { primary?: LocalIdentityMetadata; secondary?: LocalIdentityMetadata }
@@ -282,15 +285,29 @@ export interface SignResult {
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
-  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' };
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' };
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
   operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
   context: { venue: string; method: string; host: string; path: string };
 }
+export type SigningScope = 'account' | 'balance' | 'orders' | 'positions' | 'settings';
+export type SigningRole = { readonly kind: 'read'; readonly scope: SigningScope | null }
+  | { readonly kind: 'primaryRead'; readonly reason: 'clientOrderLookup' | 'postUnknownOrderRead'
+    | 'degradedRead' | 'catalog' | 'history' | 'keyPermissions'; readonly scope: SigningScope | null }
+  | { readonly kind: 'mutation' | 'sessionAuth' };
+/** Immutable engine ownership captured at Action::Sign delivery. */
+export interface SignMeta {
+  readonly task: number;
+  readonly owner: Readonly<{ kind: 'managed'; request: number; generation: number }
+    | { kind: 'session'; generation: number }>;
+  readonly deadlineMs: number;
+  readonly slot: 'primary' | 'secondary';
+  readonly role: SigningRole;
+}
 /** Owns secrets. Atomic results are exact raw operation bytes; errors are never logged. */
-export type Signer = (request: SignRequest, context: { signal: AbortSignal }) => Promise<SignResult> | SignResult;
+export type Signer = (request: SignRequest, context: { signal: AbortSignal; meta?: SignMeta }) => Promise<SignResult> | SignResult;
 
 export interface EngineHostOptions {
   /** Transfer raw engine allocation ownership after successful construction.
@@ -425,6 +442,13 @@ export interface WasmEngineLike {
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
   signingPending?(attempt: number): boolean;
+  /** Trusted pre-start negotiation; absent on builds without address-nonce. */
+  setAddressSetupSupport?(protocol: 'publicAddressOwned'): void;
+  initializeAddressSetup?(now: number, reinitialize: boolean): string;
+  addressSetupReady?(): boolean;
+  addressSetupRetired?(token: string, now: number): string;
+  /** Optional engine ownership export; invalid or absent data retains the legacy context. */
+  signMeta?(attempt: number): string | undefined;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;

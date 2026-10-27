@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
+import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, Market, Order, OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
 

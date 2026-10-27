@@ -1064,7 +1064,7 @@ impl BybitLinear {
     }
 
     fn remember_terminal_order(&mut self, id: &str) {
-        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro()) {
+        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro() || self.brazil_site) {
             return;
         }
         self.cache_terminal_order(id);
@@ -1212,9 +1212,11 @@ impl BybitLinear {
             code::STREAM_UNAVAILABLE,
             format!("HyroTrader {message}"),
         );
-        if let Some(socket) = self.private.socket {
-            cx.close(socket);
-            self.on_socket_closed(cx, Channel::Private, 4001);
+        if let Some(feed) = self.private.feed {
+            cx.retire_socket(
+                feed,
+                safe_cex_engine::socket_lifecycle::RetireReason::Authentication,
+            );
         }
     }
 
@@ -1416,7 +1418,7 @@ impl BybitLinear {
             return;
         }
         if self.category == self.primary_category {
-            self.connect(cx, Channel::Private);
+            self.open_feed(cx, Channel::Private);
         }
         if self.variant.is_hyro() {
             return;
@@ -1653,7 +1655,7 @@ impl BybitLinear {
         id: &str,
         symbol: &str,
     ) {
-        if self.variant != crate::Variant::Demo {
+        if self.variant != crate::Variant::Demo && !self.brazil_site {
             return;
         }
         for delay in [1_000.0, 3_000.0, FILL_REPAIR_GRACE_MS + 250.0] {
@@ -2107,10 +2109,12 @@ impl BybitLinear {
                 );
                 // An unauthenticated socket answers pings but carries no topics.
                 if op == "auth"
-                    && let Some(socket) = self.private.socket
+                    && let Some(feed) = self.private.feed
                 {
-                    cx.close(socket);
-                    self.on_socket_closed(cx, Channel::Private, 4001);
+                    cx.retire_socket(
+                        feed,
+                        safe_cex_engine::socket_lifecycle::RetireReason::Authentication,
+                    );
                 }
             }
             _ => {}

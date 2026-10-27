@@ -10,7 +10,7 @@ export type ExtraKeyPolicy = { key: 'zklinkSeed' | 'l1Wallet'; field?: 'optional
 /** Asymmetric only: a declared signing ref may answer public operations (P4). */
 export type SigningAlgorithm = 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest';
 export type IdentitySetupPolicy = {
-  trimCredential?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
+  trimCredential?: boolean; trimSigning?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
   signingAlgorithm?: SigningAlgorithm;
   /** Credential-only primaries (no signing ref); omitted means required, today's behaviour. */
   signing?: 'optional';
@@ -38,7 +38,7 @@ type Rule = {
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
   /** Family-specific trusted setup mapping, declared rather than name-matched. */
-  setupMapping?: 'asterdex' | 'apexomni';
+  setupMapping?: 'asterdex' | 'apexomni' | 'lighter' | 'mexc';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 

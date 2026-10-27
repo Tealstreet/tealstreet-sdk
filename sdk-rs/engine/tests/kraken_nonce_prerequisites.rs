@@ -87,6 +87,9 @@ struct Probe<const NONCE: bool> {
     queued: usize,
 }
 impl<const NONCE: bool> Venue for Probe<NONCE> {
+    fn http_mutation_barriers() -> bool {
+        true
+    }
     type Pending = Context;
     fn dispatch_nonce() -> bool {
         NONCE
@@ -260,9 +263,11 @@ mod serial {
     };
     fn call() -> SerialCall {
         SerialCall {
+            auth: Default::default(),
             operation: Operation::Mutation,
             timeout_ms: 20_000,
             attempts: 1,
+            pacing: None,
         }
     }
     fn original() -> Order {
@@ -352,6 +357,9 @@ mod serial {
         }
     }
     impl Venue for SerialProbe {
+        fn http_mutation_barriers() -> bool {
+            true
+        }
         type Pending = Context;
         fn dispatch_nonce() -> bool {
             true
@@ -383,7 +391,7 @@ mod serial {
                     &preflight,
                     call(),
                     SerialPolicy {
-                        credential,
+                        credential: Some(credential),
                         pacing: None,
                         refusals_complete: false,
                     },

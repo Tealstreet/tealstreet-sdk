@@ -2,8 +2,9 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
-    Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
+    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity,
+    KeyPresence, KeyRef, Operation, PayloadPart, SetupFacts, SignError, SignFuture, SignRequest,
+    SignResult, Signer,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -19,12 +20,33 @@ pub struct LocalSetup {
     pub primary: Option<LocalIdentity>,
     pub secondary: Option<LocalIdentity>,
 }
-#[derive(Default, serde::Deserialize)]
+
+/// Trusted Lighter setup's public API-index principal, never wire material.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LighterPrincipal {
+    api_key_index: u8,
+}
+impl LighterPrincipal {
+    pub fn new(api_key_index: u64) -> Result<Self, SignError> {
+        if api_key_index > 254 {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(Self {
+            api_key_index: api_key_index as u8,
+        })
+    }
+    pub fn api_key_index(&self) -> u8 {
+        self.api_key_index
+    }
+}
+#[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalIdentity {
-    #[serde(default)]
+    /// Omitted or `null` is Absent; `""` is Empty (D3).
+    #[serde(default = "Secret::absent", deserialize_with = "Secret::nullable")]
     pub key: Secret,
-    #[serde(default)]
+    /// Never absent: omitted is a present empty secret; `null` is refused.
+    #[serde(default = "Secret::empty")]
     pub secret: Secret,
     pub passphrase: Option<Secret>,
     /// Explicit caller account/credential mapping; no key-derived fallback.
@@ -33,12 +55,35 @@ pub struct LocalIdentity {
     pub secret_encoding: KeyEncoding,
     #[serde(default)]
     pub trim_credential: bool,
+    /// Trim the signing key text once before decoding; policy-declared.
+    /// Linked only by families that declare it (Bitunix).
+    #[cfg(feature = "trim-signing")]
+    #[serde(default)]
+    pub trim_signing: bool,
     /// Declared extra signing material, e.g. ApeX's zkLink seed.
     #[serde(default)]
     pub extra: LocalExtras,
     /// Secondary only: sign with the primary's ref instead of own material.
     #[serde(default)]
     pub signing_from_primary: bool,
+}
+impl Default for LocalIdentity {
+    /// An absent key with a present empty secret: material is never absent
+    /// except the key, whose presence is the D3 fact.
+    fn default() -> Self {
+        Self {
+            key: Secret::absent(),
+            secret: Secret::empty(),
+            passphrase: None,
+            stable_id: None,
+            secret_encoding: KeyEncoding::default(),
+            trim_credential: false,
+            #[cfg(feature = "trim-signing")]
+            trim_signing: false,
+            extra: LocalExtras::default(),
+            signing_from_primary: false,
+        }
+    }
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -74,20 +119,61 @@ impl<'de> serde::Deserialize<'de> for LocalExtras {
         deserializer.deserialize_map(Visitor)
     }
 }
-#[derive(Default)]
-pub struct Secret(Zeroizing<String>);
+/// Setup material. Only this module can build the absent form (a key's
+/// presence fact); absent reads as empty bytes.
+pub struct Secret(Option<Zeroizing<String>>);
 impl Secret {
+    fn absent() -> Self {
+        Self(None)
+    }
     pub fn new(value: String) -> Self {
-        Self(Zeroizing::new(value))
+        Self(Some(Zeroizing::new(value)))
+    }
+    /// Supplied but empty: the only empty form for a secret or passphrase.
+    pub fn empty() -> Self {
+        Self::new(String::new())
     }
     fn into_bytes(mut self) -> Vec<u8> {
-        std::mem::take(&mut *self.0).into_bytes()
+        self.0
+            .as_mut()
+            .map(|value| std::mem::take(&mut **value).into_bytes())
+            .unwrap_or_default()
+    }
+    fn is_empty(&self) -> bool {
+        self.0.as_deref().is_none_or(|value| value.is_empty())
+    }
+    /// Classified from the raw borrow with `str::trim`, before any trim policy.
+    fn presence(&self) -> KeyPresence {
+        match self.0.as_deref() {
+            None => KeyPresence::Absent,
+            Some(value) if value.is_empty() => KeyPresence::Empty,
+            Some(value) if value.trim().is_empty() => KeyPresence::Blank,
+            Some(_) => KeyPresence::Nonblank,
+        }
+    }
+    /// The key field alone reads `null` as absent.
+    fn nullable<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        <Option<String> as serde::Deserialize>::deserialize(deserializer)
+            .map(|value| Self(value.map(Zeroizing::new)))
     }
 }
 impl<'de> serde::Deserialize<'de> for Secret {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         <String as serde::Deserialize>::deserialize(deserializer).map(Self::new)
     }
+}
+
+/// Unicode White_Space trim into a fresh guarded buffer; the input is wiped on drop.
+#[cfg(feature = "trim-signing")]
+fn trimmed(input: Secret) -> Secret {
+    let Some(value) = input.0.as_deref() else {
+        return input;
+    };
+    let text = value.trim();
+    if text.len() == value.len() {
+        return input;
+    }
+    Secret::new(text.to_owned())
 }
 
 // Decoded buffers stay guarded on every failure, including the second slot.
@@ -117,9 +203,17 @@ impl DecodedIdentity {
                     .to_vec(),
             );
         }
+        #[cfg(feature = "trim-signing")]
+        let secret = if identity.trim_signing {
+            trimmed(identity.secret)
+        } else {
+            identity.secret
+        };
+        #[cfg(not(feature = "trim-signing"))]
+        let secret = identity.secret;
         Ok(Self {
             key,
-            secret: key_material::decode(identity.secret, identity.secret_encoding)?,
+            secret: key_material::decode(secret, identity.secret_encoding)?,
             passphrase: identity
                 .passphrase
                 .map(|value| key_material::decode(value, KeyEncoding::Utf8))
@@ -186,6 +280,8 @@ impl DecodedIdentity {
 
 #[derive(Default)]
 pub struct LocalSigner {
+    #[cfg(feature = "schnorr")]
+    lighter_principal: Option<(KeyRef, LighterPrincipal)>,
     keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
     /// Extra refs are usable only by their own algorithm, never presented,
     /// interpolated or used as an ordinary MAC/digest key.
@@ -202,12 +298,59 @@ impl LocalSigner {
     pub fn new() -> Self {
         Self::default()
     }
+    pub fn from_setup_with_lighter_principal(
+        setup: LocalSetup,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+        principal: LighterPrincipal,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        #[cfg(feature = "schnorr")]
+        {
+            if setup.secondary.is_some()
+                || policy.primary.and_then(|policy| policy.signing_algorithm)
+                    != Some(Algorithm::SchnorrDigest)
+            {
+                return Err(SignError::InvalidRequest);
+            }
+            let (mut signer, mut identities, facts) =
+                Self::from_setup_with_facts(setup, policy, public_data_only)?;
+            if !public_data_only
+                && facts.primary_key() != KeyPresence::Nonblank
+                && let Some(primary) = identities.primary.as_mut()
+                && primary.signing_ref().is_ok()
+            {
+                if !primary.credential.0.is_empty() {
+                    signer.remove(&primary.credential);
+                }
+                let reference = KeyRef("primary.principal".into());
+                primary.credential = reference.clone();
+                signer.lighter_principal = Some((reference, principal));
+            }
+            Ok((signer, identities, facts))
+        }
+        #[cfg(not(feature = "schnorr"))]
+        {
+            let _ = (setup, policy, public_data_only, principal);
+            Err(SignError::Unsupported)
+        }
+    }
+    #[cfg(feature = "schnorr")]
+    fn is_lighter_principal(&self, reference: &KeyRef) -> bool {
+        self.lighter_principal
+            .as_ref()
+            .is_some_and(|(issued, _)| issued == reference)
+    }
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     /// Replaced material is undeclared: a declaration describes the bytes setup
     /// installed, never later ones. A role ref keeps its role, which is its
     /// declaration, and a ref an aliased slot shares keeps its slots' algorithm;
     /// neither's type changes this way.
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(&reference) {
+            drop(Zeroizing::new(bytes));
+            return;
+        }
         match self.shared.get(&reference) {
             Some(Some(algorithm)) => {
                 self.algorithms.insert(reference.clone(), *algorithm);
@@ -244,6 +387,10 @@ impl LocalSigner {
                 if let Some(trim) = rule.and_then(|rule| rule.trim_credential) {
                     identity.trim_credential = trim;
                 }
+                #[cfg(feature = "trim-signing")]
+                if let Some(trim) = rule.and_then(|rule| rule.trim_signing) {
+                    identity.trim_signing = trim;
+                }
                 if let Some(encoding) = rule.and_then(|rule| rule.secret_encoding) {
                     identity.secret_encoding = encoding;
                 }
@@ -269,9 +416,9 @@ impl LocalSigner {
                 && (setup
                     .secondary
                     .as_ref()
-                    .is_some_and(|id| !id.secret.0.is_empty())
+                    .is_some_and(|id| !id.secret.is_empty())
                     || setup.primary.as_ref().is_none_or(|primary| {
-                        primary.secret.0.is_empty()
+                        primary.secret.is_empty()
                             || setup.secondary.as_ref().map(|id| id.secret_encoding)
                                 != Some(primary.secret_encoding)
                     }))
@@ -341,6 +488,7 @@ impl LocalSigner {
         }
         policy.apply_to_identities(&mut validation, public_data_only)?;
         policy.apply_to_identities(&mut identities, public_data_only)?;
+        policy.install_scalar_only_primary(&mut identities)?;
         let mut signer = Self::new();
         if let Some(primary) = primary {
             primary.install(&mut signer, "primary");
@@ -355,6 +503,18 @@ impl LocalSigner {
             if let (Some(identity), Some(algorithm)) = (identity, declared(rule))
                 && let Some(signing) = identity.signing_opt().filter(|key| !key.0.is_empty())
             {
+                // A declared Schnorr key is refused at setup, never reduced,
+                // with the same rule its sign and public-key arms apply. Only
+                // `schnorr` builds can sign one, so only they pay for the check.
+                #[cfg(feature = "schnorr")]
+                if algorithm == Algorithm::SchnorrDigest
+                    && !signer
+                        .keys
+                        .get(signing)
+                        .is_some_and(|key| crate::lighter::canonical_scalar(key).unwrap_or(false))
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 signer.algorithms.insert(signing.clone(), algorithm);
             }
         }
@@ -398,7 +558,41 @@ impl LocalSigner {
             serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
         Self::from_setup_with_policy_and_mode(setup, policy, public_data_only)
     }
+    /// Trusted setup plus its non-secret facts (D3): the primary key's raw
+    /// presence, read before the setup is consumed.
+    pub fn from_setup_with_facts(
+        setup: LocalSetup,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        let facts = SetupFacts::new(
+            setup
+                .primary
+                .as_ref()
+                .map_or(KeyPresence::Absent, |primary| primary.key.presence()),
+        );
+        let (signer, identities) =
+            Self::from_setup_with_policy_and_mode(setup, policy, public_data_only)?;
+        Ok((signer, identities, facts))
+    }
+    pub fn from_json_with_facts(
+        input: String,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        let input = Zeroizing::new(input);
+        if input.len() > 4 * 1024 * 1024 {
+            return Err(SignError::InvalidRequest);
+        }
+        let setup: LocalSetup =
+            serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
+        Self::from_setup_with_facts(setup, policy, public_data_only)
+    }
     pub fn remove(&mut self, reference: &KeyRef) {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(reference) {
+            self.lighter_principal = None;
+        }
         self.keys.remove(reference);
         self.roles.remove(reference);
         self.algorithms.remove(reference);
@@ -411,6 +605,14 @@ impl LocalSigner {
             return self.algorithm_key(reference, algorithm);
         }
         if self.algorithms.get(reference) != Some(&algorithm) {
+            return Err(SignError::InvalidRequest);
+        }
+        self.key(reference)
+    }
+    /// Presented or interpolated material: never a declared asymmetric key,
+    /// whichever identity names it, so no private scalar is ever emitted.
+    fn presentable_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
+        if self.algorithms.contains_key(reference) {
             return Err(SignError::InvalidRequest);
         }
         self.key(reference)
@@ -449,6 +651,11 @@ impl LocalSigner {
         bytes: Vec<u8>,
         algorithm: Algorithm,
     ) -> Result<(), SignError> {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(&reference) {
+            drop(Zeroizing::new(bytes));
+            return Err(SignError::InvalidRequest);
+        }
         if !asymmetric(algorithm)
             || self.roles.contains_key(&reference)
             || self
@@ -474,6 +681,10 @@ impl LocalSigner {
     }
     /// A local signer's missing ref never appears later.
     fn raw_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(reference) {
+            return Err(SignError::InvalidRequest);
+        }
         self.keys
             .get(reference)
             .map(|key| key.as_slice())
@@ -491,7 +702,7 @@ impl LocalSigner {
         for part in payload {
             let n = match part {
                 PayloadPart::Bytes { bytes } => bytes.len(),
-                PayloadPart::Credential { key } => self.key(key)?.len(),
+                PayloadPart::Credential { key } => self.presentable_key(key)?.len(),
                 PayloadPart::Result { index, encoding } => {
                     let n = results
                         .values
@@ -511,6 +722,10 @@ impl LocalSigner {
                             .div_ceil(3)
                             .checked_mul(4)
                             .ok_or(SignError::InvalidRequest)?,
+                        Encoding::EvmHex => {
+                            evm_signature(&results.values[*index])?;
+                            130
+                        }
                     }
                 }
             };
@@ -524,7 +739,9 @@ impl LocalSigner {
         for part in payload {
             match part {
                 PayloadPart::Bytes { bytes } => message.extend_from_slice(bytes),
-                PayloadPart::Credential { key } => message.extend_from_slice(self.key(key)?),
+                PayloadPart::Credential { key } => {
+                    message.extend_from_slice(self.presentable_key(key)?)
+                }
                 PayloadPart::Result { index, encoding } => {
                     let bytes = results
                         .values
@@ -547,6 +764,12 @@ impl LocalSigner {
                             ));
                             message.extend_from_slice(encoded.as_bytes());
                         }
+                        Encoding::EvmHex => {
+                            let signature = evm_signature(bytes)?;
+                            message.extend_from_slice(
+                                Zeroizing::new(crate::hex(&signature[..])).as_bytes(),
+                            );
+                        }
                     }
                 }
             }
@@ -566,7 +789,7 @@ impl LocalSigner {
                     Sha256::digest(&*self.expand(payload, &result)?).to_vec()
                 }
                 Operation::Present { key } => {
-                    let value = self.key(key)?;
+                    let value = self.presentable_key(key)?;
                     if value.len() > 1024 * 1024 {
                         return Err(SignError::InvalidRequest);
                     }
@@ -580,6 +803,7 @@ impl LocalSigner {
                     match algorithm {
                         Algorithm::Ed25519 => primitives::ed25519_public(key)?,
                         Algorithm::StarkDigest => primitives::stark_public(key)?,
+                        Algorithm::SchnorrDigest => primitives::schnorr_public(key)?,
                         _ => return Err(SignError::InvalidRequest),
                     }
                 }
@@ -637,6 +861,9 @@ impl LocalSigner {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod lighter_principal_tests;
 /// Semantic check of one provider's public answer at the trusted setup
 /// boundary; widths alone admit off-curve and non-canonical values.
 pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
@@ -656,9 +883,28 @@ pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
             algorithm: Algorithm::StarkDigest,
             ..
         } => crate::starknet::is_public_key(value),
+        #[cfg(feature = "schnorr")]
+        Operation::PublicKey {
+            algorithm: Algorithm::SchnorrDigest,
+            ..
+        } => crate::lighter::is_public_key(value),
         _ => false,
     }
 }
+/// `r || s || recovery` (0 or 1) as `r || s || v` with `v` = 27 or 28.
+fn evm_signature(bytes: &[u8]) -> Result<Zeroizing<[u8; 65]>, SignError> {
+    let [signature @ .., recovery] = bytes else {
+        return Err(SignError::InvalidRequest);
+    };
+    if signature.len() != 64 || *recovery > 1 {
+        return Err(SignError::InvalidRequest);
+    }
+    let mut out = Zeroizing::new([0u8; 65]);
+    out[..64].copy_from_slice(signature);
+    out[64] = 27 + recovery;
+    Ok(out)
+}
+
 /// Little-endian y (sign bit cleared) strictly below p = 2^255 - 19.
 fn ed25519_canonical_y(bytes: &[u8; 32]) -> bool {
     let mut y = *bytes;
@@ -686,15 +932,110 @@ fn implemented(algorithm: Algorithm) -> bool {
         Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => true,
         Algorithm::HmacSha512 => cfg!(feature = "hmac-sha512"),
         Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
+        Algorithm::SchnorrDigest => cfg!(feature = "schnorr"),
         Algorithm::Ed25519
         | Algorithm::Es256
         | Algorithm::Secp256k1Digest
-        | Algorithm::StarkDigest
-        | Algorithm::SchnorrDigest => false,
+        | Algorithm::StarkDigest => false,
+    }
+}
+
+#[cfg(feature = "address-nonce")]
+struct LocalAddressSetup {
+    address: Option<Result<[u8; 20], SignError>>,
+    result: Option<Result<SignResult, SignError>>,
+    started: bool,
+}
+#[cfg(feature = "address-nonce")]
+impl safe_cex_engine::signing::OwnedSetupExecution for LocalAddressSetup {
+    fn start(&mut self) -> Result<(), SignError> {
+        if self.started {
+            return Err(SignError::InvalidRequest);
+        }
+        self.started = true;
+        self.result = Some(
+            self.address
+                .take()
+                .ok_or(SignError::InvalidRequest)?
+                .map(|value| SignResult {
+                    receipt: Default::default(),
+                    values: vec![value.to_vec()],
+                    headers: Vec::new(),
+                }),
+        );
+        Ok(())
+    }
+    fn cancel(&mut self) -> Result<(), SignError> {
+        self.address = None;
+        self.started = true;
+        Ok(())
+    }
+    fn poll_result(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<SignResult, SignError>> {
+        if self.started {
+            self.result
+                .take()
+                .map_or(std::task::Poll::Pending, std::task::Poll::Ready)
+        } else {
+            std::task::Poll::Pending
+        }
+    }
+    fn poll_joined(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), SignError>> {
+        if self.started {
+            std::task::Poll::Ready(Ok(()))
+        } else {
+            std::task::Poll::Pending
+        }
     }
 }
 
 impl Signer for LocalSigner {
+    fn owned_public_address_capability(&self) -> Capability {
+        if cfg!(feature = "address-nonce") {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        }
+    }
+    fn create_public_address_setup(
+        &self,
+        request: SignRequest,
+    ) -> Option<Box<dyn safe_cex_engine::signing::OwnedSetupExecution>> {
+        #[cfg(not(feature = "address-nonce"))]
+        {
+            let _ = request;
+            None
+        }
+        #[cfg(feature = "address-nonce")]
+        {
+            let [Operation::PublicAddress { key }] = request.operations.as_slice() else {
+                return None;
+            };
+            if !cfg!(feature = "secp256k1")
+                || request.receipt != Default::default()
+                || request.context != Default::default()
+                || self.declared_key(key, Algorithm::Secp256k1Digest).is_err()
+            {
+                return None;
+            }
+            Some(Box::new(LocalAddressSetup {
+                address: Some(
+                    primitives::secp256k1_address(
+                        self.declared_key(key, Algorithm::Secp256k1Digest).ok()?,
+                    )
+                    .and_then(|bytes| bytes.try_into().map_err(|_| SignError::InvalidResult)),
+                ),
+                result: None,
+                started: false,
+            }))
+        }
+    }
+
     fn immediate(&self) -> bool {
         true
     }
@@ -718,6 +1059,56 @@ impl Signer for LocalSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D3 condition 2: secret and passphrase are never absent material.
+    /// Omitted secret is present-empty; `null` secret is refused; a `null`
+    /// passphrase is no passphrase, never a present-absent one.
+    #[test]
+    fn d3_secret_and_passphrase_are_never_absent() {
+        assert!(LocalIdentity::default().secret.0.is_some());
+        assert!(LocalIdentity::default().key.0.is_none());
+        let omitted: LocalIdentity = serde_json::from_str(r#"{"key":"k"}"#).unwrap();
+        assert!(omitted.secret.0.is_some());
+        assert!(serde_json::from_str::<LocalIdentity>(r#"{"key":"k","secret":null}"#).is_err());
+        let none: LocalIdentity = serde_json::from_str(r#"{"key":"k","passphrase":null}"#).unwrap();
+        assert!(none.passphrase.is_none());
+        let empty: LocalIdentity = serde_json::from_str(r#"{"key":"k","passphrase":""}"#).unwrap();
+        assert!(empty.passphrase.unwrap().0.is_some());
+    }
+
+    /// D3 condition 1: absent material is never installed, so no signer can
+    /// read bytes from it; every signing path refuses before byte access.
+    #[test]
+    fn d3_absent_material_is_never_installed_or_read() {
+        let (signer, ids) = LocalSigner::from_json_with_policy_and_mode(
+            r#"{"primary":{}}"#.into(),
+            CredentialSetupPolicy::default(),
+            false,
+        )
+        .unwrap();
+        assert!(
+            signer.keys.is_empty(),
+            "nothing installed from absent material"
+        );
+        assert_eq!(
+            ids.primary.unwrap().signing_ref(),
+            Err(SignError::MissingKey)
+        );
+        for reference in ["primary.credential", "primary.signing"] {
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![Operation::Present {
+                    key: KeyRef(reference.into()),
+                }],
+            };
+            assert!(signer.sign_now(&request).is_err(), "{reference}");
+            assert!(
+                signer.key(&KeyRef(reference.into())).is_err(),
+                "{reference}"
+            );
+        }
+    }
 
     #[test]
     fn setup_policy_overrides_only_declared_trim_fields_before_present_and_hmac() {
@@ -1026,6 +1417,150 @@ mod tests {
         (signer, ids.primary.unwrap().signing_ref().unwrap().clone())
     }
 
+    /// A declared Schnorr ref installed without setup's key check.
+    fn installed_schnorr(key: &[u8]) -> (LocalSigner, KeyRef) {
+        let mut signer = LocalSigner::new();
+        let reference = KeyRef("installed.schnorr".into());
+        signer
+            .insert_declared(reference.clone(), key.to_vec(), Algorithm::SchnorrDigest)
+            .unwrap();
+        (signer, reference)
+    }
+
+    fn schnorr_public_request(key: KeyRef) -> (Operation, SignRequest) {
+        let operation = Operation::PublicKey {
+            algorithm: Algorithm::SchnorrDigest,
+            key,
+        };
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![operation.clone()],
+        };
+        (operation, request)
+    }
+
+    /// R6: the provider's public key is Lighter's derivation, passes the
+    /// semantic check and verifies a signature from the same declared ref.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_key_matches_derivation_and_verifies_its_signature() {
+        use goldilocks_crypto::ScalarField;
+        let key = ScalarField::NEG_ONE.to_bytes_le();
+        let (signer, signing) = schnorr_signer(&key);
+        let (operation, request) = schnorr_public_request(signing.clone());
+        let mut result = signer.sign_now(&request).unwrap();
+        let public = result.values.remove(0);
+        assert_eq!(public, crate::lighter::public_key(&key).unwrap().to_vec());
+        assert!(valid_public_value(&operation, &public));
+        let input = [7u8; 16];
+        let mut payload = vec![0x22; 32];
+        payload.extend_from_slice(&input);
+        let signature = signer
+            .sign_now(&schnorr_request(signing, payload))
+            .unwrap()
+            .values
+            .remove(0);
+        assert!(crate::lighter::schnorr_verify(&input, &public, &signature).unwrap());
+    }
+
+    /// The derived public key is always canonical (each limb below p), as Go
+    /// emits it; this scalar's point once encoded a limb as an unreduced p.
+    #[test]
+    fn lighter_public_keys_are_canonically_encoded() {
+        use goldilocks_crypto::ScalarField;
+        const P: u64 = 0xFFFF_FFFF_0000_0001;
+        let public = crate::lighter::public_key(&ScalarField::NEG_ONE.to_bytes_le()).unwrap();
+        assert!(
+            public
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .all(|limb| u64::from_le_bytes(*limb) < P)
+        );
+        assert!(crate::lighter::is_public_key(&public));
+    }
+
+    /// R6: off-curve, non-canonical, neutral and wrong-width public values fail
+    /// the setup-boundary check.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_values_must_be_canonical_on_curve_points() {
+        use goldilocks_crypto::ScalarField;
+        let (operation, _) = schnorr_public_request(KeyRef("k".into()));
+        let good = crate::lighter::public_key(&ScalarField::NEG_ONE.to_bytes_le()).unwrap();
+        assert!(valid_public_value(&operation, &good));
+        // A flipped bit is no negative here: about half of all field elements
+        // encode some valid point. Non-canonical limbs, the neutral point and
+        // wrong widths are refused deterministically.
+        // The first little-endian limb at u64::MAX is at or above the
+        // Goldilocks prime, so this encoding is never canonical.
+        let mut noncanonical = good;
+        noncanonical[..8].fill(0xff);
+        for value in [
+            noncanonical.to_vec(),
+            [0u8; 40].to_vec(),
+            [0xff; 40].to_vec(),
+            good[..39].to_vec(),
+            [good.to_vec(), vec![0]].concat(),
+        ] {
+            assert!(!valid_public_value(&operation, &value), "{value:?}");
+        }
+    }
+
+    /// R6: the public-key arm applies the sign arm's key rule.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_key_refuses_noncanonical_and_zero_keys() {
+        use goldilocks_crypto::ScalarField;
+        for key in [
+            [0u8; 40].to_vec(),
+            ScalarField::N.to_bytes_le().to_vec(),
+            [0xff; 40].to_vec(),
+            vec![1; 39],
+        ] {
+            let (signer, signing) = installed_schnorr(&key);
+            let (_, request) = schnorr_public_request(signing);
+            assert_eq!(signer.sign_now(&request), Err(SignError::InvalidRequest));
+        }
+    }
+
+    /// R6: trusted setup refuses a declared Schnorr key the arms would refuse
+    /// (refused, never reduced), and accepts a canonical one.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_setup_refuses_noncanonical_declared_keys() {
+        use goldilocks_crypto::ScalarField;
+        let setup = |key: &[u8]| {
+            let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+            try_public_setup(
+                serde_json::json!({"primary":{"signingAlgorithm":"schnorrDigest"}}),
+                serde_json::json!({"primary":{"key":"k","secret":hex,"secretEncoding":"hex"}}),
+            )
+            .map(drop)
+        };
+        for key in [
+            [0u8; 40].to_vec(),
+            ScalarField::N.to_bytes_le().to_vec(),
+            [0xff; 40].to_vec(),
+            vec![1; 39],
+        ] {
+            assert_eq!(setup(&key), Err(SignError::InvalidRequest), "{}", key.len());
+        }
+        assert_eq!(setup(&ScalarField::NEG_ONE.to_bytes_le()), Ok(()));
+    }
+
+    /// Without the schnorr feature the public-key arm refuses as Unsupported.
+    #[cfg(not(feature = "schnorr"))]
+    #[test]
+    fn schnorr_public_key_is_unsupported_without_the_feature() {
+        let mut key = [0u8; 40];
+        key[0] = 1;
+        let (signer, signing) = installed_schnorr(&key);
+        let (_, request) = schnorr_public_request(signing);
+        assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
+    }
+
     /// R1: payloads without full entropy, or without whole input words, are refused.
     #[cfg(feature = "schnorr")]
     #[test]
@@ -1113,7 +1648,10 @@ mod tests {
             short,
             long,
         ] {
-            let (signer, signing) = schnorr_signer(&key);
+            // Installed directly: declared setup now refuses these keys first
+            // (schnorr_setup_refuses_noncanonical_declared_keys), so this
+            // pins the sign arm's own refusal.
+            let (signer, signing) = installed_schnorr(&key);
             assert_eq!(
                 signer.sign_now(&schnorr_request(signing, payload.clone())),
                 Err(SignError::InvalidRequest),
@@ -1522,6 +2060,36 @@ mod tests {
         expected.update(signer.key(&key).unwrap());
         assert_eq!(result.values[1], &expected.finalize()[..]);
         assert!(!format!("{request:?}{result:?}").contains("public-identifier"));
+    }
+    #[test]
+    fn evm_hex_renders_recovery_as_27_or_28_and_refuses_other_shapes() {
+        let mut raw = [7u8; 65];
+        for (recovery, v) in [(0u8, 27u8), (1, 28)] {
+            raw[64] = recovery;
+            let signature = evm_signature(&raw).unwrap();
+            assert_eq!(&signature[..64], &raw[..64]);
+            assert_eq!(signature[64], v);
+        }
+        raw[64] = 2;
+        assert_eq!(evm_signature(&raw).err(), Some(SignError::InvalidRequest));
+        assert_eq!(
+            evm_signature(&raw[..64]).err(),
+            Some(SignError::InvalidRequest)
+        );
+        assert_eq!(evm_signature(&[]).err(), Some(SignError::InvalidRequest));
+    }
+    #[test]
+    fn base64url_keys_decode_either_alphabet_with_or_without_padding() {
+        let decode = |text: &str| {
+            key_material::decode(Secret::new(text.into()), KeyEncoding::Base64Url)
+                .map(|bytes| bytes.to_vec())
+        };
+        assert_eq!(decode("c2VjcmV0").unwrap(), b"secret");
+        assert_eq!(decode("c2VjcmV0Cg").unwrap(), b"secret\n");
+        assert_eq!(decode("c2VjcmV0Cg==").unwrap(), b"secret\n");
+        assert_eq!(decode("-_-_").unwrap(), [0xfb, 0xff, 0xbf]);
+        assert_eq!(decode("+/+/").unwrap(), [0xfb, 0xff, 0xbf]);
+        assert!(decode("c2V*").is_err());
     }
     #[test]
     fn failed_batch_never_returns_partial_credentials_or_provider_text() {
@@ -2534,5 +3102,215 @@ mod tests {
             wallet.can_sign(&key, Algorithm::Ed25519),
             Capability::Unsupported
         );
+    }
+
+    #[cfg(feature = "trim-signing")]
+    #[test]
+    fn declared_signing_trim_installs_one_trimmed_material_for_rest_and_login() {
+        use safe_cex_engine::signing::IdentitySetupPolicy;
+        // Bitunix: both the API key and the signing key are trimmed once at setup.
+        let trim = IdentitySetupPolicy {
+            trim_credential: Some(true),
+            trim_signing: Some(true),
+            ..Default::default()
+        };
+        let policy = CredentialSetupPolicy {
+            primary: Some(trim),
+            secondary: Some(trim),
+        };
+        let setup = r#"{"primary":{"key":" yourApiKey\t","secret":" yourSecretKey \n"},
+            "secondary":{"key":"read-key ","secret":" read-secret"}}"#;
+        let (signer, ids) = LocalSigner::from_json_with_policy(setup.into(), policy).unwrap();
+        for (identity, key, secret) in [
+            (ids.primary.unwrap(), "yourApiKey", "yourSecretKey"),
+            (ids.secondary.unwrap(), "read-key", "read-secret"),
+        ] {
+            assert_eq!(signer.key(&identity.credential).unwrap(), key.as_bytes());
+            assert_eq!(
+                signer.key(identity.signing_ref().unwrap()).unwrap(),
+                secret.as_bytes()
+            );
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![
+                    Operation::Sha256 {
+                        payload: vec![
+                            PayloadPart::Bytes {
+                                bytes: b"1234561700000000123".to_vec(),
+                            },
+                            PayloadPart::Credential {
+                                key: identity.credential.clone(),
+                            },
+                        ],
+                    },
+                    Operation::Sign {
+                        algorithm: Algorithm::Sha256SecretSuffix,
+                        key: identity.signing_ref().unwrap().clone(),
+                        payload: vec![PayloadPart::Result {
+                            index: 0,
+                            encoding: Encoding::Hex,
+                        }],
+                    },
+                ],
+            };
+            let inner = crate::hex(&crate::sha256(
+                format!("1234561700000000123{key}").as_bytes(),
+            ));
+            assert_eq!(
+                signer.sign_now(&request).unwrap().values[1],
+                crate::sha256(format!("{inner}{secret}").as_bytes()).to_vec()
+            );
+        }
+        // Undeclared, the exact bytes stay untouched.
+        let (exact, ids) = LocalSigner::from_json(setup.into()).unwrap();
+        assert_eq!(
+            exact
+                .key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            "\u{a0}yourSecretKey \n".as_bytes()
+        );
+        // The declared policy wins over contrary caller metadata, and trimming
+        // precedes decoding, so a pasted trailing newline on hex material decodes.
+        let off = CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                trim_signing: Some(false),
+                ..Default::default()
+            }),
+            secondary: None,
+        };
+        let (kept, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":" s ","trimSigning":true}}"#.into(),
+            off,
+        )
+        .unwrap();
+        assert_eq!(
+            kept.key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            b" s "
+        );
+        let (hex, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":"6162\n","secretEncoding":"hex"}}"#.into(),
+            policy,
+        )
+        .unwrap();
+        assert_eq!(
+            hex.key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            b"ab"
+        );
+        // Rust White_Space includes NEL (U+0085) but not BOM (U+FEFF).
+        for (secret, installed) in [(r"\u0085s\u0085", "s"), (r"\ufeffs", "\u{feff}s")] {
+            let (signer, ids) = LocalSigner::from_json_with_policy(
+                format!(r#"{{"primary":{{"key":"k","secret":"{secret}"}}}}"#),
+                policy,
+            )
+            .unwrap();
+            assert_eq!(
+                signer
+                    .key(ids.primary.unwrap().signing_ref().unwrap())
+                    .unwrap(),
+                installed.as_bytes()
+            );
+        }
+        // A whitespace-only signing key becomes absent material, not a ref.
+        let (_, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":"  "}}"#.into(),
+            policy,
+        )
+        .unwrap();
+        assert!(ids.primary.unwrap().signing_ref().is_err());
+    }
+}
+
+#[cfg(all(test, feature = "address-nonce"))]
+mod owned_address_setup_tests {
+    use super::*;
+    use std::task::{Context as TaskContext, Poll, Waker};
+    fn provider() -> (LocalSigner, KeyRef) {
+        let mut provider = LocalSigner::new();
+        let key = KeyRef("owned-scalar".into());
+        let mut scalar = vec![0; 32];
+        scalar[31] = 1;
+        provider
+            .insert_declared(key.clone(), scalar, Algorithm::Secp256k1Digest)
+            .unwrap();
+        (provider, key)
+    }
+    fn request(key: KeyRef) -> SignRequest {
+        SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::PublicAddress { key }],
+        }
+    }
+    #[test]
+    fn owned_factory_is_dormant_and_agrees_with_independent_scalar_one_address() {
+        let (provider, key) = provider();
+        let work = request(key);
+        let mut owner = provider.create_public_address_setup(work.clone()).unwrap();
+        let mut cx = TaskContext::from_waker(Waker::noop());
+        assert!(owner.poll_result(&mut cx).is_pending());
+        assert!(owner.poll_joined(&mut cx).is_pending());
+        owner.start().unwrap();
+        let Poll::Ready(Ok(result)) = owner.poll_result(&mut cx) else {
+            panic!("immediate actual local result")
+        };
+        assert_eq!(
+            crate::hex(&result.values[0]),
+            "7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        );
+        work.validate_result(&result).unwrap();
+        assert_eq!(owner.poll_joined(&mut cx), Poll::Ready(Ok(())));
+    }
+    #[test]
+    fn dormant_local_handle_stores_only_the_fixed_public_result() {
+        use safe_cex_engine::signing::OwnedSetupExecution;
+        let mut owner = LocalAddressSetup {
+            address: Some(Ok([19; 20])),
+            result: None,
+            started: false,
+        };
+        let public: &Option<Result<[u8; 20], SignError>> = &owner.address;
+        assert_eq!(public, &Some(Ok([19; 20])));
+        owner.cancel().unwrap();
+        assert!(owner.address.is_none());
+        assert!(owner.result.is_none());
+    }
+    #[test]
+    fn direct_factory_rejects_foreign_ref_algorithm_receipt_and_extra_work() {
+        let (mut provider, key) = provider();
+        let work = request(key.clone());
+        let mut cases = Vec::new();
+        cases.push(request(KeyRef("foreign".into())));
+        let mut bad = work.clone();
+        bad.operations.clear();
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.operations
+            .push(Operation::PublicAddress { key: key.clone() });
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.receipt.stamp_ms = Some(1.);
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.receipt.expiry_ms = Some(2.);
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.receipt.nonce = Some(1);
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.context.path = "business".into();
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.operations.push(Operation::Sha256 { payload: vec![] });
+        cases.push(bad);
+        for bad in cases {
+            assert!(provider.create_public_address_setup(bad).is_none());
+        }
+        provider
+            .insert_declared(key.clone(), vec![1; 32], Algorithm::Ed25519)
+            .unwrap();
+        assert!(provider.create_public_address_setup(request(key)).is_none());
     }
 }

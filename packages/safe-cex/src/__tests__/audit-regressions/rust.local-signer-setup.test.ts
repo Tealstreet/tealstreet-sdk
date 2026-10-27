@@ -1,3 +1,10 @@
+import { vi } from 'vitest';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
 
@@ -173,9 +180,9 @@ it.each([
 
 
 describe('shared credential setup policy', () => {
-  it('declares MEXC primary trimming and secondary preservation once without enabling signing', () => {
+  it('declares MEXC normalization and rejects an inconsistent persisted mapping', () => {
     const policy = deriveSignerSetupPolicy('mexc');
-    expect(policy).toEqual({ primary: { trimCredential: true }, secondary: { trimCredential: false } });
+    expect(policy).toEqual({ primary: { trimCredential: true, signing: 'optional' }, secondary: { trimCredential: false } });
     expect(deriveSignerSetupPolicy('binance')).toEqual({});
     const input = { ...options(), key: '\u0085 primary ', secondary_key: ' secondary ', localSigner: {
       primary: { trimCredential: false, stableId: 'primary/7' },
@@ -192,7 +199,7 @@ describe('shared credential setup policy', () => {
     expect(input.localSigner.primary.trimCredential).toBe(false);
     expect(input.localSigner.secondary.trimCredential).toBe(true);
     expect(input.key).toBe('\u0085 primary ');
-    expect(() => new RustEngineExchange('mexc', input, new DefaultStore())).toThrow(/not supported/);
+    expect(() => new RustEngineExchange('mexc', input, new DefaultStore())).toThrow(/mapping conflicts/);
   });
 
   it.each([['\u0085', false], ['\ufeff', true], [' \t', false], ['  a b  ', true]] as const)(
@@ -205,6 +212,40 @@ describe('shared credential setup policy', () => {
       setup.dispose();
     },
   );
+
+  it('declares Bitunix signing-key trimming for both slots and forwards it to the provider', () => {
+    const policy = deriveSignerSetupPolicy('bitunix');
+    expect(policy).toEqual({
+      primary: { trimCredential: true, trimSigning: true },
+      secondary: { trimCredential: true, trimSigning: true },
+    });
+    const input = { ...options(), key: ' key ', secret: ' secret\n' };
+    const setup = new LocalSignerSetup(input, policy);
+    let received: unknown;
+    class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    setup.construct(Engine as never, 'bitunix', '{}');
+    expect(received).toMatchObject({
+      primary: { key: ' key ', secret: ' secret\n', trimCredential: true, trimSigning: true },
+      secondary: { trimCredential: true, trimSigning: true },
+    });
+    expect(input.secret).toBe(' secret\n');
+  });
+
+  it.each([['\u0085', false], ['\ufeff', true], [' \t', false], [' s ', true]] as const)(
+    'treats a Bitunix signing key %j by native whitespace semantics', (secret, present) => {
+      const setup = new LocalSignerSetup({ ...options(), secret }, deriveSignerSetupPolicy('bitunix'));
+      expect(setup.credentialPresence.secret).toBe(present);
+      setup.dispose();
+      const secondary = () => new LocalSignerSetup({ ...options(), secondary_secret: secret }, deriveSignerSetupPolicy('bitunix'));
+      if (present) expect(secondary).not.toThrow();
+      else expect(secondary).toThrow(/nonempty key and secret/);
+    },
+  );
+
+  it('never lets caller metadata request signing-key trimming', () => {
+    expect(() => new LocalSignerSetup({ ...options(), localSigner: { primary: { trimSigning: true } } } as unknown as ExchangeOptions)
+      .construct(class {} as never, 'binance', '{}')).toThrow();
+  });
 
   it('does not invent slots solely because a family has a setup policy', () => {
     const setup = new LocalSignerSetup({ publicDataOnly: true } as ExchangeOptions, deriveSignerSetupPolicy('mexc'));
@@ -432,9 +473,9 @@ describe('ApeX signer admission (RUST_APEXOMNI_SIGNER_ADMISSION.md)', () => {
     expect(deriveBridgeConstruction('apexomni', apex).dispatchSigning).toBe(true);
   });
 
-  it('keeps keyless and remote-signer ApeX accounts on TS until P8', () => {
+  it('keeps the Rust route while beta admission refuses unsupported ApeX signing', () => {
     const remoteSigner = { sign: async () => ({}) } as unknown as ExchangeOptions['remoteSigner'];
-    expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: '', remoteSigner })).toBe(false);
+    expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: '', remoteSigner })).toBe(true);
     expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: 'local' })).toBe(true);
   });
 });

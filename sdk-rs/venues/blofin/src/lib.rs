@@ -4,7 +4,6 @@ mod closed;
 #[path = "sign/dispatch.rs"]
 pub mod dispatch_signing;
 mod history;
-mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::Level;
@@ -25,30 +24,14 @@ use wire::*;
 
 #[derive(Clone, Default)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     /// TS enables payload attribution in production builds or with tealstreetProxy.
     pub broker_attribution: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub passphrase: Option<String>,
-    /// Opaque refs for the adopted FetchLeverage Read. The raw fields above
-    /// serve only unadopted paths; remove them at the family cutover.
+    /// Opaque refs from trusted setup; the provider holds the key material.
     pub identities: safe_cex_engine::signing::Identities,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.passphrase);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
-}
-
 pub enum Pending {
     Managed(Context, Box<Pending>),
     PublicTrades(history::PublicTradesRequest),
@@ -91,7 +74,7 @@ struct CandleState {
     last: Option<Candle>,
 }
 pub struct Blofin {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
@@ -174,7 +157,6 @@ impl Blofin {
     }
 
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::new(),
@@ -645,6 +627,10 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }
@@ -686,8 +672,7 @@ impl Venue for Blofin {
     /// An uncertain or absent-order seal: a fresh order snapshot reports
     /// through `orders_reconciled`.
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
-        self.settle_retired_trade(cx);
-        self.reconcile_orders(cx);
+        self.reconcile_uncertain_orders(cx);
     }
 
     type Pending = Pending;
@@ -705,11 +690,25 @@ impl Venue for Blofin {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read
-                .validate()
-                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
-        {
+        // Trusted setup drops an empty effective passphrase, and a Secondary
+        // inherits the Primary's, so a missing one refuses before discovery or
+        // entropy, naming the slot that lacks it.
+        let identities = &self.options.identities;
+        let primary_lacks = !self.options.public_data_only
+            && identities
+                .primary
+                .as_ref()
+                .is_some_and(|primary| primary.passphrase.is_none());
+        let secondary_lacks = identities
+            .secondary
+            .as_ref()
+            .is_some_and(|read| read.passphrase.is_none());
+        if primary_lacks || secondary_lacks {
+            let error = if primary_lacks {
+                "BloFin requires a passphrase"
+            } else {
+                "Secondary read credentials require a passphrase"
+            };
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             self.account.startup_rejected = true;
             cx.startup_failed(VenueError::new(error).kind(ErrorKind::InvalidInput));

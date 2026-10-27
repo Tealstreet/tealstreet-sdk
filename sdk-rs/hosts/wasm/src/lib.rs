@@ -4,6 +4,10 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
+#[cfg(feature = "hosted-operation-proof")]
+mod hosted_operation_proof;
+#[cfg(feature = "kraken")]
+mod hosted_operations;
 #[cfg(not(any(
     feature = "grvt",
     feature = "paradex",
@@ -48,6 +52,34 @@ mod managed_http;
 use managed_http::{HttpPacket, HttpPhaseOut};
 
 trait AnyEngine {
+    #[cfg(feature = "address-nonce")]
+    fn has_started(&self) -> bool {
+        false
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_support(
+        &mut self,
+        _supported: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        Err(safe_cex_engine::signing::SignError::Unsupported.venue_error())
+    }
+    #[cfg(feature = "address-nonce")]
+    fn initialize_address_setup(
+        &mut self,
+        _now: f64,
+        _reinitialize: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        Err(safe_cex_engine::signing::SignError::Unsupported.venue_error())
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_ready(&self) -> bool {
+        false
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_retired(&mut self, _token: &str, _now: f64) -> bool {
+        false
+    }
+
     fn failed(&self) -> bool {
         false
     }
@@ -148,6 +180,42 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    #[cfg(feature = "address-nonce")]
+    fn has_started(&self) -> bool {
+        Engine::has_started(self)
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_support(
+        &mut self,
+        supported: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.set_address_setup_host_support(if supported {
+            safe_cex_engine::SetupHostSupport::OwnedPublicAddress1
+        } else {
+            safe_cex_engine::SetupHostSupport::Unavailable
+        })
+    }
+    #[cfg(feature = "address-nonce")]
+    fn initialize_address_setup(
+        &mut self,
+        now: f64,
+        reinitialize: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        if reinitialize {
+            self.reinitialize_address_nonce(now).map(|_| ())
+        } else {
+            self.initialize_address_nonce(now).map(|_| ())
+        }
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_ready(&self) -> bool {
+        self.address_nonce_setup_ready()
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_retired(&mut self, token: &str, now: f64) -> bool {
+        self.address_setup_retired_wire(token, now)
+    }
+
     #[cfg(feature = "dispatch-signing")]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
@@ -324,6 +392,11 @@ impl safe_cex_venues::Visit for Boxed {
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    #[cfg(feature = "address-nonce")]
+    RetireAddressSetup {
+        task: u64,
+        token: String,
+    },
     AccountAuth {
         credential: safe_cex_engine::CredentialSlot,
         scope: safe_cex_engine::AccountReadScope,
@@ -447,6 +520,13 @@ fn encode(actions: &[Action]) -> String {
     let out: Vec<ActionOut<'_>> = actions
         .iter()
         .map(|action| match action {
+            #[cfg(feature = "address-nonce")]
+            Action::RetireAddressSetup { task, token } => ActionOut::RetireAddressSetup {
+                task: task.0,
+                token: token.to_wire(),
+            },
+            #[cfg(not(feature = "address-nonce"))]
+            Action::RetireAddressSetup { .. } => std::process::abort(),
             Action::WsConnect {
                 binary,
                 socket,
@@ -958,6 +1038,41 @@ impl WasmEngine {
         })
     }
 
+    #[cfg(feature = "address-nonce")]
+    #[wasm_bindgen(js_name = setAddressSetupSupport)]
+    pub fn set_address_setup_support(&mut self, protocol: &str) -> Result<(), js_sys::Error> {
+        if protocol != "publicAddressOwned" {
+            return Err(construction_error(
+                safe_cex_engine::signing::SignError::Unsupported.venue_error(),
+            ));
+        }
+        self.inner
+            .address_setup_support(true)
+            .map_err(construction_error)
+    }
+    #[cfg(feature = "address-nonce")]
+    #[wasm_bindgen(js_name = initializeAddressSetup)]
+    pub fn initialize_address_setup(
+        &mut self,
+        now: f64,
+        reinitialize: bool,
+    ) -> Result<String, js_sys::Error> {
+        self.inner
+            .initialize_address_setup(now, reinitialize)
+            .map_err(construction_error)?;
+        Ok(self.flush())
+    }
+    #[cfg(feature = "address-nonce")]
+    #[wasm_bindgen(js_name = addressSetupReady)]
+    pub fn address_setup_ready(&self) -> bool {
+        self.inner.address_setup_ready()
+    }
+    #[cfg(feature = "address-nonce")]
+    #[wasm_bindgen(js_name = addressSetupRetired)]
+    pub fn address_setup_retired(&mut self, token: &str, now: f64) -> String {
+        self.inner.address_setup_retired(token, now);
+        self.flush()
+    }
     #[wasm_bindgen(js_name = setEntropy)]
     pub fn set_entropy(&mut self, source: js_sys::Function) -> Result<(), js_sys::Error> {
         self.inner
@@ -1086,6 +1201,12 @@ impl WasmEngine {
     }
 
     pub fn start(&mut self, now: f64) -> String {
+        #[cfg(feature = "address-nonce")]
+        if !self.inner.has_started()
+            && let Err(error) = self.inner.initialize_address_setup(now, false)
+        {
+            return encode(&[Action::Notice(Notice::StartupFailed { error })]);
+        }
         self.inner.start(now);
         self.flush()
     }
@@ -1441,6 +1562,83 @@ mod tests {
         assert!(unversioned.hosted_identity.is_none());
     }
 
+    /// The host build must run address setup at start: a V3 wallet's signing
+    /// address is verified there, and every V3 signature depends on it.
+    #[cfg(feature = "asterdex")]
+    #[test]
+    fn a_v3_wallet_account_signs_after_wasm_start() {
+        use serde_json::Value;
+        const NOW: f64 = 1_700_000_000_000.;
+        let options = r#"{"applicationId":"0x63DD5aCC6b1aa0f563956C0e534DD30B6dcF7C4e","asterdex":{"apiVersion":"v3","signerAddress":"0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0"}}"#;
+        let setup = r#"{"primary":{"key":"0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0","secret":"4fd0a42218f3eae43a6ce26d22544e986139a01e5b34a62db53757ffca81bae1","secretEncoding":"hex"}}"#;
+        let Ok(mut engine) = crate::WasmEngine::new("asterdex", options, Some(setup.into())) else {
+            panic!("trusted V3 setup must construct");
+        };
+        let decode = |text: String| -> Vec<Value> {
+            if text.is_empty() {
+                Vec::new()
+            } else {
+                serde_json::from_str(&text).unwrap()
+            }
+        };
+        let mut queue: std::collections::VecDeque<Value> = decode(engine.start(NOW)).into();
+        queue.extend(decode(
+            engine
+                .command(r#"{"op":"fetchStpMode","command":1}"#, NOW)
+                .unwrap(),
+        ));
+        let mut released = Vec::new();
+        let mut resource = 0;
+        while let Some(action) = queue.pop_front() {
+            if action["op"] != "managedHttp" {
+                continue;
+            }
+            match action["phase"].as_str() {
+                Some("prepare") => {
+                    resource += 1;
+                    let next = engine
+                        .http_prepared(
+                            action["preparation"].as_str().unwrap(),
+                            &resource.to_string(),
+                            None,
+                            NOW,
+                        )
+                        .unwrap();
+                    queue.extend(decode(next));
+                }
+                Some("bind") => {
+                    let claim: Value = serde_json::from_str(
+                        &engine.http_claim(action["permit"].as_str().unwrap(), NOW),
+                    )
+                    .unwrap();
+                    if claim["status"] == "released" {
+                        let packet = &action["packet"];
+                        let url = packet["url"].as_str().unwrap().to_owned();
+                        if url.ends_with("/time") {
+                            let id = packet["request"].as_f64().unwrap();
+                            queue.extend(decode(engine.http_start(id, 200, "", NOW).unwrap()));
+                            let body = format!(r#"{{"serverTime":{NOW}}}"#);
+                            queue.extend(decode(
+                                engine.http_chunk(id, body.as_bytes(), NOW).unwrap(),
+                            ));
+                            queue.extend(decode(engine.http_end(id, NOW).unwrap()));
+                        }
+                        released.push(url);
+                    }
+                    queue.extend(decode(engine.prepare_dispatch(NOW)));
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            released.iter().any(|url| url.contains("/stpMode")
+                && url.contains("&signer=0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0&")
+                && url.contains("&nonce=")
+                && url.contains("&signature=0x")),
+            "a V3 signed read must release after start: {released:?}"
+        );
+    }
+
     #[cfg(feature = "bybit")]
     mod bybit_signer_construction {
         use crate::WasmEngine;
@@ -1641,6 +1839,67 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "apexomni", not(target_arch = "wasm32")))]
+    #[test]
+    fn apexomni_family_bootstraps_raw_and_explicit_local_signer_setup() {
+        let corpus: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../crypto/tests/fixtures/zklink/npm-wasm.json"
+        ))
+        .unwrap();
+        let seed = corpus["cases"][0]["seed"].as_str().unwrap();
+        let raw = serde_json::json!({
+            "key": "api-key", "secret": "bXlzZWNyZXQ=", "passphrase": "pass",
+            "omniKeySeed": seed,
+            "publicMode": {"requested": false},
+        });
+        let setup = serde_json::json!({"primary": {
+            "key": "api-key", "secret": "bXlzZWNyZXQ=", "passphrase": "pass",
+            "extra": {"zklinkSeed": {"value": seed, "encoding": "hex"}},
+        }});
+        for (options, setup) in [
+            (raw.to_string(), None),
+            (
+                r#"{"publicMode":{"requested":false}}"#.into(),
+                Some(setup.to_string()),
+            ),
+        ] {
+            let Ok(mut engine) = super::WasmEngine::new("apexomni", &options, setup) else {
+                panic!("ApeX local setup must construct the installed signer");
+            };
+            assert!(engine.dispatch_signing);
+            assert!(engine.inner.signer().is_some());
+            assert!(!engine.requires_external_signer());
+            let construction: serde_json::Value =
+                serde_json::from_str(&engine.construction()).unwrap();
+            assert_eq!(construction["canSign"], true);
+            assert_eq!(construction["publicDataOnly"], false);
+            let actions: Vec<serde_json::Value> =
+                serde_json::from_str(&engine.start(1000.)).unwrap();
+            assert!(actions.iter().any(|action| action["op"] == "managedHttp"));
+        }
+    }
+
+    #[cfg(all(feature = "mexc", not(target_arch = "wasm32")))]
+    #[test]
+    fn mexc_family_bootstraps_raw_and_explicit_local_signer_setup() {
+        for (options, setup) in [
+            (r#"{"key":"replay-key","secret":"fixture-secret"}"#, None),
+            (
+                "{}",
+                Some(r#"{"primary":{"key":"replay-key","secret":"fixture-secret"}}"#.into()),
+            ),
+        ] {
+            let Ok(mut engine) = super::WasmEngine::new("mexc", options, setup) else {
+                panic!("MEXC local setup must construct the installed signer");
+            };
+            assert!(engine.dispatch_signing);
+            assert!(!engine.requires_external_signer());
+            let actions: Vec<serde_json::Value> =
+                serde_json::from_str(&engine.start(1000.)).unwrap();
+            assert!(actions.iter().any(|action| action["op"] == "managedHttp"));
+        }
+    }
+
     #[cfg(all(feature = "dispatch-signing", not(target_arch = "wasm32")))]
     mod shared_dispatch_provider {
         use super::super::ExternalSigner;
@@ -1682,15 +1941,16 @@ mod tests {
             ));
         }
 
-        #[cfg(feature = "bitunix")]
+        // Provider-enabled MEXC discovery still has no signing authority.
+        #[cfg(feature = "mexc")]
         #[test]
-        fn shared_provider_feature_keeps_managed_public_bitunix_unsigned() {
+        fn shared_provider_feature_keeps_managed_public_mexc_unsigned() {
             let Ok(mut engine) =
-                super::super::WasmEngine::new("bitunix", r#"{"publicDataOnly":true}"#, None)
+                super::super::WasmEngine::new("mexc", r#"{"publicDataOnly":true}"#, None)
             else {
-                panic!("public Bitunix setup must remain native-safe and successful");
+                panic!("public MEXC setup must remain native-safe and successful");
             };
-            assert!(!engine.dispatch_signing);
+            assert!(engine.dispatch_signing);
             assert!(!engine.requires_external_signer());
             #[derive(serde::Deserialize)]
             struct Packet {
@@ -1717,7 +1977,7 @@ mod tests {
                         && action
                             .packet
                             .as_ref()
-                            .is_some_and(|packet| packet.url.contains("/api/v1/futures/market/"))
+                            .is_some_and(|packet| packet.url.contains("/api/v1/contract/"))
                 })
                 .expect("managed public discovery must prepare before release");
             assert_eq!(preparation.intent.as_deref(), Some("public"));
@@ -2034,7 +2294,14 @@ mod tests {
                 },
                 account_tier: any(&["lighter", "lighter-robinhood"], venue),
                 closed_positions: any(
-                    &["bybit", "bybitdemo", "hyrotrader", "bybitinverse", "blofin"],
+                    &[
+                        "bybit",
+                        "bybitdemo",
+                        "hyrotrader",
+                        "bybitinverse",
+                        "blofin",
+                        "bitunix",
+                    ],
                     venue,
                 ) || any(&OKX, venue),
                 balance_info: any(
@@ -2044,6 +2311,7 @@ mod tests {
                         "hyrotrader",
                         "bybitinverse",
                         "bybitspot",
+                        "binanceinverse",
                     ],
                     venue,
                 ),
@@ -2061,6 +2329,7 @@ mod tests {
                     }
                     "blofin" => safe_cex_engine::PositionHistory::Blofin,
                     "woo" => safe_cex_engine::PositionHistory::WooOrders,
+                    "bitunix" => safe_cex_engine::PositionHistory::Bitunix,
                     _ => safe_cex_engine::PositionHistory::Unsupported,
                 },
                 closed_position_format: match venue {
@@ -2071,6 +2340,7 @@ mod tests {
                         safe_cex_engine::ClosedPositionFormat::Okx
                     }
                     "blofin" => safe_cex_engine::ClosedPositionFormat::Blofin,
+                    "bitunix" => safe_cex_engine::ClosedPositionFormat::Bitunix,
                     _ => safe_cex_engine::ClosedPositionFormat::Unsupported,
                 },
                 fill_history_time: match venue {
@@ -2808,3 +3078,9 @@ mod tests {
         ));
     }
 }
+
+#[cfg(all(test, feature = "address-nonce", feature = "asterdex"))]
+#[path = "../../native/tests/support/address_start.rs"]
+mod address_start_fixture;
+#[cfg(all(test, feature = "address-nonce", feature = "asterdex"))]
+mod address_start_tests;

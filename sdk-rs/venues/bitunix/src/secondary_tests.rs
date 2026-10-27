@@ -1,20 +1,30 @@
 use super::*;
 use safe_cex_crypto::{hex, sha256};
-use safe_cex_engine::test_support::{ProbeVenue, http_requests};
-use safe_cex_engine::{Action, HttpRequest, Notice, ReadCredentials};
+use safe_cex_engine::signing::{KeyRef, Provider};
+use safe_cex_engine::test_support::{ProbeVenue, prepared_actions};
+use safe_cex_engine::{Action, HttpRequest, Notice};
 
 const NOW: f64 = 1_700_000_000_123.0;
-fn options() -> Options {
-    Options {
-        key: Some("primary-key".into()),
-        secret: Some("primary-secret".into()),
-        read_credentials: Some(ReadCredentials {
-            key: "read-key".into(),
-            secret: "read-secret".into(),
-            passphrase: None,
-        }),
-        ..Options::default()
-    }
+fn options() -> (Options, Provider) {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    let slot = |key: &str, material: &str| LocalIdentity {
+        key: Secret::new(key.into()),
+        secret: Secret::new(material.into()),
+        ..Default::default()
+    };
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: Some(slot("primary-key", "primary-material")),
+        secondary: Some(slot("read-key", "read-material")),
+    })
+    .unwrap();
+    (
+        Options {
+            credentials: identities.primary,
+            read_credentials: identities.secondary,
+            ..Options::default()
+        },
+        std::sync::Arc::new(provider),
+    )
 }
 fn header<'a>(r: &'a HttpRequest, name: &str) -> &'a str {
     r.headers
@@ -24,7 +34,7 @@ fn header<'a>(r: &'a HttpRequest, name: &str) -> &'a str {
         .1
         .as_str()
 }
-fn check_signature(r: &HttpRequest, key: &str, secret: &str, query: &str) {
+fn check_signature(r: &HttpRequest, key: &str, material: &str, query: &str) {
     assert_eq!(header(r, "api-key"), key);
     assert_eq!(header(r, "timestamp"), "1700000000123");
     let payload = format!(
@@ -34,41 +44,44 @@ fn check_signature(r: &HttpRequest, key: &str, secret: &str, query: &str) {
         r.body.as_deref().unwrap_or("")
     );
     let first = hex(&sha256(payload.as_bytes()));
-    let expected = hex(&sha256(format!("{first}{secret}").as_bytes()));
+    let expected = hex(&sha256(format!("{first}{material}").as_bytes()));
     assert_eq!(header(r, "sign"), expected);
 }
+/// Selection is by role: reads sign with the read key and the socket login
+/// signs Primary. In-job reads sign Primary (trading_funnel control 4).
 #[test]
-fn secondary_get_signatures_keep_every_mutation_and_websocket_login_primary() {
+fn reads_use_the_read_key_and_the_login_stays_primary() {
     for secondary in [false, true] {
-        let mut opts = options();
+        let (mut opts, provider) = options();
         if !secondary {
             opts.read_credentials = None;
         }
         let venue = ProbeVenue::new(
             BitunixFutures::new(opts),
             |v: &mut BitunixFutures, cx: &mut Cx<'_, Pending>| {
-                for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
-                    v.signed_request(
-                        cx,
-                        method,
-                        "/secondary-test",
-                        sign::Params::default()
-                            .str("symbol", "BTCUSDT")
-                            .str("marginCoin", "USDT"),
-                        (method != Method::Get).then(|| r#"{"amount":"1"}"#.into()),
-                        Pending::SymbolSettings {
-                            symbol: "BTCUSDT".into(),
-                            write_revision: 0,
-                            serial: 0,
-                        },
-                    );
-                }
+                let params = || {
+                    sign::Params::default()
+                        .str("symbol", "BTCUSDT")
+                        .str("marginCoin", "USDT")
+                };
+                v.signed_request(
+                    cx,
+                    "/secondary-test",
+                    params(),
+                    Pending::SymbolSettings {
+                        symbol: "BTCUSDT".into(),
+                        write_revision: 0,
+                        serial: 0,
+                        custody: None,
+                    },
+                );
                 v.login(cx, SocketId(777));
             },
         );
         let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+        e.set_signer(Some(provider)).unwrap();
         e.start(NOW);
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = prepared_actions(&mut e, NOW);
         let requests: Vec<_> = actions
             .iter()
             .filter_map(|a| match a {
@@ -76,29 +89,15 @@ fn secondary_get_signatures_keep_every_mutation_and_websocket_login_primary() {
                 _ => None,
             })
             .collect();
-        assert_eq!(requests.len(), 4);
-        for r in requests {
-            let (key, secret) = if secondary && r.method == Method::Get {
-                ("read-key", "read-secret")
+        assert_eq!(requests.len(), 1);
+        for (index, r) in requests.into_iter().enumerate() {
+            let (key, material) = if secondary && index == 0 {
+                ("read-key", "read-material")
             } else {
-                ("primary-key", "primary-secret")
+                ("primary-key", "primary-material")
             };
-            check_signature(r, key, secret, "marginCoinUSDTsymbolBTCUSDT");
-            assert_eq!(
-                r.body.as_deref(),
-                (r.method != Method::Get).then_some(r#"{"amount":"1"}"#)
-            );
+            check_signature(r, key, material, "marginCoinUSDTsymbolBTCUSDT");
         }
-        let login = actions
-            .iter()
-            .find_map(|a| match a {
-                Action::WsSend {
-                    socket: SocketId(777),
-                    text,
-                } => Some(text),
-                _ => None,
-            })
-            .unwrap();
         #[derive(serde::Deserialize)]
         struct Login<'a> {
             #[serde(borrow)]
@@ -112,6 +111,16 @@ fn secondary_get_signatures_keep_every_mutation_and_websocket_login_primary() {
             nonce: &'a str,
             sign: &'a str,
         }
+        let login = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::WsSend {
+                    socket: SocketId(777),
+                    text,
+                } => Some(text),
+                _ => None,
+            })
+            .unwrap();
         let login: Login<'_> = serde_json::from_str(login).unwrap();
         let arg = &login.args[0];
         assert_eq!(arg.api_key, "primary-key");
@@ -120,14 +129,17 @@ fn secondary_get_signatures_keep_every_mutation_and_websocket_login_primary() {
         let first = hex(&sha256(payload.as_bytes()));
         assert_eq!(
             arg.sign,
-            hex(&sha256(format!("{first}primary-secret").as_bytes()))
+            hex(&sha256(format!("{first}primary-material").as_bytes()))
         );
     }
 }
 #[test]
-fn every_account_axis_settings_and_history_get_uses_read_identity() {
+/// History signs with the read key too; tests/history.rs pins it on its own
+/// caller root (a probe has no genuine command entry).
+fn every_account_axis_and_settings_get_uses_read_identity() {
+    let (opts, provider) = options();
     let venue = ProbeVenue::new(
-        BitunixFutures::new(options()),
+        BitunixFutures::new(opts),
         |v: &mut BitunixFutures, cx: &mut Cx<'_, Pending>| {
             cx.store.set_markets(vec![Market {
                 id: "BTC/USDT".into(),
@@ -164,37 +176,35 @@ fn every_account_axis_settings_and_history_get_uses_read_identity() {
                 v.read_axis(cx, axis);
             }
             v.read_symbol_settings(cx, "BTCUSDT");
-            v.query(
-                cx,
-                7,
-                safe_cex_engine::Query::Income {
-                    from_ms: None,
-                    to_ms: None,
-                    symbol: None,
-                    kind: None,
-                    limit: None,
-                },
-            );
         },
     );
     let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+    e.set_signer(Some(provider)).unwrap();
     e.start(NOW);
-    let requests = http_requests(&mut e);
-    assert_eq!(requests.len(), 6);
+    let requests: Vec<_> = prepared_actions(&mut e, NOW)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(requests.len(), 5);
     for r in requests {
         let query = r
             .url
             .split_once('?')
             .map_or(String::new(), |(_, q)| q.replace(['=', '&'], ""));
-        check_signature(&r, "read-key", "read-secret", &query);
+        check_signature(&r, "read-key", "read-material", &query);
         assert_eq!(r.method, Method::Get);
     }
 }
 #[test]
 fn public_discovery_remains_unsigned_with_secondary_credentials() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(options()));
+    let (opts, provider) = options();
+    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(opts));
+    e.set_signer(Some(provider)).unwrap();
     e.start(NOW);
-    let requests = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+    let requests = prepared_actions(&mut e, NOW)
         .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
@@ -214,23 +224,22 @@ fn public_discovery_remains_unsigned_with_secondary_credentials() {
     );
 }
 #[test]
-fn partial_secondary_credentials_stop_before_any_io_even_public_only() {
+fn an_invalid_read_identity_stops_before_any_io_even_public_only() {
     for public_only in [false, true] {
-        for (key, secret) in [("", "read-secret"), ("read-key", ""), ("", "")] {
-            let mut opts = options();
-            opts.public_data_only = public_only;
-            let read = opts.read_credentials.as_mut().unwrap();
-            read.key = key.into();
-            read.secret = secret.into();
-            let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(opts));
-            e.start(NOW);
-            let actions: Vec<_> = e.drain_actions().collect();
-            assert!(
-                !actions
-                    .iter()
-                    .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
-            );
-            assert!(actions.iter().any(|n| matches!(n, Action::Notice(Notice::Event(event)) if event.code == code::CONFIG_INVALID)));
-        }
+        let (mut opts, _) = options();
+        opts.public_data_only = public_only;
+        opts.read_credentials = Some(Identity::new(
+            KeyRef(String::new()),
+            Some(KeyRef(String::new())),
+        ));
+        let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(opts));
+        e.start(NOW);
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+        );
+        assert!(actions.iter().any(|n| matches!(n, Action::Notice(Notice::Event(event)) if event.code == code::CONFIG_INVALID)));
     }
 }

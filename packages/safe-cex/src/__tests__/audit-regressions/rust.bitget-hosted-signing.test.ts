@@ -4,7 +4,7 @@ import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 import { createHmac } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
 
-import { createAPI } from '../../exchanges/bitget/bitget.api';
+import { createAPI } from '../reference/bitget/bitget.api';
 import { signHostedHttp } from '../../exchanges/rust/legacySigning';
 import { signHttpCapture } from '../../utils/signHttpCapture';
 import { virtualClock } from '../../utils/virtualClock';

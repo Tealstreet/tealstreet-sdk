@@ -9,7 +9,7 @@ use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::num::parse_decimal;
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::socket_lifecycle::{FeedId, LifecycleEvent, RetireReason, SocketError};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Cx, ErrorKind, Fill, Method, Response, SocketChannel, SocketId, TimerId, VenueError, num,
@@ -24,12 +24,19 @@ pub struct AccountState {
     /// listenKey upkeep session. Aster returns the active key on create and
     /// extends it on keepalive, so an extra write is harmless (repeat-safe).
     listen_key_session: Option<safe_cex_engine::request_context::Session>,
+    feed: Option<FeedId>,
+    /// The current epoch's socket, from connect until retirement.
     pub socket: Option<SocketId>,
-    open: bool,
-    supervisor: Supervisor,
     key_epoch: u64,
     key_pending: bool,
     keepalive: Option<TimerId>,
+    /// Until Phase C, the venue owns listen-key acquisition: a 10 s deadline per
+    /// create and a backoff after a failed one, counted with socket retirements.
+    key_deadline: Option<TimerId>,
+    key_retry: Option<TimerId>,
+    key_failures: u32,
+    /// The engine stopped the private feed for good; no further create may run.
+    feed_stopped: bool,
     tick: Option<TimerId>,
     positions_timer: Option<TimerId>,
     orders_timer: Option<TimerId>,
@@ -39,6 +46,9 @@ pub struct AccountState {
     last_balance: f64,
     positions_in_flight: bool,
     orders_in_flight: bool,
+    /// An uncertain write wants a read that starts after it; the in-flight
+    /// one predates it, so its completion starts the fresh read at once.
+    orders_requery: bool,
     balance_in_flight: bool,
     position_version: u64,
     mode_version: u64,
@@ -376,11 +386,12 @@ impl AsterDex {
         );
     }
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.supervisor = Supervisor::new(Config {
-            idle_timeout_ms: 20_000.0,
-            ping_interval_ms: Some(5_000.0),
-            ..Config::default()
-        });
+        if self.account.feed.is_none() {
+            match cx.register_socket_feed(crate::feed_policy(SocketChannel::Private, 1_000.0)) {
+                Ok(feed) => self.account.feed = Some(feed),
+                Err(error) => crate::socket_failed(cx, error),
+            }
+        }
         self.refresh_balance(cx);
         self.refresh_positions(cx);
         self.request_refresh_orders(cx);
@@ -414,12 +425,24 @@ impl AsterDex {
             .order_position_sides
             .insert(id.to_owned(), side);
     }
+    pub(crate) fn account_feed(&self) -> Option<FeedId> {
+        self.account.feed
+    }
+    fn private_epoch(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.account
+            .feed
+            .is_some_and(|feed| cx.socket_epoch(feed).is_some())
+    }
     fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.key_pending || self.account.socket.is_some() {
+        if self.account.key_pending
+            || self.account.key_retry.is_some()
+            || self.account.feed_stopped
+            || self.private_epoch(cx)
+        {
             return;
         }
         self.account.key_pending = true;
-        self.account.supervisor.connecting(cx);
+        self.account.key_deadline = Some(cx.set_timer(10_000.0));
         let path = self.path("listenKey");
         self.signed(
             cx,
@@ -481,6 +504,15 @@ impl AsterDex {
                 settings: Vec::new(),
             }),
         );
+    }
+    /// A fresh authoritative order read for an uncertain write: now, or as
+    /// soon as the read already in flight (which predates it) completes.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.orders_in_flight {
+            self.account.orders_requery = true;
+        } else {
+            self.request_refresh_orders(cx);
+        }
     }
     pub(crate) fn request_refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.orders_in_flight {
@@ -745,33 +777,40 @@ impl AsterDex {
                     return;
                 }
                 self.account.key_pending = false;
-                if valid
-                    && let Ok(key) = serde_json::from_str::<ListenKey>(body)
-                    && !key.listen_key.is_empty()
-                {
-                    let base = if self.options.testnet {
-                        "wss://fstream5.asterdex-testnet.com"
-                    } else {
-                        "wss://fstream.asterdex.com"
-                    };
-                    if let Some(old) = self.account.socket.take() {
-                        cx.close(old);
-                    }
-                    self.account.socket = Some(
-                        cx.connect(
-                            safe_cex_engine::SocketSpec::new(format!(
-                                "{base}/ws/{}",
-                                key.listen_key
-                            ))
-                            .channel(SocketChannel::Private),
-                        ),
-                    );
-                    if let Some(t) = self.account.keepalive.take() {
-                        cx.clear_timer(t);
-                    }
-                    self.account.keepalive = Some(cx.set_timer(30.0 * 60_000.0));
+                if let Some(timer) = self.account.key_deadline.take() {
+                    cx.clear_timer(timer);
+                }
+                let key = serde_json::from_str::<ListenKey>(body)
+                    .ok()
+                    .filter(|key| valid && !key.listen_key.is_empty());
+                let (Some(key), Some(feed)) = (key, self.account.feed) else {
+                    return self.listen_key_failed(cx);
+                };
+                if cx.socket_epoch(feed).is_some() {
+                    return;
+                }
+                let base = if self.options.testnet {
+                    "wss://fstream5.asterdex-testnet.com"
                 } else {
-                    self.close_private(cx);
+                    "wss://fstream.asterdex.com"
+                };
+                match cx.connect_socket(feed, format!("{base}/ws/{}", key.listen_key)) {
+                    Ok(epoch) => {
+                        self.account.socket = Some(epoch.socket());
+                        if let Some(t) = self.account.keepalive.take() {
+                            cx.clear_timer(t);
+                        }
+                        self.account.keepalive = Some(cx.set_timer(30.0 * 60_000.0));
+                    }
+                    Err(error) => {
+                        crate::socket_failed(cx, error);
+                        if error == SocketError::NotPermitted {
+                            // A stopped or refused feed never connects again.
+                            self.stop_private(cx);
+                        } else {
+                            self.listen_key_failed(cx);
+                        }
+                    }
                 }
             }
             Request::Keepalive { epoch } => {
@@ -781,7 +820,7 @@ impl AsterDex {
                 if valid {
                     self.account.keepalive = Some(cx.set_timer(30.0 * 60_000.0));
                 } else {
-                    self.close_private(cx);
+                    self.restart_private(cx);
                 }
             }
             Request::Mode { version } => {
@@ -890,6 +929,8 @@ impl AsterDex {
                             self.account.orders_timer = Some(cx.set_timer(1_000.0));
                         }
                     } else {
+                        // Only a clean snapshot can prove an uncertain placement absent.
+                        let clean = rows.rejected() == 0;
                         let mut rows =
                             rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                         self.account
@@ -929,8 +970,13 @@ impl AsterDex {
                             self.account.orders_seeded = true;
                         }
                         cx.store.set_orders(rows);
-                        cx.orders_reconciled(None);
+                        if clean {
+                            cx.orders_reconciled(None);
+                        }
                     }
+                }
+                if std::mem::take(&mut self.account.orders_requery) {
+                    self.request_refresh_orders(cx);
                 }
             }
         }
@@ -949,28 +995,79 @@ impl AsterDex {
             cx.clear_timer(timer);
         }
     }
-    pub(crate) fn on_account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
-        if self.account.socket != Some(socket) {
-            return false;
+    pub(crate) fn account_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        match event {
+            LifecycleEvent::Opened(epoch) => {
+                self.account.socket = Some(epoch.socket());
+                self.account.key_failures = 0;
+                cx.send(epoch.socket(), r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
+                // The only resync on reopen; balances and positions follow the poll.
+                self.request_refresh_orders(cx);
+            }
+            LifecycleEvent::Ping(epoch) => {
+                cx.send(epoch.socket(), r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#)
+            }
+            // A reconnect needs a fresh listen key; its answer connects the feed.
+            LifecycleEvent::Reconnect(_) => self.request_listen_key(cx),
+            LifecycleEvent::Retired {
+                reason: RetireReason::Stopped,
+                ..
+            } => {
+                self.account.socket = None;
+                self.stop_private(cx);
+            }
+            LifecycleEvent::Retired { .. } => {
+                self.account.socket = None;
+                self.invalidate_listen_key(cx);
+                self.account.key_failures = self.account.key_failures.saturating_add(1);
+            }
+            // Listen-key trouble is never a feed error: an Err would stop the feed.
+            _ => {}
         }
-        self.account.open = true;
-        self.account.supervisor.opened(cx);
-        cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
-        self.request_refresh_orders(cx);
-        true
+        Ok(())
     }
-    fn close_private(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(socket) = self.account.socket.take() {
-            cx.close(socket);
+    /// Retires the live epoch, whose Retired event fences the key and lets the
+    /// engine back off; with no epoch, the venue backs off the next create.
+    fn restart_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        match self.account.feed {
+            Some(feed) if cx.socket_epoch(feed).is_some() => {
+                cx.retire_socket(feed, RetireReason::Closed)
+            }
+            _ => self.listen_key_failed(cx),
         }
-        self.account.open = false;
+    }
+    fn stop_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.invalidate_listen_key(cx);
+        self.account.feed_stopped = true;
+        if let Some(timer) = self.account.key_retry.take() {
+            cx.clear_timer(timer);
+        }
+    }
+    fn listen_key_failed(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.invalidate_listen_key(cx);
+        let delay =
+            cx.jittered(Backoff::new(1_000.0, 31, 30_000.0).delay(self.account.key_failures));
+        self.account.key_failures = self.account.key_failures.saturating_add(1);
+        self.account.key_retry = Some(cx.set_timer(delay));
+    }
+    /// Fences every in-flight listen-key answer and ends the upkeep session.
+    fn invalidate_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
         self.retire_listen_key_session(cx);
         self.account.key_epoch = self.account.key_epoch.wrapping_add(1);
         self.account.key_pending = false;
-        if let Some(timer) = self.account.keepalive.take() {
+        for timer in [
+            self.account.keepalive.take(),
+            self.account.key_deadline.take(),
+        ]
+        .into_iter()
+        .flatten()
+        {
             cx.clear_timer(timer);
         }
-        self.account.supervisor.retry(cx);
     }
     pub(crate) fn listen_key_current(&self, pending: &Pending) -> bool {
         matches!(
@@ -1009,33 +1106,16 @@ impl AsterDex {
             let _ = cx.retire_session(&session);
         }
     }
-    pub(crate) fn on_account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
-        if self.account.socket != Some(socket) {
-            return false;
-        }
-        self.close_private(cx);
-        true
-    }
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.account.supervisor.on_timer(cx, timer) {
-            Tick::Reconnect => {
-                self.request_listen_key(cx);
-                return true;
+        if self.account.key_retry == Some(timer) {
+            self.account.key_retry = None;
+            self.request_listen_key(cx);
+        } else if self.account.key_deadline == Some(timer) {
+            self.account.key_deadline = None;
+            if self.account.key_pending {
+                self.listen_key_failed(cx);
             }
-            Tick::TimedOut(_) => {
-                self.close_private(cx);
-                return true;
-            }
-            Tick::Ping => {
-                if let Some(socket) = self.account.socket {
-                    cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
-                }
-                return true;
-            }
-            Tick::Handled => return true,
-            Tick::Unhandled => {}
-        }
-        if self.account.keepalive == Some(timer) {
+        } else if self.account.keepalive == Some(timer) {
             self.account.keepalive = None;
             let path = self.path("listenKey");
             self.signed(
@@ -1088,7 +1168,6 @@ impl AsterDex {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.supervisor.received(cx.now);
         #[derive(Deserialize)]
         struct Head<'a> {
             #[serde(borrow, default)]
@@ -1099,7 +1178,7 @@ impl AsterDex {
             .as_ref()
             .map(|h| &*h.e)
         {
-            Some("listenKeyExpired") => self.close_private(cx),
+            Some("listenKeyExpired") => self.restart_private(cx),
             Some("ORDER_TRADE_UPDATE" | "executionReport") => self.on_order_event(cx, text),
             Some("outboundAccountPosition") => self.on_legacy_balance(cx, text),
             Some("ACCOUNT_UPDATE") => self.on_account_event(cx, text),

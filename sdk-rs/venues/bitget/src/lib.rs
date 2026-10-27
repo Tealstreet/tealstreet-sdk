@@ -277,31 +277,6 @@ impl BitgetFutures {
         }
     }
 
-    /// Owner-approved staging: every private send and its signing step, until
-    /// the shared Plan/history bridge owns them. Remove before master.
-    pub(crate) fn send(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        at: ArrayAt,
-        signed: bool,
-        pending: Pending,
-    ) {
-        let url = format!("{}{path}", paths::REST);
-        let id = cx.request_streamed(method, url, vec![], at, pending);
-        if !signed {
-            return;
-        }
-        cx.sign_http(
-            id,
-            Box::new(sign::Http::new(
-                self.signing_identity(method, path).cloned(),
-                path.into(),
-            )),
-        );
-    }
-
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
         if index == 3
             && (self.account.startup_rejected
@@ -403,9 +378,10 @@ impl BitgetFutures {
 
     fn disconnected(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
         let connection = &mut self.sockets[index];
-        connection.open = false;
+        let opened = std::mem::replace(&mut connection.open, false);
         connection.socket = None;
         if index == 3 {
+            self.private_closed(cx, opened);
             self.account.authenticated = false;
             self.account.supervisor.retry(cx);
             return;
@@ -655,6 +631,14 @@ impl Venue for BitgetFutures {
     fn guard_order_mutations(&self) -> bool {
         true
     }
+    // reconcile_uncertain reads the orders at once; the engine re-asks until a
+    // fresh read clears the fence.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_orders(cx);
+    }
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,
@@ -725,6 +709,7 @@ impl Venue for BitgetFutures {
         connection.open = true;
         connection.ping_at = cx.now;
         if index == 3 {
+            self.account.login_answered = false;
             self.account.supervisor.opened(cx);
             self.private_open(cx, socket);
             cx.send(socket, "ping");
@@ -1031,10 +1016,7 @@ impl Venue for BitgetFutures {
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
-            Pending::History(request) => {
-                let command = request.command;
-                cx.fail(command, error)
-            }
+            Pending::History(request) => self.query_strict_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, false),
             pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
             Pending::Account {
@@ -1051,8 +1033,8 @@ impl Venue for BitgetFutures {
         }
     }
 
-    /// Managed candle and identity reads keep the engine's typed deadline;
-    /// every other failure keeps its native text.
+    /// History keeps typed failure causes separate from native response retries;
+    /// managed candle and identity reads preserve their deadline handling.
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1065,6 +1047,7 @@ impl Venue for BitgetFutures {
                 let _ = cx.fail_context(&root, error);
             }
             Pending::Identity(root) if deadline => self.identity_failed(cx, &root, error),
+            Pending::History(request) => self.query_http_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, true),
             pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
             pending => self.on_request_failed(cx, pending, &error.message),
@@ -1077,7 +1060,13 @@ impl Venue for BitgetFutures {
             return;
         }
         match pending {
-            Pending::History(request) => self.query_failed(cx, *request, error),
+            Pending::History(mut request) => {
+                if request.delivered(cx) {
+                    self.query_failed(cx, *request, error);
+                } else {
+                    let _ = request.retire_leg(cx);
+                }
+            }
             Pending::Trade(request) => {
                 let error = safe_cex_engine::VenueError::new(error)
                     .kind(safe_cex_engine::ErrorKind::Network);
@@ -1105,6 +1094,14 @@ impl Venue for BitgetFutures {
             Pending::Identity(_) => unreachable!(),
         }
     }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.history_retired(owner);
+    }
+
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_write(cx);
         if let Some(read) = self.discovery.on_timer(timer) {

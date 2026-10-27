@@ -5,7 +5,7 @@ use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Notice, Outcome, PublicFeedPolicy,
     Query, Response, SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_bitunix::{BitunixFutures, Options, Pending};
+use safe_cex_venue_bitunix::{BitunixFutures, Pending};
 
 fn policy() -> Policy {
     Policy {
@@ -74,14 +74,17 @@ impl Venue for Probe {
     }
 }
 fn seeded(keyed: bool) -> Engine<Probe> {
+    let (inner, provider, ids) = support::Options {
+        key: keyed.then(|| "fixture-key".into()),
+        secret: keyed.then(|| "fixture-secret".into()),
+        ..support::Options::default()
+    }
+    .build();
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
-        inner: BitunixFutures::new(Options {
-            key: keyed.then(|| "fixture-key".into()),
-            secret: keyed.then(|| "fixture-secret".into()),
-            ..Options::default()
-        }),
+        inner,
         held: vec![],
     });
+    support::install(&mut e, provider, ids);
     e.set_public_feed_policy(PublicFeedPolicy::Direct).unwrap();
     e.start(0.);
     loop {
@@ -161,7 +164,9 @@ fn public() -> Query {
 }
 fn query(e: &mut Engine<Probe>, now: f64, query: Query) -> Vec<Action> {
     e.handle(now, Event::Command(Command::Query { command: 71, query }));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn failure(actions: &[Action]) -> &VenueError {
     assert_eq!(actions.len(), 1, "one terminal, no companion or opaque I/O");
@@ -265,7 +270,12 @@ fn initial_capacity_refusal_does_not_consume_other_owners_and_recovers_at_same_c
                 symbols: vec!["roots".into()],
             }),
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .next()
+                .is_none()
+        );
         assert_eq!(
             e.venue().held.len(),
             256,
@@ -285,7 +295,12 @@ fn initial_capacity_refusal_does_not_consume_other_owners_and_recovers_at_same_c
             100.,
             Event::Command(Command::SetTickerSymbols { symbols: vec![] }),
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .next()
+                .is_none()
+        );
         assert!(e.venue().held.is_empty());
         empty(&query(&mut e, 100., fills(None, None)));
     }
@@ -321,18 +336,26 @@ fn fixed_clock_local_terminals_retire_their_owner_before_reuse() {
     }
 }
 #[test]
-fn valid_private_history_still_uses_its_unchanged_legacy_dispatch() {
+fn valid_private_history_is_one_managed_page_of_its_caller_root() {
     let mut e = seeded(true);
-    let a = query(&mut e, 100., orders(None));
-    assert_eq!(a.iter().filter(|a| matches!(a, Action::Http(_))).count(), 1);
-    assert!(!a.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
-    let r = a
+    e.handle(
+        100.,
+        Event::Command(Command::Query {
+            command: 71,
+            query: orders(None),
+        }),
+    );
+    // Managed pages leave only through preparation; nothing is dispatched raw.
+    let prepared = safe_cex_engine::test_support::prepared_actions(&mut e, 100.);
+    let requests: Vec<_> = prepared
         .iter()
-        .find_map(|a| match a {
+        .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
         })
-        .unwrap();
+        .collect();
+    assert_eq!(requests.len(), 1);
+    let r = requests[0];
     assert!(r.url.contains("/get_history_orders?"));
     assert!(r.url.contains("limit=100"));
     assert!(
@@ -351,5 +374,12 @@ fn valid_private_history_still_uses_its_unchanged_legacy_dispatch() {
             },
         },
     );
-    empty(&e.drain_actions().collect::<Vec<_>>());
+    let done = safe_cex_engine::test_support::prepared_actions(&mut e, 100.);
+    assert!(!done.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(
+        done.iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 71, result }) if result == "[]"))
+            .count(),
+        1
+    );
 }

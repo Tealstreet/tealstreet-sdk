@@ -6,9 +6,7 @@ use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
 use safe_cex_engine::url;
-use safe_cex_engine::{
-    Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId, model::*, socket::Tick,
-};
+use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, model::*};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::{
@@ -20,9 +18,15 @@ const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 #[derive(Clone)]
 pub enum Kind {
-    Balance { revision: u64 },
-    Orders { revision: u64 },
-    Token { socket: SocketId },
+    Balance {
+        revision: u64,
+    },
+    Orders {
+        revision: u64,
+    },
+    Token {
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
+    },
     Trade(super::trading::Step),
 }
 #[derive(Clone)]
@@ -42,6 +46,7 @@ pub struct Account {
     balance_flight: HashSet<u64>,
     balance_guard: StaleGuard,
     orders_flight: bool,
+    orders_reconcile: bool,
     pub provenance: HashMap<String, String>,
     pub terminal: HashSet<String>,
     terminal_fifo: VecDeque<String>,
@@ -217,7 +222,20 @@ pub(super) fn form(params: &[(&str, String)]) -> String {
         .join("&")
 }
 impl KrakenSpot {
+    fn current_token(&self, cx: &Cx<'_, Pending>, kind: &Kind) -> bool {
+        match kind {
+            Kind::Token { epoch } => {
+                cx.socket_epoch(epoch.feed()) == Some(*epoch)
+                    && self.account.connection.socket == Some(epoch.socket())
+                    && self.account.connection.open
+            }
+            _ => true,
+        }
+    }
     pub(super) fn send_private(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+        if !self.current_token(cx, &request.kind) {
+            return;
+        }
         let signed = (|| {
             if self.options.public_data_only {
                 return Err("Kraken Spot credentials required".into());
@@ -299,14 +317,10 @@ impl KrakenSpot {
         self.orders_read(cx);
         self.account.poll = Some(cx.set_poll_timer(10_000.));
     }
-    fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.connection.supervisor.connecting(cx);
-        self.account.connection.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new("wss://ws-auth.kraken.com/v2")
-                    .channel(SocketChannel::Private),
-            ),
-        );
+    pub(super) fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Err(error) = self.managed_connect(cx, true) {
+            self.socket_error(cx, true, error);
+        }
     }
     fn spot_settings(&self, cx: &mut Cx<'_, Pending>) {
         let settings: Vec<_> = cx
@@ -348,11 +362,19 @@ impl KrakenSpot {
             },
         );
     }
+    pub(super) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.reconcile_reask() && (self.account.orders_reconcile || self.account.orders_flight) {
+            return;
+        }
+        self.account.orders_reconcile = true;
+        self.orders_read(cx);
+    }
     fn orders_read(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.orders_flight {
             return;
         }
         self.account.orders_flight = true;
+        self.account.orders_reconcile = false;
         self.request_private(
             cx,
             "/0/private/OpenOrders",
@@ -367,16 +389,22 @@ impl KrakenSpot {
             return false;
         }
         self.account.connection.open = true;
-        self.account.connection.supervisor.opened(cx);
-        self.request_private(
-            cx,
-            "/0/private/GetWebSocketsToken",
-            vec![],
-            Kind::Token { socket },
-        );
+        if let Some(epoch) = self
+            .account
+            .connection
+            .feed
+            .and_then(|feed| cx.socket_epoch(feed))
+        {
+            self.request_private(
+                cx,
+                "/0/private/GetWebSocketsToken",
+                vec![],
+                Kind::Token { epoch },
+            );
+        }
         true
     }
-    pub(super) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+    pub(super) fn private_close(&mut self, _cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
             return false;
         }
@@ -384,7 +412,6 @@ impl KrakenSpot {
         self.account.connection.open = false;
         self.account.revision += 1;
         self.account.balance_revision += 1;
-        self.account.connection.supervisor.retry(cx);
         true
     }
     /// A catalogue re-read can list the route a funded currency was valued without.
@@ -625,6 +652,7 @@ impl KrakenSpot {
             }
         }
         if revision == self.account.revision {
+            let clean = rows.rejected() == 0;
             self.account.rearm_skips(
                 "order:",
                 rows.rejected() == 0,
@@ -641,6 +669,9 @@ impl KrakenSpot {
             self.account.provenance = provenance;
             rows.retain(|o| !self.account.terminal.contains(&o.id));
             cx.store.set_orders(rows);
+            if clean {
+                cx.orders_reconciled(None);
+            }
         }
         Ok(())
     }
@@ -650,24 +681,30 @@ impl KrakenSpot {
         request: Request,
         response: Response<'_>,
     ) {
+        if !self.current_token(cx, &request.kind) {
+            return;
+        }
         let text = match result(response) {
             Ok(t) => t,
             Err(e) => {
-                if e.contains("EAPI:Invalid signature") && request.signature_retries < 1 {
+                let signature_refused = response.status != 408
+                    && response.status < 500
+                    && e.contains("EAPI:Invalid signature");
+                if signature_refused && request.signature_retries < 1 {
                     let mut r = request;
                     r.signature_retries += 1;
                     self.send_private(cx, r);
                     return;
                 }
-                // A key without trade permission still reads; only fail that write.
-                let permission_on_write = e.contains("EGeneral:Permission denied")
-                    && matches!(request.kind, Kind::Trade(_));
-                if !permission_on_write
+                // A status alone is not permanent account evidence. Only the exhausted
+                // definitive signature refusal retains the existing terminal policy.
+                let credential_refused = response.status != 408
+                    && response.status < 500
                     && (e.contains("EAPI:Invalid key")
-                        || e.contains("EAPI:Invalid signature")
-                        || e.contains("EGeneral:Permission denied")
-                        || matches!(response.status, 401 | 403))
-                {
+                        || (e.contains("EGeneral:Permission denied")
+                            && !matches!(request.kind, Kind::Trade(_)))
+                        || (signature_refused && request.signature_retries == 1));
+                if credential_refused {
                     self.reject_auth(cx, &e);
                 }
                 let error = super::trading::write_failure(response.status, response.body, e);
@@ -688,10 +725,16 @@ impl KrakenSpot {
             }
             Kind::Orders { revision } => {
                 self.account.orders_flight = false;
-                self.orders_response(cx, text, *revision)
+                let result = self.orders_response(cx, text, *revision);
+                if self.account.orders_reconcile {
+                    self.orders_read(cx);
+                }
+                result
             }
-            Kind::Token { socket } => {
-                if self.account.connection.socket != Some(*socket) || !self.account.connection.open
+            Kind::Token { epoch } => {
+                if cx.socket_epoch(epoch.feed()) != Some(*epoch)
+                    || self.account.connection.socket != Some(epoch.socket())
+                    || !self.account.connection.open
                 {
                     return;
                 }
@@ -719,8 +762,8 @@ impl KrakenSpot {
                         }
                         for channel in ["executions", "balances"] {
                             let execution = channel == "executions";
-                            cx.send(
-                                *socket,
+                            if let Err(error) = cx.send_after_socket_interests(
+                                epoch.feed(),
                                 serde_json::to_string(&Sub {
                                     method: "subscribe",
                                     params: Params {
@@ -733,7 +776,10 @@ impl KrakenSpot {
                                     },
                                 })
                                 .unwrap(),
-                            );
+                            ) {
+                                self.socket_error(cx, true, error);
+                                break;
+                            }
                         }
                         Ok(())
                     }
@@ -755,18 +801,26 @@ impl KrakenSpot {
         request: Request,
         error: safe_cex_engine::VenueError,
     ) {
+        if !self.current_token(cx, &request.kind) {
+            return;
+        }
         let Kind::Trade(_) = request.kind else {
             let error = error.message.as_str();
             match request.kind {
                 Kind::Balance { revision } => {
                     self.account.balance_flight.remove(&revision);
                 }
-                Kind::Orders { .. } => self.account.orders_flight = false,
-                Kind::Token { socket } => {
-                    if self.account.connection.socket == Some(socket) {
-                        cx.close(socket);
-                        self.private_close(cx, socket);
+                Kind::Orders { .. } => {
+                    self.account.orders_flight = false;
+                    if self.account.orders_reconcile {
+                        self.orders_read(cx);
                     }
+                }
+                Kind::Token { epoch } => {
+                    cx.retire_socket(
+                        epoch.feed(),
+                        safe_cex_engine::socket_lifecycle::RetireReason::Closed,
+                    );
                 }
                 Kind::Trade(_) => unreachable!("trade failures return below"),
             }
@@ -782,6 +836,9 @@ impl KrakenSpot {
         mut request: Request,
         error: &str,
     ) {
+        if !self.current_token(cx, &request.kind) {
+            return;
+        }
         if !matches!(request.kind, Kind::Trade(_)) && request.retries < 3 {
             request.retries += 1;
             let timer = cx.set_timer(0.);
@@ -810,28 +867,7 @@ impl KrakenSpot {
             self.orders_read(cx);
             return true;
         }
-        match self.account.connection.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => return false,
-            Tick::Reconnect => self.private_connect(cx),
-            Tick::Ping => {
-                if let Some(s) = self
-                    .account
-                    .connection
-                    .socket
-                    .filter(|_| self.account.connection.open)
-                {
-                    cx.send(s, "{\"method\":\"ping\"}");
-                }
-            }
-            Tick::TimedOut(_) => {
-                if let Some(s) = self.account.connection.socket {
-                    cx.close(s);
-                    self.private_close(cx, s);
-                }
-            }
-            Tick::Handled => (),
-        }
-        true
+        false
     }
     pub(super) fn terminal(&mut self, id: &str) {
         if self.account.terminal.insert(id.into()) {
@@ -853,7 +889,9 @@ impl KrakenSpot {
         if self.account.connection.socket != Some(socket) {
             return false;
         }
-        self.account.connection.supervisor.received(cx.now);
+        if !self.account.connection.open {
+            return true;
+        }
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return true;
         };
@@ -863,8 +901,12 @@ impl KrakenSpot {
                 code::SUBSCRIPTION_REJECTED,
                 "Kraken Spot private subscription failed",
             );
-            cx.close(socket);
-            self.private_close(cx, socket);
+            if let Some(feed) = self.account.connection.feed {
+                cx.retire_socket(
+                    feed,
+                    safe_cex_engine::socket_lifecycle::RetireReason::Closed,
+                );
+            }
             return true;
         }
         let Some(data) = msg.data else { return true };

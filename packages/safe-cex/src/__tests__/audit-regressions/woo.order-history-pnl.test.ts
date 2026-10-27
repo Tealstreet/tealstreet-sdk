@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapWooHistoricalOrder } from '../../exchanges/woo/woo.order-history';
+import { mapWooHistoricalOrder } from '../reference/woo/woo.order-history';
 
 /**
  * WOO's `/v1/orders` PnL fields, and the presence-vs-zero distinction they turn on.

@@ -25,12 +25,17 @@ use safe_cex_engine::model::{
     Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
     Precision, ProductKind, Ticker,
 };
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::socket::{Config, Timeout};
+use safe_cex_engine::socket_lifecycle::{
+    AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy, Interest,
+    Invalidation, LifecycleEvent, MAX_INTERESTS, RetireReason, SocketCapabilities, SocketError,
+    TrafficPolicy,
+};
 use safe_cex_engine::time;
 use safe_cex_engine::{Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue};
 use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
 /// What a signed request's key is for; `BybitLinear::select_key` turns it
@@ -178,13 +183,13 @@ enum Channel {
     Private,
 }
 
+/// One managed feed; the engine owns its epochs, timers, retries and pacing.
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    supervisor: Supervisor,
-    /// Subscribe messages paced out one per `SUBSCRIBE_PACE_MS`.
-    outbox: VecDeque<String>,
-    outbox_timer: Option<TimerId>,
+    feed: Option<FeedId>,
+    /// Whether this Ready's ticker cap was already reported.
+    tickers_capped: bool,
 }
 
 impl Connection {
@@ -192,9 +197,8 @@ impl Connection {
         Self {
             socket: None,
             open: false,
-            supervisor: Supervisor::new(SOCKET),
-            outbox: VecDeque::new(),
-            outbox_timer: None,
+            feed: None,
+            tickers_capped: false,
         }
     }
 }
@@ -247,6 +251,9 @@ struct ProductState {
 }
 
 pub struct BybitLinear {
+    /// A Bybit Brazil (`BRA_BTL`) account: REST writes publish their own order
+    /// rows, as on Demo, until its proxied private WS is venue-validated.
+    brazil_site: bool,
     signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     recv_window: Option<u32>,
     category: Category,
@@ -399,6 +406,14 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     }
 }
 
+/// Bybit's own `retCode`, when the body carries one. An HTTP status is never a
+/// venue code, so a non-JSON or envelope-less failure has none.
+pub(crate) fn native_code(response: &Response<'_>) -> Option<i64> {
+    serde_json::from_str::<Status>(response.body)
+        .ok()
+        .and_then(|status| status.ret_code)
+}
+
 fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
     use safe_cex_engine::startup::{MAX_RATE_LIMIT_PAUSE_MS, rate_limit_pause_ms};
 
@@ -512,6 +527,7 @@ impl BybitLinear {
             read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
             environment_probe_origin,
+            brazil_site: options.bybit_site_id.as_deref() == Some("BRA_BTL"),
             environment_probe_attempted: false,
             environment_probe: None,
             public: Connection::new(),
@@ -898,60 +914,70 @@ impl BybitLinear {
         true
     }
 
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+    fn open_feed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
         if channel == Channel::Private && !cx.private_feed_policy().streaming() {
             return;
         }
+        if channel == Channel::Public && cx.public_feed_policy() != PublicFeedPolicy::Direct {
+            return;
+        }
         let url = match channel {
-            Channel::Public => self.paths.public_ws.as_str(),
-            Channel::Private => self.paths.private_ws.as_str(),
+            Channel::Public => self.paths.public_ws.clone(),
+            Channel::Private => self.paths.private_ws.clone(),
         };
-        let socket = cx.connect(
-            safe_cex_engine::SocketSpec::new(url).channel(match channel {
-                Channel::Public => safe_cex_engine::SocketChannel::Public,
-                Channel::Private => safe_cex_engine::SocketChannel::Private,
-            }),
+        let feed = match self.connection(channel).feed {
+            Some(feed) => {
+                if cx.socket_epoch(feed).is_some() {
+                    return;
+                }
+                feed
+            }
+            None => {
+                let registered = cx.register_socket_feed(FeedPolicy {
+                    role: match channel {
+                        Channel::Public => safe_cex_engine::SocketChannel::Public,
+                        Channel::Private => safe_cex_engine::SocketChannel::Private,
+                    },
+                    supervision: SOCKET,
+                    auth: AuthMode::None,
+                    recovery: AuthRecovery::Reconnect,
+                    permanent_refusal_group: None,
+                    traffic: TrafficPolicy::AnyText,
+                    controls: ControlPolicy::Native,
+                    invalidation: Invalidation::Required,
+                    subscription_interval_ms: SUBSCRIBE_PACE_MS,
+                });
+                match registered {
+                    Ok(feed) => {
+                        self.connection(channel).feed = Some(feed);
+                        feed
+                    }
+                    Err(error) => return self.socket_failed(cx, error),
+                }
+            }
+        };
+        if let Err(error) = cx.connect_socket(feed, url) {
+            self.socket_failed(cx, error);
+        }
+    }
+
+    fn socket_failed(&self, cx: &mut Cx<'_, Pending>, error: SocketError) {
+        cx.notice(
+            Level::Error,
+            code::SUBSCRIPTION_REJECTED,
+            format!("Bybit socket admission failed: {error:?}"),
         );
-        let supervise =
-            channel == Channel::Private || cx.public_feed_policy() == PublicFeedPolicy::Direct;
-        let connection = self.connection(channel);
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if supervise {
-            connection.supervisor.connecting(cx);
-        }
-        connection.socket = Some(socket);
-        connection.open = false;
     }
 
-    fn on_socket_timer(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, timer: TimerId) {
-        let connection = self.connection(channel);
-        let socket = connection.socket;
-        match connection.supervisor.on_timer(cx, timer) {
-            Tick::Reconnect => self.connect(cx, channel),
-            Tick::Ping => {
-                if let Some(socket) = socket {
-                    cx.send(socket, r#"{"op":"ping"}"#);
-                }
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = socket {
-                    cx.close(socket);
-                }
-                self.on_socket_closed(cx, channel, 4000);
-            }
-            Tick::Handled | Tick::Unhandled => {}
-        }
-    }
-
-    fn on_socket_closed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, code: u16) {
+    fn on_socket_retired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        channel: Channel,
+        reason: RetireReason,
+    ) {
         let connection = self.connection(channel);
         connection.socket = None;
         connection.open = false;
-        connection.outbox.clear();
-        if let Some(timer) = connection.outbox_timer.take() {
-            cx.clear_timer(timer);
-        }
-        connection.supervisor.retry(cx);
         if channel == Channel::Private {
             let category = self.category;
             for other in self.categories() {
@@ -960,41 +986,104 @@ impl BybitLinear {
             }
             self.select_category(category);
         }
-        cx.notice(
-            Level::Warn,
-            code::WS_DISCONNECTED,
-            format!("Bybit socket closed ({code}); reconnecting"),
+        let message = match reason {
+            RetireReason::Timeout(Timeout::Idle) => {
+                "Bybit socket closed (idle timeout); reconnecting"
+            }
+            RetireReason::Timeout(_) => "Bybit socket timed out; reconnecting",
+            RetireReason::Authentication => "Bybit socket authentication failed; reconnecting",
+            RetireReason::Closed => "Bybit socket closed; reconnecting",
+            RetireReason::Stopped => "Bybit socket stopped",
+        };
+        cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
+    }
+
+    /// The feed's channel, with its category selected.
+    fn select_feed(&mut self, feed: FeedId) -> Option<Channel> {
+        if self.private.feed == Some(feed) {
+            self.select_category(self.primary_category);
+            return Some(Channel::Private);
+        }
+        if self.public.feed == Some(feed) {
+            return Some(Channel::Public);
+        }
+        let category = self
+            .products
+            .iter()
+            .find(|state| state.public.feed == Some(feed))
+            .map(|state| state.category)?;
+        self.select_category(category);
+        Some(Channel::Public)
+    }
+
+    /// The current category's ticker topics from the store.
+    fn ticker_topics(&self, cx: &Cx<'_, Pending>) -> Vec<String> {
+        cx.store
+            .markets()
+            .iter()
+            .filter(|m| self.owns_symbol(&m.symbol))
+            .map(|m| format!("tickers.{}", m.symbol))
+            .collect()
+    }
+
+    /// The current category's public topics: live books, candles, trades, then
+    /// tickers. Tickers are capped so the requested topics always fit the
+    /// engine's interest bound; the bool reports a cap.
+    fn public_interests(&self, cx: &Cx<'_, Pending>) -> (Vec<Interest>, bool) {
+        let mut topics: Vec<String> = Vec::new();
+        let spot = self.variant.is_spot();
+        for (symbol, state) in &self.books {
+            if (!spot && Category::for_symbol(symbol) != self.category)
+                || matches!(state.sync, Sync::Resubscribing(_))
+            {
+                continue;
+            }
+            topics.push(Self::book_topic(self.paths.book_depth, symbol));
+        }
+        topics.extend(
+            self.candles
+                .keys()
+                .filter(|(symbol, _)| self.owns_symbol(symbol))
+                .filter_map(|(symbol, interval)| Self::kline_topic(symbol, *interval)),
         );
+        topics.extend(
+            self.trade_subscribers
+                .keys()
+                .filter(|symbol| self.owns_symbol(symbol))
+                .map(|symbol| format!("publicTrade.{symbol}")),
+        );
+        let tickers = self.ticker_topics(cx);
+        let room = MAX_INTERESTS.saturating_sub(topics.len());
+        let capped = tickers.len() > room;
+        topics.extend(tickers.into_iter().take(room));
+        (
+            topics.into_iter().map(Interest::from_wire_args).collect(),
+            capped,
+        )
     }
 
-    /// Queue `op` messages for `topics`, ten per message, paced.
-    fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, op: &str, topics: &[String]) {
-        let connection = &mut self.public;
-        if connection.socket.is_none() || !connection.open {
-            return;
-        }
-        for chunk in topics.chunks(TOPICS_PER_SUBSCRIBE) {
-            let args = serde_json::to_string(chunk).unwrap_or_default();
-            connection
-                .outbox
-                .push_back(format!(r#"{{"op":"{op}","args":{args}}}"#));
-        }
-        if connection.outbox_timer.is_none() {
-            self.drain_outbox(cx);
-        }
-    }
-
-    fn drain_outbox(&mut self, cx: &mut Cx<'_, Pending>) {
-        let connection = &mut self.public;
-        connection.outbox_timer = None;
-        let (Some(socket), Some(message)) = (connection.socket, connection.outbox.pop_front())
-        else {
+    fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(feed) = self.public.feed.filter(|_| self.public.open) else {
             return;
         };
-        cx.send(socket, message);
-        if !connection.outbox.is_empty() {
-            connection.outbox_timer = Some(cx.set_timer(SUBSCRIBE_PACE_MS));
+        let (interests, capped) = self.public_interests(cx);
+        if capped && !self.public.tickers_capped {
+            self.public.tickers_capped = true;
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
+                "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
+            );
         }
+        if let Err(error) = cx.set_socket_interests(feed, interests) {
+            self.socket_failed(cx, error);
+        }
+    }
+
+    /// Topic changes reach the venue as one desired set; the engine encodes
+    /// and paces the subscribe/unsubscribe deltas.
+    fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, _op: &str, _topics: &[String]) {
+        self.sync_public_interests(cx);
     }
 
     fn book_topic(depth: u32, symbol: &str) -> String {
@@ -1519,7 +1608,7 @@ impl BybitLinear {
                 continue;
             }
             self.select_category(other);
-            self.connect(cx, Channel::Public);
+            self.open_feed(cx, Channel::Public);
             if self.credentials.is_some() {
                 self.try_start_account(cx);
             }
@@ -2277,9 +2366,6 @@ impl BybitLinear {
         if !resubscribe.is_empty() {
             self.subscribe(cx, "subscribe", &resubscribe);
         }
-        if self.public.outbox_timer == Some(timer) {
-            self.drain_outbox(cx);
-        }
         if self.startup.backoff.on_timer(timer).is_some() {
             self.request_startup(cx);
         }
@@ -2295,17 +2381,15 @@ impl BybitLinear {
             );
             self.try_load_markets(cx);
         }
-        for channel in [Channel::Public, Channel::Private] {
-            if channel == Channel::Private && self.category != self.primary_category {
-                continue;
-            }
-            self.on_socket_timer(cx, channel, timer);
-        }
         self.on_account_timer(cx, timer);
     }
 }
 
 impl Venue for BybitLinear {
+    // Bybit never hands work to a subscription release; its continuation paths compile out.
+    fn socket_capabilities() -> SocketCapabilities {
+        SocketCapabilities { handoff: false }
+    }
     fn on_http_preflight_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -2382,6 +2466,13 @@ impl Venue for BybitLinear {
         self.reconcile_ordinary(cx);
     }
 
+    // reconcile_uncertain reads every product's orders at once; the engine
+    // re-asks until a clean fresh read clears the fence. HyroTrader keeps its
+    // own same-intent retry, which recovers identity through link reads.
+    fn fence_uncertain_placements(&self) -> bool {
+        !self.variant.is_hyro()
+    }
+
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -2446,60 +2537,13 @@ impl Venue for BybitLinear {
         }
     }
 
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        self.select_socket_category(socket);
-        let Some(channel) = self.channel_of(socket) else {
-            return;
-        };
-        let connection = self.connection(channel);
-        connection.open = true;
-        connection.supervisor.opened(cx);
-        match channel {
-            Channel::Public => {
-                let mut topics: Vec<String> = cx
-                    .store
-                    .markets()
-                    .iter()
-                    .filter(|m| self.owns_symbol(&m.symbol))
-                    .map(|m| format!("tickers.{}", m.symbol))
-                    .collect();
-                let category = self.category;
-                let spot = self.variant.is_spot();
-                for (symbol, state) in &mut self.books {
-                    if !spot && Category::for_symbol(symbol) != category {
-                        continue;
-                    }
-                    state.book.clear();
-                    if let Sync::Resubscribing(timer) = state.sync {
-                        cx.clear_timer(timer);
-                    }
-                    state.sync = Sync::Waiting;
-                    topics.push(Self::book_topic(self.paths.book_depth, symbol));
-                }
-                topics.extend(
-                    self.candles
-                        .keys()
-                        .filter(|(symbol, _)| self.owns_symbol(symbol))
-                        .filter_map(|(symbol, interval)| Self::kline_topic(symbol, *interval)),
-                );
-                topics.extend(
-                    self.trade_subscribers
-                        .keys()
-                        .filter(|symbol| self.owns_symbol(symbol))
-                        .map(|symbol| format!("publicTrade.{symbol}")),
-                );
-                self.subscribe(cx, "subscribe", &topics);
-            }
-            Channel::Private => self.on_private_open(cx, socket),
-        }
-    }
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
 
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         self.select_socket_category(socket);
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
-        self.connection(channel).supervisor.received(cx.now);
         match channel {
             Channel::Public => self.on_public_frame(cx, text),
             Channel::Private => {
@@ -2519,10 +2563,100 @@ impl Venue for BybitLinear {
         }
     }
 
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
-        self.select_socket_category(socket);
-        if let Some(channel) = self.channel_of(socket) {
-            self.on_socket_closed(cx, channel, code);
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        let feed = match &event {
+            LifecycleEvent::Opened(epoch)
+            | LifecycleEvent::Ready { epoch, .. }
+            | LifecycleEvent::Authenticated { epoch, .. }
+            | LifecycleEvent::AuthFailure { epoch, .. }
+            | LifecycleEvent::Retired { epoch, .. }
+            | LifecycleEvent::Ping(epoch)
+            | LifecycleEvent::RetryLogin(epoch) => epoch.feed(),
+            LifecycleEvent::Reconnect(feed)
+            | LifecycleEvent::InterestsCommitted { feed, .. }
+            | LifecycleEvent::InterestsRefused { feed, .. } => *feed,
+        };
+        let Some(channel) = self.select_feed(feed) else {
+            return Err(SocketError::Stale);
+        };
+        match event {
+            LifecycleEvent::Opened(epoch) => {
+                let connection = self.connection(channel);
+                connection.socket = Some(epoch.socket());
+                connection.open = true;
+                if channel == Channel::Private {
+                    self.on_private_open(cx, epoch.socket());
+                }
+            }
+            LifecycleEvent::Ready { .. } if channel == Channel::Public => {
+                let category = self.category;
+                let spot = self.variant.is_spot();
+                for (symbol, state) in &mut self.books {
+                    // Only the reopened feed's category resyncs; other feeds stay live.
+                    if !spot && Category::for_symbol(symbol) != category {
+                        continue;
+                    }
+                    state.book.clear();
+                    if let Sync::Resubscribing(timer) = state.sync {
+                        cx.clear_timer(timer);
+                    }
+                    state.sync = Sync::Waiting;
+                }
+                self.public.tickers_capped = false;
+                self.sync_public_interests(cx);
+            }
+            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), r#"{"op":"ping"}"#),
+            LifecycleEvent::Reconnect(_) => self.open_feed(cx, channel),
+            LifecycleEvent::Retired { reason, .. } => self.on_socket_retired(cx, channel, reason),
+            LifecycleEvent::InterestsRefused { error, .. } => return Err(error),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn encode_socket_interests(
+        &self,
+        _store: &safe_cex_engine::Store,
+        _feed: FeedId,
+        subscribe: bool,
+        interests: &[Interest],
+        emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+    ) -> Result<(), SocketError> {
+        let op = if subscribe {
+            "subscribe"
+        } else {
+            "unsubscribe"
+        };
+        for chunk in interests.chunks(TOPICS_PER_SUBSCRIBE) {
+            let topics: Vec<&str> = chunk.iter().map(|i| i.wire_args.as_ref()).collect();
+            emit(EncodedBatch {
+                text: format!(
+                    r#"{{"op":"{op}","args":{}}}"#,
+                    serde_json::to_string(&topics).unwrap_or_default()
+                ),
+                covered_keys: chunk.iter().map(|i| i.key.clone()).collect(),
+            })?;
+        }
+        Ok(())
+    }
+
+    fn socket_control(
+        &self,
+        _: &safe_cex_engine::Store,
+        _: FeedId,
+        _: bool,
+        text: &str,
+    ) -> Control {
+        if text.contains(r#""op":"pong""#) || text.contains(r#""ret_msg":"pong""#) {
+            Control::Pong
+        } else {
+            Control::Other
         }
     }
 

@@ -80,7 +80,7 @@ it('actual WASM consumes separate local setup and rejects malformed or unsupport
   const setup = JSON.stringify({ primary: { key: 'public-key-only', secret: vector.secret } });
   for (const [venue, options, credentials] of [
     ['binance', '{', setup],
-    ['bitunix', '{}', setup],
+    ['blofin', '{}', setup], // unadopted provider control after MEXC migration
     ['binance', '{}', '{"primary":{"secret":"audit-secret-sentinel"'],
   ]) {
     let failure: unknown;
@@ -104,7 +104,7 @@ it('actual WASM consumes separate local setup and rejects malformed or unsupport
 
 it('actual WASM refuses external-provider override on an unmigrated family', async () => {
   const { WasmEngine } = await loadNodeEngine();
-  const engine = new WasmEngine('bitunix', JSON.stringify({ publicDataOnly: true }));
+  const engine = new WasmEngine('blofin', JSON.stringify({ publicDataOnly: true })); // unadopted provider control
   try {
     expect(() => new EngineHost(engine, makeTransport([]), {}, { signer: (request) => ({ values: [], receipt: request.receipt }) })).toThrow(/not supported/);
   } finally { engine.free?.(); }

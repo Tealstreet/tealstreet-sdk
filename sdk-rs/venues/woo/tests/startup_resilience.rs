@@ -15,8 +15,8 @@ fn public_engine() -> Engine<Woo> {
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = support::prepared_seed_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/public/info") => Some(request),
             _ => None,
@@ -47,14 +47,16 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
             .expect("shared exponential retry timer");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = support::prepared_seed_actions(&mut engine, now)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) if request.url.contains("/public/info") => Some(request),
                 _ => None,
             })
             .expect("fresh catalogue request");
     }
+    // Skipped discovery rows log at Debug.
+    engine.set_log_level(safe_cex_engine::Level::Debug);
     engine.handle(
         now,
         Event::HttpResponse {
@@ -81,8 +83,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
         ..Default::default()
     }));
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = support::prepared_seed_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/public/info") => Some(request),
             _ => None,
@@ -101,8 +103,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
     );
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
-    let reads = engine
-        .drain_actions()
+    let reads = support::prepared_seed_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -131,8 +133,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = support::prepared_seed_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -149,8 +151,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
             },
         },
     );
-    let ticker = engine
-        .drain_actions()
+    let ticker = support::prepared_seed_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -176,8 +178,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
         .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine
-        .drain_actions()
+    let retry = support::prepared_seed_actions(&mut engine, 1000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url == ticker.url => Some(r),
             _ => None,
@@ -190,15 +192,15 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
 fn live_ticker_never_creates_a_catalogue_market_missing_from_the_rest_seed() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = support::prepared_seed_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
         })
         .unwrap();
     engine.handle(0.0, Event::HttpResponse { request: catalogue.id, response: Response { status: 200, headers: "", body: r###"{"success":true,"rows":[{"broken":true},{"symbol":"SPOT_BTC_USDT"},{"symbol":"PERP_BTC_USDT","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":100,"base_imr":0.02,"price_range":0.01},{"symbol":"PERP_ETH_USDT","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":100,"base_imr":0.02,"price_range":0.01}]}"### }});
-    let mut actions = engine.drain_actions().collect::<Vec<_>>();
+    let mut actions = support::prepared_seed_actions(&mut engine, 0.0);
     let ticker = actions
         .iter()
         .find_map(|a| match a {
@@ -237,8 +239,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
         for cached in [false, true] {
             let mut engine = public_engine();
             engine.start(0.0);
-            let catalogue = engine
-                .drain_actions()
+            let catalogue = support::prepared_seed_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) => Some(request),
                     _ => None,
@@ -255,8 +257,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
                     },
                 },
             );
-            let ticker = engine
-                .drain_actions()
+            let ticker = support::prepared_seed_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url.contains("/public/futures") => {
                         Some(request)
@@ -297,8 +299,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
                 })
                 .expect("unusable successful HTTP body must back off");
             engine.handle(1000.0, Event::TimerFired { timer });
-            let retry = engine
-                .drain_actions()
+            let retry = support::prepared_seed_actions(&mut engine, 1000.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url == ticker.url => Some(request),
                     _ => None,

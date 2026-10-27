@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { privateProxyIpsSingapore, privateProxyIpsTokyo } from '@tealstreet/proxy-ips-lists/src';
-import { createAPI, formatCryptocomApiError } from '../../exchanges/cryptocom/cryptocom.api';
-import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
-import { generateSignature } from '../../exchanges/cryptocom/cryptocom.signing';
-import { ENDPOINTS } from '../../exchanges/cryptocom/cryptocom.types';
+import { createAPI, formatCryptocomApiError } from '../reference/cryptocom/cryptocom.api';
+import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
+import { generateSignature } from '../reference/cryptocom/cryptocom.signing';
+import { ENDPOINTS } from '../reference/cryptocom/cryptocom.types';
 import { getExchangeMetadata } from '../../exchangeMetadata';
 import { DefaultStore } from '../../store/store.base';
 import {

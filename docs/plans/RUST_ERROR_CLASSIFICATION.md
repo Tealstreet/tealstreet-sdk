@@ -257,18 +257,24 @@ before fixing it, because other lanes may have landed it already.
 | 24 | orderly | `trading.rs:1781,1513` | −1007 is left None and skips the uncertain-write account reconcile. |
 | 25 | coinbase | `trading.rs:1533-1535` | `DUPLICATE_CLIENT_ORDER_ID` "may name a live order" but is None, not Unknown. |
 
+Kraken beta remediation (rows 18 and 21, Kraken portions only): failures now
+retain structured accepted IDs and explicit Unknown after effects, with shared
+order-lock reconciliation. Rows 30 and 37 are corrected for Kraken: one Spot
+HTTP auth refusal does not deactivate; Futures native codes pass through the
+CodeTable on non-2xx. Other venues listed in those inventory rows remain separate.
+
 ### P1: wrong kind, outcome or auth decision in the safe direction
 
 | # | Venue | Site | Defect |
 | --- | --- | --- | --- |
-| 26 | asterdex | `request.rs:217` | A signer failure (including during −1021/−1022 resends) becomes Unknown instead of NotSent. |
+| 26 | asterdex | `request.rs:217` | A signer failure (including during −1021/−1022 resends) becomes Unknown instead of NotSent. Isolated 2026-10-26: a first-attempt signer refusal is NotSent; only a −1022 refusal followed by a granted resend refused before release is Unknown, by the engine journal contract. Kept for beta (overseer ruling); see the post-beta follow-up under Progress. |
 | 27 | phemex | `lib.rs:624-626,354` | Every write status ≥400 becomes Unknown with no kind (auth and rate-limit kinds are lost). |
 | 28 | txflow | `lib.rs:889-891` → `trading.rs:772` | A write 4xx becomes `network`/Unknown, and the native body is discarded. |
 | 29 | orderly | `account.rs:1096-1105` | Any 4xx on the Info read permanently deactivates the account. |
 | 30 | kraken spot | `spot/account.rs:669` | Any 401/403 on any private request deactivates the venue. |
 | 31 | breakoutprop | `lib.rs:816` | Login 401/403 carries no kind, so it is emitted as `REQUEST_FAILED`, not `AUTH_REJECTED`. |
 | 32 | paradex | `account.rs:510-521` | Auth refusals are retried every 2 s forever, with no auth kind. |
-| 33 | bitunix | `recovery.rs:209-216` | Read 401/403/404 → `network`. 10007 is `authInvalid` on writes but `invalidInput` on reads. |
+| 33 | bitunix | `recovery.rs:209-216` | Read 401/403/404 → `network`. 10007 is `authInvalid` on writes but `invalidInput` on reads. **Fixed:** account reads take their kind from the shared `BITUNIX` table (status rows, read-scoped 10007 → `authInvalid`); `tests/account_read_classification.rs`. |
 | 34 | okx, bingx, bitget, kucoin, weex | `trading.rs:1072-1078` vs `account.rs:2190-2197`; `account.rs:1729`; `trading.rs:1920-1925`; `wire.rs:302,313`; `trading.rs:376` | Auth tables diverge or are ignored on writes. The OKX write table lacks 50100/50101/50103-50105. KuCoin 400002 (clock skew) arrives as HTTP 401, so the status branch decides `authInvalid` before the table; the fix depends on rule 4 overriding status. Bitget/WEEX native auth codes on writes get kind `rejected`. |
 | 35 | apexomni, bitrue, cryptocom, kraken, woo, blofin (`trading.rs:1584`), bingx, kucoin, mexc, backpack, polymarket | Each family's table fallback | An unlisted native code gives None. Each table must declare `unlisted`. |
 | 36 | binance, asterdex, bybit | `account.rs:324`; `account.rs:353-357`; `lib.rs:357` | A non-JSON 4xx becomes code 0 / HTTP status in the native-code namespace (Bybit leaks the status as `venue_code`, `refresh.rs:258`). |
@@ -437,4 +443,17 @@ Each PR lists its exact deltas under [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALL
   command or Plan retires. A mark only keeps a fence longer, so a reconcile
   read that must clear one uses a fresh owner, never a leg of a read already
   in flight.
-
+- 2026-10-26, AsterDEX beta (#2270):
+  - Non-JSON 4XX write replies classify through `ASTER_STATUS` (400/401/403/418/429), so a gateway 429 or 418 is
+    `rateLimited`/Rejected (#36 closed for AsterDEX).
+  - #26 isolated, and Unknown kept for beta by overseer ruling. The reconcile read clears it, so it carries no
+    money risk.
+  - **Post-beta follow-up (engine change, needs 8x5tm1 GO):** a definitive, effects-free refusal followed by a
+    retry that never reached transport should project Rejected. `CommandWrites` counts a released attempt as
+    uncertain whenever a later attempt on its leg is unreleased, even one with a final NotSent result. Narrowing
+    that to a pending later attempt flips exactly four contract tests that pin the current Unknown:
+    `earlier_released_retryable_refusal_then_failed_retry_is_unknown_for_every_failure_cause`,
+    `released_native_refusal_then_retry_preparation_failure_is_unknown_not_not_sent`,
+    `prior_send_evidence_survives_native_refusal_retry_and_signer_failure` and
+    `observer_projection_does_not_consume_definitive_refusal_retry`. AsterDEX's
+    `a_refused_resend_signature_after_a_signature_rejection_is_unknown` pins the venue-level outcome.

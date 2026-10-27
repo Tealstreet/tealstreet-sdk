@@ -2,7 +2,9 @@
 mod account;
 mod history;
 mod identity;
+mod seed_read;
 mod sign;
+mod socket_codec;
 mod trading;
 mod wire;
 
@@ -10,8 +12,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
-use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
+use safe_cex_engine::model::{Candle, Interval, Market};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
     Venue, num,
@@ -44,23 +45,14 @@ pub enum Pending {
     Trade(trading::Request),
     History(history::Request),
     Account(account::Request),
-    Markets {
-        rows: Vec<Market>,
-        ranges: HashMap<String, f64>,
-        skipped: account::Skipped,
-    },
-    Tickers {
-        rows: Vec<Ticker>,
-        indexes: HashMap<String, u32>,
-        skipped: account::Skipped,
-    },
-    Funding {
-        rows: Vec<(String, f64, f64)>,
-    },
+    Seed(Box<seed_read::Read>),
+    #[cfg(test)]
+    SigningProbe,
     Depth {
         symbol: String,
         generation: u64,
     },
+    SocketBookSeeds(Vec<(String, u64)>),
     Candles {
         command: CommandId,
         rows: Vec<Candle>,
@@ -69,6 +61,7 @@ pub enum Pending {
 }
 #[derive(Default)]
 struct Connection {
+    feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     socket: Option<SocketId>,
     open: bool,
     ping_at: f64,
@@ -85,6 +78,7 @@ enum Sync {
 struct Depth {
     count: u32,
     generation: u64,
+    seed_due: bool,
     book: Book,
     sync: Sync,
 }
@@ -100,7 +94,6 @@ pub struct Woo {
     options: safe_cex_crypto::secrets::Sensitive<Options>,
     rest: &'static str,
     public: Connection,
-    public_supervisor: Supervisor,
     depth: HashMap<String, Depth>,
     candles: HashMap<(String, Interval), CandleState>,
     generation: u64,
@@ -202,12 +195,6 @@ impl Woo {
             },
             options,
             public: Connection::default(),
-            public_supervisor: Supervisor::new(Config {
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(6_000.0),
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
             depth: HashMap::new(),
             candles: HashMap::new(),
             generation: 0,
@@ -224,32 +211,14 @@ impl Woo {
     pub fn price_range(&self, symbol: &str) -> Option<f64> {
         self.price_ranges.get(symbol).copied()
     }
-    fn seed(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        let (path, pending) = if tickers {
-            (
-                "/v1/public/futures",
-                Pending::Tickers {
-                    indexes: HashMap::new(),
-                    rows: Vec::new(),
-                    skipped: Default::default(),
-                },
-            )
-        } else {
-            (
-                "/v1/public/info",
-                Pending::Markets {
-                    rows: Vec::new(),
-                    ranges: HashMap::new(),
-                    skipped: Default::default(),
-                },
-            )
-        };
-        cx.request_streamed(
-            Method::Get,
-            format!("{}{path}", self.rest),
-            vec![],
-            ArrayAt::Field("rows"),
-            pending,
+    fn seed(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        self.seed_read(
+            cx,
+            if tickers {
+                seed_read::Kind::Tickers
+            } else {
+                seed_read::Kind::Markets
+            },
         );
     }
     fn apply_ticks(&self, cx: &mut Cx<'_, Pending>, topic: &str, rows: Vec<Tick<'_>>) {
@@ -320,52 +289,12 @@ impl Woo {
             });
         }
     }
-    fn funding_read(&self, cx: &mut Cx<'_, Pending>) {
-        cx.request_streamed(
-            Method::Get,
-            format!("{}/v1/public/funding_rates", self.rest),
-            vec![],
-            ArrayAt::Field("rows"),
-            Pending::Funding { rows: Vec::new() },
-        );
+    fn funding_read(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.seed_read(cx, seed_read::Kind::Funding);
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        let host = if self.options.testnet {
-            "wss://wss.staging.woox.io/ws/stream/"
-        } else {
-            "wss://wss.woox.io/ws/stream/"
-        };
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public_supervisor.connecting(cx);
-        }
-        self.public.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(format!(
-                    "{host}{}",
-                    self.options
-                        .application_id
-                        .as_deref()
-                        .unwrap_or("undefined")
-                ))
-                .channel(SocketChannel::Public),
-            ),
-        );
-    }
-    fn topic(&self, cx: &mut Cx<'_, Pending>, topic: &str, subscribe: bool) {
-        if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
-            cx.send(
-                socket,
-                format!(
-                    r#"{{"event":"{}","topic":{}}}"#,
-                    if subscribe {
-                        "subscribe"
-                    } else {
-                        "unsubscribe"
-                    },
-                    serde_json::to_string(topic).unwrap()
-                ),
-            );
+        if let Err(error) = self.managed_connect(cx, false) {
+            self.socket_error(cx, false, error);
         }
     }
     fn book_request(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -377,7 +306,9 @@ impl Woo {
         };
         self.generation += 1;
         state.generation = self.generation;
-        state.sync = Sync::Buffer(Vec::new());
+        if !matches!(state.sync, Sync::Buffer(_)) {
+            state.sync = Sync::Buffer(Vec::new());
+        }
         cx.request(
             Method::Get,
             format!("{}/v1/public/orderbook/{}", self.rest, native(m)),
@@ -388,6 +319,7 @@ impl Woo {
                 generation: state.generation,
             },
         );
+        state.seed_due = false;
     }
     fn book_retry(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         let Some(state) = self.depth.get_mut(symbol) else {
@@ -398,6 +330,7 @@ impl Woo {
         }
         self.generation += 1;
         state.generation = self.generation;
+        state.seed_due = false;
         state.book.clear();
         state.sync = Sync::Retry(cx.set_timer(1000.0));
         cx.book_changed(symbol);
@@ -444,21 +377,18 @@ impl Woo {
             state.count += 1;
             return;
         }
+        self.generation += 1;
         self.depth.insert(
             symbol.clone(),
             Depth {
                 count: 1,
-                generation: 0,
+                generation: self.generation,
+                seed_due: true,
                 book: Book::default(),
                 sync: Sync::Buffer(Vec::new()),
             },
         );
-        if self.public.open
-            && let Some(m) = cx.store.market(&symbol)
-        {
-            self.topic(cx, &format!("{}@orderbookupdate", native(m)), true);
-            self.book_request(cx, &symbol);
-        }
+        self.sync_public_interests(cx);
     }
     fn stream_candle(
         &mut self,
@@ -644,43 +574,60 @@ impl Venue for Woo {
         }
         self.seed(cx, false);
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account_open(cx, socket) {
-            return;
+    fn socket_control(
+        &self,
+        _: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        _: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        self.managed_control(feed, text)
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.managed_event(cx, event)
+    }
+    fn on_socket_interests_released(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        pending: Pending,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        if self.public.feed != Some(epoch.feed())
+            || !self.public.open
+            || cx.socket_epoch(epoch.feed()) != Some(epoch)
+        {
+            return Ok(());
         }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = true;
-        self.public.ping_at = cx.now;
-        self.public_supervisor.opened(cx);
-        cx.send(socket, r#"{"event":"ping"}"#);
-        for topic in ["tickers", "bbos", "markprices"] {
-            self.topic(cx, topic, true);
-        }
-        let symbols: Vec<_> = self.depth.keys().cloned().collect();
-        for symbol in symbols {
-            if let Some(m) = cx.store.market(&symbol) {
-                self.topic(cx, &format!("{}@orderbookupdate", native(m)), true);
-            }
-            self.book_request(cx, &symbol);
-        }
-        for (symbol, interval) in self.candles.keys() {
-            if let Some(m) = cx.store.market(symbol) {
-                self.topic(cx, &format!("{}@kline_{interval}", native(m)), true);
-            }
-        }
-        if !self.options.public_data_only {
-            let mut seen = std::collections::HashSet::new();
-            for (symbol, _) in self.candles.keys() {
-                if seen.insert(symbol)
-                    && let Some(m) = cx.store.market(symbol)
+        if let Pending::SocketBookSeeds(seeds) = pending {
+            for (symbol, generation) in seeds {
+                if self
+                    .depth
+                    .get(&symbol)
+                    .is_some_and(|state| state.seed_due && state.generation == generation)
                 {
-                    self.topic(cx, &format!("{}@trades", native(m)), true);
+                    self.book_request(cx, &symbol);
                 }
             }
         }
+        Ok(())
     }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.managed_encode(store, feed, subscribe, items, emit)
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account_message(cx, socket, text) {
             return;
@@ -688,7 +635,6 @@ impl Venue for Woo {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public_supervisor.received(cx.now);
         if let Ok(msg) = serde_json::from_str::<TickerMessage<'_>>(text)
             && msg.event.is_empty()
             && matches!(msg.topic.as_ref(), "tickers" | "bbos" | "markprices")
@@ -739,174 +685,16 @@ impl Venue for Woo {
             }
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.account_close(cx, socket) {
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.socket = None;
-        self.public.open = false;
-        self.public_supervisor.retry(cx);
-        for (symbol, state) in &mut self.depth {
-            cx.book_changed(symbol);
-            self.generation += 1;
-            state.generation = self.generation;
-            state.book.clear();
-            state.sync = Sync::Buffer(Vec::new());
-        }
-    }
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Identity(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Trade(_) => (),
             Pending::Account(request) => self.account_item(cx, request, item),
-            Pending::Markets {
-                rows,
-                ranges,
-                skipped,
-            } => {
-                let raw = match serde_json::from_str::<Instrument<'_>>(item) {
-                    Ok(raw) => raw,
-                    Err(_) => {
-                        match serde_json::from_str::<Symbol<'_>>(item) {
-                            Ok(s) if !s.symbol.starts_with("PERP_") => (),
-                            Ok(s) => {
-                                skipped.add(Some(&s.symbol));
-                                safe_cex_engine::startup::skipped_row(cx);
-                            }
-                            Err(_) => {
-                                skipped.add(None);
-                                safe_cex_engine::startup::skipped_row(cx);
-                            }
-                        }
-                        return;
-                    }
-                };
-                let Some((base, quote)) = raw
-                    .symbol
-                    .strip_prefix("PERP_")
-                    .and_then(|s| s.split_once('_'))
-                else {
-                    return;
-                };
-                if raw.base_tick <= 0.0
-                    || raw.quote_tick <= 0.0
-                    || raw.base_min <= 0.0
-                    || raw.base_max < raw.base_min
-                {
-                    skipped.add(Some(&raw.symbol));
-                    safe_cex_engine::startup::skipped_row(cx);
-                    return;
-                }
-                let symbol = compact(&raw.symbol);
-                if let Some(range) = raw.price_range.filter(|v| *v > 0.0) {
-                    ranges.insert(symbol.clone(), range);
-                }
-                rows.push(Market {
-                    id: format!("{base}/{quote}:USDT"),
-                    symbol,
-                    pretty_symbol: None,
-                    base: base.into(),
-                    quote: quote.into(),
-                    active: true,
-                    precision: Precision {
-                        amount: raw.base_tick,
-                        price: raw.quote_tick,
-                    },
-                    limits: Limits {
-                        amount: MinMax {
-                            min: raw.base_min,
-                            max: raw.base_max,
-                        },
-                        leverage: MinMax {
-                            min: 1.0,
-                            max: (1.0
-                                / if raw.base_imr > 0.0 {
-                                    raw.base_imr
-                                } else {
-                                    0.01
-                                })
-                            .floor(),
-                        },
-                        price: None,
-                    },
-                    contract_size: None,
-                    is_expiring: None,
-                    is_inverse: None,
-                    is_spot: None,
-                    is_perpetual: None,
-                    is_read_only: None,
-                    taker_fee: None,
-                    maker_fee: None,
-                });
-            }
-            Pending::Tickers {
-                rows,
-                indexes,
-                skipped,
-            } => {
-                let raw = match serde_json::from_str::<Statistics<'_>>(item) {
-                    Ok(raw) => raw,
-                    Err(_) => {
-                        match serde_json::from_str::<Symbol<'_>>(item) {
-                            Ok(s) if cx.store.market(&compact(&s.symbol)).is_none() => (),
-                            Ok(s) => {
-                                skipped.add(Some(&s.symbol));
-                                safe_cex_engine::startup::skipped_row(cx);
-                            }
-                            Err(_) => {
-                                skipped.add(None);
-                                safe_cex_engine::startup::skipped_row(cx);
-                            }
-                        }
-                        return;
-                    }
-                };
-                let symbol = compact(&raw.symbol);
-                let Some(m) = cx.store.market(&symbol) else {
-                    return;
-                };
-                if raw.close <= 0.0 {
-                    skipped.add(Some(&raw.symbol));
-                    safe_cex_engine::startup::skipped_row(cx);
-                    return;
-                }
-                indexes.insert(raw.symbol.to_string(), rows.len() as u32);
-                rows.push(Ticker {
-                    id: m.id.clone(),
-                    symbol,
-                    bid: raw.close,
-                    ask: raw.close,
-                    last: raw.close,
-                    mark: raw.mark_price,
-                    index: raw.index_price.unwrap_or(f64::NAN),
-                    percentage: if raw.open > 0.0 {
-                        num::round_half_up((raw.close - raw.open) / raw.open * 10000.0) / 100.0
-                    } else {
-                        0.0
-                    },
-                    open_interest: raw.open_interest,
-                    funding_rate: raw.last_funding_rate,
-                    funding_time: raw.next_funding_time,
-                    volume: raw.volume,
-                    quote_volume: raw.amount,
-                    mid_price: None,
-                });
-            }
-            Pending::Funding { rows } => {
-                if let Ok(raw) = serde_json::from_str::<Funding<'_>>(item)
-                    && raw.next_funding_time > 0.0
-                {
-                    rows.push((
-                        compact(&raw.symbol),
-                        raw.est_funding_rate,
-                        raw.next_funding_time,
-                    ));
-                }
-            }
+            Pending::Seed(read) => self.seed_item(cx, read, item),
+            #[cfg(test)]
+            Pending::SigningProbe => (),
             Pending::Candles { rows, bad, .. } => {
                 if let Some(c) = serde_json::from_str(item).ok().and_then(candle) {
                     rows.push(c);
@@ -914,7 +702,7 @@ impl Venue for Woo {
                     *bad = true;
                 }
             }
-            Pending::Depth { .. } => (),
+            Pending::Depth { .. } | Pending::SocketBookSeeds(_) => (),
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -937,116 +725,21 @@ impl Venue for Woo {
             self.account_response(cx, request, response);
             return;
         }
+        if let Pending::Seed(read) = pending {
+            self.seed_response(cx, *read, response);
+            return;
+        }
         if !(200..300).contains(&response.status) || Envelope::checked(response.body).is_err() {
             self.on_request_failed(cx, pending, "WOO read rejected");
             return;
         }
         match pending {
+            Pending::SocketBookSeeds(_) => (),
             Pending::Identity(_) | Pending::History(_) | Pending::Trade(_) => unreachable!(),
             Pending::Account(_) => unreachable!(),
-            Pending::Markets {
-                rows,
-                ranges,
-                skipped,
-            } => {
-                if let Some(text) = skipped.summary("markets") {
-                    cx.notice(Level::Warn, code::ROW_SKIPPED, text);
-                }
-                if rows.is_empty() {
-                    self.on_request_failed(
-                        cx,
-                        Pending::Markets {
-                            rows: vec![],
-                            ranges: HashMap::new(),
-                            skipped: Default::default(),
-                        },
-                        "Invalid WOO markets",
-                    );
-                    return;
-                }
-                let refresh = std::mem::replace(&mut self.catalogue_committed, true);
-                let rows = if refresh {
-                    let mut ranges = ranges;
-                    for (symbol, range) in std::mem::take(&mut self.price_ranges) {
-                        ranges.entry(symbol).or_insert(range);
-                    }
-                    self.price_ranges = ranges;
-                    keep_listed(cx.store.markets(), rows)
-                } else {
-                    self.price_ranges = ranges;
-                    rows
-                };
-                cx.store.set_markets(rows);
-                self.skipped_markets = skipped
-                    .ids()
-                    .iter()
-                    .filter(|id| cx.store.market(&compact(id)).is_none())
-                    .cloned()
-                    .collect();
-                // An unnamed malformed row counts once toward the re-read bound.
-                let before = self.malformed_rows;
-                self.malformed_rows = self.skipped_markets.len() + usize::from(skipped.anonymous());
-                // A partial catalogue commits so private reads start, and is re-read.
-                if reread_partial(
-                    cx,
-                    &mut self.reread_stalls,
-                    refresh,
-                    before,
-                    self.malformed_rows,
-                ) {
-                    self.seed_backoff.failed(cx, false);
-                } else {
-                    self.seed_backoff.succeeded(cx, &false);
-                }
-                if refresh {
-                    return;
-                }
-                if self.options.public_data_only
-                    || self.options.key.as_deref().is_none_or(str::is_empty)
-                {
-                    cx.store.set_balance(Default::default());
-                    cx.store.set_positions(Vec::new());
-                    cx.store.set_orders(Vec::new());
-                } else {
-                    self.account_start(cx);
-                }
-                self.seed(cx, true);
-            }
-            Pending::Tickers {
-                rows,
-                indexes,
-                skipped,
-            } => {
-                if let Some(text) = skipped.summary("tickers") {
-                    cx.notice(Level::Warn, code::ROW_SKIPPED, text);
-                }
-                if rows.is_empty() {
-                    self.on_request_failed(
-                        cx,
-                        Pending::Tickers {
-                            indexes: HashMap::new(),
-                            rows: vec![],
-                            skipped: Default::default(),
-                        },
-                        "Invalid WOO tickers",
-                    );
-                    return;
-                }
-                self.ticker_indexes = indexes;
-                cx.store.set_tickers(rows);
-                self.seed_backoff.succeeded(cx, &true);
-                self.account_refresh(cx);
-                self.connect_public(cx);
-                self.funding = Some(cx.set_timer(60_000.0));
-            }
-            Pending::Funding { rows } => {
-                for (symbol, rate, time) in rows {
-                    cx.store.update_ticker(&symbol, |t| {
-                        t.funding_rate = rate;
-                        t.funding_time = time;
-                    });
-                }
-            }
+            Pending::Seed(_) => unreachable!(),
+            #[cfg(test)]
+            Pending::SigningProbe => (),
             Pending::Candles {
                 command,
                 mut rows,
@@ -1121,17 +814,28 @@ impl Venue for Woo {
             }
         }
     }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Seed(read) => self.seed_precommit_failed(cx, *read, reason, error),
+            other => self.on_sign_error(cx, other, error),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::SocketBookSeeds(_) => (),
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Markets { .. } | Pending::Tickers { .. } => {
-                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-                self.seed_backoff
-                    .failed(cx, matches!(pending, Pending::Tickers { .. }));
-            }
+            Pending::Seed(read) => self.seed_failed(cx, *read, error, true),
+            #[cfg(test)]
+            Pending::SigningProbe => (),
             Pending::Depth { symbol, generation } => {
                 if self
                     .depth
@@ -1142,7 +846,6 @@ impl Venue for Woo {
                 }
             }
             Pending::Candles { command, .. } => cx.fail(command, error),
-            Pending::Funding { .. } => cx.notice(Level::Warn, code::REQUEST_FAILED, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1150,6 +853,9 @@ impl Venue for Woo {
             return;
         }
         if self.account_timer(cx, timer) {
+            return;
+        }
+        if !cx.now.is_finite() {
             return;
         }
         if let Some(tickers) = self.seed_backoff.on_timer(timer) {
@@ -1161,25 +867,6 @@ impl Venue for Woo {
             self.funding = Some(cx.set_timer(60_000.0));
             return;
         }
-        match self.public_supervisor.on_timer(cx, timer) {
-            SocketTick::Unhandled => (),
-            SocketTick::Reconnect => return self.connect_public(cx),
-            SocketTick::Ping => {
-                if let Some(s) = self.public.socket {
-                    self.public.ping_at = cx.now;
-                    cx.send(s, r#"{"event":"ping"}"#);
-                }
-                return;
-            }
-            SocketTick::TimedOut(_) => {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006);
-                }
-                return;
-            }
-            SocketTick::Handled => return,
-        }
         let retry = self.depth.iter().find_map(|(s, d)| {
             if matches!(d.sync,Sync::Retry(t) if t==timer) {
                 Some(s.clone())
@@ -1188,7 +875,11 @@ impl Venue for Woo {
             }
         });
         if let Some(symbol) = retry {
-            self.book_request(cx, &symbol);
+            if let Some(state) = self.depth.get_mut(&symbol) {
+                state.seed_due = true;
+                state.sync = Sync::Buffer(Vec::new());
+            }
+            self.sync_public_interests(cx);
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -1215,24 +906,18 @@ impl Venue for Woo {
                 {
                     cx.clear_timer(t);
                 }
-                if let Some(m) = cx.store.market(&symbol) {
-                    self.topic(cx, &format!("{}@orderbookupdate", native(m)), false);
-                }
+                self.sync_public_interests(cx);
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let Some(m) = cx.store.market(&symbol).map(native) else {
+                if cx.store.market(&symbol).is_none() {
                     return;
-                };
-                let trade = self.candles.keys().any(|(s, _)| s == &symbol);
+                }
                 let state = self.candles.entry((symbol.clone(), interval)).or_default();
                 state.count += 1;
                 if state.count > 1 {
                     return;
                 }
-                self.topic(cx, &format!("{m}@kline_{interval}"), true);
-                if !trade && !self.options.public_data_only {
-                    self.topic(cx, &format!("{m}@trades"), true);
-                }
+                self.sync_public_interests(cx);
             }
             Command::UnsubscribeCandles { symbol, interval } => {
                 let key = (symbol.clone(), interval);
@@ -1244,14 +929,7 @@ impl Venue for Woo {
                     return;
                 }
                 self.candles.remove(&key);
-                if let Some(m) = cx.store.market(&symbol).map(native) {
-                    self.topic(cx, &format!("{m}@kline_{interval}"), false);
-                    if !self.options.public_data_only
-                        && !self.candles.keys().any(|(s, _)| s == &symbol)
-                    {
-                        self.topic(cx, &format!("{m}@trades"), false);
-                    }
-                }
+                self.sync_public_interests(cx);
             }
             cmd @ Command::FetchCandles { .. } => self.fetch_candles(cx, cmd),
             Command::Query { command, query } => self.history_command(cx, command, query),

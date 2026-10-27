@@ -35,9 +35,25 @@
       "types": "./js/loader.d.mts",
       "default": "./js/engine.web.mjs"
     },
+    "./engine/beta-web": {
+      "types": "./js/loader.d.mts",
+      "default": "./js/engine.beta.web.mjs"
+    },
+    "./beta-venues": {
+      "types": "./js/beta-venues.d.mts",
+      "default": "./js/beta-venues.mjs"
+    },
     "./venues": {
       "types": "./js/venues.d.mts",
       "default": "./js/venues.mjs"
+    },
+    "./hosted-operations": {
+      "types": "./js/hosted-operations.d.mts",
+      "default": "./js/hosted-operations.mjs"
+    },
+    "./kraken-operation-codec": {
+      "types": "./js/kraken-operation-codec.d.mts",
+      "default": "./js/kraken-operation-codec.mjs"
     }
   },
   "scripts": {
@@ -45,7 +61,8 @@
     "test": "node --test js/*.test.mjs",
     "test-host": "node --test js/host.test.mjs",
     "test-host-unit": "node --test js/host*.test.mjs",
-    "test-workers-unit": "node --test --test-name-pattern='Workers|notices' js/workers.test.mjs"
+    "test-workers-unit": "node --test --test-name-pattern='Workers|notices' js/workers.test.mjs",
+    "test-hosted-operation-proof": "node --test js/hosted-operation.integration.mjs"
   },
   "dependencies": {
     "ws": "^8.21.3"

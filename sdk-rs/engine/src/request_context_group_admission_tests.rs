@@ -5,7 +5,7 @@ use crate::request_context::{
 };
 use crate::{Command, CredentialSlot, Response, SocketId, Venue};
 
-struct Consumer<const NONCE: bool = false>(usize);
+struct Consumer<const NONCE: bool = false, const BARRIERS: bool = true>(usize);
 fn credential() -> Credential {
     Credential {
         slot: CredentialSlot::Primary,
@@ -20,7 +20,10 @@ fn call(timeout_ms: u32) -> CallBound<'static> {
         after_refusal: &[],
     }
 }
-impl<const NONCE: bool> Venue for Consumer<NONCE> {
+impl<const NONCE: bool, const BARRIERS: bool> Venue for Consumer<NONCE, BARRIERS> {
+    fn http_mutation_barriers() -> bool {
+        BARRIERS
+    }
     fn http_release() -> crate::HttpRelease<Self> {
         if NONCE {
             crate::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
@@ -158,7 +161,7 @@ impl<const NONCE: bool> Venue for Consumer<NONCE> {
                 .map(|(plan, _, _)| plan),
             _ => cx.admit_plan_with_barriers(&preflight, &steps, policy, barriers),
         };
-        if self.0 < 10 || self.0 == 15 || self.0 == 16 {
+        if self.0 < 10 || self.0 == 15 || self.0 == 16 || self.0 == 18 {
             assert_eq!(
                 result.err(),
                 Some(if self.0 == 1 {
@@ -380,4 +383,29 @@ fn nonce_unscheduled_barrier_refuses_before_ids_storage_or_credits() {
 #[test]
 fn nonce_unscheduled_ordinary_plan_still_admits() {
     check_registration::<true>(17);
+}
+
+/// A venue that does not declare barriers cannot admit a barrier group: the
+/// refusal comes before any ID, action or plan context is spent, so no group
+/// is left for its compiled-out pump. Mode 18 is mode 10's valid geometry.
+#[test]
+fn undeclared_venue_barrier_admission_spends_nothing() {
+    assert!(!Consumer::<false, false>::http_mutation_barriers());
+    let mut engine = crate::test_support::seeded_engine(Consumer::<false, false>(18));
+    engine.start(0.);
+    engine.handle(
+        1.,
+        crate::Event::Command(Command::SetLeverage {
+            command: 7,
+            symbol: "BTC-USDT".into(),
+            leverage: 5.,
+            side: None,
+        }),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+    );
 }

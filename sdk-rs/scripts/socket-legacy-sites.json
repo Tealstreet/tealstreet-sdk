@@ -5,12 +5,6 @@
   "venues/apexomni/src/public.rs": {
     "5f909e96e7b6a63ad0bf29ce5603bb2147062337ba502396a0d8a060ef9d8cfb": 1
   },
-  "venues/asterdex/src/account.rs": {
-    "636727ac935b8262441935b36413173080a83d5c18b1f615a67bf2b51264e02b": 1
-  },
-  "venues/asterdex/src/lib.rs": {
-    "2f2da7c6f310b0f056fed7fd7bce4abdeb0976542d25ce0be1a6c90bf46b1599": 1
-  },
   "venues/binance/src/lib.rs": {
     "3060648449b23280179314cd92797f38b0e594ffcf428857b8059f23cba98e0a": 1,
     "914d8478f1d42bb51af9781252934d30705b1b5a520f72db075e320a9fc12dcc": 1,
@@ -59,14 +53,6 @@
     "23b3e9939bcd241c677784173074726099fd82f1db03f61be1253da68284b203": 1,
     "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2
   },
-  "venues/bybit/src/account.rs": {
-    "7e4a3661bd2f079cb2fd3b4b596f7eef242ebfe5fbd13ccbb558a0dbcd26f75e": 1
-  },
-  "venues/bybit/src/lib.rs": {
-    "386a577181c5a17b4a85abe0c193d881536d6a3fdc3ac4dec82f0681865bfa57": 1,
-    "914d8478f1d42bb51af9781252934d30705b1b5a520f72db075e320a9fc12dcc": 1,
-    "964f681c5fe6876e3a66908bc6a144f76fc7585b0568f4f82bb471492bb0c755": 1
-  },
   "venues/coinbase/src/account.rs": {
     "80d6da32d1ff894feb349435b11b1d16783adf7f241e52f37faea1214194f2e0": 1
   },
@@ -89,20 +75,6 @@
     "0ba20fe80a261e365a8e049237b34024661d8d9d569825b54dc157e85d3d224f": 1,
     "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2,
     "cdbc56e33db26826a6081ba21a8e2bde0358586fa3f14bce7fae483b071e8b6c": 1
-  },
-  "venues/kraken/src/account.rs": {
-    "297733c7eb42dfbca2cbf5172bc2d8d63e74f1cff9c223adc1a9bff1c7b526ed": 1
-  },
-  "venues/kraken/src/lib.rs": {
-    "4de7e8e27dd8db2b87ec30fe4c77928d419debb784462b2e420932a1076af845": 1,
-    "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2
-  },
-  "venues/kraken/src/spot/account.rs": {
-    "fa61c8e381d26f7e9dc72cec5abd5a874645bf5f1cec71af7ffa68e4babba0d6": 1
-  },
-  "venues/kraken/src/spot/mod.rs": {
-    "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 3,
-    "d1fb86f0d751998134c0de52dfcade47e3341e511b77d521ff9083aa447f7e21": 1
   },
   "venues/kucoin/src/lib.rs": {
     "2a89d00ef5f001595e92d20c064edaa82bab9edd9d95754da2d0cb7f382e624a": 1
@@ -146,11 +118,5 @@
     "22407a560a9b6955a6a74cff78bb148f107e9289c1550c83d749b48facdc8d3a": 2,
     "52155f5c065b519e8cceea36d068f2dc7c8729ffffb71ba4136c739dfd420344": 1,
     "e3f45941f6f918ffd8e24c8d3b84b5a4864310f29dcd5e237385c1366f68a826": 1
-  },
-  "venues/woo/src/account.rs": {
-    "e567217140b0ee574fed9b858562afae4ae28785801a5fdf52085f314cdb25d7": 1
-  },
-  "venues/woo/src/lib.rs": {
-    "5be5194a404687623724c0571afed56fb181da3f56559e564ec1280e6a66c9ed": 1
   }
 }

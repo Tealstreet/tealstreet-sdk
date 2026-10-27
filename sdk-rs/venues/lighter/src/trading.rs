@@ -1,16 +1,24 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
 use crate::{Lighter, Pending, sign};
+use safe_cex_engine::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact};
 use safe_cex_engine::model::*;
-use safe_cex_engine::request_context::Operation;
+use safe_cex_engine::request_context::plan::{CallAuth, SerialCall, SerialPolicy, Slot};
+use safe_cex_engine::request_context::{
+    Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
+};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
 use serde::Deserialize;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const TIER_MESSAGE: &str = "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.";
 const APPROVAL_MESSAGE: &str = "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.";
 const POSITION_READ_TIMEOUT_MS: f64 = 10_000.0;
+// Provisional: no recorded Lighter private tape measures the ACK-to-stream gap,
+// so the group proof bound matches POSITION_READ_TIMEOUT_MS; refine at live smoke.
+const GROUP_PROOF_BOUND_MS: u32 = 10_000;
+const GROUP_PENDING_MESSAGE: &str = "is awaiting confirmation of its grouped placement";
 const RATE_MESSAGE: &str = "Lighter rate limit is active; wait before retrying. Limits can apply to IP, account or transaction quota.";
 const MAX_CLIENT_INDEX: u64 = (1 << 48) - 1;
 
@@ -28,14 +36,23 @@ pub struct Trading {
     timer: Option<TimerId>,
     position_wait: Option<PositionWait>,
     retired_snapshot: Option<u64>,
+    retired_effects: Vec<Effect>,
     uncertain_settings: HashMap<String, u64>,
 }
 struct PositionWait {
     command: CommandId,
     serial: u64,
-    timer: TimerId,
+    confirmed: Option<bool>,
 }
 struct Job {
+    preflight: Preflight,
+    plan: Option<Plan>,
+    slot: Option<Slot>,
+    live: Option<Context>,
+    delay_ms: u32,
+    waiting_plan: bool,
+    condition: Option<safe_cex_engine::request_context::ConditionWait>,
+    effect: Option<Effect>,
     command: CommandId,
     steps: VecDeque<Step>,
     ids: Vec<String>,
@@ -45,6 +62,21 @@ struct Job {
     amend_filled: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// Every grouped-order leg this job prepared; held against cancel/amend.
+    group_legs: Vec<String>,
+    /// Legs of acknowledged groups that the stream or a snapshot must prove.
+    group_accepted: Vec<String>,
+    group_seen: HashSet<String>,
+    /// The plan is parked in a settle-only wait for group proof.
+    settled: bool,
+}
+impl Job {
+    /// Every acknowledged group leg has been seen by its own id.
+    fn group_proven(&self) -> bool {
+        self.group_accepted
+            .iter()
+            .all(|id| self.group_seen.contains(id))
+    }
 }
 enum Step {
     Position {
@@ -53,6 +85,11 @@ enum Step {
         requested: bool,
     },
     Place(Vec<Prepared>),
+    /// One create_grouped_orders transaction: parent, then SL, then TP.
+    Group {
+        grouping: u8,
+        orders: Vec<Prepared>,
+    },
     Cancel(Box<Order>),
     Setting {
         symbol: String,
@@ -72,7 +109,10 @@ pub enum Request {
 pub struct Submission {
     effect: Effect,
     count: usize,
+    /// A grouped placement is never resent, even on a nonce refusal.
+    grouped: bool,
 }
+#[derive(Clone)]
 enum Effect {
     Place,
     Cancel,
@@ -142,7 +182,16 @@ struct Integrator {
 }
 
 impl Lighter {
-    pub(crate) fn trade_order_observed(&mut self, id: &str, filled: f64, status: OrderStatus) {
+    /// An authoritative stream row. `client_index` is the row's own client order
+    /// index when present; only it can prove a grouped leg.
+    pub(crate) fn trade_order_observed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        client_index: Option<&str>,
+        filled: f64,
+        status: OrderStatus,
+    ) {
         for job in self
             .trading
             .active
@@ -155,6 +204,85 @@ impl Lighter {
                 job.amend_filled = true;
             }
         }
+        if let Some(client_index) = client_index {
+            self.trade_group_observed(cx, client_index);
+        }
+    }
+
+    /// Group legs are proven only in their own namespace: a row's client order
+    /// index. Native order indexes can coincide with our minted indexes.
+    pub(crate) fn trade_group_observed(&mut self, cx: &mut Cx<'_, Pending>, client_index: &str) {
+        for job in self
+            .trading
+            .active
+            .iter_mut()
+            .chain(self.trading.queue.iter_mut())
+        {
+            if job.group_legs.iter().any(|own| own == client_index) {
+                job.group_seen.insert(client_index.to_string());
+            }
+        }
+        if let Some(job) = self.trading.active.as_ref()
+            && job.settled
+            && job.group_proven()
+            && let Some(wait) = &job.condition
+        {
+            let _ = cx.release_condition_wait(wait);
+        }
+    }
+
+    /// The private stream is the only proof source; losing it while a group is
+    /// settling ends the wait now, and the ready handler reports Unknown.
+    pub(crate) fn trade_stream_lost(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(job) = self.trading.active.as_ref()
+            && job.settled
+            && let Some(wait) = &job.condition
+        {
+            let _ = cx.release_condition_wait(wait);
+        }
+    }
+
+    /// After every step: park in a settle-only wait until the stream proves
+    /// each acknowledged leg, or fail Unknown with every id.
+    fn trade_settle_group(&mut self, cx: &mut Cx<'_, Pending>) {
+        let job = self.trading.active.as_mut().unwrap();
+        let (Some(plan), Some(slot), Some(context)) =
+            (job.plan.clone(), job.slot.take(), job.live.take())
+        else {
+            self.trade_group_unconfirmed(cx);
+            return;
+        };
+        match cx.serial_plan_settle_wait(&plan, &slot, &context, GROUP_PROOF_BOUND_MS) {
+            Ok(wait) => {
+                job.condition = Some(wait);
+                job.waiting_plan = true;
+                job.settled = true;
+            }
+            Err(_) => {
+                job.slot = Some(slot);
+                job.live = Some(context);
+                self.trade_group_unconfirmed(cx);
+            }
+        }
+    }
+
+    /// Unknown with every accepted id kept and the plan's uncertainty inherited;
+    /// an orders refresh follows so the next complete snapshot reconciles. No replay.
+    fn trade_group_unconfirmed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(plan) = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.plan.clone())
+        {
+            let _ = cx.inherit_plan_uncertainty(&plan);
+        }
+        self.trading.next_nonce.invalidate();
+        self.refresh_orders(cx);
+        self.trade_finish(
+            cx,
+            uncertain("Lighter accepted the grouped order but the account stream did not confirm every leg; check open orders before retrying"),
+        );
     }
 
     pub(crate) fn trade_execution_observed(&mut self, id: &str, timestamp: f64) {
@@ -198,6 +326,13 @@ impl Lighter {
             Command::CancelOrders { command, ids } => {
                 let mut steps = VecDeque::new();
                 for id in ids {
+                    if self.group_pending(&id) {
+                        refuse(
+                            cx,
+                            not_sent(format!("Lighter order {id} {GROUP_PENDING_MESSAGE}")),
+                        );
+                        return;
+                    }
                     if id.parse::<u64>().is_err() {
                         refuse(
                             cx,
@@ -217,9 +352,9 @@ impl Lighter {
                 }
                 (command, steps)
             }
-            Command::CancelSymbolOrders { command, symbol } => (
-                command,
-                cx.store
+            Command::CancelSymbolOrders { command, symbol } => {
+                let orders: Vec<Order> = cx
+                    .store
                     .orders()
                     .iter()
                     .filter(|o| {
@@ -227,9 +362,25 @@ impl Lighter {
                             && matches!(o.status, OrderStatus::Open | OrderStatus::Creating)
                     })
                     .cloned()
-                    .map(|order| Step::Cancel(Box::new(order)))
-                    .collect(),
-            ),
+                    .collect();
+                if let Some(order) = orders.iter().find(|o| self.group_pending(&o.id)) {
+                    refuse(
+                        cx,
+                        not_sent(format!(
+                            "Lighter order {} {GROUP_PENDING_MESSAGE}",
+                            order.id
+                        )),
+                    );
+                    return;
+                }
+                (
+                    command,
+                    orders
+                        .into_iter()
+                        .map(|order| Step::Cancel(Box::new(order)))
+                        .collect(),
+                )
+            }
             Command::AmendOrder {
                 command,
                 id,
@@ -246,6 +397,13 @@ impl Lighter {
                     refuse(
                         cx,
                         not_sent("Lighter order already has an amendment pending"),
+                    );
+                    return;
+                }
+                if self.group_pending(&id) {
+                    refuse(
+                        cx,
+                        not_sent(format!("Lighter order {id} {GROUP_PENDING_MESSAGE}")),
                     );
                     return;
                 }
@@ -317,7 +475,7 @@ impl Lighter {
                 }]),
             ),
             Command::SetPositionMode {
-                command,
+                command: _,
                 hedged,
                 symbol: _,
             } => {
@@ -328,14 +486,56 @@ impl Lighter {
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.store.set_hedged(false);
-                    cx.done(command, "null".into());
+                    if let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
+                        purpose: PreflightPurpose::WriteAfterReads,
+                        read_credential: None,
+                        write_credential: self
+                            .account
+                            .identity
+                            .as_ref()
+                            .map(crate::primary_credential),
+                    }) {
+                        cx.store.set_hedged(false);
+                        let _ = cx.done_empty_plan(&preflight, "null".into());
+                    }
                 }
                 return;
             }
             _ => return,
         };
+        let group_legs: Vec<String> = steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::Group { orders, .. } => Some(orders.iter().map(|p| p.order.id.clone())),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
+            purpose: PreflightPurpose::WriteAfterReads,
+            read_credential: None,
+            write_credential: self
+                .account
+                .identity
+                .as_ref()
+                .map(crate::primary_credential),
+        }) else {
+            return;
+        };
+        let queued = self.trading.active.is_some() || !self.trading.queue.is_empty();
+        if queued && cx.park_preflight_for(&preflight, None).is_err() {
+            let _ = cx.fail_preflight(&preflight, "Lighter FIFO admission failed");
+            return;
+        }
         self.trading.queue.push_back(Job {
+            preflight,
+            plan: None,
+            slot: None,
+            live: None,
+            delay_ms: 0,
+            waiting_plan: false,
+            condition: None,
+            effect: None,
             command,
             steps,
             ids: vec![],
@@ -344,8 +544,23 @@ impl Lighter {
             amend,
             amend_filled: false,
             effective: false,
+            group_legs,
+            group_accepted: Vec::new(),
+            group_seen: HashSet::new(),
+            settled: false,
         });
-        self.trade_kick(cx);
+        if !queued {
+            self.trade_kick(cx);
+        }
+    }
+
+    /// A leg of a grouped placement whose job has not finished.
+    fn group_pending(&self, id: &str) -> bool {
+        self.trading
+            .active
+            .iter()
+            .chain(self.trading.queue.iter())
+            .any(|job| job.group_legs.iter().any(|leg| leg == id))
     }
 
     fn builder(&self) -> Option<sign::Builder> {
@@ -378,13 +593,28 @@ impl Lighter {
         let Some(job) = self.trading.active.as_ref() else {
             return;
         };
-        if job.steps.is_empty() {
-            let job = self.trading.active.take().unwrap();
-            cx.done(job.command, serde_json::to_string(&job.ids).unwrap());
-            self.trade_kick(cx);
+        if job.waiting_plan {
             return;
         }
-        if self.account.signer.is_none() {
+        if job.steps.is_empty() {
+            if !job.group_proven() {
+                self.trade_settle_group(cx);
+                return;
+            }
+            let job = self.trading.active.take().unwrap();
+            if let Some(plan) = job.plan {
+                if let (Some(slot), Some(context)) = (&job.slot, &job.live) {
+                    let _ = cx.finish_plan_call(&plan, slot, context);
+                }
+                let _ = cx.done_plan(&plan, serde_json::to_string(&job.ids).unwrap());
+            } else {
+                let _ =
+                    cx.done_empty_plan(&job.preflight, serde_json::to_string(&job.ids).unwrap());
+            }
+            self.trade_wake_next(cx);
+            return;
+        }
+        if self.account.identity.is_none() {
             self.trade_finish(
                 cx,
                 not_sent("Lighter signer unavailable; execution is disabled"),
@@ -430,8 +660,32 @@ impl Lighter {
                 self.trading.position_wait = Some(PositionWait {
                     command,
                     serial,
-                    timer: cx.set_timer(POSITION_READ_TIMEOUT_MS),
+                    confirmed: None,
                 });
+                let preflight = self.trading.active.as_ref().unwrap().preflight.clone();
+                let job = self.trading.active.as_mut().unwrap();
+                let result = if let Some(plan) = &job.plan {
+                    match (job.slot.take(), job.live.take()) {
+                        (Some(slot), Some(context)) => cx
+                            .serial_plan_condition_wait(
+                                plan,
+                                &slot,
+                                &context,
+                                serial_call(Operation::Mutation),
+                                Some(POSITION_READ_TIMEOUT_MS as u32),
+                            )
+                            .map(|wait| {
+                                job.condition = Some(wait);
+                                job.waiting_plan = true;
+                            }),
+                        _ => Err(safe_cex_engine::request_context::Error::State),
+                    }
+                } else {
+                    cx.park_preflight_for(&preflight, Some(POSITION_READ_TIMEOUT_MS as u32))
+                };
+                if let Err(error) = result {
+                    self.trade_finish(cx, error.venue_error());
+                }
             }
             return;
         }
@@ -453,12 +707,19 @@ impl Lighter {
             return;
         }
         if self.builder().is_some()
-            && job.steps.iter().any(|s| matches!(s, Step::Place(_)))
+            && job
+                .steps
+                .iter()
+                .any(|s| matches!(s, Step::Place(_) | Step::Group { .. }))
             && job.builder_stage < 2
         {
             if job.builder_stage == 0 {
                 if !self.refresh_limits(cx) {
                     self.trading.waiting_limits = true;
+                    let preflight = self.trading.active.as_ref().unwrap().preflight.clone();
+                    if let Err(error) = cx.park_preflight_for(&preflight, None) {
+                        self.trade_finish(cx, error.venue_error());
+                    }
                     return;
                 }
                 if self.limits_standard() {
@@ -471,12 +732,10 @@ impl Lighter {
             }
             let account = self.account.account_index.unwrap();
             self.trading.inflight = true;
-            cx.request(
-                Method::Get,
+            self.trade_read(
+                cx,
                 format!("{}/api/v1/account?by=index&value={account}", self.host()),
-                vec![],
-                None,
-                Pending::Trade(Request::Approval),
+                Request::Approval,
             );
             return;
         }
@@ -485,15 +744,13 @@ impl Lighter {
             let key = self.account.api_key_index.unwrap();
             self.trading.inflight = true;
             self.trading.nonce_ticket = self.trading.next_nonce.ticket();
-            cx.request(
-                Method::Get,
+            self.trade_read(
+                cx,
                 format!(
                     "{}/api/v1/nextNonce?account_index={account}&api_key_index={key}",
                     self.host()
                 ),
-                vec![],
-                None,
-                Pending::Trade(Request::Nonce),
+                Request::Nonce,
             );
             return;
         }
@@ -506,34 +763,57 @@ impl Lighter {
             }
         };
         let count = txs.len();
-        let mut signed = Vec::with_capacity(count);
+        let intent = match &effect {
+            Effect::Place => Some(safe_cex_engine::classify::Intent::Place),
+            Effect::Setting { .. } => Some(safe_cex_engine::classify::Intent::Setting),
+            Effect::Cancel => None,
+        };
+        let Some(context) = self.trade_context(cx, Operation::Mutation, intent) else {
+            return;
+        };
+        let mut reserved = Vec::with_capacity(count);
         for tx in txs {
             let Some(nonce) = self.trading.next_nonce.take() else {
+                self.trading.next_nonce.invalidate();
                 self.trade_finish(cx, not_sent("Lighter transaction nonce exhausted"));
                 return;
             };
-            match self
-                .account
-                .signer
-                .as_ref()
-                .unwrap()
-                .sign(&tx, nonce, cx.now as u64, |bytes| {
-                    cx.fill_signing_entropy(bytes).map_err(|_| ())
-                }) {
-                Ok(tx) => signed.push(tx),
-                Err(error) => {
-                    self.trading.next_nonce.invalidate();
-                    self.trade_finish(cx, not_sent(error));
-                    return;
-                }
-            }
+            reserved.push((tx, nonce));
         }
-        let (path, body) = sign::send_body(&signed);
+        let recipe = (|| {
+            let account = sign::Account::new(
+                self.chain_id(),
+                self.account
+                    .account_index
+                    .ok_or("Lighter account is not loaded yet")?,
+                self.account
+                    .api_key_index
+                    .ok_or("Invalid Lighter API key index")?,
+            )?;
+            sign::TxRecipe::new(
+                self.account
+                    .identity
+                    .clone()
+                    .ok_or("Lighter signer unavailable")?,
+                account,
+                reserved,
+            )
+        })();
+        let recipe = match recipe {
+            Ok(recipe) => recipe,
+            Err(error) => {
+                self.trading.next_nonce.invalidate();
+                self.trade_finish(cx, not_sent(error));
+                return;
+            }
+        };
+        let path = if count == 1 { "sendTx" } else { "sendTxBatch" };
         if let Effect::Setting { symbol, .. } = &effect {
             self.account_setting_write(symbol);
         }
         let job = self.trading.active.as_ref().unwrap();
-        if let Some(Step::Place(orders)) = job.steps.front() {
+        let grouped = matches!(job.steps.front(), Some(Step::Group { .. }));
+        if let Some(Step::Place(orders) | Step::Group { orders, .. }) = job.steps.front() {
             cx.command_progress(
                 job.command,
                 orders
@@ -546,14 +826,24 @@ impl Lighter {
                     .collect(),
             );
         }
+        self.trading.active.as_mut().unwrap().effect = Some(effect.clone());
         self.trading.inflight = true;
-        cx.request(
+        if let Err((_, error)) = cx.request_signed_managed(
+            context,
+            None,
             Method::Post,
             format!("{}/api/v1/{path}", self.host()),
-            vec![("Content-Type", "application/x-www-form-urlencoded".into())],
-            Some(body),
-            Pending::Trade(Request::Submit(Submission { effect, count })),
-        );
+            None,
+            Box::new(sign::FormRecipe(recipe)),
+            Pending::Trade(Request::Submit(Submission {
+                effect,
+                count,
+                grouped,
+            })),
+        ) {
+            self.trading.inflight = false;
+            self.trade_finish(cx, error.venue_error());
+        }
     }
 
     fn build_submission(
@@ -575,6 +865,14 @@ impl Lighter {
                     Effect::Place,
                 ))
             }
+            Step::Group { grouping, orders } => Ok((
+                vec![sign::Transaction::Grouped {
+                    grouping: *grouping,
+                    orders: orders.iter().map(|p| p.native.clone()).collect(),
+                    builder: self.builder(),
+                }],
+                Effect::Place,
+            )),
             Step::Cancel(order) => Ok((
                 vec![sign::Transaction::Cancel {
                     market_id: market_id(cx, &order.symbol)?,
@@ -648,6 +946,30 @@ impl Lighter {
         request: Request,
         response: Response<'_>,
     ) {
+        let Some(context) = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.live.clone())
+        else {
+            return;
+        };
+        let valid = if let Some(plan) = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.plan.as_ref())
+        {
+            cx.validate_plan_delivery(plan, &context)
+        } else {
+            cx.validate_preflight_delivery(
+                &self.trading.active.as_ref().unwrap().preflight,
+                &context,
+            )
+        };
+        if valid.is_err() {
+            return;
+        }
         self.trading.inflight = false;
         if matches!(response.status, 405 | 429) && !matches!(&request, Request::Submit(_)) {
             let parsed = serde_json::from_str::<Reply>(response.body).ok();
@@ -697,6 +1019,7 @@ impl Lighter {
                     }
                 }
                 self.trading.active.as_mut().unwrap().builder_stage = 2;
+                self.trade_read_finished(cx, &context);
                 self.trade_kick(cx);
             }
             Request::Nonce => {
@@ -718,6 +1041,7 @@ impl Lighter {
                                 not_sent("Lighter returned an invalid transaction nonce"),
                             );
                         } else {
+                            self.trade_read_finished(cx, &context);
                             self.trade_kick(cx);
                         }
                     }
@@ -731,6 +1055,7 @@ impl Lighter {
                 let reply = match parsed {
                     Ok(reply) => reply,
                     Err(_) => {
+                        let _ = cx.http_write_unproven(&context, UNCERTAIN_RESULT);
                         self.submission_uncertain(cx, &submission.effect);
                         let error = if matches!(response.status, 405 | 429) {
                             uncertain(format!("{UNCERTAIN_RESULT}; {RATE_MESSAGE}"))
@@ -743,14 +1068,20 @@ impl Lighter {
                     }
                 };
                 let code = reply.code.as_ref().and_then(Number::integer);
-                if code == Some(21104)
+                if submission.count == 1
+                    && !submission.grouped
+                    && code == Some(21104)
                     && response.status < 500
                     && !matches!(response.status, 405 | 429)
                     && !self.trading.active.as_ref().unwrap().retried_nonce
                 {
                     self.trading.active.as_mut().unwrap().retried_nonce = true;
                     self.trading.next_nonce.invalidate();
-                    self.trading.timer = Some(cx.set_timer(150.0));
+                    if !self.trade_refusal(cx, &context, code.unwrap(), &reply.message) {
+                        return;
+                    }
+                    self.trading.active.as_mut().unwrap().delay_ms = 150;
+                    self.trade_kick(cx);
                     return;
                 }
                 let hashes = reply.tx_hash.as_ref().or(reply.tx_hash_camel.as_ref());
@@ -763,6 +1094,7 @@ impl Lighter {
                     self.trading.next_nonce.invalidate();
                     // The sequencer may still accept individual transactions of a refused batch.
                     let unknown = response.status >= 500
+                        || (submission.grouped && (response.status == 408 || code == Some(21104)))
                         || code.is_none()
                         || code == Some(200)
                         || submission.count > 1
@@ -820,7 +1152,32 @@ impl Lighter {
                     } else {
                         error
                     };
+                    if unknown {
+                        let _ = cx.http_write_unproven(&context, &error.message);
+                    } else if !self.trade_refusal(cx, &context, code.unwrap(), &error.message) {
+                        return;
+                    }
                     self.trade_finish(cx, error);
+                    return;
+                }
+                let ids: Vec<String> = match self.trading.active.as_ref().unwrap().steps.front() {
+                    Some(Step::Place(orders) | Step::Group { orders, .. }) => {
+                        orders.iter().map(|p| p.order.id.clone()).collect()
+                    }
+                    _ => Vec::new(),
+                };
+                self.trading
+                    .active
+                    .as_mut()
+                    .unwrap()
+                    .ids
+                    .extend(ids.iter().cloned());
+                if cx
+                    .http_write_fact(&context, WriteFact::Accepted { order_ids: ids }, None)
+                    .is_err()
+                    || cx.validate_http_write_effects(&context).is_err()
+                {
+                    self.trade_finish(cx, uncertain("Invalid Lighter write evidence"));
                     return;
                 }
                 let step = self
@@ -831,18 +1188,17 @@ impl Lighter {
                     .steps
                     .pop_front()
                     .unwrap();
+                if let Step::Group { orders, .. } = &step {
+                    let job = self.trading.active.as_mut().unwrap();
+                    job.group_accepted
+                        .extend(orders.iter().map(|p| p.order.id.clone()));
+                }
                 match step {
                     Step::Position { .. } => unreachable!(),
-                    Step::Place(orders) => {
+                    Step::Place(orders) | Step::Group { orders, .. } => {
                         for mut p in orders {
                             p.order.last_update = cx.now;
                             self.record_placement(p.order.clone());
-                            self.trading
-                                .active
-                                .as_mut()
-                                .unwrap()
-                                .ids
-                                .push(p.order.id.clone());
                             // A live terminal event can overtake the HTTP acknowledgement.
                             if !self.account_order_terminal(&p.order.id)
                                 && !cx.store.order(&p.order.id).is_some_and(|o| {
@@ -895,8 +1251,8 @@ impl Lighter {
                     }
                 }
                 let job = self.trading.active.as_mut().unwrap();
-                job.retried_nonce = false;
                 job.effective = true;
+                job.effect = None;
                 self.refresh_orders(cx);
                 if self
                     .trading
@@ -904,7 +1260,8 @@ impl Lighter {
                     .as_ref()
                     .is_some_and(|job| !job.steps.is_empty())
                 {
-                    self.trading.timer = Some(cx.set_timer(100.0));
+                    self.trading.active.as_mut().unwrap().delay_ms = 100;
+                    self.trade_kick(cx);
                 } else {
                     self.trade_kick(cx);
                 }
@@ -913,11 +1270,13 @@ impl Lighter {
     }
 
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        if self.trading.active.is_none() {
+            return;
+        }
         self.trading.inflight = false;
         match request {
             Request::Approval => {
-                self.trading.active.as_mut().unwrap().builder_stage = 2;
-                self.trade_kick(cx);
+                self.trade_finish(cx, not_sent(error).kind(ErrorKind::Network));
             }
             Request::Nonce => self.trade_finish(cx, not_sent(error).kind(ErrorKind::Network)),
             Request::Submit(s) => {
@@ -943,16 +1302,11 @@ impl Lighter {
     }
 
     pub(crate) fn trade_limits_ready(&mut self, cx: &mut Cx<'_, Pending>) {
-        if std::mem::take(&mut self.trading.waiting_limits) {
-            if self.limits_standard() {
-                self.trade_finish(cx, not_sent(TIER_MESSAGE));
-                return;
-            }
-            if let Some(job) = self.trading.active.as_mut() {
-                job.builder_stage = 1;
-            }
+        if self.trading.waiting_limits
+            && let Some(job) = &self.trading.active
+        {
+            let _ = cx.request_preflight_ready(&job.preflight);
         }
-        self.trade_kick(cx);
     }
 
     pub(crate) fn trade_position_symbol(&self, serial: u64) -> Option<&String> {
@@ -978,39 +1332,31 @@ impl Lighter {
         confirmed: bool,
     ) {
         if self.trading.position_wait.is_none() {
-            self.trade_kick(cx);
             return;
         }
         if self.trade_position_symbol(serial).is_none() {
             return;
         }
-        let wait = self.trading.position_wait.take().unwrap();
-        cx.clear_timer(wait.timer);
-        if !confirmed {
-            self.trade_finish(cx, not_sent("Lighter account snapshot could not confirm reduce-only exposure; order was not sent"));
-            return;
+        if let Some(wait) = self.trading.position_wait.as_mut() {
+            wait.confirmed = Some(confirmed);
         }
-        let job = self.trading.active.as_ref().unwrap();
-        let Some(Step::Position { symbol, side, .. }) = job.steps.front() else {
-            unreachable!()
-        };
-        if !has_position(cx, symbol, *side) {
-            self.trade_finish(
-                cx,
-                not_sent("No open position available for this Lighter reduce-only limit order"),
-            );
-            return;
+        if let Some(job) = &self.trading.active {
+            if let Some(wait) = &job.condition {
+                let _ = cx.release_condition_wait(wait);
+            } else {
+                let _ = cx.request_preflight_ready(&job.preflight);
+            }
         }
-        self.trading.active.as_mut().unwrap().steps.pop_front();
-        self.trade_kick(cx);
     }
     fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, error: impl Into<VenueError>) {
         if let Some(wait) = self.trading.position_wait.take() {
-            cx.clear_timer(wait.timer);
             self.trading.retired_snapshot = Some(wait.serial);
         }
         self.trading.waiting_limits = false;
         if let Some(job) = self.trading.active.take() {
+            if job.effect.is_some() {
+                self.trading.next_nonce.invalidate();
+            }
             let mut error = error.into();
             if !job.ids.is_empty() {
                 let indexes = job.ids.join(",");
@@ -1024,26 +1370,22 @@ impl Lighter {
             {
                 error.outcome = None;
             }
-            cx.fail(job.command, error);
+            if let Some(plan) = &job.plan {
+                if let (Some(slot), Some(context)) = (&job.slot, &job.live) {
+                    let _ = cx.finish_plan_call(plan, slot, context);
+                }
+                let _ = cx.fail_plan(plan, error);
+            } else {
+                if let Some(context) = &job.live {
+                    let _ = cx.finish_http_context(context);
+                }
+                let _ = cx.fail_preflight(&job.preflight, error);
+            }
         }
-        self.trade_kick(cx);
+        self.trade_wake_next(cx);
     }
 
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self
-            .trading
-            .position_wait
-            .as_ref()
-            .is_some_and(|w| w.timer == timer)
-        {
-            let wait = self.trading.position_wait.take().unwrap();
-            self.trading.retired_snapshot = Some(wait.serial);
-            self.trade_finish(
-                cx,
-                not_sent("Timed out confirming Lighter reduce-only exposure; order was not sent"),
-            );
-            return true;
-        }
         if self.trading.timer != Some(timer) {
             return false;
         }
@@ -1103,6 +1445,13 @@ impl Lighter {
                     requested: false,
                 });
             }
+            if opts.kind == OrderType::Limit
+                && !opts.reduce_only.unwrap_or(false)
+                && (opts.stop_loss.is_some() || opts.take_profit.is_some())
+            {
+                steps.push_back(self.prepare_group(cx, &opts)?);
+                continue;
+            }
             let bracket = matches!(opts.kind, OrderType::Limit | OrderType::Market)
                 && !opts.reduce_only.unwrap_or(false);
             let prepared = self.prepare_one(cx, &opts)?;
@@ -1139,6 +1488,50 @@ impl Lighter {
             steps.push_back(Step::Place(batched));
         }
         Ok(steps)
+    }
+
+    /// TS d94e9d744f1: a limit entry with protections is one grouped transaction,
+    /// OTO (1) with one child or OTOCO (3) with both, parent then SL then TP.
+    fn prepare_group(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Step, String> {
+        const SPLIT: &str =
+            "Lighter attached TP/SL limit orders cannot be split into multiple native lots.";
+        let mut orders = self.prepare_one(cx, opts)?;
+        if orders.len() != 1 {
+            return Err(SPLIT.into());
+        }
+        for (kind, trigger) in [
+            (OrderType::StopLoss, opts.stop_loss),
+            (OrderType::TakeProfit, opts.take_profit),
+        ] {
+            let Some(trigger) = trigger else {
+                continue;
+            };
+            let mut child = opts.clone();
+            child.kind = kind;
+            child.side = opts.side.opposite();
+            child.price = Some(trigger);
+            child.trigger_price = Some(trigger);
+            child.stop_loss = None;
+            child.take_profit = None;
+            child.reduce_only = Some(true);
+            child.time_in_force = Some(TimeInForce::ImmediateOrCancel);
+            let mut leg = self.prepare_one(cx, &child)?;
+            if leg.len() != 1 {
+                return Err(SPLIT.into());
+            }
+            let mut leg = leg.pop().unwrap();
+            // Children close the filled parent: native amount zero.
+            leg.native.amount = 0;
+            orders.push(leg);
+        }
+        Ok(Step::Group {
+            grouping: if orders.len() == 3 { 3 } else { 1 },
+            orders,
+        })
     }
 
     fn prepare_one(
@@ -1400,6 +1793,380 @@ fn uncertain(message: impl Into<String>) -> VenueError {
 /// A native pre-I/O refusal settles only the genuine Mutation entry.
 fn refuse(cx: &mut Cx<'_, Pending>, error: VenueError) {
     cx.refuse_command(Operation::Mutation, error);
+}
+
+pub(crate) fn serial_call(operation: Operation) -> SerialCall {
+    SerialCall {
+        auth: CallAuth::Preflight,
+        operation,
+        timeout_ms: 20_000,
+        attempts: 1,
+        pacing: None,
+    }
+}
+impl Lighter {
+    fn trade_context(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        operation: Operation,
+        intent: Option<safe_cex_engine::classify::Intent>,
+    ) -> Option<Context> {
+        let job = self.trading.active.as_mut()?;
+        let result = if let Some(plan) = &job.plan {
+            if job.live.is_some() {
+                let context = job.live.take().unwrap();
+                let slot = job.slot.take().unwrap();
+                if job.delay_ms > 0 {
+                    let delay = std::mem::take(&mut job.delay_ms);
+                    match cx.continue_serial_plan_after(
+                        plan,
+                        &slot,
+                        &context,
+                        delay,
+                        serial_call(operation),
+                    ) {
+                        Ok(()) => {
+                            job.waiting_plan = true;
+                            self.trading.inflight = false;
+                            return None;
+                        }
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    cx.continue_serial_plan(plan, &slot, &context, serial_call(operation))
+                        .and_then(|slot| {
+                            let context = Self::trade_plan_context(cx, plan, &slot, intent)?;
+                            job.slot = Some(slot);
+                            Ok(context)
+                        })
+                }
+            } else if let Some(slot) = &job.slot {
+                Self::trade_plan_context(cx, plan, slot, intent)
+            } else {
+                return None;
+            }
+        } else if operation == Operation::Read {
+            cx.preflight_read_context(
+                &job.preflight,
+                Policy {
+                    operation,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+                safe_cex_engine::request_context::plan::CallTerms {
+                    timeout_ms: 20_000,
+                    attempts: 1,
+                    wait_ms: 0,
+                    retry_window: safe_cex_engine::request_context::plan::RetryWindow::FreshAttempt,
+                },
+            )
+        } else {
+            let credential = crate::primary_credential(self.account.identity.as_ref()?);
+            cx.admit_serial_plan(
+                &job.preflight,
+                serial_call(operation),
+                SerialPolicy {
+                    credential: Some(credential),
+                    pacing: None,
+                    refusals_complete: true,
+                },
+            )
+            .and_then(|(plan, slot)| {
+                let context = Self::trade_plan_context(cx, &plan, &slot, intent)?;
+                job.plan = Some(plan);
+                job.slot = Some(slot);
+                Ok(context)
+            })
+        };
+        match result {
+            Ok(context) => {
+                self.trading.active.as_mut().unwrap().live = Some(context.clone());
+                Some(context)
+            }
+            Err(error) => {
+                self.trade_finish(cx, error.venue_error());
+                None
+            }
+        }
+    }
+    fn trade_plan_context(
+        cx: &mut Cx<'_, Pending>,
+        plan: &Plan,
+        slot: &Slot,
+        intent: Option<safe_cex_engine::classify::Intent>,
+    ) -> Result<Context, safe_cex_engine::request_context::Error> {
+        match intent {
+            Some(intent) => cx.plan_leg_context_with_intent(plan, slot, intent),
+            None => cx.plan_leg_context(plan, slot),
+        }
+    }
+    fn trade_read(&mut self, cx: &mut Cx<'_, Pending>, url: String, request: Request) {
+        let Some(context) = self.trade_context(cx, Operation::Read, None) else {
+            return;
+        };
+        self.trading.inflight = true;
+        if let Err((_, error)) = cx.request_managed(
+            context,
+            None,
+            Method::Get,
+            url,
+            None,
+            Pending::Trade(request),
+        ) {
+            self.trading.inflight = false;
+            self.trade_finish(cx, error.venue_error());
+        }
+    }
+    fn trade_read_finished(&mut self, cx: &mut Cx<'_, Pending>, context: &Context) {
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| job.plan.is_none())
+        {
+            let preflight = &self.trading.active.as_ref().unwrap().preflight;
+            if let Err(error) = cx.finish_preflight_call(preflight, context) {
+                self.trade_finish(cx, error.venue_error());
+                return;
+            }
+            self.trading.active.as_mut().unwrap().live = None;
+        }
+    }
+    fn trade_refusal(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        context: &Context,
+        code: u64,
+        message: &str,
+    ) -> bool {
+        match Self::record_refusal(cx, context, code, message) {
+            Ok(()) => true,
+            Err(error) => {
+                self.trade_finish(cx, error.venue_error());
+                false
+            }
+        }
+    }
+
+    pub(crate) fn record_refusal(
+        cx: &mut Cx<'_, Pending>,
+        context: &Context,
+        code: u64,
+        message: &str,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        let table = CodeTable {
+            rows: &[Row {
+                key: Key::Range(0, i64::MAX),
+                verdict: Verdict::Refused(ErrorKind::Rejected),
+                only: None,
+            }],
+            success: &[],
+            status: &[],
+            unlisted: Verdict::Unknown(None),
+        };
+        let native = Native {
+            code: NativeCode::Int(code as i64),
+            message,
+        };
+        cx.classify_write(context, &table, Some(&native), message)
+            .and_then(|fact| {
+                cx.http_write_fact(
+                    context,
+                    WriteFact::Failed {
+                        fact,
+                        known_effects: false,
+                    },
+                    None,
+                )
+            })
+            .map(|_| ())
+    }
+
+    fn trade_wake_next(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(job) = self.trading.queue.front() {
+            let _ = cx.request_preflight_ready(&job.preflight);
+        }
+    }
+    pub(crate) fn trade_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &Preflight,
+    ) {
+        self.settle_retired_trades(cx);
+        if self.trading.active.is_none() {
+            if !self
+                .trading
+                .queue
+                .front()
+                .is_some_and(|job| job.preflight.owner() == preflight.owner())
+            {
+                let _ = cx.park_preflight_for(preflight, None);
+                return;
+            }
+            self.trading.active = self.trading.queue.pop_front();
+        }
+        if !self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| job.preflight.owner() == preflight.owner())
+        {
+            let _ = cx.park_preflight_for(preflight, None);
+            return;
+        }
+        if std::mem::take(&mut self.trading.waiting_limits) {
+            if self.limits_standard() {
+                self.trade_finish(cx, not_sent(TIER_MESSAGE));
+                return;
+            }
+            self.trading.active.as_mut().unwrap().builder_stage = 1;
+        }
+        if let Some(wait) = self.trading.position_wait.take()
+            && wait.confirmed != Some(true)
+        {
+            self.trade_finish(cx, not_sent("Lighter account snapshot could not confirm reduce-only exposure; order was not sent"));
+            return;
+        }
+        self.trade_kick(cx);
+    }
+    pub(crate) fn trade_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
+        self.settle_retired_trades(cx);
+        let Some(job) = self.trading.active.as_mut().filter(|job| {
+            job.plan
+                .as_ref()
+                .is_some_and(|own| own.owner() == plan.owner())
+        }) else {
+            return;
+        };
+        if job.settled {
+            // A released settled Plan has no bound left: every path seals it.
+            job.condition = None;
+            job.waiting_plan = false;
+            if !job.group_proven() {
+                self.trade_group_unconfirmed(cx);
+                return;
+            }
+            let job = self.trading.active.take().unwrap();
+            let plan = job.plan.clone().unwrap();
+            if cx
+                .done_plan(&plan, serde_json::to_string(&job.ids).unwrap())
+                .is_err()
+            {
+                self.trading.active = Some(job);
+                self.trade_group_unconfirmed(cx);
+                return;
+            }
+            self.trade_wake_next(cx);
+            return;
+        }
+        job.slot = cx
+            .plan_slots(plan)
+            .ok()
+            .and_then(|slots| slots.into_iter().next());
+        job.waiting_plan = false;
+        job.condition = None;
+        if let Some(wait) = self.trading.position_wait.take()
+            && wait.confirmed != Some(true)
+        {
+            self.trade_finish(cx, not_sent("Lighter account snapshot could not confirm reduce-only exposure; order was not sent"));
+            return;
+        }
+        self.trade_kick(cx);
+    }
+}
+
+impl Lighter {
+    pub(crate) fn trade_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<Preflight> {
+        self.trading
+            .queue
+            .retain(|job| !owner.matches_preflight(&job.preflight));
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| owner.matches_preflight(&job.preflight))
+        {
+            let job = self.trading.active.take().unwrap();
+            if let Some(effect) = job.effect {
+                self.trading.retired_effects.push(effect);
+            }
+            self.trading.inflight = false;
+            self.trading.waiting_limits = false;
+            self.trading.position_wait = None;
+            return self.trading.queue.front().map(|job| job.preflight.clone());
+        }
+        None
+    }
+    pub(crate) fn restore_retired_trades(&mut self) -> bool {
+        let effects = std::mem::take(&mut self.trading.retired_effects);
+        let refresh = !effects.is_empty();
+        for effect in effects {
+            self.trading.next_nonce.invalidate();
+            if let Effect::Setting { symbol, .. } = effect {
+                self.account_setting_write(&symbol);
+                self.trading
+                    .uncertain_settings
+                    .insert(symbol.clone(), self.account_setting_epoch(&symbol));
+            }
+        }
+        refresh
+    }
+    pub(crate) fn settle_retired_trades(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.restore_retired_trades() {
+            self.refresh_account(cx);
+            self.refresh_orders(cx);
+        }
+    }
+    pub(crate) fn trade_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        if self.trading.active.is_none() {
+            return;
+        }
+        self.trading.inflight = false;
+        if let Request::Submit(submission) = request
+            && error.outcome != Some(Outcome::NotSent)
+        {
+            self.submission_uncertain(cx, &submission.effect);
+        }
+        self.trade_finish(cx, error);
+    }
+}
+
+impl Lighter {
+    pub(crate) fn trade_condition_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::ConditionOwner,
+        error: VenueError,
+    ) {
+        let matches = self.trading.active.as_ref().is_some_and(|job| match owner {
+            safe_cex_engine::request_context::ConditionOwner::Preflight(preflight) => {
+                preflight.owner() == job.preflight.owner()
+            }
+            safe_cex_engine::request_context::ConditionOwner::Plan(plan) => job
+                .plan
+                .as_ref()
+                .is_some_and(|own| own.owner() == plan.owner()),
+        });
+        if !matches {
+            return;
+        }
+        if self.trading.active.as_ref().is_some_and(|job| job.settled) {
+            self.trading.active.as_mut().unwrap().condition = None;
+            self.trade_group_unconfirmed(cx);
+        } else {
+            self.trade_finish(cx, error);
+        }
+    }
 }
 
 #[cfg(test)]

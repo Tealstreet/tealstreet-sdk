@@ -167,6 +167,8 @@ pub struct AccountState {
     orders: Option<OrdersJoin>,
     orders_refresh_timer: Option<TimerId>,
     orders_stale: bool,
+    /// A reconcile asked while a snapshot was in flight: read again once it settles.
+    orders_owed: bool,
     last_orders_retry_at: f64,
     logged_balance: bool,
     wallet_assets: Option<Vec<WalletAsset>>,
@@ -447,6 +449,17 @@ impl BinanceFutures {
                 version: self.account.account_version,
             }),
         );
+    }
+
+    /// Fresh open-orders read after an uncertain placement. Joins an in-flight
+    /// snapshot by owing a new one behind it, since that read predates the mark;
+    /// a re-ask (no new uncertain write) joins without owing another.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.orders.is_some() {
+            self.account.orders_owed |= !cx.reconcile_reask();
+        } else {
+            self.fetch_orders(cx);
+        }
     }
 
     pub(crate) fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1336,6 +1349,13 @@ impl BinanceFutures {
             return;
         }
         let join = self.account.orders.take().expect("checked above");
+        self.settle_orders(cx, join);
+        if std::mem::take(&mut self.account.orders_owed) {
+            self.fetch_orders(cx);
+        }
+    }
+
+    fn settle_orders(&mut self, cx: &mut Cx<'_, Pending>, join: OrdersJoin) {
         if join.failed {
             self.account.orders_stale = true;
             return;
@@ -1409,6 +1429,7 @@ impl BinanceFutures {
                 return;
             }
         }
+        let clean = join.skipped.rejected() == 0;
         if !cx
             .store
             .commit_orders_snapshot([join.token], |current_rows| {
@@ -1473,6 +1494,11 @@ impl BinanceFutures {
         {
             self.account.orders_stale = true;
             self.schedule_orders_refresh(cx);
+        } else if clean && !(self.account.orders_owed && !(self.is_spot() || self.is_inverse())) {
+            // Published and fully mapped: this read may resolve an uncertain placement.
+            // Each half of a two-read census pins its own read token, so one owed a
+            // successor may have begun before the write and leaves release to it.
+            cx.orders_reconciled(None);
         }
     }
 
@@ -1580,6 +1606,7 @@ impl BinanceFutures {
         let mut balance = Balance::default();
         let mut details = Vec::new();
         let mut coins = Vec::new();
+        let mut currencies = Vec::new();
         for asset in assets {
             let wallet = asset.wallet;
             let available = asset.available;
@@ -1629,6 +1656,16 @@ impl BinanceFutures {
                             .map_or(0.0, |coin| coin.notional)
                     },
                 });
+                // Coin units, as TS's per-coin `currencies`; inverse markets read their margin coin.
+                currencies.push(CurrencyBalance {
+                    currency: asset.asset.to_string(),
+                    balance: Balance {
+                        total: wallet,
+                        free: available,
+                        used: initial,
+                        upnl: unrealized,
+                    },
+                });
             }
             if wallet > 0.0 {
                 details.push(format!("{}({wallet} @ {price})", asset.asset));
@@ -1636,6 +1673,8 @@ impl BinanceFutures {
         }
         if self.is_inverse() {
             cx.store.set_coin_balances(coins);
+            currencies.sort_by(|a: &CurrencyBalance, b| a.currency.cmp(&b.currency));
+            cx.store.set_currency_balances(currencies);
         }
         self.note_valuation_wait(cx, missing_price, zero_valued);
         if missing_price {

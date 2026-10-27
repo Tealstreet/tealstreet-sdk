@@ -603,7 +603,32 @@ impl<P> Cx<'_, P> {
         };
         // After admission, so a refused binding fails an owning Plan like any
         // other issue refusal.
-        let resolved = self.resolve_bearer(&context, bearer);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let forbids_recipe = self.io.core.request_contexts.session_call(context.owner())
+            && !matches!(&recipe, ManagedRecipe::Unsigned(_));
+        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+        let forbids_recipe = false;
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let keyless_owner = context.owner();
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let wire = if let ManagedRecipe::Unsigned(headers) = &recipe {
+            self.io.core.request_contexts.prepare_keyless_wire(
+                &context,
+                method,
+                &url,
+                headers,
+                body.as_deref(),
+            )
+        } else {
+            Ok(None)
+        };
+        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+        let wire: Result<Option<[u8; 32]>, Error> = Ok(None);
+        let resolved = match &wire {
+            Err(error) => Err(*error),
+            Ok(_) if forbids_recipe => Err(Error::Invalid),
+            Ok(_) => self.resolve_bearer(&context, bearer),
+        };
         let generation = resolved.as_ref().ok().copied().flatten();
         // A group claims its members together, and that claim checks no
         // member's Bearer (R11, deferred to its first consumer), so a
@@ -622,6 +647,25 @@ impl<P> Cx<'_, P> {
         let refusal: Option<&'static str> = None;
         #[cfg(not(feature = "session-bearer"))]
         let refusal = bearer.is_some().then_some(SESSION_BEARER_DISABLED);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let refusal = refusal.or_else(|| {
+            if forbids_recipe {
+                Some("Keyless Session serial calls cannot sign")
+            } else if wire.is_err() {
+                Some("Keyless serial resend changed its request")
+            } else if self
+                .io
+                .core
+                .request_contexts
+                .keyless_session(context.owner())
+                .is_some()
+                && resolved.is_err()
+            {
+                Some("Keyless serial call requires its admitted Session")
+            } else {
+                None
+            }
+        });
         let result = match resolved {
             Ok(_) if refusal.is_some() => Err((pending, Error::Invalid)),
             Ok(bearer) => self.queue_managed_admitted(
@@ -637,6 +681,15 @@ impl<P> Cx<'_, P> {
             ),
             Err(error) => Err((pending, error)),
         };
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        if result.is_ok()
+            && let Ok(Some(fingerprint)) = wire
+        {
+            self.io
+                .core
+                .request_contexts
+                .commit_keyless_wire(keyless_owner, fingerprint);
+        }
         #[cfg(feature = "http-plans")]
         if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
             self.fail_owned_admission(admission, *error, refusal);
@@ -666,6 +719,15 @@ impl<P> Cx<'_, P> {
         bearer: Option<&Session>,
     ) -> Result<Option<u64>, Error> {
         let registry = &self.io.core.request_contexts;
+        #[cfg(feature = "serial-plans")]
+        if let Some(root) =
+            registry.validate_keyless_session(context.owner(), &self.io.core.identities)?
+        {
+            let actual = bearer.ok_or(Error::Revoked)?;
+            if registry.validate_session(actual)? != root {
+                return Err(Error::Revoked);
+            }
+        }
         let generation = match bearer {
             Some(session) => Some(registry.validate_session(session)?),
             None => match registry.leg_bearer(context) {
@@ -751,6 +813,20 @@ impl<P> Cx<'_, P> {
             Err(error) => return Err((pending, error)),
         };
         if let Err(error) = self.io.core.http_pacing.check(context.pacing(), self.now) {
+            return Err((pending, error));
+        }
+        #[cfg(feature = "release-domains")]
+        if let Err(error) = self
+            .io
+            .core
+            .domain_admits(context.operation(), context.pacing(), {
+                #[cfg(feature = "http-mutation-barriers")]
+                let grouped = group.is_some();
+                #[cfg(not(feature = "http-mutation-barriers"))]
+                let grouped = false;
+                grouped
+            })
+        {
             return Err((pending, error));
         }
         #[cfg(feature = "dispatch-nonce")]
@@ -958,6 +1034,12 @@ impl<P> Cx<'_, P> {
         )
         .expect("validated physical HTTP window");
         let preparation = lifecycle.preparation();
+        #[cfg(feature = "release-domains")]
+        self.io.core.domain_accept(
+            request,
+            lifecycle.context().operation(),
+            lifecycle.context().pacing(),
+        );
         self.io.core.managed_http.insert(
             request,
             Managed {
@@ -1282,6 +1364,8 @@ impl crate::engine::CoreIo<'_> {
         cancel: Option<Action>,
     ) -> Option<Managed> {
         let managed = self.core.managed_http.remove(&request)?;
+        #[cfg(feature = "release-domains")]
+        self.core.domain_advance(request);
         #[cfg(feature = "session-bearer")]
         self.core
             .bearer_parked
@@ -1463,14 +1547,23 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 }
-                self.io
-                    .core
-                    .actions
-                    .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
-                        preparation: token,
-                        permit,
-                        request,
-                    })));
+                let bind = Action::ManagedHttp(Box::new(HttpAction::Bind {
+                    preparation: token,
+                    permit,
+                    request,
+                }));
+                // Const-folded: an undeclared venue compiles the domain hold out.
+                #[cfg(feature = "release-domains")]
+                let bind = if V::http_release_domain().is_some() {
+                    self.io.core.domain_bind(token.attempt().request, bind)
+                } else {
+                    Some(bind)
+                };
+                #[cfg(not(feature = "release-domains"))]
+                let bind = Some(bind);
+                if let Some(bind) = bind {
+                    self.io.core.actions.push(bind);
+                }
             }
             Err(Error::State) => {} // Duplicate readiness cannot replace an issued permit.
             Err(error) => self.http_preparation_failed(
@@ -1574,8 +1667,17 @@ impl<V: Venue> Engine<V> {
     /// role was captured at admission. Descriptive only: it grants nothing.
     #[cfg(feature = "sign-meta")]
     pub fn sign_meta(&self, task: RequestId) -> Option<crate::sign_meta::SignMeta> {
-        use crate::sign_meta::{SignMeta, SignOwner};
-        let (request, deadline_ms) = self.io.core.signing.prepared_task(task)?;
+        let prepared = self.io.core.signing.prepared_task(task);
+        #[cfg(feature = "address-nonce")]
+        {
+            let setup = self.io.core.address_setup.current_meta(task);
+            debug_assert!(prepared.is_none() || setup.is_none());
+            if prepared.is_none() {
+                return setup;
+            }
+        }
+        use crate::sign_meta::{SignKind, SignMeta};
+        let (request, deadline_ms) = prepared?;
         let managed = self.io.core.managed_http.get(&request)?;
         if managed.signing_attempt != Some(task) {
             return None;
@@ -1583,22 +1685,26 @@ impl<V: Venue> Engine<V> {
         let role = managed.role?;
         let context = managed.lifecycle.context();
         let slot = context.credential()?.slot;
-        let owner = match context.owner() {
-            Owner::Session { generation } => SignOwner::Session { generation },
+        let kind = match context.owner() {
+            Owner::Session { generation } => SignKind::Session {
+                generation,
+                slot,
+                role,
+            },
             _ => {
                 let attempt = managed.lifecycle.attempt();
-                SignOwner::Managed {
+                SignKind::Managed {
                     request: attempt.request,
                     generation: attempt.generation,
+                    slot,
+                    role,
                 }
             }
         };
         Some(SignMeta {
             task,
-            owner,
             deadline_ms,
-            slot,
-            role,
+            kind,
         })
     }
 
@@ -1733,14 +1839,22 @@ impl<V: Venue> Engine<V> {
                     self.pump_mutation_group(now, request);
                     return;
                 }
-                self.io
-                    .core
-                    .actions
-                    .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
-                        preparation: token,
-                        permit,
-                        request: packet,
-                    })));
+                let bind = Action::ManagedHttp(Box::new(HttpAction::Bind {
+                    preparation: token,
+                    permit,
+                    request: packet,
+                }));
+                #[cfg(feature = "release-domains")]
+                let bind = if V::http_release_domain().is_some() {
+                    self.io.core.domain_bind(request, bind)
+                } else {
+                    Some(bind)
+                };
+                #[cfg(not(feature = "release-domains"))]
+                let bind = Some(bind);
+                if let Some(bind) = bind {
+                    self.io.core.actions.push(bind);
+                }
             }
             (result, mut outbound) => {
                 if let Some(action) = outbound.as_mut() {
@@ -1985,6 +2099,20 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
+        #[cfg(feature = "address-nonce")]
+        if managed
+            .recipe
+            .as_ref()
+            .is_some_and(|recipe| !recipe.nonce_identity_current(&self.io.core.identities))
+        {
+            self.http_preparation_failed(
+                now,
+                preparation,
+                Error::Revoked,
+                crate::signing::SignError::InvalidRequest.venue_error(),
+            );
+            return Err(Error::Revoked);
+        }
         if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,
@@ -2246,6 +2374,10 @@ impl<V: Venue> Engine<V> {
             #[cfg(not(feature = "dispatch-nonce"))]
             let message = "HTTP request was not released";
             self.http_preparation_failed(now, preparation, error, VenueError::new(message));
+        }
+        #[cfg(feature = "release-domains")]
+        if V::http_release_domain().is_some() && matches!(result, Ok(Claim::Released(_))) {
+            self.io.core.domain_advance(request);
         }
         result
     }
@@ -2824,10 +2956,16 @@ mod tests {
     include!("request_context_plan_expiry_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_independence_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_plan_retire_tests.rs");
     #[cfg(feature = "serial-plans")]
     include!("request_context_serial_plan_tests.rs");
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     include!("request_context_serial_session_tests.rs");
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    include!("request_context_keyless_serial_tests.rs");
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    include!("request_context_serial_call_auth_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
     #[cfg(feature = "sign-meta")]
@@ -2994,6 +3132,7 @@ mod tests {
         native_effects: usize,
         housekeeping_checks: usize,
         reconciles: Vec<Option<Vec<String>>>,
+        reasks: Vec<bool>,
         // The command intent a test mutation is issued under (default Place).
         mutation_intent: Option<crate::classify::Intent>,
         // Whether a reconcile hook ever saw borrowed delivery/read authority.
@@ -3307,11 +3446,12 @@ mod tests {
                 panic!("unexpected transport failure");
             }
         }
-        fn reconcile_uncertain(&mut self, _cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
+        fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
             self.reconciles.push(symbols.map(<[String]>::to_vec));
+            self.reasks.push(cx.reconcile_reask());
             #[cfg(feature = "order-locks")]
             {
-                self.reconcile_custody |= _cx_has_custody(_cx);
+                self.reconcile_custody |= _cx_has_custody(cx);
             }
         }
         fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -4995,7 +5135,8 @@ mod tests {
                 .iter()
                 .filter(|action| matches!(action,
             Action::Notice(Notice::CommandFailed { command: 8, error })
-            if error.message == "Placement outcome is uncertain; reconcile before cancel-all"))
+            if error.message == "Placement outcome is uncertain; reconcile before cancel-all"
+                && error.outcome == Some(crate::Outcome::NotSent)))
                 .count(),
             1
         );
@@ -5392,6 +5533,127 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn a_managed_unknown_placement_fences_its_symbol_until_reconciled() {
+        let place = |command, symbol: &str| Command::PlaceOrders {
+            command,
+            orders: vec![
+                serde_json::from_str(&format!(
+                    r#"{{"symbol":"{symbol}","type":"limit","side":"buy","amount":1,"price":1}}"#
+                ))
+                .unwrap(),
+            ],
+        };
+        let (mut engine, _) = start(Probe::default());
+        engine.io.core.order_locks = crate::order_locks::OrderLocks::fencing_placements(true);
+        // A read dispatched before the write: its answer cannot vouch for the placement.
+        let stale = engine.io.core.order_locks.token();
+        // A released managed placement that seals Unknown (a lost 503 answer).
+        seal_uncertain(
+            &mut engine,
+            &place(7, "BTCUSDT"),
+            6.,
+            VenueError::new("lost"),
+        );
+        assert!(engine.io.core.order_locks.uncertain("BTCUSDT"));
+        assert_eq!(
+            engine.venue.reconciles,
+            vec![Some(vec!["BTCUSDT".to_owned()])],
+            "the Unknown seal asks for its reconcile at once"
+        );
+        let locks = &mut engine.io.core.order_locks;
+        assert_eq!(
+            locks.acquire(&place(8, "BTCUSDT"), &engine.store, false),
+            Err(crate::order_locks::Refusal::Uncertain(8)),
+            "a retry cannot duplicate the possibly placed order"
+        );
+        assert!(
+            locks
+                .acquire(&place(9, "ETHUSDT"), &engine.store, false)
+                .is_ok()
+        );
+        assert!(
+            locks
+                .acquire(
+                    &Command::CancelOrders {
+                        command: 10,
+                        ids: vec!["resting".into()],
+                    },
+                    &engine.store,
+                    false,
+                )
+                .is_ok(),
+            "a cancel is still admitted"
+        );
+        locks.reconciled(Some("BTCUSDT"), stale);
+        assert_eq!(
+            locks.acquire(&place(11, "BTCUSDT"), &engine.store, false),
+            Err(crate::order_locks::Refusal::Uncertain(11)),
+            "a stale read does not release the fence"
+        );
+        // A fresh read for the symbol, after the write, releases the fence.
+        let token = locks.token();
+        locks.reconciled(Some("BTCUSDT"), token);
+        assert!(!locks.uncertain("BTCUSDT"));
+        assert!(
+            locks
+                .acquire(&place(12, "BTCUSDT"), &engine.store, false)
+                .is_ok()
+        );
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_fenced_symbol_re_asks_its_reconcile_with_bounded_backoff_until_released() {
+        let place = Command::PlaceOrders {
+            command: 7,
+            orders: vec![
+                serde_json::from_str(
+                    r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":1}"#,
+                )
+                .unwrap(),
+            ],
+        };
+        let (mut engine, _) = start(Probe::default());
+        engine.io.core.order_locks = crate::order_locks::OrderLocks::fencing_placements(true);
+        seal_uncertain(&mut engine, &place, 6., VenueError::new("lost"));
+        let btc = Some(vec!["BTCUSDT".to_owned()]);
+        assert_eq!(engine.venue.reconciles, vec![btc.clone()], "asked at once");
+        // Each reconcile read fails; the engine re-asks 1 s, 2 s, 4 s ... capped at 30 s.
+        let mut at = 6.;
+        let mut gaps = Vec::new();
+        for _ in 0..8 {
+            let (timer, due) = engine.reconcile_timer.expect("a re-ask is armed");
+            gaps.push(due - at);
+            at = due;
+            engine.handle(at, Event::TimerFired { timer });
+        }
+        assert_eq!(
+            gaps,
+            [
+                1_000., 2_000., 4_000., 8_000., 16_000., 30_000., 30_000., 30_000.
+            ]
+        );
+        assert_eq!(engine.venue.reconciles.len(), 9);
+        assert!(engine.venue.reconciles.iter().all(|scope| *scope == btc));
+        // The seal's ask is not a re-ask; every backoff call is.
+        assert!(!engine.venue.reasks[0]);
+        assert!(engine.venue.reasks[1..].iter().all(|reask| *reask));
+        // A fresh read releases the fence and the re-asks stop.
+        let token = engine.io.core.order_locks.token();
+        engine
+            .io
+            .core
+            .order_locks
+            .reconciled(Some("BTCUSDT"), token);
+        let (timer, due) = engine.reconcile_timer.expect("the last re-ask is armed");
+        engine.handle(due, Event::TimerFired { timer });
+        assert_eq!(engine.venue.reconciles.len(), 9, "no re-ask after release");
+        assert!(engine.reconcile_timer.is_none());
+        assert!(engine.io.core.fence_reread.is_none());
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn unlocked_uncertain_writes_full_read_and_waits_are_bounded() {
         // A managed write the order lock never held still reconciles in full.
         let (mut engine, _) = start(Probe::default());
@@ -5608,6 +5870,49 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn a_paged_census_releases_only_marks_its_first_page_saw() {
+        let (mut engine, _) = start(Probe::default());
+        let release = |engine: &mut Engine<Probe>, token: u64, epoch: Option<u64>| {
+            engine.io.core.order_response_token = Some(token);
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            match epoch {
+                Some(epoch) => cx.orders_reconciled_since(None, epoch),
+                None => cx.orders_reconciled(None),
+            }
+            engine.io.core.order_response_token = None;
+        };
+        let eth = || Some(vec!["ETHUSDT".to_owned()]);
+        // The census's first page leaves; then ETH turns uncertain; a later page
+        // (its own context) leaves after the mark and completes the census.
+        let first_page = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .order_read_epoch();
+        engine.io.core.order_locks.fence(eth().as_deref());
+        let last_page = engine.io.core.order_locks.token();
+        release(&mut engine, last_page, Some(first_page));
+        assert!(
+            engine.io.core.order_locks.uncertain("ETHUSDT"),
+            "the first page predates the mark"
+        );
+        // RED for the per-page token: the last page alone would release it.
+        release(&mut engine, last_page, None);
+        assert!(!engine.io.core.order_locks.uncertain("ETHUSDT"));
+        // A census begun after the mark releases it.
+        engine.io.core.order_locks.fence(eth().as_deref());
+        let begun = engine.io.core.order_locks.token();
+        release(&mut engine, begun, Some(begun));
+        assert!(!engine.io.core.order_locks.uncertain("ETHUSDT"));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn an_overflowing_reconcile_queue_never_cuts_a_wait_short() {
         let btc = || Some(vec!["BTCUSDT".to_owned()]);
         // 64 deferred entries with unequal waits, then one immediate entry.
@@ -5662,9 +5967,17 @@ mod tests {
             6.,
             VenueError::new("lost"),
         );
+        // A second placement on the uncertain symbol is now refused at entry; a
+        // routed cancel there is still admitted and its uncertain seal asks again.
         seal_uncertain(
             &mut engine,
-            &place(8, "BTCUSDT"),
+            &Command::CancelOrdersWithSymbols {
+                command: 8,
+                orders: vec![crate::model::CancelOrderRef {
+                    id: "x".into(),
+                    symbol: "BTCUSDT".into(),
+                }],
+            },
             7.,
             VenueError::new("lost"),
         );

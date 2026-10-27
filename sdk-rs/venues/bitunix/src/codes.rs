@@ -1,7 +1,9 @@
 //! Native Bitunix codes; the engine owns error precedence and retry evidence.
 use safe_cex_engine::{
     ErrorKind, Response,
-    classify::{self, CodeTable, Key, Native, NativeCode, ReadFailure, Released, Row, Verdict},
+    classify::{
+        self, CodeTable, Intent, Key, Native, NativeCode, ReadFailure, Released, Row, Verdict,
+    },
 };
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -18,7 +20,16 @@ pub(crate) const BITUNIX: CodeTable = CodeTable {
         row(Key::Int(403), Verdict::Refused(ErrorKind::AuthPermission)),
         row(Key::Int(10004), Verdict::Refused(ErrorKind::AuthPermission)),
         row(Key::Int(10003), Verdict::Refused(ErrorKind::AuthInvalid)),
-        row(Key::Int(10007), Verdict::Refused(ErrorKind::AuthInvalid)),
+        // "Sign signature error": a write re-signs once with a fresh nonce.
+        row(
+            Key::Int(10007),
+            Verdict::RefusedResend(ErrorKind::AuthInvalid),
+        ),
+        Row {
+            key: Key::Int(10007),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: Some(Intent::Read),
+        },
         row(Key::Int(10005), Verdict::Refused(ErrorKind::RateLimited)),
         row(Key::Int(10006), Verdict::Refused(ErrorKind::RateLimited)),
         row(Key::Int(10001), Verdict::Unknown(Some(ErrorKind::Network))),
@@ -42,7 +53,13 @@ pub(crate) const BITUNIX: CodeTable = CodeTable {
     ],
     success: &[Key::Int(0)],
     unlisted: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
-    status: &[],
+    // Native `response_data`: these statuses refuse a write before execution.
+    status: &[
+        (400, Verdict::Refused(ErrorKind::Rejected)),
+        (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+        (403, Verdict::Refused(ErrorKind::AuthPermission)),
+        (429, Verdict::Refused(ErrorKind::RateLimited)),
+    ],
 };
 #[derive(Deserialize)]
 struct Evidence<'a> {

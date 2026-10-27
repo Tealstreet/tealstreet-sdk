@@ -6,6 +6,8 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_binance::BinanceFutures;
 mod config;
+#[allow(unused_imports)]
+pub use config::keyed;
 pub use config::{Options, engine};
 
 pub const EXCHANGE_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"#;
@@ -96,6 +98,9 @@ impl Harness {
     pub fn collect(&mut self) {
         for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
+                Action::RetireAddressSetup { .. } => {
+                    panic!("address setup is unsupported in the binance test harness")
+                }
                 Action::ManagedHttp(_) => {
                     panic!("managed HTTP preparation is not configured in this harness yet")
                 }
@@ -183,6 +188,13 @@ impl Harness {
         self.requests.iter().any(|r| r.url.contains(path))
     }
 
+    /// Nothing is replayed: an unproven write only starts the fence's open-orders reconcile.
+    pub fn only_reconcile_reads(&self) -> bool {
+        self.requests.iter().all(|r| {
+            r.method == safe_cex_engine::Method::Get
+                && (r.url.contains("openOrders") || r.url.contains("openAlgoOrders"))
+        })
+    }
     pub fn take(&mut self, path: &str) -> HttpRequest {
         let index = self
             .requests

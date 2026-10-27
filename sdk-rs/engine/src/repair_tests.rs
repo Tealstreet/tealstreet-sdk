@@ -172,6 +172,11 @@ mod repair {
         foreign_successor: Option<Result<(), RepairRefusal>>,
         failures: usize,
         reconciles: Vec<Option<Vec<String>>>,
+        /// Hold the replace root's cancel unreleased, then finish it inside a
+        /// later Background read delivery (a revocation by new evidence).
+        finish_held_in_read: bool,
+        /// Finish the admitted leg instead of sending, as after a refused send.
+        refuse_send: bool,
     }
     impl Repairer {
         fn mark(cx: &Cx<'_, Context>) -> (crate::resource_ids::ResourceIds, usize) {
@@ -251,7 +256,11 @@ mod repair {
             match result {
                 Ok((root, context)) => {
                     self.roots.push((root, context.clone()));
-                    self.send(cx, context, Method::Delete);
+                    if self.refuse_send {
+                        cx.finish_http_context(&context).unwrap();
+                    } else {
+                        self.send(cx, context, Method::Delete);
+                    }
                 }
                 Err(_) => self.admit_spent_nothing.push(Self::mark(cx) == before),
             }
@@ -272,6 +281,12 @@ mod repair {
         }
         fn snapshot_data(&mut self, cx: &mut Cx<'_, Context>, context: &Context) {
             cx.validate_background_read_http_delivery(context).unwrap();
+            if self.finish_held_in_read
+                && let Some((_, held)) = self.roots.first()
+            {
+                cx.finish_http_context(held).unwrap();
+                return;
+            }
             let token = self.token.take().expect("token begun before the read");
             let publish = matches!(
                 self.snap,
@@ -383,12 +398,14 @@ mod repair {
                     cx.admit_serial_plan(
                         &preflight,
                         crate::request_context::plan::SerialCall {
+                            auth: Default::default(),
                             operation: Operation::Mutation,
                             timeout_ms: 20_000,
                             attempts: 1,
+                            pacing: None,
                         },
                         crate::request_context::plan::SerialPolicy {
-                            credential: primary(),
+                            credential: Some(primary()),
                             pacing: None,
                             refusals_complete: true,
                         },
@@ -480,6 +497,9 @@ mod repair {
                 if let Ok((root, context)) = result {
                     self.roots.push((root, context.clone()));
                     self.send(cx, context, Method::Delete);
+                    if self.finish_held_in_read {
+                        self.read_snapshot(cx);
+                    }
                 }
                 return;
             }
@@ -897,6 +917,105 @@ mod repair {
             "lock conflict refuses the foreground write"
         );
         assert!(preps(&actions).is_empty());
+    }
+
+    #[test]
+    fn a_refused_send_settles_its_root_once_with_nothing_sent() {
+        let mut e = minted(&["c1"]);
+        e.venue.refuse_send = true;
+        e.venue.groups = vec![vec![(0, "c1", "c1", "BTCUSD", "buy")]];
+        let actions = fire(&mut e, 2.);
+        assert_eq!(e.venue.admits, vec![Ok(())], "root admitted");
+        assert!(preps(&actions).is_empty(), "nothing prepared or sent");
+        assert_eq!(e.venue.notices.len(), 1, "{:?}", e.venue.notices);
+        assert!(e.venue.notices[0].contains("cancel: NotSent"), "{:?}", e.venue.notices);
+        assert_eq!(e.venue.notice_outside_entry, vec![true]);
+        let root = e.venue.roots[0].0.clone();
+        let mut cx = Cx { now: 2.5, store: &mut e.store, io: &mut e.io };
+        assert_eq!(
+            cx.repair_successor(&root).err(),
+            Some(RepairRefusal::Invalid),
+            "finishing the last leg outside a delivery is terminal"
+        );
+        e.handle_command(
+            3.,
+            Command::CancelOrders {
+                command: 9,
+                ids: vec!["c1".into()],
+            },
+            None,
+        )
+        .unwrap();
+        assert!(
+            !drain(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. }))),
+            "the root's lock was released"
+        );
+        assert_eq!(e.venue.notices.len(), 1, "settled exactly once");
+    }
+    #[test]
+    fn a_foreground_cancel_all_runs_beside_a_released_repair_cancel() {
+        let (mut e, token) = one_root(&["c1"]);
+        release(&mut e, token, 2.);
+        let actions = cancel_all(&mut e, 9, 2.5);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. }))),
+            "two cancels on one symbol do not conflict"
+        );
+        reply(&mut e, token, 3., 200, r#"{"code":0,"ids":["c1"]}"#);
+        assert_eq!(e.venue.notices.len(), 1);
+        assert!(e.venue.notices[0].contains("cancel: Accepted"), "{:?}", e.venue.notices);
+    }
+
+    #[test]
+    fn a_newer_cancel_all_race_settles_the_repair_as_native_rejected() {
+        // Overseer ruling on #2181: no send-time ID capture. A foreground
+        // cancel-all beside an in-flight repair is admitted; when both cancel
+        // one order, the repair's provider refusal settles Rejected (native).
+        let (mut e, token) = one_root(&["c1"]);
+        release(&mut e, token, 2.);
+        let actions = cancel_all(&mut e, 9, 2.5);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. }))),
+            "the newer cancel-all is admitted"
+        );
+        e.venue.forced_result = Some(WriteResult::Rejected(VenueError::new("order not found")));
+        reply(&mut e, token, 3., 200, r#"{"code":0}"#);
+        assert_eq!(e.venue.notices.len(), 1, "{:?}", e.venue.notices);
+        assert!(e.venue.notices[0].contains("cancel: Rejected"), "{:?}", e.venue.notices);
+    }
+
+    #[test]
+    fn a_held_repair_leg_finished_inside_a_background_delivery_settles_its_root() {
+        let (mut e, _) = snapshot(Repairer {
+            replace: true,
+            finish_held_in_read: true,
+            ..Default::default()
+        });
+        let actions = fire(&mut e, 2.);
+        assert_eq!(e.venue.admits, vec![Ok(())]);
+        let read = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match a.as_ref() {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } if request.method == Method::Get => Some(*preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("the later Background read");
+        release(&mut e, read, 2.);
+        reply(&mut e, read, 2.5, 200, "[]");
+        assert_eq!(e.venue.notices.len(), 1, "{:?}", e.venue.notices);
+        assert!(
+            e.venue.notices[0].contains("cancel: NotSent"),
+            "{:?}",
+            e.venue.notices
+        );
+        assert_eq!(e.venue.notice_outside_entry, vec![true]);
     }
 
     // Snapshot origin (cancel-then-place).

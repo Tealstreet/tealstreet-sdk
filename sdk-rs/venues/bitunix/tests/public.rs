@@ -1,5 +1,6 @@
 //! Payload shapes: bitunix.com/api-docs/futures/market/{trading_pairs,tickers,kline}.html
 //! Legacy depthop semantics: exchanges/bitunix/CLAUDE.md, captured 2026-07-15.
+mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketId};
 use safe_cex_venue_bitunix::{BitunixFutures, Options};
 const PAIRS: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","base":"BTC","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"},{"symbol":"NOUSDT","base":"NO","quote":"USDT","symbolStatus":"OPEN","basePrecision":0,"quotePrecision":2,"maxLimitOrderVolume":"100","isApiSupported":"false"}]}"#;
@@ -18,10 +19,10 @@ fn response(e: &mut Engine<BitunixFutures>, r: safe_cex_engine::RequestId, body:
     );
 }
 fn ready() -> (Engine<BitunixFutures>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         public_data_only: true,
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(0.0);
     let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
         .into_iter()
@@ -43,7 +44,9 @@ fn ready() -> (Engine<BitunixFutures>, SocketId) {
             _ => {}
         }
     }
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     for a in actions {
         if let Action::WsConnect { socket, .. } = a {
             e.handle(0.0, Event::WsOpened { socket });
@@ -87,7 +90,9 @@ fn full_snapshots_replace_both_sides_and_replay_on_reconnect() {
     }
     assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(95998.0, 4.0)]);
     assert!(e.book("BTCUSDT").unwrap().asks().is_empty());
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         2.0,
         Event::WsClosed {
@@ -115,7 +120,7 @@ fn full_snapshots_replace_both_sides_and_replay_on_reconnect() {
         .unwrap();
     e.handle(at, Event::WsOpened { socket });
     assert!(e.book("BTCUSDT").is_none());
-    assert!(e.drain_actions().any(
+    assert!(safe_cex_engine::test_support::prepared_now(&mut e).into_iter().any(
         |a| matches!(a,Action::WsSend {text,..} if text.contains("market_btcusdt_depthop_0.1"))
     ));
 }
@@ -171,7 +176,9 @@ fn incomplete_stream_never_commits_a_partial_market_list() {
 #[test]
 fn candle_reads_use_quote_volume_and_seconds() {
     let (mut e, _) = ready();
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         1000.0,
         Event::Command(Command::FetchCandles {
@@ -198,7 +205,7 @@ fn candle_reads_use_quote_volume_and_seconds() {
         r.id,
         r#"{"code":0,"data":[{"time":1000,"open":"1","high":"3","low":"1","close":"2","quoteVol":"99"}]}"#,
     );
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone {command:9,result:s}) if s.contains("\"timestamp\":1.0") && s.contains("\"volume\":99.0"))));
+    assert!(safe_cex_engine::test_support::prepared_now(&mut e).into_iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone {command:9,result:s}) if s.contains("\"timestamp\":1.0") && s.contains("\"volume\":99.0"))));
 }
 
 #[test]
@@ -285,7 +292,8 @@ fn ticker_seed_failure_retries_only_seed_and_public_streams_wait_for_it() {
     assert!(r.url.ends_with("/tickers"));
     response(&mut e, r.id, TICKERS);
     assert_eq!(
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
             .filter(|a| matches!(a, Action::WsConnect { .. }))
             .count(),
         2
@@ -295,7 +303,9 @@ fn ticker_seed_failure_retries_only_seed_and_public_streams_wait_for_it() {
 #[test]
 fn watchdog_closes_a_silent_connection_and_reconnects() {
     let (mut e, original) = ready();
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         1.0,
         Event::WsClosed {
@@ -327,7 +337,9 @@ fn watchdog_closes_a_silent_connection_and_reconnects() {
         })
         .unwrap();
     e.handle(at + 45_000.0, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         actions
             .iter()
@@ -407,7 +419,9 @@ fn public_envelopes_accept_arbitrary_field_order_and_reject_malformed_payloads()
 #[test]
 fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() {
     let (mut e, _) = ready();
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     // Malformed text is rejected by the engine's typed Interval; Bitunix still
     // refuses valid intervals its kline API does not offer.
     use safe_cex_engine::model::Interval;
@@ -423,7 +437,9 @@ fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() 
                 to_ms: Some(100_000_000.0),
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions.iter().any(|a| matches!(
@@ -468,7 +484,9 @@ fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() 
                 },
             },
         );
-        e.drain_actions().for_each(drop);
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .for_each(drop);
     }
 }
 #[test]
@@ -482,7 +500,9 @@ fn candle_interest_without_credentials_reads_no_symbol_settings() {
         }),
     );
     // Public-only accounts neither send the signed read nor log a credentials failure.
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -517,17 +537,19 @@ fn pending_http_actions(actions: &[Action], path: &str) -> safe_cex_engine::Http
         .expect(path)
 }
 fn public_engine(credentials: bool) -> Engine<BitunixFutures> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: credentials.then(|| "key".into()),
         secret: credentials.then(|| "secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(0.0);
     e
 }
 #[test]
 fn a_malformed_public_row_does_not_starve_valid_market_or_ticker_peers() {
     let mut e = public_engine(false);
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     let market = pending_http(&mut e, 0., "trading_pairs");
     let pair: serde_json::Value = serde_json::from_str(PAIRS).unwrap();
     response(
@@ -554,7 +576,7 @@ fn a_malformed_public_row_does_not_starve_valid_market_or_ticker_peers() {
     );
     assert!(e.store().loaded().tickers);
     assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 96000.0);
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::ROW_SKIPPED)));
+    assert!(safe_cex_engine::test_support::prepared_now(&mut e).into_iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::ROW_SKIPPED)));
 }
 #[test]
 fn a_bad_ticker_row_cannot_discard_the_rest_of_a_usable_seed() {
@@ -589,7 +611,8 @@ fn all_malformed_required_seeds_retry_without_loaded_empty_state() {
             })
         );
         assert!(
-            e.drain_actions()
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
                 .any(|a| matches!(a, Action::SetTimer { .. }))
         );
     }
@@ -624,7 +647,10 @@ fn private_initialization_starts_before_tickers_and_seed_recovery_never_restarts
         r#"{"code":0,"data":{"positionList":[{"symbol":"BTCUSDT","positionId":"p","qty":"1","side":"BUY","avgOpenPrice":"100","leverage":20,"marginMode":"ISOLATION","positionMode":"ONE_WAY"}]}}"#,
     );
     response(&mut e, orders.id, r#"{"code":0,"data":{"orderList":[]}}"#);
-    for a in e.drain_actions().collect::<Vec<_>>() {
+    for a in safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect::<Vec<_>>()
+    {
         if let Action::Http(r) = a {
             assert!(r.url.contains("/tpsl/"));
             response(&mut e, r.id, r#"{"code":0,"data":[]}"#);
@@ -635,7 +661,9 @@ fn private_initialization_starts_before_tickers_and_seed_recovery_never_restarts
         e.store().loaded().balance && e.store().loaded().positions && e.store().loaded().orders,
         "private startup must complete while ticker seed remains pending"
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     response(
         &mut e,
         ticker.id,
@@ -651,7 +679,9 @@ fn private_initialization_starts_before_tickers_and_seed_recovery_never_restarts
     e.handle(at, Event::TimerFired { timer });
     let r = pending_http(&mut e, at, "/tickers");
     response(&mut e, r.id, TICKERS);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(e.store().loaded().tickers);
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
     assert_eq!(
@@ -693,7 +723,9 @@ fn public_failures_use_capped_shared_backoff_and_report_recovery() {
                 error: "public unavailable",
             },
         );
-        let out: Vec<_> = e.drain_actions().collect();
+        let out: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         degraded+=out.iter().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::STARTUP_DEGRADED)).count();
         let (timer, at) = out
             .iter()
@@ -712,7 +744,9 @@ fn public_failures_use_capped_shared_backoff_and_report_recovery() {
         request = pending_http(&mut e, now, "trading_pairs");
         e.handle(now, Event::TimerFired { timer });
         assert!(
-            !e.drain_actions().any(|a| matches!(a, Action::Http(_))),
+            !safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .any(|a| matches!(a, Action::Http(_))),
             "retired timer must not duplicate read"
         );
     }
@@ -720,7 +754,7 @@ fn public_failures_use_capped_shared_backoff_and_report_recovery() {
     response(&mut e, request.id, PAIRS);
     let request = pending_http(&mut e, 0., "/tickers");
     response(&mut e, request.id, TICKERS);
-    assert_eq!(e.drain_actions().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::STARTUP_RECOVERED)).count(),1);
+    assert_eq!(safe_cex_engine::test_support::prepared_now(&mut e).into_iter().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::STARTUP_RECOVERED)).count(),1);
 }
 
 #[test]
@@ -786,7 +820,9 @@ fn intentionally_empty_or_filtered_catalogues_are_distinct_from_malformed_rows()
         response(&mut e, request.id, &body);
         assert!(!e.store().loaded().markets);
         assert!(e.store().markets().is_empty());
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         assert!(!actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::ROW_SKIPPED)));
         assert!(actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
         assert!(
@@ -814,7 +850,9 @@ fn discovery_stream_business_rate_limits_without_arrays_keep_the_native_pause() 
                     request.id,
                     &format!(r#"{{"code":{code},"msg":"request too frequently"{data}}}"#),
                 );
-                let out: Vec<_> = e.drain_actions().collect();
+                let out: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .collect();
                 assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
                 assert!(
                     out.iter()
@@ -843,7 +881,9 @@ fn discovery_stream_errors_never_echo_raw_envelopes_into_failure_or_degradation(
             let mut degraded = 0;
             for _ in 0..6 {
                 response(&mut e, request.id, body);
-                let out: Vec<_> = e.drain_actions().collect();
+                let out: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .collect();
                 assert!(!format!("{out:?}").contains("RAW_BODY_SENTINEL"));
                 degraded+=out.iter().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::STARTUP_DEGRADED)).count();
                 let (timer, at) = out

@@ -124,6 +124,9 @@ pub enum Request {
         context: Option<Context>,
         generation: u64,
         version: u64,
+        /// The order-uncertainty epoch when this census began: its pages run
+        /// under separate contexts, so it releases only what its first page saw.
+        epoch: u64,
         kind: usize,
         product: usize,
         rows: SnapshotBuilder<String, Order>,
@@ -243,6 +246,11 @@ impl AccountState {
 
 impl Okx {
     pub(crate) fn account_after_uncertain_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        // A backoff re-ask joins any running read: the seal's own ask already
+        // restarted reads, so a running one postdates the write.
+        if cx.reconcile_reask() && self.account.orders_in_flight {
+            return;
+        }
         self.account.join = None;
         self.account.orders_generation += 1;
         self.account.orders_in_flight = false;
@@ -370,6 +378,7 @@ impl Okx {
                     context: None,
                     generation,
                     version: self.account.revision,
+                    epoch: cx.order_read_epoch(),
                     kind: 0,
                     product: 0,
                     rows: SnapshotBuilder::default(),
@@ -895,6 +904,7 @@ impl Okx {
                 context,
                 generation,
                 version,
+                epoch,
                 mut kind,
                 mut product,
                 rows,
@@ -921,6 +931,7 @@ impl Okx {
                             context: None,
                             generation,
                             version,
+                            epoch,
                             kind,
                             product,
                             rows,
@@ -946,6 +957,7 @@ impl Okx {
                             context: None,
                             generation,
                             version,
+                            epoch,
                             kind,
                             product,
                             rows,
@@ -1004,7 +1016,7 @@ impl Okx {
                 cx.store.set_orders(rows);
                 // A rejected row may be an uncertain placement; it proves nothing.
                 if clean {
-                    cx.orders_reconciled(None);
+                    cx.orders_reconciled_since(None, epoch);
                 }
                 self.trading
                     .acknowledged
@@ -2261,5 +2273,34 @@ fn read_policy(credential: Option<Credential>) -> Policy {
         timeout_ms: 20_000,
         pacing: None,
         retry: RetryPolicy::Never,
+    }
+}
+
+#[cfg(test)]
+mod key_refusal_tests {
+    use super::*;
+    use safe_cex_engine::classify::{Intent, Native, NativeCode, Verdict};
+
+    /// A write and a read refused with the same key code carry the same kind.
+    #[test]
+    fn write_and_read_key_refusals_agree() {
+        for code in 50000..50200 {
+            let text = code.to_string();
+            let Some(kind) = rest_key_rejection(&text) else {
+                continue;
+            };
+            let native = Native {
+                code: NativeCode::Int(code),
+                message: "native",
+            };
+            let verdict = crate::trading::CODES.verdict(&native, Intent::Place);
+            // 50113 (a rejected signature) is the one key refusal re-signed once.
+            let expected = if code == 50113 {
+                Verdict::RefusedResend(kind)
+            } else {
+                Verdict::Refused(kind)
+            };
+            assert_eq!(verdict, expected, "{code}");
+        }
     }
 }

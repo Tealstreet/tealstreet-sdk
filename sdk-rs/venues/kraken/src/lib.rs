@@ -1,5 +1,6 @@
 //! Kraken futures: typed state machines driven entirely by engine events.
 mod account;
+mod socket_codec;
 mod spot;
 pub use spot::KrakenSpot;
 mod history;
@@ -14,7 +15,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::request_context::{CommandEntryError, Context, Operation, Scope};
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
     Venue,
@@ -76,25 +77,11 @@ pub struct CandlePage {
     pages: u8,
 }
 const MAX_CANDLE_PAGES: u8 = 10;
+#[derive(Default)]
 struct Connection {
+    feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     socket: Option<SocketId>,
     open: bool,
-    supervisor: Supervisor,
-}
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            supervisor: Supervisor::new(Config {
-                connect_timeout_ms: 45_000.0,
-                idle_timeout_ms: 45_000.0,
-                ping_interval_ms: Some(15_000.0),
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
-        }
-    }
 }
 #[derive(Default)]
 struct DepthState {
@@ -251,66 +238,9 @@ impl Kraken {
             Err((pending, reason)) => self.public_failed(cx, pending, &reason.to_string()),
         }
     }
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public.supervisor.connecting(cx);
-        }
-        self.public.socket = Some(cx.connect(
-            safe_cex_engine::SocketSpec::new(self.ws_url()).channel(SocketChannel::Public),
-        ));
-        self.public.open = false;
-    }
-    fn subscribe(&self, cx: &mut Cx<'_, Pending>, event: &str, feed: &str, products: &[&str]) {
-        if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-            #[derive(serde::Serialize)]
-            struct S<'a> {
-                event: &'a str,
-                feed: &'a str,
-                product_ids: &'a [&'a str],
-            }
-            cx.send(
-                s,
-                serde_json::to_string(&S {
-                    event,
-                    feed,
-                    product_ids: products,
-                })
-                .unwrap(),
-            );
-        }
-    }
-    fn selected_tickers<'a>(&'a self, cx: &'a Cx<'_, Pending>) -> Vec<&'a str> {
-        let selected: Vec<_> = cx
-            .store
-            .markets()
-            .iter()
-            .filter(|m| self.ticker_symbols.contains(&m.symbol))
-            .map(|m| m.symbol.as_str())
-            .collect();
-        if selected.is_empty() {
-            cx.store
-                .markets()
-                .iter()
-                .map(|m| m.symbol.as_str())
-                .collect()
-        } else {
-            selected
-        }
-    }
-    fn subscribe_tickers(&self, cx: &mut Cx<'_, Pending>, event: &str) {
-        let products: Vec<String> = self
-            .selected_tickers(cx)
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
-        for batch in products.chunks(50) {
-            self.subscribe(
-                cx,
-                event,
-                "ticker",
-                &batch.iter().map(String::as_str).collect::<Vec<_>>(),
-            );
+    fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Err(error) = self.managed_connect(cx, false) {
+            self.socket_error(cx, false, error);
         }
     }
     fn invalidate_books(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -339,8 +269,7 @@ impl Kraken {
                 state.book.clear();
                 state.retry_at = cx.now + 10_000.0;
                 cx.book_changed(symbol);
-                self.subscribe(cx, "unsubscribe", "book", &[symbol]);
-                self.subscribe(cx, "subscribe", "book", &[symbol]);
+                self.repair_book(cx, symbol);
                 return;
             }
         }
@@ -606,6 +535,15 @@ fn resolution(interval: Interval) -> Option<&'static str> {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_orders(cx);
+    }
     #[inline]
     fn dispatch_nonce() -> bool {
         true
@@ -623,6 +561,34 @@ impl Venue for Kraken {
             leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn socket_control(
+        &self,
+        _store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        authenticated: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        self.managed_control(feed, authenticated, text)
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.managed_event(cx, event)
+    }
+    fn encode_socket_interests(
+        &self,
+        _store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.managed_encode(feed, subscribe, items, emit)
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -665,12 +631,7 @@ impl Venue for Kraken {
             return;
         }
         self.public.open = true;
-        self.public.supervisor.opened(cx);
-        self.subscribe_tickers(cx, "subscribe");
-        let symbols: Vec<_> = self.books.keys().cloned().collect();
-        for s in symbols {
-            self.subscribe(cx, "subscribe", "book", &[&s]);
-        }
+        self.sync_public_interests(cx);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account_ws_message(cx, socket, text) {
@@ -682,7 +643,6 @@ impl Venue for Kraken {
         let Ok(msg) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
-        self.public.supervisor.received(cx.now);
         if !msg.event.is_empty() {
             if msg.event == "error" {
                 cx.notice(
@@ -770,7 +730,6 @@ impl Venue for Kraken {
         self.public.socket = None;
         self.public.open = false;
         self.invalidate_books(cx);
-        self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         if matches!(pending, Pending::Candles { .. }) && !self.candles_delivery(cx, pending) {
@@ -997,7 +956,7 @@ impl Venue for Kraken {
                 if refresh {
                     return;
                 }
-                self.connect(cx);
+                self.connect_public(cx);
                 self.account_start(cx);
                 self.tickers_request(cx);
             }
@@ -1250,24 +1209,6 @@ impl Venue for Kraken {
             }
             return;
         }
-        match self.public.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => (),
-            Tick::Reconnect => return self.connect(cx),
-            Tick::Ping => {
-                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-                    cx.send(s, "{\"event\":\"ping\"}");
-                }
-                return;
-            }
-            Tick::TimedOut(_) => {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006);
-                }
-                return;
-            }
-            Tick::Handled => return,
-        }
         if self.poll == Some(timer) {
             self.poll = None;
             let stale: Vec<_> = self
@@ -1283,8 +1224,7 @@ impl Venue for Kraken {
                     s.retry_at = cx.now + 30_000.0;
                     cx.book_changed(&symbol);
                 }
-                self.subscribe(cx, "unsubscribe", "book", &[&symbol]);
-                self.subscribe(cx, "subscribe", "book", &[&symbol]);
+                self.repair_book(cx, &symbol);
             }
             let candles: Vec<_> = self
                 .candles
@@ -1307,9 +1247,8 @@ impl Venue for Kraken {
         }
         match command {
             Command::SetTickerSymbols { symbols } => {
-                self.subscribe_tickers(cx, "unsubscribe");
                 self.ticker_symbols = symbols;
-                self.subscribe_tickers(cx, "subscribe");
+                self.sync_public_interests(cx);
             }
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
@@ -1321,7 +1260,7 @@ impl Venue for Kraken {
                 s.last_received = cx.now;
                 s.retry_at = cx.now + 30_000.0;
                 if first {
-                    self.subscribe(cx, "subscribe", "book", &[&symbol]);
+                    self.sync_public_interests(cx);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1329,7 +1268,7 @@ impl Venue for Kraken {
                     s.subscribers = s.subscribers.saturating_sub(1);
                     if s.subscribers == 0 {
                         self.books.remove(&symbol);
-                        self.subscribe(cx, "unsubscribe", "book", &[&symbol]);
+                        self.sync_public_interests(cx);
                     }
                 }
             }

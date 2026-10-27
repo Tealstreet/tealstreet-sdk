@@ -1,7 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
-import type { ExchangeErrorKind } from './commandOutcome';
 import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeErrorKind } from './commandOutcome';
 import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
@@ -140,7 +140,7 @@ export type ExchangeOptions = {
   /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
   readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
-  /** Run this account on the Rust engine when its venue has one (`RUST_VENUES`). */
+  /** Retained input compatibility; this build always uses Rust for beta venues. */
   readonly engine?: 'rust';
   readonly privateOnly?: boolean;
   /** Rust live public-feed ownership. Shared ports must be explicitly transferred to workers. */

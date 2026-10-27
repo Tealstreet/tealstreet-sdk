@@ -1,6 +1,9 @@
-//! This corpus was captured from the TS adapter and real Go-WASM before this port.
+#[path = "support/reference_signer.rs"]
+mod reference_signer;
+use reference_signer::Signer;
+// This corpus was captured from the TS adapter and real Go-WASM before this port.
 use safe_cex_crypto::lighter::SchnorrNonce;
-use safe_cex_venue_lighter::sign::{Builder, Order, Signer, Transaction};
+use safe_cex_venue_lighter::sign::{Builder, Order, Transaction};
 use serde_json::Value;
 
 const CORPUS: &str =
@@ -74,6 +77,16 @@ fn transaction(method: &str, value: &Value) -> Transaction {
             market_id: integer(&value["marketId"]) as u32,
             order_id: integer(&value["orderId"]),
         },
+        "getCreateGroupedOrdersTransaction" => Transaction::Grouped {
+            grouping: integer(&value["groupingType"]) as u8,
+            orders: value["orders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(order)
+                .collect(),
+            builder: builder(value),
+        },
         "getUpdateLeverageTransaction" => Transaction::Leverage {
             market_id: integer(&value["marketId"]) as u32,
             leverage: value["leverage"].as_f64().unwrap(),
@@ -118,7 +131,7 @@ fn independently_captured_ts_transactions_match_preimages_signatures_and_wire() 
     let mut batches = 0;
     for case in corpus["cases"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
-        if name.contains("create-grouped-") || name.contains("/approve-") {
+        if name.contains("/approve-") {
             continue;
         }
         let config = &case["outer"]["adapterConfig"];
@@ -221,7 +234,8 @@ fn independently_captured_ts_transactions_match_preimages_signatures_and_wire() 
             );
         }
     }
-    assert_eq!((transactions, authentications, batches), (64, 4, 4));
+    // 64 single transactions plus 12 create_grouped_orders (OTO, OCO, OTOCO variants).
+    assert_eq!((transactions, authentications, batches), (76, 4, 4));
 }
 
 fn simple_order() -> Order {

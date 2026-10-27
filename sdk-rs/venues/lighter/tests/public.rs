@@ -1,7 +1,8 @@
 // Payloads follow https://apidocs.lighter.xyz/docs/websocket-reference.
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use support::{Timers, advance, drain};
 const MARKETS: &str = r#"{"code":200,"order_book_details":[{"market_id":0,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"10","min_initial_margin_fraction":"200"},{"market_id":1,"symbol":"BTC","status":"active","supported_size_decimals":5,"supported_price_decimals":1,"min_initial_margin_fraction":"100"},{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot"}]}"#;
 fn reply(e: &mut Engine<Lighter>, id: RequestId, body: &str) {
@@ -22,10 +23,10 @@ fn seeded() -> (Engine<Lighter>, SocketId) {
     (engine, socket)
 }
 fn seeded_with_poll() -> (Engine<Lighter>, SocketId, safe_cex_engine::TimerId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(1_000.0);
     let id = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
         .into_iter()
@@ -216,10 +217,10 @@ fn candle_ms_seconds_ordering_and_invalid_interval() {
 }
 #[test]
 fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(1_000.0);
     let id = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
         .into_iter()
@@ -261,7 +262,7 @@ fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
 }
 #[test]
 fn metadata_failure_falls_back_but_invalid_success_never_clears() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options::default()));
+    let mut e = support::engine(Options::default());
     e.start(1_000.0);
     let id = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
         .into_iter()
@@ -283,10 +284,10 @@ fn metadata_failure_falls_back_but_invalid_success_never_clears() {
 
 #[test]
 fn subscription_can_be_cancelled_before_markets_arrive() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(1000.0);
     let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
         .into_iter()
@@ -359,7 +360,7 @@ fn empty_quotes_and_bad_market_rows_do_not_drop_other_market_statistics() {
 
 #[test]
 fn primary_and_fallback_catalogues_retry_with_backoff_then_keep_valid_neighbors() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options::default()));
+    let mut e = support::engine(Options::default());
     e.start(0.);
     let mut transport_now = 0.;
     for delay in [1000., 2000., 4000.] {
@@ -397,6 +398,8 @@ fn primary_and_fallback_catalogues_retry_with_backoff_then_keep_valid_neighbors(
             _ => None,
         })
         .unwrap();
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     reply(&mut e, id, &MARKETS.replacen("[", "[{},", 1));
     assert_eq!(e.store().markets().len(), 2);
     assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Skipped malformed public discovery row")));
@@ -498,4 +501,230 @@ fn silent_book_is_cleared_while_other_channels_keep_socket_alive() {
         r#"{"channel":"order_book:0","type":"subscribed/order_book","order_book":{"nonce":12,"bids":[{"price":"97","size":"1"}],"asks":[]}}"#,
     );
     assert_eq!(e.book("ETH").unwrap().best_bid(), Some(97.0));
+}
+
+#[test]
+fn base_and_usd_open_interest_can_coexist_in_a_live_stats_row() {
+    let (mut e, socket) = seeded();
+    send(
+        &mut e,
+        socket,
+        2_000.0,
+        r#"{"channel":"market_stats:all","market_stats":{"0":{"symbol":"ETH","market_id":0,"mark_price":"2333.18","index_price":"2333.93","last_trade_price":"2333.21","open_interest":"76059298.189074","open_interest_usd":"152118596.378148"}}}"#,
+    );
+    let ticker = e.store().ticker("ETH").unwrap();
+    assert_eq!(ticker.mark, 2333.18);
+    assert_eq!(ticker.index, 2333.93);
+    assert_eq!(ticker.last, 2333.21);
+    assert_eq!(ticker.open_interest, 76059298.189074);
+}
+
+#[test]
+fn rest_depth_aggregates_native_lots_without_binary_residue() {
+    let (mut e, _) = seeded();
+    book(&mut e);
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookOrders") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(
+        &mut e,
+        request.id,
+        r#"{"code":200,"bids":[{"price":"100","remaining_base_amount":"0.1"},{"price":"100","remaining_base_amount":"0.2"}],"asks":[{"price":"101","remaining_base_amount":"0.1"},{"price":"101","remaining_base_amount":"0.2"}]}"#,
+    );
+    let book = e.book("ETH").unwrap();
+    assert_eq!(book.bids(), [(100.0, 0.3)]);
+    assert_eq!(book.asks(), [(101.0, 0.3)]);
+}
+
+#[test]
+fn public_close_primes_the_book_before_the_reconnect_timer() {
+    let (mut e, socket) = seeded();
+    book(&mut e);
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookOrders") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(
+        &mut e,
+        request.id,
+        r#"{"code":200,"bids":[{"price":"100","remaining_base_amount":"1"}],"asks":[]}"#,
+    );
+    e.drain_actions().for_each(drop);
+    // The previous successful snapshot's two-second pacing interval has elapsed.
+    e.handle(4_000.0, Event::WsClosed { socket, code: 1006 });
+    let recovery = safe_cex_engine::test_support::prepared_actions(&mut e, 4_000.0)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookOrders") => Some(request),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(recovery.len(), 1, "close must not wait for another poll");
+    e.handle(
+        4_001.0,
+        Event::HttpResponse {
+            request: recovery[0].id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":200,"bids":[{"price":"99","remaining_base_amount":"2"}],"asks":[]}"#,
+            },
+        },
+    );
+    assert_eq!(e.book("ETH").unwrap().bids(), [(99.0, 2.0)]);
+    for now in [4_002.0, 4_003.0, 4_004.0] {
+        e.handle(now, Event::WsClosed { socket, code: 1006 });
+    }
+    assert!(
+        safe_cex_engine::test_support::prepared_actions(&mut e, 4_004.0)
+            .into_iter()
+            .all(|action| !matches!(action, Action::Http(request) if request.url.contains("orderBookOrders")))
+    );
+}
+
+#[test]
+fn market_snapshot_seeds_last_price_before_socket_stats() {
+    let mut e = support::engine(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    e.start(1_000.0);
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookDetails") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    let markets = MARKETS.replacen(
+        "\"market_id\":0,",
+        "\"market_id\":0,\"last_trade_price\":\"2333.21\",",
+        1,
+    );
+    reply(&mut e, request.id, &markets);
+    assert_eq!(e.store().ticker("ETH").unwrap().last, 2333.21);
+    assert_eq!(e.store().ticker("BTC").unwrap().last, 0.0);
+}
+
+#[test]
+fn reconnect_keeps_one_snapshot_and_fresh_socket_depth_wins() {
+    let (mut e, socket) = seeded();
+    book(&mut e);
+    let initial = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookOrders") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut e, initial.id, r#"{"bids":[],"asks":[]}"#);
+    e.drain_actions().for_each(drop);
+    e.handle(4_000.0, Event::WsClosed { socket, code: 1006 });
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 4_000.0);
+    let recovery: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookOrders") => Some(request.id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(recovery.len(), 1);
+    let (retry, retry_at) = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms > 4_000.0 && *at_ms < 10_000.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .unwrap();
+    e.handle(retry_at, Event::TimerFired { timer: retry });
+    let socket = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(retry_at + 1.0, Event::WsOpened { socket });
+    assert!(safe_cex_engine::test_support::prepared_actions(&mut e, retry_at + 1.0)
+        .into_iter().all(|action| !matches!(action, Action::Http(request) if request.url.contains("orderBookOrders"))));
+    send(
+        &mut e,
+        socket,
+        retry_at + 2.0,
+        r#"{"channel":"order_book:0","type":"subscribed/order_book","order_book":{"nonce":50,"bids":[{"price":"102","size":"3"}],"asks":[]}}"#,
+    );
+    e.handle(
+        retry_at + 1_000.0,
+        Event::HttpResponse {
+            request: recovery[0],
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"bids":[{"price":"99","remaining_base_amount":"1"}],"asks":[]}"#,
+            },
+        },
+    );
+    assert_eq!(e.book("ETH").unwrap().bids(), [(102.0, 3.0)]);
+    e.handle(retry_at + 1_001.0, Event::WsClosed { socket, code: 1006 });
+    assert!(safe_cex_engine::test_support::prepared_actions(&mut e, retry_at + 1_001.0)
+        .into_iter().all(|action| !matches!(action, Action::Http(request) if request.url.contains("orderBookOrders"))));
+}
+
+#[test]
+fn stats_prefer_base_interest_independently_of_json_order_and_keep_usd_fallback() {
+    let (mut e, socket) = seeded();
+    send(
+        &mut e,
+        socket,
+        2_000.0,
+        r#"{"channel":"ticker:0","ticker":{"open_interest_usd":"20","open_interest":"10","last_trade_price":"100"}}"#,
+    );
+    assert_eq!(e.store().ticker("ETH").unwrap().open_interest, 10.0);
+    send(
+        &mut e,
+        socket,
+        2_001.0,
+        r#"{"channel":"ticker:0","ticker":{"openInterestUsd":"30"}}"#,
+    );
+    assert_eq!(e.store().ticker("ETH").unwrap().open_interest, 30.0);
+    assert_eq!(e.store().ticker("ETH").unwrap().last, 100.0);
+}
+
+#[test]
+fn catalogue_starts_ticker_hydration_before_the_socket_opens() {
+    let mut e = support::engine(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    e.start(1_000.0);
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookDetails") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut e, catalogue.id, MARKETS);
+    let stats = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("exchangeStats") => Some(request),
+            _ => None,
+        })
+        .expect("ticker hydration must not depend on a socket Open");
+    reply(
+        &mut e,
+        stats.id,
+        r#"{"code":200,"order_book_stats":[{"symbol":"ETH","last_trade_price":"2333.21"}]}"#,
+    );
+    assert_eq!(e.store().ticker("ETH").unwrap().last, 2333.21);
 }

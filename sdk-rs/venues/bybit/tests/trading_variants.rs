@@ -25,7 +25,12 @@ fn options(variant: Variant) -> Options {
 }
 
 fn ready(variant: Variant) -> Harness {
-    let mut h = Harness::started(options(variant));
+    ready_with(options(variant))
+}
+
+fn ready_with(options: Options) -> Harness {
+    let variant = options.variant;
+    let mut h = Harness::started(options);
     if h.has_request("/v5/account/info") {
         h.respond("/v5/account/info", 200, support::ACCOUNT_INFO);
     }
@@ -55,6 +60,16 @@ fn ready(variant: Variant) -> Harness {
         support::TICKERS.to_owned()
     };
     h.respond("/v5/market/tickers", 200, &tickers);
+    // Managed public feeds accept no traffic on an unopened socket.
+    let public: Vec<_> = h
+        .sockets
+        .iter()
+        .filter(|(_, url)| url.contains("/v5/public"))
+        .map(|(socket, _)| *socket)
+        .collect();
+    for socket in public {
+        h.event(Event::WsOpened { socket });
+    }
     if variant.is_hyro() {
         let socket = h.socket("/v5/private").unwrap();
         h.event(Event::WsOpened { socket });
@@ -82,7 +97,17 @@ fn ready(variant: Variant) -> Harness {
         h.respond("/v5/position/list", 200, EMPTY);
         h.respond("/v5/account/wallet-balance", 200, WALLET);
         assert!(h.engine.store().loaded().orders);
-    } else if variant == Variant::Demo {
+    } else {
+        // Managed sockets deliver nothing on an unopened socket; Bybit's own auth ACK then
+        // marks the private session live, as in a real session.
+        let socket = h.socket("/v5/private").unwrap();
+        h.event(Event::WsOpened { socket });
+        h.message(
+            "/v5/private",
+            r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"cejreaspqfh3sjdnldmg-p"}"#,
+        );
+    }
+    if variant == Variant::Demo {
         while h.has_request("/v5/order/realtime") {
             h.respond("/v5/order/realtime", 200, EMPTY);
         }
@@ -3688,4 +3713,25 @@ fn hyro_waiter_takes_its_own_founders_outcome_not_a_later_founders() {
         1,
         "one terminal"
     );
+}
+
+/// TS keeps its local REST order lifecycle for Bybit Brazil (`BRA_BTL`) as for
+/// Demo, until the proxied private WS is venue-validated; plain live Bybit
+/// leaves order rows to the private stream.
+#[test]
+fn brazil_limit_ack_publishes_locally_but_plain_linear_waits_for_the_stream() {
+    for (site, local) in [(Some("BRA_BTL"), true), (None, false)] {
+        let mut h = ready_with(Options {
+            bybit_site_id: site.map(Into::into),
+            ..options(Variant::Linear)
+        });
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        resolve_mode(&mut h, "BTCUSDT");
+        h.respond("/v5/order/create-batch", 200, r#"{"retCode":0,"result":{"list":[{"orderId":"local"}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+        assert_eq!(
+            h.engine.store().order("local").is_some(),
+            local,
+            "site {site:?}"
+        );
+    }
 }

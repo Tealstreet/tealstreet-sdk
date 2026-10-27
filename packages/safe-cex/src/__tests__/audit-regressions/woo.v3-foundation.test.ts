@@ -7,7 +7,7 @@ import type {
   WooV3PlaceOrderResult,
   WooV3Position,
   WooV3Response,
-} from '../../exchanges/woo/woo.v3.contracts';
+} from '../reference/woo/woo.v3.contracts';
 
 import { describe, expect, it } from 'vitest';
 
@@ -18,8 +18,8 @@ import {
   WOO_V3_RUNTIME_STATUS,
   WOO_V3_WEBSOCKET_MIGRATION,
   WOO_V3_WS_URL,
-} from '../../exchanges/woo/woo.v3.contracts';
-import { prepareWooV3Request } from '../../exchanges/woo/woo.v3.request';
+} from '../reference/woo/woo.v3.contracts';
+import { prepareWooV3Request } from '../reference/woo/woo.v3.request';
 
 const DOCUMENTED_AUTH_FIXTURE = {
   apiKey: 'AbmyVJGUpN064ks5ELjLfA==',

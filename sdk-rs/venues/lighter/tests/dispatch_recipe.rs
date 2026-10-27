@@ -1,6 +1,9 @@
-//! `TxRecipe` through the real engine dispatcher and `LocalSigner` produces
-//! the legacy `Signer`'s `sendTx`/`sendTxBatch` body byte for byte (R3), and
-//! holds parked transactions until a valid result arrives (R4).
+#[path = "support/reference_signer.rs"]
+mod reference_signer;
+use reference_signer::{Signer, send_body};
+// `TxRecipe` through the real engine dispatcher and `LocalSigner` produces
+// the legacy `Signer`'s `sendTx`/`sendTxBatch` body byte for byte (R3), and
+// holds parked transactions until a valid result arrives (R4).
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
 use safe_cex_engine::entropy::Entropy;
@@ -14,9 +17,7 @@ use safe_cex_engine::{
     Action, Command, Cx, Engine, Event, HttpRequest, Method, RequestId, Response, SocketId,
     TimerId, Venue,
 };
-use safe_cex_venue_lighter::sign::{
-    Account, Builder, Order, Signer, Transaction, TxRecipe, send_body,
-};
+use safe_cex_venue_lighter::sign::{Account, Builder, Order, Transaction, TxRecipe};
 use std::sync::{Arc, Mutex};
 
 const ORIGIN: &str = "https://mainnet.zklighter.elliot.ai";
@@ -182,6 +183,19 @@ fn legacy(txs: &[(Transaction, u64)], now_ms: u64) -> (&'static str, String) {
     send_body(&signed)
 }
 
+fn protection(order_id: u64, order_type: u8, trigger_price: u32) -> Order {
+    Order {
+        order_id,
+        is_buy: false,
+        amount: 0,
+        order_type,
+        time_in_force: 0,
+        reduce_only: true,
+        trigger_price,
+        ..order(order_id)
+    }
+}
+
 fn cases() -> Vec<Vec<(Transaction, u64)>> {
     let create = |order_id, builder| Transaction::Create {
         order: order(order_id),
@@ -225,6 +239,30 @@ fn cases() -> Vec<Vec<(Transaction, u64)>> {
                 16,
             ),
         ],
+        vec![(
+            Transaction::Grouped {
+                grouping: 1,
+                orders: vec![order(20), protection(21, 2, 300_000)],
+                builder: None,
+            },
+            17,
+        )],
+        vec![(
+            Transaction::Grouped {
+                grouping: 3,
+                orders: vec![
+                    order(22),
+                    protection(23, 2, 300_000),
+                    protection(24, 4, 320_000),
+                ],
+                builder: Some(Builder {
+                    account_index: 99,
+                    maker_fee: 5,
+                    taker_fee: 10,
+                }),
+            },
+            18,
+        )],
     ]
 }
 
@@ -238,8 +276,8 @@ fn released(engine: &mut Engine<Issue>) -> Vec<HttpRequest> {
         .collect()
 }
 
-/// R3: Create (with and without builder attributes), Cancel, Leverage and a
-/// batch all equal the legacy wire body byte for byte.
+/// R3: Create (with and without builder attributes), grouped OTO and OTOCO,
+/// Cancel, Leverage and a batch all equal the legacy wire body byte for byte.
 #[test]
 fn tx_recipe_matches_the_legacy_send_tx_body() {
     for txs in cases() {

@@ -10,8 +10,10 @@ mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::classify::{self, ReadFailure, ReadRetry, Released};
+use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::log::code;
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
@@ -33,23 +35,13 @@ const MARKETS: &str = "/api/v1/futures/market/trading_pairs";
 const TICKERS: &str = "/api/v1/futures/market/tickers";
 const KLINE: &str = "/api/v1/futures/market/kline";
 
+/// Opaque trusted-setup identities; signing material stays with the provider.
 #[derive(Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
+    pub credentials: Option<Identity>,
+    pub read_credentials: Option<Identity>,
 }
 
 pub enum Pending {
@@ -73,7 +65,55 @@ pub enum Pending {
         symbol: String,
         write_revision: u64,
         serial: u64,
+        custody: Option<account::ReadCustody>,
     },
+}
+impl Pending {
+    pub(crate) fn with_custody(self, custody: account::ReadCustody) -> Self {
+        match self {
+            Self::Private(mut read) => {
+                read.custody = Some(custody);
+                Self::Private(read)
+            }
+            Self::SymbolSettings {
+                symbol,
+                write_revision,
+                serial,
+                ..
+            } => Self::SymbolSettings {
+                symbol,
+                write_revision,
+                serial,
+                custody: Some(custody),
+            },
+            other => other,
+        }
+    }
+    fn custody(&self) -> Option<&account::ReadCustody> {
+        match self {
+            Self::Private(read) => read.custody.as_ref(),
+            Self::SymbolSettings { custody, .. } => custody.as_ref(),
+            _ => None,
+        }
+    }
+    /// Settle a Background read's authority; idempotent. Command-owned
+    /// prerequisite reads settle through their Preflight or Plan instead.
+    pub(crate) fn release(&mut self, cx: &mut Cx<'_, Pending>) {
+        let custody = match self {
+            Self::Private(read) => &mut read.custody,
+            Self::SymbolSettings { custody, .. } => custody,
+            _ => return,
+        };
+        if matches!(custody, Some(account::ReadCustody::Background(_)))
+            && let Some(custody) = custody.take()
+        {
+            let _ = cx.finish_http_context(custody.context());
+        }
+    }
+    /// Exact delivery precedes any decoding or Store effect.
+    fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.custody().is_none_or(|custody| custody.delivered(cx))
+    }
 }
 #[derive(Clone)]
 enum Feed {
@@ -103,8 +143,8 @@ struct BookState {
 }
 
 pub struct BitunixFutures {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
-    credentials: Option<sign::Credentials>,
+    options: Options,
+    slots: Slots<Identity>,
     account: account::AccountState,
     trading: trading::TradingState,
     sockets: Vec<Socket>,
@@ -115,20 +155,17 @@ pub struct BitunixFutures {
 }
 impl BitunixFutures {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
-            credentials: if options.public_data_only {
-                None
+            slots: if options.public_data_only {
+                Slots::default()
             } else {
-                options
-                    .key
-                    .as_ref()
-                    .zip(options.secret.as_ref())
-                    .filter(|(k, s)| !k.is_empty() && !s.is_empty())
-                    .map(|(k, s)| sign::Credentials {
-                        key: k.clone(),
-                        secret: s.clone(),
-                    })
+                Slots::new(
+                    options.credentials.clone(),
+                    options.read_credentials.clone(),
+                    SlotPolicy {
+                        secondary_requires_primary: true,
+                    },
+                )
             },
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
@@ -282,13 +319,6 @@ impl BitunixFutures {
         };
         if cx.finish_http_context(&context).is_ok() {
             self.public_failed(cx, read, error, 0.0);
-        }
-    }
-    fn headers(&self) -> Vec<(&'static str, String)> {
-        if self.options.testnet {
-            vec![("x-simulated-trading", "1".into())]
-        } else {
-            vec![]
         }
     }
     fn socket_spec(feed: &Feed, recover: bool) -> safe_cex_engine::SocketSpec {
@@ -505,6 +535,47 @@ fn candle(k: &Kline, rest: bool) -> Candle {
     }
 }
 impl Venue for BitunixFutures {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    // reconcile_uncertain starts the regular and tpsl census reads at once.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    /// One mutation per order for its whole job, continuations included.
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.trading_retired(owner);
+    }
+    /// An uncertain seal: restore sealed jobs' rows, then Primary order
+    /// snapshots report through `orders_reconciled`.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_trading(cx);
+    }
     fn account_auth_outcome(
         &self,
         pending: &Pending,
@@ -516,13 +587,37 @@ impl Venue for BitunixFutures {
     }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        safe_cex_engine::Capabilities::BASE
+        safe_cex_engine::Capabilities {
+            closed_positions: true,
+            position_history: safe_cex_engine::PositionHistory::Bitunix,
+            closed_position_format: safe_cex_engine::ClosedPositionFormat::Bitunix,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read.validate()
+            && read.validate().is_err()
         {
-            cx.notice(Level::Error, code::CONFIG_INVALID, error);
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                safe_cex_engine::ReadCredentials::status(false).unwrap_err(),
+            );
             return;
         }
         self.markets(cx);
@@ -637,6 +732,9 @@ impl Venue for BitunixFutures {
         {
             return;
         }
+        if !pending.delivered(cx) {
+            return;
+        }
         match pending {
             Pending::Private(read) => self.account_item(cx, read, item),
             Pending::History(read) => self.history_item(cx, read, item),
@@ -717,7 +815,19 @@ impl Venue for BitunixFutures {
             _ => {}
         }
     }
-    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+    fn on_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut pending: Pending,
+        response: Response<'_>,
+    ) {
+        if pending.custody().is_some() {
+            let delivered = pending.delivered(cx);
+            pending.release(cx);
+            if !delivered {
+                return;
+            }
+        }
         let pending = match pending {
             Pending::History(read) => {
                 self.history_response(cx, read, response);
@@ -740,9 +850,10 @@ impl Venue for BitunixFutures {
                         account::Axis::Orders => 2,
                         account::Axis::Tpsl => 3,
                     }] == read.serial;
+                let custody = read.custody.take();
                 self.account_response(cx, read, response);
                 if let Some(command) = after {
-                    self.prepared(cx, command, success);
+                    self.prepared(cx, command, success, custody);
                 }
                 return;
             }
@@ -754,6 +865,7 @@ impl Venue for BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => {
                 self.symbol_settings_response(cx, &symbol, write_revision, serial, response);
                 return;
@@ -855,10 +967,15 @@ impl Venue for BitunixFutures {
     fn on_stream_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Pending,
+        mut pending: Pending,
         response: Response<'_>,
     ) {
+        pending.release(cx);
         let pending = match pending {
+            Pending::History(read) => {
+                self.history_stream_error(cx, read, &response);
+                return;
+            }
             Pending::Private(read) => {
                 self.account_failed(cx, read, Some(&response));
                 return;
@@ -867,6 +984,7 @@ impl Venue for BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => {
                 self.settings_failed(cx, &symbol, write_revision, serial, Some(&response));
                 return;
@@ -894,11 +1012,12 @@ impl Venue for BitunixFutures {
     fn on_stream_malformed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Pending,
+        mut pending: Pending,
         status: u16,
         headers: &str,
         error: &str,
     ) {
+        pending.release(cx);
         let response = Response {
             status,
             headers,
@@ -913,6 +1032,7 @@ impl Venue for BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => {
                 self.settings_failed(cx, &symbol, write_revision, serial, Some(&response));
                 return;
@@ -934,13 +1054,20 @@ impl Venue for BitunixFutures {
             );
         }
     }
-    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        self.public_typed_failed(cx, pending, error);
-    }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         self.public_typed_failed(cx, pending, error);
     }
-    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+    /// A provider refusal never released the request: a write is NotSent,
+    /// and a read keeps its native failure path.
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Trade(request) => self.trade_error(cx, request, error),
+            Pending::History(read) => self.history_sign_failed(cx, read, &error.message),
+            pending => self.public_typed_failed(cx, pending, error),
+        }
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
+        pending.release(cx);
         match pending {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, read, error),
@@ -955,6 +1082,7 @@ impl Venue for BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => self.settings_failed(cx, &symbol, write_revision, serial, None),
             pending @ (Pending::Markets { .. } | Pending::Tickers { .. }) => {
                 let failure = classify::read(&codes::BITUNIX, Released::Transport, None, error);
@@ -963,9 +1091,6 @@ impl Venue for BitunixFutures {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.trade_timer(cx, timer) {
-            return;
-        }
         if self.account_timer(cx, timer) {
             return;
         }

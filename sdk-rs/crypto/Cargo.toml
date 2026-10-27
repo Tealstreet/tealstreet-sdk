@@ -30,6 +30,7 @@ getrandom_04.workspace = true
 
 
 [features]
+address-nonce = ["safe-cex-engine/address-nonce", "secp256k1"]
 # zkLink pulls franklin-crypto; only ApeX Omni builds enable it.
 zklink = ["dep:franklin-crypto"]
 # Local provider arms. The primitive modules stay available to venues; only a
@@ -41,12 +42,16 @@ secp256k1 = []
 stark = []
 # Kraken dispatch recipes require HMAC-SHA512; other families opt in explicitly.
 hmac-sha512 = []
+# Declared signing-key trimming at setup; only Bitunix links it.
+trim-signing = []
 schnorr = []
 
 [dev-dependencies]
 alloy-signer = { workspace = true, features = ["eip712"] }
 alloy-dyn-abi.workspace = true
 serde.workspace = true
+# The scalar-only managed-flow control drives a real engine with this provider.
+safe-cex-engine = { workspace = true, features = ["test-support", "serial-plans", "address-nonce"] }
 
 [lints]
 workspace = true

@@ -940,6 +940,8 @@
     "showPriceAlertsOnChart": "Show Price Alerts",
     "chartAiAnalysis": "Chart AI Analysis",
     "chartAiAnalysisDetails": "Shows Analyze chart and Select pattern on the chart while you hover it, and lets the Agent read the chart. Needs the Agent and the command bar. Off: no buttons and no chart analysis.",
+    "chartContextMenuActions": "Chart Right-Click Actions",
+    "chartContextMenuActions-details": "Choose which Tealstreet trading actions appear in the chart right-click menu. On hosted TradingView and Tealchart, disabling every action removes the right-click menu entirely.",
     "extendLinesLeft": "Extend Label Lines Left",
     "transparentPriceAxis": "Transparent Price Axis",
     "oneTapMobileDrag": "One-Tap Mobile Drag",

@@ -2,8 +2,8 @@
 
 Owner: codex-9czdjh. Reviewer: codex-uufub4 (socket/nonce custody); shared API
 changes additionally need the engine owner. Baseline: actual
-`49a5b54f36232d1c926f4280141d92060db18e2b`. Plan only: no source, feature, inventory,
-hosted activation or signing cutover. Native-drain #2171 and NX #8172 establish
+`49a5b54f36232d1c926f4280141d92060db18e2b`. Plan landed as #2172; shared timing modes landed as #2177. The first venue checkpoint below contains inert originals; the successor implements
+the four managed feeds without hosted activation or signing cutover. Native-drain #2171 and NX #8172 establish
 separate retirement prerequisites, not socket or nonce takeover authority.
 
 ## Scope and exact inventory
@@ -42,7 +42,7 @@ traffic-based reset, not a reset from opening alone.
 
 | Feed | Endpoint | Connect / idle / ping | Backoff cap | Native auth/readiness |
 | --- | --- | --- | --- | --- |
-| Futures public | futures.kraken.com/ws/v1; demo-futures.kraken.com/ws/v1 on testnet | 45,000 / 45,000 / 15,000 | 16,000 | No auth; native public interest replay on open. Current open text refreshes receive before decoding. |
+| Futures public | futures.kraken.com/ws/v1; demo-futures.kraken.com/ws/v1 on testnet | 45,000 / 45,000 / 15,000 | 16,000 | No auth; native public interest replay on open. Only successfully decoded Message envelopes refresh receive. |
 | Futures private | Same configured Futures WS URL | 15,000 / 60,000 / 10,000 | 30,000 | Challenge wait OPEN+15,000; one accepted nonempty challenge renews ACK wait to receipt+15,000. All three distinct subscribed ACKs end auth. Only successfully decoded native Ws envelopes refresh receive. |
 | Spot public | ws.kraken.com/v2 | 45,000 / 45,000 / 15,000 | 16,000 | No auth. Native ticker/book/OHLC replay; current text refreshes receive, including malformed text. |
 | Spot private | ws-auth.kraken.com/v2 | 45,000 / 45,000 / 15,000 | 16,000 | On open, signed HTTP GetWebSocketsToken then executions/balances subscriptions. No separate native auth ACK deadline or wait-for-ACK publication gate. Current text refreshes receive before decoding. |
@@ -56,6 +56,11 @@ open_positions by OPEN+180,000. Native valid empty snapshots count; a heartbeat,
 ACK or malformed payload does not. This is distinct from authentication and
 idle. Once all initial payloads are accepted, a quiet account with native ping
 traffic can remain connected indefinitely. No age-based private resubscription.
+
+The shared initial-payload expiry reports RetireReason::Timeout(Timeout::Auth),
+including after Ready, as the existing snapshot bound does. This is a timeout
+retirement, not AuthFailure evidence or a definitive authentication refusal;
+the codec must not classify it as an invalid credential or grant a write resend.
 
 ## Ownership and codec mapping
 
@@ -88,7 +93,7 @@ traffic can remain connected indefinitely. No age-based private resubscription.
    rejection classes still reconnect with their native diagnostics; no new
    account latch, retry or permanent startup refusal.
 5. Spot private maps to AuthMode::None for lifecycle readiness, with native error
-   decoding and AnyText traffic. Open starts the existing token HTTP request,
+   decoding and declared successful-decode traffic. Open starts the existing token HTTP request,
    bound in Pending to the exact engine-issued Epoch. Adopt its response only
    while that same epoch is current/open; a token for an old socket cannot send
    on a replacement. Keep the exact two subscription JSON shapes and order
@@ -105,10 +110,10 @@ traffic can remain connected indefinitely. No age-based private resubscription.
 
 ## Shared API dispositions required before source
 
-Overseer ruling: native parity is mandatory for all three cases below. Managed
-sockets owner claude-55ao7t decides which are already expressible by the engine;
-for any gap, that owner names the smallest shared change and the overseer assigns
-it separately. No venue-local Supervisor, watchdog or policy approximation.
+The original plan identified the three gaps below. Shared owner claude-55ao7t
+scoped them and #2177 now supplies all three engine modes. No venue-local
+Supervisor or watchdog is needed. The current better-than-TypeScript standard
+permits tested safety improvements, documented in CALLERS at source cutover.
 
 AuthEvidence::Progress is already present at the baseline; do not rebuild that
 seam. Two native timing/traffic requirements do not fit a blind policy mapping:
@@ -133,9 +138,9 @@ OPEN, while managed Required auth's authenticated transition resets Supervisor's
 since at final ACK. Preserve native OPEN-based 30-second stability/reset
 behavior; the managed-sockets owner identifies the existing expression or smallest shared change. Auth latency
 must not extend that anchor.
-These are review/source gates, not approved new APIs. No generic implementation
-belongs in this docs checkpoint. Any required shared seam gets its own plan,
-originals and owner review before the whole-family activation.
+These shared API gates are closed by landed #2177: Declared traffic, an
+independent text-scope initial-payload completion, and StableAnchor::Open.
+Venue originals, codec source review and whole-family qualification remain.
 
 ## Originals after plan/API direction CLEAR
 
@@ -182,11 +187,108 @@ request/signing/credential inventories remain exact. Publish the caller-visible
 managed expiry/resource/retirement differences in CALLERS, without implying a
 nonce takeover, remote nonexecution or journal rewrite.
 
-CI records Kraken family sizes. Measure one local composed combined on the
-current landing tip before READY; keep a paired Kraken/combined comparison for
-the newly linked managed lifecycle. If generic engine/provider code is required,
-measure Bybit and Bitget on that same composed tree too. No budget/profile/gate
-changes. Delete each own scratch target after measurement, keep sources/logs and
-the size table, and run no competing size builds in this lane. Source CLEAR,
-qualified green CI and auditor exact-tree GO precede guarded SDK landing. This
-plan records source inspection only; no originals, builds or execution claimed.
+CI records Kraken family sizes. Under the venue-only speed policy, no local
+combined measurement is required while combined headroom exceeds 200K. Attribute
+the newly linked managed lifecycle cost per #2189. Shared engine/provider changes
+retain their separate gates. No profile or gate changes belong to this slice.
+Delete own scratch targets after checks and retain source/log evidence. One
+reviewer CLEAR plus the green correctness set, including Kraken replay, permits
+a guarded owner merge without auditor GO. CPU and certification are not gates.
+
+## Local ingress originals checkpoint
+
+Base: actual `fff73624e85`, after #2177 and #2189. The complete incoming
+`socket_supervision.rs` is an unchanged prefix; one child module adds 17 real
+startup/physical-ingress controls. No runtime, feature, Cargo or inventory change.
+
+The scoped target runs 32 controls: all 15 incoming native controls GREEN, plus
+14 intended assertion REDs and three new native GREENs, zero ignored. The REDs
+pin duplicate OPEN replay, connect/idle/auth equality before delayed timer
+delivery, and unopened Spot financial ingress issuing HTTP. These are safer
+engine-owned admission rules, not timing-text parity work. The GREENs pin
+permissively decoded empty envelopes, malformed-envelope refusal to refresh,
+and all three validated empty initial payloads before the final auth ACK.
+
+Duplicate-OPEN timer and late-OPEN no-send suffixes remain gated behind their
+first RED assertions until source. The inherited harness discards unrelated
+actions, so these controls do not claim exhaustive global noninterference;
+the unopened Spot control separately inspects the full raw action drain for
+HTTP/managed-HTTP work. Strict scoped Clippy and workspace formatting pass.
+The archived source and logs are bound in
+`/tmp/codex-kraken-socket-originals/qualification.json`; its target is deleted.
+
+Source uses the landed shared modes and removes all nine socket inventory
+occurrences together, retaining REST/signing custody separately. CI is the
+family size record; the venue-only speed policy governs combined measurement.
+Record the managed-sockets feature-link cost identified by #2189 alongside
+Kraken's measured family result; do not attribute that cost solely to codec code.
+
+## Local source qualification
+
+All four physical connects use managed feed/epoch admission. The eligible public
+and private feeds register before either physical connection begins. Public
+subscriptions are transactional ticker/book/OHLC interests; repairs use the
+engine repair operation rather than a coalescible unsubscribe/subscribe pair.
+Futures challenge frames remain epoch-owned one-shot authentication work. Spot
+token Pending holds the exact Epoch, rejects stale responses/retries before any
+legacy signing work, and releases its two native frames through the existing
+epoch-bound one-shot queue, never persistent replay interests.
+
+The original Spot stale-token test's setup requested a second token by sending
+a duplicate OPEN to an already open socket. Its successor uses a genuine first
+OPEN with the private transport deliberately held unopened; all original wire,
+fresh-signature, old-token refusal and new-token assertions remain unchanged.
+The new duplicate-OPEN controls require the safer inert result.
+
+The first local source run passed 30/32 socket controls and exposed an incorrect
+persistent-token replay implementation. That implementation was removed. The
+corrected source passed 32/32, then 37/37 after five additive controls. The first
+broader native run stopped at the duplicate-OPEN fixture setup described above;
+it is not reported as a green suite. Frozen composed qualification follows.
+
+The broader composed run exposed the same duplicate-OPEN setup in the Dogecoin
+public wire oracle. That fixture now also holds the physical public socket
+unopened and retains every original symbol/JSON assertion. The native suite is
+not declared green until this corrected setup passes. An additional real HTTP
+token result at idle equality must release zero subscription frames and retire
+the epoch through the shared one-shot final fence.
+
+## Public capacity correction
+
+The source reviewer identified permanent stopping on transient public Capacity.
+The correction uses shared Closed retirement and native backoff only for public
+Capacity, leaving permanent encoder/private outcomes fail closed. A bounded
+observer around the real Futures/Spot venues creates genuine valid-key proposal
+and continuation credit pressure. Kraken has no production continuation consumer;
+the fixture carries a live Background read Context as opaque native Pending,
+never as a new HTTP request or financial continuation. One genuine published wake is replayed before and after recovery; the other 511
+retired continuations must expose no wake or callback. No timer identity is invented.
+
+Frame-byte pressure uses actual native codec batches, each padded with legal JSON
+whitespace below the per-frame cap; parsing independently proves identical JSON.
+Repairing 80 genuine retained book interests fills the shared queued-byte budget.
+This is controlled encoder pressure, not a claim that native emits that padding.
+The fixture proves once-only invalidation/close/backoff, retained ticker/book/OHLC
+replay and actual private sibling publication. Initial fixture mistakes (assuming
+an invalidated book stayed exposed, comparing Spot display symbols to wire aliases,
+and hitting permanent InvalidCoverage instead of queue Capacity) are retained
+separately and never counted as source regression REDs.
+
+## Replacement admission and publication
+
+Public connect installs a genuine engine epoch and the matching native socket
+reference before fallible interest staging. A staging Capacity is handled by
+Closed retirement and an Ok return, so Reconnect cannot propagate it into the
+engine's permanent failed-feed path. Both real venues have a captured-retry
+control that saturates 512 valid proposal credits at replacement admission,
+observes a distinct retired epoch with no exposed connect/frame/HTTP, verifies
+one exponential retry, then proves A/B/ticker/Spot OHLC replay and live private
+publication. All seven pressure controls pass at the local correction.
+
+Under the overseer's speed policy this is a venue-only slice: no engine/shared
+runtime, checker, budget or inventory addition. CI remains the family-size
+record; no local combined measurement is required while the declared combined
+headroom exceeds 200K. One reviewer CLEAR and the green correctness set, including
+Kraken replay, permit the guarded owner merge without auditor GO. CPU and
+certification are not the landing gate. The full hosted route and nonce takeover
+remain separate; no activation is asserted here.

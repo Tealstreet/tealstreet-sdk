@@ -26,14 +26,23 @@ const DETECTION_MS: u32 = 10_000;
 const DETECTION: &str = "Bitget account detection did not complete";
 
 /// Bitget's native write codes: 40009 earns the one fresh resend, 40010, 40725
-/// and 45001 prove nothing, and any other code is a pre-execution refusal.
-const CODES: CodeTable = CodeTable {
+/// and 45001 prove nothing, the read side's key refusals keep their auth kind
+/// (pinned by account::write_and_read_key_refusals_agree), and any other code is
+/// a pre-execution refusal.
+pub(crate) const CODES: CodeTable = CodeTable {
     rows: &[
         Row {
             key: Key::Int(40009),
-            verdict: Verdict::RefusedResend(ErrorKind::Rejected),
+            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
+        auth(40001, ErrorKind::AuthInvalid),
+        auth(40006, ErrorKind::AuthInvalid),
+        auth(40011, ErrorKind::AuthInvalid),
+        auth(40012, ErrorKind::AuthInvalid),
+        auth(40037, ErrorKind::AuthInvalid),
+        auth(40014, ErrorKind::AuthPermission),
+        auth(40018, ErrorKind::AuthPermission),
         Row {
             key: Key::Int(40010),
             verdict: Verdict::Unknown(None),
@@ -58,6 +67,14 @@ const CODES: CodeTable = CodeTable {
         (429, Verdict::Refused(ErrorKind::RateLimited)),
     ],
 };
+
+const fn auth(code: i64, kind: ErrorKind) -> Row {
+    Row {
+        key: Key::Int(code),
+        verdict: Verdict::Refused(kind),
+        only: None,
+    }
+}
 
 #[derive(Default)]
 pub struct Trading {
@@ -669,7 +686,7 @@ impl BitgetFutures {
                             );
                         };
                         let policy = SerialPolicy {
-                            credential,
+                            credential: Some(credential),
                             pacing: None,
                             refusals_complete: true,
                         };
@@ -3135,6 +3152,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 
 fn serial(operation: Operation) -> SerialCall {
     SerialCall {
+        auth: Default::default(),
         operation,
         timeout_ms: CALL_MS,
         // Mutations carry the one native 40009 resend; reads never resend.
@@ -3143,6 +3161,7 @@ fn serial(operation: Operation) -> SerialCall {
         } else {
             1
         },
+        pacing: None,
     }
 }
 

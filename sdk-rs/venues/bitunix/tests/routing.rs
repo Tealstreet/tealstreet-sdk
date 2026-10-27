@@ -1,13 +1,13 @@
+mod support;
 use safe_cex_engine::{Action, Event, Response, SocketChannel};
-use safe_cex_venue_bitunix::{BitunixFutures, Options};
 
 #[test]
 fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut engine = support::engine(support::Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     engine.start(0.0);
     let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.)
         .into_iter()
@@ -68,21 +68,25 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             },
         },
     );
-    connections.extend(engine.drain_actions().filter_map(|action| match action {
-        Action::WsConnect {
-            binary,
-            socket,
-            url,
-            channel,
-            context,
-            headers,
-        } => {
-            assert!(headers.is_empty(), "Bitunix feeds send no upgrade headers");
-            assert!(!binary, "Bitunix feeds use the text protocol");
-            Some((socket, url, channel.unwrap(), context.unwrap()))
-        }
-        _ => None,
-    }));
+    connections.extend(
+        safe_cex_engine::test_support::prepared_now(&mut engine)
+            .into_iter()
+            .filter_map(|action| match action {
+                Action::WsConnect {
+                    binary,
+                    socket,
+                    url,
+                    channel,
+                    context,
+                    headers,
+                } => {
+                    assert!(headers.is_empty(), "Bitunix feeds send no upgrade headers");
+                    assert!(!binary, "Bitunix feeds use the text protocol");
+                    Some((socket, url, channel.unwrap(), context.unwrap()))
+                }
+                _ => None,
+            }),
+    );
     let mut feeds = connections
         .iter()
         .map(|(_, _, _, context)| context.feed.as_str())
@@ -124,7 +128,9 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             code: 1006,
         },
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut engine)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -138,7 +144,9 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
         })
         .unwrap();
     engine.handle(at, Event::TimerFired { timer: retry });
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut engine)
+        .into_iter()
+        .collect();
     let (replacement, context) = actions
         .iter()
         .find_map(|action| match action {
@@ -166,7 +174,9 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
         })
         .unwrap();
     engine.handle(50_000.0, Event::TimerFired { timer: watchdog });
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut engine)
+        .into_iter()
+        .collect();
     assert!(
         actions
             .iter()
@@ -185,7 +195,9 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
         })
         .unwrap();
     engine.handle(at, Event::TimerFired { timer: retry });
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut engine)
+        .into_iter()
+        .collect();
     let (recovered, context) = actions
         .iter()
         .find_map(|action| match action {
@@ -207,7 +219,9 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             code: 1006,
         },
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut engine)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -221,6 +235,6 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
         })
         .unwrap();
     engine.handle(at, Event::TimerFired { timer: retry });
-    assert!(engine.drain_actions().any(|action| matches!(action,
+    assert!(safe_cex_engine::test_support::prepared_now(&mut engine).into_iter().any(|action| matches!(action,
         Action::WsConnect { context: Some(context), .. } if context.feed == "ticker:300" && !context.recover)));
 }

@@ -4,7 +4,8 @@ use safe_cex_engine::{Action, Command, Event, Notice, Query};
 use serde::Deserialize;
 use support::*;
 fn done(e: &mut TestEngine) -> Result<String, String> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { result, .. }) => Some(Ok(result)),
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
@@ -203,7 +204,9 @@ fn client_order_lookup_rejects_without_a_request_or_panic() {
             },
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -268,7 +271,9 @@ fn an_id_free_order_page_never_counts_as_paging_progress() {
         r.id,
         &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         actions
@@ -437,7 +442,9 @@ fn later_page_failures_resolve_only_accepted_rows_with_owned_incomplete_evidence
             let request = requests(&mut e).remove(0);
             fail_history(&mut e, request.id, failure, kind);
             owned_partial(
-                &e.drain_actions().collect::<Vec<_>>(),
+                &safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
                 if kind == 1 { 100 } else { 200 },
             );
         }
@@ -454,7 +461,9 @@ fn duplicate_full_pages_retain_rows_only_with_owned_incomplete_evidence() {
         let request = requests(&mut e).remove(0);
         reply(&mut e, request.id, &page);
         owned_partial(
-            &e.drain_actions().collect::<Vec<_>>(),
+            &safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect::<Vec<_>>(),
             if kind == 1 { 100 } else { 200 },
         );
     }
@@ -472,7 +481,9 @@ fn page_caps_retain_rows_with_owned_warning_before_done() {
                 request = requests(&mut e).remove(0);
             }
         }
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect::<Vec<_>>();
         owned_partial(&actions, if kind == 1 { 5000 } else { 20000 });
         assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.message.contains("page cap"))));
     }
@@ -493,7 +504,9 @@ fn a_valid_empty_end_page_remains_complete_after_retained_rows() {
                 r#"{"code":0,"data":{"tradeList":[]}}"#
             },
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert!(!actions.iter().any(|a|matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
         let result = actions
             .iter()
@@ -529,7 +542,12 @@ fn a_full_fresh_order_page_without_time_progress_is_owned_partial_history() {
         request.id,
         &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
     );
-    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 200);
+    owned_partial(
+        &safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect::<Vec<_>>(),
+        200,
+    );
 }
 #[test]
 fn a_full_order_page_at_the_inclusive_start_cannot_prove_complete_history() {
@@ -556,7 +574,12 @@ fn a_full_order_page_at_the_inclusive_start_cannot_prove_complete_history() {
         request.id,
         &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
     );
-    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 100);
+    owned_partial(
+        &safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect::<Vec<_>>(),
+        100,
+    );
 }
 #[test]
 fn order_rows_before_the_requested_start_prove_the_walk_is_complete() {
@@ -583,7 +606,9 @@ fn order_rows_before_the_requested_start_prove_the_walk_is_complete() {
         request.id,
         &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(actions.iter().any(
         |a| matches!(a, Action::Notice(Notice::CommandDone {command:41,result}) if result=="[]")
     ));
@@ -626,7 +651,13 @@ fn first_page_failure_has_a_typed_owner_and_never_an_empty_success() {
             let (mut e, _) = startup();
             let request = start_history(&mut e, kind);
             fail_history(&mut e, request.id, failure, kind);
-            typed_rejection(&e.drain_actions().collect::<Vec<_>>(), 41, false);
+            typed_rejection(
+                &safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                41,
+                false,
+            );
         }
     }
 }
@@ -649,7 +680,9 @@ fn failed_later_page_cannot_publish_its_valid_prefix() {
             .push(serde_json::Value::Null);
         reply(&mut e, request.id, &value.to_string());
         owned_partial(
-            &e.drain_actions().collect::<Vec<_>>(),
+            &safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect::<Vec<_>>(),
             if kind == 1 { 100 } else { 200 },
         );
     }
@@ -668,7 +701,13 @@ fn raw_progress_without_accepted_rows_still_rejects_a_later_failure() {
         reply(&mut e, request.id, &page);
         let request = requests(&mut e).remove(0);
         fail_history(&mut e, request.id, 0, kind);
-        typed_rejection(&e.drain_actions().collect::<Vec<_>>(), 41, false);
+        typed_rejection(
+            &safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            41,
+            false,
+        );
     }
 }
 
@@ -688,7 +727,9 @@ fn partial_query_cannot_mark_or_complete_its_pending_neighbour() {
     );
     let neighbour = requests(&mut e).remove(0);
     fail_history(&mut e, next.id, 0, 1);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect::<Vec<_>>();
     owned_partial(&actions, 100);
     assert!(!actions.iter().any(|action| matches!(
         action,
@@ -701,7 +742,9 @@ fn partial_query_cannot_mark_or_complete_its_pending_neighbour() {
         neighbour.id,
         r#"{"code":0,"data":{"tradeList":[]}}"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 42, result }) if result == "[]")));
     assert!(!actions.iter().any(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
 }
@@ -714,13 +757,11 @@ fn signing_preparation_refusal_stays_strict_after_accepted_rows() {
     };
     let refused = Arc::new(AtomicBool::new(false));
     let control = refused.clone();
-    let mut e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
-            key: Some("replay-key".into()),
-            secret: Some("replay-secret".into()),
-            ..Default::default()
-        }),
-    );
+    let mut e = support::engine(support::Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        ..Default::default()
+    });
     e.set_signing_entropy(Box::new(move |bytes| {
         if control.load(Ordering::SeqCst) {
             Err("signing source unavailable".into())
@@ -734,7 +775,12 @@ fn signing_preparation_refusal_stays_strict_after_accepted_rows() {
     let request = start_history(&mut e, 1);
     refused.store(true, Ordering::SeqCst);
     reply(&mut e, request.id, &history_page(1, 0));
-    typed_rejection(&e.drain_actions().collect::<Vec<_>>(), 41, true);
+    // A managed page signs when it is prepared.
+    typed_rejection(
+        &safe_cex_engine::test_support::prepared_actions(&mut e, 0.0),
+        41,
+        true,
+    );
 }
 
 #[test]
@@ -751,7 +797,9 @@ fn a_genuine_empty_first_page_is_complete_without_a_followup_request() {
                 r#"{"code":0,"data":{"tradeList":[]}}"#
             },
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 41, result }) if result == "[]")));
         assert!(!actions.iter().any(|action| matches!(
             action,
@@ -776,7 +824,12 @@ fn an_unbounded_first_page_with_invalid_time_progress_stalls_without_leaking_a_t
         request.id,
         &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
     );
-    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 0);
+    owned_partial(
+        &safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect::<Vec<_>>(),
+        0,
+    );
 }
 
 #[test]
@@ -804,7 +857,12 @@ fn an_explicit_first_end_time_that_does_not_advance_is_incomplete() {
         request.id,
         &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
     );
-    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 100);
+    owned_partial(
+        &safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect::<Vec<_>>(),
+        100,
+    );
 }
 
 #[test]
@@ -830,4 +888,28 @@ fn a_requested_order_limit_does_not_short_circuit_native_paging() {
     let rows: Vec<serde_json::Value> = serde_json::from_str(&done(&mut e).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["id"], "0");
+}
+
+/// History pages sign with the read key when one is configured; each page is a
+/// leg of the command's own caller root.
+#[test]
+fn history_pages_sign_with_the_read_key() {
+    let (mut e, _) = startup_with_engine(support::engine(support::Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-material".into()),
+        read_credentials: Some(safe_cex_engine::ReadCredentials {
+            key: "read-key".into(),
+            secret: "read-material".into(),
+            passphrase: None,
+        }),
+        ..Default::default()
+    }));
+    let request = start_history(&mut e, 1);
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| *name == "api-key" && value == "read-key"),
+        "the read key signs history"
+    );
 }

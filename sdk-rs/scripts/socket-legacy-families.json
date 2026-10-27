@@ -2,25 +2,21 @@
   "temporaryFeature": "managed-sockets",
   "sourceRoots": {
     "apexomni": "venues/apexomni/src/",
-    "asterdex": "venues/asterdex/src/",
     "binance": "venues/binance/src/",
     "bingx": "venues/bingx/src/",
     "bitget": "venues/bitget/src/",
     "bitrue": "venues/bitrue/src/",
     "bitunix": "venues/bitunix/src/",
     "blofin": "venues/blofin/src/",
-    "bybit": "venues/bybit/src/",
     "coinbase": "venues/coinbase/src/",
     "cryptocom": "venues/cryptocom/src/",
     "grvt": "venues/grvt/src/",
-    "kraken": "venues/kraken/src/",
     "kucoin": "venues/kucoin/src/",
     "kucoinspot": "venues/kucoin/src/spot/",
     "lighter": "venues/lighter/src/",
     "mexc": "venues/mexc/src/",
     "orderly": "venues/orderly/src/",
     "paradex": "venues/paradex/src/",
-    "polymarket": "venues/polymarket/src/",
-    "woo": "venues/woo/src/"
+    "polymarket": "venues/polymarket/src/"
   }
 }

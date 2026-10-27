@@ -5,16 +5,25 @@ use safe_cex_venue_bitunix::{BitunixFutures, Options};
 #[test]
 fn bitunix_uses_the_shared_engine_clock_without_a_capability_opt_in() {
     let venue = BitunixFutures::new(Options::default());
-    assert_eq!(venue.capabilities(), safe_cex_engine::Capabilities::BASE);
+    // Only the reported closed-position axis differs from the base record.
+    assert_eq!(
+        venue.capabilities(),
+        safe_cex_engine::Capabilities {
+            closed_positions: true,
+            position_history: safe_cex_engine::PositionHistory::Bitunix,
+            closed_position_format: safe_cex_engine::ClosedPositionFormat::Bitunix,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    );
 }
 
 #[test]
 fn first_authenticated_rest_and_private_login_use_the_supplied_engine_time() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut engine = support::engine(support::Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     engine.start(1_760_000_000_000.0);
     let catalogue =
         safe_cex_engine::test_support::prepared_actions(&mut engine, 1_760_000_000_000.0)
@@ -41,7 +50,9 @@ fn first_authenticated_rest_and_private_login_use_the_supplied_engine_time() {
             },
         },
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut engine)
+        .into_iter()
+        .collect();
     let mut signed = 0;
     let mut private = None;
     for action in actions {

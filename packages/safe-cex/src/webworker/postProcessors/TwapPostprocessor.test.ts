@@ -167,6 +167,7 @@ describe('TwapPostprocessor', () => {
 
     it('should include both options and state in output', () => {
       const twap = createMockTwapInstance('twap-1', OrderSide.Buy, 1.0);
+      (twap as any).currentOrderIds = ['order-1'];
       twapManager.runningTwaps.set('twap-1', twap);
 
       processor.process(mockStore);
@@ -181,6 +182,7 @@ describe('TwapPostprocessor', () => {
       // From state
       expect(activeTwap.status).toBe(TwapStatus.Running);
       expect(activeTwap.ordersExecuted).toBe(0);
+      expect((activeTwap as any).currentOrderIds).toEqual(['order-1']);
     });
 
     it('should use "Unknown" symbol when market has no symbol', () => {

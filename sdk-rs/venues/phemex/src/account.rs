@@ -95,6 +95,7 @@ fn log_skip(
 pub struct OrdersRead {
     symbol: String,
     generation: u64,
+    snapshot: Option<safe_cex_engine::store::OrderSnapshotToken>,
 }
 #[derive(Default)]
 struct Reconcile {
@@ -542,15 +543,15 @@ impl PhemexPerpetuals {
         body: &str,
     ) {
         let current = self.orders_read_current(&read);
-        let _ = cx.finish_http_context(read.read.context());
         if current {
             self.account
                 .reconcile
                 .get_mut(&read.native.symbol)
                 .expect("current read")
                 .context = None;
-            self.orders_read_response(cx, read.native, body);
+            self.orders_read_response(cx, read.native, read.read.context(), body);
         }
+        let _ = cx.finish_http_context(read.read.context());
     }
     pub(crate) fn orders_background_failed(
         &mut self,
@@ -805,7 +806,7 @@ impl PhemexPerpetuals {
         currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
         cx.store.set_currency_balances(currencies);
     }
-    pub(crate) fn accept_write_order(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) {
+    fn record_write_order(&mut self, row: &OrderRow<'_>) {
         if matches!(row.pos_side.as_ref(), "Long" | "Short" | "Merged") {
             self.account
                 .order_sides
@@ -820,12 +821,15 @@ impl PhemexPerpetuals {
             self.account
                 .remember_terminal(row.order_id.to_string(), row.version());
         }
+        self.account.order_revision += 1;
+    }
+    pub(crate) fn accept_write_order(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) {
+        self.record_write_order(row);
         if let Some(orders) = row.orders(cx.now) {
             for order in orders {
                 cx.store.upsert_order(order);
             }
         }
-        self.account.order_revision += 1;
     }
     pub(crate) fn is_account_feed(&self, feed: FeedId) -> bool {
         self.account.feed == Some(feed)
@@ -1326,6 +1330,7 @@ impl PhemexPerpetuals {
             for symbol in owed {
                 self.cancel_landed(cx, &symbol);
             }
+            self.retire_late_subjects(cx, None);
         }
         if message.positions_p.is_some() {
             for (row, currency, context, position, version, key, last) in staged_positions {
@@ -1427,7 +1432,12 @@ impl PhemexPerpetuals {
         }
     }
     /// A cancel-all on `symbol` was dispatched; a still-unknown placement may land later.
-    pub(crate) fn orders_cancel_all(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+    pub(crate) fn orders_cancel_all(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+        symbol: &str,
+    ) {
         let Some(entry) = self.account.reconcile.get_mut(symbol) else {
             return;
         };
@@ -1455,7 +1465,13 @@ impl PhemexPerpetuals {
                 ids.join(", ")
             ),
         );
-        for item in lost {
+        let covered = self.mint_late_subjects(cx, preflight, symbol, &lost);
+        let entry = self
+            .account
+            .reconcile
+            .get_mut(symbol)
+            .expect("existing lost placement");
+        for item in covered {
             if !entry.cancel.contains(&item) {
                 entry.cancel.push(item);
             }
@@ -1521,6 +1537,13 @@ impl PhemexPerpetuals {
             self.cancel_late(cx, symbol, late);
         }
     }
+    pub(crate) fn reconcile_uncertain_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.settle_retired_trading(cx);
+        if self.account.reconcile_timer.is_none() {
+            self.orders_reconcile(cx);
+        }
+    }
+
     /// Starts each owed read once it is due and no placement on that symbol is in flight.
     pub(crate) fn orders_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.credentials.is_none() {
@@ -1556,6 +1579,7 @@ impl PhemexPerpetuals {
             let request = OrdersRead {
                 symbol: symbol.clone(),
                 generation,
+                snapshot: cx.store.begin_orders_snapshot(),
             };
             let read = match self.background_read(
                 cx,
@@ -1609,7 +1633,8 @@ impl PhemexPerpetuals {
     pub(crate) fn orders_read_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        read: OrdersRead,
+        mut read: OrdersRead,
+        context: &ReadContext,
         body: &str,
     ) {
         let Ok(envelope) = serde_json::from_str::<OrdersEnvelope<'_>>(body) else {
@@ -1636,6 +1661,7 @@ impl PhemexPerpetuals {
             return;
         };
         let mut complete = true;
+        let mut published = Vec::new();
         for raw in rows {
             let Ok(row) = serde_json::from_str::<OrderRow<'_>>(raw.get()) else {
                 cx.notice(
@@ -1661,6 +1687,7 @@ impl PhemexPerpetuals {
                         row.order_id, row.status, row.kind
                     ),
                 );
+                complete = false;
                 continue;
             }
             if row.orders(cx.now).is_none() {
@@ -1674,11 +1701,40 @@ impl PhemexPerpetuals {
             }
             // The private stream stays authoritative for every order it already reported.
             if cx.store.order(&row.order_id).is_some()
+                || published
+                    .iter()
+                    .any(|order: &Order| order.id == row.order_id)
                 || self.account.terminals.contains_key(row.order_id.as_ref())
             {
                 continue;
             }
-            self.accept_write_order(cx, &row);
+            published.extend(row.orders(cx.now).expect("validated native mapping"));
+            self.record_write_order(&row);
+        }
+        let receipt = if self.has_late_subjects(&read.symbol) && cx.store.loaded().orders {
+            read.snapshot.take().and_then(|token| {
+                cx.commit_repair_snapshot(context, [token], |current| {
+                    let mut merged = current.to_vec();
+                    for order in &published {
+                        if let Some(old) = merged.iter_mut().find(|old| old.id == order.id) {
+                            *old = order.clone();
+                        } else {
+                            merged.push(order.clone());
+                        }
+                    }
+                    merged
+                })
+            })
+        } else {
+            None
+        };
+        if receipt.is_none() {
+            for order in published {
+                cx.store.upsert_order(order);
+            }
+        }
+        if complete && let Some(receipt) = &receipt {
+            self.retire_late_subjects(cx, Some((&read.symbol, read.generation, receipt)));
         }
         self.cancel_late_orders(cx, &read, complete);
         let symbol = read.symbol.clone();

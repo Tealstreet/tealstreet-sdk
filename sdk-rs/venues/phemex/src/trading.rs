@@ -1,6 +1,8 @@
 //! Sequenced g-API writes. The complete command is validated before dispatch;
 //! ambiguous transport failures never cause a mutation to be retried.
+mod repair;
 use crate::{Pending, PhemexPerpetuals};
+pub use repair::RepairRequest;
 use safe_cex_engine::Level;
 use safe_cex_engine::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact};
 use safe_cex_engine::credential_selection::CredentialRole;
@@ -28,7 +30,7 @@ pub(crate) struct State {
     brackets: HashMap<String, Brackets>,
     /// Venue-originated late cancels, sent one at a time so no ack sees another's revision bump.
     late: VecDeque<Step>,
-    late_sending: bool,
+    repair: repair::State,
 }
 impl State {
     pub(crate) fn placing(&self, symbol: &str) -> bool {
@@ -80,9 +82,11 @@ pub struct PlannedRequest {
 }
 fn serial_call() -> SerialCall {
     SerialCall {
+        auth: Default::default(),
         operation: Operation::Mutation,
         timeout_ms: 20_000,
         attempts: 1,
+        pacing: None,
     }
 }
 const REFUSALS: CodeTable = CodeTable {
@@ -184,6 +188,20 @@ struct Envelope {
     #[serde(default)]
     data: Option<Box<RawValue>>,
 }
+
+pub(crate) fn unproven_diagnostics(
+    response: Response<'_>,
+    evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+) {
+    if let Ok(envelope) = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body) {
+        if let Some(code) = envelope.code {
+            evidence.venue_code(&code.to_string());
+        }
+        if !envelope.msg.is_empty() {
+            evidence.venue_message(&envelope.msg);
+        }
+    }
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Identity {
@@ -211,6 +229,90 @@ struct Identity {
 enum CancelResult {
     Rows(Vec<Identity>),
     Row(Identity),
+}
+
+struct CancelAck {
+    accepted: HashSet<String>,
+    finalized: HashMap<String, OrderStatus>,
+    fills: Vec<(String, f64)>,
+    problem: Option<String>,
+    refusals: HashMap<String, NativeCode<'static>>,
+}
+fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
+    let result: CancelResult =
+        serde_json::from_str(raw).map_err(|_| "Phemex malformed cancel acknowledgement")?;
+    let (rows, array) = match result {
+        CancelResult::Rows(rows) => (rows, true),
+        CancelResult::Row(row) => (vec![row], false),
+    };
+    let mut seen = HashSet::new();
+    let mut accepted = HashSet::new();
+    let mut finalized = HashMap::new();
+    let mut problem = None;
+    let mut refusals = HashMap::new();
+    let mut fills = Vec::new();
+    for row in rows {
+        if !ids.contains(&row.order_id) || !seen.insert(row.order_id.clone()) {
+            accepted.remove(&row.order_id);
+            finalized.remove(&row.order_id);
+            refusals.remove(&row.order_id);
+            problem = Some("Phemex cancel identity mismatch".to_string());
+            continue;
+        }
+        if row.code != 0 || row.biz_error != 0 || row.exec_status.eq_ignore_ascii_case("Rejected") {
+            refusals.insert(
+                row.order_id.clone(),
+                if row.code != 0 {
+                    NativeCode::Int(row.code)
+                } else if row.biz_error != 0 {
+                    NativeCode::Int(row.biz_error)
+                } else {
+                    NativeCode::Text("Rejected")
+                },
+            );
+            problem = Some(format!(
+                "Phemex cancel row rejected: {} {}",
+                row.code, row.biz_error
+            ));
+            continue;
+        }
+        let filled = row.cum_qty_rq.or(row.cum_qty).or(row.exec_qty);
+        if filled.is_some_and(|v| !v.is_finite() || v < 0.0) {
+            problem = Some("Phemex invalid cancel cumulative fill".into());
+            continue;
+        }
+        let status = match row.ord_status.to_ascii_lowercase().as_str() {
+            "init" => None,
+            "canceled" | "cancelled" => Some(OrderStatus::Canceled),
+            "filled" => Some(OrderStatus::Closed),
+            _ => {
+                problem = Some("Phemex cancel acknowledgement has no confirmed outcome".into());
+                continue;
+            }
+        };
+        if let Some(filled) = filled {
+            fills.push((row.order_id.clone(), filled));
+        }
+        accepted.insert(row.order_id.clone());
+        if let Some(status) = status {
+            finalized.insert(row.order_id, status);
+        }
+    }
+    if seen.is_empty() || array && seen.len() != ids.len() {
+        problem = Some("Phemex missing cancel acknowledgement rows".into());
+    }
+    // A documented bulk object acknowledges the request, but its
+    // representative order row proves finality only for that ID.
+    if !array && problem.is_none() {
+        accepted.extend(ids.iter().cloned());
+    }
+    Ok(CancelAck {
+        accepted,
+        finalized,
+        fills,
+        problem,
+        refusals,
+    })
 }
 
 fn reject(cx: &mut Cx<'_, Pending>, preflight: &Preflight, error: VenueError) {
@@ -1161,7 +1263,7 @@ impl PhemexPerpetuals {
             Ok(steps) => {
                 if steps.is_empty() {
                     if let Some(symbol) = cancel_all {
-                        self.orders_cancel_all(cx, &symbol);
+                        self.orders_cancel_all(cx, &preflight, &symbol);
                     }
                     if cx.done_empty_plan(&preflight, "[]".into()).is_ok() {
                         self.orders_reconcile(cx);
@@ -1173,7 +1275,7 @@ impl PhemexPerpetuals {
                     &preflight,
                     serial_call(),
                     SerialPolicy {
-                        credential: credential.unwrap(),
+                        credential: Some(credential.unwrap()),
                         pacing: None,
                         refusals_complete: false,
                     },
@@ -1223,7 +1325,7 @@ impl PhemexPerpetuals {
                     },
                 );
                 if let Some(symbol) = cancel_all {
-                    self.orders_cancel_all(cx, &symbol);
+                    self.orders_cancel_all(cx, &preflight, &symbol);
                 }
                 self.trade_next(cx, id);
             }
@@ -1297,34 +1399,6 @@ impl PhemexPerpetuals {
             cx.store.upsert_order((**order).clone());
         }
         self.dispatch_planned(cx, id, step, plan, slot, context, identity);
-    }
-
-    fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, command: Option<CommandId>, step: Step) {
-        if let Call::Cancel { before, .. } = &step.call {
-            for o in before {
-                cx.store.set_order_status(&o.id, OrderStatus::Canceling);
-            }
-        }
-        self.account_write(cx);
-        let revision = self.account.order_revision();
-        if let Some(job) = command.and_then(|id| self.trading.jobs.get_mut(&id)) {
-            job.revision = revision;
-        }
-        self.request(
-            cx,
-            step.method,
-            step.path,
-            &step.query,
-            None,
-            Pending::Trade(Request {
-                command,
-                call: step.call,
-                revision,
-                signed_until: None,
-                released_request: None,
-            }),
-            None,
-        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1517,35 +1591,6 @@ impl PhemexPerpetuals {
         }
     }
 
-    pub(crate) fn trade_sign_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        mut error: VenueError,
-    ) {
-        if request.command.is_some_and(|id| {
-            self.trading
-                .jobs
-                .get(&id)
-                .is_none_or(|job| job.revision != request.revision)
-        }) {
-            return;
-        }
-        let released = request.signed_until.is_some();
-        if released {
-            error.outcome = Some(safe_cex_engine::Outcome::Unknown);
-        }
-        self.finish_failed_trade(cx, request, error, released);
-    }
-
-    pub(crate) fn trade_response(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        response: Response<'_>,
-    ) {
-        self.trade_response_inner(cx, request, response, None);
-    }
     fn trade_response_inner(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1566,6 +1611,10 @@ impl PhemexPerpetuals {
         let mut resolved = false;
         let mut refusal_code = None;
         let mut known_effects = false;
+        let http_failure = (!(200..300).contains(&response.status))
+            .then(|| serde_json::from_str::<crate::wire::Envelope<'_>>(response.body).ok())
+            .flatten();
+        let mut classified_http_error = None;
         let result = (|| {
             if !(200..300).contains(&response.status) {
                 return Err(format!("HTTP {}: {}", response.status, response.body));
@@ -1715,105 +1764,10 @@ impl PhemexPerpetuals {
                         .data
                         .filter(|raw| raw.get() != "null")
                         .ok_or("Phemex missing cancel acknowledgement")?;
-                    let result: CancelResult = serde_json::from_str(raw.get())
-                        .map_err(|_| "Phemex malformed cancel acknowledgement")?;
-                    let (rows, array) = match result {
-                        CancelResult::Rows(rows) => (rows, true),
-                        CancelResult::Row(row) => (vec![row], false),
-                    };
-                    let mut seen = HashSet::new();
-                    let mut accepted = HashSet::new();
-                    let mut finalized = HashMap::new();
-                    let mut problem = None;
-                    for row in rows {
-                        if !ids.contains(&row.order_id) || !seen.insert(row.order_id.clone()) {
-                            accepted.remove(&row.order_id);
-                            finalized.remove(&row.order_id);
-                            problem = Some("Phemex cancel identity mismatch".to_string());
-                            continue;
-                        }
-                        if row.code != 0
-                            || row.biz_error != 0
-                            || row.exec_status.eq_ignore_ascii_case("Rejected")
-                        {
-                            problem = Some(format!(
-                                "Phemex cancel row rejected: {} {}",
-                                row.code, row.biz_error
-                            ));
-                            continue;
-                        }
-                        let filled = row.cum_qty_rq.or(row.cum_qty).or(row.exec_qty);
-                        if filled.is_some_and(|v| !v.is_finite() || v < 0.0) {
-                            problem = Some("Phemex invalid cancel cumulative fill".into());
-                            continue;
-                        }
-                        let status = match row.ord_status.to_ascii_lowercase().as_str() {
-                            "init" => None,
-                            "canceled" | "cancelled" => Some(OrderStatus::Canceled),
-                            "filled" => Some(OrderStatus::Closed),
-                            _ => {
-                                problem = Some(
-                                    "Phemex cancel acknowledgement has no confirmed outcome".into(),
-                                );
-                                continue;
-                            }
-                        };
-                        if let Some(filled) = filled
-                            && cx
-                                .store
-                                .order(&row.order_id)
-                                .is_some_and(|o| filled > o.filled)
-                        {
-                            cx.store.update_order(&row.order_id, |o| {
-                                o.filled = filled;
-                                o.remaining = (o.amount - filled).max(0.0);
-                            });
-                        }
-                        accepted.insert(row.order_id.clone());
-                        if let Some(status) = status {
-                            finalized.insert(row.order_id, status);
-                        }
-                    }
-                    if seen.is_empty() || array && seen.len() != ids.len() {
-                        problem = Some("Phemex missing cancel acknowledgement rows".into());
-                    }
-                    // A documented bulk object acknowledges the request, but its
-                    // representative order row proves finality only for that ID.
-                    if !array && problem.is_none() {
-                        accepted.extend(ids.iter().cloned());
-                    }
-                    for o in before {
-                        let base = native(&o.id).ok();
-                        let status = base.and_then(|id| finalized.get(id)).copied();
-                        let accepted = base.is_some_and(|id| accepted.contains(id));
-                        if cx.store.order(&o.id).is_some_and(|current| {
-                            current.status == OrderStatus::Canceling
-                                && current.amount == o.amount
-                                && current.filled >= o.filled
-                        }) {
-                            if let Some(status) = status {
-                                cx.store.set_order_status(&o.id, status);
-                            } else if !accepted
-                                && cx
-                                    .store
-                                    .order(&o.id)
-                                    .is_some_and(|current| current.filled == o.filled)
-                            {
-                                cx.store.set_order_status(&o.id, o.status);
-                            }
-                        }
-                    }
-                    for id in &accepted {
-                        self.trading.acknowledged.remove(id);
-                    }
-                    for id in finalized.keys() {
-                        self.account.terminal(id, cx.now);
-                    }
-                    if !accepted.is_empty() {
-                        known_effects = true;
-                        self.account_write(cx);
-                    }
-                    if let Some(error) = problem {
+                    let ack = decode_cancel_ack(raw.get(), ids)?;
+                    known_effects = !ack.accepted.is_empty();
+                    self.apply_cancel_ack(cx, before, &ack);
+                    if let Some(error) = ack.problem {
                         return Err(error);
                     }
                 }
@@ -1868,7 +1822,13 @@ impl PhemexPerpetuals {
                         .map_or_else(Vec::new, |job| job.ids[before_ids..].to_vec()),
                 },
                 Err(message) => {
-                    let native = refusal_code.map(|code| Native { code, message: "" });
+                    let native = http_failure
+                        .as_ref()
+                        .map(|envelope| Native {
+                            code: envelope.code.map_or(NativeCode::None, NativeCode::Int),
+                            message: &envelope.msg,
+                        })
+                        .or_else(|| refusal_code.map(|code| Native { code, message: "" }));
                     let fact = match cx.classify_write(
                         context,
                         &REFUSALS,
@@ -1887,6 +1847,9 @@ impl PhemexPerpetuals {
                             return;
                         }
                     };
+                    if !(200..300).contains(&response.status) {
+                        classified_http_error = Some(fact.error().clone());
+                    }
                     WriteFact::Failed {
                         fact,
                         known_effects,
@@ -1936,25 +1899,15 @@ impl PhemexPerpetuals {
                 }
                 self.account_write(cx);
                 self.account_refresh(cx);
-                match (request.command, &request.call) {
-                    (Some(command), _) => self.trade_next(cx, command),
-                    (None, call) => {
-                        if let Call::Cancel { ids, .. } = call {
-                            cx.notice(
-                                Level::Warn,
-                                code::ORDERS_REPLACED,
-                                format!(
-                                    "Phemex canceled late-landing order {} after cancel-all",
-                                    ids.join(", ")
-                                ),
-                            );
-                        }
-                        self.trading.late_sending = false;
-                        self.late_next(cx);
-                    }
+                if let Some(command) = request.command {
+                    self.trade_next(cx, command);
                 }
             }
             Err(error) => {
+                if let Some(error) = classified_http_error {
+                    self.finish_failed_trade(cx, request, error, true);
+                    return;
+                }
                 let outcome = if resolved {
                     Outcome::Rejected
                 } else {
@@ -1997,6 +1950,56 @@ impl PhemexPerpetuals {
         self.orders_reconcile(cx);
     }
 
+    fn apply_cancel_ack(&mut self, cx: &mut Cx<'_, Pending>, before: &[Order], ack: &CancelAck) {
+        let CancelAck {
+            accepted,
+            finalized,
+            fills,
+            ..
+        } = ack;
+        for (id, filled) in fills {
+            if cx
+                .store
+                .order(id)
+                .is_some_and(|order| *filled > order.filled)
+            {
+                cx.store.update_order(id, |order| {
+                    order.filled = *filled;
+                    order.remaining = (order.amount - filled).max(0.0);
+                });
+            }
+        }
+        for o in before {
+            let base = native(&o.id).ok();
+            let status = base.and_then(|id| finalized.get(id)).copied();
+            let accepted = base.is_some_and(|id| accepted.contains(id));
+            if cx.store.order(&o.id).is_some_and(|current| {
+                current.status == OrderStatus::Canceling
+                    && current.amount == o.amount
+                    && current.filled >= o.filled
+            }) {
+                if let Some(status) = status {
+                    cx.store.set_order_status(&o.id, status);
+                } else if !accepted
+                    && cx
+                        .store
+                        .order(&o.id)
+                        .is_some_and(|current| current.filled == o.filled)
+                {
+                    cx.store.set_order_status(&o.id, o.status);
+                }
+            }
+        }
+        for id in accepted {
+            self.trading.acknowledged.remove(id);
+        }
+        for id in finalized.keys() {
+            self.account.terminal(id, cx.now);
+        }
+        if !accepted.is_empty() {
+            self.account_write(cx);
+        }
+    }
     fn restore_failed_trade(&mut self, cx: &mut Cx<'_, Pending>, request: &Request) {
         match &request.call {
             Call::Place { order, .. } => cx.store.remove_orders(&[order.id.as_str()]),
@@ -2024,22 +2027,6 @@ impl PhemexPerpetuals {
     ) {
         self.restore_failed_trade(cx, &request);
         let Some(command) = request.command else {
-            self.account_refresh(cx);
-            let ids = match &request.call {
-                Call::Cancel { ids, .. } => ids.join(", "),
-                _ => String::new(),
-            };
-            cx.notice(
-                Level::Error,
-                code::CHILD_LEG_FAILED,
-                format!(
-                    "Phemex could not cancel late-landing order {ids} after cancel-all: {}; \
-                     cancel it manually",
-                    error.message
-                ),
-            );
-            self.trading.late_sending = false;
-            self.late_next(cx);
             return;
         };
         let job = self.trading.jobs.remove(&command);
@@ -2102,16 +2089,6 @@ impl PhemexPerpetuals {
                     "Phemex could not cancel late-landing orders on {symbol}: {error}; cancel them manually"
                 ),
             ),
-        }
-    }
-
-    fn late_next(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.trading.late_sending {
-            return;
-        }
-        if let Some(step) = self.trading.late.pop_front() {
-            self.trading.late_sending = true;
-            self.dispatch(cx, None, step);
         }
     }
 }

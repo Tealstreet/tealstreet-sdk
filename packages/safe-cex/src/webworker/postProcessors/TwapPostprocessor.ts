@@ -20,9 +20,10 @@ export class TwapPostprocessor extends ExchangeDependentPostprocessor {
         id: twapInstance.id,
         ...twapInstance.options,
         ...twapInstance.state,
+        currentOrderIds: twapInstance.currentOrderIds,
         size: twapInstance.options.side === 'sell' ? twapInstance.options.size * -1 : twapInstance.options.size,
         symbol: twapInstance.options.activeMarket?.symbol || 'Unknown',
-      });
+      } as (typeof activeTWAPs)[number]);
     }
 
     store.activeTWAPs = activeTWAPs;

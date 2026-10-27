@@ -1720,7 +1720,7 @@ fn partial_batch_rejection_preserves_prior_ack_routing() {
 }
 
 #[test]
-fn proven_rejection_cannot_clear_older_transport_uncertainty() {
+fn a_refused_retry_cannot_clear_older_transport_uncertainty() {
     let mut e = rejection_engine(vec![live_row("old-live")]);
     let a = command(
         &mut e,
@@ -1745,10 +1745,8 @@ fn proven_rejection_cannot_clear_older_transport_uncertainty() {
             orders: vec![opts("rejected-caller")],
         },
     );
-    let create = writes(&a)[0].clone();
-    let mut value = ack(&create, "rejected-native");
-    value["data"]["ordStatus"] = json!("Rejected");
-    assert!(done(&respond(&mut e, &create, value)).is_err());
+    assert!(writes(&a).is_empty());
+    assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
     let a = command(
         &mut e,
         Command::CancelSymbolOrders {
@@ -1811,6 +1809,113 @@ fn non_success_http_cannot_prove_create_rejection() {
             warnings(&a).iter().any(|m| m.contains("caller")),
             "HTTP {status}: unknown placement stays owed a late cancel"
         );
+    }
+}
+
+#[test]
+fn non_success_write_keeps_typed_native_diagnostics_without_proving_rejection() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (status, body, kind, native_code, native_message) in [
+        (
+            400,
+            r#"{"code":11001,"msg":"insufficient balance","data":null}"#,
+            Some(ErrorKind::Rejected),
+            Some("11001"),
+            Some("insufficient balance"),
+        ),
+        (
+            401,
+            r#"{"msg":"invalid credentials"}"#,
+            Some(ErrorKind::AuthInvalid),
+            None,
+            Some("invalid credentials"),
+        ),
+        (
+            403,
+            "<html>forbidden</html>",
+            Some(ErrorKind::AuthPermission),
+            None,
+            None,
+        ),
+        (
+            429,
+            r#"{"msg":"slow down"}"#,
+            Some(ErrorKind::RateLimited),
+            None,
+            Some("slow down"),
+        ),
+        (
+            408,
+            r#"{"code":11001,"msg":"insufficient balance"}"#,
+            Some(ErrorKind::Timeout),
+            Some("11001"),
+            Some("insufficient balance"),
+        ),
+        (
+            500,
+            r#"{"code":11001,"msg":"insufficient balance"}"#,
+            Some(ErrorKind::VenueUnavailable),
+            Some("11001"),
+            Some("insufficient balance"),
+        ),
+        (
+            500,
+            "<html>upstream unavailable</html>",
+            Some(ErrorKind::VenueUnavailable),
+            None,
+            None,
+        ),
+        (
+            400,
+            r#"{"code":11001,"msg":"insufficient balance","data":{"orderID":"unproven-id"}}"#,
+            Some(ErrorKind::Rejected),
+            Some("11001"),
+            Some("insufficient balance"),
+        ),
+    ] {
+        let mut e = rejection_engine(vec![live_row("old-live")]);
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 101,
+                orders: vec![opts("caller")],
+            },
+        );
+        e.handle(
+            1001.,
+            Event::HttpResponse {
+                request: writes(&a)[0].id,
+                response: Response {
+                    status,
+                    headers: "retry-after: 2\r\n",
+                    body,
+                },
+            },
+        );
+        let a: Vec<_> = e.drain_actions().collect();
+        let error = failure(&a);
+        assert_eq!(error.kind, kind, "HTTP {status}: {error:?}");
+        assert_eq!(error.venue_code.as_deref(), native_code, "HTTP {status}");
+        assert_eq!(
+            error.venue_message.as_deref(),
+            native_message,
+            "HTTP {status}"
+        );
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "HTTP {status}");
+        assert_eq!(error.retry_after_ms, (status == 429).then_some(2000.));
+        assert!(writes(&a).is_empty());
+        assert!(e.store().order("unproven-id").is_none());
+        assert_eq!(
+            a.iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 101, .. })
+                ))
+                .count(),
+            1
+        );
+        let serialized = serde_json::to_value(error).unwrap();
+        assert_eq!(serialized["outcome"], "unknown");
     }
 }
 
@@ -2443,15 +2548,19 @@ fn transport_uncertain_placement_reads_open_orders_after_its_signed_expiry() {
 }
 
 #[test]
-fn open_order_read_started_before_a_later_failure_cannot_settle_it() {
+fn an_inflight_reconcile_prevents_a_second_uncertain_placement() {
     let mut e = rejection_engine(vec![live_row("old-live")]);
     let (stale, now) = unproven_then_read(&mut e, 1000., 131, "first-unknown");
-    let second = place_at(&mut e, now + 1., 132, "second-unknown");
-    let a = reply(&mut e, now + 2., &second, 200, UNPROVEN_ACK);
-    assert!(
-        open_order_reads(&a).is_empty(),
-        "one read per symbol at a time"
+    let a = at(
+        &mut e,
+        now + 1.,
+        Event::Command(Command::PlaceOrders {
+            command: 132,
+            orders: vec![opts("second-unknown")],
+        }),
     );
+    assert!(writes(&a).is_empty());
+    assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
     let a = reply(
         &mut e,
         now + 3.,
@@ -2464,26 +2573,15 @@ fn open_order_read_started_before_a_later_failure_cannot_settle_it() {
     );
     assert!(
         open_order_reads(&a).is_empty(),
-        "second write is not expired yet"
+        "a refused retry creates no additional reconciliation read"
     );
-    let (timer, wake) = latest_timer(&a).expect("a newer failure owes a newer read");
     assert_eq!(cancel_all_ids(&mut e, now + 4., 133), ["first", "old-live"]);
-    let fresh = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer }));
-    assert_eq!(fresh.len(), 1);
-    let a = reply(
-        &mut e,
-        wake + 1.,
-        &fresh[0],
-        200,
-        &rows(vec![
-            live_row("old-live"),
-            rest_row("first", "first-unknown"),
-            rest_row("second", "second-unknown"),
-        ]),
+    assert!(
+        e.store()
+            .orders()
+            .iter()
+            .all(|o| o.client_order_id.as_deref() != Some("second-unknown"))
     );
-    let late = deletes(&a);
-    assert_eq!(late.len(), 1, "only the order the stale read missed: {a:?}");
-    assert_eq!(p(&late[0], "orderID").as_deref(), Some("second"));
 }
 
 #[test]
@@ -2795,7 +2893,8 @@ fn lost_client_order_id_cannot_be_reused_until_its_read_settles_it() {
         writes(&a).is_empty(),
         "a retry would be canceled as the late landing"
     );
-    assert!(done(&a).unwrap_err().contains("unknown outcome"), "{a:?}");
+    assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert!(done(&a).unwrap_err().contains("uncertain"), "{a:?}");
     let read = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer })).remove(0);
     let a = reply(&mut e, wake + 1., &read, 200, &rows(vec![]));
     assert!(deletes(&a).is_empty());
@@ -2846,12 +2945,24 @@ fn late_landing_seen_on_the_private_stream_is_canceled_immediately() {
 }
 
 #[test]
-fn late_cancels_in_two_groups_are_sequenced_without_false_errors() {
+fn a_fenced_second_group_does_not_block_the_first_late_cancel() {
     let (mut e, _) = armed_engine("Hedged");
-    lose_then_cancel_all(&mut e, 1000., 221, opts("long-lost"));
+    let (timer, wake) = lose_then_cancel_all(&mut e, 1000., 221, opts("long-lost"));
     let mut short = opts("short-lost");
     short.side = OrderSide::Sell;
-    let (timer, wake) = lose_then_cancel_all(&mut e, 1010., 223, short);
+    let refused = at(
+        &mut e,
+        1010.,
+        Event::Command(Command::PlaceOrders {
+            command: 223,
+            orders: vec![short],
+        }),
+    );
+    assert!(writes(&refused).is_empty());
+    assert_eq!(
+        failure(&refused).outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
     let read = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer })).remove(0);
     let mut long = rest_row("long", "long-lost");
     long["posSide"] = json!("Long");
@@ -2865,17 +2976,13 @@ fn late_cancels_in_two_groups_are_sequenced_without_false_errors() {
     let body = json!({"code":0,"data":{"orderID":id,"ordStatus":"Canceled"}}).to_string();
     let a = reply(&mut e, wake + 2., &first[0], 200, &body);
     assert_eq!(error_logs(&a), 0, "{a:?}");
-    let second = deletes(&a);
-    assert_eq!(second.len(), 1);
-    let other = p(&second[0], "orderID").unwrap();
-    assert_ne!(other, id);
-    let body = json!({"code":0,"data":{"orderID":other,"ordStatus":"Canceled"}}).to_string();
-    let a = reply(&mut e, wake + 3., &second[0], 200, &body);
-    assert_eq!(error_logs(&a), 0, "{a:?}");
-    for id in ["long", "short"] {
-        assert_eq!(
-            e.store().order(id).map(|o| o.status),
-            Some(OrderStatus::Canceled)
-        );
-    }
+    assert!(deletes(&a).is_empty(), "the refused group owes no cancel");
+    assert_eq!(
+        e.store().order("long").map(|o| o.status),
+        Some(OrderStatus::Canceled)
+    );
+    assert_eq!(
+        e.store().order("short").map(|o| o.status),
+        Some(OrderStatus::Open)
+    );
 }

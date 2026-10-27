@@ -5,8 +5,8 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["order-locks", "condition-waits"] }
-safe-cex-crypto = { workspace = true, features = ["secp256k1"] }
+safe-cex-engine = { workspace = true, features = ["order-locks", "condition-waits", "managed-sockets", "address-nonce"] }
+safe-cex-crypto = { workspace = true, features = ["secp256k1", "address-nonce"] }
 safe-cex-venue-binance.workspace = true
 serde.workspace = true
 serde_json.workspace = true

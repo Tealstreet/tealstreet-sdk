@@ -1,7 +1,7 @@
 //! Streamed serial Plans: one live call, continued from exact custody, with no
 //! declared length and no root wall-clock.
 use super::*;
-use crate::request_context::plan::{CallTerms, RetryWindow, SerialCall, SerialPolicy};
+use crate::request_context::plan::{CallAuth, CallTerms, RetryWindow, SerialCall, SerialPolicy};
 use crate::request_context::{Credential, RetryPolicy};
 
 /// A serial root never expires by clock; it ends through custody or a stop.
@@ -12,9 +12,14 @@ pub(super) const JOURNAL_ATTEMPTS: usize = 2;
 
 pub(super) struct Serial {
     pub(super) refusals_complete: bool,
+    /// The current call, its `pacing` already resolved: `None` is unpaced.
     call: SerialCall,
     #[cfg(feature = "session-bearer")]
     pub(super) session_seed: Option<(u64, u64)>,
+    #[cfg(feature = "session-bearer")]
+    pub(super) session_root: Option<crate::request_context::Session>,
+    #[cfg(feature = "session-bearer")]
+    pub(super) wire_fingerprint: Option<[u8; 32]>,
     /// Read calls sign with the Preflight's read role (or go unsigned), never
     /// with the Plan's write credential.
     read: Option<Credential>,
@@ -24,6 +29,12 @@ pub(super) struct Serial {
     pub(super) condition: Option<(u64, f64)>,
     #[cfg(feature = "condition-waits")]
     pub(super) waits: u64,
+    /// A settle wait left no next entry: nothing more can be issued, and its
+    /// release only readies the Plan (once, at the stored time) for `done_plan`.
+    #[cfg(feature = "condition-waits")]
+    pub(super) settled: bool,
+    #[cfg(feature = "condition-waits")]
+    pub(super) settle_ready: Option<f64>,
 }
 
 /// How a continuation's next call becomes eligible.
@@ -48,6 +59,35 @@ impl Next {
 }
 
 impl Serial {
+    pub(super) fn session_call(&self) -> bool {
+        self.call.auth == CallAuth::Session
+    }
+
+    fn has_session_root(&self) -> bool {
+        #[cfg(feature = "session-bearer")]
+        {
+            self.session_root.is_some()
+        }
+        #[cfg(not(feature = "session-bearer"))]
+        {
+            false
+        }
+    }
+
+    fn validate_auth(
+        call: SerialCall,
+        write: &Option<Credential>,
+        session_root: bool,
+    ) -> Result<(), Error> {
+        match call.auth {
+            CallAuth::Session if !cfg!(feature = "session-bearer") || !session_root => {
+                Err(Error::Invalid)
+            }
+            CallAuth::Preflight if write.is_none() => Err(Error::Invalid),
+            _ => Ok(()),
+        }
+    }
+
     #[cfg(feature = "session-bearer")]
     pub(super) fn allows_session_read_resend(&self) -> bool {
         self.call.operation == Operation::Read && self.call.attempts == 2
@@ -62,15 +102,26 @@ impl Serial {
         &self,
         write: &Option<Credential>,
     ) -> (Operation, RetryPolicy, Option<Credential>) {
-        let credential = match self.call.operation {
-            Operation::Read => self.read.clone(),
-            Operation::Mutation => write.clone(),
+        let credential = if self.session_call() {
+            None
+        } else {
+            match self.call.operation {
+                Operation::Read => self.read.clone(),
+                Operation::Mutation => write.clone(),
+            }
         };
         (self.call.operation, retry_policy(self.call), credential)
     }
 
+    pub(super) fn pacing(&self) -> Option<crate::request_context::Pacing> {
+        self.call.pacing
+    }
+
     /// Whether `next` signs: a Read only under the read role.
     fn signs(&self, next: SerialCall, write: &Option<Credential>) -> bool {
+        if next.auth == CallAuth::Session {
+            return false;
+        }
         match next.operation {
             Operation::Read => self.read.is_some(),
             Operation::Mutation => write.is_some(),
@@ -106,6 +157,31 @@ fn validate_call(call: SerialCall) -> Result<(), Error> {
     Ok(())
 }
 
+impl crate::engine::IoCore {
+    /// The call with the pacing its legs carry: its own, else the root's.
+    /// Domain members resolve through the domain; any other call, including a
+    /// Read in a Mutations domain, stays unpaced and names only zero-gap groups.
+    fn resolve_serial_pacing(
+        &self,
+        root: Option<crate::request_context::Pacing>,
+        call: SerialCall,
+    ) -> Result<SerialCall, Error> {
+        #[cfg(feature = "release-domains")]
+        if self.domain_member(call.operation).is_some() {
+            let pacing = self.domain_pacing(call.operation, call.pacing.or(root))?;
+            return Ok(SerialCall { pacing, ..call });
+        }
+        #[cfg(feature = "release-domains")]
+        let root = root.filter(|root| !self.domain_paces(Some(*root)));
+        let pacing = call.pacing.or(root);
+        if pacing.is_some_and(|pacing| pacing.minimum_gap_ms != 0.) {
+            return Err(Error::Invalid);
+        }
+        self.http_pacing.validate_zero(pacing)?;
+        Ok(SerialCall { pacing, ..call })
+    }
+}
+
 impl<P> Cx<'_, P> {
     /// Admit a streamed serial Plan with its first call from a WriteAfterReads
     /// Preflight with a write credential.
@@ -134,13 +210,42 @@ impl<P> Cx<'_, P> {
         }
         validate_call(first)?;
         let (intent, _) = self.preflight_plan_origin(preflight)?;
-        if policy
-            .pacing
-            .is_some_and(|pacing| pacing.minimum_gap_ms != 0.)
-        {
-            return Err(Error::Invalid);
+        #[cfg(feature = "session-bearer")]
+        let session_root = self
+            .io
+            .core
+            .request_contexts
+            .keyless_session(preflight.owner())
+            .cloned();
+        Serial::validate_auth(first, &intent.write_credential, {
+            #[cfg(feature = "session-bearer")]
+            {
+                session_root.is_some()
+            }
+            #[cfg(not(feature = "session-bearer"))]
+            {
+                false
+            }
+        })?;
+        // A domain member is paced by its domain; any other serial Plan stays unpaced.
+        #[cfg(feature = "release-domains")]
+        let pacing = self
+            .io
+            .core
+            .domain_pacing(Operation::Mutation, policy.pacing)?;
+        #[cfg(not(feature = "release-domains"))]
+        let pacing = policy.pacing;
+        #[cfg(feature = "release-domains")]
+        let in_domain = self.io.core.domain_paces(pacing);
+        #[cfg(not(feature = "release-domains"))]
+        let in_domain = false;
+        if !in_domain {
+            if pacing.is_some_and(|pacing| pacing.minimum_gap_ms != 0.) {
+                return Err(Error::Invalid);
+            }
+            self.io.core.http_pacing.validate_zero(pacing)?;
         }
-        self.io.core.http_pacing.validate_zero(policy.pacing)?;
+        let first = self.io.core.resolve_serial_pacing(pacing, first)?;
         let schedule = Schedule::from_single_call(CallTerms {
             wait_ms: 0,
             timeout_ms: first.timeout_ms,
@@ -154,8 +259,8 @@ impl<P> Cx<'_, P> {
                 policy: PlanPolicy {
                     independent_calls: false,
                     operation: Operation::Mutation,
-                    credential: Some(policy.credential),
-                    pacing: policy.pacing,
+                    credential: policy.credential,
+                    pacing,
                     retry: retry_policy(first),
                 },
                 terminals: Ok(Vec::new()),
@@ -169,11 +274,19 @@ impl<P> Cx<'_, P> {
                 call: first,
                 #[cfg(feature = "session-bearer")]
                 session_seed: None,
+                #[cfg(feature = "session-bearer")]
+                session_root,
+                #[cfg(feature = "session-bearer")]
+                wire_fingerprint: None,
                 read: intent.read_credential,
                 #[cfg(feature = "condition-waits")]
                 condition: None,
                 #[cfg(feature = "condition-waits")]
                 waits: 0,
+                #[cfg(feature = "condition-waits")]
+                settled: false,
+                #[cfg(feature = "condition-waits")]
+                settle_ready: None,
             }),
         )?;
         let slot = self
@@ -261,14 +374,22 @@ impl crate::engine::CoreCx<'_> {
         wake: Next,
     ) -> Result<Slot, Error> {
         validate_call(next)?;
+        #[cfg(feature = "session-bearer")]
+        self.io
+            .core
+            .request_contexts
+            .validate_keyless_session(plan.owner(), &self.io.core.identities)?;
         let body = self
             .io
             .core
             .request_contexts
             .validate_plan(plan, self.now)?;
-        if body.serial.is_none() {
+        let serial = body.serial.as_ref().ok_or(Error::Invalid)?;
+        #[cfg(feature = "condition-waits")]
+        if serial.settled {
             return Err(Error::Invalid);
         }
+        Serial::validate_auth(next, &body.policy.credential, serial.has_session_root())?;
         let index = body.schedule.ordinal(slot)?;
         let call = body.entries[index]
             .call
@@ -318,6 +439,10 @@ impl crate::engine::CoreCx<'_> {
             .as_ref()
             .expect("checked serial Plan")
             .signs(next, &body.policy.credential);
+        let next = self
+            .io
+            .core
+            .resolve_serial_pacing(body.policy.pacing, next)?;
         if !self.io.core.next_id.available(1 + 3 * attempts)
             || (signed && !self.io.core.signing.available_ids(attempts))
         {
@@ -428,6 +553,10 @@ impl crate::engine::CoreCx<'_> {
                 .expect("validated serial Plan")
                 .session_seed = None;
         }
+        #[cfg(feature = "session-bearer")]
+        {
+            body.serial.as_mut().expect("serial call").wire_fingerprint = None;
+        }
         let slot = body.schedule.available().next().expect("next serial call");
         self.io.core.request_contexts.reserved_contexts += 1;
         self.rearm_plan(plan);
@@ -448,6 +577,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<Context, Error> {
         self.validate_plan_delivery(plan, context)?;
         let registry = &self.io.core.request_contexts;
+        registry.validate_keyless_session(plan.owner(), &self.io.core.identities)?;
         let body = registry.validate_plan(plan, self.now)?;
         if body.serial.is_none() {
             return Err(Error::State);

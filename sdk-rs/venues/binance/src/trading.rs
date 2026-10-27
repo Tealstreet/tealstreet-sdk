@@ -38,9 +38,18 @@ pub struct Request {
     command: CommandId,
     context: Context,
     call: Call,
+    resend: Resend,
+}
+
+/// What a signature-rejected write needs to be re-signed and sent once more.
+struct Resend {
+    method: Method,
+    url: String,
+    query: Query,
 }
 
 /// What a response means for its job.
+#[derive(Clone)]
 enum Call {
     /// Portfolio margin answers with our client id, which is the order's id.
     PlaceOne {
@@ -140,12 +149,14 @@ struct Amendment {
     replacement: PlaceOrderOpts,
 }
 
+#[derive(Clone)]
 struct CancelTarget {
     id: String,
     symbol: String,
     native: Option<u64>,
 }
 
+#[derive(Clone)]
 enum CancelProof {
     One(CancelTarget),
     Algo(CancelTarget),
@@ -277,42 +288,55 @@ impl BinanceFutures {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if let Command::FetchStpMode { command }
-        | Command::AmendOrderWithSymbol { command, .. }
-        | Command::SetStpMode { command, .. }
-        | Command::CancelOrdersWithSymbols { command, .. }
-        | Command::FetchAccount { command }
-        | Command::FetchOrderBook { command, .. } = &command
-        {
-            cx.fail(
-                *command,
+        // Every refusal before admission is the command's own typed terminal.
+        let operation = if matches!(
+            command,
+            Command::FetchStpMode { .. }
+                | Command::FetchAccount { .. }
+                | Command::FetchOrderBook { .. }
+                | Command::FetchLeverage { .. }
+        ) {
+            Operation::Read
+        } else {
+            Operation::Mutation
+        };
+        if matches!(
+            command,
+            Command::FetchStpMode { .. }
+                | Command::AmendOrderWithSymbol { .. }
+                | Command::SetStpMode { .. }
+                | Command::CancelOrdersWithSymbols { .. }
+                | Command::FetchAccount { .. }
+                | Command::FetchOrderBook { .. }
+        ) {
+            cx.refuse_command(
+                operation,
                 not_sent("This Binance command is not supported").kind(ErrorKind::Unsupported),
             );
             return;
         }
-        if self.is_spot() {
-            let id = match &command {
-                Command::SetLeverage { command, .. }
-                | Command::FetchLeverage { command, .. }
-                | Command::SetMarginType { command, .. }
-                | Command::SetPositionMode { command, .. } => Some(*command),
-                _ => None,
-            };
-            if let Some(id) = id {
-                cx.fail(
-                    id,
-                    not_sent("Binance Spot does not support derivative settings")
-                        .kind(ErrorKind::Unsupported),
-                );
-                return;
-            }
+        if self.is_spot()
+            && matches!(
+                command,
+                Command::SetLeverage { .. }
+                    | Command::FetchLeverage { .. }
+                    | Command::SetMarginType { .. }
+                    | Command::SetPositionMode { .. }
+            )
+        {
+            cx.refuse_command(
+                operation,
+                not_sent("Binance Spot does not support derivative settings")
+                    .kind(ErrorKind::Unsupported),
+            );
+            return;
         }
         // A limit-execution stop would be re-placed as a market stop at its limit price.
-        if let Command::AmendOrder { command, id, .. } = &command
+        if let Command::AmendOrder { id, .. } = &command
             && self.account.limit_stops.contains(id)
         {
-            cx.fail(
-                *command,
+            cx.refuse_command(
+                operation,
                 not_sent("Binance stop-limit orders cannot be amended; cancel and place a new one")
                     .kind(ErrorKind::Unsupported),
             );
@@ -459,7 +483,7 @@ impl BinanceFutures {
         };
         if !self.credentials.has_primary() {
             let error = not_sent("Binance trading needs an API key").kind(ErrorKind::AuthInvalid);
-            cx.fail(id, error);
+            cx.refuse_command(operation, error);
             return;
         }
         let plan = plan.and_then(|job| {
@@ -503,7 +527,7 @@ impl BinanceFutures {
             }
             Err(message) => {
                 cx.command_error(id, message.clone());
-                cx.fail(id, not_sent(message).kind(ErrorKind::InvalidInput));
+                cx.refuse_command(operation, not_sent(message).kind(ErrorKind::InvalidInput));
             }
         }
     }
@@ -585,7 +609,8 @@ impl BinanceFutures {
                     credential: Some(selection.credential(credentials.credential.clone())),
                     timeout_ms: 20_000,
                     pacing: None,
-                    retry: RetryPolicy::Never,
+                    // A -1022 signature rejection is re-signed and sent once more.
+                    retry: RetryPolicy::DefinitiveRefusal,
                 },
             );
             let context = context.and_then(|context| {
@@ -603,22 +628,12 @@ impl BinanceFutures {
                 return;
             };
             cx.command_progress(command, planned.receipts);
-            if cx
-                .request_signed_managed(
-                    context.clone(),
-                    None,
-                    planned.method,
-                    format!("{}{}", self.urls.account_rest, planned.path),
-                    None,
-                    Box::new(self.signed_recipe(credentials, planned.query)),
-                    Pending::Trade(Request {
-                        command,
-                        context,
-                        call: planned.call,
-                    }),
-                )
-                .is_err()
-            {
+            let resend = Resend {
+                method: planned.method,
+                url: format!("{}{}", self.urls.account_rest, planned.path),
+                query: planned.query,
+            };
+            if !self.send_trade(cx, command, context, planned.call, resend, credentials) {
                 self.trading.jobs.remove(&command);
                 let _ = cx.fail_context(
                     &root,
@@ -627,6 +642,33 @@ impl BinanceFutures {
                 return;
             }
         }
+    }
+
+    /// Sign and send one write leg; false when the engine refuses it.
+    fn send_trade(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        context: Context,
+        call: Call,
+        resend: Resend,
+        credentials: crate::sign::Credentials,
+    ) -> bool {
+        cx.request_signed_managed(
+            context.clone(),
+            None,
+            resend.method,
+            resend.url.clone(),
+            None,
+            Box::new(self.signed_recipe(credentials, resend.query.clone())),
+            Pending::Trade(Request {
+                command,
+                context,
+                call,
+                resend,
+            }),
+        )
+        .is_ok()
     }
 
     pub(crate) fn capture_unproven_trade(
@@ -749,8 +791,11 @@ impl BinanceFutures {
             command,
             context,
             call,
+            resend,
         } = request;
         let native_response = response.is_ok();
+        let resend_call = call.clone();
+        let stopped = self.trading.jobs.get(&command).is_some_and(|job| job.stop);
 
         let mut reports = Vec::new();
         let mut batch_reports = false;
@@ -999,8 +1044,22 @@ impl BinanceFutures {
             } else {
                 recorded
             };
-            if recorded.is_err() {
-                return;
+            match recorded {
+                Err(_) => return,
+                // One re-signed resend of a definitive signature refusal; the
+                // journal refuses a second, which then fails as recorded.
+                // A job already stopping, or ended, never sends again.
+                Ok(Some(grant))
+                    if may_resend(stopped, self.trading.jobs.contains_key(&command)) =>
+                {
+                    // Undo the stop this refusal just set: the leg is resent, not failed.
+                    if let Some(job) = self.trading.jobs.get_mut(&command) {
+                        job.stop = stopped;
+                    }
+                    self.resend_trade(cx, command, &context, grant, resend_call, resend);
+                    return;
+                }
+                Ok(_) => {}
             }
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
@@ -1010,6 +1069,36 @@ impl BinanceFutures {
         job.outstanding = job.outstanding.saturating_sub(1);
         if job.outstanding == 0 {
             self.advance(cx, command);
+        }
+    }
+
+    fn resend_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        context: &Context,
+        grant: safe_cex_engine::request_context::ResendGrant,
+        call: Call,
+        resend: Resend,
+    ) {
+        let sent = self
+            .credentials
+            .select(CredentialRole::Mutation)
+            .ok()
+            .map(|(_, credentials)| credentials.clone())
+            .and_then(|credentials| {
+                let context = cx.http_resend_context(context, grant).ok()?;
+                self.send_trade(cx, command, context, call, resend, credentials)
+                    .then_some(())
+            });
+        if sent.is_none()
+            && let Some(job) = self.trading.jobs.remove(&command)
+            && let Some(root) = job.context
+        {
+            let _ = cx.fail_context(
+                &root,
+                VenueError::new("Binance HTTP lifecycle refused the signature resend"),
+            );
         }
     }
 
@@ -1054,8 +1143,9 @@ impl BinanceFutures {
         // Binance allows one closePosition order per direction per symbol.
         let mut replaced: Vec<Order> = Vec::new();
         let pm = self.options.portfolio_margin;
+        let replaces_close_orders = !pm && !self.is_spot();
         for opts in orders {
-            if !pm {
+            if replaces_close_orders {
                 for existing in self.conflicting_close_orders(cx, opts) {
                     if !replaced.iter().any(|o| o.id == existing.id) {
                         replaced.push(existing);
@@ -1288,9 +1378,8 @@ impl BinanceFutures {
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
     ) -> Result<Vec<Params>, String> {
-        if opts.reduce_only == Some(true) || opts.close == Some(true) {
-            return Err("Binance Spot does not support reduceOnly or closePosition".into());
-        }
+        // Spot has no position to reduce, so the flags are dropped as in TS; a sell
+        // beyond the balance fails at Binance.
         if matches!(
             opts.kind,
             OrderType::TrailingStopLoss | OrderType::Conditional
@@ -1894,9 +1983,10 @@ const BINANCE: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::RateLimited),
             only: None,
         },
+        // A rejected signature executed nothing: re-sign and send once more.
         Row {
             key: Key::Int(-1022),
-            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
         Row {
@@ -2632,13 +2722,8 @@ mod audit_tests {
     fn engine(variant: Variant, fail_at: usize) -> Engine<BinanceFutures> {
         FAIL_AT.set(fail_at);
         IDS.set(0);
-        let (mut venue, signer) = crate::test_config::Options {
-            variant,
-            key: Some("api-key".into()),
-            secret: Some("secret".into()),
-            ..crate::test_config::Options::default()
-        }
-        .build();
+        let (mut venue, signer) =
+            crate::test_config::keyed(variant, "api-key", "fixture-seed").build();
         venue.trading.id_generator = Some(injected_uuid);
         let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         engine.set_signer(Some(signer)).unwrap();
@@ -3065,6 +3150,38 @@ mod audit_tests {
             },
         );
         let dropped = engine.venue().trading.jobs.is_empty();
+        // The Unknown fences the symbol; a clean post-mark open-orders snapshot
+        // releases it so the second placement exercises a new owner generation.
+        for _ in 0..4 {
+            let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut engine, 1002.)
+                .into_iter()
+                .filter_map(|action| match action {
+                    Action::Http(http)
+                        if http.url.contains("openOrders")
+                            || http.url.contains("openAlgoOrders") =>
+                    {
+                        Some(http.id)
+                    }
+                    _ => None,
+                })
+                .collect();
+            if reads.is_empty() {
+                break;
+            }
+            for request in reads {
+                engine.handle(
+                    1002.,
+                    Event::HttpResponse {
+                        request,
+                        response: Response {
+                            status: 200,
+                            headers: "",
+                            body: "[]",
+                        },
+                    },
+                );
+            }
+        }
         engine.drain_actions().for_each(drop);
         engine.handle(
             1003.,
@@ -3108,6 +3225,28 @@ mod audit_tests {
         assert_eq!(
             result,
             Err("Binance client order ID generation failed: entropy unavailable".into())
+        );
+    }
+}
+
+/// A granted signature resend goes out only for a live job that was not
+/// already stopping before this refusal.
+fn may_resend(stopped_before: bool, job_live: bool) -> bool {
+    job_live && !stopped_before
+}
+
+#[cfg(test)]
+mod resend_guard_tests {
+    #[test]
+    fn a_stopping_or_ended_job_never_resends() {
+        assert!(super::may_resend(false, true));
+        assert!(
+            !super::may_resend(true, true),
+            "stopping before the refusal"
+        );
+        assert!(
+            !super::may_resend(false, false),
+            "the command already ended"
         );
     }
 }

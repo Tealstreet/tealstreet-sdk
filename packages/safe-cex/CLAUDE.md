@@ -1,5 +1,19 @@
 # CLAUDE.md - safe-cex Package
 
+The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
+SDK factories and workers have no TypeScript venue fallback; OUT names refuse
+with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
+and test-only replay/reference implementations remain independent dependencies.
+Historical Rust-adapter fixtures mock only beta admission through
+`__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
+the real refusal boundary. These fixtures confer no beta activation.
+Hosted-enabled beta names are Binance x4, Bybit x4, OKX x4, Bitget/USDC and
+Bitunix (#2262). Provider-mode eligibility still follows each declared remote
+policy, with no separate beta override.
+Rust option-query capabilities remain false until the loaded native record
+explicitly enables them; a generic wrapper method alone never advertises them.
+
+
 Core exchange integration library. See also exchange-specific `CLAUDE.md` files in `src/exchanges/*/`.
 
 > **CLAUDE.md is a living spec.** When you change non-obvious
@@ -44,8 +58,8 @@ package setting; measured performance evidence covers WASM.
 
 Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
 The construction-rules `dispatchSigning` flag selects provider setup, currently
-Binance's four aliases, Bybit's five aliases, WEEX (hosted admission disabled)
-and AsterDEX. AsterDEX first maps its account through `asterdexSignerSetup.ts`
+Binance's four aliases, Bybit's five aliases, WEEX (hosted admission disabled),
+AsterDEX and Lighter. AsterDEX first maps its account through `asterdexSignerSetup.ts`
 (resolved API version, hex V3 wallet keys, read agent aliasing the primary
 wallet); native setup and `asterdex-signer-setup.golden.json` pin the same
 mapping. High-level credential input is consumed by a trusted
@@ -55,6 +69,13 @@ argument is private provider setup, separate from engine-options JSON. Cached
 construction metadata preserves `canSign`/public mode; transport receives only
 read-identity presence; managed routing uses explicit credential intent before
 credentials are materialised, while legacy requests retain header-based routing.
+Lighter's trusted native/JSON mapping uses a typed API-index principal when a
+private Schnorr signing ref exists and the original key is not Nonblank.
+Original SetupFacts stay unchanged; the principal is never presentable. Validated
+public L1 lookup metadata is captured before stripping credentials. The resolved
+Account/API index and installed signing ref bind the transaction/auth recipes.
+Schnorr activation and eager-holder removal ship together in the venue cutover.
+
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
 `stableId` per primary/secondary identity. It is consumed with passphrases through
@@ -64,7 +85,8 @@ names; identity/nonce consumers require the caller's intended stable mapping.
 
 Trusted signer setup uses shared declarative per-family/per-slot normalization
 from construction-rules.json. Unspecified fields preserve caller trimCredential
-metadata; MEXC forces primary credential trimming and secondary preservation.
+metadata; MEXC forces primary credential trimming and secondary preservation. Bitunix declares `trimSigning` with `trimCredential` for both slots, so the
+signing key is trimmed once at setup too (applies once Bitunix adopts dispatch signing).
 The same field policy declares primary required-for-private passphrases and
 required secondary passphrases with primary fallback for OKX and Bitget aliases
 and WEEX.
@@ -138,9 +160,8 @@ The delegated provider initializes UTF-8 codecs only when provider work begins.
 Importing the native registry before its host installs TextEncoder/TextDecoder
 must remain supported; signing and frame I/O require those runtime codecs.
 
-Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
-both `createExchange` (including saved-account/public factories) and
-`ExchangeWorker`. Registry defaults remain independent of that opt-in.
+The beta registry always selects Rust in SDK factories and `ExchangeWorker`;
+`ExchangeOptions.engine` remains an accepted compatibility input only.
 `src/__tests__/cutover/*.wasm.test.ts` verifies the worker frame/store consumer
 contract for every `RUST_VENUES` name; actual native startup and independent
 binary lifecycle fixtures have separate evidence scopes. See phase 9 of
@@ -1476,3 +1497,9 @@ polling policy, including server slowdown and Infinity. Unknown, public,
 unsigned and retry-intermediate results do not clear or create failures.
 Coinbase currently uses primary JWT credentials only: saved read fields and
 their proxy are dropped from effective options with a warning before startup.
+
+MEXC trusted compatibility setup preserves its existing persisted account IDs:
+`mexc:` plus the first12 SHA256 bytes of the raw Primary API key are supplied as
+explicit Primary stableId before provider trimming. JS/native setup reject a
+conflicting supplied mapping. Generic LocalSigner never derives stable IDs;
+MEXC venue execution reads only installed metadata, never hashes credentials.

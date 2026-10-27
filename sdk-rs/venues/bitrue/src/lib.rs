@@ -7,14 +7,16 @@ mod trading;
 mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
-use safe_cex_engine::credential_selection::{
-    CredentialRole, PrimaryReason, Selection, SlotPolicy, Slots,
-};
+use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
-use safe_cex_engine::selected_read::{ReadLeg, ReadLegPolicy, ReadRequest};
+use safe_cex_engine::request_context::{
+    Context, Egress, Operation, Policy, RetryPolicy, Scope, SessionPolicy,
+};
+use safe_cex_engine::selected_read::{
+    AdmittedRead, ReadLeg, ReadLegPolicy, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
@@ -24,7 +26,7 @@ use safe_cex_engine::{
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use wire::{CandleWire, Contract, ContractKey, Message, Payload};
-const REST: &str = "https://fapi.bitrue.com";
+pub(crate) const REST: &str = "https://fapi.bitrue.com";
 const PUBLIC: &str = "wss://fmarket-ws.bitrue.com/kline-api/ws";
 /// ```compile_fail
 /// let _ = safe_cex_venue_bitrue::Options { key: None, ..Default::default() };
@@ -47,12 +49,58 @@ impl Default for Options {
     }
 }
 pub struct Pending {
-    pub request: sign::Request,
+    pub wire: sign::Request,
     pub job: Job,
     pub signature_resent: bool,
     pub attempts: u8,
-    selected: Option<(Selection, Identity)>,
-    leg: Option<ReadLeg>,
+    custody: Option<Custody>,
+}
+/// The engine authority a released request holds until it settles.
+enum Custody {
+    /// A Background account read; native retries reuse its authority.
+    Read(AdmittedRead),
+    /// One physical page under a command's original Read root.
+    Leg(ReadLeg),
+    /// A listen-key Session operation, or a keyless catalog read.
+    Context(Context),
+}
+impl Pending {
+    /// A trading call: its Plan Context travels in the request itself.
+    pub(crate) fn trade(
+        method: Method,
+        path: String,
+        body: Option<String>,
+        request: trading::Request,
+    ) -> Self {
+        Self {
+            wire: sign::Request {
+                method,
+                path,
+                body,
+                at: None,
+                floor: None,
+            },
+            job: Job::Trade(request),
+            signature_resent: false,
+            attempts: 0,
+            custody: None,
+        }
+    }
+    pub(crate) fn into_trade(self) -> Option<trading::Request> {
+        match self.job {
+            Job::Trade(request) => Some(request),
+            _ => None,
+        }
+    }
+}
+impl Custody {
+    fn context(&self) -> &Context {
+        match self {
+            Self::Read(read) => read.context(),
+            Self::Leg(leg) => leg.context(),
+            Self::Context(context) => context,
+        }
+    }
 }
 pub enum Job {
     Markets {
@@ -259,7 +307,7 @@ impl Bitrue {
             .map(|m| m.symbol.clone())
     }
     fn send(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
@@ -267,24 +315,8 @@ impl Bitrue {
         at: Option<ArrayAt>,
         job: Job,
     ) {
-        let role = match &job {
-            Job::Markets { .. } => CredentialRole::PrimaryRead {
-                reason: PrimaryReason::Catalog,
-                scope: None,
-            },
-            Job::Account(account::Request::Listen { .. } | account::Request::Keepalive { .. }) => {
-                CredentialRole::SessionAuth
-            }
-            Job::Account(_) | Job::History(_) => CredentialRole::Read { scope: None },
-            Job::Trade(request) => request.credential_role(),
-        };
-        let selected = self
-            .slots()
-            .select(role)
-            .ok()
-            .map(|(selection, identity)| (selection, identity.clone()));
         let pending = Pending {
-            request: sign::Request {
+            wire: sign::Request {
                 method,
                 path: path.to_owned(),
                 body,
@@ -294,8 +326,7 @@ impl Bitrue {
             job,
             signature_resent: false,
             attempts: 0,
-            selected,
-            leg: None,
+            custody: None,
         };
         self.issue(cx, pending);
     }
@@ -308,15 +339,45 @@ impl Bitrue {
             },
         )
     }
-    fn issue(&self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
-        let r = &pending.request;
-        let primary_read = matches!(&pending.job, Job::Markets { .. });
-        let url = if r.path.starts_with("https://") {
-            r.path.clone()
+    /// Exact delivery precedes any decoding or Store effect.
+    fn delivered(cx: &Cx<'_, Pending>, pending: &Pending) -> bool {
+        match (&pending.custody, account::Request::root(&pending.job)) {
+            (Some(Custody::Leg(leg)), Some(root)) => root.validate_delivery(cx, leg).is_ok(),
+            (Some(custody), _) => cx.validate_http_context(custody.context()).is_ok(),
+            (None, _) => true,
+        }
+    }
+    fn url(path: &str) -> String {
+        if path.starts_with("https://") {
+            path.to_owned()
         } else {
-            format!("{REST}{}", r.path)
-        };
-        if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job {
+            format!("{REST}{path}")
+        }
+    }
+    fn recipe(
+        &self,
+        identity: &Identity,
+        wire: &sign::Request,
+    ) -> Box<dyn safe_cex_engine::SignStep> {
+        Box::new(sign::dispatch::Http::new(
+            identity.clone(),
+            wire.method,
+            Self::url(&wire.path),
+            wire.body.clone(),
+            self.options.recv_window,
+            wire.floor,
+        ))
+    }
+    fn read_policy() -> ReadPolicy {
+        ReadPolicy {
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::ReadFailure,
+        }
+    }
+    /// Admit and queue one physical request under the authority its job needs.
+    fn issue(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+        if let Some(root) = account::Request::root(&pending.job) {
             let leg = match root.leg(
                 cx,
                 ReadLegPolicy {
@@ -325,81 +386,256 @@ impl Bitrue {
                 },
             ) {
                 Ok(leg) => leg,
-                Err(error) => {
-                    let _ = cx.fail_context(root.context(), error.read_venue_error());
-                    return;
+                Err(_) => {
+                    return self.on_request_failed(
+                        cx,
+                        pending,
+                        "Bitrue managed read lifecycle is unavailable",
+                    );
                 }
             };
-            let (method, body, stream, floor, window) = (
-                r.method,
-                r.body.clone(),
-                r.at,
-                r.floor,
-                self.options.recv_window,
-            );
-            let recipe_url = url.clone();
-            let recipe_body = body.clone();
-            let result = leg.queue(
-                cx,
-                ReadRequest {
-                    method,
-                    url,
-                    body,
-                    stream,
-                },
-                |identity| {
-                    Box::new(sign::dispatch::Http::new(
-                        identity.clone(),
-                        method,
-                        recipe_url,
-                        recipe_body,
-                        window,
-                        floor,
-                    ))
-                },
-                |leg| {
-                    pending.leg = Some(leg);
-                    pending
-                },
-            );
-            if let Err((pending, error)) = result
-                && let Job::Account(account::Request::Brackets { root, .. }) = pending.job
-            {
-                let _ = cx.fail_context(root.context(), error.read_venue_error());
+            return self.queue_leg(cx, leg, pending);
+        }
+        match &pending.job {
+            Job::Trade(_) => unreachable!("trading calls queue under their Plan"),
+            Job::Account(account::Request::Listen { .. } | account::Request::Keepalive { .. }) => {
+                self.issue_session(cx, pending)
             }
-            return;
-        }
-        let headers = sign::dispatch::HEADERS
-            .iter()
-            .map(|(n, v)| (*n, (*v).to_owned()))
-            .collect();
-        let recipe = pending.selected.as_ref().map(|(selection, identity)| {
-            (
-                *selection,
-                sign::dispatch::Http::new(
-                    identity.clone(),
-                    r.method,
-                    url.clone(),
-                    r.body.clone(),
-                    self.options.recv_window,
-                    r.floor,
-                ),
-            )
-        });
-        let (method, body, at) = (r.method, r.body.clone(), r.at);
-        let id = cx.request(method, url, headers, body, pending);
-        if let Some((selection, recipe)) = recipe {
-            selection.sign(cx, id, Box::new(recipe));
-        } else if primary_read {
-            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
-        }
-        if let Some(at) = at {
-            cx.stream_response(id, at);
+            Job::Markets { .. } => {
+                let selected = SelectedRead::select(
+                    &self.slots(),
+                    ReadRole::Primary {
+                        reason: PrimaryReason::Catalog,
+                        scope: None,
+                    },
+                );
+                // Keys sign the catalog even in public-data-only mode, as native.
+                if selected.is_ok() {
+                    self.issue_read(cx, selected, pending)
+                } else {
+                    self.issue_public(cx, pending)
+                }
+            }
+            Job::Account(account::Request::Orders { primary: true, .. }) => {
+                let selected = SelectedRead::select(
+                    &self.slots(),
+                    ReadRole::Primary {
+                        reason: PrimaryReason::PostUnknownOrderRead,
+                        scope: Some(safe_cex_engine::AccountReadScope::Orders),
+                    },
+                );
+                self.issue_read(cx, selected, pending)
+            }
+            Job::Account(_) | Job::History(_) => {
+                let selected = SelectedRead::select(&self.slots(), ReadRole::Read { scope: None });
+                self.issue_read(cx, selected, pending)
+            }
         }
     }
-    fn retire_leg(cx: &mut Cx<'_, Pending>, pending: &mut Pending) {
-        if let Some(leg) = pending.leg.take() {
-            let _ = cx.finish_http_context(leg.context());
+    fn issue_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        selected: Result<
+            SelectedRead,
+            safe_cex_engine::credential_selection::CredentialUnavailable,
+        >,
+        pending: Pending,
+    ) {
+        match SelectedRead::scoped(cx, selected, Scope::Background, Self::read_policy()) {
+            Ok(read) => self.queue_read(cx, read, pending),
+            Err(_) => {
+                self.on_request_failed(cx, pending, "Bitrue managed read lifecycle is unavailable")
+            }
+        }
+    }
+    fn queue_read(&mut self, cx: &mut Cx<'_, Pending>, read: AdmittedRead, pending: Pending) {
+        let request = ReadRequest {
+            method: pending.wire.method,
+            url: Self::url(&pending.wire.path),
+            body: pending.wire.body.clone(),
+            stream: pending.wire.at,
+        };
+        let wire = pending.wire.clone();
+        let queued = read.queue(
+            cx,
+            request,
+            |identity| self.recipe(identity, &wire),
+            |read| Pending {
+                custody: Some(Custody::Read(read)),
+                ..pending
+            },
+        );
+        if let Err((pending, error)) = queued {
+            self.on_request_failed(cx, pending, &error.venue_error().message);
+        }
+    }
+    fn queue_leg(&mut self, cx: &mut Cx<'_, Pending>, leg: ReadLeg, pending: Pending) {
+        let request = ReadRequest {
+            method: pending.wire.method,
+            url: Self::url(&pending.wire.path),
+            body: pending.wire.body.clone(),
+            stream: pending.wire.at,
+        };
+        let wire = pending.wire.clone();
+        let queued = leg.queue(
+            cx,
+            request,
+            |identity| self.recipe(identity, &wire),
+            |leg| Pending {
+                custody: Some(Custody::Leg(leg)),
+                ..pending
+            },
+        );
+        if let Err((pending, error)) = queued {
+            self.on_request_failed(cx, pending, &error.venue_error().message);
+        }
+    }
+    /// The keyless catalog keeps native's explicit Primary route and headers.
+    fn issue_public(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+        let policy = Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        let Ok(context) = cx.http_context_with_egress(Scope::Background, policy, Egress::Primary)
+        else {
+            return self.on_request_failed(
+                cx,
+                pending,
+                "Bitrue managed read lifecycle is unavailable",
+            );
+        };
+        let (method, url, body, at) = (
+            pending.wire.method,
+            Self::url(&pending.wire.path),
+            pending.wire.body.clone(),
+            pending.wire.at,
+        );
+        let pending = Pending {
+            custody: Some(Custody::Context(context.clone())),
+            ..pending
+        };
+        match cx.request_managed_with_headers(
+            context,
+            None,
+            method,
+            url,
+            sign::dispatch::HEADERS,
+            body,
+            pending,
+        ) {
+            Ok(id) => {
+                if let Some(at) = at {
+                    cx.stream_response(id, at);
+                }
+            }
+            Err((pending, error)) => {
+                self.on_request_failed(cx, pending, &error.venue_error().message)
+            }
+        }
+    }
+    /// A listen-key create opens its Session; its native retries and the
+    /// keepalive are further operations of that Session.
+    fn issue_session(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+        let Ok((selection, identity)) = self
+            .slots()
+            .select(CredentialRole::SessionAuth)
+            .map(|(selection, identity)| (selection, identity.clone()))
+        else {
+            return self.on_request_failed(cx, pending, "Bitrue private credentials required");
+        };
+        let credential = selection.credential(identity.credential.clone());
+        let create = matches!(pending.job, Job::Account(account::Request::Listen { .. }));
+        // A fresh create opens the Session; its native retries and -1022
+        // re-sign stay operations of that same Session generation (D1).
+        let fresh = create && pending.attempts == 0 && !pending.signature_resent;
+        if fresh || self.account.session.is_none() {
+            self.retire_session(cx);
+            match cx.open_session(SessionPolicy {
+                credential: Some(credential.clone()),
+                // Bitrue listen keys expire 60 minutes after their last
+                // keepalive, so an extra create is harmless. One-write guard
+                // off: a lost create would otherwise block native's retry.
+                repeat_safe: true,
+                private_egress: None,
+            }) {
+                Ok(session) => self.account.session = Some(session),
+                Err(_) => {
+                    return self.on_request_failed(
+                        cx,
+                        pending,
+                        "Bitrue listen key session is unavailable",
+                    );
+                }
+            }
+        }
+        let session = self.account.session.clone().expect("opened above");
+        let Ok(context) = cx.session_context(
+            &session,
+            Policy {
+                operation: Operation::Mutation,
+                credential: Some(credential),
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) else {
+            return self.on_request_failed(cx, pending, "Bitrue listen key session is unavailable");
+        };
+        let recipe = self.recipe(&identity, &pending.wire);
+        let (method, url, body) = (
+            pending.wire.method,
+            Self::url(&pending.wire.path),
+            pending.wire.body.clone(),
+        );
+        let pending = Pending {
+            custody: Some(Custody::Context(context.clone())),
+            ..pending
+        };
+        if let Err((pending, error)) =
+            cx.request_signed_managed(context, None, method, url, body, recipe, pending)
+        {
+            self.on_request_failed(cx, pending, &error.venue_error().message);
+        }
+    }
+    pub(crate) fn retire_session(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(session) = self.account.session.take() {
+            // Nothing parks on a listen-key session: it never has waiters.
+            let _ = cx.retire_session(&session);
+        }
+    }
+    /// Settle whatever authority the request held.
+    fn finish_custody(cx: &mut Cx<'_, Pending>, pending: &mut Pending) {
+        if let Some(custody) = pending.custody.take() {
+            let _ = cx.finish_http_context(custody.context());
+        }
+    }
+    /// A native resend: a Background read retries under its own authority;
+    /// a root page or a Session operation is reissued as a new one.
+    fn reissue(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
+        Self::reset_job(&mut pending.job);
+        match pending.custody.take() {
+            Some(Custody::Read(read)) => {
+                match read.retry(
+                    cx,
+                    safe_cex_engine::request_context::RetryEvidence::ReadFailure,
+                    (),
+                ) {
+                    Ok((read, ())) => self.queue_read(cx, read, pending),
+                    Err(refusal) => {
+                        let _ = cx.finish_http_context(refusal.read.context());
+                        self.on_request_failed(cx, pending, "Bitrue read retry refused");
+                    }
+                }
+            }
+            custody => {
+                if let Some(custody) = custody {
+                    let _ = cx.finish_http_context(custody.context());
+                }
+                self.issue(cx, pending);
+            }
         }
     }
     fn reset_job(job: &mut Job) {
@@ -418,7 +654,7 @@ impl Bitrue {
             Job::Trade(_) => {}
         }
     }
-    fn markets(&self, cx: &mut Cx<'_, Pending>) {
+    fn markets(&mut self, cx: &mut Cx<'_, Pending>) {
         self.send(
             cx,
             Method::Get,
@@ -641,6 +877,37 @@ impl Venue for Bitrue {
     }
     fn guard_order_mutations(&self) -> bool {
         true
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match &pending.job {
+            Job::Trade(request) => trading::trade_reconciliation(request),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trading_preflight_ready(cx, preflight);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trading_retired(owner)
+    }
+    /// An uncertain or absent-order seal: restore the retired job's rows and
+    /// reconcile the named symbols (every market when unnamed) through Primary
+    /// open-order snapshots.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
+        self.reconcile_trading(cx, symbols);
     }
 
     type Pending = Pending;
@@ -910,21 +1177,20 @@ impl Venue for Bitrue {
         mut pending: Pending,
         response: Response<'_>,
     ) {
-        if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job {
-            let Some(leg) = &pending.leg else {
-                return;
-            };
-            if root.validate_delivery(cx, leg).is_err() {
-                return;
-            }
+        if let Job::Trade(mut request) = pending.job {
+            request.floor = pending.wire.floor;
+            return self.trade_response(cx, request, response);
         }
-        Self::retire_leg(cx, &mut pending);
-        if !pending.signature_resent && codes::resend(&response) {
-            pending.signature_resent = true;
-            Self::reset_job(&mut pending.job);
-            self.issue(cx, pending);
+        if !Self::delivered(cx, &pending) {
             return;
         }
+        if !pending.signature_resent && codes::resend(&response) {
+            pending.signature_resent = true;
+            return self.reissue(cx, pending);
+        }
+        // Settled after its job: a history page admits rows under its live leg.
+        let custody = pending.custody.take();
+        let leg = custody.as_ref().map(Custody::context);
         match pending.job {
             Job::Markets {
                 rows,
@@ -986,8 +1252,11 @@ impl Venue for Bitrue {
                 }
             }
             Job::Account(r) => self.account_response(cx, r, response),
-            Job::Trade(r) => self.trade_response(cx, r, response),
-            Job::History(r) => self.history_response(cx, r, response),
+            Job::Trade(_) => unreachable!(),
+            Job::History(r) => self.history_response(cx, r, leg, response),
+        }
+        if let Some(custody) = custody {
+            let _ = cx.finish_http_context(custody.context());
         }
     }
     fn on_signing_release(
@@ -996,7 +1265,7 @@ impl Venue for Bitrue {
         release: safe_cex_engine::SigningRelease,
     ) {
         if let safe_cex_engine::SigningTarget::Http { pending, .. } = target {
-            pending.request.floor = release.stamp_floor();
+            pending.wire.floor = release.stamp_floor();
         }
     }
     fn on_stream_error(
@@ -1005,6 +1274,17 @@ impl Venue for Bitrue {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Job::Trade(mut request) = pending.job {
+            request.floor = pending.wire.floor;
+            if codes::resend(&response) {
+                return self.trade_response(cx, request, response);
+            }
+            // A body without the list is a failed read, not DATA.
+            let error =
+                safe_cex_engine::VenueError::new("Response did not contain the expected list")
+                    .kind(safe_cex_engine::ErrorKind::Internal);
+            return self.trade_call_failed(cx, request, error, true);
+        }
         if !pending.signature_resent && codes::resend(&response) {
             self.on_response(cx, pending, response);
         } else {
@@ -1024,10 +1304,13 @@ impl Venue for Bitrue {
         mut pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        Self::retire_leg(cx, &mut pending);
-        let safe = pending.request.method == Method::Get
-            || (pending.request.method == Method::Post
-                && pending.request.path
+        if let Job::Trade(mut request) = pending.job {
+            request.floor = pending.wire.floor;
+            return self.trade_call_failed(cx, request, error, true);
+        }
+        let safe = pending.wire.method == Method::Get
+            || (pending.wire.method == Method::Post
+                && pending.wire.path
                     == "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey");
         if matches!(
             error.kind,
@@ -1037,9 +1320,7 @@ impl Venue for Bitrue {
             && pending.attempts < 3
         {
             pending.attempts += 1;
-            Self::reset_job(&mut pending.job);
-            self.issue(cx, pending);
-            return;
+            return self.reissue(cx, pending);
         }
         self.on_request_failed(cx, pending, &error.message);
     }
@@ -1049,25 +1330,20 @@ impl Venue for Bitrue {
         mut pending: Pending,
         mut error: safe_cex_engine::VenueError,
     ) {
-        Self::retire_leg(cx, &mut pending);
+        Self::finish_custody(cx, &mut pending);
         if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job {
             error.outcome = None;
             let _ = cx.fail_context(root.context(), error);
             return;
         }
         match pending.job {
-            Job::Trade(request) => self.trade_sign_failed(
-                cx,
-                request,
-                error,
-                pending.signature_resent || pending.attempts > 0,
-            ),
+            Job::Trade(request) => self.trade_call_failed(cx, request, error, false),
             Job::History(request) => request.sign_failed(cx, error),
             _ => self.on_request_failed(cx, pending, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
-        Self::retire_leg(cx, &mut pending);
+        Self::finish_custody(cx, &mut pending);
         if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job
             && cx.validate_read_root_context(root.context()).is_err()
         {
@@ -1083,7 +1359,12 @@ impl Venue for Bitrue {
                 self.startup_retry.failed(cx, ());
             }
             Job::Account(r) => self.account_failed(cx, r, error),
-            Job::Trade(r) => self.trade_lost(cx, r, error),
+            Job::Trade(r) => self.trade_call_failed(
+                cx,
+                r,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+                true,
+            ),
             Job::History(r) => self.history_failed(cx, r, error),
         }
     }
@@ -1344,6 +1625,3 @@ fn reread_partial<P>(
     }
     *stalls < 5
 }
-
-#[cfg(test)]
-mod secondary_tests;

@@ -511,6 +511,15 @@ impl Venue for Cryptocom {
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
+    // reconcile_uncertain starts a fresh Orders+AdvancedOrders read at once.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    /// The engine asks once per uncertain seal and re-asks while fenced; the fresh
+    /// order read reports through `orders_reconciled`.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_uncertain_placement(cx);
+    }
 
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {

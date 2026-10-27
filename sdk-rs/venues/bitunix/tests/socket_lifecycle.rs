@@ -1,13 +1,14 @@
+mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketId, TimerId};
-use safe_cex_venue_bitunix::{BitunixFutures, Options};
+use safe_cex_venue_bitunix::BitunixFutures;
 type TestEngine = Engine<BitunixFutures>;
 
 fn ready() -> (TestEngine, Vec<(String, SocketId)>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(0.0);
     let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
         .into_iter()
@@ -56,7 +57,9 @@ fn ready() -> (TestEngine, Vec<(String, SocketId)>) {
 }
 fn retry(e: &mut TestEngine, socket: SocketId, at: f64) -> (TimerId, f64) {
     e.handle(at, Event::WsClosed { socket, code: 1006 });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -75,7 +78,9 @@ fn retry(e: &mut TestEngine, socket: SocketId, at: f64) -> (TimerId, f64) {
 }
 fn reconnect(e: &mut TestEngine, timer: TimerId, at: f64, feed: &str, recover: bool) -> SocketId {
     e.handle(at, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     let sockets: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
@@ -126,14 +131,26 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
                     text: r#"{"op":"pong"}"#,
                 },
             );
-            assert!(e.drain_actions().next().is_none());
+            assert!(
+                safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .next()
+                    .is_none()
+            );
             now += delay;
             socket = reconnect(&mut e, timer, now, &feed, false);
             e.handle(now, Event::TimerFired { timer });
-            assert!(e.drain_actions().next().is_none());
+            assert!(
+                safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .next()
+                    .is_none()
+            );
             // Opening alone must not reset the failed-feed counter.
             e.handle(now, Event::WsOpened { socket });
-            e.drain_actions().for_each(drop);
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .for_each(drop);
             now += 1.0;
         }
         // Real traffic after a stable epoch resets only this feed.
@@ -145,7 +162,9 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
                 text: r#"{"op":"pong"}"#,
             },
         );
-        e.drain_actions().for_each(drop);
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .for_each(drop);
         let (_, delay) = retry(&mut e, socket, now);
         assert!(
             (750.0..=1000.0).contains(&delay),
@@ -166,7 +185,9 @@ fn disconnected_futures_clear_consumers_before_retry_and_ignore_old_epochs() {
             symbol: "T0USDT".into(),
         }),
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.take_frame(0.0);
     let depth =
         r#"{"channel":"market_t0usdt_depthop_0.1","data":{"bids":[["1","2"]],"asks":[["2","3"]]}}"#;
@@ -193,7 +214,9 @@ fn disconnected_futures_clear_consumers_before_retry_and_ignore_old_epochs() {
         .1;
     assert_eq!(clear.len(), 16);
     assert_eq!(&clear[4..12], &[0; 8]);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -211,16 +234,26 @@ fn disconnected_futures_clear_consumers_before_retry_and_ignore_old_epochs() {
     ] {
         e.handle(3.0, event);
         assert!(e.book("T0USDT").is_none());
-        assert!(e.drain_actions().next().is_none());
+        assert!(
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .next()
+                .is_none()
+        );
     }
     let fresh = reconnect(&mut e, timer, 2.0 + delay, "futures", false);
     e.handle(2.0 + delay, Event::WsOpened { socket: fresh });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert_eq!(actions.iter().filter(|a| matches!(a, Action::WsSend { text, .. } if text.contains("market_t0usdt_depthop_0.1"))).count(), 1);
     assert!(e.book("T0USDT").is_none());
     e.handle(3.0 + delay, Event::WsOpened { socket: fresh });
     assert!(
-        e.drain_actions().next().is_none(),
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .next()
+            .is_none(),
         "duplicate open cannot replay twice"
     );
     e.handle(
@@ -241,7 +274,9 @@ fn reopen(e: &mut TestEngine, socket: SocketId, feed: &str, now: &mut f64) -> (S
     *now += delay;
     let fresh = reconnect(e, timer, *now, feed, false);
     e.handle(*now, Event::WsOpened { socket: fresh });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     let watch = timers(&actions)
         .into_iter()
         .find(|(_, at)| *at == *now + 5000.0)
@@ -251,7 +286,9 @@ fn reopen(e: &mut TestEngine, socket: SocketId, feed: &str, now: &mut f64) -> (S
 }
 fn fire_watch(e: &mut TestEngine, timer: TimerId, now: f64) -> (TimerId, Vec<Action>) {
     e.handle(now, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     let next = timers(&actions)[0].0;
     (next, actions)
 }
@@ -283,7 +320,9 @@ fn private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic() {
             text: r#"{"op":"pong"}"#,
         },
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     for elapsed in (65_000..105_000).step_by(5000) {
         let (next, actions) = fire_watch(&mut e, watch, opened + elapsed as f64);
         watch = next;
@@ -303,7 +342,9 @@ fn private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic() {
     let deadline = timers(&actions)[0].1;
     let fresh = reconnect(&mut e, timer, deadline, "private", true);
     e.handle(deadline, Event::WsOpened { socket: fresh });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     watch = timers(&actions)[0].0;
     // A replacement epoch resets the pong gate without resetting retry state.
     let (_, actions) = fire_watch(&mut e, watch, deadline + 60_000.0);
@@ -319,7 +360,9 @@ fn connecting_timeout_retries_once_with_recover_context_for_every_feed() {
         let (retry_timer, delay) = retry(&mut e, socket, now);
         now += delay;
         e.handle(now, Event::TimerFired { timer: retry_timer });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         let connecting = actions
             .iter()
             .find_map(|a| match a {
@@ -329,7 +372,9 @@ fn connecting_timeout_retries_once_with_recover_context_for_every_feed() {
             .unwrap();
         let watch = timers(&actions)[0].0;
         e.handle(now + 10_000.0, Event::TimerFired { timer: watch });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         assert!(
             actions
                 .iter()
@@ -350,7 +395,12 @@ fn connecting_timeout_retries_once_with_recover_context_for_every_feed() {
                 code: 1006,
             },
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .next()
+                .is_none()
+        );
         reconnect(&mut e, timer, at, &feed, true);
         now = at + 1.0;
     }
@@ -368,24 +418,43 @@ fn retired_queue_and_login_timers_cannot_send_on_a_replacement_epoch() {
             text: r#"{"op":"login","data":{"result":false}}"#,
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let stale_login = timers(&actions)[0].0;
     let (fresh, watch) = reopen(&mut e, private, "private", &mut now);
     e.handle(now + 2000.0, Event::TimerFired { timer: stale_login });
-    assert!(e.drain_actions().next().is_none());
+    assert!(
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .next()
+            .is_none()
+    );
     e.handle(now + 2000.0, Event::WsOpened { socket: fresh });
-    assert!(e.drain_actions().next().is_none());
+    assert!(
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .next()
+            .is_none()
+    );
     // Retired supervisor watch and login events cannot affect an active sibling.
     retry(&mut e, fresh, now + 2001.0);
     e.handle(now + 6000.0, Event::TimerFired { timer: watch });
-    assert!(e.drain_actions().next().is_none());
+    assert!(
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .next()
+            .is_none()
+    );
     now += 10_000.0;
     let shard = sockets.iter().find(|(f, _)| f == "ticker:0").unwrap().1;
     let (timer, delay) = retry(&mut e, shard, now);
     now += delay;
     let fresh = reconnect(&mut e, timer, now, "ticker:0", false);
     e.handle(now, Event::WsOpened { socket: fresh });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let stale_queue = timers(&actions)
         .into_iter()
         .find(|(_, at)| *at == now + 250.0)
@@ -394,7 +463,10 @@ fn retired_queue_and_login_timers_cannot_send_on_a_replacement_epoch() {
     retry(&mut e, fresh, now + 1.0);
     e.handle(now + 251.0, Event::TimerFired { timer: stale_queue });
     assert!(
-        e.drain_actions().next().is_none(),
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .next()
+            .is_none(),
         "queued subscriptions from a retired shard must not leak"
     );
 }
@@ -417,7 +489,9 @@ fn shard_retirement_does_not_clear_books_and_reconnect_replays_current_interests
         e.handle(0.0, Event::Command(command));
     }
     e.handle(1.0, Event::WsMessage { socket: futures, text: r#"{"channel":"market_t0usdt_depthop_0.1","data":{"bids":[["1","2"]],"asks":[["2","3"]]}}"# });
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     retry(&mut e, shard, 2.0);
     assert!(
         e.book("T0USDT").is_some(),
@@ -443,7 +517,8 @@ fn shard_retirement_does_not_clear_books_and_reconnect_replays_current_interests
         e.handle(4.0, Event::Command(command));
     }
     assert!(
-        !e.drain_actions()
+        !safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
             .any(|a| matches!(a, Action::WsSend { .. }))
     );
     let fresh = reconnect(&mut e, timer, 3.0 + delay, "futures", false);
@@ -468,5 +543,10 @@ fn shard_retirement_does_not_clear_books_and_reconnect_replays_current_interests
             .any(|s| s.contains("market_t0usdt") || s.contains("market_t1usdt"))
     );
     e.handle(4.0 + delay, Event::WsOpened { socket: fresh });
-    assert!(e.drain_actions().next().is_none());
+    assert!(
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .next()
+            .is_none()
+    );
 }

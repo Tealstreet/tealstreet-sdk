@@ -10,7 +10,14 @@ export const diagnosticKey = (failure) => failure
 // Group exact paths sharing a rationale without repeating prose thousands of
 // times for catalogue/depth rows. This never introduces patterns or ranges.
 const declaredDiagnostics = (entry) => (entry?.diagnostics ?? []).flatMap((item) =>
-  (item.keys ?? [item.key]).map((key) => ({ key, divergence: item.divergence })));
+  (item.keys ?? [item.key]).map((key) => ({ key, divergence: item.divergence, condition: item.condition })));
+
+const lighterDailyCounter = /^checkpoint 0 tickers\[\d+\]\.(?:percentage|quoteVolume|volume)$/;
+const matchesCondition = (declaration, failure) => {
+  if (declaration?.condition === undefined) return true;
+  const values = /^checkpoint 0 tickers\[\d+\]\.(?:percentage|quoteVolume|volume): ts=0 rust=(-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)$/i.exec(failure);
+  return declaration.condition === 'lighter-zero-bootstrap' && values !== null && Number.isFinite(Number(values[1]));
+};
 
 export function validateKnownFailures(manifest) {
   const errors = [];
@@ -40,13 +47,19 @@ export function validateKnownFailures(manifest) {
         if (typeof path !== 'string' || !path || path.includes('*') || keys.has(path))
           errors.push(`invalid diagnostic declaration ${identity}`);
         keys.add(path);
+        if (diagnostic.condition !== undefined && (diagnostic.condition !== 'lighter-zero-bootstrap' ||
+            entry.venue !== 'lighter' || !lighterDailyCounter.test(path)))
+          errors.push(`invalid conditional diagnostic ${identity}`);
       }
     }
   }
   return errors;
 }
 
-export function assessGateReport(report, manifest) {
+export const assessGateReport = (report, manifest) => assessReport(report, manifest, false);
+export const assessCorrectnessReport = (report, manifest) => assessReport(report, manifest, true);
+
+function assessReport(report, manifest, correctnessOnly) {
   const errors = [...validateKnownFailures(manifest)];
   if (errors.length) return { errors, known: [], resolved: [] };
   if (report?.schema !== 1 || !['PASS', 'FAIL'].includes(report.status) ||
@@ -54,6 +67,11 @@ export function assessGateReport(report, manifest) {
       (report.status === 'PASS') !== (report.failures.length === 0) ||
       typeof report.private !== 'boolean' || !/^[a-f0-9]{64}$/.test(report.tapeSha256 ?? ''))
     return { errors: [...errors, 'invalid strict gate report'], known: [], resolved: [] };
+  if (correctnessOnly !== (report.correctnessOnly === true))
+    errors.push('correctness-only reports cannot substitute for measured gate evidence');
+  if (correctnessOnly && (report.runs !== 0 || report.correctnessRuns !== 1 ||
+      report.coverage?.performance !== 'not-run' || report.coverage?.correctness !== (report.replayFailure ? 'incomplete' : 'complete')))
+    errors.push('invalid correctness-only replay coverage');
   const entry = manifest.failures.find((candidate) => candidate.venue === report.venue && candidate.tapeSha256 === report.tapeSha256);
   const declarations = new Map(declaredDiagnostics(entry).map((item) => [item.key, item]));
   if (report.replayFailure) {
@@ -72,16 +90,17 @@ export function assessGateReport(report, manifest) {
   // their strict result remains FAIL and never certifies complete parity.
   for (const impl of ['ts', 'rust']) {
     const samples = report.samples?.[impl];
-    const expected = report.private ? report.correctnessRuns : report.runs;
-    if (!Number.isSafeInteger(expected) || expected < (report.private ? 1 : 7) || !Array.isArray(samples) || samples.length !== expected) {
+    const correctness = report.private || correctnessOnly;
+    const expected = correctness ? report.correctnessRuns : report.runs;
+    if (!Number.isSafeInteger(expected) || expected < (correctness ? 1 : 7) || !Array.isArray(samples) || samples.length !== expected) {
       errors.push(`${impl}: incomplete gate samples`);
       continue;
     }
     for (const sample of samples) errors.push(...memoryMetricErrors(sample),
-      ...performanceMetricErrors(sample, report.private ? 'correctness' : 'performance'));
+      ...performanceMetricErrors(sample, correctness ? 'correctness' : 'performance'));
   }
   const protectedFailure = /baseline is invalid|invalid (?:cpuMs|steadyCpuMs|processCpuMs)|incomplete replay workload|workload differs|checkpoint snapshots missing|invalid tape boundary|empty public seed|requested book .* is missing|fixer modified Rust|fixer changed undeclared/;
-  if (!report.private) {
+  if (!report.private && !correctnessOnly) {
     if (report.requiredImprovement !== 0.10) errors.push('performance improvement contract differs from 10%');
     if (!errors.length) for (const missing of performanceFailures(report.samples.ts, report.samples.rust))
       if (!report.failures.includes(missing)) errors.push(`strict report omitted ${missing}`);
@@ -94,7 +113,8 @@ export function assessGateReport(report, manifest) {
     // Every implementation must reproduce its own audited replay. Snapshot
     // leaf and duplicate-row diagnostics have no common "workload" suffix.
     const ownReplayFailure = /^(?:ts|rust) performance run \d+(?:[ :]|$)/.test(failure);
-    if (ownReplayFailure || failure.startsWith('checkpoint coverage ') || protectedFailure.test(failure) || !declarations.has(key)) errors.push(`${report.venue}: unexpected ${failure}`);
+    if (ownReplayFailure || failure.startsWith('checkpoint coverage ') || protectedFailure.test(failure) ||
+        !declarations.has(key) || !matchesCondition(declarations.get(key), failure)) errors.push(`${report.venue}: unexpected ${failure}`);
     else known.push({ key, divergence: declarations.get(key).divergence });
   }
   return { errors, known, resolved: [...declarations.keys()].filter((key) => !observed.has(key)) };

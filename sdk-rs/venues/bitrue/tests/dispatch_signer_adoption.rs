@@ -159,6 +159,32 @@ fn response(
     );
     actions(h, now)
 }
+/// The routing intent a managed request for `path` declares at preparation;
+/// managed requests carry their route there, not in `HttpRequest::route`.
+fn prepared_intent(
+    h: &mut Harness,
+    now: f64,
+    path: &str,
+) -> Option<safe_cex_engine::request_context::RoutingIntent> {
+    h.engine.prepare_dispatch(now);
+    h.engine.drain_actions().find_map(|action| match action {
+        Action::ManagedHttp(managed) => match *managed {
+            safe_cex_engine::request_context::HttpAction::Prepare {
+                intent, request, ..
+            } if request.url.ends_with(path) => Some(intent),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+fn assert_primary_catalogue(options: Options) {
+    let mut probe = fixture(options);
+    probe.engine.start(NOW);
+    assert_eq!(
+        prepared_intent(&mut probe, NOW, "/fapi/v1/contracts"),
+        Some(safe_cex_engine::request_context::RoutingIntent::Primary)
+    );
+}
 fn catalogue(h: &mut Harness) -> HttpRequest {
     h.engine.start(NOW);
     take_http(&actions(h, NOW), Method::Get, "/fapi/v1/contracts")
@@ -261,9 +287,9 @@ fn batch(h: &Harness, identity: &Identity, method: Method, canonical: &str, stam
 
 #[test]
 fn original_catalogue_uses_primary_atomic_provider() {
+    assert_primary_catalogue(options());
     let mut h = fixture(options());
-    let request = catalogue(&mut h);
-    assert_eq!(request.route, Some(safe_cex_engine::RequestRoute::Primary));
+    catalogue(&mut h);
     batch(
         &h,
         h.identities.primary.as_ref().unwrap(),
@@ -361,7 +387,8 @@ fn assert_unknown_setting_failure(h: &Harness, result: &[Action], provider_posts
                 assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
                 assert_eq!(
                     error.message,
-                    r#"Bitrue HTTP 500: {"code":"-1022","msg":"Invalid signature"}"#
+                    // A 5xx write is the engine's unproven seal; no body is decoded.
+                    "HTTP response does not prove the write outcome"
                 );
                 Some("failure")
             }
@@ -534,9 +561,9 @@ fn native_recv_window_remains_header_only() {
 }
 #[test]
 fn native_keyless_catalogue_keeps_primary_route_and_static_headers() {
+    assert_primary_catalogue(Options::default());
     let mut h = fixture(Options::default());
     let request = catalogue(&mut h);
-    assert_eq!(request.route, Some(safe_cex_engine::RequestRoute::Primary));
     assert_eq!(
         request.headers,
         vec![
@@ -834,7 +861,24 @@ fn native_keyless_signature_refusal_gets_one_unsigned_primary_reissue() {
         r#"{"code":"-1022","msg":"Invalid signature"}"#,
     );
     let second = take_http(&result, Method::Get, "/fapi/v1/contracts");
-    assert_eq!(second.route, Some(safe_cex_engine::RequestRoute::Primary));
+    // The reissue is again a managed read on the Primary route.
+    let mut probe = fixture(Options::default());
+    let refused = catalogue(&mut probe);
+    probe.engine.handle(
+        NOW,
+        Event::HttpResponse {
+            request: refused.id,
+            response: Response {
+                status: 400,
+                headers: "",
+                body: r#"{"code":"-1022","msg":"Invalid signature"}"#,
+            },
+        },
+    );
+    assert_eq!(
+        prepared_intent(&mut probe, NOW, "/fapi/v1/contracts"),
+        Some(safe_cex_engine::request_context::RoutingIntent::Primary)
+    );
     assert_eq!(second.headers, first.headers);
     assert!(h.requests.lock().unwrap().is_empty());
     let result = response(
@@ -1130,6 +1174,51 @@ impl Signer for ParkedProvider {
         self.0.can_sign(key, algorithm)
     }
 }
+/// `prepared_actions` refuses parked signing, so this drive keeps the
+/// prepared route across the Sign/Signed hand-off and releases on Bind.
+fn staged_actions(h: &mut Harness, now: f64) -> Vec<Action> {
+    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    h.engine.prepare_dispatch(now);
+    let mut queue: std::collections::VecDeque<_> = h.engine.drain_actions().collect();
+    let mut released = Vec::new();
+    while let Some(action) = queue.pop_front() {
+        let Action::ManagedHttp(action) = action else {
+            released.push(action);
+            continue;
+        };
+        match *action {
+            HttpAction::Prepare {
+                preparation,
+                request,
+                ..
+            } if h.engine.http_preparation_pending(preparation) => {
+                let prepared = Prepared {
+                    id: request.id.0,
+                    expires_at: None,
+                };
+                h.engine.http_prepared(now, preparation, prepared);
+            }
+            HttpAction::Bind {
+                permit, request, ..
+            } => {
+                if let Ok(Claim::Released(_)) = h.engine.claim_http(now, permit) {
+                    released.push(Action::Http(request));
+                }
+            }
+            _ => {}
+        }
+        for action in h
+            .engine
+            .drain_actions()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
+            queue.push_front(action);
+        }
+    }
+    released
+}
 #[test]
 fn staged_catalogue_waits_for_atomic_async_provider_and_never_replays_partial_headers() {
     for refuse in [false, true] {
@@ -1138,7 +1227,7 @@ fn staged_catalogue_waits_for_atomic_async_provider_and_never_replays_partial_he
             .set_signer(Some(Arc::new(ParkedProvider(h.provider.clone()))))
             .unwrap();
         h.engine.start(NOW);
-        let staged = actions(&mut h, NOW);
+        let staged = staged_actions(&mut h, NOW);
         assert!(!staged.iter().any(|a| matches!(a, Action::Http(_))));
         let work: Vec<_> = staged
             .into_iter()
@@ -1155,7 +1244,7 @@ fn staged_catalogue_waits_for_atomic_async_provider_and_never_replays_partial_he
             h.provider.sign_ready(&work).unwrap()
         };
         h.engine.handle(NOW, Event::Signed { attempt, result });
-        let released = actions(&mut h, NOW);
+        let released = staged_actions(&mut h, NOW);
         if refuse {
             assert!(!released.iter().any(|a| matches!(a, Action::Http(_))));
         } else {
