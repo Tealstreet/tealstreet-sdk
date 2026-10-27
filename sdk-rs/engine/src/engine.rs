@@ -1641,6 +1641,9 @@ struct IoCore {
     nonce_unscheduled: bool,
     #[cfg(feature = "dispatch-nonce")]
     nonce_enabled: bool,
+    /// `V::managed_sockets()`, copied by `Engine::new` for registration in `Cx`.
+    #[cfg(feature = "managed-sockets")]
+    managed_sockets_declared: bool,
     /// `V::http_mutation_barriers()`, copied by `Engine::new` for admission in `Cx`.
     #[cfg(feature = "http-mutation-barriers")]
     mutation_barriers_declared: bool,
@@ -1794,6 +1797,10 @@ struct IoCore {
 
 struct Io<P> {
     core: IoCore,
+    /// Managed close, installed by `Engine::new` only for venues that declare
+    /// managed sockets, so other venues never reference the managed retire path.
+    #[cfg(feature = "managed-sockets")]
+    managed_close: Option<for<'a> fn(&mut Cx<'a, P>, SocketId)>,
     pending: crate::IdMap<RequestId, PendingHttp<P>>,
     session_waits: request_context_registry::session::Waits<P>,
     #[cfg(feature = "managed-sockets")]
@@ -1812,6 +1819,8 @@ impl Default for IoCore {
             nonce_unscheduled: false,
             #[cfg(feature = "dispatch-nonce")]
             nonce_enabled: false,
+            #[cfg(feature = "managed-sockets")]
+            managed_sockets_declared: false,
             #[cfg(feature = "http-mutation-barriers")]
             mutation_barriers_declared: false,
             request_contexts: Default::default(),
@@ -2032,6 +2041,8 @@ impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
             core: IoCore::default(),
+            #[cfg(feature = "managed-sockets")]
+            managed_close: None,
             pending: Default::default(),
             session_waits: Default::default(),
             #[cfg(feature = "managed-sockets")]
@@ -2332,14 +2343,21 @@ impl<P> Cx<'_, P> {
 
     pub fn close(&mut self, socket: SocketId) {
         #[cfg(feature = "managed-sockets")]
-        if self.io.managed_socket_active() {
-            self.io.opaque_entry_activity();
-            if let Some(epoch) = self.io.core.socket_driver.state.socket_epoch(socket) {
-                self.retire_socket(epoch.feed(), crate::socket_lifecycle::RetireReason::Stopped);
-            }
+        if self.io.managed_socket_active()
+            && let Some(close) = self.io.managed_close
+        {
+            close(self, socket);
             return;
         }
         self.close_socket_transport(socket);
+    }
+
+    #[cfg(feature = "managed-sockets")]
+    fn managed_close(cx: &mut Cx<'_, P>, socket: SocketId) {
+        cx.io.opaque_entry_activity();
+        if let Some(epoch) = cx.io.core.socket_driver.state.socket_epoch(socket) {
+            cx.retire_socket(epoch.feed(), crate::socket_lifecycle::RetireReason::Stopped);
+        }
     }
 
     /// Physical close and signing cancellation only. Managed lifecycle effects
@@ -3313,6 +3331,16 @@ pub trait Venue {
         &[]
     }
 
+    /// Whether this venue uses managed sockets. Engine<V> reads it statically,
+    /// so a venue that does not declare it compiles every managed path out.
+    #[inline]
+    fn managed_sockets() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+
     /// Whether this venue uses HTTP mutation barrier groups. Engine<V> reads it
     /// statically, so a venue that does not declare it compiles group paths out.
     #[inline]
@@ -3799,11 +3827,18 @@ impl<V: Venue> Engine<V> {
                     #[cfg(feature = "http-mutation-barriers")]
                     mutation_barriers_declared: V::http_mutation_barriers(),
                     #[cfg(feature = "managed-sockets")]
+                    managed_sockets_declared: V::managed_sockets(),
+                    #[cfg(feature = "managed-sockets")]
                     socket_capabilities: V::socket_capabilities(),
                     #[cfg(feature = "order-locks")]
                     order_locks,
                     ..IoCore::default()
                 },
+                #[cfg(feature = "managed-sockets")]
+                managed_close: V::managed_sockets().then_some(
+                    Cx::<V::Pending>::managed_close
+                        as for<'a> fn(&mut Cx<'a, V::Pending>, SocketId),
+                ),
                 ..Io::default()
             },
             started: false,
@@ -4626,7 +4661,7 @@ impl<V: Venue> Engine<V> {
                 watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
         }
         #[cfg(feature = "managed-sockets")]
-        if self.io.managed_socket_active() {
+        if V::managed_sockets() && self.io.managed_socket_active() {
             // Managed ingress shares the ordinary event prelude and epilogue.
             // In particular health accounting is reset once per host event.
             if self.handle_managed_socket(now, &event) {
@@ -4671,8 +4706,13 @@ impl<V: Venue> Engine<V> {
                     .core
                     .sockets
                     .received(socket, now, &mut cx.io.core.health);
+                // Only managed venues pay for the shared non-inlined delivery boundary.
                 #[cfg(feature = "managed-sockets")]
-                Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
+                if V::managed_sockets() {
+                    Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
+                } else {
+                    self.venue.on_message(&mut cx, socket, text);
+                }
                 #[cfg(not(feature = "managed-sockets"))]
                 self.venue.on_message(&mut cx, socket, text);
             }
@@ -5351,6 +5391,7 @@ impl<V: Venue> Engine<V> {
                         .socket_failed(&io.core.signing, &io.core.sockets, socket);
                 #[cfg(feature = "managed-sockets")]
                 if refused
+                    && V::managed_sockets()
                     && cx.io.managed_socket_active()
                     && let Some(epoch) = cx.io.core.socket_driver.state.socket_epoch(socket)
                 {
@@ -5358,7 +5399,7 @@ impl<V: Venue> Engine<V> {
                     self.flush_http_owner_retirements();
                     return;
                 }
-                if cx.io.managed_socket_active() {
+                if V::managed_sockets() && cx.io.managed_socket_active() {
                     cx.close(socket);
                 } else {
                     cx.close(socket);
@@ -5729,7 +5770,7 @@ impl<V: Venue> Engine<V> {
                 #[cfg(not(feature = "managed-sockets"))]
                 let live = true;
                 #[cfg(feature = "managed-sockets")]
-                let live = if !self.io.managed_socket_active() {
+                let live = if !(V::managed_sockets() && self.io.managed_socket_active()) {
                     true
                 } else {
                     match &action {
@@ -5962,7 +6003,7 @@ impl<V: Venue> Engine<V> {
         self.dispatch_actions(self.io.core.dispatch_now);
         self.process_socket_work(self.io.core.dispatch_now);
         #[cfg(feature = "managed-sockets")]
-        if self.io.managed_socket_active() {
+        if V::managed_sockets() && self.io.managed_socket_active() {
             self.fence_socket_actions(self.io.core.dispatch_now);
             self.dispatch_actions(self.io.core.dispatch_now);
             self.drain_socket_frames(self.io.core.dispatch_now);

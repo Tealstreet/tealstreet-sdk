@@ -146,6 +146,9 @@ impl ScopeProbe {
     }
 }
 impl Venue for ScopeProbe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Context;
     fn start(&mut self, _cx: &mut Cx<'_, Context>) {
         #[cfg(feature = "managed-sockets")]
