@@ -106,13 +106,16 @@ pub fn ethereum_key_digest(chain: &str) -> Result<[u8; 32], String> {
 /// `STARK Key` signature's r, ground below the curve order. Big-endian.
 pub fn derive_from_ethereum(key: &str, chain: &str) -> Result<Zeroizing<[u8; 32]>, String> {
     let digest = ethereum_key_digest(chain)?;
-    let seed = ethereum::sign_digest(&digest, key).map_err(|_| "Invalid Paradex Ethereum key")?;
+    // The seed signature, its r and the grind material are key-derived: wiped.
+    let seed = Zeroizing::new(
+        ethereum::sign_digest(&digest, key).map_err(|_| "Invalid Paradex Ethereum key")?,
+    );
     let r = seed
         .strip_prefix("0x")
         .unwrap_or(&seed)
         .get(..64)
         .ok_or("Invalid Paradex Ethereum signature")?;
-    let mut r_bytes = [0u8; 32];
+    let mut r_bytes = Zeroizing::new([0u8; 32]);
     for (byte, pair) in r_bytes.iter_mut().zip(r.as_bytes().as_chunks::<2>().0) {
         *byte = u8::from_str_radix(
             std::str::from_utf8(pair).map_err(|_| "Invalid Paradex Ethereum signature")?,
@@ -127,7 +130,9 @@ pub fn derive_from_ethereum(key: &str, chain: &str) -> Result<Zeroizing<[u8; 32]
         .find_map(|index| {
             let index_bytes = index.to_be_bytes();
             let index_start = index_bytes.iter().position(|b| *b != 0).unwrap_or(3);
-            let mut material = r_bytes.to_vec();
+            // Sized once, so no reallocation leaves an unwiped copy.
+            let mut material = Zeroizing::new(Vec::with_capacity(36));
+            material.extend_from_slice(&r_bytes[..]);
             material.extend_from_slice(&index_bytes[index_start..]);
             let digest = U256::from_be_bytes(crate::sha256(&material));
             (digest < limit).then_some(digest % order)
