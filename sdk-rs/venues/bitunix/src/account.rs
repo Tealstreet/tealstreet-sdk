@@ -101,6 +101,8 @@ pub struct Read {
     pub baselines: Vec<(String, (f64, f64))>,
     /// A Primary order snapshot after an uncertain write.
     pub reconcile: bool,
+    /// `order_read_epoch` at dispatch: a release clears only marks it saw.
+    pub epoch: u64,
 }
 impl Read {
     pub(crate) fn orders_current(&self, store: &safe_cex_engine::Store) -> bool {
@@ -183,10 +185,8 @@ pub struct OrderReadProgress {
     issued: f64,
     timer: TimerId,
     dirty: bool,
-    /// Issued as an owed uncertain-write census: a later request joins it.
+    /// Issued as an owed uncertain-write census: a re-ask joins it.
     owed: bool,
-    /// `writes_settled` when issued: unchanged, a later request is a re-ask.
-    writes_settled: u64,
     newer: RowAdmission<String>,
     rejected: RowAdmission<String>,
 }
@@ -200,14 +200,12 @@ pub struct AccountState {
     /// issued after the request. Reads stay Primary-signed until a complete
     /// snapshot at or past it commits.
     pub owed: [Option<u64>; 2],
-    /// Trading writes settled (answered or lost) and jobs ended, engine
-    /// retirement included. Every uncertain seal bumps it, so an owed census
-    /// issued since the last bump is still fresh.
-    pub writes_settled: u64,
-    /// `writes_settled` at the last uncertain-write request.
-    pub request_writes: Option<u64>,
-    /// Regular and TP/SL order snapshots committed since that reconcile.
-    pub reconciled: [bool; 2],
+    /// Set while the engine re-asks (`cx.reconcile_reask`) with a debt still
+    /// owed: an owed census in flight is joined at its floor.
+    pub reask: bool,
+    /// The dispatch epoch of each slot's paying snapshot since the last new
+    /// request; the release needs both and reports from the earlier.
+    pub paid: [Option<u64>; 2],
     /// Symbols whose leverage/margin mode were read on first candle interest.
     pub symbol_settings: std::collections::HashSet<String>,
     /// Serial of the last balance read that was answered (reply or failure).
@@ -594,13 +592,12 @@ impl BitunixFutures {
             }
         }
         if let Some(slot) = axis.order_slot() {
-            // A re-ask keeps an owed census issued since the last settled write;
-            // after a newer write only a later census pays the debt.
-            let fresh = self.account.order_reads[slot]
-                .as_ref()
-                .is_some_and(|progress| {
-                    progress.owed && progress.writes_settled == self.account.writes_settled
-                });
+            // A re-ask keeps the owed census in flight at its floor; a new
+            // request owes a census issued after it.
+            let fresh = self.account.reask
+                && self.account.order_reads[slot]
+                    .as_ref()
+                    .is_some_and(|progress| progress.owed);
             if self.account.reconcile && !fresh {
                 self.account.owed[slot] = Some(self.account.serials[slot + 2] + 1);
             }
@@ -660,6 +657,7 @@ impl BitunixFutures {
             reconcile: axis
                 .order_slot()
                 .is_some_and(|slot| self.account.owed[slot].is_some()),
+            epoch: cx.order_read_epoch(),
         };
         if let Some(slot) = axis.order_slot() {
             self.account.order_reads[slot] = Some(OrderReadProgress {
@@ -668,7 +666,6 @@ impl BitunixFutures {
                 timer: cx.set_timer(ORDER_STALL_MS),
                 dirty: false,
                 owed: read.reconcile,
-                writes_settled: self.account.writes_settled,
                 newer: Default::default(),
                 rejected: Default::default(),
             });
@@ -1368,11 +1365,12 @@ impl BitunixFutures {
         let Some(token) = read.order_token.take() else {
             return;
         };
-        let (reconcile, slot, partial, serial) = (
+        let (reconcile, slot, partial, serial, epoch) = (
             read.reconcile,
             usize::from(read.axis == Axis::Tpsl),
             read.partial_orders(),
             read.serial,
+            read.epoch,
         );
         if !cx
             .store
@@ -1381,15 +1379,15 @@ impl BitunixFutures {
             self.debounce(cx, Axis::Orders);
             return;
         }
-        // A slot counts only when its own clean snapshot pays the debt: the
-        // engine judges freshness by the last response alone, so a joined
-        // census older than the latest request must never complete a release.
+        // A slot counts only when its own clean snapshot pays the debt. The
+        // release reports from the earlier slot's dispatch epoch, so a mark
+        // made after either census began survives it.
         if reconcile && !partial && self.account.owed[slot].is_some_and(|owed| serial >= owed) {
             self.account.owed[slot] = None;
-            self.account.reconciled[slot] = true;
-            if self.account.reconciled == [true, true] {
-                self.account.reconciled = [false, false];
-                cx.orders_reconciled(None);
+            self.account.paid[slot] = Some(epoch);
+            if let [Some(regular), Some(tpsl)] = self.account.paid {
+                self.account.paid = [None, None];
+                cx.orders_reconciled_since(None, regular.min(tpsl));
             }
         }
     }
