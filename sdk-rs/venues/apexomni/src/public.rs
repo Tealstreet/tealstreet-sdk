@@ -609,14 +609,14 @@ impl ApexOmni {
         topics
     }
     fn admit_public_model(&self, cx: &mut Cx<'_, Pending>) -> Result<(), SocketError> {
+        let items: Vec<_> = self
+            .public_topics()
+            .into_iter()
+            .map(Interest::from_wire_args)
+            .collect();
+        crate::socket_codec::validate_public_replay(&items)?;
         if let Some(feed) = self.public.feed {
-            cx.set_socket_interests(
-                feed,
-                self.public_topics()
-                    .into_iter()
-                    .map(Interest::from_wire_args)
-                    .collect(),
-            )?;
+            cx.set_socket_interests(feed, items)?;
         }
         Ok(())
     }

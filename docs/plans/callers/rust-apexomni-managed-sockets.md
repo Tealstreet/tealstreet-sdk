@@ -54,10 +54,10 @@ ACK never populates it, and already-authenticated data follows the native path.
 Malformed first data cannot publish a valid subset or restart the auth deadline.
 The cap applies only to retained first-data proof, not authenticated row parsing.
 
-Thirteen production-binding controls cover exact-once proof
+Fifteen production-binding controls cover exact-once proof
 publication, revocation before Authenticated, old/new-epoch isolation, full-state
 nonfinite ingress, duplicate queued demand, real 512-credit admission pressure
-and encoded-frame Capacity recovery with live-book invalidation and a healthy
+and byte-bounded subscription bursts with live-book retention and a healthy
 private peer, plus the exact retained-proof bound and one-over refusal. Removing the
 epoch check or invoking the proof reducer twice makes the corresponding control
 assertion RED. The original first five bodies remain unchanged.
@@ -75,7 +75,21 @@ native heal wake instead of the newly visible socket watchdog. All 269 existing
 assertion invocations and 100 raw literals in those two files remain unchanged;
 financial row bodies and their observation clocks are preserved.
 
-On the initial composition, seven scoped targets pass: 141 tests and two existing
+On the initial composition, seven scoped targets pass: 144 tests and two existing
 ignored remote-zkLink controls. This is local scoped evidence, not a full-family
 or current-tip CI claim. Current composed strict/fmt/bans, source review and PR
 family/replay qualification remain required before exact-tree auditor GO.
+
+Public batches stop at both the native 50-topic maximum and 65,536 serialized
+bytes. Full projected demand is preflighted through the same encoder before any
+model commitment, including covered-key queue bytes and the native ping reserve.
+This prevents incrementally admitted demand from becoming unreplayable on a new
+epoch. The real sequential escaped-key book/candle reconnect control fails with
+the old fixed-size batching; the separate aggregate-budget control fails without
+the full-set preflight. Both retain the private peer and prove later recovery.
+The former oversized-frame Capacity oracle is superseded by a successful bounded
+burst control; ordinary proposal-credit Capacity rollback remains separately
+pinned. No claim is made that Ready replay errors can reach venue refusal hooks.
+Private control classification borrows a typed header and RawValue contents;
+full row validation runs only for a first authentication proof. Authenticated
+rows retain their native decoder, including payloads beyond the retention cap.

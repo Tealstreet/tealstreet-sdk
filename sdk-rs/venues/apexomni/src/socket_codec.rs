@@ -271,32 +271,70 @@ impl ApexOmni {
                 Err(SocketError::NotPermitted)
             };
         }
-        #[derive(serde::Serialize)]
-        struct Subscription<'a> {
-            op: &'a str,
-            args: Vec<&'a str>,
-        }
-        for chunk in items.chunks(50) {
-            if chunk.iter().any(|i| i.key != i.wire_args) {
-                return Err(SocketError::InvalidInterest);
-            }
-            let body = Subscription {
-                op: if subscribe {
-                    "subscribe"
-                } else {
-                    "unsubscribe"
-                },
-                args: chunk.iter().map(|i| i.wire_args.as_ref()).collect(),
-            };
-            let text = serde_json::to_string(&body).map_err(|_| SocketError::InvalidInterest)?;
-            if text.len() > safe_cex_engine::socket_lifecycle::MAX_FRAME_BYTES {
-                return Err(SocketError::Capacity);
-            }
-            emit(EncodedBatch {
-                text,
-                covered_keys: chunk.iter().map(|i| i.key.clone()).collect(),
-            })?;
+        encode_public_batches(subscribe, items, emit)
+    }
+}
+
+pub(super) fn validate_public_replay(items: &[Interest]) -> Result<(), SocketError> {
+    use safe_cex_engine::socket_lifecycle::{MAX_FRAMES, MAX_QUEUED_BYTES};
+    // Replay queues include coverage keys and the native post-interest ping.
+    let mut bytes = r#"{"op":"ping"}"#.len();
+    let mut frames = 0;
+    encode_public_batches(true, items, &mut |batch| {
+        bytes += batch.text.len()
+            + batch
+                .covered_keys
+                .iter()
+                .map(|key| key.len())
+                .sum::<usize>();
+        frames += 1;
+        if bytes > MAX_QUEUED_BYTES || frames > MAX_FRAMES {
+            return Err(SocketError::Capacity);
         }
         Ok(())
+    })
+}
+
+fn encode_public_batches(
+    subscribe: bool,
+    items: &[Interest],
+    emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+) -> Result<(), SocketError> {
+    use safe_cex_engine::socket_lifecycle::MAX_FRAME_BYTES;
+    let prefix = if subscribe {
+        r#"{"op":"subscribe","args":["#
+    } else {
+        r#"{"op":"unsubscribe","args":["#
+    };
+    let mut text = prefix.to_owned();
+    let mut covered_keys = Vec::new();
+    for item in items {
+        if item.key != item.wire_args || item.key.is_empty() || item.key.len() > 1024 {
+            return Err(SocketError::InvalidInterest);
+        }
+        let arg = serde_json::to_string(item.wire_args.as_ref())
+            .map_err(|_| SocketError::InvalidInterest)?;
+        if prefix.len() + arg.len() + 2 > MAX_FRAME_BYTES {
+            return Err(SocketError::Capacity);
+        }
+        if !covered_keys.is_empty()
+            && (covered_keys.len() == 50 || text.len() + 1 + arg.len() + 2 > MAX_FRAME_BYTES)
+        {
+            text.push_str("]}");
+            emit(EncodedBatch {
+                text: std::mem::replace(&mut text, prefix.to_owned()),
+                covered_keys: std::mem::take(&mut covered_keys),
+            })?;
+        }
+        if !covered_keys.is_empty() {
+            text.push(',');
+        }
+        text.push_str(&arg);
+        covered_keys.push(item.key.clone());
     }
+    if !covered_keys.is_empty() {
+        text.push_str("]}");
+        emit(EncodedBatch { text, covered_keys })?;
+    }
+    Ok(())
 }

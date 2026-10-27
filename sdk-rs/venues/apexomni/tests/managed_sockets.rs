@@ -742,7 +742,7 @@ fn actual_proposal_credit_refusal_rolls_back_only_the_unadmitted_book() {
 }
 
 #[test]
-fn valid_key_encoded_frame_pressure_retires_once_and_recovers_without_losing_the_private_peer() {
+fn burst_large_topics_are_split_without_invalidating_live_books_or_the_private_peer() {
     let (mut engine, _, public, private) = probe(Scenario::Pressure);
     engine.handle(20.0, Event::WsOpened { socket: private });
     engine.prepared(20.0).for_each(drop);
@@ -764,91 +764,36 @@ fn valid_key_encoded_frame_pressure_retires_once_and_recovers_without_losing_the
         Event::Command(Command::SetTickerSymbols { symbols: vec![] }),
     );
     let actions: Vec<_> = engine.prepared(24.0).collect();
-    assert!(
-        engine.book("BTCUSDT").unwrap().is_empty(),
-        "Capacity retirement invalidates live book data"
-    );
-    assert_eq!(
-        actions
-            .iter()
-            .filter(|a| matches!(a, Action::WsClose { socket } if *socket == public))
-            .count(),
-        1
-    );
-    assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::WsClose { socket } if *socket == private))
-    );
-    let retries: Vec<_> = actions
-        .iter()
-        .filter_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms > 24.0 && *at_ms <= 1024.0 => {
-                Some((*timer, *at_ms))
-            }
-            _ => None,
-        })
-        .collect();
-    assert_eq!(retries.len(), 1);
-    for index in 0..20 {
-        engine.handle(
-            25.0,
-            Event::Command(Command::UnsubscribeOrderBook {
-                symbol: hostile_symbol(index),
-            }),
-        );
-        engine.prepared(25.0).for_each(drop);
-    }
-    let (retry, at) = retries[0];
-    engine.handle(at, Event::TimerFired { timer: retry });
-    let replacement = engine
-        .prepared(at)
-        .find_map(|a| match a {
-            Action::WsConnect {
-                socket,
-                channel: Some(SocketChannel::Public),
-                ..
-            } => Some(socket),
-            _ => None,
-        })
-        .unwrap();
-    assert_ne!(replacement, public);
-    engine.handle(
-        at,
-        Event::WsOpened {
-            socket: replacement,
-        },
-    );
-    let frames = sends(engine.prepared(at).collect(), replacement);
-    assert!(frames.iter().any(|t| t.contains("orderBook200.H.BTCUSDT")));
-    assert!(frames.iter().all(|t| t.len() <= 65536));
-    engine.handle(
-        at + 1.0,
-        Event::WsMessage {
-            socket: public,
-            text: BOOK_SNAPSHOT,
-        },
-    );
-    assert!(engine.book("BTCUSDT").unwrap().is_empty());
-    assert!(engine.prepared(at + 1.0).next().is_none());
-    engine.handle(
-        at + 2.0,
-        Event::WsMessage {
-            socket: replacement,
-            text: BOOK_SNAPSHOT,
-        },
-    );
+    assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
     assert!(!engine.book("BTCUSDT").unwrap().is_empty());
-    engine.prepared(at + 2.0).for_each(drop);
+    #[derive(serde::Deserialize)]
+    struct Frame {
+        op: String,
+        args: Vec<String>,
+    }
+    let mut actual = Vec::new();
+    for text in sends(actions, public) {
+        assert!(text.len() <= safe_cex_engine::socket_lifecycle::MAX_FRAME_BYTES);
+        let frame: Frame = serde_json::from_str(&text).unwrap();
+        assert_eq!(frame.op, "subscribe");
+        assert!(frame.args.len() <= 50);
+        actual.extend(frame.args);
+    }
+    let mut expected: Vec<_> = (0..20)
+        .map(|index| format!("orderBook200.H.{}", hostile_symbol(index)))
+        .collect();
+    actual.sort();
+    expected.sort();
+    assert_eq!(actual, expected);
     engine.handle(
-        at + 3.0,
+        25.0,
         Event::WsMessage {
             socket: private,
             text: r#"{"op":"ping","args":["peer"]}"#,
         },
     );
     assert_eq!(
-        sends(engine.prepared(at + 3.0).collect(), private),
+        sends(engine.prepared(25.0).collect(), private),
         [r#"{"op":"pong","args":["peer"]}"#]
     );
 }
@@ -892,10 +837,308 @@ fn retained_first_proof_accepts_the_exact_bound_and_refuses_one_over_without_cac
                 23.0,
                 Event::WsMessage {
                     socket,
-                    text: PROOF,
+                    text: &proof,
                 },
             );
             assert_eq!(engine.store().orders().len(), 1);
         }
     }
+}
+
+#[test]
+fn sequential_large_topics_replay_after_reconnect_with_book_candle_and_private_demand_intact() {
+    let (mut engine, _, public, private) = probe(Scenario::Plain);
+    engine.handle(20.0, Event::WsOpened { socket: private });
+    engine.prepared(20.0).for_each(drop);
+    engine.handle(21.0, Event::WsOpened { socket: public });
+    engine.prepared(21.0).for_each(drop);
+    engine.handle(22.0, Event::Command(add_book()));
+    engine.prepared(22.0).for_each(drop);
+    engine.handle(23.0, Event::Command(add_candle()));
+    engine.prepared(23.0).for_each(drop);
+    engine.handle(
+        24.0,
+        Event::WsMessage {
+            socket: public,
+            text: BOOK_SNAPSHOT,
+        },
+    );
+    engine.prepared(24.0).for_each(drop);
+    assert!(!engine.book("BTCUSDT").unwrap().is_empty());
+    let mut expected = vec![
+        "instrumentInfo.all".to_owned(),
+        "orderBook200.H.BTCUSDT".into(),
+        "candle.1.BTCUSDT".into(),
+        "recentlyTrade.H.BTCUSDT".into(),
+    ];
+    for index in 0..20 {
+        let symbol = hostile_symbol(index);
+        let topic = format!("orderBook200.H.{symbol}");
+        assert!(topic.len() <= 1024);
+        engine.handle(
+            30.0 + 2.0 * index as f64,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: symbol.clone(),
+            }),
+        );
+        let frames = sends(engine.prepared(30.0 + 2.0 * index as f64).collect(), public);
+        assert_eq!(frames.len(), 1, "each real incremental subscription fits");
+        expected.push(topic);
+        engine.handle(
+            31.0 + 2.0 * index as f64,
+            Event::Command(Command::SubscribeCandles {
+                symbol: symbol.clone(),
+                interval: safe_cex_engine::model::Interval::M1,
+            }),
+        );
+        let frames = sends(engine.prepared(31.0 + 2.0 * index as f64).collect(), public);
+        assert!(!frames.is_empty());
+        expected.push(format!("candle.1.{symbol}"));
+        expected.push(format!("recentlyTrade.H.{symbol}"));
+    }
+    for index in 0..51 {
+        let now = 80.0 + index as f64;
+        let symbol = format!("ZZZ{index}");
+        engine.handle(
+            now,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: symbol.clone(),
+            }),
+        );
+        assert_eq!(sends(engine.prepared(now).collect(), public).len(), 1);
+        expected.push(format!("orderBook200.H.{symbol}"));
+    }
+    engine.handle(
+        140.0,
+        Event::WsClosed {
+            socket: public,
+            code: 1006,
+        },
+    );
+    let actions: Vec<_> = engine.prepared(140.0).collect();
+    assert!(engine.book("BTCUSDT").unwrap().is_empty());
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == private))
+    );
+    let (timer, at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > 140.0 && *at_ms <= 1140.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("actual native retry");
+    engine.handle(at, Event::TimerFired { timer });
+    let replacement = engine
+        .prepared(at)
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } => Some(socket),
+            _ => None,
+        })
+        .expect("fresh public epoch");
+    assert_ne!(replacement, public);
+    engine.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let actions: Vec<_> = engine.prepared(at).collect();
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::WsClose { .. })),
+        "retained Desired must replay without stopping either feed"
+    );
+    #[derive(serde::Deserialize)]
+    struct Frame {
+        op: String,
+        #[serde(default)]
+        args: Vec<String>,
+    }
+    let mut actual = Vec::new();
+    for text in sends(actions, replacement) {
+        assert!(text.len() <= safe_cex_engine::socket_lifecycle::MAX_FRAME_BYTES);
+        let frame: Frame = serde_json::from_str(&text).unwrap();
+        if frame.op == "subscribe" {
+            assert!(frame.args.len() <= 50);
+            actual.extend(frame.args);
+        }
+    }
+    expected.sort();
+    actual.sort();
+    assert_eq!(
+        actual, expected,
+        "all retained books/candles replay exactly once"
+    );
+    engine.handle(
+        at + 1.0,
+        Event::WsMessage {
+            socket: public,
+            text: BOOK_SNAPSHOT,
+        },
+    );
+    assert!(engine.book("BTCUSDT").unwrap().is_empty());
+    assert!(engine.prepared(at + 1.0).next().is_none());
+    engine.handle(
+        at + 2.0,
+        Event::WsMessage {
+            socket: replacement,
+            text: BOOK_SNAPSHOT,
+        },
+    );
+    assert!(!engine.book("BTCUSDT").unwrap().is_empty());
+    engine.prepared(at + 2.0).for_each(drop);
+    engine.handle(
+        at + 3.0,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"op":"ping","args":["peer"]}"#,
+        },
+    );
+    assert_eq!(
+        sends(engine.prepared(at + 3.0).collect(), private),
+        [r#"{"op":"pong","args":["peer"]}"#]
+    );
+}
+
+#[test]
+fn full_replay_budget_refuses_only_the_new_demand_then_reconnects_and_reuses_released_credit() {
+    let (mut engine, _, public, private) = probe(Scenario::Plain);
+    engine.handle(20.0, Event::WsOpened { socket: private });
+    engine.prepared(20.0).for_each(drop);
+    engine.handle(21.0, Event::WsOpened { socket: public });
+    engine.prepared(21.0).for_each(drop);
+    let mut accepted = Vec::new();
+    let mut refused = None;
+    let mut now = 30.0;
+    for index in 0..850 {
+        now += 1.0;
+        let symbol = hostile_symbol(index);
+        engine.handle(
+            now,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: symbol.clone(),
+            }),
+        );
+        let actions: Vec<_> = engine.prepared(now).collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
+        if engine.book(&symbol).is_none() {
+            assert!(sends(actions.clone(), public).is_empty());
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(e)) if e.message.contains("Capacity"))));
+            refused = Some(symbol);
+            break;
+        }
+        assert_eq!(sends(actions, public).len(), 1);
+        accepted.push(symbol);
+    }
+    let refused = refused.expect(
+        "incremental admission must refuse a retained set exceeding the full replay queue budget",
+    );
+    assert!(
+        accepted.len() > 500,
+        "real queue pressure, not an arbitrary small topic limit"
+    );
+    now += 1.0;
+    engine.handle(
+        now,
+        Event::WsClosed {
+            socket: public,
+            code: 1006,
+        },
+    );
+    let actions: Vec<_> = engine.prepared(now).collect();
+    let (timer, at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > now && *at_ms <= now + 1000.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("actual retry retains accepted demand");
+    engine.handle(at, Event::TimerFired { timer });
+    let replacement = engine
+        .prepared(at)
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let actions: Vec<_> = engine.prepared(at).collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
+    #[derive(serde::Deserialize)]
+    struct Frame {
+        op: String,
+        #[serde(default)]
+        args: Vec<String>,
+    }
+    let mut actual = Vec::new();
+    let mut bytes = 0;
+    for text in sends(actions, replacement) {
+        assert!(text.len() <= safe_cex_engine::socket_lifecycle::MAX_FRAME_BYTES);
+        bytes += text.len();
+        let frame: Frame = serde_json::from_str(&text).unwrap();
+        if frame.op == "subscribe" {
+            assert!(frame.args.len() <= 50);
+            bytes += frame.args.iter().map(String::len).sum::<usize>();
+            actual.extend(frame.args);
+        }
+    }
+    assert!(bytes <= safe_cex_engine::socket_lifecycle::MAX_QUEUED_BYTES);
+    let mut expected: Vec<_> = accepted
+        .iter()
+        .map(|s| format!("orderBook200.H.{s}"))
+        .collect();
+    expected.push("instrumentInfo.all".into());
+    expected.sort();
+    actual.sort();
+    assert_eq!(actual, expected);
+    engine.handle(
+        at + 1.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: accepted.pop().unwrap(),
+        }),
+    );
+    engine.prepared(at + 1.0).for_each(drop);
+    engine.handle(
+        at + 2.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: refused.clone(),
+        }),
+    );
+    assert!(
+        engine.book(&refused).is_some(),
+        "removing demand restores real replay credit"
+    );
+    assert_eq!(
+        sends(engine.prepared(at + 2.0).collect(), replacement).len(),
+        1
+    );
+    engine.handle(
+        at + 3.0,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"op":"ping","args":["peer"]}"#,
+        },
+    );
+    assert_eq!(
+        sends(engine.prepared(at + 3.0).collect(), private),
+        [r#"{"op":"pong","args":["peer"]}"#]
+    );
 }
