@@ -1992,20 +1992,16 @@ impl Hyperliquid {
         if terminal(&update.status) {
             if update.status != "filled"
                 && cx.store.order(&id).is_none()
-                && row
-                    .cloid
-                    .as_deref()
-                    .and_then(|cloid| self.account.records.get(cloid))
-                    .is_some_and(|record| {
-                        record.order.symbol == symbol
-                            && record.order.reduce_only
-                            && matches!(
-                                record.order.kind,
-                                OrderType::StopLoss | OrderType::TakeProfit
-                            )
-                    })
+                && !self.account.suppressed.contains_key(&id)
+                && row.oid != 0
+                && row.reduce_only
+                && row.is_trigger
+                && matches!(
+                    row.order_type.as_ref(),
+                    "Stop Market" | "Stop Limit" | "Take Profit Market" | "Take Profit Limit"
+                )
+                && let Some(cloid) = row.cloid.as_deref().filter(|cloid| !cloid.is_empty())
             {
-                let cloid = row.cloid.as_deref().unwrap();
                 cx.event(
                     Level::Warn,
                     code::CHILD_LEG_FAILED,

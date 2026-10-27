@@ -128,8 +128,15 @@ This also covers an amend's confirmed full-position replacement: its preissued
 Setting succeeds with the replacement cloid and no fabricated native order ID.
 
 A protective child that terminates before first appearing in the active store
-emits the existing child_leg.failed event once, correlated by symbol, native oid,
+emits the existing child_leg.failed event, correlated by symbol, native oid,
 clientOrderId and native status; already-stored terminal removal is unchanged.
+The native private row must identify a reduce-only trigger with a supported
+Stop/Take-Profit type, a mapped symbol, a nonzero oid and a nonempty cloid.
+No expiring placement record is required. Duplicate terminals are suppressed by
+the existing oid tombstone before it is updated. This is bounded deduplication:
+a complete census prunes tombstones older than 120 seconds, and a confirmed open
+row in a later census can clear one after 30 seconds. A replay after that cleanup
+can repeat the event; callers must not treat it as a second placement or resend.
 The existing browser EngineHost event action reaches handlers.onEvent, and the
 SDK RustEngineExchange.receiveEvent emits engine-event and writes warning/error
 logs with the event fields. No new NX wiring is required. Parent acceptance is

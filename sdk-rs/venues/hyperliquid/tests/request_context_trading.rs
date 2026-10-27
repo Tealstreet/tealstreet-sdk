@@ -1314,7 +1314,7 @@ fn deferred_full_position_trigger_succeeds_without_an_order_id() {
     no_trade(&actions);
 }
 
-fn deferred_child_terminal(status: &str) {
+fn deferred_child_terminal(status: &str, expire_record: bool) {
     for materialized in [false, true] {
         let (mut e, socket) = boot();
         let mut c = place(OWNER);
@@ -1351,11 +1351,45 @@ fn deferred_child_terminal(status: &str) {
             e.drain_actions().for_each(drop);
             assert!(e.store().order("3002").is_some());
         }
+        let terminal_at = if expire_record {
+            let heartbeat = format!(
+                "{{\"channel\":\"clearinghouseState\",\"data\":{}}}",
+                support::STATE
+            );
+            for tick in 1..=180 {
+                e.handle(
+                    NOW + f64::from(tick) * 10_000.,
+                    Event::WsMessage {
+                        socket,
+                        text: &heartbeat,
+                    },
+                );
+                e.drain_actions().for_each(drop);
+            }
+            let at = NOW + 1_800_001.;
+            let unrelated = json!({"channel":"orderUpdates", "data":[{"order":{
+                "coin":"BTC", "oid":7000, "side":"B", "limitPx":"200",
+                "origSz":"1", "sz":"1", "orderType":"Limit", "tif":"Gtc"
+            },"status":"open"}]})
+            .to_string();
+            e.handle(
+                at,
+                Event::WsMessage {
+                    socket,
+                    text: &unrelated,
+                },
+            );
+            e.drain_actions().for_each(drop);
+            assert!(e.store().order("7000").is_some());
+            at + 1.
+        } else {
+            NOW + 3.
+        };
         let text =
             json!({"channel":"orderUpdates", "data":[{"order":row,"status":status}]}).to_string();
         for delivery in 0..2 {
             e.handle(
-                NOW + 3. + f64::from(delivery),
+                terminal_at + f64::from(delivery),
                 Event::WsMessage {
                     socket,
                     text: &text,
@@ -1393,17 +1427,123 @@ fn deferred_child_terminal(status: &str) {
             assert!(results(&actions, OWNER).is_empty());
             no_trade(&actions);
         }
+        let heartbeat = format!(
+            "{{\"channel\":\"clearinghouseState\",\"data\":{}}}",
+            support::STATE
+        );
+        for tick in 1..=13 {
+            e.handle(
+                terminal_at + f64::from(tick) * 10_000.,
+                Event::WsMessage {
+                    socket,
+                    text: &heartbeat,
+                },
+            );
+            e.drain_actions().for_each(drop);
+        }
+        e.handle(
+            terminal_at + 130_001.,
+            Event::WsMessage {
+                socket,
+                text: &text,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED)));
+        no_trade(&actions);
     }
 }
 
 #[test]
 fn deferred_child_rejection_is_correlated_once_before_materialization() {
-    deferred_child_terminal("perpMarginRejected");
+    deferred_child_terminal("perpMarginRejected", false);
 }
 
 #[test]
 fn deferred_child_cancel_is_correlated_once_before_materialization() {
-    deferred_child_terminal("canceled");
+    deferred_child_terminal("canceled", false);
+}
+
+#[test]
+fn deferred_child_terminal_survives_record_expiry() {
+    for status in ["perpMarginRejected", "canceled"] {
+        deferred_child_terminal(status, true);
+    }
+}
+
+#[test]
+fn native_protective_terminal_evidence_does_not_need_a_placement_record() {
+    for kind in [
+        "Stop Market",
+        "Stop Limit",
+        "Take Profit Market",
+        "Take Profit Limit",
+    ] {
+        let (mut e, socket) = boot();
+        let text = json!({"channel":"orderUpdates","data":[{"order":{
+            "coin":"BTC","oid":3002,"cloid":CLOID,"side":"A","sz":"1",
+            "origSz":"1","limitPx":"90","triggerPx":"80",
+            "reduceOnly":true,"isTrigger":true,"orderType":kind
+        },"status":"canceled"}]})
+        .to_string();
+        for delivery in 0..2 {
+            e.handle(
+                NOW + f64::from(delivery),
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|action| matches!(action,
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED))
+                    .count(),
+                usize::from(delivery == 0)
+            );
+            assert!(e.store().orders().is_empty());
+            no_trade(&actions);
+        }
+    }
+}
+
+#[test]
+fn incomplete_or_ordinary_terminal_rows_do_not_report_a_failed_protective_child() {
+    for (field, value) in [
+        ("reduceOnly", json!(false)),
+        ("isTrigger", json!(false)),
+        ("orderType", json!("Limit")),
+        ("orderType", json!("unknown")),
+        ("cloid", json!("")),
+        ("cloid", json!(null)),
+        ("oid", json!(0)),
+        ("coin", json!("unknown")),
+    ] {
+        let (mut e, socket) = boot();
+        let mut row = json!({"coin":"BTC","oid":3002,"cloid":CLOID,"side":"A",
+            "sz":"1","origSz":"1","limitPx":"90","triggerPx":"80",
+            "reduceOnly":true,"isTrigger":true,"orderType":"Stop Market"});
+        row[field] = value;
+        let text = json!({"channel":"orderUpdates","data":[{"order":row,"status":"canceled"}]})
+            .to_string();
+        e.handle(
+            NOW,
+            Event::WsMessage {
+                socket,
+                text: &text,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED)));
+        no_trade(&actions);
+    }
 }
 
 #[test]
