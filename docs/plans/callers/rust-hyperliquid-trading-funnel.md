@@ -81,8 +81,10 @@ The former Sensitive options wrapper erased only public account data after the
 scalar holder was removed, so that wrapper and its erasure implementation are
 removed. Redacted Debug and the installed-options no-scalar controls remain.
 Two startup-unit-fixture inventory hits describe trusted LocalSigner setup JSON
-and policy metadata, not venue secret holders or eager signing calls. The final lexical request fragments are removed by moving builder/effect
-classification to pure enum predicates, with no Cx or issuing authority; the
+and policy metadata in cfg(test) startup_tests.rs. The production signer never
+reaches these test-fixture setup inputs; they are not venue secret holders or
+eager signing calls. The final lexical request fragments are removed by moving
+builder/effect classification to pure enum predicates, with no Cx or issuing authority; the
 native callback uses those predicates. The queued-read struct is destructured
 at dispatch: its field named request was counted as a legacy member despite
 being an enum continuation. Neither field nor receiver is renamed. The error
