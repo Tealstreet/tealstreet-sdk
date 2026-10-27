@@ -1,5 +1,6 @@
 //! Official clearinghouseState, frontendOpenOrders and WsUserFills payload shapes.
 mod support;
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Event};
 use support::*;
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -19,8 +20,8 @@ fn private_bootstrap_separates_positions_and_market_settings() {
 fn newer_stream_state_wins_over_inflight_rest_and_failed_reads_preserve_state() {
     let (mut e, s) = ready("disabled");
     let (s, _) = reconnect(&mut e, s, 2000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -156,8 +157,8 @@ fn user_event_order_objects_and_raw_arrays_remove_terminal_orders() {
 fn newer_authoritative_rest_closes_positions_after_partial_stream() {
     let (mut e, s) = ready("disabled");
     let (s, _) = reconnect(&mut e, s, 2000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -239,8 +240,8 @@ fn fill_count(frame: &[u8]) -> u32 {
 fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
     let (mut e, s) = ready_with_dex("disabled", true);
     let (s, _) = reconnect(&mut e, s, 2000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -255,8 +256,8 @@ fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
         4000.0,
         r#"{"channel":"userFills","data":{"fills":[{"coin":"xyz:FOO","side":"B","px":"50","sz":"2","time":3000,"tid":11,"oid":91,"dir":"Open Long","startPosition":"0","closedPnl":"0","fee":"0.01"}]}}"#,
     );
-    let timer = e
-        .drain_actions()
+    let timer = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
                 (at_ms == 4350.0).then_some(timer)
@@ -266,8 +267,8 @@ fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
         })
         .unwrap();
     e.handle(4350.0, Event::TimerFired { timer });
-    let next = e
-        .drain_actions()
+    let next = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
                 (at_ms == 4700.0).then_some(timer)
@@ -289,7 +290,7 @@ fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
         reply(&mut e, &r, 200, body);
     }
     e.handle(4700.0, Event::TimerFired { timer: next });
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Http(r) if kind(&r)=="clearinghouseState" && r.body.as_ref().unwrap().contains("xyz"))));
+    assert!(prepared_now(&mut e).into_iter().any(|a|matches!(a,Action::Http(r) if kind(&r)=="clearinghouseState" && r.body.as_ref().unwrap().contains("xyz"))));
 }
 #[test]
 fn rest_after_cancel_trust_window_reenables_live_order_updates() {
@@ -301,8 +302,8 @@ fn rest_after_cancel_trust_window_reenables_live_order_updates() {
         r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","origSz":"1","sz":"0"},"status":"canceled"}]}"#,
     );
     let (s, _) = reconnect(&mut e, s, 40000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -396,8 +397,8 @@ fn delayed_hip3_state_preserves_position_after_newer_fill() {
 fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
     let (mut e, s) = ready("disabled");
     let (s, _) = reconnect(&mut e, s, 2000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -432,8 +433,8 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
         );
     }
     assert!(e.store().order("9").is_some());
-    let timer = e
-        .drain_actions()
+    let timer = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
                 (at_ms == 3700.0).then_some(timer)
@@ -443,8 +444,8 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
         })
         .expect("invalidated reconnect snapshot must retry");
     e.handle(3700.0, Event::TimerFired { timer });
-    let r = e
-        .drain_actions()
+    let r = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 (kind(&r) == "frontendOpenOrders").then_some(r)
@@ -480,8 +481,8 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
             &format!(r#"{{"channel":"orderUpdates","data":[{{"order":{row},"status":"open"}}]}}"#),
         );
         let (_replacement, _) = reconnect(&mut e, s, 2100.0);
-        let r = e
-            .drain_actions()
+        let r = prepared_now(&mut e)
+            .into_iter()
             .find_map(|a| {
                 if let Action::Http(r) = a {
                     (kind(&r) == "frontendOpenOrders").then_some(r)
@@ -512,8 +513,8 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
                 ids: vec!["9".into()],
             }),
         );
-        let cancel = e
-            .drain_actions()
+        let cancel = prepared_now(&mut e)
+            .into_iter()
             .find_map(|a| {
                 if let Action::Http(r) = a {
                     r.url.ends_with("/exchange").then_some(r)
@@ -530,11 +531,17 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
         e.handle(finished_at, Event::HttpChunk {request: r.id, data: br#"{"coin":"BTC","oid":10,"side":"B","limitPx":"80","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}]"#});
         e.handle(finished_at, Event::HttpEnd { request: r.id });
         assert!(e.store().order("9").is_none());
-        assert!(
-            e.drain_actions().any(
+        let actions = prepared_now(&mut e);
+        if finished_at < 22_100.0 {
+            assert!(actions.into_iter().any(
                 |a| matches!(a, Action::SetTimer { at_ms, .. } if at_ms == finished_at + 500.0)
-            )
-        );
+            ));
+        } else {
+            assert!(
+                e.store().order("10").is_none(),
+                "expired stream publishes no rows"
+            );
+        }
     }
 }
 
@@ -542,15 +549,15 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
 fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
     let (mut e, _) = ready_with_dex("disabled", true);
     let now = 2000.;
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     e.handle(
         now,
         Event::PollScaleChanged {
             scale: f64::INFINITY,
         },
     );
-    let stale: Vec<_> = e
-        .drain_actions()
+    let stale: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::ClearTimer { timer } => Some(timer),
             _ => None,
@@ -568,7 +575,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                 scale: interval / POLL_MS,
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = prepared_now(&mut e).into_iter().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         let timers: Vec<_> = actions
             .iter()
@@ -587,12 +594,16 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !prepared_now(&mut e)
+                .into_iter()
+                .any(|a| matches!(a, Action::Http(_)))
+        );
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    let mut pending: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -610,7 +621,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: f64::INFINITY,
         },
     );
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     for _ in 0..12 {
         if pending.is_empty() {
             break;
@@ -628,7 +639,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
+            pending.extend(prepared_now(&mut e).into_iter().filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
             }));
@@ -641,8 +652,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: 10_000. / POLL_MS,
         },
     );
-    let resumed: Vec<_> = e
-        .drain_actions()
+    let resumed: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -771,8 +782,8 @@ fn resync(
     let (replacement, at) = reconnect(e, s.socket, now.max(s.now));
     s.socket = replacement;
     s.now = at;
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -799,7 +810,8 @@ fn resync(
             },
         );
     }
-    e.drain_actions()
+    prepared_now(e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
