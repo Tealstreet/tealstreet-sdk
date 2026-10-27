@@ -18,10 +18,10 @@ close frame.
   run; no GO carries across this change.
 - Each venue declares floors from its TS reference close handling, in its own
   adoption PR. Every adopter on master at landing declares `&[]`: Binance, BingX,
-  Bybit, OKX, AsterDEX, Backpack, Hyperliquid, Kraken, Kraken Spot, Phemex,
+  Bybit, OKX, ApeX, AsterDEX, Backpack, Hyperliquid, Kraken, Kraken Spot, Phemex,
   TxFlow, WEEX and WOO (plus BloFin once on master). Their TS sockets pass
   `onClose` to `base.ws.ts` with no per-code floor. The owners confirmed this
-  for Binance (kuhwxi), BingX and BloFin (mxb4mq).
+  for Binance (kuhwxi), BingX, BloFin and ApeX (mxb4mq).
 - Lighter (#2314) declares `(1013, 30_000.)` on both its public and private
   feeds, matching TS `ws-public.ts:61` and `ws-private.ts:103`, and restores its
   legacy 30 s pin. Its reason-text "rate limit" rule is not code-keyed and is
