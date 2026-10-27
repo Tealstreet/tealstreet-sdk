@@ -841,6 +841,11 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
 }
 
 impl Venue for AsterDex {
+    #[inline]
+    fn managed_sockets() -> bool {
+        true
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }

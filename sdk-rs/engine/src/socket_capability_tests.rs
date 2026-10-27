@@ -21,6 +21,9 @@ struct Handoff<const HANDOFF: bool> {
 type Full = Handoff<true>;
 type Narrow = Handoff<false>;
 impl<const HANDOFF: bool> Venue for Handoff<HANDOFF> {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Counted;
     fn socket_capabilities() -> crate::socket_lifecycle::SocketCapabilities {
         crate::socket_lifecycle::SocketCapabilities { handoff: HANDOFF }

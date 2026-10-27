@@ -51,6 +51,9 @@ impl<V: Venue> Venue for Observed<V> {
     fn dispatch_nonce() -> bool {
         V::dispatch_nonce()
     }
+    fn managed_sockets() -> bool {
+        V::managed_sockets()
+    }
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
         self.native.start(cx)
     }
