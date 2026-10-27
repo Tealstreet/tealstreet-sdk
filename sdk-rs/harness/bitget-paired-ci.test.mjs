@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 import { BITGET_CUMULATIVE_ANCHOR } from './bitget-paired-steady.mjs';
-import { selectBitgetPair } from './bitget-paired-ci.mjs';
+import { RETIRED_RUST_LANDING_TIP, selectBitgetPair } from './bitget-paired-ci.mjs';
 
 const A = 'a'.repeat(40), B = 'b'.repeat(40), H = 'c'.repeat(40), TREE = 'd'.repeat(40);
 function fixture() {
@@ -14,7 +14,7 @@ function fixture() {
     name: 'Rust / Bitget counterbalanced steady CPU' }];
   const pulls = [pull], calls = [];
   const state = { checkout: { sha: B, tree: { sha: TREE }, parents: [{ sha: A }, { sha: H }] },
-    localParents: [A, H], firstParents: [A, BITGET_CUMULATIVE_ANCHOR], ancestor: true, landingTip: A, localLanding: A, mergeTree: TREE, origin: 'https://github.com/Tealstreet/tealstreet-sdk' };
+    localParents: [A, H], firstParents: [A, BITGET_CUMULATIVE_ANCHOR], ancestor: true, retiredLanded: true, retiredFirstParents: [RETIRED_RUST_LANDING_TIP, BITGET_CUMULATIVE_ANCHOR], landingTip: A, localLanding: A, mergeTree: TREE, origin: 'https://github.com/Tealstreet/tealstreet-sdk' };
   const reader = { getRun: async () => run, listJobs: async () => jobs,
     getRustLanding: async () => ({ ref: 'refs/heads/master',
       url: 'https://api.github.com/repos/Tealstreet/tealstreet-sdk/git/refs/heads/master', object: { type: 'commit', sha: state.landingTip } }),
@@ -32,6 +32,12 @@ function fixture() {
     if (args[0] === 'fetch') { assert.deepEqual(args, ['fetch', '--no-tags', 'origin',
       'refs/heads/master:refs/remotes/origin/master']); return ''; }
     if (args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/master') return state.localLanding;
+    if (args[0] === 'merge-base' && args[2] === RETIRED_RUST_LANDING_TIP) {
+      assert.equal(args[3], state.landingTip);
+      if (!state.retiredLanded) throw new Error('not an ancestor');
+      return '';
+    }
+    if (args[0] === 'rev-list' && args[2] === RETIRED_RUST_LANDING_TIP) return state.retiredFirstParents.join('\n');
     if (args[0] === 'merge-base') {
       assert.deepEqual(args.slice(0,3), ['merge-base', '--is-ancestor', state.checkout.parents[0].sha]);
       assert.equal(args[3], state.landingTip);
@@ -45,6 +51,11 @@ function fixture() {
   };
   return { run, pull, pulls, jobs, calls, state, context: { reader, runId: 10, root: '/fixture', gitRead } };
 }
+
+test('the anchor may sit on the retired landing chain that master merged', async () => {
+  const x = fixture(); x.state.firstParents = [A];
+  assert.equal((await selectBitgetPair(x.context)).baseline, A);
+});
 
 test('baseline comes from the authenticated checkout first parent on the actual landing chain', async () => {
   const x = fixture(), result = await selectBitgetPair(x.context);
@@ -91,7 +102,10 @@ test('checkout API/local parents and trees, exact head and first-parent landing 
     ['wrong parent two', x => { x.state.checkout.parents[1].sha = A; x.state.localParents[1] = A; }, /checkout API\/local/],
     ['wrong tree', x => { x.state.checkout.tree.sha = A; }, /checkout API\/local/],
     ['ancestor reachable only through a merged branch', x => { x.state.firstParents = [H]; }, /actual first-parent/],
-    ['fixed anchor is not on the live first-parent chain', x => { x.state.firstParents = [A]; }, /fixed cumulative anchor/],
+    ['fixed anchor is on neither the live nor the retired first-parent chain', x => {
+      x.state.firstParents = [A]; x.state.retiredFirstParents = [RETIRED_RUST_LANDING_TIP]; }, /fixed cumulative anchor/],
+    ['retired landing tip is not under the live landing', x => {
+      x.state.firstParents = [A]; x.state.retiredLanded = false; }, /not an ancestor/],
     ['not a live-target ancestor', x => { x.state.ancestor = false; }, /not an ancestor/],
     ['single-parent checkout', x => { x.state.checkout.parents.pop(); x.state.localParents.pop(); }, /checkout API\/local/],
     ['API and local parents disagree', x => { x.state.localParents[0] = H; }, /checkout API\/local/],

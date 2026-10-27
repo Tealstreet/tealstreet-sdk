@@ -15,6 +15,12 @@ const git = (root, ...args) => {
   insist(child.status === 0 && !child.error && !child.signal, `git ${args[0]} failed: ${child.stderr ?? ''}`);
   return child.stdout.trim();
 };
+// #2299 merged the retired feat/rust-rewrite into master as a second parent, so the
+// anchor sits on that frozen tip's first-parent chain rather than master's.
+export const RETIRED_RUST_LANDING_TIP = '9f5ea60ecd4b2430b279a73f5e0d9fbfd9869f14';
+const retiredLandingHolds = (gitRead, landingTip) =>
+  gitRead('merge-base', '--is-ancestor', RETIRED_RUST_LANDING_TIP, landingTip) === '' &&
+  gitRead('rev-list', '--first-parent', RETIRED_RUST_LANDING_TIP).split('\n').includes(BITGET_CUMULATIVE_ANCHOR);
 const write = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 
 /** Select from authenticated run/PR/commit APIs, never an input baseline flag.
@@ -66,7 +72,8 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
     const firstParents = gitRead('rev-list', '--first-parent', landingTip).split('\n');
     insist(gitRead('merge-base', '--is-ancestor', baseline, landingTip) === '' && firstParents.includes(baseline),
     'checkout base must be an actual first-parent Rust landing');
-    insist(firstParents.includes(BITGET_CUMULATIVE_ANCHOR), 'fixed cumulative anchor must be on the live first-parent landing chain');
+    insist(firstParents.includes(BITGET_CUMULATIVE_ANCHOR) || retiredLandingHolds(gitRead, landingTip),
+      'fixed cumulative anchor must be on the live first-parent landing chain');
     let graphqlBaseRefOid = null, graphqlError = null;
     try {
       graphqlBaseRefOid = await reader.getPullBaseOid(pull.number);
