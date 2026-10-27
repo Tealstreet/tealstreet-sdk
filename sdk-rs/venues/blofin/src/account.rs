@@ -669,7 +669,6 @@ impl Blofin {
             cx.stop_socket_feed(feed);
         }
         self.account.authenticated = false;
-        self.account.connection.open = false;
         if let Some(socket) = self.account.connection.socket.take() {
             cx.close(socket);
         }
@@ -709,7 +708,6 @@ impl Blofin {
                 self.private_url(),
             )),
         );
-        self.account.connection.open = true;
 
         cx.send(socket, "ping");
     }

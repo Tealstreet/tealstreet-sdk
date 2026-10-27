@@ -204,38 +204,66 @@ impl Blofin {
         }
     }
     fn change_interests(&mut self, cx: &mut Cx<'_, Pending>, change: Change) {
-        if !self.public.open {
-            self.commit_change(change);
-            return;
-        }
-        if self.public.pending.is_some() {
-            Self::socket_notice(cx, SocketError::Capacity);
-            return;
-        }
-        let Some(feed) = self.public.feed else {
-            return;
-        };
-        match cx.set_socket_interests(feed, self.desired_interests(cx.store, false, Some(&change)))
-        {
-            Ok(proposal) => self.public.pending = Some((proposal, change)),
-            Err(error) => Self::socket_notice(cx, error),
+        self.public.queued.push_back(change);
+        self.flush_changes(cx);
+    }
+    fn flush_changes(&mut self, cx: &mut Cx<'_, Pending>) {
+        while self.public.pending.is_none() {
+            let Some(change) = self.public.queued.pop_front() else {
+                break;
+            };
+            match &change {
+                Change::AddBook(symbol) => {
+                    if let Some(state) = self.books.get_mut(symbol) {
+                        state.subscribers += 1;
+                        continue;
+                    }
+                }
+                Change::RemoveBook(symbol) => {
+                    let Some(state) = self.books.get_mut(symbol) else {
+                        continue;
+                    };
+                    if state.subscribers > 1 {
+                        state.subscribers -= 1;
+                        continue;
+                    }
+                }
+                Change::AddCandle(symbol, i) => {
+                    if let Some(state) = self.candles.get_mut(&(symbol.clone(), *i)) {
+                        state.subscribers += 1;
+                        continue;
+                    }
+                }
+                Change::RemoveCandle(symbol, i) => {
+                    let Some(state) = self.candles.get_mut(&(symbol.clone(), *i)) else {
+                        continue;
+                    };
+                    if state.subscribers > 1 {
+                        state.subscribers -= 1;
+                        continue;
+                    }
+                }
+            }
+            let Some(feed) = self
+                .public
+                .feed
+                .filter(|feed| cx.socket_epoch(*feed).is_some())
+            else {
+                self.commit_change(change);
+                continue;
+            };
+            match cx
+                .set_socket_interests(feed, self.desired_interests(cx.store, false, Some(&change)))
+            {
+                Ok(proposal) => self.public.pending = Some((proposal, change)),
+                Err(error) => Self::socket_notice(cx, error),
+            }
         }
     }
     pub(super) fn subscribe_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
-        if let Some(state) = self.books.get_mut(&symbol) {
-            state.subscribers += 1;
-            return;
-        }
         self.change_interests(cx, Change::AddBook(symbol));
     }
     pub(super) fn unsubscribe_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
-        let Some(state) = self.books.get_mut(&symbol) else {
-            return;
-        };
-        if state.subscribers > 1 {
-            state.subscribers -= 1;
-            return;
-        }
         self.change_interests(cx, Change::RemoveBook(symbol));
     }
     pub(super) fn subscribe_candles(
@@ -244,10 +272,6 @@ impl Blofin {
         symbol: String,
         i: Interval,
     ) {
-        if let Some(state) = self.candles.get_mut(&(symbol.clone(), i)) {
-            state.subscribers += 1;
-            return;
-        }
         self.change_interests(cx, Change::AddCandle(symbol, i));
     }
     pub(super) fn unsubscribe_candles(
@@ -256,13 +280,6 @@ impl Blofin {
         symbol: String,
         i: Interval,
     ) {
-        let Some(state) = self.candles.get_mut(&(symbol.clone(), i)) else {
-            return;
-        };
-        if state.subscribers > 1 {
-            state.subscribers -= 1;
-            return;
-        }
         self.change_interests(cx, Change::RemoveCandle(symbol, i));
     }
     pub(super) fn repair_book_interest(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -323,7 +340,6 @@ impl Blofin {
         match event {
             LifecycleEvent::Opened(epoch) if private => self.private_open(cx, epoch.socket()),
             LifecycleEvent::Opened(_) => {
-                self.public.open = true;
                 cx.send_after_socket_interests(feed, "ping".into())?;
             }
             LifecycleEvent::Authenticated { first: true, .. } if private => self.private_ready(cx),
@@ -336,15 +352,14 @@ impl Blofin {
             }
             LifecycleEvent::Retired { .. } if private => {
                 self.account.connection.socket = None;
-                self.account.connection.open = false;
                 self.account.authenticated = false;
             }
             LifecycleEvent::Retired { .. } => {
                 self.public.socket = None;
-                self.public.open = false;
                 if let Some((_, change)) = self.public.pending.take() {
                     self.commit_change(change);
                 }
+                self.flush_changes(cx);
                 for (symbol, state) in &mut self.books {
                     state.book.clear();
                     state.sequence = None;
@@ -363,6 +378,7 @@ impl Blofin {
                 {
                     let (_, change) = self.public.pending.take().expect("exact proposal");
                     self.commit_change(change);
+                    self.flush_changes(cx);
                 }
             }
             LifecycleEvent::InterestsRefused {
@@ -377,8 +393,18 @@ impl Blofin {
                     cx.retire_socket(feed, RetireReason::Closed);
                 }
             }
-            LifecycleEvent::InterestsRefused { error, .. } => {
-                self.public.pending = None;
+            LifecycleEvent::InterestsRefused {
+                proposal, error, ..
+            } => {
+                if !private
+                    && self
+                        .public
+                        .pending
+                        .as_ref()
+                        .is_some_and(|(own, _)| *own == proposal)
+                {
+                    self.public.pending = None;
+                }
                 return Err(error);
             }
             _ => (),

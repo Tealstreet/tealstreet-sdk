@@ -59,9 +59,9 @@ pub enum Pending {
 #[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
-    open: bool,
     feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     pending: Option<(u64, socket_codec::Change)>,
+    queued: std::collections::VecDeque<socket_codec::Change>,
 }
 #[derive(Default)]
 struct DepthState {

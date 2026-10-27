@@ -579,6 +579,7 @@ struct PressureTrace {
     public: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     retired: Vec<SocketId>,
     armed: bool,
+    changes: u8,
 }
 struct ProposalPressure(Blofin, std::rc::Rc<std::cell::RefCell<PressureTrace>>);
 impl Venue for ProposalPressure {
@@ -613,7 +614,73 @@ impl Venue for ProposalPressure {
                 }
             }
         }
-        self.0.on_socket_event(cx, event)
+        let injection = match &event {
+            LifecycleEvent::Opened(epoch)
+                if self.1.borrow().old == Some(epoch.socket()) && self.1.borrow().changes != 3 =>
+            {
+                self.1.borrow().changes
+            }
+            LifecycleEvent::Opened(epoch)
+                if self.1.borrow().old != Some(epoch.socket()) && self.1.borrow().changes == 3 =>
+            {
+                3
+            }
+            _ => 0,
+        };
+        let private_feed = match &event {
+            LifecycleEvent::Opened(epoch) => Some(epoch.feed()),
+            _ => None,
+        };
+        self.0.on_socket_event(cx, event)?;
+        if injection == 3 {
+            let feed = private_feed.unwrap();
+            cx.set_socket_interests(feed, vec![])
+                .expect("real private proposal before retirement");
+            self.0.on_command(
+                cx,
+                Command::SubscribeOrderBook {
+                    symbol: "BTCUSDT".into(),
+                },
+            );
+            cx.stop_socket_feed(feed);
+        } else if injection == 2 || injection == 4 {
+            self.0.on_command(
+                cx,
+                Command::SubscribeOrderBook {
+                    symbol: "BTCUSDT".into(),
+                },
+            );
+            if injection == 2 {
+                self.0.on_command(
+                    cx,
+                    Command::SubscribeCandles {
+                        symbol: "BTCUSDT".into(),
+                        interval: safe_cex_engine::model::Interval::M1,
+                    },
+                );
+                self.0.on_command(
+                    cx,
+                    Command::SubscribeOrderBook {
+                        symbol: "BTCUSDT".into(),
+                    },
+                );
+                self.0.on_command(
+                    cx,
+                    Command::SubscribeCandles {
+                        symbol: "BTCUSDT".into(),
+                        interval: safe_cex_engine::model::Interval::M1,
+                    },
+                );
+            } else {
+                self.0.on_command(
+                    cx,
+                    Command::UnsubscribeOrderBook {
+                        symbol: "BTCUSDT".into(),
+                    },
+                );
+            }
+        }
+        Ok(())
     }
     fn socket_control(
         &self,
@@ -697,7 +764,17 @@ impl Venue for ProposalPressure {
         self.0.on_timer(cx, timer);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command) {
+        let renew = self.1.borrow().changes == 6
+            && matches!(&command, Command::UnsubscribeOrderBook { .. });
         self.0.on_command(cx, command);
+        if renew {
+            self.0.on_command(
+                cx,
+                Command::SubscribeOrderBook {
+                    symbol: "BTCUSDT".into(),
+                },
+            );
+        }
     }
     fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
         None
@@ -1049,4 +1126,255 @@ fn a_retired_real_parked_login_cannot_release_into_its_replacement_epoch() {
     );
     let ready = safe_cex_engine::test_support::prepared_actions(&mut e, at);
     assert_eq!(topics(&ready, current).len(), 4);
+}
+
+fn callback_changes(mode: u8) -> (Engine<ProposalPressure>, SocketId, SocketId) {
+    let (provider, identities) = safe_cex_crypto::signer::LocalSigner::from_json(
+        r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#.into(),
+    )
+    .unwrap();
+    let trace = std::rc::Rc::new(std::cell::RefCell::new(PressureTrace {
+        changes: mode,
+        ..PressureTrace::default()
+    }));
+    let mut e = safe_cex_engine::test_support::seeded_engine(ProposalPressure(
+        Blofin::new(Options {
+            identities: identities.clone(),
+            ..Options::default()
+        }),
+        trace.clone(),
+    ));
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
+    e.start(0.);
+    let mut actions = vec![];
+    for body in [support::INSTRUMENT, r#"{"code":"0","data":[]}"#] {
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
+        let request = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r.id),
+                _ => None,
+            })
+            .unwrap();
+        actions.extend(out);
+        e.handle(
+            0.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+    actions.extend(safe_cex_engine::test_support::prepared_actions(&mut e, 0.));
+    let socket = |private: bool| {
+        actions
+            .iter()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, url, .. }
+                    if url.ends_with(if private { "/private" } else { "/public" }) =>
+                {
+                    Some(*socket)
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    let public = socket(false);
+    let private = socket(true);
+    trace.borrow_mut().old = Some(public);
+    (e, public, private)
+}
+#[test]
+fn a_preopen_book_or_candle_is_present_on_the_initial_physical_open() {
+    use safe_cex_engine::model::Interval;
+    for (command, channel) in [
+        (
+            Command::SubscribeOrderBook {
+                symbol: "BTCUSDT".into(),
+            },
+            "books",
+        ),
+        (
+            Command::SubscribeCandles {
+                symbol: "BTCUSDT".into(),
+                interval: Interval::M1,
+            },
+            "candle1m",
+        ),
+    ] {
+        let mut h = Harness::new();
+        let socket = public(&h);
+        let pending = event(&mut h, 0., Event::Command(command));
+        assert!(sends(&pending, socket).is_empty());
+        let opened = event(&mut h, 1., Event::WsOpened { socket });
+        let topics = topics(&opened, socket);
+        assert!(
+            topics
+                .iter()
+                .any(|(op, c, id)| op == "subscribe" && c == channel && id == "BTC-USDT"),
+            "pre-open desired topic must replay: {topics:?}"
+        );
+        assert_eq!(topics.iter().filter(|(_, c, _)| c == "books5").count(), 1);
+    }
+}
+#[test]
+fn a_second_pending_public_change_and_duplicate_addition_keep_their_demand() {
+    let (mut e, public, _) = callback_changes(2);
+    let opened = pressure_actions(&mut e, 1., Event::WsOpened { socket: public });
+    let added = topics(&opened, public);
+    assert!(
+        added.iter().any(|(_, c, _)| c == "candle1m"),
+        "second pending addition lost: {added:?}"
+    );
+    assert_eq!(added.iter().filter(|(_, c, _)| c == "books5").count(), 1);
+    let first = pressure_actions(
+        &mut e,
+        2.,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert!(
+        topics(&first, public).is_empty(),
+        "one of two book refs must remain"
+    );
+    let last = pressure_actions(
+        &mut e,
+        3.,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert_eq!(
+        topics(&last, public),
+        vec![("unsubscribe".into(), "books".into(), "BTC-USDT".into())]
+    );
+    let first = pressure_actions(
+        &mut e,
+        4.,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    assert!(
+        topics(&first, public).is_empty(),
+        "one of two candle refs must remain"
+    );
+    let last = pressure_actions(
+        &mut e,
+        5.,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    let topics = topics(&last, public);
+    assert_eq!(topics.len(), 2);
+    assert!(topics.contains(&("unsubscribe".into(), "books5".into(), "BTC-USDT".into())));
+    assert!(topics.contains(&("unsubscribe".into(), "candle1m".into(), "BTC-USDT".into())));
+}
+#[test]
+fn a_private_proposal_refusal_cannot_discard_the_real_public_pending_change() {
+    let (mut e, public, private) = callback_changes(3);
+    pressure_actions(&mut e, 0., Event::WsOpened { socket: public });
+    let refused = pressure_actions(&mut e, 1., Event::WsOpened { socket: private });
+    assert!(
+        refused
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == private))
+    );
+    assert!(
+        !refused
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == public))
+    );
+    assert!(
+        topics(&refused, public)
+            .iter()
+            .any(|(_, c, _)| c == "books")
+    );
+    let remove = pressure_actions(
+        &mut e,
+        2.,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert_eq!(
+        topics(&remove, public).len(),
+        2,
+        "public commit must retain local book ref despite private refusal"
+    );
+}
+#[test]
+fn a_pending_addition_followed_by_removal_leaves_no_book_subscription() {
+    let (mut e, public, _) = callback_changes(4);
+    let out = pressure_actions(&mut e, 1., Event::WsOpened { socket: public });
+    let all = topics(&out, public);
+    let mut live = std::collections::BTreeSet::new();
+    for (op, channel, id) in all {
+        if op == "subscribe" {
+            live.insert((channel, id));
+        } else {
+            live.remove(&(channel, id));
+        }
+    }
+    assert!(
+        !live
+            .iter()
+            .any(|(channel, _)| channel == "books" || channel == "books5"),
+        "pending removal must leave no live book demand: {live:?}"
+    );
+    let out = pressure_actions(
+        &mut e,
+        2.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert_eq!(
+        topics(&out, public).len(),
+        2,
+        "later fresh addition must not be a phantom ref increment"
+    );
+}
+#[test]
+fn a_pending_removal_followed_by_renewal_restores_the_book_subscription() {
+    let (mut e, public, _) = callback_changes(6);
+    pressure_actions(&mut e, 0., Event::WsOpened { socket: public });
+    let initial = pressure_actions(
+        &mut e,
+        1.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = pressure_actions(
+        &mut e,
+        2.,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let mut live = std::collections::BTreeSet::new();
+    for (op, channel, id) in topics(&initial, public)
+        .into_iter()
+        .chain(topics(&out, public))
+    {
+        if op == "subscribe" {
+            live.insert((channel, id));
+        } else {
+            live.remove(&(channel, id));
+        }
+    }
+    assert!(
+        live.contains(&("books".into(), "BTC-USDT".into())),
+        "renewal must survive the pending removal: {live:?}"
+    );
 }

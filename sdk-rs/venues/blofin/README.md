@@ -1,9 +1,9 @@
 # BloFin socket liveness
 
-Both feeds use the engine managed lifecycle with independent epochs and retries.
-Public keeps connect20s, idle20s, ping5s and backoff cap16s. Private keeps a10s
-connection deadline, separate10s authentication deadline, ping5s and idle20s.
-Pongs refresh liveness but never extend authentication. Only definitive code0
+Both feeds use the engine-managed lifecycle with independent epochs and retries.
+Public keeps connect 20 s, idle 20 s, ping 5 s and backoff cap 16 s. Private keeps a 10 s
+connection deadline, separate 10 s authentication deadline, ping 5 s and idle 20 s.
+Pongs refresh liveness but never extend authentication. Only definitive code 0
 login proof enables subscriptions and private financial payload publication.
 
 The unchanged Primary SessionAuth provider signs a fresh login per current
