@@ -1,5 +1,9 @@
 # Phase 9: TypeScript caller inventory and deletion dependencies
 
+> **Closed to appends since 2026-10-27.** Record new caller obligations as one
+> file per change in [callers/](callers/README.md). Edit a section here only
+> when that obligation itself changes.
+
 Audited 2026-10-20 on the phase-9 readiness branch, against the repository's
 `packages/` and `apps/` source. This is an inventory and an ordered future
 migration plan. This change deletes no TypeScript venue. The authoritative

@@ -1317,3 +1317,337 @@ fn an_engine_expired_placement_is_a_new_request_not_a_re_ask() {
         "both post-mark slots release ETH"
     );
 }
+
+/// Item 3, 8x5tm1 condition 1 (a deliberate change): the engine's re-ask counts
+/// only writes that turned uncertain, so a definitive write between two asks no
+/// longer resets the census. The re-ask keeps the paid TP/SL slot and joins the
+/// owed regular census; that census began before the write, and the store
+/// snapshot gate drops it, so it cannot complete the release.
+#[test]
+fn a_definitive_write_between_asks_keeps_paid_slots_and_the_pre_write_census_cannot_release() {
+    let pairs = PAIRS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","base":"ETH","quote":"USDT","symbolStatus":"OPEN","basePrecision":2,"quotePrecision":2,"maxLimitOrderVolume":"1000"}]}"#,
+    );
+    let tickers = TICKERS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","last":"3000","open":"2900","markPrice":"3001","baseVol":"10","quoteVol":"30000"}]}"#,
+    );
+    let (mut e, _) = startup_serving(
+        engine(Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Options::default()
+        }),
+        &pairs,
+        &tickers,
+    );
+    let place = |command: u32, symbol: &str, price: f64| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol": symbol, "type": "limit", "side": "buy", "price": price, "amount": 1.0,
+            }))
+            .unwrap(),
+        ],
+    };
+    let reads = |actions: &[Action], tpsl: bool| -> Vec<HttpRequest> {
+        http(actions)
+            .into_iter()
+            .filter(|r| r.url.ends_with("get_pending_orders") && r.url.contains("/tpsl/") == tpsl)
+            .collect()
+    };
+    let respond = |e: &mut TestEngine, log: &mut Vec<Action>, request: &HttpRequest, at: f64| {
+        let body = if request.url.contains("/tpsl/") {
+            TPSL
+        } else {
+            ORDERS
+        };
+        log.extend(answer(e, at, request, body));
+    };
+    let btc_refused = |e: &mut TestEngine, log: &mut Vec<Action>, command: u32, at: f64| {
+        e.handle(at, Event::Command(place(command, "BTCUSDT", 90000.0)));
+        let out = prepared(e, at);
+        let refused = writes_of(&out, "place_order") == 0;
+        log.extend(out);
+        refused
+    };
+    // Fire every armed, uncleared timer due by `until`; return the census reads.
+    let advance = |e: &mut TestEngine, log: &mut Vec<Action>, until: f64| {
+        let mut sent = Vec::new();
+        let mut fired = std::collections::HashSet::new();
+        loop {
+            let cleared: std::collections::HashSet<_> = log
+                .iter()
+                .filter_map(|a| match a {
+                    Action::ClearTimer { timer } => Some(*timer),
+                    _ => None,
+                })
+                .collect();
+            let next = log
+                .iter()
+                .filter_map(|a| match a {
+                    Action::SetTimer { timer, at_ms }
+                        if *at_ms <= until
+                            && !cleared.contains(timer)
+                            && !fired.contains(timer) =>
+                    {
+                        Some((*timer, *at_ms))
+                    }
+                    _ => None,
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            let Some((timer, at)) = next else { return sent };
+            fired.insert(timer);
+            e.handle(at, Event::TimerFired { timer });
+            let out = prepared(e, at);
+            sent.extend(
+                http(&out)
+                    .into_iter()
+                    .filter(|r| r.url.ends_with("get_pending_orders")),
+            );
+            log.extend(out);
+        }
+    };
+    let mut log = Vec::new();
+
+    // Mark (BTC, a lost ACK): regular A and TP/SL B are owed and issued.
+    e.handle(1000.0, Event::Command(place(701, "BTCUSDT", 90000.0)));
+    let placed = prepared(&mut e, 1000.0);
+    let write = post(&http(&placed), "place_order").expect("BTC placement");
+    log.extend(placed);
+    e.handle(
+        1010.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "lost placement ACK",
+        },
+    );
+    let sealed = prepared(&mut e, 1010.0);
+    let (a, b) = (reads(&sealed, false), reads(&sealed, true));
+    log.extend(sealed);
+    assert_eq!((a.len(), b.len()), (1, 1));
+    // B pays the TP/SL slot.
+    respond(&mut e, &mut log, &b[0], 1100.0);
+
+    // A definitive write (ETH accepted) lands between the asks: it marks nothing.
+    e.handle(1200.0, Event::Command(place(702, "ETHUSDT", 2900.0)));
+    let placed = prepared(&mut e, 1200.0);
+    let eth = post(&http(&placed), "place_order").expect("ETH placement");
+    log.extend(placed);
+    log.extend(answer(
+        &mut e,
+        1210.0,
+        &eth,
+        r#"{"code":0,"data":{"orderId":"eth-1","clientId":"c-1"}}"#,
+    ));
+
+    // The engine re-asks: the paid TP/SL slot is kept and A is joined. (Any TP/SL
+    // read here is the definitive write's ordinary refresh, not owed.)
+    let reissued = advance(&mut e, &mut log, 2100.0);
+    assert!(
+        reissued.iter().all(|r| r.url.contains("/tpsl/")),
+        "the re-ask joins the owed regular census A instead of reissuing it"
+    );
+
+    // A began before the definitive write: the snapshot gate drops it, so the
+    // release cannot fire on it and BTC stays fenced.
+    respond(&mut e, &mut log, &a[0], 2200.0);
+    assert!(
+        btc_refused(&mut e, &mut log, 703, 2300.0),
+        "a pre-write census cannot release"
+    );
+
+    // Control: the owed regular census follows and releases BTC.
+    let later = advance(&mut e, &mut log, 6000.0);
+    let regular: Vec<_> = later.iter().filter(|r| !r.url.contains("/tpsl/")).collect();
+    assert!(!regular.is_empty(), "a later regular census is owed");
+    for request in later.iter() {
+        respond(&mut e, &mut log, request, 6100.0);
+    }
+    assert!(
+        !btc_refused(&mut e, &mut log, 704, 6200.0),
+        "the post-write census releases BTC"
+    );
+}
+
+/// Item 3 (9czdjh): an engine re-ask with nothing owed is a new request. The
+/// fence cannot clear while another placement holds its scope, so both slots
+/// can pay without a release; that placement then settles definitively, which
+/// marks nothing, and the next re-ask must start a fresh pair (not skip every
+/// slot forever) and release the uncertain symbol.
+#[test]
+fn a_reask_with_nothing_owed_starts_a_fresh_census_after_a_held_placement_settles() {
+    let pairs = PAIRS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","base":"ETH","quote":"USDT","symbolStatus":"OPEN","basePrecision":2,"quotePrecision":2,"maxLimitOrderVolume":"1000"}]}"#,
+    );
+    let tickers = TICKERS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","last":"3000","open":"2900","markPrice":"3001","baseVol":"10","quoteVol":"30000"}]}"#,
+    );
+    let (mut e, _) = startup_serving(
+        engine(Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Options::default()
+        }),
+        &pairs,
+        &tickers,
+    );
+    let place = |command: u32, symbol: &str, price: f64| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol": symbol, "type": "limit", "side": "buy", "price": price, "amount": 1.0,
+            }))
+            .unwrap(),
+        ],
+    };
+    let census = |actions: &[Action]| -> Vec<HttpRequest> {
+        http(actions)
+            .into_iter()
+            .filter(|r| r.url.ends_with("get_pending_orders"))
+            .collect()
+    };
+    let respond = |e: &mut TestEngine, log: &mut Vec<Action>, request: &HttpRequest, at: f64| {
+        let body = if request.url.contains("/tpsl/") {
+            TPSL
+        } else {
+            ORDERS
+        };
+        log.extend(answer(e, at, request, body));
+    };
+    let btc_refused = |e: &mut TestEngine, log: &mut Vec<Action>, command: u32, at: f64| {
+        e.handle(at, Event::Command(place(command, "BTCUSDT", 90000.0)));
+        let out = prepared(e, at);
+        let refused = writes_of(&out, "place_order") == 0;
+        log.extend(out);
+        refused
+    };
+    let mut log = Vec::new();
+    let mut fired = std::collections::HashSet::new();
+    // Fire due timers in order, answering every census read at once, until a
+    // regular and a TP/SL read have both been answered.
+    let mut next_pair = |e: &mut TestEngine, log: &mut Vec<Action>| -> f64 {
+        let (mut regular, mut tpsl) = (false, false);
+        loop {
+            let cleared: std::collections::HashSet<_> = log
+                .iter()
+                .filter_map(|a| match a {
+                    Action::ClearTimer { timer } => Some(*timer),
+                    _ => None,
+                })
+                .collect();
+            let (timer, at) = log
+                .iter()
+                .filter_map(|a| match a {
+                    Action::SetTimer { timer, at_ms }
+                        if !cleared.contains(timer) && !fired.contains(timer) =>
+                    {
+                        Some((*timer, *at_ms))
+                    }
+                    _ => None,
+                })
+                .min_by(|x, y| x.1.total_cmp(&y.1))
+                .expect("a census pair follows");
+            assert!(at < 15_000.0, "no census pair within the re-ask backoff");
+            fired.insert(timer);
+            e.handle(at, Event::TimerFired { timer });
+            let out = prepared(e, at);
+            let reads = census(&out);
+            log.extend(out);
+            for request in &reads {
+                if request.url.contains("/tpsl/") {
+                    tpsl = true;
+                } else {
+                    regular = true;
+                }
+                respond(e, log, request, at + 10.0);
+            }
+            if regular && tpsl {
+                return at + 20.0;
+            }
+        }
+    };
+
+    // BTC turns uncertain; its seal-time census is dispatched.
+    e.handle(1000.0, Event::Command(place(801, "BTCUSDT", 90000.0)));
+    let placed = prepared(&mut e, 1000.0);
+    let write = post(&http(&placed), "place_order").expect("BTC placement");
+    log.extend(placed);
+    e.handle(
+        1010.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "lost placement ACK",
+        },
+    );
+    let sealed = prepared(&mut e, 1010.0);
+    let first = census(&sealed);
+    log.extend(sealed);
+    assert_eq!(first.len(), 2);
+    // An independent ETH placement is released and held unanswered.
+    e.handle(1100.0, Event::Command(place(802, "ETHUSDT", 2900.0)));
+    let placed = prepared(&mut e, 1100.0);
+    let eth = post(&http(&placed), "place_order").expect("ETH placement");
+    log.extend(placed);
+    // The seal-time census began before the ETH write: the snapshot gate drops it.
+    for request in &first {
+        respond(&mut e, &mut log, request, 1150.0);
+    }
+    // A census dispatched after the ETH write pays both slots, but the held
+    // placement keeps the fence standing.
+    let at = next_pair(&mut e, &mut log);
+    assert!(
+        btc_refused(&mut e, &mut log, 803, at),
+        "a held placement blocks the release"
+    );
+    // ETH settles definitively: no new uncertain mark, nothing left owed.
+    log.extend(answer(
+        &mut e,
+        at + 10.0,
+        &eth,
+        r#"{"code":0,"data":{"orderId":"eth-1","clientId":"c-1"}}"#,
+    ));
+    // The engine's next re-ask finds nothing owed: it starts a fresh owed pair
+    // (answered as it appears), which releases BTC.
+    let mut fired = std::collections::HashSet::new();
+    let mut now = at + 20.0;
+    loop {
+        let cleared: std::collections::HashSet<_> = log
+            .iter()
+            .filter_map(|a| match a {
+                Action::ClearTimer { timer } => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        let Some((timer, at)) = log
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms }
+                    if *at_ms <= 5_000.0 && !cleared.contains(timer) && !fired.contains(timer) =>
+                {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .min_by(|x, y| x.1.total_cmp(&y.1))
+        else {
+            break;
+        };
+        fired.insert(timer);
+        now = now.max(at);
+        e.handle(now, Event::TimerFired { timer });
+        let out = prepared(&mut e, now);
+        let reads = census(&out);
+        log.extend(out);
+        for request in &reads {
+            respond(&mut e, &mut log, request, now + 10.0);
+        }
+    }
+    assert!(
+        !btc_refused(&mut e, &mut log, 804, 5_100.0),
+        "the fresh pair releases BTC"
+    );
+}
