@@ -19,13 +19,17 @@ trade command entry. Each former revision bump calls
 Read reservation identity uses a checked issue sequence, never publication
 authority. After a clean commit, a separate unconsumed Store witness suppresses
 unnecessary replacement reads only while that witness remains current. New
-issues drop the old witness. Signing failures still release only their own
-reservation. Store epoch or read-identity exhaustion permanently refuses further
+issues retain that witness; only a clean complete commit replaces it. Signing
+failures still release only their own reservation. Store epoch or read-identity
+exhaustion permanently refuses further
 reads instead of wrapping; no unfenced read is sent.
 
 Production-binding controls cover a read crossing an explicit Store write fence
 (RED on the parent), accepted cancel followed by an older read (preservation,
 already GREEN on the parent), normal publication and sibling Store publication.
+An incomplete later read preserves the last clean witness, suppressing a
+redundant refetch when an older stale response arrives (RED before the witness
+retention correction; preservation on the parent).
 Existing forced-reconciliation, sign-failure ownership, malformed-row retention
 and native financial controls stay in place. The explicit Store-fence RED does
 not claim that the parent's accepted-write revision fence was broken.

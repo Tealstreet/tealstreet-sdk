@@ -600,7 +600,6 @@ impl Account {
             return;
         };
         self.orders_read_sequence = owner;
-        self.orders_witness = None;
         self.orders_in_flight = Some(owner);
         self.read_snapshot(
             cx,

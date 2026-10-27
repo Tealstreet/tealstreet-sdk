@@ -585,6 +585,42 @@ fn sibling_store_publication_does_not_invalidate_an_orders_read() {
 }
 
 #[test]
+fn an_incomplete_new_read_keeps_the_clean_witness_for_an_older_stale_response() {
+    let mut h = Harness::ready();
+    h.poll_late(9000.0);
+    let old = h.take(ORDERS);
+    h.now += 1.;
+    h.event(Event::Command(Command::CancelOrders {
+        command: 992,
+        ids: vec![ORDER_ID.into()],
+    }));
+    h.respond(
+        "/trade/order",
+        200,
+        r#"{"code":80016,"msg":"order not exist"}"#,
+    );
+    h.respond(ORDERS, 200, OPEN);
+    for at in [11000., 13000., 15000., 17000.] {
+        h.fire_at(at);
+    }
+    let incomplete = h.take(ORDERS);
+    h.reply(
+        incomplete.id,
+        200,
+        r#"{"code":0,"data":{"orders":[{"orderId":8389765519993909000}]}}"#,
+    );
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    h.reply(old.id, 200, r#"{"code":0,"data":[]}"#);
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| !request.url.contains(ORDERS)),
+        "a clean current snapshot still suppresses a redundant read after an incomplete successor"
+    );
+}
+
+#[test]
 fn http_200_error_envelopes_and_malformed_snapshots_preserve_state() {
     let mut h = Harness::ready();
     h.poll_late(26000.0);
