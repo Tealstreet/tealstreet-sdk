@@ -8544,11 +8544,10 @@ mod security_debug {
             signer_headers: vec![("X-Proof".into(), sentinel.into())],
             body: Some(sentinel.into()),
         };
-        for debug in [format!("{http:?}")] {
-            assert!(!debug.contains(sentinel));
-            assert!(!debug.contains("https://venue.test"));
-        }
-        assert!(format!("{http:?}").contains("RequestId(17)"));
+        let debug = format!("{http:?}");
+        assert!(!debug.contains(sentinel));
+        assert!(!debug.contains("https://venue.test"));
+        assert!(debug.contains("RequestId(17)"));
     }
 }
 
