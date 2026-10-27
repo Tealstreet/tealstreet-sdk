@@ -520,6 +520,9 @@ impl Venue for BitunixFutures {
         self.account_auth(pending, response, store)
     }
     type Pending = Pending;
+    fn managed_sockets() -> bool {
+        true
+    }
     fn socket_capabilities() -> safe_cex_engine::socket_lifecycle::SocketCapabilities {
         safe_cex_engine::socket_lifecycle::SocketCapabilities { handoff: false }
     }
