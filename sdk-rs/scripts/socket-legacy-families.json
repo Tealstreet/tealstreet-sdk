@@ -6,7 +6,6 @@
     "bingx": "venues/bingx/src/",
     "bitget": "venues/bitget/src/",
     "bitrue": "venues/bitrue/src/",
-    "bitunix": "venues/bitunix/src/",
     "blofin": "venues/blofin/src/",
     "coinbase": "venues/coinbase/src/",
     "cryptocom": "venues/cryptocom/src/",

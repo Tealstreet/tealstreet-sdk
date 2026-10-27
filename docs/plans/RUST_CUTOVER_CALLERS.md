@@ -10239,3 +10239,7 @@ stream proof and calls `done_plan`, or on expiry calls
 every accepted order ID and the scope stays fenced. It is never Done without
 proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
 grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).
+
+### Bitunix managed sockets (#2301)
+
+Bitunix's futures, public-shard and private sockets now run on the engine's managed sockets ([RUST_BITUNIX_MANAGED_SOCKETS.md](RUST_BITUNIX_MANAGED_SOCKETS.md)). URLs, feed identities, routing, subscription frames and their 250 ms shard pacing, the private ping-then-login bootstrap and the 2 s login retry are unchanged. One tightening: a frame arriving at or past a socket's idle or connect deadline is no longer published or reduced, even before the deadline timer is delivered; the socket retires and reconnects instead. Callers need no change.
