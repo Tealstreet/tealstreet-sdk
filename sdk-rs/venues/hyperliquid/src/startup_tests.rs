@@ -57,13 +57,16 @@ fn retry(actions: &[Action], sent: f64, nominal: f64) -> TimerId {
     retry_timer(actions, sent, nominal).expect("public context backoff")
 }
 fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
+    let policy = serde_json::from_str(r#"{"primary":{"source":"scalarOnly","signingAlgorithm":"secp256k1Digest","secretEncoding":"hex"}}"#).unwrap();
+    let (provider, identities, _) = safe_cex_crypto::signer::LocalSigner::from_json_with_facts(
+        if private { r#"{"primary":{"secret":"0123456789012345678901234567890123456789012345678901234567890123"}}"# } else { "{}" }.into(), policy, false,
+    ).unwrap();
     let options = Options {
         testnet: true,
         public_data_only: !private,
         // Well-known scripted test key; no account transport exists.
         key: private.then(|| "0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: private
-            .then(|| "0x0123456789012345678901234567890123456789012345678901234567890123".into()),
+        credentials: identities.primary.clone(),
         application_id: private.then(|| "0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Default::default()
     };
@@ -72,6 +75,10 @@ fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
     } else {
         Hyperliquid::new(options)
     });
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
+    e.initialize_address_nonce(999.).unwrap();
+    assert!(e.address_nonce_setup_ready());
     e.start(1000.0);
     e
 }

@@ -7,6 +7,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { venueFamilies, venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { wasmBudgetError } from './wasm-budget.mjs';
 import { checkAdvertisedCommands, constructionProfiles } from './capability-conformance.mjs';
+import { checkHyperliquidLocalSigning } from './hyperliquid-local-signing.mjs';
 
 const pkg = new URL('../hosts/wasm/pkg/', import.meta.url);
 const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.url), 'utf8')
@@ -30,6 +31,10 @@ for (const family of selectedFamilies) {
     }
     const engine = await import(new URL(`web/${family}/safe_cex_wasm.js`, pkg));
     await engine.default({ module_or_path: readFileSync(new URL(`web/${family}/safe_cex_wasm_bg.wasm`, pkg)) });
+    if (family === 'hyperliquid') {
+      await checkHyperliquidLocalSigning(engine.WasmEngine, false);
+      await checkHyperliquidLocalSigning(engine.WasmEngine, true);
+    }
     if (family === 'apexomni') {
       const corpus = JSON.parse(readFileSync(new URL('../crypto/tests/fixtures/zklink/npm-wasm.json', import.meta.url)));
       const seed = corpus.cases[0].seed;

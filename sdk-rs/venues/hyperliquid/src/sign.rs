@@ -1,4 +1,6 @@
 //! L1 phantom-agent signing. Struct declaration order is part of the hash.
+pub mod dispatch;
+
 use safe_cex_crypto::{eip712, ethereum};
 use serde::Serialize;
 
@@ -14,7 +16,16 @@ pub fn action_hash(
     vault: Option<&str>,
     nonce: u64,
 ) -> Result<[u8; 32], String> {
-    let mut bytes = rmp_serde::to_vec_named(action).map_err(|e| e.to_string())?;
+    let encoded = rmp_serde::to_vec_named(action).map_err(|e| e.to_string())?;
+    action_hash_encoded(&encoded, vault, nonce)
+}
+
+fn action_hash_encoded(
+    encoded: &[u8],
+    vault: Option<&str>,
+    nonce: u64,
+) -> Result<[u8; 32], String> {
+    let mut bytes = encoded.to_vec();
     bytes.extend_from_slice(&nonce.to_be_bytes());
     bytes.push(u8::from(vault.is_some()));
     if let Some(vault) = vault {

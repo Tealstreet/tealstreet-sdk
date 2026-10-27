@@ -36,6 +36,11 @@ pub enum Request {
     Builder,
     Fees,
 }
+impl Request {
+    pub(crate) fn is_builder(&self) -> bool {
+        matches!(self, Self::Builder)
+    }
+}
 enum ReadContinuation {
     Account(Request),
     History(Box<crate::history::Request>),
@@ -324,11 +329,17 @@ impl Hyperliquid {
                 }
                 read => read,
             };
-            self.account.read_weight += read.weight;
-            if read.streamed {
-                self.info(cx, read.body, ArrayAt::Root, read.request.pending());
+            let QueuedRead {
+                body,
+                request,
+                streamed,
+                weight,
+            } = read;
+            self.account.read_weight += weight;
+            if streamed {
+                self.info(cx, body, ArrayAt::Root, request.pending());
             } else {
-                self.info_read(cx, read.body, read.request.pending(), None);
+                self.info_read(cx, body, request.pending(), None);
             }
         }
     }
@@ -370,12 +381,11 @@ impl Hyperliquid {
         }
         self.account.started = true;
         if !self.options.public_data_only
-            && let Some(secret) = self.options.secret.as_deref().filter(|s| !s.is_empty())
+            && let Some(actual) = self.sealed_agent()
         {
             let expected = self.options.key.as_deref().or(self.user());
             if let Some(expected) = expected
-                && safe_cex_crypto::ethereum::private_key_address(secret)
-                    .map_or(true, |actual| !actual.eq_ignore_ascii_case(expected))
+                && !actual.eq_ignore_ascii_case(expected)
             {
                 cx.notice(
                     Level::Warn,
@@ -936,6 +946,7 @@ impl Hyperliquid {
                 }
             }
             Request::Asset { symbol, revision } => {
+                self.account.inflight.remove(&format!("asset:{symbol}"));
                 if !self.settings_uncertain(&symbol)
                     || !self
                         .account
@@ -943,6 +954,9 @@ impl Hyperliquid {
                         .get(&symbol)
                         .is_some_and(|b| b.revision == revision)
                 {
+                    if self.settings_uncertain(&symbol) {
+                        self.refresh_uncertain_settings(cx, &symbol);
+                    }
                     return;
                 }
                 if let Ok(row) = serde_json::from_str::<ActiveAsset>(raw)
@@ -1063,6 +1077,7 @@ impl Hyperliquid {
             }
             Request::Spot { .. } => self.account.spot_inflight = false,
             Request::Asset { symbol, .. } => {
+                self.account.inflight.remove(&format!("asset:{symbol}"));
                 if self.settings_uncertain(&symbol) {
                     self.account.asset_retry.insert(symbol);
                     if self.account.asset_retry_timer.is_none() {
@@ -1166,7 +1181,6 @@ impl Hyperliquid {
         );
     }
     pub(crate) fn refresh_uncertain_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
-        self.acknowledge_settings(cx, symbol);
         let dex = self.dex_of(cx, symbol).to_owned();
         self.account.state_dirty.insert(dex);
         if self.account.state_refresh_timer.is_none() {
@@ -1182,10 +1196,14 @@ impl Hyperliquid {
             coin: &'a str,
         }
         if let Some(coin) = self.coin(cx, symbol) {
+            let coin = coin.to_owned();
+            if !self.account.inflight.insert(format!("asset:{symbol}")) {
+                return;
+            }
             let body = serde_json::to_string(&Read {
                 r#type: "activeAssetData",
                 user: self.user().unwrap_or_default(),
-                coin,
+                coin: &coin,
             })
             .unwrap();
             self.read_body(
@@ -1972,6 +1990,33 @@ impl Hyperliquid {
         let dex = self.dex_of(cx, &symbol).to_owned();
         *self.account.orders_revision.entry(dex).or_default() += 1;
         if terminal(&update.status) {
+            if failed_protective_status(&update.status)
+                && cx.store.order(&id).is_none()
+                && !self.account.suppressed.contains_key(&id)
+                && row.oid != 0
+                && row.reduce_only
+                && row.is_trigger
+                && matches!(
+                    row.order_type.as_ref(),
+                    "Stop Market" | "Stop Limit" | "Take Profit Market" | "Take Profit Limit"
+                )
+                && let Some(cloid) = row.cloid.as_deref().filter(|cloid| !cloid.is_empty())
+            {
+                cx.event(
+                    Level::Warn,
+                    code::CHILD_LEG_FAILED,
+                    format!(
+                        "Hyperliquid protective order {id} ({cloid}) {}",
+                        update.status
+                    ),
+                    vec![
+                        ("symbol", symbol.as_str().into()),
+                        ("orderId", id.as_str().into()),
+                        ("clientOrderId", cloid.into()),
+                        ("status", update.status.as_ref().into()),
+                    ],
+                );
+            }
             if update.status == "filled" {
                 self.amend_source_filled(&id);
             }
@@ -2363,4 +2408,35 @@ pub(crate) fn terminal(status: &str) -> bool {
         || status == "rejected"
         || status.ends_with("Canceled")
         || status.ends_with("Rejected")
+}
+
+// Closed failure statuses; user, sibling-fill and scheduled cancels are normal.
+// https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#query-order-status-by-oid-or-cloid
+fn failed_protective_status(status: &str) -> bool {
+    matches!(
+        status,
+        "rejected"
+            | "tickRejected"
+            | "minTradeNtlRejected"
+            | "perpMarginRejected"
+            | "reduceOnlyRejected"
+            | "badAloPxRejected"
+            | "iocCancelRejected"
+            | "badTriggerPxRejected"
+            | "marketOrderNoLiquidityRejected"
+            | "positionIncreaseAtOpenInterestCapRejected"
+            | "positionFlipAtOpenInterestCapRejected"
+            | "tooAggressiveAtOpenInterestCapRejected"
+            | "openInterestIncreaseRejected"
+            | "insufficientSpotBalanceRejected"
+            | "oracleRejected"
+            | "perpMaxPositionRejected"
+            | "marginCanceled"
+            | "vaultWithdrawalCanceled"
+            | "openInterestCapCanceled"
+            | "selfTradeCanceled"
+            | "reduceOnlyCanceled"
+            | "delistedCanceled"
+            | "liquidatedCanceled"
+    )
 }

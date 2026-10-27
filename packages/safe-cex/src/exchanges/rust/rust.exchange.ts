@@ -101,6 +101,7 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { mapAsterDEXSignerSetup } from './asterdexSignerSetup';
+import { mapHyperliquidSignerSetup } from './hyperliquidSignerSetup';
 import { assertBetaAccount, BETA_VENUES, isBetaVenue } from './betaVenues';
 import {
   deriveBridgeConstruction,
@@ -542,6 +543,16 @@ export class RustEngineExchange extends BaseExchange {
     // A setup refusal surfaces at start(), where callers route its message.
     let aster: ReturnType<typeof mapAsterDEXSignerSetup> | undefined;
     let setupError: ExchangeError | undefined;
+    const hyperliquid = deriveSignerSetupMapping(exchangeName) === 'hyperliquid';
+    const hyperliquidAccount = options.key;
+    let hyperliquidSetup: ExchangeOptions | undefined;
+    if (bridgeConstruction.dispatchSigning && !delegated && hyperliquid) {
+      try { hyperliquidSetup = mapHyperliquidSignerSetup(options); }
+      catch (error) {
+        if (!(error instanceof ExchangeError)) throw error;
+        setupError = error;
+      }
+    }
     if (bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'asterdex') {
       try {
         aster = mapAsterDEXSignerSetup(options);
@@ -568,12 +579,14 @@ export class RustEngineExchange extends BaseExchange {
                   options.omniKeySeed || undefined,
                 )
               : new LocalSignerSetup(
-                  deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options,
+                  hyperliquidSetup ?? (deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options),
                   deriveSignerSetupPolicy(exchangeName),
                 )
         : undefined;
     const signingMode = signerSetup
-      ? derivePublicMode(exchangeName, options, undefined, signerSetup.credentialPresence)
+      ? derivePublicMode(exchangeName, options, undefined, hyperliquid
+        ? { key: Boolean(hyperliquidAccount), secret: signerSetup.credentialPresence.secret }
+        : signerSetup.credentialPresence)
       : undefined;
     if (
       signingMode &&
@@ -588,6 +601,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (signerSetup || setupError)
       options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
+    if (hyperliquid && (signerSetup || setupError)) options = { ...options, key: hyperliquidAccount };
     const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
       ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
       : [];

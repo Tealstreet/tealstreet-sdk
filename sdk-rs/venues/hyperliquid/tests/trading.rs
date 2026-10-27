@@ -1,10 +1,10 @@
 //! Command contract cases derived from the official exchange endpoint shapes.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::Value;
+use support::prepared_now;
 use support::*;
 const CLOID: &str = "0x00000000000000000000000000000001";
 #[test]
@@ -50,7 +50,8 @@ fn opts(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
 fn write(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.drain_plain()
+    fire_timers(e)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 (r.url.ends_with("/exchange")).then_some(r)
@@ -144,7 +145,7 @@ fn bybit_controls_reject_the_whole_batch_before_any_write() {
 }
 
 #[test]
-fn full_position_stop_accepts_waiting_without_oid() {
+fn full_position_stop_without_oid_is_an_accepted_setting() {
     let (mut e, _) = ready("disabled");
     e.handle(2000.0,Event::Command(Command::PlaceOrders{command:1,orders:vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"stop_market","side":"sell","price":80,"amount":2,"reduceOnly":true,"clientOrderId":"{CLOID}"}}"#))]}));
     let r = write(&mut e);
@@ -158,10 +159,18 @@ fn full_position_stop_accepts_waiting_without_oid() {
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandDone { command: 1, result }) if result == "[]")));
     assert!(
-        e.drain_plain().any(
-            |a| matches!(a,Action::Notice(Notice::CommandDone{result:ref ids,..})if ids=="[]")
-        )
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
 }
 #[test]
@@ -241,17 +250,6 @@ fn amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only() {
         200,
         r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
     );
-    let timer = e
-        .drain_plain()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(timer)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    e.handle(2500.0, Event::TimerFired { timer });
     let r = write(&mut e);
     let b = body(&r);
     let wire = &b["action"]["orders"][0];
@@ -264,19 +262,25 @@ fn amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only() {
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
-    let result = e
-        .drain_plain()
-        .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { result: s, .. }) = a {
-                Some(s)
-            } else {
-                None
+    assert_eq!(b["action"]["grouping"], "positionTpsl");
+    assert_eq!(wire["s"], "0");
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    let result = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandDone { command: 2, result }) => {
+                Some(serde_json::from_str::<Value>(result).unwrap())
             }
+            _ => None,
         })
-        .unwrap();
-    let result: Value = serde_json::from_str(&result).unwrap();
-    assert_eq!(result["clientOrderId"], wire["c"]);
+        .expect("confirmed full-position replacement succeeds");
     assert_eq!(result["orderIds"], serde_json::json!([]));
+    assert_eq!(result["clientOrderId"], wire["c"]);
+    assert!(e.store().order("9").is_none());
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandFailed { .. }) | Action::Http(_)
+    )));
 }
 #[test]
 fn malformed_cancel_ack_stops_replacement_and_keeps_original() {
@@ -346,17 +350,6 @@ fn queued_leverage_uses_margin_mode_from_preceding_command() {
         200,
         r#"{"status":"ok","response":{"type":"default"}}"#,
     );
-    let timer = e
-        .drain_plain()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(timer)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    e.handle(2500.0, Event::TimerFired { timer });
     let second = write(&mut e);
     let b = body(&second);
     assert_eq!(b["action"]["isCross"], false);
@@ -395,7 +388,7 @@ fn configured_builder_pair_requires_the_configured_approval_rate() {
 
 #[test]
 fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() {
-    for malformed_reply in [false, true] {
+    for failure in [0, 1, 2] {
         let (mut e, socket) = ready("disabled");
         e.handle(
             2000.0,
@@ -415,10 +408,22 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
                 side: None,
             }),
         );
-        if malformed_reply {
+        if failure == 1 {
             e.handle(2002.0, Event::HttpResponse { request: first.id, response: Response {
                 status: 200, headers: "", body: r#"{"status":"ok","response":{"type":"order","data":{"statuses":[]}}}"#,
             }});
+        } else if failure == 2 {
+            e.handle(
+                2002.0,
+                Event::HttpResponse {
+                    request: first.id,
+                    response: Response {
+                        status: 503,
+                        headers: "",
+                        body: "unavailable",
+                    },
+                },
+            );
         } else {
             e.handle(
                 2002.0,
@@ -524,13 +529,7 @@ fn stale_account_snapshot_cannot_reverse_acknowledged_margin_change() {
             },
         },
     );
-    let (timer, at_ms) = e
-        .drain_plain()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
-            _ => None,
-        })
-        .unwrap();
+    let pending = e.drain_plain().collect::<Vec<_>>();
     message(
         &mut e,
         socket,
@@ -551,19 +550,19 @@ fn stale_account_snapshot_cannot_reverse_acknowledged_margin_change() {
         e.store().positions()[0].margin_type,
         Some(safe_cex_engine::model::MarginType::Isolated)
     );
-    e.handle(at_ms, Event::TimerFired { timer });
-    let second = write(&mut e);
-    assert_eq!(body(&second)["action"]["isCross"], false);
+    let actions = fire_actions(&mut e, pending);
+    let second = action_write(&actions);
+    assert_eq!(body(second)["action"]["isCross"], false);
 }
 
 #[test]
-fn signing_failure_restores_cancel_status_without_sending_a_request() {
+fn missing_installed_signer_refuses_cancel_without_changing_order_status() {
     let wallet = "0x14791697260e4c9a71f18484c9f997b308e59325";
     let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(
         safe_cex_venue_hyperliquid::Options {
             key: Some(wallet.into()),
             application_id: Some(wallet.into()),
-            secret: Some("0x00".into()),
+            credentials: None,
             ..Default::default()
         },
     ));
@@ -632,21 +631,14 @@ fn reply_at(e: &mut Engine<Hyperliquid>, request: &HttpRequest, now: f64, raw: &
         },
     );
 }
+// Follow only emitted readiness/pacing timers, never the live 20-second call timeout.
 fn fire_timers(e: &mut Engine<Hyperliquid>) -> Vec<Action> {
-    let mut actions = e.drain_plain().collect::<Vec<_>>();
-    let mut timers = actions
-        .iter()
-        .filter_map(|a| match a {
-            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
-    for (timer, at_ms) in timers {
-        e.handle(at_ms, Event::TimerFired { timer });
-        actions.extend(e.drain_plain());
-    }
-    actions
+    let actions = e.drain_plain().collect();
+    fire_actions(e, actions)
+}
+fn fire_actions(e: &mut Engine<Hyperliquid>, actions: Vec<Action>) -> Vec<Action> {
+    let end = safe_cex_engine::test_support::dispatch_now(e) + 334.0;
+    support::advance_packet_timers(e, actions, end)
 }
 fn action_write(actions: &[Action]) -> &HttpRequest {
     actions
@@ -815,7 +807,7 @@ fn resting_core_ack_can_be_canceled_before_websocket_update() {
 }
 
 #[test]
-fn definite_settings_rejection_keeps_next_queued_command_usable() {
+fn unlisted_settings_error_fences_the_next_queued_command() {
     let (mut e, _) = ready("disabled");
     e.handle(
         2000.0,
@@ -847,14 +839,13 @@ fn definite_settings_rejection_keeps_next_queued_command_usable() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error }) if error.legacy_text() == "Cannot switch margin mode with open orders"))
     );
-    let second = action_write(&actions);
-    assert_eq!(body(second)["action"]["isCross"], true);
-    assert_eq!(body(second)["action"]["leverage"], 5);
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetData"))
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings are uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetData" || kind(r) == "clearinghouseState")));
 }
 
 #[test]
@@ -1087,8 +1078,9 @@ fn delayed_source_fill_after_replacement_dispatch_preserves_confirmed_replacemen
         2401.0,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":10}}]}}}"#,
     );
-    let result = e
-        .drain_plain()
+    let terminal = e.drain_plain().collect::<Vec<_>>();
+    let result = terminal
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result),
             _ => None,
@@ -1278,14 +1270,14 @@ fn cross_on_an_isolated_only_market_is_rejected_before_signing() {
 #[test]
 fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome};
-    let rejected = (Some(ErrorKind::Rejected), Some(Outcome::Rejected));
-    let unknown = (None, Some(Outcome::Unknown));
+    let rejected = (Some(ErrorKind::Rejected), Some(Outcome::Unknown));
+    let unknown = (Some(ErrorKind::Internal), Some(Outcome::Unknown));
     let limit = r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":2}"#;
     for (status, body, classified) in [
         (
             200,
             r#"{"status":"err","response":"Insufficient margin"}"#,
-            rejected,
+            unknown,
         ),
         (
             200,
@@ -1295,14 +1287,18 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"status":"ok","response":{"type":"order","data":{"statuses":["mystery"]}}}"#,
-            unknown,
+            rejected,
         ),
         (200, "<html>", unknown),
-        (502, "bad gateway", unknown),
+        (
+            502,
+            "bad gateway",
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+        ),
         (
             429,
             "rate limited",
-            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
         ),
     ] {
         let (mut e, _) = ready("disabled");
@@ -1440,14 +1436,6 @@ fn schedule_control_shares_ordinary_write_queue_and_nonce_without_settings_mutat
         200,
         r#"{"status":"ok","response":{"type":"default"}}"#,
     );
-    let timer = e
-        .drain_plain()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, .. } => Some(timer),
-            _ => None,
-        })
-        .unwrap();
-    e.handle(2500.0, Event::TimerFired { timer });
     let control = write(&mut e);
     let control_body = body(&control);
     assert_eq!(
@@ -1477,3 +1465,104 @@ fn schedule_control_shares_ordinary_write_queue_and_nonce_without_settings_mutat
 
 #[path = "support/beta_batch_outcomes.rs"]
 mod beta_batch_outcomes;
+
+#[test]
+fn settings_engine_seal_joins_old_read_but_only_a_post_write_read_recovers() {
+    let (mut e, socket) = ready("disabled");
+    let set = |e: &mut Engine<Hyperliquid>, command, now| {
+        e.handle(
+            now,
+            Event::Command(Command::SetLeverage {
+                command,
+                symbol: "ETH-PERP".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+    };
+    set(&mut e, 101, 2000.0);
+    let first = write(&mut e);
+    e.handle(
+        2001.0,
+        Event::HttpFailed {
+            request: first.id,
+            error: "lost",
+        },
+    );
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    let old = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(r) if kind(r) == "activeAssetData" => Some(r.clone()),
+            _ => None,
+        })
+        .expect("real targeted settings read");
+    let fresh = STATE.replace("BTC", "ETH").replace("1000}", "2100}");
+    message(
+        &mut e,
+        socket,
+        2100.0,
+        &format!(r#"{{"channel":"clearinghouseState","data":{fresh}}}"#),
+    );
+    e.drain_plain().for_each(drop);
+    set(&mut e, 102, 2500.0);
+    let second = write(&mut e);
+    e.handle(
+        2501.0,
+        Event::HttpResponse {
+            request: second.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: r#"{"status":"err","response":"unavailable"}"#,
+            },
+        },
+    );
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 102, error }) if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(r) if kind(r) == "activeAssetData")),
+        "join the real in-flight read"
+    );
+    reply_at(
+        &mut e,
+        &old,
+        2600.0,
+        r#"{"coin":"ETH","leverage":{"type":"cross","value":20}}"#,
+    );
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    let reads = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Http(r) if kind(r) == "activeAssetData" => Some(r.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reads.len(),
+        1,
+        "stale completion starts one fresh successor"
+    );
+    assert_eq!(e.store().setting("ETH-PERP").unwrap().leverage, 10.0);
+    set(&mut e, 103, 2601.0);
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 103, error }) if error.legacy_text().contains("settings are uncertain"))));
+    reply_at(
+        &mut e,
+        &reads[0],
+        2700.0,
+        r#"{"coin":"ETH","leverage":{"type":"isolated","value":5}}"#,
+    );
+    e.drain_plain().for_each(drop);
+    set(&mut e, 104, 2900.0);
+    let recovered = write(&mut e);
+    assert_eq!(body(&recovered)["action"]["leverage"], 5);
+    assert_eq!(body(&recovered)["action"]["isCross"], false);
+}

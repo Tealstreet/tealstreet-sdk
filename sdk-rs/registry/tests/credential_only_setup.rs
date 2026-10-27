@@ -33,14 +33,7 @@ impl safe_cex_venues::Visit for Accept {
 /// Omni, the eighth, is pinned after the socket sign-failure fix lane.
 #[test]
 fn k4_non_validating_crates_without_dispatch_signing_refuse_injected_identities() {
-    for venue in [
-        "breakoutprop",
-        "grvt",
-        "hyperliquid",
-        "orderly",
-        "paradex",
-        "polymarket",
-    ] {
+    for venue in ["breakoutprop", "grvt", "orderly", "paradex", "polymarket"] {
         for primary in [
             r#"{"credential":"primary.credential","signing":""}"#,
             r#"{"credential":"","signing":"primary.signing"}"#,
@@ -58,6 +51,34 @@ fn k4_non_validating_crates_without_dispatch_signing_refuse_injected_identities(
                 error.message, "Injected signing is not supported for this venue yet",
                 "{venue}"
             );
+        }
+    }
+}
+
+#[cfg(feature = "hyperliquid")]
+#[test]
+fn k4_hyperliquid_injected_refs_still_require_the_installed_provider_after_cutover() {
+    for venue in ["hyperliquid", "hyperliquidspot"] {
+        for primary in [
+            r#"{"credential":"primary.credential","signing":""}"#,
+            r#"{"credential":"","signing":"primary.signing"}"#,
+            r#"{"credential":"primary.credential","signing":"primary.signing"}"#,
+        ] {
+            let options: EngineOptions =
+                serde_json::from_str(&format!(r#"{{"signing":{{"primary":{primary}}}}}"#)).unwrap();
+            let error = safe_cex_venues::build(
+                venue,
+                options,
+                Some(safe_cex_engine::test_support::seeded_entropy(17)),
+                Accept,
+            )
+            .expect_err("refs alone cannot install a signing provider");
+            assert_eq!(
+                error.message,
+                "Hyperliquid requires its primary signing provider"
+            );
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+            assert_eq!(error.outcome, None);
         }
     }
 }
