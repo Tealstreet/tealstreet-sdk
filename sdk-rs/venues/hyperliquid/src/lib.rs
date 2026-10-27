@@ -19,7 +19,7 @@ use safe_cex_engine::{
     VenueError,
 };
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
 
 #[derive(Clone, Default)]
@@ -128,6 +128,11 @@ pub struct ManagedInfoRead {
     context: Context,
     pending: Pending,
 }
+struct InfoSuccessor {
+    body: String,
+    pending: Pending,
+    streamed: Option<ArrayAt>,
+}
 #[derive(Default)]
 struct Connection {
     feed: Option<FeedId>,
@@ -175,6 +180,8 @@ pub struct Hyperliquid {
     /// and owned exposure on them is hidden rather than freezing the account.
     excluded: HashSet<String>,
     startup: safe_cex_engine::startup::Backoff<(String, u32)>,
+    info_completing: bool,
+    info_successors: VecDeque<InfoSuccessor>,
 }
 impl Hyperliquid {
     pub fn new(options: Options) -> Self {
@@ -203,6 +210,8 @@ impl Hyperliquid {
             core_discovery_incomplete: true,
             excluded: HashSet::new(),
             startup: Default::default(),
+            info_completing: false,
+            info_successors: VecDeque::new(),
         }
     }
     pub fn new_spot(mut options: Options) -> Self {
@@ -367,6 +376,14 @@ impl Hyperliquid {
         pending: Pending,
         streamed: Option<ArrayAt>,
     ) {
+        if self.info_completing {
+            self.info_successors.push_back(InfoSuccessor {
+                body,
+                pending,
+                streamed,
+            });
+            return;
+        }
         let context = match cx.http_context(
             safe_cex_engine::request_context::Scope::Background,
             Policy {
@@ -1154,8 +1171,13 @@ impl Venue for Hyperliquid {
                     .validate_background_read_http_delivery(&read.context)
                     .is_ok()
                 {
+                    self.info_completing = true;
                     self.on_response(cx, read.pending, response);
                     let _ = cx.finish_http_context(&read.context);
+                    self.info_completing = false;
+                    while let Some(next) = self.info_successors.pop_front() {
+                        self.info_read(cx, next.body, next.pending, next.streamed);
+                    }
                 }
             }
             Pending::SocketRefresh { .. } => {}

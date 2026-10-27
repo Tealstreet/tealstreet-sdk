@@ -1,14 +1,18 @@
 mod support;
 
-use safe_cex_engine::request_context::{Claim, HttpAction, Prepared, RoutingIntent};
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response};
-use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+use safe_cex_engine::request_context::{
+    Claim, Context, HttpAction, Operation, Policy, Prepared, RetryPolicy, RoutingIntent, Scope,
+};
+use safe_cex_engine::{
+    Action, Command, Cx, Engine, Event, HttpRequest, Response, SocketId, TimerId, Venue,
+};
+use safe_cex_venue_hyperliquid::{Hyperliquid, Options, Pending};
 use std::collections::{HashSet, VecDeque};
 
 const NOW: f64 = 1_000.;
 const SPOT: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"1","markPx":"1"}]]"#;
 
-fn reply(engine: &mut Engine<Hyperliquid>, request: &HttpRequest, body: &str) {
+fn reply<V: Venue>(engine: &mut Engine<V>, request: &HttpRequest, body: &str) {
     engine.handle(
         NOW,
         Event::HttpResponse {
@@ -22,7 +26,7 @@ fn reply(engine: &mut Engine<Hyperliquid>, request: &HttpRequest, body: &str) {
     );
 }
 
-fn release(engine: &mut Engine<Hyperliquid>, testnet: bool) -> Vec<Action> {
+fn release<V: Venue>(engine: &mut Engine<V>, testnet: bool) -> Vec<Action> {
     engine.prepare_dispatch(NOW);
     let mut queue: VecDeque<_> = engine.drain_actions().collect();
     let mut result = Vec::new();
@@ -77,6 +81,127 @@ fn release(engine: &mut Engine<Hyperliquid>, testnet: bool) -> Vec<Action> {
         queue.extend(engine.drain_actions());
     }
     result
+}
+
+struct Saturated {
+    inner: Hyperliquid,
+    peers: Vec<Context>,
+    validated: usize,
+}
+impl Saturated {
+    fn peer(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.peers.push(
+            cx.http_context(
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 60_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .expect("genuine retained peer"),
+        );
+    }
+}
+impl Venue for Saturated {
+    type Pending = Pending;
+    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.inner.start(cx);
+        for _ in 0..255 {
+            self.peer(cx);
+        }
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, r: Response<'_>) {
+        self.inner.on_response(cx, p, r);
+    }
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, p: &mut Pending, item: &str) {
+        self.inner.on_item(cx, p, item);
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, e: &str) {
+        self.inner.on_request_failed(cx, p, e);
+    }
+    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, s: SocketId) {
+        self.inner.on_open(cx, s);
+    }
+    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, s: SocketId, code: u16) {
+        self.inner.on_close(cx, s, code);
+    }
+    fn on_message(&mut self, cx: &mut Cx<'_, Pending>, s: SocketId, text: &str) {
+        self.inner.on_message(cx, s, text);
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.inner.on_timer(cx, timer);
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::SetTickerSymbols { symbols } = &command {
+            if symbols == &["fresh"] {
+                self.peer(cx);
+            }
+            for peer in &self.peers {
+                cx.validate_http_context(peer).unwrap();
+            }
+            self.validated = self.peers.len();
+        } else {
+            self.inner.on_command(cx, command);
+        }
+    }
+    fn book(&self, symbol: &str) -> Option<&safe_cex_engine::book::Book> {
+        self.inner.book(symbol)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+        self.inner.books()
+    }
+}
+
+#[test]
+fn saturated_catalogue_publishes_then_reuses_its_credit_for_discovery() {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Saturated {
+        inner: Hyperliquid::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        }),
+        peers: vec![],
+        validated: 0,
+    });
+    engine.start(NOW);
+    let metadata = release(&mut engine, false)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(support::kind(&metadata), "metaAndAssetCtxs");
+    reply(&mut engine, &metadata, support::META);
+    assert_eq!(engine.store().markets().len(), 2);
+    let discovery = release(&mut engine, false)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if support::kind(&r) == "perpDexs" => Some(r),
+            _ => None,
+        })
+        .expect("completed metadata releases its credit before issuing discovery");
+    engine.handle(
+        NOW,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["validate".into()],
+        }),
+    );
+    assert_eq!(engine.venue().validated, 255);
+    reply(&mut engine, &discovery, "[null]");
+    engine.handle(
+        NOW,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["fresh".into()],
+        }),
+    );
+    assert_eq!(
+        engine.venue().validated,
+        256,
+        "discovery also retires its own credit"
+    );
 }
 
 #[test]
