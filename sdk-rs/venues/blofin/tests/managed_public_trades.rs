@@ -478,6 +478,42 @@ struct FullQueue {
 }
 
 impl Venue for FullQueue {
+    fn managed_sockets() -> bool {
+        <Blofin as Venue>::managed_sockets()
+    }
+    fn socket_capabilities() -> safe_cex_engine::socket_lifecycle::SocketCapabilities {
+        <Blofin as Venue>::socket_capabilities()
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.venue.on_socket_event(cx, event)
+    }
+    fn socket_control(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        authenticated: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        self.venue.socket_control(store, feed, authenticated, text)
+    }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        values: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.venue
+            .encode_socket_interests(store, feed, subscribe, values, emit)
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> Capabilities {
         self.venue.capabilities()

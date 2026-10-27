@@ -247,6 +247,7 @@ fn leverage(id: u32) -> Command {
 
 fn seeded() -> Harness {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h
 }
@@ -258,6 +259,7 @@ fn seed_order(h: &mut Harness, id: &str, extra: &str) {
 /// A flat account switched to isolated margin and hedge mode.
 fn hedged_isolated() -> Harness {
     let mut h = Harness::new();
+    h.open_private();
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
@@ -366,6 +368,7 @@ fn cancels_and_settings_are_primary_managed_mutations() {
 #[test]
 fn verify_is_a_secondary_managed_read_after_one_native_pause() {
     let mut h = Harness::with_secondary();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     let intents = command(&mut h, amend(7));
@@ -885,6 +888,7 @@ fn a_new_uncertain_amend_requires_a_census_started_after_its_mark() {
     eth["baseCurrency"] = "ETH".into();
     instruments["data"].as_array_mut().unwrap().push(eth);
     let mut h = Harness::with_instruments(&instruments.to_string());
+    h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"ETH-USDT","orderCategory":"normal","orderId":"22","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"}]}"#);
 
@@ -1122,6 +1126,7 @@ fn a_text_only_gone_row_is_classified_by_its_code_and_stops() {
 #[test]
 fn the_reconcile_snapshot_is_primary_signed_with_a_secondary_configured() {
     let mut h = Harness::with_secondary();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     command(&mut h, cancel(7));
