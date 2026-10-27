@@ -25,16 +25,16 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
   insist(candidates.length === 1, 'missing/duplicate paired physical producer');
   const checkoutSha = gitRead('rev-parse', 'HEAD'), checkoutTree = gitRead('rev-parse', 'HEAD^{tree}');
   let pull, landing, mergeTree;
-  if (run.event === 'push' && run.head_branch === 'feat/rust-rewrite') {
+  if (run.event === 'push' && run.head_branch === 'master') {
     landing = await reader.getCommit(run.head_sha); mergeTree = checkoutTree;
   } else {
     const associated = await reader.listCommitPulls(run.head_sha);
     const matching = associated.filter(item => item.state === 'open' && item.head?.sha === run.head_sha &&
-      item.base?.ref === 'feat/rust-rewrite' && item.base?.repo?.full_name === 'Tealstreet/tealstreet-sdk');
+      item.base?.ref === 'master' && item.base?.repo?.full_name === 'Tealstreet/tealstreet-sdk');
     insist(matching.length === 1, 'missing/ambiguous exact open PR for this run');
     pull = await reader.getPull(matching[0].number);
     insist(pull.state === 'open' && pull.head?.sha === run.head_sha &&
-      pull.base?.ref === 'feat/rust-rewrite' && pull.base.repo?.full_name === 'Tealstreet/tealstreet-sdk' &&
+      pull.base?.ref === 'master' && pull.base.repo?.full_name === 'Tealstreet/tealstreet-sdk' &&
       run.repository.full_name === 'Tealstreet/tealstreet-sdk', 'live PR must name the authenticated Rust landing base');
     let associatedBase;
     if (run.event === 'pull_request') {
@@ -53,15 +53,15 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
       apiParents.every(parent => /^[a-f0-9]{40}$/.test(parent)) && apiParents[1] === run.head_sha,
     'checkout API/local tree and exact two-parent PR composition must agree');
     const baseline = apiParents[0], landingRef = await reader.getRustLanding();
-    insist(landingRef.ref === 'refs/heads/feat/rust-rewrite' &&
-      landingRef.url === 'https://api.github.com/repos/Tealstreet/tealstreet-sdk/git/refs/heads/feat/rust-rewrite' &&
+    insist(landingRef.ref === 'refs/heads/master' &&
+      landingRef.url === 'https://api.github.com/repos/Tealstreet/tealstreet-sdk/git/refs/heads/master' &&
       landingRef.object?.type === 'commit' && /^[a-f0-9]{40}$/.test(landingRef.object.sha),
     'authenticated current Rust landing ref from the base repository required');
     const landingTip = landingRef.object.sha;
     insist(/^https:\/\/github\.com\/Tealstreet\/tealstreet-sdk(?:\.git)?$/.test(gitRead('remote', 'get-url', 'origin')),
       'local origin must be the authenticated base repository');
-    gitRead('fetch', '--no-tags', 'origin', 'refs/heads/feat/rust-rewrite:refs/remotes/origin/feat/rust-rewrite');
-    insist(gitRead('rev-parse', 'refs/remotes/origin/feat/rust-rewrite') === landingTip,
+    gitRead('fetch', '--no-tags', 'origin', 'refs/heads/master:refs/remotes/origin/master');
+    insist(gitRead('rev-parse', 'refs/remotes/origin/master') === landingTip,
       'API and local current Rust landing ref must agree');
     const firstParents = gitRead('rev-list', '--first-parent', landingTip).split('\n');
     insist(gitRead('merge-base', '--is-ancestor', baseline, landingTip) === '' && firstParents.includes(baseline),

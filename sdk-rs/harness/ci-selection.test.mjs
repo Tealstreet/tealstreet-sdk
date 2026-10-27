@@ -135,7 +135,7 @@ test('base dependency edges and transitive users survive removed dependencies', 
 
 test('selection uses actual checkout parents, never a stale event base SHA', () => {
   const a = 'a'.repeat(40), b = 'b'.repeat(40), c = 'c'.repeat(40), t = 'd'.repeat(40);
-  const event = { pull_request: { head: { sha: b }, base: { sha: c, ref: 'feat/rust-rewrite', repo: { full_name: 'Tealstreet/tealstreet-sdk' } } } };
+  const event = { pull_request: { head: { sha: b }, base: { sha: c, ref: 'master', repo: { full_name: 'Tealstreet/tealstreet-sdk' } } } };
   const value = { event, checkout: c, parents: [a, b], tree: t, mergeTree: t };
   assert.equal(checkoutBase(value), a);
   for (const change of [{ parents: [a] }, { parents: [a, c] }, { parents: [a, b, c] }, { mergeTree: a },

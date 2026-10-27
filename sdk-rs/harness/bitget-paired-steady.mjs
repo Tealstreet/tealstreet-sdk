@@ -41,14 +41,14 @@ const exactCase = report => report?.venue === 'bitget' && report.private === fal
 export function bitgetPairedAuthority({ run, pull, landing, job, checkoutSha, checkoutTree, mergeTree, measurementFiles }) {
   insist(run?.repository?.full_name === 'Tealstreet/tealstreet-sdk' && positive(run.id) &&
     run.run_attempt === 1 && ['pull_request', 'workflow_dispatch', 'push'].includes(run.event), 'original repository run required');
-  insist(run.event !== 'push' || run.head_branch === 'feat/rust-rewrite', 'push must be the Rust landing branch');
+  insist(run.event !== 'push' || run.head_branch === 'master', 'push must be the Rust landing branch');
   let baseline, pullNumber = null;
-  if (run.event === 'push' && run.head_branch === 'feat/rust-rewrite') {
+  if (run.event === 'push' && run.head_branch === 'master') {
     insist(landing?.sha === run.head_sha && checkoutSha === landing.sha && landing.tree?.sha === checkoutTree &&
       oid(landing.parents?.[0]?.sha), 'landing baseline must be the authenticated actual first parent');
     baseline = landing.parents[0].sha;
   } else {
-    insist(pull?.base?.repo?.full_name === run.repository.full_name && pull.base.ref === 'feat/rust-rewrite' &&
+    insist(pull?.base?.repo?.full_name === run.repository.full_name && pull.base.ref === 'master' &&
       oid(pull.base.sha) && oid(pull.head?.sha) && pull.head.sha === run.head_sha && positive(pull.number),
     'baseline must be the authenticated landing base of this exact PR head');
     baseline = pull.base.sha; pullNumber = pull.number;
