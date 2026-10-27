@@ -35,6 +35,10 @@ def modes():
         'metadata Plan CI control']
     # No venue enables address setup until its own adoption; exercise the real seam.
     grouped[('address-nonce', 'http-plans', 'test-support')] = ['verified address nonce setup control']
+    # No family enables owned takeover before its provider/host activation.
+    grouped[('http-plans', 'nonce-handoff', 'test-support')] = ['owned nonce handoff without order locks']
+    grouped[('http-plans', 'nonce-handoff', 'order-locks', 'serial-plans', 'test-support')] = [
+        'owned nonce handoff and uncertainty control']
     # No family enables serial Plans before adoption; keep them compiled and tested.
     grouped[('http-plans', 'order-locks', 'serial-plans', 'test-support')] = ['serial Plan control']
     # Condition waits imply serial-plans; no family enables them before adoption.

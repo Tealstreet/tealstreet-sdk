@@ -42,6 +42,8 @@ pub enum Verdict {
     Unknown(Option<ErrorKind>),
     /// "Not open / already in that state" for one intent. Not a store transition.
     Satisfied(SatisfiedIntent),
+    /// Exact native proof of nonce rejection before execution; never a resend.
+    NonceRefused,
 }
 
 impl Verdict {
@@ -50,11 +52,15 @@ impl Verdict {
             Self::Refused(kind) | Self::RefusedResend(kind) => Some(kind),
             Self::Unknown(kind) => kind,
             Self::Satisfied(_) => None,
+            Self::NonceRefused => Some(ErrorKind::InvalidInput),
         }
     }
 
     pub fn is_refusal(self) -> bool {
-        matches!(self, Self::Refused(_) | Self::RefusedResend(_))
+        matches!(
+            self,
+            Self::Refused(_) | Self::RefusedResend(_) | Self::NonceRefused
+        )
     }
 }
 
@@ -144,9 +150,13 @@ impl CodeTable {
         if self.success.iter().any(|key| key.matches(native)) {
             return Verdict::Unknown(Some(ErrorKind::Internal));
         }
-        let verdict = self
-            .row(native, intent)
-            .map_or(self.unlisted, |row| row.verdict);
+        let row = self.row(native, intent);
+        let verdict = row.map_or(self.unlisted, |row| row.verdict);
+        if verdict == Verdict::NonceRefused
+            && !row.is_some_and(|row| matches!(row.key, Key::Int(_) | Key::Text(_)))
+        {
+            return Verdict::Unknown(Some(ErrorKind::InvalidInput));
+        }
         scoped(verdict, intent)
     }
 
@@ -164,6 +174,7 @@ impl CodeTable {
             .iter()
             .find(|(documented, _)| *documented == status)
             .map(|(_, verdict)| *verdict)
+            .filter(|verdict| *verdict != Verdict::NonceRefused)
     }
 }
 
@@ -268,6 +279,7 @@ pub fn error(
             Verdict::Refused(_) | Verdict::RefusedResend(_) => Some(Outcome::Rejected),
             Verdict::Unknown(_) => Some(Outcome::Unknown),
             Verdict::Satisfied(_) => None,
+            Verdict::NonceRefused => Some(Outcome::NotSent),
         };
     }
     if let Some(native) = native {
@@ -575,7 +587,7 @@ pub fn read(
             None
         }
         (Verdict::Unknown(_), _) => Some(header.map_or(ReadRetry::ReadFailure, ReadRetry::After)),
-        (Verdict::Refused(_) | Verdict::Satisfied(_), _) => None,
+        (Verdict::Refused(_) | Verdict::Satisfied(_) | Verdict::NonceRefused, _) => None,
     };
     ReadFailure { error, retry }
 }
@@ -597,6 +609,10 @@ pub fn assert_table(table: &CodeTable) {
             row.verdict != Verdict::RefusedResend(ErrorKind::RateLimited),
             "row {index}: a rate limit waits; it never resends"
         );
+        assert!(
+            row.verdict != Verdict::NonceRefused || matches!(row.key, Key::Int(_) | Key::Text(_)),
+            "nonce refusal needs one exact native code"
+        );
         if let Key::Range(low, high) = row.key {
             assert!(low <= high, "row {index}: empty range");
         }
@@ -610,7 +626,7 @@ pub fn assert_table(table: &CodeTable) {
     assert!(
         !matches!(
             table.unlisted,
-            Verdict::Satisfied(_) | Verdict::RefusedResend(_)
+            Verdict::Satisfied(_) | Verdict::RefusedResend(_) | Verdict::NonceRefused
         ),
         "unlisted codes cannot be Satisfied or RefusedResend"
     );
@@ -667,3 +683,7 @@ fn keys_overlap(a: Key, b: Key) -> bool {
 #[cfg(test)]
 #[path = "classify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "nonce_refusal_tests.rs"]
+mod nonce_refusal_tests;
