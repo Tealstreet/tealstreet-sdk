@@ -699,3 +699,22 @@ no callers.
   that opens the credential-bearing Session, with Some(authority) and the `Auth` step.
   Never on a Session call or a Mutation. RED: the `/auth` Prepare is Direct and signed,
   and any other signed credentialed Direct Context is refused before IDs.
+
+### PR-3a source checkpoint
+
+REDs `bf099180639` (four assertion REDs and one PRESERVATION control), corrected by
+`c1630d1a24e`: a later page ends at the walk's window, not its own. Source:
+- history pages are `ReadCursorHistory` legs of a command Read root
+  (`admit_http_command`, then `http_leg_context` per page through `Account::read`).
+  Rows and page advances are admitted only through the delivering leg;
+- a preparation failure (never sent) rejects strictly NotSent;
+- a transport failure keeps the INCOMPLETE partial;
+- FetchLeverage is a command Read, `Pending::Leverage`, with `done_context`/`fail_context`;
+- `Account::read_error` shares the refused-`/auth` mapping with identity.
+
+Adapted: `history.rs` `owned_history_preparation_refusal_after_accepted_rows_remains_strict`.
+It used to answer page 1 180 s late, which is now past the walk window. The page is
+now sent just before the JWT refresh point and answered within the window, and the
+parked page 2 ends NotSent at the walk window. Its assertions are unchanged.
+
+Inventory: Paradex 19 → 14. Callers: `docs/plans/callers/rust-paradex-request-funnel.md`.
