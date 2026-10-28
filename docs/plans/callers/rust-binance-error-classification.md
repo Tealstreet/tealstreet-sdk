@@ -32,6 +32,14 @@ Kind deltas callers will see (messages are unchanged):
 - **Candles command:** an HTTP failure now carries the table kind (-1120 BAD_INTERVAL
   is `invalidInput`) and `venueCode`; the message text is unchanged.
 
+Recorded corpus provenance: the nine `tests/fixtures/errors` replies are live,
+no-credential captures (bogus key, bogus signature, paced 1.5 s, 9 requests)
+taken 2026-10-28 01:18:50-01:19:03Z. They ran before claude-ddi2il had seen the
+list; that was disclosed, and ddi2il ruled to keep all nine. `spot-account-bogus-key`
+recorded -1021 (recvWindow), not an auth refusal, because Spot checks the
+timestamp before the key. It therefore pins the read path's `rejected` kind for
+an unlisted code, not auth.
+
 Not changed in this PR, and why:
 - **Depth snapshot refusals** still retry silently with backoff (pinned with
   recorded -1121/-1102 replies).
