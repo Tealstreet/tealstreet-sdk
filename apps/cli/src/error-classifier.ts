@@ -56,6 +56,7 @@ export function classifyForCLI(
     case 'order_warning':
       return { action: 'warn' };
     case 'order_rejected':
+    case 'insufficient_balance':
       return { action: 'error' };
 
     // Unsupported backend — error with context

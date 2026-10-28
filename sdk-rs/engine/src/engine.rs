@@ -9008,6 +9008,7 @@ mod public_retry_tests {
         for kind in [
             ErrorKind::Rejected,
             ErrorKind::InvalidInput,
+            ErrorKind::InsufficientBalance,
             ErrorKind::AuthInvalid,
             ErrorKind::AuthExpired,
             ErrorKind::AuthPermission,

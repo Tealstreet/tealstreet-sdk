@@ -547,6 +547,13 @@ test('a terminal startup failure reaches the host with its structured detail', (
   assert.deepEqual(failures, [detail]);
 });
 
+test('an insufficient-balance refusal keeps its kind across the host bridge', () => {
+  const error = new ExchangeError('Margin is insufficient.', { kind: 'insufficientBalance', outcome: 'rejected', venueCode: '-2019' });
+  assert.equal(error.kind, 'insufficientBalance');
+  assert.equal(error.outcome, 'rejected');
+  assert.equal(new ExchangeError('x', { kind: 'insufficientFunds' }).kind, undefined);
+});
+
 test('socket feed identity and protocol recovery reach the account transport', () => {
   let received;
   const host = new EngineHost({}, {

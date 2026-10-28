@@ -84,8 +84,8 @@ export function builderAuthorizationOf(value: unknown): BuilderAuthorizationDeta
 /** Structured engine failure (`engine/src/error.rs`); `message` is the user-facing text. */
 export interface VenueErrorDetail {
   message: string;
-  kind?: 'rejected' | 'invalidInput' | 'authInvalid' | 'authExpired' | 'authPermission' | 'rateLimited'
-    | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
+  kind?: 'rejected' | 'invalidInput' | 'insufficientBalance' | 'authInvalid' | 'authExpired' | 'authPermission'
+    | 'rateLimited' | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
   outcome?: 'notSent' | 'rejected' | 'unknown';
   venueCode?: string;
   venueMessage?: string;
