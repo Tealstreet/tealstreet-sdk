@@ -401,30 +401,58 @@ pub mod error_corpus {
     ) {
         for row in table.rows {
             if let crate::classify::Key::IntMessage(code, message) = row.key {
-                let recorded = corpus.iter().any(|(_, fixture)| {
-                    serde_json::from_str::<serde_json::Value>(&fixture.body)
-                        .is_ok_and(|body| carries(&body, code, message))
-                });
+                let recorded = corpus
+                    .iter()
+                    .any(|(_, fixture)| carries(&fixture.body, code, message));
                 assert!(recorded, "code {code} {message:?} has no recorded fixture");
             }
         }
     }
 
-    /// One JSON object holding both the code (number or string) and the message.
-    fn carries(value: &serde_json::Value, code: i64, message: &str) -> bool {
-        match value {
-            serde_json::Value::Object(map) => {
-                let has_code = map.values().any(|value| {
-                    value.as_i64() == Some(code) || value.as_str() == Some(&code.to_string())
-                });
-                let has_message = map.values().any(|value| value.as_str() == Some(message));
-                (has_code && has_message) || map.values().any(|value| carries(value, code, message))
+    /// Some JSON object in `text` whose own members hold both the code (number
+    /// or string) and the exact message.
+    fn carries(text: &str, code: i64, message: &str) -> bool {
+        let bytes = text.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'"' => index = string_end(bytes, index),
+                b'{' => {
+                    let end = value_end(bytes, index);
+                    if object_carries(&text[index..end], code, message) {
+                        return true;
+                    }
+                    index += 1;
+                }
+                _ => index += 1,
             }
-            serde_json::Value::Array(items) => {
-                items.iter().any(|item| carries(item, code, message))
-            }
-            _ => false,
         }
+        false
+    }
+
+    /// The object's direct members, never those of a nested value.
+    fn object_carries(object: &str, code: i64, message: &str) -> bool {
+        let bytes = object.as_bytes();
+        let (codes, mut has_code, mut has_message) =
+            ([code.to_string(), format!("\"{code}\"")], false, false);
+        let mut index = skip_space(bytes, 1);
+        while bytes.get(index) == Some(&b'"') {
+            let colon = skip_space(bytes, string_end(bytes, index));
+            if bytes.get(colon) != Some(&b':') {
+                break;
+            }
+            let start = skip_space(bytes, colon + 1);
+            let stop = value_end(bytes, start);
+            let value = &object[start..stop];
+            has_code |= codes.iter().any(|token| token == value);
+            has_message |= serde_json::from_str::<String>(value).is_ok_and(|text| text == message);
+            index = skip_space(bytes, stop);
+            if bytes.get(index) != Some(&b',') {
+                break;
+            }
+            index = skip_space(bytes, index + 1);
+        }
+        has_code && has_message
     }
 
     fn is_date(text: &str) -> bool {
@@ -441,9 +469,7 @@ pub mod error_corpus {
     /// identifying free text: 40+ hex digits, IPv4, IPv6, a UUID or a mixed-case
     /// base58 run of 32+.
     fn unredacted(text: &str) -> Option<String> {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(text)
-            && let Some(key) = sensitive_value(&value)
-        {
+        if let Some(key) = sensitive_json(text) {
             return Some(format!("an unredacted {key}"));
         }
         for pair in text.split(['?', '&']).skip(1) {
@@ -458,28 +484,102 @@ pub mod error_corpus {
         identifying_text(text)
     }
 
-    fn sensitive_value(value: &serde_json::Value) -> Option<String> {
-        match value {
-            serde_json::Value::Object(map) => map.iter().find_map(|(key, value)| {
-                let blank = match value {
-                    serde_json::Value::Null => true,
-                    serde_json::Value::String(text) => text.is_empty() || text == REDACTED,
-                    _ => false,
-                };
-                if is_sensitive(key) && !blank {
-                    Some(key.clone())
-                } else {
-                    sensitive_value(value)
-                }
-            }),
-            serde_json::Value::Array(items) => items.iter().find_map(sensitive_value),
-            serde_json::Value::String(text) if text.starts_with(['{', '[']) => {
-                serde_json::from_str::<serde_json::Value>(text)
-                    .ok()
-                    .and_then(|nested| sensitive_value(&nested))
-            }
-            _ => None,
+    /// The index just past the JSON string opening at `at`.
+    fn string_end(text: &[u8], at: usize) -> usize {
+        let mut index = at + 1;
+        while index < text.len() && text[index] != b'"' {
+            index += if text[index] == b'\\' { 2 } else { 1 };
         }
+        (index + 1).min(text.len())
+    }
+
+    /// The index just past the JSON value starting at `at`.
+    fn value_end(text: &[u8], at: usize) -> usize {
+        match text.get(at) {
+            Some(b'"') => string_end(text, at),
+            Some(b'{' | b'[') => {
+                let (mut depth, mut index) = (0usize, at);
+                while index < text.len() {
+                    match text[index] {
+                        b'"' => {
+                            index = string_end(text, index);
+                            continue;
+                        }
+                        b'{' | b'[' => depth += 1,
+                        b'}' | b']' => depth = depth.saturating_sub(1),
+                        _ => {}
+                    }
+                    index += 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                index
+            }
+            _ => {
+                let mut index = at;
+                while index < text.len() && !b" \t\r\n,}]".contains(&text[index]) {
+                    index += 1;
+                }
+                index
+            }
+        }
+    }
+
+    fn skip_space(text: &[u8], mut at: usize) -> usize {
+        while at < text.len() && text[at].is_ascii_whitespace() {
+            at += 1;
+        }
+        at
+    }
+
+    /// The first sensitive key whose value is not blank: the same structural
+    /// scan the JS writer redacts with, over any text and JSON nested in strings.
+    fn sensitive_json(text: &str) -> Option<String> {
+        let bytes = text.as_bytes();
+        let nested = |token: &str| {
+            serde_json::from_str::<String>(token)
+                .ok()
+                .filter(|inner| inner.trim_start().starts_with(['{', '[']))
+                .and_then(|inner| sensitive_json(&inner))
+        };
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] != b'"' {
+                index += 1;
+                continue;
+            }
+            let end = string_end(bytes, index);
+            let token = &text[index..end];
+            let colon = skip_space(bytes, end);
+            if bytes.get(colon) != Some(&b':') {
+                if let Some(key) = nested(token) {
+                    return Some(key);
+                }
+                index = end;
+                continue;
+            }
+            let key = serde_json::from_str::<String>(token).unwrap_or_default();
+            let start = skip_space(bytes, colon + 1);
+            let stop = value_end(bytes, start);
+            let value = &text[start..stop];
+            let blank = matches!(value, "\"\"" | "null") || value == format!("\"{REDACTED}\"");
+            if is_sensitive(&key) && !blank {
+                return Some(key);
+            }
+            let inner = if value.starts_with('"') {
+                nested(value)
+            } else if value.starts_with(['{', '[']) {
+                sensitive_json(value)
+            } else {
+                None
+            };
+            if inner.is_some() {
+                return inner;
+            }
+            index = stop.max(index + 1);
+        }
+        None
     }
 
     /// Maximal runs of characters satisfying `keep`.
@@ -670,17 +770,27 @@ pub mod error_corpus {
         /// text is refused, its redacted form and every keep text pass.
         #[test]
         fn the_loader_agrees_with_the_writer_on_the_shared_vectors() {
-            let rules: serde_json::Value =
+            #[derive(Deserialize)]
+            struct Vector {
+                raw: String,
+                redacted: String,
+            }
+            #[derive(Deserialize)]
+            struct Vectors {
+                redact: Vec<Vector>,
+                keep: Vec<String>,
+            }
+            #[derive(Deserialize)]
+            struct File {
+                vectors: Vectors,
+            }
+            let file: File =
                 serde_json::from_str(include_str!("error_corpus_redaction.json")).unwrap();
-            let vectors = &rules["vectors"];
-            for vector in vectors["redact"].as_array().unwrap() {
-                let raw = vector["raw"].as_str().unwrap();
+            for Vector { raw, redacted } in &file.vectors.redact {
                 assert!(unredacted(raw).is_some(), "not refused: {raw}");
-                let redacted = vector["redacted"].as_str().unwrap();
                 assert_eq!(unredacted(redacted), None, "{redacted}");
             }
-            for keep in vectors["keep"].as_array().unwrap() {
-                let keep = keep.as_str().unwrap();
+            for keep in &file.vectors.keep {
                 assert_eq!(unredacted(keep), None, "{keep}");
             }
             assert!(identifying_text("Your IP 203.0.113.7.").is_some());
