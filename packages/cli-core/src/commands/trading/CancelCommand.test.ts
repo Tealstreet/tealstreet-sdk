@@ -286,6 +286,83 @@ describe('CancelCommand', () => {
     });
   });
 
+  describe('tokens on venues listing B / S / T markets', () => {
+    // Blofin lists B-USDT and S-USDT, OKX lists S-USDT-SWAP. Symbol
+    // resolution is a base-prefix match, so `buys` resolved to BUSDT,
+    // `sells` / `stops` to SUSDT and an id suffix like `b3f9` to BUSDT, and
+    // the symbol fallback cancelled every order on that market.
+    function exchangeWithPrefixMarkets(orders: Order[]): ExchangeLike {
+      const exchange = createMockExchange(orders);
+      const store = exchange.store as unknown as { markets: unknown[]; tickers: unknown[] };
+      for (const base of ['B', 'S', 'T']) {
+        store.markets.push({ symbol: `${base}USDT`, base, quote: 'USDT', precision: { amount: 1, price: 0.0001 } });
+        store.tickers.push({ symbol: `${base}USDT`, last: 1 });
+      }
+      return exchange;
+    }
+
+    const orders = [
+      createMockOrder('1', 'BTCUSDT', OrderSide.Buy, OrderType.Limit),
+      createMockOrder('2', 'BTCUSDT', OrderSide.Sell, OrderType.Limit),
+      createMockOrder('3', 'BTCUSDT', OrderSide.Buy, OrderType.StopLoss),
+      createMockOrder('4', 'BTCUSDT', OrderSide.Sell, OrderType.StopLoss),
+    ];
+
+    it.each([
+      [['buys'], ['1']],
+      [['sells'], ['2']],
+      [['stops'], ['3', '4']],
+      [['buy', 'stops'], ['3']],
+      [['sell', 'stops'], ['4']],
+    ])('cancel %j cancels only %j', async (filter, expectedIds) => {
+      const exchange = exchangeWithPrefixMarkets(orders);
+      const ctx = createMockContext(['cancel', ...filter], exchange, 'BTCUSDT');
+
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(true);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      const cancelled = vi.mocked(exchange.cancelOrders!).mock.calls[0][0] as Order[];
+      expect(cancelled.map((o) => o.id)).toEqual(expectedIds);
+    });
+
+    it('errors on a stray keyword instead of cancelling everything', async () => {
+      // `to` resolves to TUSDT; it only means something after `from <p1>`.
+      const exchange = exchangeWithPrefixMarkets(orders);
+      const ctx = createMockContext(['cancel', 'to'], exchange, 'BTCUSDT');
+
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(false);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      expect(exchange.cancelOrders).not.toHaveBeenCalled();
+    });
+
+    it('treats a B-prefixed id suffix as an id, not as BUSDT', async () => {
+      const idOrders = [...orders, createMockOrder('abc-b3f9', 'BTCUSDT', OrderSide.Buy, OrderType.Limit)];
+      const exchange = exchangeWithPrefixMarkets(idOrders);
+      const ctx = createMockContext(['cancel', 'b3f9'], exchange, 'BTCUSDT');
+
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(true);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      const cancelled = vi.mocked(exchange.cancelOrders!).mock.calls[0][0] as Order[];
+      expect(cancelled.map((o) => o.id)).toEqual(['abc-b3f9']);
+    });
+
+    it('errors on an unknown S-prefixed token instead of cancelling SUSDT', async () => {
+      const exchange = exchangeWithPrefixMarkets(orders);
+      const ctx = createMockContext(['cancel', 'sx9'], exchange, 'BTCUSDT');
+
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(false);
+      expect(exchange.cancelSymbolOrders).not.toHaveBeenCalled();
+      expect(exchange.cancelOrders).not.toHaveBeenCalled();
+    });
+  });
+
   describe('unrecognized commands', () => {
     it('returns "Not implemented" for a filter that fails the id regex', async () => {
       // `unk!` has a `!` so it's neither a known keyword nor a valid
