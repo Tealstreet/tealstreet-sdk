@@ -738,7 +738,10 @@ fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence
             Some(Outcome::Rejected),
             "provider_first={provider_first}: a native refusal proves a POST reached the venue"
         );
-        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
+        assert_eq!(
+            error.kind,
+            Some(safe_cex_engine::ErrorKind::InsufficientBalance)
+        );
         assert_eq!(error.venue_code.as_deref(), Some("110007"));
         // The journal reports the earliest leg that reached the venue.
         assert!(

@@ -406,14 +406,6 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     }
 }
 
-/// Bybit's own `retCode`, when the body carries one. An HTTP status is never a
-/// venue code, so a non-JSON or envelope-less failure has none.
-pub(crate) fn native_code(response: &Response<'_>) -> Option<i64> {
-    serde_json::from_str::<Status>(response.body)
-        .ok()
-        .and_then(|status| status.ret_code)
-}
-
 fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
     use safe_cex_engine::startup::{MAX_RATE_LIMIT_PAUSE_MS, rate_limit_pause_ms};
 

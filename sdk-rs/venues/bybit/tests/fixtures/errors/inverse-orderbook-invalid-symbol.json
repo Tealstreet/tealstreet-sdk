@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:03:08.828Z",
+  "endpoint": "/v5/market/orderbook?category=inverse&symbol=NOPEUSD",
+  "http_status": 200,
+  "body": "{\"retCode\":10001,\"retMsg\":\"params error: symbol invalid\",\"result\":{},\"retExtInfo\":{},\"time\":1793152988842}",
+  "expect": {
+    "kind": "invalidInput",
+    "outcome": null,
+    "path": "read"
+  }
+}
