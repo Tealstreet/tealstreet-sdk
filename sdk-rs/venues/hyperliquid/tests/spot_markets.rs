@@ -5,6 +5,7 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 use serde_json::Value;
+use support::prepared_now;
 use support::{META, STATE, kind, message, reply};
 
 /// UBTC is Unit-bridged (displays as BTC); UPUMP keeps its prefix because a native
@@ -25,7 +26,6 @@ struct Run {
 fn options(spot: bool) -> Options {
     Options {
         key: Some(KEY.into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some(KEY.into()),
         enable_spot_markets: spot,
         ..Options::default()
@@ -34,12 +34,12 @@ fn options(spot: bool) -> Options {
 
 /// Answers every read; `spot_meta` is the body for spotMetaAndAssetCtxs (`None`: HTTP 500).
 fn run(spot: bool, spot_meta: Option<&str>, spot_first: bool) -> Run {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(options(spot)));
+    let mut e = support::private_engine(options(spot), support::TEST_SECRET.into(), false);
     e.start(1000.0);
     let (mut socket, mut reads, mut sends) = (None, Vec::new(), Vec::new());
     let (mut logs, mut timers) = (Vec::new(), Vec::new());
     for _ in 0..20 {
-        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        let mut actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
         if actions.is_empty() {
             break;
         }
@@ -79,7 +79,12 @@ fn run(spot: bool, spot_meta: Option<&str>, spot_first: bool) -> Run {
                 }
                 Action::WsSend { text, .. } => sends.push(text),
                 Action::Notice(Notice::Event(event)) => logs.push(event.message),
-                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::SetTimer { timer, at_ms } => {
+                    timers.push((timer, at_ms));
+                    if at_ms == 1000.0 {
+                        e.handle(at_ms, Event::TimerFired { timer });
+                    }
+                }
                 _ => {}
             }
         }
@@ -178,7 +183,7 @@ fn a_failed_spot_read_warns_retries_and_never_holds_back_perps() {
     let mut retry = None;
     for (timer, at) in timers {
         r.e.handle(at, Event::TimerFired { timer });
-        retry = r.e.drain_actions().find_map(|a| match a {
+        retry = prepared_now(&mut r.e).into_iter().find_map(|a| match a {
             Action::Http(req) if kind(&req) == "spotMetaAndAssetCtxs" => Some(req),
             _ => None,
         });
@@ -247,7 +252,7 @@ fn spot_holdings_publish_as_coins_while_standard_balance_stays_perp_only() {
 fn spot_fills_move_holdings_never_positions() {
     let mut r = run(true, Some(SPOT_META), false);
     let before = r.e.store().positions().to_vec();
-    r.e.drain_actions().for_each(drop);
+    prepared_now(&mut r.e).into_iter().for_each(drop);
     message(
         &mut r.e,
         r.socket,
@@ -266,7 +271,7 @@ fn spot_fills_move_holdings_never_positions() {
 #[test]
 fn spot_orders_use_spot_prices_never_reduce_only_and_ignore_leverage() {
     let mut r = run(true, Some(SPOT_META), false);
-    r.e.drain_actions().for_each(drop);
+    prepared_now(&mut r.e).into_iter().for_each(drop);
     r.e.handle(
         2000.0,
         Event::Command(Command::SetLeverage {
@@ -276,7 +281,7 @@ fn spot_orders_use_spot_prices_never_reduce_only_and_ignore_leverage() {
             side: None,
         }),
     );
-    let done = r.e.drain_actions().collect::<Vec<_>>();
+    let done = prepared_now(&mut r.e).into_iter().collect::<Vec<_>>();
     assert!(!done.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(done.iter().any(|a| matches!(
         a,
@@ -326,7 +331,8 @@ fn a_spot_disabled_account_reads_and_subscribes_exactly_as_before() {
 }
 
 fn exchange_write(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.drain_actions()
+    prepared_now(e)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
             _ => None,

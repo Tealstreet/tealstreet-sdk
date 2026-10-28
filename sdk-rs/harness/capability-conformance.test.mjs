@@ -128,7 +128,7 @@ test('construction fixture covers known prerequisites and the options profile', 
 
 test('request evidence requires real wire fields and terminal evidence is unique and typed', () => {
   for (const actions of [
-    [{ op: 'http' }], [{ op: 'sign' }], [{ op: 'signPayload' }], [{ op: 'wsSend' }],
+    [{ op: 'http' }], [{ op: 'sign' }], [{ op: 'wsSend' }],
     [{ op: 'event' }],
     [{ op: 'done', command: 17, result: '[]', error: 123 }],
     [{ op: 'done', command: 17, result: '[]' }, { op: 'done', command: 17, result: '[]' }],

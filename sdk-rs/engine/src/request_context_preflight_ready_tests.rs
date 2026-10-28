@@ -839,6 +839,7 @@ fn readiness_socket_policy() -> crate::socket_lifecycle::FeedPolicy {
         controls: ControlPolicy::Native,
         invalidation: Invalidation::Required,
         subscription_interval_ms: 0.,
+        close_floors: &[],
     }
 }
 #[cfg(feature = "managed-sockets")]

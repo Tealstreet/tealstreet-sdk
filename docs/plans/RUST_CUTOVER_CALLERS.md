@@ -1,5 +1,9 @@
 # Phase 9: TypeScript caller inventory and deletion dependencies
 
+> **Closed to appends since 2026-10-27.** Record new caller obligations as one
+> file per change in [callers/](callers/README.md). Edit a section here only
+> when that obligation itself changes.
+
 Audited 2026-10-20 on the phase-9 readiness branch, against the repository's
 `packages/` and `apps/` source. This is an inventory and an ordered future
 migration plan. This change deletes no TypeScript venue. The authoritative
@@ -10287,3 +10291,21 @@ managed Reads bound to the account's JWT Session; the engine copies
   identity read fails `AuthInvalid`/`NotSent`, and the Session is retired.
 - A JWT that is not header-safe is never sent; reads wait for a valid one.
 Trading, history, leverage and `/auth` itself still use the legacy sender.
+
+### Hyperliquid managed discovery and account reads
+
+Both Hyperliquid products issue discovery and background account/fee info calls
+through unsigned managed Prepare, Bind and Claim. Account reads mint their
+Context after the native weight queue admits the physical call. Streamed rows
+and terminal publication validate that exact Background Read delivery; success
+and every failure retire it before another retry can reuse its capacity.
+Successful reducers publish while their Context is valid; successor info calls
+are submitted after its retirement, so a saturated registry can reuse that slot.
+The physical call has a fixed 20-second bound across preparation and transport;
+later rows are discarded, including a previously valid streamed prefix. Native
+discovery backoff and account reconciliation remain responsible for fresh reads.
+Fixture transport now drives real managed release. Cached-read capacity tests
+finish bootstrap before installing their cache; the long streamed-cancel test
+keeps its non-resurrection assertion and additionally forbids expired new rows.
+Bootstrap fixtures also fire the genuine socket-handoff wake before expecting
+portfolio collateral reads; their balance and holdings assertions stay intact.

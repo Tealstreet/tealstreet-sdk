@@ -187,7 +187,6 @@ fn no_io(actions: &[Action]) {
         Action::Http(_)
             | Action::Sign { .. }
             | Action::SignedOutbound { .. }
-            | Action::SignPayload { .. }
             | Action::WsConnect { .. }
             | Action::WsSend { .. }
     )));

@@ -604,6 +604,7 @@ impl<V: Venue> Engine<V> {
                     retirement,
                     reason,
                     retry,
+                    close_code,
                 } = effect
                 {
                     if V::socket_capabilities().handoff {
@@ -632,6 +633,10 @@ impl<V: Venue> Engine<V> {
                         {
                             cx.io.core.health.count(log_code::WS_CLOSED);
                         }
+                        // Nothing was dialled, so the transport close below must not count.
+                        if reason == RetireReason::RouteExhausted {
+                            cx.io.core.sockets.closed(retirement.epoch.socket(), true);
+                        }
                         cx.close_socket_transport(retirement.epoch.socket());
                     }
                     let result = self.socket_native(
@@ -639,13 +644,14 @@ impl<V: Venue> Engine<V> {
                         LifecycleEvent::Retired {
                             epoch: retirement.epoch,
                             reason,
+                            close_code,
                         },
                     );
                     if let Err(error) = result {
                         self.socket_refused(now, "invalidation", error);
                     }
                     if let Err(error) = self.socket_mutate(now, |d, cx| {
-                        d.acknowledge_retirement(cx, retirement, result.is_ok(), retry)
+                        d.acknowledge_retirement(cx, retirement, result.is_ok(), retry, close_code)
                     }) {
                         self.socket_refused(now, "retirement", error);
                     }
@@ -766,14 +772,13 @@ impl<V: Venue> Engine<V> {
                 }
             }
         }
-        let (socket, kind) = match event {
-            Event::WsOpened { socket } => (*socket, Ingress::Open),
+        let (socket, kind, close_code) = match event {
+            Event::WsOpened { socket } => (*socket, Ingress::Open, None),
             Event::WsMessage { socket, .. } | Event::WsBinary { socket, .. } => {
-                (*socket, Ingress::Message)
+                (*socket, Ingress::Message, None)
             }
-            Event::WsClosed { socket, .. } | Event::WsRouteExhausted { socket } => {
-                (*socket, Ingress::Close)
-            }
+            Event::WsClosed { socket, code } => (*socket, Ingress::Close, Some(*code)),
+            Event::WsRouteExhausted { socket } => (*socket, Ingress::Close, None),
             _ => return false,
         };
         let admission = if kind == Ingress::Message {
@@ -781,7 +786,8 @@ impl<V: Venue> Engine<V> {
             let admission = self.io.core.socket_driver.admit_ingress(now, socket, kind);
             self.assert_live();
             if matches!(admission, Admission::Expired(..)) {
-                let result = self.socket_mutate(now, |d, cx| d.finish_ingress(cx, admission, kind));
+                let result =
+                    self.socket_mutate(now, |d, cx| d.finish_ingress(cx, admission, kind, None));
                 self.socket_enqueue(now, result.effects);
             } else if self.io.core.socket_effects.len() > MAX_EFFECTS {
                 // Empty publication still owns exhaustion cleanup at this
@@ -790,7 +796,12 @@ impl<V: Venue> Engine<V> {
             }
             admission
         } else {
-            let result = self.socket_mutate(now, |d, cx| d.ingress(cx, socket, kind));
+            let exhausted = matches!(event, Event::WsRouteExhausted { .. });
+            let result = self.socket_mutate(now, |d, cx| match close_code {
+                _ if exhausted => d.route_exhausted(cx, socket),
+                Some(code) => d.close(cx, socket, code),
+                None => d.ingress(cx, socket, kind),
+            });
             self.socket_enqueue(now, result.effects);
             result.admission
         };
@@ -1263,6 +1274,7 @@ mod tests {
             controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
         }
     }
     impl Venue for Probe {
@@ -1723,6 +1735,43 @@ mod tests {
         );
         assert_eq!(e.io.core.health.reconnects, 1);
         assert_eq!(e.io.core.health.ws_closed, 1);
+    }
+    #[test]
+    fn route_exhaustion_retires_as_exhausted_not_a_close() {
+        let (mut e, socket) = engine();
+        e.drain_actions().for_each(drop);
+        e.venue.events.clear();
+        e.handle(1., Event::WsRouteExhausted { socket });
+        assert!(
+            e.venue.events.iter().any(|event| matches!(
+                event,
+                LifecycleEvent::Retired {
+                    reason: RetireReason::RouteExhausted,
+                    ..
+                }
+            )),
+            "the venue must see the exhaustion: {:?}",
+            e.venue.events
+        );
+        assert_eq!(
+            e.io.core.health.ws_closed, 0,
+            "nothing was dialled, so nothing closed"
+        );
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. } | Action::WsConnect { .. })),
+            "no route is left, so the engine must not schedule a reconnect"
+        );
+        e.handle(1., Event::WsRouteExhausted { socket });
+        assert_eq!(
+            e.venue
+                .events
+                .iter()
+                .filter(|event| matches!(event, LifecycleEvent::Retired { .. }))
+                .count(),
+            1,
+            "a stale exhaustion is not admitted twice"
+        );
     }
     #[test]
     fn managed_frames_reset_auth_health_per_event_and_keep_common_epilogue() {
@@ -2333,6 +2382,10 @@ mod capability_tests;
 #[cfg(test)]
 #[path = "socket_declaration_tests.rs"]
 mod declaration_tests;
+
+#[cfg(test)]
+#[path = "socket_close_floor_tests.rs"]
+mod close_floor_tests;
 
 #[cfg(all(test, feature = "socket-native-timing"))]
 #[path = "socket_native_timing_tests.rs"]

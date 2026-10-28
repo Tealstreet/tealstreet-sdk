@@ -52,7 +52,6 @@ fn no_command_or_signing(a: &[Action]) {
         a,
         Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
             | Action::Sign { .. }
-            | Action::SignPayload { .. }
     )));
 }
 fn midpoint(a: Vec<Action>) -> HttpRequest {

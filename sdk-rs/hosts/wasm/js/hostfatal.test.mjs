@@ -6,7 +6,7 @@ const settle = () => new Promise(setImmediate);
 const socketAction = { op: 'wsConnect', socket: 7, url: 'wss://example.test' };
 const methods = ['start', 'command', 'takeFrame', 'snapshotFrame', 'capabilities', 'wsOpen', 'wsMessage',
   'wsMessageActions', 'wsMessageBytes', 'wsBinary', 'wsClose', 'wsRouteExhausted', 'timer', 'httpStart', 'httpChunk',
-  'httpEnd', 'httpFailed', 'payloadSigned', 'payloadSignFailed'];
+  'httpEnd', 'httpFailed'];
 
 function rig(overrides = {}, transportOverrides = {}, handlers = {}) {
   const calls = [];
@@ -30,7 +30,6 @@ function rig(overrides = {}, transportOverrides = {}, handlers = {}) {
     setTimeout: (fn) => { timers.set(++nextTimer, fn); return nextTimer; },
     clearTimeout: (handle) => timers.delete(handle),
     request: async () => ({ status: 200, body: new Uint8Array([1]) }),
-    signPayload: async () => ({ signature: 'signature' }),
     ...transportOverrides,
   };
   const host = new EngineHost(engine, transport, { onDead: (error) => deaths.push(error), ...handlers });
@@ -63,11 +62,6 @@ for (const method of methods) {
     else if (method === 'httpFailed') await r.host.request({ request: 1, headers: [], url: 'https://example.test',
       get method() { throw new Error('request setup failed'); } });
     else if (method.startsWith('http')) await r.host.receive(1, { status: 200, body: new Uint8Array([1]) });
-    else {
-      if (method === 'payloadSignFailed') r.transport.signPayload = async () => { throw new Error('signer unavailable'); };
-      r.host.execute({ op: 'signPayload', request: 2, payload: {}, timeoutMs: 10 });
-      await settle();
-    }
     assert.equal(entries, 1);
     assert.equal(r.host.dead, true);
     assert.equal(r.host.disposed, true);
@@ -88,7 +82,6 @@ for (const method of methods) {
     assert.equal(r.deaths.length, 1);
     assert.equal(r.host.sockets.size, 0);
     assert.equal(r.host.timers.size, 0);
-    assert.equal(r.host.signings.size, 0);
   });
 }
 
@@ -126,15 +119,12 @@ test('real WASM unreachable is contained without poisoning a sibling host', asyn
 
 test('fatal cleanup settles all pending operations with unknown write outcomes despite broken cleanup', async () => {
   let httpSignal;
-  let signSignal;
   let finishHttp;
-  let finishSign;
   let closes = 0;
   let cleared = 0;
   let disposed = 0;
   const r = rig({ start() { throw new WebAssembly.RuntimeError('unreachable'); } }, {
     request: ({ signal }) => { httpSignal = signal; return new Promise((resolve) => { finishHttp = resolve; }); },
-    signPayload: (_, { signal }) => { signSignal = signal; return new Promise((resolve) => { finishSign = resolve; }); },
     connect: () => ({ close() { closes++; throw new Error('close failed'); } }),
     clearTimeout: () => { cleared++; throw new Error('clear failed'); },
     dispose: () => { disposed++; throw new Error('dispose failed'); },
@@ -143,7 +133,6 @@ test('fatal cleanup settles all pending operations with unknown write outcomes d
   r.host.execute({ ...socketAction, socket: 8 });
   r.host.execute({ op: 'setTimer', timer: 4, at: 124 });
   const receive = r.host.request({ request: 1, method: 'POST', headers: [], url: 'https://example.test' });
-  r.host.execute({ op: 'signPayload', request: 2, payload: {}, timeoutMs: 10 });
   await settle();
   const pending = Promise.allSettled([
     r.host.command({ op: 'placeOrders', orders: [{ clientOrderId: 'caller-1' }] }),
@@ -163,15 +152,13 @@ test('fatal cleanup settles all pending operations with unknown write outcomes d
   assert.equal(results[3].reason.outcome, undefined);
   assert.equal(r.host.commands.size, 0);
   assert.equal(httpSignal.aborted, true);
-  assert.equal(signSignal.aborted, true);
   assert.equal(closes, 2);
-  // The signing/native timers and all four pending command deadlines are cleared.
-  assert.equal(cleared, 6);
+  // The native timer and all four pending command deadlines are cleared.
+  assert.equal(cleared, 5);
   assert.equal(disposed, 1);
   assert.equal(r.deaths.length, 1);
   const count = r.calls.length;
   finishHttp({ status: 200, body: new Uint8Array([1]) });
-  finishSign({ signature: 'late' });
   await receive;
   await settle();
   assert.equal(r.calls.length, count);

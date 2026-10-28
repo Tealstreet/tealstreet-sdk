@@ -1,5 +1,6 @@
 //! Payloads from the official info/perpetuals and websocket/subscriptions docs.
 //! https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 
@@ -20,8 +21,8 @@ fn response(engine: &mut Engine<Hyperliquid>, request: RequestId, body: &str) {
     );
 }
 fn request(engine: &mut Engine<Hyperliquid>) -> RequestId {
-    engine
-        .drain_actions()
+    prepared_now(engine)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r.id)
@@ -45,8 +46,8 @@ fn start() -> (Engine<Hyperliquid>, SocketId) {
     );
     let id = request(&mut e);
     response(&mut e, id, "[null]");
-    let socket = e
-        .drain_actions()
+    let socket = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::WsConnect { socket, .. } = a {
                 Some(socket)
@@ -85,15 +86,15 @@ fn dex_mids_subscription_matches_ts_account_session_requirement() {
             id,
             r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50"}]]"#,
         );
-        let socket = e
-            .drain_actions()
+        let socket = prepared_now(&mut e)
+            .into_iter()
             .find_map(|action| match action {
                 Action::WsConnect { socket, .. } => Some(socket),
                 _ => None,
             })
             .unwrap();
         e.handle(1000.0, Event::WsOpened { socket });
-        let dex_mids = e.drain_actions().any(|action| match action {
+        let dex_mids = prepared_now(&mut e).into_iter().any(|action| match action {
             Action::WsSend { text, .. } => {
                 let message: serde_json::Value = serde_json::from_str(&text).unwrap();
                 message["subscription"]["type"] == "allMids"
@@ -171,7 +172,7 @@ fn full_depth_bbo_overlay_stale_bbo_and_reconnect() {
 #[test]
 fn posted_candle_read_preserves_body_and_streams() {
     let (mut e, _) = start();
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     e.handle(
         1000.0,
         Event::Command(Command::FetchCandles {
@@ -205,7 +206,7 @@ fn posted_candle_read_preserves_body_and_streams() {
         req.id,
         r#"[{"t":0,"o":"1","h":"2","l":"1","c":"2","v":"3"}]"#,
     );
-    assert!(e.drain_actions().any(|a| matches!(
+    assert!(prepared_now(&mut e).into_iter().any(|a| matches!(
         a,
         Action::Notice(safe_cex_engine::Notice::CommandDone { .. })
     )));
@@ -213,8 +214,8 @@ fn posted_candle_read_preserves_body_and_streams() {
 #[test]
 fn silence_watchdog_closes_without_a_close_event() {
     let (mut e, _) = start();
-    let timer = e
-        .drain_actions()
+    let timer = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, .. } = a {
                 Some(timer)
@@ -225,7 +226,8 @@ fn silence_watchdog_closes_without_a_close_event() {
         .unwrap();
     e.handle(50000.0, Event::TimerFired { timer });
     assert!(
-        e.drain_actions()
+        prepared_now(&mut e)
+            .into_iter()
             .any(|a| matches!(a, Action::WsClose { .. }))
     );
 }
@@ -244,7 +246,8 @@ fn incomplete_metadata_never_commits_and_schedules_a_read_retry() {
         response(&mut e, id, body);
         assert!(!e.store().loaded().markets);
         assert!(
-            e.drain_actions()
+            prepared_now(&mut e)
+                .into_iter()
                 .any(|a| matches!(a, Action::SetTimer { .. }))
         );
     }
@@ -252,7 +255,7 @@ fn incomplete_metadata_never_commits_and_schedules_a_read_retry() {
 #[test]
 fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
     let (mut e, _) = start();
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     e.handle(
         1000.0,
         Event::Command(Command::FetchCandles {
@@ -264,7 +267,7 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
             to_ms: None,
         }),
     );
-    assert!(e.drain_actions().any(|a| matches!(
+    assert!(prepared_now(&mut e).into_iter().any(|a| matches!(
         a,
         Action::Notice(safe_cex_engine::Notice::CommandFailed { .. })
     )));
@@ -295,7 +298,7 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
         r.id,
         r#"[{"t":0,"o":"NaN","h":"2","l":"1","c":"2","v":"3"}]"#,
     );
-    assert!(e.drain_actions().any(|a| matches!(
+    assert!(prepared_now(&mut e).into_iter().any(|a| matches!(
         a,
         Action::Notice(safe_cex_engine::Notice::CommandFailed { .. })
     )));
@@ -316,7 +319,7 @@ fn malformed_nested_rows_keep_positional_native_asset_mapping_and_valid_peers() 
     assert_eq!(e.store().markets().len(), 1);
     assert_eq!(e.store().markets()[0].id, "BTC");
     assert_eq!(e.store().tickers()[0].last, 100.);
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Skipped malformed public discovery row")));
+    assert!(prepared_now(&mut e).into_iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Skipped malformed public discovery row")));
 }
 
 #[test]
@@ -332,8 +335,8 @@ fn base_metadata_failure_keeps_backing_off_until_a_valid_read_arrives() {
                 error: "offline",
             },
         );
-        let (timer, at) = e
-            .drain_actions()
+        let (timer, at) = prepared_now(&mut e)
+            .into_iter()
             .find_map(|a| match a {
                 Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
                 _ => None,
@@ -372,6 +375,6 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         );
         let ids: Vec<_> = e.store().markets().iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["BTC"], "szDecimals {sz}");
-        assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
+        assert!(prepared_now(&mut e).into_iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
     }
 }

@@ -3,6 +3,7 @@ use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
     Claim, Error, HttpAction, Permit, Preparation, Prepared, RoutingIntent,
 };
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, Response,
     VenueError,
@@ -40,9 +41,9 @@ fn boot_modes(testnet: bool, hip3: bool, merged_spot: bool) -> Engine<Hyperliqui
         ..Options::default()
     }));
     e.start(NOW);
-    // Discovery is deliberately still legacy: this slice changes candles only.
-    let initial: Vec<_> = e
-        .drain_actions()
+    // Settle discovery through the real managed transport before the command.
+    let initial: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -66,8 +67,8 @@ fn boot_modes(testnet: bool, hip3: bool, merged_spot: bool) -> Engine<Hyperliqui
             r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"UBTC","index":1,"szDecimals":5,"fullName":"Unit Bitcoin"}],"universe":[{"name":"@1","tokens":[1,0],"index":1}]},[{"coin":"@1","midPx":"60000","markPx":"60010","prevDayPx":"59000","dayNtlVlm":"1000"}]]"#,
         );
     }
-    let dexs = e
-        .drain_actions()
+    let dexs = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.body.as_deref() == Some(r#"{"type":"perpDexs"}"#) => Some(r),
             _ => None,
@@ -84,8 +85,8 @@ fn boot_modes(testnet: bool, hip3: bool, merged_spot: bool) -> Engine<Hyperliqui
         },
     );
     if hip3 {
-        let dex = e
-            .drain_actions()
+        let dex = prepared_now(&mut e)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r)
                     if r.body.as_deref() == Some(r#"{"type":"metaAndAssetCtxs","dex":"xyz"}"#) =>
@@ -102,7 +103,7 @@ fn boot_modes(testnet: bool, hip3: bool, merged_spot: bool) -> Engine<Hyperliqui
         assert_eq!(e.store().market("UBTC/USDC").unwrap().is_spot, Some(true));
     }
     // Anonymous fee seeding and socket setup are outside this candle control.
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     e.take_frame(NOW);
     e
 }
@@ -128,10 +129,9 @@ fn preparation(actions: &[Action]) -> (Preparation, HttpRequest) {
         "perps candle JSON POST must await managed preparation, with no legacy HTTP"
     );
     assert!(
-        !actions.iter().any(|a| matches!(
-            a,
-            Action::Sign { .. } | Action::SignPayload { .. } | Action::SignedOutbound { .. }
-        )),
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::SignedOutbound { .. })),
         "public candle read requires no signer or fabricated credential"
     );
     let mut prepares = actions.iter().filter_map(|a| match a {
@@ -195,10 +195,11 @@ fn bind(e: &mut Engine<Hyperliquid>, token: Preparation, now: f64) -> (Permit, H
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. }
-    )));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+    );
     actions
         .into_iter()
         .find_map(|a| match a {
@@ -341,10 +342,11 @@ fn perps_candle_typed_preparation_refusal_is_preserved_once() {
     assert_eq!(error.kind, Some(ErrorKind::AuthPermission));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     assert_eq!(error.message, "public route denied");
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. }
-    )));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+    );
     e.http_preparation_failed(NOW + 2., token, Error::State, VenueError::new("duplicate"));
     assert!(results(&e.drain_actions().collect::<Vec<_>>(), 502).is_empty());
 }
@@ -532,11 +534,7 @@ fn capacity_denial_precedes_invalid_input_and_does_not_retire_a_peer() {
     assert_eq!(error.message, "Engine request capacity reached");
     assert!(!actions.iter().any(|a| matches!(
         a,
-        Action::Http(_)
-            | Action::ManagedHttp(_)
-            | Action::SetTimer { .. }
-            | Action::Sign { .. }
-            | Action::SignPayload { .. }
+        Action::Http(_) | Action::ManagedHttp(_) | Action::SetTimer { .. } | Action::Sign { .. }
     )));
     assert!(e.http_preparation_pending(tokens[1]));
     e.http_preparation_failed(

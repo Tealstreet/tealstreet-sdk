@@ -258,7 +258,6 @@ fn drain(e: &mut Driver, now: f64) -> Output {
         !out.actions.iter().any(|a| matches!(
             a,
             Action::Sign { .. }
-                | Action::SignPayload { .. }
                 | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
         )),
         "public seed has no signing or command authority"

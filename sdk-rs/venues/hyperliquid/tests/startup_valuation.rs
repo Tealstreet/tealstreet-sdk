@@ -2,6 +2,7 @@
 mod support;
 use safe_cex_engine::{Action, Engine, Event, PublicFeedPolicy};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+use support::prepared_now;
 use support::*;
 
 fn collateral() -> &'static str {
@@ -76,10 +77,10 @@ fn shared_quote_recovers_pending_native_collateral_without_owned_public_feed() {
 #[test]
 fn pending_live_collateral_fences_older_rest_and_uses_latest_position_pnl() {
     let (mut engine, socket) = ready("portfolioMargin");
-    engine.drain_actions().for_each(drop);
+    prepared_now(&mut engine).into_iter().for_each(drop);
     engine.handle(1500.0, Event::WsOpened { socket });
-    let requests = engine
-        .drain_actions()
+    let requests = prepared_now(&mut engine)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -120,12 +121,15 @@ fn pending_live_collateral_fences_older_rest_and_uses_latest_position_pnl() {
 
 #[test]
 fn cold_portfolio_wallet_does_not_load_a_fabricated_zero_collateral_balance() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut engine = support::private_engine(
+        Options {
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        false,
+    );
     engine
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();
@@ -133,7 +137,7 @@ fn cold_portfolio_wallet_does_not_load_a_fabricated_zero_collateral_balance() {
     let mut socket = None;
     let mut core_reads = Vec::new();
     for _ in 0..20 {
-        let mut actions = engine.drain_actions().collect::<Vec<_>>();
+        let mut actions = prepared_now(&mut engine).into_iter().collect::<Vec<_>>();
         if actions.is_empty() {
             break;
         }
@@ -205,15 +209,14 @@ fn collateral_tokens_without_a_valuation_market_keep_native_amount_and_load_bala
         // Perp mode has no spot meta: UBTC and airdropped tokens have no mappable market.
         let state = r#"{"channel":"spotState","data":{"spotState":{"balances":[{"coin":"USDC","token":0,"total":"100","hold":"0"},{"coin":"BTC","token":1,"total":"2","hold":"0.5"},{"coin":"UBTC","token":197,"total":"1","hold":"0"},{"coin":"PURRDROP","token":411,"total":"5000","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"300"]]}}}"#;
         message(&mut engine, socket, 2000.0, state);
-        let warnings = engine
-            .drain_actions()
+        let warnings = prepared_now(&mut engine).into_iter()
             .filter(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("no valuation market")))
             .count();
         assert_eq!(engine.store().balance().total, 300.0);
         assert_eq!(engine.store().balance().free, 300.0);
         assert_eq!(warnings, 1);
         message(&mut engine, socket, 2100.0, state);
-        assert!(!engine.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("no valuation market"))));
+        assert!(!prepared_now(&mut engine).into_iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("no valuation market"))));
     }
 }
 

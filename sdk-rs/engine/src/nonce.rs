@@ -8,18 +8,20 @@ use std::{
 };
 
 #[derive(Default)]
-struct NonceState {
-    reserved: u64,
+pub(crate) struct NonceState {
+    pub(crate) reserved: u64,
     #[cfg(feature = "dispatch-nonce")]
-    released: Option<u64>,
+    pub(crate) released: Option<u64>,
+    #[cfg(feature = "nonce-handoff")]
+    pub(crate) tracking: Option<Box<handoff::Tracking>>,
 }
-type NonceMap = HashMap<(&'static str, [u8; 32]), NonceState>;
-static NONCES: OnceLock<Mutex<NonceMap>> = OnceLock::new();
+pub(crate) type NonceMap = HashMap<(&'static str, [u8; 32]), NonceState>;
+pub(crate) static NONCES: OnceLock<Mutex<NonceMap>> = OnceLock::new();
 
 /// A nonce domain's signer identity. Built only from non-secret material, so
 /// no key digest or slot name can become a nonce domain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NonceKey([u8; 32]);
+pub struct NonceKey(pub(crate) [u8; 32]);
 
 impl NonceKey {
     /// Trusted, caller-assigned `Identity.stable_id`; tagged apart from public ids.
@@ -45,7 +47,7 @@ impl NonceKey {
 
 /// Trusted identity source declared with each nonce policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NonceSubjectStrategy {
+pub(crate) enum NonceSubjectStrategy {
     StableId,
     Address,
 }
@@ -60,11 +62,11 @@ enum NonceClock {
 /// One family's nonce policy, including the trusted identity source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NonceDomain {
-    subject: NonceSubjectStrategy,
-    name: &'static str,
+    pub(crate) subject: NonceSubjectStrategy,
+    pub(crate) name: &'static str,
     clock: NonceClock,
     scale: u64,
-    limit: u64,
+    pub(crate) limit: u64,
 }
 impl NonceDomain {
     fn floor(&self) -> NonceFloor {
@@ -116,6 +118,9 @@ pub(crate) use claim::ClaimAuthority;
 pub(crate) use claim::NonceReservation;
 pub use claim::{NonceClaim, NonceSelectionError, NonceSubject};
 
+#[path = "nonce_handoff.rs"]
+pub mod handoff;
+
 /// Clock floor for a reservation, in the family's wire unit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NonceFloor {
@@ -159,6 +164,36 @@ pub(crate) fn reserve(
         nonces.try_reserve(1).map_err(|_| NonceError::Unavailable)?;
     }
     let state = nonces.entry((domain, key)).or_default();
+    let nonce = floor.max(state.reserved.checked_add(1).ok_or(NonceError::Exhausted)?);
+    if nonce > limit {
+        return Err(NonceError::Exhausted);
+    }
+    #[cfg(feature = "nonce-handoff")]
+    handoff::raw(state)?;
+    state.reserved = nonce;
+    Ok(nonce)
+}
+
+#[cfg(feature = "nonce-handoff")]
+pub(crate) fn reserve_claim(
+    domain: &'static str,
+    key: [u8; 32],
+    floor: u64,
+    limit: u64,
+    epoch: Option<&std::sync::Arc<()>>,
+    owner: Option<&std::sync::Arc<handoff::Owner>>,
+) -> Result<u64, NonceError> {
+    let mut store = NONCES
+        .get_or_init(Mutex::default)
+        .lock()
+        .map_err(|_| NonceError::Unavailable)?;
+    if !handoff::current(store.get(&(domain, key)), epoch, owner) {
+        return Err(NonceError::InvalidClaim);
+    }
+    if !store.contains_key(&(domain, key)) {
+        store.try_reserve(1).map_err(|_| NonceError::Unavailable)?;
+    }
+    let state = store.entry((domain, key)).or_default();
     let nonce = floor.max(state.reserved.checked_add(1).ok_or(NonceError::Exhausted)?);
     if nonce > limit {
         return Err(NonceError::Exhausted);

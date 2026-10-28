@@ -45,6 +45,8 @@ enum SetupMapping {
     #[serde(rename = "apexomni")]
     ApexOmni,
     Lighter,
+    Hyperliquid,
+    Paradex,
 }
 
 #[derive(Default, Deserialize)]

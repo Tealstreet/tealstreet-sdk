@@ -5,6 +5,7 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, Outcome, Response, Venue,
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+use support::prepared_now;
 
 const SPOT_META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"1","markPx":"1","prevDayPx":"1","dayNtlVlm":"100"}]]"#;
 
@@ -25,20 +26,14 @@ fn response(engine: &mut Engine<Hyperliquid>, now: f64, request: &HttpRequest, b
 fn boot(spot: bool) -> (Engine<Hyperliquid>, HttpRequest) {
     let options = Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Options::default()
     };
-    let venue = if spot {
-        Hyperliquid::new_spot(options)
-    } else {
-        Hyperliquid::new(options)
-    };
-    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+    let mut engine = support::private_engine(options, support::TEST_SECRET.into(), spot);
     engine.start(1_000.0);
     let mut old_read = None;
     for _ in 0..20 {
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
         if actions.is_empty() {
             break;
         }
@@ -89,7 +84,7 @@ fn place(engine: &mut Engine<Hyperliquid>, now: f64, command: u32, spot: bool) -
             orders: vec![order],
         }),
     );
-    engine.drain_actions().collect()
+    prepared_now(engine).into_iter().collect()
 }
 
 fn write(actions: &[Action]) -> &HttpRequest {
@@ -135,7 +130,7 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
             error: "placement reply lost after dispatch",
         },
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
     assert!(actions.iter().any(|action| matches!(action,
         Action::Notice(Notice::CommandFailed { command: 101, error })
         if error.outcome == Some(Outcome::Unknown)
@@ -153,9 +148,12 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
             symbol: symbol.into(),
         }),
     );
-    refused(&engine.drain_actions().collect::<Vec<_>>(), 106);
+    refused(
+        &prepared_now(&mut engine).into_iter().collect::<Vec<_>>(),
+        106,
+    );
     response(&mut engine, 2_900.0, &old_read, "[]");
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
     let fresh = actions
         .into_iter()
         .find_map(|action| match action {
@@ -191,7 +189,7 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
             ),
             ReconcileReply::Clean => unreachable!(),
         }
-        let mut actions: Vec<_> = engine.drain_actions().collect();
+        let mut actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
         let retry = place(&mut engine, 6_500.0, 105, spot);
         refused(&retry, 105);
         actions.extend(retry);
@@ -214,7 +212,7 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
         engine.store().order("7").is_some(),
         "publish before releasing"
     );
-    assert!(!engine.drain_actions().any(|action|
+    assert!(!prepared_now(&mut engine).into_iter().any(|action|
         matches!(action, Action::Http(request) if support::kind(&request) == "frontendOpenOrders")
     ), "the successful fresh read must not inherit an extra owed read from a re-ask");
     engine.handle(
@@ -224,7 +222,7 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
             symbol: symbol.into(),
         }),
     );
-    let cancel: Vec<_> = engine.drain_actions().collect();
+    let cancel: Vec<_> = prepared_now(&mut engine).into_iter().collect();
     let cancel = write(&cancel);
     let payload: serde_json::Value = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
     assert_eq!(payload["action"]["type"], "cancel");
@@ -234,7 +232,7 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
         cancel,
         r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
     );
-    engine.drain_actions().for_each(drop);
+    prepared_now(&mut engine).into_iter().for_each(drop);
     let retry = place(&mut engine, clean_at + 800.0, 104, spot);
     write(&retry);
     assert!(!retry.iter().any(|action| matches!(
@@ -262,8 +260,8 @@ fn repeated_reconcile_hooks_join_one_real_open_orders_read() {
         });
         let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         engine.start(1_000.0);
-        let requests: Vec<_> = engine
-            .drain_actions()
+        let requests: Vec<_> = prepared_now(&mut engine)
+            .into_iter()
             .filter_map(|action| match action {
                 Action::Http(request) => Some(request),
                 _ => None,

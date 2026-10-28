@@ -1,6 +1,5 @@
 //! Atomic private snapshots, protected from newer stream and command updates.
 use super::*;
-use safe_cex_engine::Fill;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
@@ -16,8 +15,8 @@ use safe_cex_engine::selected_read::{
     AdmittedRead, BackgroundReadError, LocalRefusal, ReadPolicy, ReadRequest, ReadRole,
     SelectedRead,
 };
-use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::rate_limit_pause_ms;
+use safe_cex_engine::{Fill, OrderSnapshotToken};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -87,12 +86,10 @@ struct Execution {
 
 #[derive(Default)]
 pub(crate) struct Account {
-    pub(crate) supervisor: Supervisor,
-    authenticated: bool,
+    pub(super) authenticated: bool,
     pub connection: Connection,
     pub margin: Option<MarginType>,
     pub mode_loaded: bool,
-    pub orders_revision: u64,
     pub positions_revision: u64,
     pub balance_revision: u64,
     pub settings_revision: u64,
@@ -157,15 +154,7 @@ impl Account {
         }
     }
     pub(crate) fn new() -> Self {
-        Self {
-            supervisor: Supervisor::new(Config {
-                auth_timeout_ms: Some(10_000.0),
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(5_000.0),
-                ..Config::default()
-            }),
-            ..Self::default()
-        }
+        Self::default()
     }
 
     fn remember_terminal(&mut self, id: &str) {
@@ -222,10 +211,11 @@ pub enum Request {
         page_rows: usize,
         rows: SnapshotBuilder<String, Order>,
         sources: HashMap<String, Source>,
-        revision: u64,
+        snapshot: OrderSnapshotToken,
         /// A Primary-signed reconcile snapshot: only it may clear an order fence.
         reconcile: bool,
         uncertainty_generation: u64,
+        read_epoch: u64,
         failed: bool,
     },
 }
@@ -584,7 +574,9 @@ impl Blofin {
             return;
         }
         self.account.session_started = cx.now;
-        self.private_connect(cx);
+        if let Err(error) = self.connect_feed(cx, true) {
+            Self::socket_notice(cx, error);
+        }
         self.account.tick = Some(cx.set_poll_timer(10_000.0));
         self.read_setting(cx, StartupRead::Margin);
         self.read_setting(cx, StartupRead::Mode);
@@ -672,9 +664,10 @@ impl Blofin {
         if let Some((timer, _)) = self.account.retry.take() {
             cx.clear_timer(timer);
         }
-        self.account.supervisor.cancel(cx);
+        if let Some(feed) = self.account.connection.feed {
+            cx.stop_socket_feed(feed);
+        }
         self.account.authenticated = false;
-        self.account.connection.open = false;
         if let Some(socket) = self.account.connection.socket.take() {
             cx.close(socket);
         }
@@ -696,24 +689,14 @@ impl Blofin {
             "wss://openapi.blofin.com/ws/private"
         }
     }
-    fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.startup_rejected {
-            return;
-        }
-        let url = self.private_url();
-        self.account.connection.socket = Some(cx.connect(
-            safe_cex_engine::SocketSpec::new(url).channel(safe_cex_engine::SocketChannel::Private),
-        ));
-        self.account.authenticated = false;
-        self.account.supervisor.connecting(cx);
-    }
     /// The login signs through the provider with the Primary, as every
     /// private request does; a refusal latches the role and the engine closes.
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        self.account.supervisor.opened(cx);
         let Some(primary) = self.options.identities.primary.clone() else {
             cx.close(socket);
-            self.private_close(cx, socket);
+            if let Some(feed) = self.account.connection.feed {
+                cx.stop_socket_feed(feed);
+            }
             return;
         };
         cx.send_signed(
@@ -724,9 +707,32 @@ impl Blofin {
                 self.private_url(),
             )),
         );
-        self.account.connection.open = true;
 
         cx.send(socket, "ping");
+    }
+    pub(super) fn private_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.authenticated = true;
+        if self.account.margin.is_some() && self.account.mode_loaded {
+            self.refresh_account(cx);
+            self.refresh_orders(cx, 1);
+        }
+    }
+    pub(super) fn private_auth_failure(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        if !self.account.authenticated
+            && !(cx.store.loaded().balance && cx.store.loaded().orders)
+            && error.venue_code.as_deref() != Some("152409")
+            && let Some(kind) = error.venue_code.as_deref().and_then(key_rejection)
+        {
+            let error = rejection(
+                "API key login",
+                error.venue_code.as_deref().unwrap_or_default(),
+                error.venue_message.as_deref().unwrap_or_default(),
+                kind,
+            );
+            self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid);
+            return;
+        }
+        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, error.message);
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.account_busy || !self.signed() {
@@ -768,6 +774,14 @@ impl Blofin {
         if self.account.orders_busy || !self.signed() {
             return;
         }
+        let Some(snapshot) = cx.store.begin_orders_snapshot() else {
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
+                "BloFin order snapshot fence exhausted",
+            );
+            return;
+        };
         self.account.orders_busy = true;
         let reconcile = std::mem::take(&mut self.account.reconcile_owed);
         self.orders_page(
@@ -781,9 +795,10 @@ impl Blofin {
                 page_rows: 0,
                 rows: SnapshotBuilder::default(),
                 sources: HashMap::new(),
-                revision: self.account.orders_revision,
+                snapshot,
                 reconcile,
                 uncertainty_generation: self.account.uncertainty_generation,
+                read_epoch: cx.order_read_epoch(),
                 failed: false,
             },
         );
@@ -1480,9 +1495,10 @@ impl Blofin {
                 page_rows,
                 rows,
                 mut sources,
-                revision,
+                snapshot,
                 reconcile,
                 uncertainty_generation,
+                read_epoch,
                 failed: false,
             } => {
                 if page_rows > 0 {
@@ -1498,9 +1514,10 @@ impl Blofin {
                                 page_rows,
                                 rows,
                                 sources,
-                                revision,
+                                snapshot,
                                 reconcile,
                                 uncertainty_generation,
+                                read_epoch,
                                 failed: true,
                             },
                             "BloFin pending order pagination did not advance",
@@ -1518,9 +1535,10 @@ impl Blofin {
                             page_rows: 0,
                             rows,
                             sources,
-                            revision,
+                            snapshot,
                             reconcile,
                             uncertainty_generation,
+                            read_epoch,
                             failed: false,
                         },
                     );
@@ -1536,9 +1554,10 @@ impl Blofin {
                             page_rows: 0,
                             rows,
                             sources,
-                            revision,
+                            snapshot,
                             reconcile,
                             uncertainty_generation,
+                            read_epoch,
                             failed: false,
                         },
                     );
@@ -1549,17 +1568,16 @@ impl Blofin {
                         // complete cumulative rows still prove execution prefixes.
                         self.seed_startup_executions(cx, rows.rows(), &sources);
                     }
-                    if revision == self.account.orders_revision {
-                        let clean = rows.rejected() == 0;
+                    let clean = rows.rejected() == 0;
+                    let committed = cx.store.commit_orders_snapshot([snapshot], |current| {
                         if clean {
                             self.account.order_skips.clear();
                         }
                         let accepted = rows.rows().len();
-                        let mut rows =
-                            rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
+                        let mut rows = rows.commit(current.iter().cloned(), |o| o.id.clone());
                         // Stored copies kept for rejected rows bypass the snapshot's own rules.
                         let mut kept = rows.split_off(accepted);
-                        for order in cx.store.orders() {
+                        for order in current {
                             if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
                                 self.account.remember_terminal(&order.id);
                             }
@@ -1572,15 +1590,15 @@ impl Blofin {
                                     .and_then(|extra| extra.filled_in_placement_units)
                                     .unwrap_or(0.0)
                                     >= self.filled_native(&order.id)
-                                    || cx.store.order(&order.id).is_some())
+                                    || current.iter().any(|existing| existing.id == order.id))
                         });
                         let retained: HashSet<_> =
                             rows.iter().map(|order| order.id.as_str()).collect();
                         sources.retain(|id, _| retained.contains(id.as_str()));
                         for order in &mut rows {
-                            if let Some(existing) = cx
-                                .store
-                                .order(&order.id)
+                            if let Some(existing) = current
+                                .iter()
+                                .find(|existing| existing.id == order.id)
                                 .filter(|existing| existing.filled > order.filled)
                             {
                                 *order = existing.clone();
@@ -1675,14 +1693,16 @@ impl Blofin {
                         }
                         rows.extend(kept);
                         self.account.sources = sources;
-                        cx.store.set_orders(rows);
+                        rows
+                    });
+                    if committed {
                         // The last page's token cannot freshen a pre-mark first page.
                         if clean
                             && reconcile
                             && uncertainty_generation == self.account.uncertainty_generation
                         {
                             self.account.reconcile_owed = false;
-                            cx.orders_reconciled(None);
+                            cx.orders_reconciled_since(None, read_epoch);
                         } else if reconcile {
                             self.account.reconcile_owed = true;
                         }
@@ -1742,7 +1762,6 @@ impl Blofin {
         socket: SocketId,
         text: &str,
     ) {
-        self.account.supervisor.received(cx.now);
         if text == "pong" {
             return;
         }
@@ -1753,49 +1772,7 @@ impl Blofin {
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
-        // BloFin answers a refused login with `event: "error"` (60009 or a 1524xx code).
-        // A socket 152409 reconnects with a fresh signature, like 60009.
-        let login_failed = (message.event == "login" && message.code != "0")
-            || (message.event == "error" && !self.account.authenticated);
-        if login_failed {
-            // Before the account is ready a refused key cannot recover by reconnecting.
-            if !self.account.authenticated
-                && !(cx.store.loaded().balance && cx.store.loaded().orders)
-                && message.code != "152409"
-                && let Some(kind) = key_rejection(&message.code)
-            {
-                let error = rejection("API key login", &message.code, &message.msg, kind);
-                self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid);
-                return;
-            }
-            cx.notice(
-                Level::Error,
-                code::STREAM_UNAVAILABLE,
-                format!("BloFin login rejected: {}", message.code),
-            );
-            cx.close(socket);
-            self.private_close(cx, socket);
-            return;
-        }
-        if message.event == "login" {
-            if self.account.authenticated {
-                return;
-            }
-            self.account.authenticated = true;
-            self.account.supervisor.authenticated(cx);
-            for channel in ["account", "positions", "orders", "orders-algo"] {
-                cx.send(
-                    socket,
-                    format!("{{\"op\":\"subscribe\",\"args\":[{{\"channel\":\"{channel}\"}}]}}"),
-                );
-            }
-            if self.account.margin.is_some() && self.account.mode_loaded {
-                self.refresh_account(cx);
-                self.refresh_orders(cx, 1);
-            }
-            return;
-        }
-        if !message.event.is_empty() {
+        if !message.event.is_empty() || !self.account.authenticated {
             return;
         }
         match message.arg.channel.as_ref() {
@@ -1825,7 +1802,7 @@ impl Blofin {
                 if let Ok(Data { data: rows }) =
                     serde_json::from_str::<Data<Vec<&serde_json::value::RawValue>>>(text)
                 {
-                    self.account.orders_revision += 1;
+                    cx.store.invalidate_order_snapshots();
                     for raw in rows {
                         let Ok(StreamOrder {
                             mut row,
@@ -2213,37 +2190,7 @@ impl Blofin {
         fill.amount = prepared.amount();
         cx.fill(fill);
     }
-    pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account.connection.socket != Some(socket) {
-            return;
-        }
-        let c = &mut self.account.connection;
-        c.socket = None;
-        c.open = false;
-        self.account.supervisor.retry(cx);
-    }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.account.supervisor.on_timer(cx, timer) {
-            SocketTick::Unhandled => (),
-            SocketTick::Reconnect => {
-                self.private_connect(cx);
-                return true;
-            }
-            SocketTick::Ping => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.send(socket, "ping");
-                }
-                return true;
-            }
-            SocketTick::TimedOut(_) => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.close(socket);
-                    self.private_close(cx, socket);
-                }
-                return true;
-            }
-            SocketTick::Handled => return true,
-        }
         if let Some(read) = self.account.startup.on_timer(timer) {
             self.read_setting(cx, read);
             return true;

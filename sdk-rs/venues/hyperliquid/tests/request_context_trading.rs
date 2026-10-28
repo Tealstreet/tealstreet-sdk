@@ -1,4 +1,4 @@
-//! Original custody probes; raw compatibility is restricted to native wire/reply ingress.
+//! Production custody controls with real setup, native replies and Prepare/Bind/Claim.
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::Interval;
@@ -27,6 +27,50 @@ struct Probe {
     validated: usize,
 }
 impl Venue for Probe {
+    fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
+        self.inner.address_nonce_domain()
+    }
+    fn public_address_slots(&self) -> safe_cex_engine::AddressSetupSlots {
+        self.inner.public_address_slots()
+    }
+    fn dispatch_nonce() -> bool {
+        Hyperliquid::dispatch_nonce()
+    }
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    }
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        self.inner.http_pacing()
+    }
+    fn http_release_domain() -> Option<safe_cex_engine::request_context::ReleaseDomain> {
+        Hyperliquid::http_release_domain()
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.inner.on_http_preflight_ready(cx, owner);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.inner.on_http_plan_ready(cx, owner);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.inner.on_http_owner_retired_preflight(owner)
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<safe_cex_engine::request_context::ReconciliationData, Error> {
+        self.inner.capture_http_reconciliation(pending)
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -167,16 +211,21 @@ fn boot_with_builder(approval_ready: bool) -> (Engine<Probe>, SocketId) {
     static AGENT: AtomicU64 = AtomicU64::new(100);
     let scalar = format!("{:064x}", AGENT.fetch_add(1, Ordering::Relaxed));
     let address = safe_cex_crypto::ethereum::private_key_address(&scalar).unwrap();
+    let (provider, identities) = support::agent(&scalar);
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
         inner: Hyperliquid::new(Options {
             key: Some(address.clone()),
-            secret: Some(scalar),
+            credentials: identities.primary.clone(),
             application_id: Some(address),
             ..Options::default()
         }),
         peers: vec![],
         validated: 0,
     });
+    e.set_signer(Some(provider)).unwrap();
+    e.set_identities(identities).unwrap();
+    e.initialize_address_nonce(999.).unwrap();
+    assert!(e.address_nonce_setup_ready());
     e.start(1000.);
     let mut socket = None;
     for _ in 0..30 {
@@ -291,12 +340,7 @@ fn prep(actions: &[Action]) -> (Preparation, HttpRequest) {
 fn native_release(e: &mut Engine<Probe>, actions: &[Action]) -> HttpRequest {
     native_release_at(e, NOW, actions)
 }
-fn native_release_at(e: &mut Engine<Probe>, now: f64, actions: &[Action]) -> HttpRequest {
-    let raw = exchange(actions);
-    if !raw.is_empty() {
-        assert_eq!(raw.len(), 1);
-        return raw[0].clone();
-    }
+fn prepare_for_pacing(e: &mut Engine<Probe>, now: f64, actions: &[Action]) -> Vec<Action> {
     let (p, _) = prep(actions);
     e.http_prepared(
         now,
@@ -306,18 +350,51 @@ fn native_release_at(e: &mut Engine<Probe>, now: f64, actions: &[Action]) -> Htt
             expires_at: None,
         },
     );
-    let (permit, request) = e
-        .drain_actions()
-        .find_map(|a| match a {
-            Action::ManagedHttp(a) => match *a {
-                HttpAction::Bind {
-                    permit, request, ..
-                } => Some((permit, request)),
-                _ => None,
-            },
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(exchange(&actions).is_empty());
+    assert!(
+        !actions.iter().any(
+            |a| matches!(a, Action::ManagedHttp(a) if matches!(&**a, HttpAction::Bind { .. }))
+        )
+    );
+    actions
+}
+fn native_release_at(e: &mut Engine<Probe>, now: f64, actions: &[Action]) -> HttpRequest {
+    assert!(
+        exchange(actions).is_empty(),
+        "writes have no raw transport fallback"
+    );
+    let bound = actions.iter().find_map(|a| match a {
+        Action::ManagedHttp(a) => match &**a {
+            HttpAction::Bind {
+                permit, request, ..
+            } => Some((*permit, request.clone())),
             _ => None,
-        })
-        .expect("real Bind; signed adoption needs the actual provider fixture");
+        },
+        _ => None,
+    });
+    let (permit, request) = bound.unwrap_or_else(|| {
+        let (p, _) = prep(actions);
+        e.http_prepared(
+            now,
+            p,
+            Prepared {
+                id: p.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        e.drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => Some((permit, request)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("real signed Bind")
+    });
     assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
     request
 }
@@ -327,10 +404,11 @@ fn no_trade(actions: &[Action]) {
         "shared refusal precedes native exchange"
     );
     assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(&**a, HttpAction::Prepare { .. } | HttpAction::Bind { .. } | HttpAction::BindGroup { .. }))));
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::Sign { .. } | Action::SignPayload { .. } | Action::SignedOutbound { .. }
-    )));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::SignedOutbound { .. }))
+    );
 }
 fn one_error(actions: &[Action], kind: ErrorKind, outcome: Outcome) {
     let r = results(actions, OWNER);
@@ -445,6 +523,7 @@ fn capacity(case: Case) {
         let mut settled: Vec<_> = e.drain_actions().collect();
         if matches!(case, Case::Amend) {
             assert!(results(&settled, OWNER).is_empty());
+            settled = prepare_for_pacing(&mut e, NOW + 1., &settled);
             let timer = settled
                 .iter()
                 .find_map(|a| match a {
@@ -613,7 +692,7 @@ fn delayed_prepare_expires_at_the_twenty_second_bound() {
     assert!(e.drain_actions().next().is_none());
 }
 #[test]
-fn native_order_wire_and_no_oid_trigger_are_preserved() {
+fn an_idless_status_on_an_ordinary_order_remains_unknown() {
     let (mut e, _) = boot();
     let a = command(&mut e, NOW, place(OWNER));
     let r = native_release(&mut e, &a);
@@ -634,7 +713,10 @@ fn native_order_wire_and_no_oid_trigger_are_preserved() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
     let a: Vec<_> = e.drain_actions().collect();
-    assert_eq!(results(&a, OWNER), vec![Ok("[]".into())]);
+    assert_eq!(
+        results(&a, OWNER)[0].as_ref().unwrap_err().outcome,
+        Some(Outcome::Unknown)
+    );
 }
 fn status_refusal(status: u16, outcome: Outcome) {
     let (mut e, _) = boot();
@@ -650,16 +732,16 @@ fn status_refusal(status: u16, outcome: Outcome) {
     assert!(e.drain_actions().next().is_none());
 }
 #[test]
-fn native_401_is_rejected_without_resend() {
-    status_refusal(401, Outcome::Rejected);
+fn unproven_http_401_is_unknown_without_resend() {
+    status_refusal(401, Outcome::Unknown);
 }
 #[test]
-fn native_403_is_rejected_without_resend() {
-    status_refusal(403, Outcome::Rejected);
+fn unproven_http_403_is_unknown_without_resend() {
+    status_refusal(403, Outcome::Unknown);
 }
 #[test]
-fn native_429_is_rejected_without_resend() {
-    status_refusal(429, Outcome::Rejected);
+fn unproven_http_429_is_unknown_without_resend() {
+    status_refusal(429, Outcome::Unknown);
 }
 #[test]
 fn native_408_is_unknown_without_resend() {
@@ -715,33 +797,59 @@ fn duplicate_owner_preserves_the_retained_peer() {
 }
 
 #[test]
-fn fifo_keeps_the_native_334_ms_queue_anchor() {
+fn fifo_waits_334_ms_after_a_delayed_successful_final_claim() {
     let (mut e, _) = boot();
     let first = command(&mut e, NOW, leverage(OWNER));
-    let r = native_release(&mut e, &first);
+    let (preparation, _) = prep(&first);
+    e.http_prepared(
+        NOW,
+        preparation,
+        Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let bound: Vec<_> = e.drain_actions().collect();
     let queued = command(&mut e, NOW + 1., leverage(OWNER + 1));
     no_trade(&queued);
     assert!(results(&queued, OWNER + 1).is_empty());
+    let first_claim_at = NOW + 500.;
+    let r = native_release_at(&mut e, first_claim_at, &bound);
     respond(
         &mut e,
-        NOW + 2.,
+        first_claim_at + 1.,
         &r,
         200,
         r#"{"status":"ok","response":{"type":"default"}}"#,
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert_eq!(results(&actions, OWNER), vec![Ok("[]".into())]);
-    no_trade(&actions);
+    let actions = prepare_for_pacing(&mut e, first_claim_at + 1., &actions);
     let timer = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 334. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == first_claim_at + 334. => Some(*timer),
             _ => None,
         })
-        .expect("native queue-time 334 ms pacing");
-    e.handle(NOW + 334., Event::TimerFired { timer });
+        .expect("334 ms pacing starts at the actual final Claim");
+    e.handle(first_claim_at + 333., Event::TimerFired { timer });
+    let early: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !early.iter().any(
+            |a| matches!(a, Action::ManagedHttp(a) if matches!(&**a, HttpAction::Bind { .. }))
+        )
+    );
+    assert!(exchange(&early).is_empty());
+    let timer = early
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == first_claim_at + 334. => Some(*timer),
+            _ => None,
+        })
+        .expect("early wake preserves the final-release deadline");
+    e.handle(first_claim_at + 334., Event::TimerFired { timer });
     let actions: Vec<_> = e.drain_actions().collect();
-    let second = native_release_at(&mut e, NOW + 334., &actions);
+    let second = native_release_at(&mut e, first_claim_at + 334., &actions);
     assert_eq!(
         serde_json::from_str::<Value>(second.body.as_deref().unwrap()).unwrap()["action"]["type"],
         "updateLeverage"
@@ -844,17 +952,41 @@ fn builder_hold(reply_ready: bool) {
     let actions = command(&mut e, NOW, place(OWNER));
     assert!(exchange(&actions).is_empty());
     assert!(results(&actions, OWNER).is_empty());
-    let read = actions
+    let preparation = actions
         .iter()
         .find_map(|a| match a {
-            Action::Http(r)
-                if !r.url.ends_with("/exchange") && support::kind(r) == "maxBuilderFee" =>
-            {
-                Some(r.clone())
-            }
+            Action::ManagedHttp(action) => match &**action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if support::kind(request) == "maxBuilderFee" => Some(*preparation),
+                _ => None,
+            },
             _ => None,
         })
         .expect("native builder prerequisite");
+    e.http_prepared(
+        NOW,
+        preparation,
+        Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let (permit, read) = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind {
+                    permit, request, ..
+                } if support::kind(&request) == "maxBuilderFee" => Some((permit, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("builder read binds its prepared route");
+    assert!(matches!(e.claim_http(NOW, permit), Ok(Claim::Released(_))));
     let timer = actions
         .iter()
         .find_map(|a| match a {
@@ -949,6 +1081,7 @@ fn stale_old_reply_cannot_settle_the_next_fifo_owner() {
     respond(&mut e, NOW + 2., &r, 200, ACCEPT);
     let a: Vec<_> = e.drain_actions().collect();
     assert_eq!(results(&a, OWNER).len(), 1);
+    let a = prepare_for_pacing(&mut e, NOW + 2., &a);
     let timer = a
         .iter()
         .find_map(|a| match a {
@@ -992,6 +1125,578 @@ fn native_two_row_reply(body: &str) -> (Engine<Probe>, Vec<Action>) {
 }
 
 #[test]
+fn deferred_attachment_returns_only_the_accepted_parent_id() {
+    let (e, actions) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":3001}},"waitingForFill"]}}}"#,
+    );
+    assert_eq!(results(&actions, OWNER), vec![Ok(r#"["3001"]"#.into())]);
+    assert_eq!(e.store().orders().len(), 1);
+    assert_eq!(e.store().order("3001").unwrap().id, "3001");
+    no_trade(&actions);
+}
+
+#[test]
+fn a_refused_attachment_keeps_the_real_parent_as_a_known_partial() {
+    let (e, actions) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":3001}},{"error":"Insufficient margin to place order."}]}}}"#,
+    );
+    let result = results(&actions, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["3001"]);
+    assert!(e.store().order("3001").is_some());
+    no_trade(&actions);
+}
+
+#[test]
+fn an_unlisted_child_failure_wins_over_a_cited_refusal_without_losing_the_parent() {
+    for errors in [
+        [
+            "Insufficient margin to place order.",
+            "unlisted child failure",
+        ],
+        [
+            "unlisted child failure",
+            "Insufficient margin to place order.",
+        ],
+    ] {
+        let (mut e, _) = boot();
+        let mut c = place(OWNER);
+        let Command::PlaceOrders { orders, .. } = &mut c else {
+            unreachable!()
+        };
+        orders[0].stop_loss = Some(80.);
+        orders[0].take_profit = Some(120.);
+        let actions = command(&mut e, NOW, c);
+        let request = native_release(&mut e, &actions);
+        let response = json!({"status":"ok","response":{"type":"order","data":{"statuses":[
+            {"resting":{"oid":3001}}, {"error":errors[0]}, {"error":errors[1]}
+        ]}}})
+        .to_string();
+        respond(&mut e, NOW + 1., &request, 200, &response);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let result = results(&actions, OWNER);
+        let error = result[0].as_ref().unwrap_err();
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["3001"]);
+        assert!(e.store().order("3001").is_some());
+        no_trade(&actions);
+    }
+}
+
+#[test]
+fn independent_native_child_ids_are_preserved_without_logical_id_invention() {
+    let (_, actions) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":3001}},{"resting":{"oid":3002}}]}}}"#,
+    );
+    assert_eq!(
+        results(&actions, OWNER),
+        vec![Ok(r#"["3001","3002"]"#.into())]
+    );
+}
+
+#[test]
+fn a_deferred_attachment_never_hides_another_child_failure() {
+    for (child, expected) in [
+        ("Insufficient margin to place order.", None),
+        ("unlisted child failure", Some(Outcome::Unknown)),
+    ] {
+        for deferred_first in [false, true] {
+            let (mut e, _) = boot();
+            let mut c = place(OWNER);
+            let Command::PlaceOrders { orders, .. } = &mut c else {
+                unreachable!()
+            };
+            orders[0].stop_loss = Some(80.);
+            orders[0].take_profit = Some(120.);
+            let actions = command(&mut e, NOW, c);
+            let request = native_release(&mut e, &actions);
+            let mut children = [json!({"error":child}), json!("waitingForFill")];
+            if deferred_first {
+                children.reverse();
+            }
+            let response = json!({"status":"ok","response":{"type":"order","data":{
+                "statuses":[{"resting":{"oid":3001}}, children[0], children[1]]
+            }}})
+            .to_string();
+            respond(&mut e, NOW + 1., &request, 200, &response);
+            let actions: Vec<_> = e.drain_actions().collect();
+            let result = results(&actions, OWNER);
+            let error = result[0].as_ref().unwrap_err();
+            assert_eq!(error.outcome, expected);
+            assert_eq!(error.partial.as_ref().unwrap().order_ids, ["3001"]);
+            assert!(e.store().order("3001").is_some());
+            no_trade(&actions);
+        }
+    }
+}
+
+#[test]
+fn a_deferred_attachment_requires_its_accepted_parent_in_the_parent_row() {
+    for statuses in [
+        json!(["waitingForFill", {"resting":{"oid":3001}}]),
+        json!([{"error":"Insufficient margin to place order."}, "waitingForFill"]),
+        json!([{"resting":{"oid":3001}}, "waitingForTrigger"]),
+    ] {
+        let body = json!({"status":"ok","response":{"type":"order","data":{
+            "statuses":statuses
+        }}})
+        .to_string();
+        let (_, actions) = native_two_row_reply(&body);
+        let result = results(&actions, OWNER);
+        assert_eq!(
+            result[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        no_trade(&actions);
+    }
+}
+
+#[test]
+fn a_fixed_size_trigger_does_not_gain_the_full_position_setting_contract() {
+    let (mut e, _) = boot();
+    let mut c = full_position_trigger(OWNER);
+    let Command::PlaceOrders { orders, .. } = &mut c else {
+        unreachable!()
+    };
+    orders[0].amount = 0.5;
+    let actions = command(&mut e, NOW, c);
+    let request = native_release(&mut e, &actions);
+    let wire: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(wire["action"]["grouping"], "na");
+    assert_eq!(wire["action"]["orders"][0]["s"], "0.5");
+    respond(
+        &mut e,
+        NOW + 1.,
+        &request,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(
+        results(&actions, OWNER)[0].as_ref().unwrap_err().outcome,
+        Some(Outcome::Unknown)
+    );
+    no_trade(&actions);
+}
+
+fn full_position_trigger(command: u32) -> Command {
+    Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(json!({
+                "symbol":"BTC-PERP", "type":"stop_market", "side":"sell",
+                "price":80, "amount":0, "reduceOnly":true,
+                "clientOrderId":"0x00000000000000000000000000000002"
+            }))
+            .unwrap(),
+        ],
+    }
+}
+
+#[test]
+fn deferred_full_position_trigger_succeeds_without_an_order_id() {
+    let (mut e, _) = boot();
+    let actions = command(&mut e, NOW, full_position_trigger(OWNER));
+    let request = native_release(&mut e, &actions);
+    let wire: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(wire["action"]["grouping"], "positionTpsl");
+    assert_eq!(wire["action"]["orders"][0]["s"], "0");
+    respond(
+        &mut e,
+        NOW + 1.,
+        &request,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(results(&actions, OWNER), vec![Ok("[]".into())]);
+    assert!(e.store().orders().is_empty());
+    no_trade(&actions);
+}
+
+fn deferred_child_terminal(status: &str, expire_record: bool, failed_leg: bool) {
+    for materialized in [false, true] {
+        let (mut e, socket) = boot();
+        let mut c = place(OWNER);
+        let Command::PlaceOrders { orders, .. } = &mut c else {
+            unreachable!()
+        };
+        orders[0].stop_loss = Some(80.);
+        let actions = command(&mut e, NOW, c);
+        let request = native_release(&mut e, &actions);
+        let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        let cloid = body["action"]["orders"][1]["c"].as_str().unwrap();
+        respond(
+            &mut e,
+            NOW + 1.,
+            &request,
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":3001}},"waitingForFill"]}}}"#,
+        );
+        e.drain_actions().for_each(drop);
+        let row = json!({"coin":"BTC", "oid":3002, "cloid":cloid,
+            "side":"A", "limitPx":"90", "origSz":"1", "sz":"1",
+            "isTrigger":true, "triggerPx":"80", "reduceOnly":true,
+            "orderType":"Stop Market", "tif":""});
+        if materialized {
+            let text = json!({"channel":"orderUpdates", "data":[{"order":row,"status":"open"}]})
+                .to_string();
+            e.handle(
+                NOW + 2.,
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+            e.drain_actions().for_each(drop);
+            assert!(e.store().order("3002").is_some());
+        }
+        let terminal_at = if expire_record {
+            let heartbeat = format!(
+                "{{\"channel\":\"clearinghouseState\",\"data\":{}}}",
+                support::STATE
+            );
+            for tick in 1..=180 {
+                e.handle(
+                    NOW + f64::from(tick) * 10_000.,
+                    Event::WsMessage {
+                        socket,
+                        text: &heartbeat,
+                    },
+                );
+                e.drain_actions().for_each(drop);
+            }
+            let at = NOW + 1_800_001.;
+            let unrelated = json!({"channel":"orderUpdates", "data":[{"order":{
+                "coin":"BTC", "oid":7000, "side":"B", "limitPx":"200",
+                "origSz":"1", "sz":"1", "orderType":"Limit", "tif":"Gtc"
+            },"status":"open"}]})
+            .to_string();
+            e.handle(
+                at,
+                Event::WsMessage {
+                    socket,
+                    text: &unrelated,
+                },
+            );
+            e.drain_actions().for_each(drop);
+            assert!(e.store().order("7000").is_some());
+            at + 1.
+        } else {
+            NOW + 3.
+        };
+        let text =
+            json!({"channel":"orderUpdates", "data":[{"order":row,"status":status}]}).to_string();
+        for delivery in 0..2 {
+            e.handle(
+                terminal_at + f64::from(delivery),
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            let terminal: Vec<_> = actions
+                .iter()
+                .filter_map(|action| match action {
+                    Action::Notice(Notice::Event(event))
+                        if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED =>
+                    {
+                        Some(event)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                terminal.len(),
+                usize::from(failed_leg && !materialized && delivery == 0)
+            );
+            if let Some(event) = terminal.first() {
+                for (field, value) in [
+                    ("symbol", "BTC-PERP"),
+                    ("orderId", "3002"),
+                    ("clientOrderId", cloid),
+                    ("status", status),
+                ] {
+                    assert!(
+                        event
+                            .fields
+                            .contains(&(field, safe_cex_engine::log::Value::Str(value.into())))
+                    );
+                }
+            }
+            assert!(e.store().order("3002").is_none());
+            assert!(e.store().order("3001").is_some());
+            assert!(results(&actions, OWNER).is_empty());
+            no_trade(&actions);
+        }
+        let heartbeat = format!(
+            "{{\"channel\":\"clearinghouseState\",\"data\":{}}}",
+            support::STATE
+        );
+        for tick in 1..=13 {
+            e.handle(
+                terminal_at + f64::from(tick) * 10_000.,
+                Event::WsMessage {
+                    socket,
+                    text: &heartbeat,
+                },
+            );
+            e.drain_actions().for_each(drop);
+        }
+        e.handle(
+            terminal_at + 130_001.,
+            Event::WsMessage {
+                socket,
+                text: &text,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED)));
+        no_trade(&actions);
+    }
+}
+
+#[test]
+fn deferred_child_rejection_is_correlated_once_before_materialization() {
+    deferred_child_terminal("perpMarginRejected", false, true);
+}
+
+#[test]
+fn deferred_child_venue_forced_cancel_is_correlated_once_before_materialization() {
+    deferred_child_terminal("marginCanceled", false, true);
+}
+
+#[test]
+fn deferred_child_terminal_survives_record_expiry() {
+    for status in ["perpMarginRejected", "marginCanceled"] {
+        deferred_child_terminal(status, true, true);
+    }
+}
+
+#[test]
+fn normal_protective_terminal_user_cancel_is_not_a_failed_leg() {
+    deferred_child_terminal("canceled", false, false);
+    deferred_child_terminal("canceled", true, false);
+}
+
+#[test]
+fn normal_protective_terminal_sibling_fill_cancel_is_not_a_failed_leg() {
+    deferred_child_terminal("siblingFilledCanceled", false, false);
+    deferred_child_terminal("siblingFilledCanceled", true, false);
+}
+
+#[test]
+fn native_protective_terminal_evidence_does_not_need_a_placement_record() {
+    for kind in [
+        "Stop Market",
+        "Stop Limit",
+        "Take Profit Market",
+        "Take Profit Limit",
+    ] {
+        let (mut e, socket) = boot();
+        let text = json!({"channel":"orderUpdates","data":[{"order":{
+            "coin":"BTC","oid":3002,"cloid":CLOID,"side":"A","sz":"1",
+            "origSz":"1","limitPx":"90","triggerPx":"80",
+            "reduceOnly":true,"isTrigger":true,"orderType":kind
+        },"status":"perpMarginRejected"}]})
+        .to_string();
+        for delivery in 0..2 {
+            e.handle(
+                NOW + f64::from(delivery),
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|action| matches!(action,
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED))
+                    .count(),
+                usize::from(delivery == 0)
+            );
+            assert!(e.store().orders().is_empty());
+            no_trade(&actions);
+        }
+    }
+}
+
+#[test]
+fn incomplete_or_ordinary_terminal_rows_do_not_report_a_failed_protective_child() {
+    for (field, value) in [
+        ("reduceOnly", json!(false)),
+        ("isTrigger", json!(false)),
+        ("orderType", json!("Limit")),
+        ("orderType", json!("unknown")),
+        ("cloid", json!("")),
+        ("cloid", json!(null)),
+        ("oid", json!(0)),
+        ("coin", json!("unknown")),
+    ] {
+        let (mut e, socket) = boot();
+        let mut row = json!({"coin":"BTC","oid":3002,"cloid":CLOID,"side":"A",
+            "sz":"1","origSz":"1","limitPx":"90","triggerPx":"80",
+            "reduceOnly":true,"isTrigger":true,"orderType":"Stop Market"});
+        row[field] = value;
+        let text =
+            json!({"channel":"orderUpdates","data":[{"order":row,"status":"perpMarginRejected"}]})
+                .to_string();
+        e.handle(
+            NOW,
+            Event::WsMessage {
+                socket,
+                text: &text,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED)));
+        no_trade(&actions);
+    }
+}
+
+#[test]
+fn native_protective_failure_statuses_form_a_closed_set() {
+    for (failed, statuses) in [
+        (
+            true,
+            &[
+                "rejected",
+                "tickRejected",
+                "minTradeNtlRejected",
+                "perpMarginRejected",
+                "reduceOnlyRejected",
+                "badAloPxRejected",
+                "iocCancelRejected",
+                "badTriggerPxRejected",
+                "marketOrderNoLiquidityRejected",
+                "positionIncreaseAtOpenInterestCapRejected",
+                "positionFlipAtOpenInterestCapRejected",
+                "tooAggressiveAtOpenInterestCapRejected",
+                "openInterestIncreaseRejected",
+                "insufficientSpotBalanceRejected",
+                "oracleRejected",
+                "perpMaxPositionRejected",
+                "marginCanceled",
+                "vaultWithdrawalCanceled",
+                "openInterestCapCanceled",
+                "selfTradeCanceled",
+                "reduceOnlyCanceled",
+                "delistedCanceled",
+                "liquidatedCanceled",
+            ][..],
+        ),
+        (
+            false,
+            &[
+                "filled",
+                "canceled",
+                "siblingFilledCanceled",
+                "scheduledCancel",
+                "open",
+                "triggered",
+                "FooRejected",
+                "FooCanceled",
+            ][..],
+        ),
+    ] {
+        for status in statuses {
+            let (mut e, socket) = boot();
+            let text = json!({"channel":"orderUpdates","data":[{"order":{
+                "coin":"BTC","oid":3002,"cloid":CLOID,"side":"A","sz":"1",
+                "origSz":"1","limitPx":"90","triggerPx":"80",
+                "reduceOnly":true,"isTrigger":true,"orderType":"Stop Market"
+            },"status":status}]})
+            .to_string();
+            e.handle(
+                NOW,
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|action| matches!(action,
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED))
+                    .count(),
+                usize::from(failed),
+                "{status}"
+            );
+            no_trade(&actions);
+        }
+    }
+}
+
+#[test]
+fn deferred_full_position_effect_allows_one_successor_and_survives_its_refusal() {
+    let (mut e, _) = boot();
+    let mut first = full_position_trigger(OWNER);
+    let Command::PlaceOrders { orders, .. } = &mut first else {
+        unreachable!()
+    };
+    let Command::PlaceOrders {
+        orders: following, ..
+    } = place(OWNER)
+    else {
+        unreachable!()
+    };
+    orders.extend(following);
+    let actions = command(&mut e, NOW, first);
+    let request = native_release(&mut e, &actions);
+    respond(
+        &mut e,
+        NOW + 1.,
+        &request,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(results(&actions, OWNER).is_empty());
+    let paced = prepare_for_pacing(&mut e, NOW + 1., &actions);
+    let timer = paced
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 334. => Some(*timer),
+            _ => None,
+        })
+        .expect("the accepted setting permits the next physical leg");
+    e.handle(NOW + 334., Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let following = native_release_at(&mut e, NOW + 334., &actions);
+    assert_ne!(following.id, request.id);
+    respond(
+        &mut e,
+        NOW + 335.,
+        &following,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let result = results(&actions, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.outcome, None);
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    no_trade(&actions);
+}
+
+#[test]
 fn native_mixed_refusal_scans_accepted_rows_after_the_first_error() {
     let (e, a) = native_two_row_reply(
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"first rejected"},{"resting":{"oid":901}}]}}}"#,
@@ -1017,7 +1722,7 @@ fn native_all_rejected_rows_keep_the_full_ordered_diagnostic() {
     let error = result[0].as_ref().unwrap_err();
     assert_eq!(error.message, "first rejected, second rejected");
     assert_eq!(error.kind, Some(ErrorKind::Rejected));
-    assert_eq!(error.outcome, Some(Outcome::Rejected));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(e.store().orders().is_empty());
     no_trade(&a);
 }
@@ -1069,11 +1774,14 @@ fn native_wrong_response_kind_cannot_publish_matching_rows() {
 }
 
 #[test]
-fn native_waiting_rows_complete_without_invented_order_ids() {
+fn unmatched_pending_rows_are_unknown_without_an_accepted_parent() {
     let (e, a) = native_two_row_reply(
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill","waitingForTrigger"]}}}"#,
     );
-    assert_eq!(results(&a, OWNER), vec![Ok("[]".into())]);
+    assert_eq!(
+        results(&a, OWNER)[0].as_ref().unwrap_err().outcome,
+        Some(Outcome::Unknown)
+    );
     assert!(e.store().orders().is_empty());
     no_trade(&a);
 }
@@ -1131,6 +1839,7 @@ fn native_late_source_fill_keeps_the_confirmed_replacement_identity() {
     );
     let a: Vec<_> = e.drain_actions().collect();
     assert!(results(&a, OWNER).is_empty());
+    let a = prepare_for_pacing(&mut e, NOW + 1., &a);
     let timer = a
         .iter()
         .find_map(|action| match action {
@@ -1165,4 +1874,18 @@ fn native_late_source_fill_keeps_the_confirmed_replacement_identity() {
     assert_eq!(ids["clientOrderId"], cloid);
     assert!(e.store().order("10").is_some());
     no_trade(&a);
+}
+
+#[test]
+fn cited_margin_refusal_with_an_accepted_row_is_known_partial() {
+    let (e, actions) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":900}},{"error":"Insufficient margin to place order."}]}}}"#,
+    );
+    let terminal = results(&actions, OWNER);
+    assert_eq!(terminal.len(), 1);
+    let error = terminal[0].as_ref().unwrap_err();
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["900"]);
+    assert!(e.store().order("900").is_some());
+    no_trade(&actions);
 }

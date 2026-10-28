@@ -51,9 +51,6 @@ export interface BoundHttp {
 export interface Transport {
   /** Default account HTTP adapter, resolved by the routing host. */
   httpMode?: 'direct' | 'how';
-  signPayload?(request: {
-    exchangeName: 'paradex'; key: string; payload: string; scheme: 'stark'; encoding: 'felt-pair';
-  }, context: { signal: AbortSignal }): Promise<{ signature: string; headers?: Record<string, string> }> | { signature: string; headers?: Record<string, string> };
   /** Host-derived protocol options; apply after caller options when constructing the engine. */
   engineOptions?: Readonly<Record<string, unknown>>;
   /** Header-capable raw socket constructor for HOW and relay protocol clients. */
@@ -467,8 +464,6 @@ export interface WasmEngineLike {
   signed?(attempt: number, resultJson: string, now: number): string;
   signFailed?(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;
   prepareDispatch?(now: number): string;
-  payloadSigned?(request: number, signature: string, headers: string, now: number): string;
-  payloadSignFailed?(request: number, error: string, now: number): string;
   timer(timer: number, now: number): string;
 }
 

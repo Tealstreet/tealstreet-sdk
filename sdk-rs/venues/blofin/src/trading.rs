@@ -1477,14 +1477,14 @@ impl Blofin {
         };
         match &step.effect {
             Effect::Place { .. } => {
-                self.account.orders_revision += 1;
+                cx.store.invalidate_order_snapshots();
                 for order in &step.orders {
                     cx.store.upsert_order(order.clone());
                     active.job.creating.push(order.id.clone());
                 }
             }
             Effect::Cancel(targets) => {
-                self.account.orders_revision += 1;
+                cx.store.invalidate_order_snapshots();
                 for id in targets.iter().flat_map(|t| &t.store_ids) {
                     cx.store.set_order_status(id, OrderStatus::Canceling);
                     active.job.canceling.push(id.clone());
@@ -1733,7 +1733,7 @@ impl Blofin {
     fn restore_retired(&mut self, cx: &mut Cx<'_, Pending>) -> Option<bool> {
         let job = self.trading.retired.take()?;
         self.cleanup_job(cx, &job);
-        self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
+        cx.store.invalidate_order_snapshots();
         Some(job.join)
     }
     /// A half-applied hedged join refreshes the account, as native's join did.
@@ -1766,7 +1766,7 @@ impl Blofin {
             if released {
                 error.outcome = Some(Outcome::Unknown);
                 if request.step.is_place() {
-                    self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
+                    cx.store.invalidate_order_snapshots();
                 }
             }
             let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
@@ -1823,7 +1823,7 @@ impl Blofin {
         }
         if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
             if request.step.is_place() {
-                self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
+                cx.store.invalidate_order_snapshots();
             }
             return self.end(cx, active, current, error);
         }
@@ -2019,7 +2019,7 @@ impl Blofin {
                     }
                     if gone || accepted {
                         self.trading.acknowledged.remove(&target.id);
-                        self.account.orders_revision += 1;
+                        cx.store.invalidate_order_snapshots();
                         if target.family != 1 {
                             self.remember_terminal(&target.id);
                         }

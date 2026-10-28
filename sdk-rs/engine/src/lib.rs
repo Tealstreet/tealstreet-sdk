@@ -63,14 +63,13 @@ pub use capabilities::{
     AccountLookup, CancelAll, Capabilities, ClosedPositionFormat, FillHistoryTime, LeverageQuery,
     MaxLeverage, PositionHistory, QuantityUnits,
 };
-pub use credentials::ReadCredentials;
+pub use credentials::{READ_CREDENTIALS_INVALID, ReadCredentials};
 pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CommandWait, CredentialSlot, Cx,
     DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpRelease, HttpRequest,
-    MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PayloadSignRequest, PollTimerBounds,
-    Query, ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SignatureTarget,
-    SigningTarget, SocketChannel, SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction,
-    unsupported_venue_action,
+    MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PollTimerBounds, Query,
+    ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SigningTarget, SocketChannel,
+    SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction, unsupported_venue_action,
 };
 pub use error::{
     BuilderAuthorization, BuilderAuthorizationReason, ErrorKind, Outcome, Partial, VenueError,

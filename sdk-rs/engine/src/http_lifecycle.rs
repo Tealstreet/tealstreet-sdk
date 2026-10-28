@@ -2109,11 +2109,12 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
-        #[cfg(feature = "address-nonce")]
-        if managed
-            .recipe
-            .as_ref()
-            .is_some_and(|recipe| !recipe.nonce_identity_current(&self.io.core.identities))
+        #[cfg(any(feature = "address-nonce", feature = "nonce-handoff"))]
+        if self.io.core.nonce_enabled
+            && managed
+                .recipe
+                .as_ref()
+                .is_some_and(|recipe| !recipe.nonce_identity_current(&self.io.core.identities))
         {
             self.http_preparation_failed(
                 now,
@@ -4721,6 +4722,81 @@ mod tests {
             );
             assert_eq!(engine.venue.responses, 0);
             assert!(engine.drain_actions().next().is_none());
+        }
+    }
+
+    /// RUST_ORDER_FENCE_DOMAINS.md crossings 1-3: the late-ACK fence and the
+    /// snapshot fence advance independently (crossing 4 is pinned in store.rs).
+    #[test]
+    fn late_ack_and_snapshot_fences_cross_independently() {
+        #[derive(Clone, Copy, Debug)]
+        enum Crossing {
+            RowUpdate,
+            SiblingPublish,
+            AbsentRowInvalidation,
+        }
+        for crossing in [
+            Crossing::RowUpdate,
+            Crossing::SiblingPublish,
+            Crossing::AbsentRowInvalidation,
+        ] {
+            let (mut engine, _) = start(Probe::default());
+            engine
+                .store
+                .set_orders(vec![fixture_order("one"), fixture_order("two")]);
+            let held = engine.store.begin_orders_snapshot().unwrap();
+            let sibling = engine.store.begin_orders_snapshot().unwrap();
+            let (context, token, _) = mutation(&mut engine, 7, 0.);
+            let permit = bind(&mut engine, token, 1.);
+            engine.claim_http(2., permit).unwrap();
+            fail_mutation(&mut engine, &context, 3.);
+            match crossing {
+                Crossing::RowUpdate => engine.store.upsert_order(fixture_order("unrelated")),
+                Crossing::SiblingPublish => assert!(
+                    engine
+                        .store
+                        .commit_orders_snapshot([sibling], |current| current.to_vec())
+                ),
+                Crossing::AbsentRowInvalidation => engine.store.invalidate_order_snapshots(),
+            }
+            engine.drain_actions().for_each(drop);
+            engine.handle(
+                7.,
+                Event::HttpResponse {
+                    request: token.attempt().request,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: "ok",
+                    },
+                },
+            );
+            let patched = matches!(crossing, Crossing::AbsentRowInvalidation);
+            let status = if patched {
+                crate::model::OrderStatus::Canceled
+            } else {
+                crate::model::OrderStatus::Open
+            };
+            assert_eq!(
+                &*engine.venue.reconciliations.borrow(),
+                &["ok"],
+                "{crossing:?}"
+            );
+            assert_eq!(
+                engine.store.order("one").unwrap().status,
+                status,
+                "{crossing:?}"
+            );
+            assert_eq!(
+                engine.store.order("two").unwrap().status,
+                status,
+                "{crossing:?}"
+            );
+            assert_eq!(
+                engine.store.orders_snapshot_current(&held),
+                !patched,
+                "{crossing:?}: only an explicit invalidation stales the held snapshot"
+            );
         }
     }
 

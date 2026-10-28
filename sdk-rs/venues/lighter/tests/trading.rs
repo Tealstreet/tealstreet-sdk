@@ -833,9 +833,7 @@ fn trailing_stop_is_rejected_instead_of_placing_a_market_order() {
         .into_iter()
         .collect::<Vec<_>>();
     assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::SignPayload { .. })),
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
         "{actions:?}"
     );
     assert!(actions.iter().any(|a| matches!(

@@ -8,6 +8,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 use support::Plain;
+use support::prepared_now;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 10_000.0;
 
@@ -16,13 +17,16 @@ fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
     ready_with_policy(private, PublicFeedPolicy::Direct)
 }
 fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperliquid>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        public_data_only: !private,
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            public_data_only: !private,
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        true,
+    );
     e.set_public_feed_policy(policy).unwrap();
     e.start(1000.0);
     let r = take_http(&mut e);
@@ -850,12 +854,15 @@ fn positional_context_fallback_requires_a_complete_homogeneous_documented_array(
 }
 const MULTI_QUOTE_META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HYPE","index":150,"szDecimals":2},{"name":"USDT0","index":268,"szDecimals":2},{"name":"USDH","index":360,"szDecimals":2},{"name":"USDE","index":235,"szDecimals":2}],"universe":[{"name":"@207","tokens":[150,268],"index":207},{"name":"@232","tokens":[150,360],"index":232},{"name":"@255","tokens":[150,235],"index":255},{"name":"@107","tokens":[150,0],"index":107},{"name":"@200","tokens":[268,0],"index":200}]},[{"coin":"@255","midPx":"13","markPx":"13"},{"coin":"@107","midPx":"40","markPx":"40"},{"coin":"@207","midPx":"11","markPx":"11"},{"coin":"@232","midPx":"12","markPx":"12"},{"coin":"@200","midPx":"0.98","markPx":"0.98"}]]"#;
 fn custom_spot(meta: &str) -> (Engine<Hyperliquid>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        true,
+    );
     e.start(1000.0);
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, meta);
@@ -1048,12 +1055,28 @@ fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
         (TEST_SECRET, "invalid-wallet"),
         (" ", TEST_WALLET),
     ] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-            secret: Some(secret.into()),
-            key: Some(key.into()),
-            application_id: Some(TEST_WALLET.into()),
-            ..Options::default()
-        }));
+        if secret != TEST_SECRET {
+            let policy = serde_json::from_str(r#"{"primary":{"source":"scalarOnly","signingAlgorithm":"secp256k1Digest","secretEncoding":"hex"}}"#).unwrap();
+            let error = safe_cex_crypto::signer::LocalSigner::from_json_with_facts(
+                serde_json::json!({"primary":{"secret":secret}}).to_string(),
+                policy,
+                false,
+            )
+            .err()
+            .expect("trusted scalar decode refuses before any engine I/O");
+            assert_eq!(error, safe_cex_engine::signing::SignError::InvalidRequest);
+            assert_eq!(error.to_string(), "Invalid signing request");
+            continue;
+        }
+        let mut e = support::private_engine(
+            Options {
+                key: Some(key.into()),
+                application_id: Some(TEST_WALLET.into()),
+                ..Options::default()
+            },
+            secret.into(),
+            true,
+        );
         e.start(1000.0);
         let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(
@@ -1073,13 +1096,16 @@ fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
 }
 #[test]
 fn spot_local_signer_identity_is_separate_from_main_wallet_and_vault() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        secret: Some(TEST_SECRET.into()),
-        key: Some(TEST_WALLET.to_uppercase()),
-        application_id: Some("0x0000000000000000000000000000000000000002".into()),
-        vault: Some("0x0000000000000000000000000000000000000003".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            key: Some(TEST_WALLET.to_uppercase()),
+            application_id: Some("0x0000000000000000000000000000000000000002".into()),
+            vault: Some("0x0000000000000000000000000000000000000003".into()),
+            ..Options::default()
+        },
+        TEST_SECRET.into(),
+        true,
+    );
     e.start(1000.0);
     let request = take_http(&mut e);
     support::reply(&mut e, &request, 200, META);
@@ -1109,14 +1135,14 @@ fn absent_spot_local_credentials_and_explicit_public_mode_stay_public() {
         Options::default(),
         Options {
             key: Some(TEST_WALLET.into()),
-            secret: Some(String::new()),
+            credentials: None,
             application_id: Some(TEST_WALLET.into()),
             ..Options::default()
         },
         Options {
             public_data_only: true,
             key: Some("bad-wallet".into()),
-            secret: Some("bad-secret".into()),
+            credentials: None,
             application_id: Some(TEST_WALLET.into()),
             ..Options::default()
         },
@@ -1377,15 +1403,15 @@ fn shared_spot_prices_preserve_direct_private_valuation_cadence_and_raw_holdings
 fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
     let (mut e, _) = ready(true);
     let now = 2000.;
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     e.handle(
         now,
         Event::PollScaleChanged {
             scale: f64::INFINITY,
         },
     );
-    let stale: Vec<_> = e
-        .drain_actions()
+    let stale: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::ClearTimer { timer } => Some(timer),
             _ => None,
@@ -1401,7 +1427,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                 scale: interval / POLL_MS,
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = prepared_now(&mut e).into_iter().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         let timers: Vec<_> = actions
             .iter()
@@ -1418,12 +1444,16 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !prepared_now(&mut e)
+                .into_iter()
+                .any(|a| matches!(a, Action::Http(_)))
+        );
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    let mut pending: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -1443,7 +1473,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: f64::INFINITY,
         },
     );
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     for _ in 0..12 {
         if pending.is_empty() {
             break;
@@ -1461,7 +1491,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
+            pending.extend(prepared_now(&mut e).into_iter().filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
             }));
@@ -1474,8 +1504,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: 10_000. / POLL_MS,
         },
     );
-    let resumed: Vec<_> = e
-        .drain_actions()
+    let resumed: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -1490,12 +1520,15 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
 }
 #[test]
 fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        true,
+    );
     e.start(1000.0);
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, META);
@@ -1542,12 +1575,15 @@ fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
 }
 #[test]
 fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        true,
+    );
     e.start(1000.0);
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, META);
@@ -1681,7 +1717,7 @@ mod owned_nonpageable {
     fn history_has_owned_incomplete_coverage_even_with_cached_orders_and_error_log_level() {
         let (mut e, _) = placed();
 
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         let before = e.store().orders().to_vec();
         assert!(
             !before.is_empty(),
@@ -1692,7 +1728,10 @@ mod owned_nonpageable {
         for (index, query) in queries().into_iter().enumerate() {
             let command = 100 + index as u32;
             e.handle(5000., Event::Command(Command::Query { command, query }));
-            incomplete(&e.drain_actions().collect::<Vec<_>>(), command);
+            incomplete(
+                &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+                command,
+            );
             assert_eq!(e.store().orders(), before);
             assert_eq!(e.store().balance(), &balance);
         }
@@ -1701,7 +1740,7 @@ mod owned_nonpageable {
     #[test]
     fn public_trade_refusal_is_typed_not_sent_with_original_text_and_no_coverage() {
         let (mut e, _) = placed();
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         e.handle(
             5000.,
             Event::Command(Command::Query {
@@ -1712,7 +1751,7 @@ mod owned_nonpageable {
                 },
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = prepared_now(&mut e).into_iter().collect();
         let [
             Action::Notice(Notice::CommandFailed {
                 command: 200,
@@ -1733,7 +1772,7 @@ mod owned_nonpageable {
     #[test]
     fn lookup_miss_remains_nondefinitive_without_a_history_marker_or_io() {
         let (mut e, _) = placed();
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         e.handle(
             5000.,
             Event::Command(Command::Query {
@@ -1744,7 +1783,7 @@ mod owned_nonpageable {
                 },
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = prepared_now(&mut e).into_iter().collect();
         let [
             Action::Notice(Notice::CommandDone {
                 command: 300,
@@ -1759,7 +1798,7 @@ mod owned_nonpageable {
     #[test]
     fn existing_local_lookup_hit_stays_separate_from_unavailable_history() {
         let (mut e, _) = placed();
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         let cached = e.store().orders()[0].clone();
         let client_order_id = cached
             .client_order_id
@@ -1775,7 +1814,7 @@ mod owned_nonpageable {
                 },
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = prepared_now(&mut e).into_iter().collect();
         let [
             Action::Notice(Notice::CommandDone {
                 command: 400,

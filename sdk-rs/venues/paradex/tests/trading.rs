@@ -6,12 +6,14 @@ use safe_cex_venue_paradex::Options;
 use serde::Deserialize;
 use support::*;
 fn private() -> Harness {
-    let mut h = Harness::empty(Options {
-        key: Some(format!("0x{}1", "0".repeat(63))),
-        paradex_address: Some("0x0123".into()),
-        subkey_address: Some("0x456".into()),
-        ..Options::default()
-    });
+    let mut h = Harness::keyed(
+        Options {
+            paradex_address: Some("0x0123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Options::default()
+        },
+        STARK_KEY,
+    );
     h.reply(
         "/markets",
         &MARKETS.replace(
@@ -1339,7 +1341,7 @@ fn public_rest_book_refusal_does_not_invalidate_or_refresh_existing_jwt() {
     assert!(h.pending.is_empty());
     assert!(!h.actions.iter().any(|a| matches!(
         a,
-        Action::SignPayload { .. } | Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
+        Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
     )));
     assert_eq!(
         (

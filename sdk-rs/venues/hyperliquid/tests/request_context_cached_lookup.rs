@@ -2,6 +2,7 @@
 mod support;
 use safe_cex_engine::model::{Interval, Order, OrderSide, OrderStatus, OrderType, TimeInForce};
 use safe_cex_engine::request_context::{Error, HttpAction, Preparation};
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, Notice, Query, VenueError};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 
@@ -195,15 +196,31 @@ fn missing_identity_rejects_invalid_clock_before_result() {
 fn started(testnet: bool, identity: bool) -> Engine<Hyperliquid> {
     let mut engine = engine(false, testnet, true, identity);
     engine.start(NOW);
-    let meta = engine
-        .drain_actions()
+    let meta = prepared_now(&mut engine)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if support::kind(&request) == "metaAndAssetCtxs" => Some(request),
             _ => None,
         })
         .unwrap();
     support::reply(&mut engine, &meta, 200, support::META);
-    engine.drain_actions().for_each(drop);
+    for _ in 0..4 {
+        let actions = prepared_now(&mut engine);
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            if let Action::Http(request) = action {
+                let body = match support::kind(&request).as_str() {
+                    "perpDexs" => "[null]",
+                    "userFees" => r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
+                    other => panic!("unexpected bootstrap read {other}"),
+                };
+                support::reply(&mut engine, &request, 200, body);
+            }
+        }
+    }
+    engine.store_mut().set_orders(vec![order()]);
     engine.take_frame(NOW);
     engine
 }

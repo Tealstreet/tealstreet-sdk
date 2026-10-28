@@ -1180,6 +1180,10 @@ fn rest_and_stream_remaining_preserve_native_decimal_precision() {
             let row = serde_json::json!({"id":"decimal","symbol":"BTC-USDT","status":"OPEN","type":"LIMIT","side":"BUY","size":amount.to_string(),"price":"100","cumSuccessFillSize":filled.to_string()});
             let body = serde_json::json!({"code":0,"data":[row.clone()]}).to_string();
             let (mut e, socket, reads) = seeded();
+            if streamed {
+                e.handle(20.0, Event::WsOpened { socket });
+                e.prepared(20.0).for_each(drop);
+            }
             for request in reads {
                 let data = if request.url.ends_with("/v3/account") {
                     ACCOUNT
