@@ -69,11 +69,17 @@ Controls that already pass on base are labelled PRESERVATION.
 
 ## Review additions (fe7lgm core CLEAR, zs5e83 plan CLEAR)
 
-6. **Identity rebind (fe7lgm).** A Session opened for a ScalarOnly primary with
-   signing ref A refuses at the root check after the Primary is reinstalled with
-   signing ref B. That holds at issue, at continuation and at resend. Binding to the
-   signing ref creates this stale case, and a same-account stale generation does not
-   cover it.
+6. **Identity rebind (fe7lgm). Reshaped, not dropped.** A live rebind cannot happen:
+   `set_signer`, `set_identities` and `register_nonce_owner` (the only identity
+   mutators) all refuse after start, and a Session needs a started engine. A
+   cross-engine handle fails `validate_session` before the matcher. fe7lgm accepted
+   two pins instead:
+   - (a) PRESERVATION: after start, `set_identities` with a ScalarOnly Primary
+     carrying signing ref B refuses, and the open root bound to A is still admitted
+     at issue, continuation and resend.
+   - (b) A matcher-level unit test in `signing.rs`: `accepts_session_root` with
+     Session credential A, against a ScalarOnly identity whose signing ref is B,
+     refuses.
 7. **Empty ref (fe7lgm).** A login Session whose credential is the empty KeyRef (the
    ScalarOnly primary's own `credential` field) refuses, at `Sessions::open` or at
    the root check, whichever fires first. It never binds through the fallback.
