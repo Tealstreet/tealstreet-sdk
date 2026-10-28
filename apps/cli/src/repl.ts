@@ -119,7 +119,7 @@ import {
   type FooterState,
 } from './footer-segments';
 import { enableStatusLine } from './status-line';
-import { classifyForCLI, criticalErrorKey } from './error-classifier';
+import { classifyForCLI, criticalErrorKey, errorEventClassification } from './error-classifier';
 import { startListener, stopListener } from './listener';
 import { webhookBodyRefusal, webhookChainRefusal, webhookRefusal } from '@tealstreet/cli-core';
 import { restartWebhookRelay, startWebhookRelay, stopWebhookRelay } from './listener/webhook-relay';
@@ -960,7 +960,7 @@ function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): v
     const error = args[0] as string;
     const acctName = accountName || session.currentAccountName || 'unknown';
     const monitor = exchangeManager.getHealthMonitor(acctName);
-    const category = monitor ? monitor.processMessage(error, true) : null;
+    const category = monitor ? monitor.processMessage(error, true, errorEventClassification(args[1])) : null;
     const action = classifyForCLI(category, 'error', error);
 
     switch (action.action) {
