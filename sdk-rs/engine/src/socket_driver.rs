@@ -587,7 +587,6 @@ impl Driver {
 
     /// Traffic and receive bookkeeping for a frame whose admission at `now`
     /// returned `Current(epoch)`, with the feed's declared traffic policy.
-    #[inline(always)]
     pub(crate) fn observe_admitted(
         &mut self,
         now: f64,

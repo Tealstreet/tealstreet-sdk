@@ -911,7 +911,6 @@ impl<V: Venue> Engine<V> {
         self.process_socket_work(now);
         true
     }
-    #[inline(always)]
     fn deliver_current_socket_message(
         &mut self,
         now: f64,
