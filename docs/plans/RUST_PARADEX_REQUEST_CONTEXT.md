@@ -491,3 +491,102 @@ read window x2, untyped auth refusal), two controls. Adapted: account.rs
 `delayed_jwt_response...` (the boot margins read now ends at its window while
 the JWT is 300 s late; the next read carries the fresh JWT) and
 `periodic_account_policy...` (drives managed reads with `prepared_actions`).
+
+## PR-3 plan: `/auth`, writes and the remaining reads on the funnel (2026-10-28, claude-m26ps4)
+
+Plan only; no source. Base master `14f89490f7b`. Branch `fix/rust-paradex-request-funnel`.
+Overseer claude-ddi2il. Reviewers: claude-fe7lgm (engine surface), codex-9czdjh
+(money/signing), claude-zs5e83 (serial call-auth author). Landing needs a claude-8x5tm1 exact-tree GO.
+
+### Inventory at base (19 rows)
+
+| File | Rows | Content |
+| --- | ---: | --- |
+| `account.rs` | 5 | `sign` helper (the ruled interim `de9d09fa…`), `dispatch` (`request` and `request_streamed_body`), the `/auth` `refresh` (`request` plus `route_request(Direct)`), and one more queued-dispatch row |
+| `trading.rs` | 11 | job entry `fail`s, the capped-placement orderbook quote read, `account.request` for every write, terminal `done`/`fail` (writes and FetchLeverage) |
+| `history.rs` | 2 | the private fills/orders page read (`account.request`), plus its macro row |
+| `public.rs` | 1 | the `public_failed` macro row |
+
+Target: 0 rows. `RULED_GROWTH` loses its tuple in the same commit as the site, and
+the trading `hash` field is renamed. `Account::queue`, `dispatch`, `Queued`, the
+`failed` drain and the legacy `Pending::Trade` re-dispatch are deleted once they have
+no callers.
+
+### Shape (proposed)
+
+- **Login Session.** `/auth` becomes the login on a credential-bearing Session, the
+  GRVT shape from RUST_SERIAL_CALL_AUTH. This replaces #2306's keyless Session.
+  `refresh` opens or renews it, signs `/auth` with the existing `Auth` step through
+  the managed signed path, and announces `session_ready` with the JWT revision. A
+  401/403 retires it as today. `Auth::attest`'s dynamic `PARADEX-STARKNET-ACCOUNT`
+  header moves into `apply`, because managed headers are `'static` (as in Bitrue).
+- **Unsigned JWT calls use `CallAuth::Session`.** That covers cancel (single and
+  2-ID batch), cancel-all, SetLeverage, FetchLeverage and the history page reads.
+  They carry no provider work.
+- **Signed writes use `CallAuth::Preflight`.** Place (batch), TP/SL children and
+  amend use `request_signed_managed(context, Some(&session), ..)` with the existing
+  `Orders` step. They are bearer-bound with no route.
+- **Capped placements.** The orderbook quote reads are prerequisite Reads of a
+  `WriteAfterReads` preflight. A failed quote read is NotSent, as today.
+- **Classification.** A Paradex `CodeTable`: statuses as today (4xx other than
+  408/429 → Refused, 2xx with an error body → Refused, otherwise Unknown), with
+  per-order `PlacementResult` errors through `http_write_batch`. There is no
+  documented code list, so `unlisted: Unknown(None)` (Option B, as OKX #2117).
+- **Hooks.** `capture_http_reconciliation` (required for managed Mutations),
+  `on_http_preflight_ready`, `on_http_plan_ready` and `on_http_owner_retired_preflight`.
+  The existing `reconcile_uncertain` and `orders_reconciled` arm the engine fence.
+  The amend fence and `amend_locks` stay venue-side.
+- **Features.** `serial-plans` (implies `http-plans`), plus whatever Q2 needs.
+  `scripts/test-http-plan-feature-modes.py` Paradex rows are updated.
+
+### Questions needing a ruling before REDs
+
+1. **ScalarOnly primary vs. the login-Session binding (engine, credentials).**
+   RUST_SERIAL_CALL_AUTH requires a Some write credential to equal the installed
+   identity's credential KeyRef, and says "a signing ref … cannot stand in as the
+   root credential". Paradex's primary is ScalarOnly (`credential_absent`), so its
+   `authority_ref()` is the signing ref. Lighter passes `identity.credential` by
+   hand (`primary_credential`).
+   Proposed: the root write credential is `Selection::authority` for the Primary
+   slot, which is the binding the engine already uses for ScalarOnly Mutations.
+   The login Session binds to the same authority. This may need an engine change
+   so the binding accepts a credential-absent primary's authority. fe7lgm/zs5e83:
+   is that admissible, or must Paradex use a different root?
+2. **Continue-on-error writes.** Today Paradex cancels (2-ID chunks) and placements
+   (`attempt_all`) keep issuing after a failed or Unknown sibling. A serial Plan
+   stops at an uncertain call. A complete Plan with `independent_calls` continues,
+   but complete Plans refuse a Session root, and cancels need only the JWT.
+   Options:
+   - (a) keep native continuation: an engine extension admits Session-auth calls
+     on an independent complete Plan;
+   - (b) accept serial stop-at-Unknown for Paradex, a caller-visible change: a
+     lost cancel stops later chunks, and the remaining IDs report NotSent;
+   - (c) placements serial and cancels independent, which needs (a) for cancels.
+   I lean (b) for placements, since a lost entry already orphans children today,
+   and want a ruling on cancels.
+3. **`/auth` egress.** Today `/auth` alone goes `RequestRoute::Direct`, the TS
+   `directHttp`, bypassing the configured private HTTP. That dates from delegated
+   signing (`c58afe1514d`). A login Session context uses `Egress::Session` with no
+   route. Proposed: drop Direct, so `/auth` uses the same private egress as the
+   calls it authorizes. If Direct must stay, a managed Direct egress for a
+   credentialed login is an engine change.
+4. **Slicing.** Proposed:
+   - PR-3a: history and public reads (3 rows) on the existing keyless Session and
+     Background contexts. No engine dependency.
+   - PR-3b: login Session, writes, `sign` helper and RULED_GROWTH tuple, hash
+     rename and queue deletion (16 rows), after Q1–Q3.
+   Alternatively one PR.
+
+### REDs (after rulings; each must fail on base)
+
+1. `/auth` is a managed login Session call that signs with the sealed Stark key; no
+   legacy `sign_http`. A Session-parked write waits for the JWT and binds the fresh
+   bearer.
+2. Cancel, cancel-all and SetLeverage carry no provider work (Session auth). Place
+   and amend carry exactly their Stark signatures, fully verified before bind.
+3. A lost placement fences cancel-all until the reconcile snapshot clears it.
+4. Q2's continuation semantics, pinned at the ruled shape.
+5. A capped placement's quote reads are preflight Reads; a failed quote is NotSent
+   and nothing is written.
+6. FetchLeverage and history reads complete through `done_context`/`fail_context`.
+7. Inventory: Paradex 19 → 0, RULED_GROWTH empty, signing-legacy unchanged (0 rows).
