@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LIVE_SMOKE_MAX_NOTIONAL, smokeArgs, smokeOrder, marketRules, fencedTransport, selectSmokeMarket } from './live-smoke.mjs';
+import { LIVE_SMOKE_MAX_NOTIONAL, smokeArgs, smokeOrder, marketRules, fencedTransport, selectSmokeMarket, readCredentials, main } from './live-smoke.mjs';
+import { Readable } from 'node:stream';
 import { MARKET_FLAG } from '../hosts/wasm/js/wire.mjs';
 import { subscriptionKey } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
@@ -159,4 +160,34 @@ test('managed smoke fence preserves receivers and validates signed data once bef
   assert.deepEqual(events, ['validate', 'bind', 'send']);
   ready.cancel(); prepared.cancel();
   assert.deepEqual(events.slice(-2), ['bound-cancel', 'prepare-cancel']);
+});
+
+test('CLI accepts stdin credentials, dry run and the credential listing without a venue', () => {
+  assert.deepEqual(smokeArgs(['--list-credentials']), { listCredentials: true });
+  const values = smokeArgs(['--venue', 'bitunix', '--mainnet', '--credentials-stdin', '--dry-run']);
+  assert.equal(values.credentialsStdin, true);
+  assert.equal(values.dryRun, true);
+  assert.equal(smokeArgs(['--venue', 'binance']).dryRun, false);
+});
+
+test('stdin credentials are one bounded object of strings and are never echoed', async () => {
+  const read = (text) => readCredentials(Readable.from([Buffer.from(text)]));
+  assert.deepEqual(await read('{"KEY":"stdin-key","SECRET":"stdin-secret"}'), { KEY: 'stdin-key', SECRET: 'stdin-secret' });
+  for (const text of ['not-json-secret-value', '["secret-value"]', '{"KEY":7}', 'null'])
+    await assert.rejects(read(text), (error) => !error.message.includes('secret-value') && !error.message.includes('not-json'));
+  await assert.rejects(readCredentials(Readable.from([Buffer.alloc(64 * 1024 + 1, 0x20)])), /too large/);
+});
+
+test('a credential failure on stdin prints only the generic refusal', async () => {
+  const output = [];
+  const log = console.log, error = console.error;
+  console.log = (...items) => output.push(items.join(' '));
+  console.error = (...items) => output.push(items.join(' '));
+  try {
+    const code = await main(['--venue', 'bitunix', '--mainnet', '--credentials-stdin'], {},
+      Readable.from([Buffer.from('{"KEY":"stdin-key-must-not-print","SECRET":"x"}')]));
+    assert.equal(code, 1);
+  } finally { console.log = log; console.error = error; }
+  assert.equal(output.some((line) => line.includes('stdin-key-must-not-print')), false);
+  assert.equal(output.length, 1);
 });
