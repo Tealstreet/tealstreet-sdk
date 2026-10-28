@@ -7,7 +7,9 @@ use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{CommandId, Cx, Method, Outcome, Query, Response, VenueError, json::ArrayAt};
+use safe_cex_engine::{
+    CommandId, Cx, ErrorKind, Method, Outcome, Query, Response, VenueError, json::ArrayAt,
+};
 use serde::{Deserialize, Serialize};
 
 /// Fills pages before the read falls back to order history or stops.
@@ -73,18 +75,21 @@ pub struct Request {
     open_complete: bool,
 }
 impl Request {
-    /// Admit the delivered page through its own leg; a stale leg admits nothing.
-    fn advance(&mut self, cx: &Cx<'_, Pending>, page: CursorPage) -> CursorStep {
-        match self.leg.as_ref().map(|leg| self.history.admit(cx, leg)) {
-            Some(Ok(mut admitted)) => admitted.advance(page),
-            _ => CursorStep::Done,
-        }
+    /// Admit the delivered page through its own leg; a stale leg admits nothing
+    /// and the caller refuses the walk rather than completing it.
+    fn advance(&mut self, cx: &Cx<'_, Pending>, page: CursorPage) -> Option<CursorStep> {
+        let leg = self.leg.as_ref()?;
+        Some(self.history.admit(cx, leg).ok()?.advance(page))
     }
-    fn advance_probe(&mut self, cx: &Cx<'_, Pending>, page: CursorPage) -> CursorStep {
-        match self.leg.as_ref().map(|leg| self.history.admit(cx, leg)) {
-            Some(Ok(mut admitted)) => admitted.advance_probe(page),
-            _ => CursorStep::Done,
-        }
+    fn advance_probe(&mut self, cx: &Cx<'_, Pending>, page: CursorPage) -> Option<CursorStep> {
+        let leg = self.leg.as_ref()?;
+        Some(self.history.admit(cx, leg).ok()?.advance_probe(page))
+    }
+    fn refuse_unadmitted(self, cx: &mut Cx<'_, Pending>) {
+        let _ = self.history.reject(
+            cx,
+            VenueError::new("Paradex history page was not admitted").kind(ErrorKind::Internal),
+        );
     }
 }
 #[derive(Serialize)]
@@ -760,15 +765,16 @@ impl History {
         let next = envelope.next.filter(|s| !s.is_empty());
         if matches!(request.query, Query::OrderByClientId { .. }) && !request.lookup_history {
             if request.history.staged_len() > 0 {
-                request.advance(
-                    cx,
-                    CursorPage {
-                        next: None,
-                        rows: request.raw_rows,
-                        fresh: request.raw_rows,
-                        want_more: false,
-                    },
-                );
+                let page = CursorPage {
+                    next: None,
+                    rows: request.raw_rows,
+                    fresh: request.raw_rows,
+                    want_more: false,
+                };
+                if request.advance(cx, page).is_none() {
+                    request.refuse_unadmitted(cx);
+                    return;
+                }
                 self.finish(cx, request, Ok(()));
                 return;
             }
@@ -778,7 +784,11 @@ impl History {
                 fresh: request.raw_rows,
                 want_more: true,
             };
-            match request.advance_probe(cx, page) {
+            let Some(step) = request.advance_probe(cx, page) else {
+                request.refuse_unadmitted(cx);
+                return;
+            };
+            match step {
                 CursorStep::More(_) => {
                     self.issue(cx, account, request);
                     return;
@@ -809,15 +819,16 @@ impl History {
         {
             // Native aggregate fallback ends this empty discovery stage; it is
             // not a partial fill result or a new command/completion owner.
-            request.advance(
-                cx,
-                CursorPage {
-                    next: None,
-                    rows: 0,
-                    fresh: 0,
-                    want_more: false,
-                },
-            );
+            let page = CursorPage {
+                next: None,
+                rows: 0,
+                fresh: 0,
+                want_more: false,
+            };
+            if request.advance(cx, page).is_none() {
+                request.refuse_unadmitted(cx);
+                return;
+            }
             request.fallback = true;
             if !request.history.restart_stage() {
                 let _ = request
@@ -847,7 +858,11 @@ impl History {
             fresh: request.raw_rows,
             want_more: !enough,
         };
-        match request.advance(cx, page) {
+        let Some(step) = request.advance(cx, page) else {
+            request.refuse_unadmitted(cx);
+            return;
+        };
+        match step {
             CursorStep::More(_) => {
                 self.issue(cx, account, request);
                 return;
