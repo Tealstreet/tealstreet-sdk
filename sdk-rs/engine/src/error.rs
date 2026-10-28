@@ -1,10 +1,11 @@
 //! Structured command and lifecycle failures. `message` is the user-facing
 //! text hosts have always shown; the other fields let consumers classify a
 //! failure without matching that text.
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "test-support"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorKind {
     Rejected,
@@ -42,7 +43,8 @@ impl ErrorKind {
 
 /// Whether a write reached the venue. `None` on [`VenueError`] means the site
 /// has not classified it, never that it is safe to resend.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "test-support"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum Outcome {
     NotSent,

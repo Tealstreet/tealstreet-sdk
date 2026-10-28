@@ -321,16 +321,21 @@ pub mod error_corpus {
         "client_order_id",
     ];
 
-    /// Every `*.json` fixture in `dir`, sorted by file name; a missing directory is empty.
+    /// Every `*.json` fixture in `dir`, sorted by file name. A missing or empty
+    /// corpus panics, so a wrong or moved path can never pass a test vacuously.
     pub fn load(dir: &Path) -> Vec<(String, Fixture)> {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return Vec::new();
-        };
+        let entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|error| panic!("error corpus {}: {error}", dir.display()));
         let mut names: Vec<_> = entries
             .map(|entry| entry.unwrap().path())
             .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
             .collect();
         names.sort();
+        assert!(
+            !names.is_empty(),
+            "error corpus {} has no fixtures",
+            dir.display()
+        );
         names
             .into_iter()
             .map(|path| {
@@ -459,6 +464,40 @@ pub mod error_corpus {
             assert_eq!(fixture.expect.kind, Some(ErrorKind::InsufficientBalance));
             assert_eq!(fixture.expect.outcome, Some(Outcome::Rejected));
             assert_eq!(fixture.expect.path, Pinned::Write);
+        }
+
+        fn corpus(name: &str) -> std::path::PathBuf {
+            let dir =
+                std::env::temp_dir().join(format!("error-corpus-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        #[test]
+        fn load_reads_sorted_fixtures_and_ignores_other_files() {
+            let dir = corpus("sorted");
+            let live = fixture(r#""source":"live","body":"x""#);
+            std::fs::write(dir.join("b-second.json"), &live).unwrap();
+            std::fs::write(dir.join("a-first.json"), &live).unwrap();
+            std::fs::write(dir.join("README.md"), "notes").unwrap();
+            let names: Vec<_> = load(&dir).into_iter().map(|(name, _)| name).collect();
+            assert_eq!(names, ["a-first", "b-second"]);
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+
+        #[test]
+        #[should_panic(expected = "error corpus")]
+        fn a_missing_corpus_directory_panics() {
+            load(Path::new("/nonexistent/tests/fixtures/errors"));
+        }
+
+        #[test]
+        #[should_panic(expected = "has no fixtures")]
+        fn an_empty_corpus_panics() {
+            let dir = corpus("empty");
+            std::fs::write(dir.join("README.md"), "notes").unwrap();
+            load(&dir);
         }
 
         #[test]
