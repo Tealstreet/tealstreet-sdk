@@ -227,6 +227,7 @@ export function requireGithubResponseSize(length, kind = 'metadata') {
 }
 
 const GITHUB_TRANSPORT_ATTEMPTS = 3;
+const PAGINATION_PASSES = 3;
 const NETWORK_CODES = new Set(['EPIPE', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN',
   'ENOTFOUND', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
   'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']);
@@ -287,19 +288,27 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
     if (immutable) immutableResponses.set(path, Buffer.from(raw));
     return binary ? raw : parseCohortJson(raw);
   };
+  // A live run can still add jobs (runtime matrices) between page reads, so a
+  // changed total discards the pass and re-lists from page 1, at most three passes.
   const list = async (base, field, extra = '', maxPages = 128) => {
-    const result = [], seen = new Set(); let total;
-    for (let page = 1; page <= maxPages; page++) {
-      const data = await get(`${base}?${extra}per_page=100&page=${page}`);
-      check(Number.isSafeInteger(data.total_count) && data.total_count >= 0 && Array.isArray(data[field]) && data[field].length <= 100, 'invalid paginated response');
-      if (total === undefined) total = data.total_count;
-      check(total === data.total_count && total <= maxPages * 100, 'pagination changed/exceeds hard limit');
-      for (const row of data[field]) { check(integer(row.id) && !seen.has(row.id), 'duplicate paginated identity'); seen.add(row.id); result.push(row); }
-      check(result.length <= total, 'pagination count mismatch');
-      if (result.length === total) return result;
-      check(data[field].length === 100, 'truncated pagination');
+    for (let pass = 1; pass <= PAGINATION_PASSES; pass++) {
+      if (pass > 1) await sleep((pass - 1) * 2000);
+      const result = [], seen = new Set(); let total, changed = false;
+      for (let page = 1; page <= maxPages && !changed; page++) {
+        const data = await get(`${base}?${extra}per_page=100&page=${page}`);
+        check(Number.isSafeInteger(data.total_count) && data.total_count >= 0 && Array.isArray(data[field]) && data[field].length <= 100, 'invalid paginated response');
+        if (total === undefined) total = data.total_count;
+        check(data.total_count <= maxPages * 100, 'pagination exceeds hard limit');
+        if (total !== data.total_count) { changed = true; break; }
+        for (const row of data[field]) { check(integer(row.id) && !seen.has(row.id), 'duplicate paginated identity'); seen.add(row.id); result.push(row); }
+        check(result.length <= total, 'pagination count mismatch');
+        if (result.length === total) return result;
+        check(data[field].length === 100, 'truncated pagination');
+      }
+      if (!changed) throw new Error('CPU cohort: pagination hard limit');
+      if (pass < PAGINATION_PASSES) console.warn(`Re-listing ${base} from page 1 (pass ${pass + 1}/${PAGINATION_PASSES}): its total changed between pages`);
     }
-    throw new Error('CPU cohort: pagination hard limit');
+    throw new Error(`CPU cohort: pagination unstable after ${PAGINATION_PASSES} passes`);
   };
   const noteJobs = (jobs) => {
     for (const job of jobs) {
