@@ -15,7 +15,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::socket_lifecycle::RetireReason;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, json, num};
+use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, VenueError, json, num};
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -312,6 +312,36 @@ fn nonnegative_number(value: &str) -> bool {
     value
         .parse::<f64>()
         .is_ok_and(|n| n.is_finite() && n >= 0.0)
+}
+
+/// A failed private read, classified by the Binance table (rules 2-6). The
+/// message stays the venue's text; the code goes in the native evidence.
+pub(crate) fn read_error(response: &Response<'_>) -> VenueError {
+    use safe_cex_engine::classify::{self, Native, NativeCode, Released};
+    let (code, message) =
+        venue_error(response).unwrap_or_else(|| (0, format!("HTTP {}", response.status)));
+    let native = (code != 0).then(|| Native {
+        code: NativeCode::Int(code),
+        message: &message,
+    });
+    classify::read(
+        &crate::trading::BINANCE,
+        Released::Response(response),
+        native.as_ref(),
+        message.clone(),
+    )
+    .error
+}
+
+/// A read lost in transport: `network`, by rule 2.
+fn transport_error(message: String) -> VenueError {
+    use safe_cex_engine::classify::{self, Released};
+    classify::read(&crate::trading::BINANCE, Released::Transport, None, message).error
+}
+
+fn prefixed(mut error: VenueError, prefix: &str) -> VenueError {
+    error.message = format!("{prefix}{}", error.message);
+    error
 }
 
 /// The body's Binance error, if the request failed.
@@ -622,45 +652,49 @@ impl BinanceFutures {
         request: Request,
         error: &str,
     ) {
-        self.account_request_failed(cx, request, format!("network error: {error}"));
+        self.account_request_failed(
+            cx,
+            request,
+            transport_error(format!("network error: {error}")),
+        );
     }
 
     pub(crate) fn account_request_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        message: String,
+        error: VenueError,
     ) {
         match request {
             Request::ListenKey => {
-                let message = format!("Binance user data stream unavailable: {message}");
+                let error = prefixed(error, "Binance user data stream unavailable: ");
                 // One toast per failure streak; later attempts only log.
                 let level = if self.account.listen_key_failures == 0 {
                     Level::Error
                 } else {
                     Level::Warn
                 };
-                cx.notice(level, code::STREAM_UNAVAILABLE, message);
+                cx.notice_error(level, code::STREAM_UNAVAILABLE, &error);
                 self.account.resync_orders_on_open = true;
                 let delay = cx.jittered(LISTEN_KEY_RETRY.delay(self.account.listen_key_failures));
                 self.account.listen_key_failures += 1;
                 self.account.listen_key_timer = Some(cx.set_timer(delay));
             }
             Request::Keepalive => {
-                let message = format!("Binance user data stream keepalive failed: {message}");
+                let error = prefixed(error, "Binance user data stream keepalive failed: ");
                 let level = if self.account.keepalive_failing {
                     Level::Warn
                 } else {
                     Level::Error
                 };
-                cx.notice(level, code::STREAM_UNAVAILABLE, message);
+                cx.notice_error(level, code::STREAM_UNAVAILABLE, &error);
                 self.account.keepalive_failing = true;
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_RETRY_MAX_MS));
             }
             Request::PositionRisk { generation, .. } | Request::SymbolConfig { generation, .. } => {
-                cx.retried_failure(
+                cx.retried_failure_error(
                     "binance.account:615",
-                    format!("Binance positions: {message}"),
+                    &prefixed(error, "Binance positions: "),
                 );
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
@@ -671,12 +705,15 @@ impl BinanceFutures {
             }
             Request::Account { .. } => {
                 self.account.account_in_flight = false;
-                cx.retried_failure("binance.account:629", format!("Binance account: {message}"));
+                cx.retried_failure_error(
+                    "binance.account:629",
+                    &prefixed(error, "Binance account: "),
+                );
             }
             Request::OpenOrders { generation } | Request::OpenAlgoOrders { generation } => {
-                cx.retried_failure(
+                cx.retried_failure_error(
                     "binance.account:636",
-                    format!("Binance fetchOrders error: {message}"),
+                    &prefixed(error, "Binance fetchOrders error: "),
                 );
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
@@ -686,7 +723,7 @@ impl BinanceFutures {
                 self.finish_orders(cx);
             }
             Request::LeverageBrackets(_) | Request::PositionMode => {
-                cx.retried_failure("binance.account:649", format!("Binance: {message}"));
+                cx.retried_failure_error("binance.account:649", &prefixed(error, "Binance: "));
             }
         }
     }
@@ -875,8 +912,8 @@ impl BinanceFutures {
         request: Request,
         response: Response<'_>,
     ) {
-        if let Some((_, message)) = venue_error(&response) {
-            self.account_request_failed(cx, request, message);
+        if venue_error(&response).is_some() {
+            self.account_request_failed(cx, request, read_error(&response));
             return;
         }
         let body = response.body;
@@ -904,9 +941,11 @@ impl BinanceFutures {
                     url.push_str(&safe_cex_engine::url::encode(&key.listen_key));
                     self.connect_url(cx, Channel::Private, &url);
                 }
-                Err(error) => {
-                    self.account_request_failed(cx, Request::ListenKey, error.to_string())
-                }
+                Err(error) => self.account_request_failed(
+                    cx,
+                    Request::ListenKey,
+                    VenueError::new(error.to_string()),
+                ),
             },
             Request::Keepalive => {
                 self.account.keepalive_failing = false;

@@ -1946,7 +1946,7 @@ impl BinanceFutures {
 
 /// Binance native codes and documented statuses
 /// (developers.binance.com/docs/derivatives/usds-margined-futures/error-code).
-const BINANCE: CodeTable = CodeTable {
+pub(crate) const BINANCE: CodeTable = CodeTable {
     rows: &[
         Row {
             key: Key::Int(-1000),
@@ -2007,6 +2007,36 @@ const BINANCE: CodeTable = CodeTable {
         Row {
             key: Key::Int(-1002),
             verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        // BALANCE_NOT_SUFFICIENT, MARGIN_NOT_SUFFICIEN, and MIN_LEVERAGE_RATIO
+        // ("Leverage is smaller than permitted: insufficient margin balance.").
+        Row {
+            key: Key::Int(-2018),
+            verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2019),
+            verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2028),
+            verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+            only: None,
+        },
+        // Order rules the order itself broke: UNABLE_TO_FILL,
+        // ORDER_WOULD_IMMEDIATELY_TRIGGER, REDUCE_ONLY_REJECT, FOK_ORDER_REJECT
+        // and GTX_ORDER_REJECT (post-only).
+        Row {
+            key: Key::Range(-2022, -2020),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-5022, -5021),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
         Row {

@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T01:18:58.196Z",
+  "endpoint": "/dapi/v1/depth?symbol=NOPEUSD_PERP",
+  "http_status": 400,
+  "body": "{\"code\":-1121,\"msg\":\"Invalid symbol.\"}",
+  "expect": {
+    "kind": null,
+    "outcome": null,
+    "path": "read"
+  }
+}
