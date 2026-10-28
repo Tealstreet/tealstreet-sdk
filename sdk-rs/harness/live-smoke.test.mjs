@@ -40,6 +40,16 @@ test('fine ticks on high prices keep the floor-bound order and amendment one tic
   assert.equal(order.amendPrice, 57000.96);
 });
 
+test('a real fraction of a step still rounds in the requested direction', () => {
+  const lot = { ...market, precisionPrice: 1e-8, minAmount: 1e-8, precisionAmount: 1e-8, maxAmount: 1e6 };
+  // Floor: 0.09999999995 sits half a tick below 0.1, so the order price is 0.09999999.
+  const below = smokeOrder(lot, { bids: [0.09999999995 / 0.9], asks: [0.2] }, { minNotional: 0, notionalKnown: true });
+  assert.equal(below.price, 0.09999999);
+  // Ceil: 0.10000000005 units of minimum quantity must round up to 0.10000001.
+  const above = smokeOrder({ ...lot, minAmount: 0.10000000005 }, { bids: [1], asks: [2] }, { minNotional: 0, notionalKnown: true });
+  assert.equal(above.amount, 0.10000001);
+});
+
 test('inverse minimum notional uses quote contracts', () => {
   assert.equal(smokeOrder({ ...market, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.INVERSE,
     precisionAmount: 1, minAmount: 1, contractSize: 10 }, book, { minNotional: 21, notionalKnown: true }).amount, 3);
