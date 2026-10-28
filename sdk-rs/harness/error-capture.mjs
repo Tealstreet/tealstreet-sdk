@@ -15,8 +15,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const REDACTED = '<redacted>';
+// Ruling R4's live-request budget: 12 per run, and never more than that to one host.
+export const MAX_CASES = 12;
 export const MAX_PER_HOST = 12;
-export const MAX_CASES = 48;
 export const PACE_MS = 1_500;
 export const TIMEOUT_MS = 10_000;
 

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
-  MAX_PER_HOST, REDACTED, RULES, capture, checkCases, fixture, isSensitive, redactBody, redactEndpoint,
+  MAX_CASES, REDACTED, RULES, capture, checkCases, fixture, isSensitive, redactBody, redactEndpoint,
 } from './error-capture.mjs';
 
 const expect = { kind: 'authInvalid', outcome: 'rejected', path: 'startup' };
@@ -55,9 +55,9 @@ test('cases outside ruling R4 are refused before any request', () => {
   assert.throws(() => checkCases([{ ...ok, url: 'http://api.venue.test/' }]), /https only/);
   assert.throws(() => checkCases([ok, ok]), /duplicate/);
   assert.throws(() => checkCases([{ ...ok, expect: {} }]), /expect.path/);
-  const many = (host) => Array.from({ length: MAX_PER_HOST + 1 }, (_, i) => ({ ...ok, name: `case-${i}`, url: `https://${host(i)}/v1` }));
-  assert.throws(() => checkCases(many(() => 'api.venue.test')), /per host/);
-  assert.equal(checkCases(many((i) => (i % 2 ? 'a.venue.test' : 'b.venue.test'))).length, MAX_PER_HOST + 1);
+  const many = (count, host) => Array.from({ length: count }, (_, i) => ({ ...ok, name: `case-${i}`, url: `https://${host(i)}/v1` }));
+  assert.equal(checkCases(many(MAX_CASES, () => 'api.venue.test')).length, MAX_CASES);
+  assert.throws(() => checkCases(many(MAX_CASES + 1, (i) => (i % 2 ? 'a.venue.test' : 'b.venue.test'))), /at most 12 captures per run/);
 });
 
 test('a fixture carries live provenance in the shape the Rust loader reads', () => {
