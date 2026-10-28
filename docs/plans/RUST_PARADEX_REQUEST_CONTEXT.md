@@ -693,3 +693,9 @@ no callers.
   - (3) Parent to children stays as today.
   - (4) The Q3 signed-Direct login is a third engine change. Only one engine PR is
     active at a time.
+- **Q3 final (fe7lgm).** Session private egress is not equivalent to TS `directHttp` for
+  `/auth`. c58afe1514d records "JWT acquisition uses a direct request in every mode".
+  So Direct stays. The engine seam admits `Egress::Direct` only on the signed login
+  that opens the credential-bearing Session, with Some(authority) and the `Auth` step.
+  Never on a Session call or a Mutation. RED: the `/auth` Prepare is Direct and signed,
+  and any other signed credentialed Direct Context is refused before IDs.
