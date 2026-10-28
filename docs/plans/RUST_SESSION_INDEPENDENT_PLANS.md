@@ -30,19 +30,22 @@ admit_session_plan(
     &mut self,
     preflight: &Preflight,
     steps: &[StepBound<'_>],
-    auth: &[CallAuth],
+    auth: &[&[CallAuth]],
     policy: PlanPolicy,
 ) -> Result<Plan, Error>
 ```
 
 It is gated `all(serial-plans, session-bearer)`, the gate every root path already
-uses. `auth` gives one declaration per step, and `CallBound` literals are
-untouched. It admits only when all of these hold; otherwise it refuses Invalid
+uses. `auth[i][j]` declares the call `steps[i].calls[j]`, because a step can
+hold several concurrent calls. `CallBound` literals are untouched. It admits only when all of these hold; otherwise it refuses Invalid
 before any IDs:
 - the Preflight is a live login Session root (`validate_session_root`, including
   #2348's ScalarOnly authority);
 - `policy.independent_calls` and `Operation::Mutation`;
-- `auth.len() == steps.len()`;
+- `auth` mirrors `steps` at both levels (`auth.len() == steps.len()` and
+  `auth[i].len() == steps[i].calls.len()`);
+- no call carries an `after_refusal` fallback step. Fallback auth is out of
+  scope, because Paradex cancels and TP/SL need no fallbacks;
 - each `CallAuth::Session` step has the root, and each `CallAuth::Preflight` step
   has the root's write credential (`policy.credential == write`).
 
@@ -57,8 +60,13 @@ RUST_SERIAL_CALL_AUTH sentence is amended to name this one route.
   carries no signing reservation, and accepts only an unsigned recipe.
 - A Preflight leg's Context has the write credential, a signed recipe and the bearer
   argument, with route None.
-- `session_call` and the frozen-wire fingerprint and seed are decided per leg
-  (keyed by entry), not per owner or serial body.
+- `session_call` (which feeds the recipe gate in `queue_managed`) and the
+  frozen-wire fingerprint and seed are decided per leg, keyed by the leg's entry,
+  not per owner. For a serial body the per-entry lookup resolves through the
+  existing `serial.session_call()` and its single fingerprint slot. By
+  construction that is the current entry, so there is no parallel store and
+  serial behaviour is byte-for-byte unchanged. Only a complete Session body
+  gets a per-entry fingerprint map.
 - `resolve_bearer` still requires the root generation on every leg, signed or not.
 
 **Reused as is:**
@@ -70,8 +78,10 @@ RUST_SERIAL_CALL_AUTH sentence is amended to name this one route.
 
 **Resend:**
 - `plan_resend_context` keeps signed-leg resends.
-- A Session leg's resend generalises `serial_plan_session_resend`'s rules to a
-  complete leg: immutable body, the current Session revision, and no third send.
+- A Session leg's resend is a new function for complete legs. It shares the rule
+  helpers with `serial_plan_session_resend` (immutable body, the current Session
+  revision, no third send), and the serial function's signature and checks stay
+  untouched.
 
 **Not in scope:**
 - Barrier members (they already forbid bearer-bound members).
@@ -102,20 +112,37 @@ RUST_SERIAL_CALL_AUTH sentence is amended to name this one route.
    - a Session step without a root;
    - a Preflight step without the write credential;
    - `independent_calls: false`;
-   - a Read Plan.
+   - a Read Plan;
+   - a non-empty `after_refusal` on any call (fe7lgm).
 5. **Retirement between legs.** Unreleased legs end NotSent through the venue's
    `finish_plan_failed_call`. There is no auth latch, and later ordinary signed
    work still releases.
 6. **Resend.** A Session leg's auth resend keeps its body and rereads the new
    bearer revision. A signed leg's resend repeats its signing. A changed Session
    body refuses.
-7. **Length mismatch (ddi2il).** `auth.len() != steps.len()`, either shorter or
-   longer, refuses Invalid before any IDs, with `next_id` unchanged.
-8. **PRESERVATION:**
+7. **Length mismatch (ddi2il, fe7lgm).** A mismatch at either level, steps or
+   the calls within a step, shorter or longer, refuses Invalid before any IDs,
+   with `next_id` unchanged.
+8. **Concurrent mixed step (fe7lgm).** One step holds a Session cancel leg and
+   a signed Preflight leg, both in flight.
+   - Each leg gets its own auth: credential None with `Egress::Session`, against
+     credential Some, bearer-bound, route None.
+   - The Session leg's recipe gate refuses a signed recipe while its signed
+     sibling is admitted. This is the RED for the per-owner decision.
+9. **Fingerprint isolation (fe7lgm).** A Session resend on one concurrent leg
+   leaves the sibling's fingerprint and revision untouched. A changed body on
+   either leg refuses only that leg.
+10. **PRESERVATION:**
    - `complete_plan_refusal_preserves_serial_opportunity` and Mode::Complete:
      `admit_plan`, physical and barrier routes still refuse a Session root,
      assertions unchanged;
-   - every serial call-auth, keyless-serial and plan-independence control.
+   - every serial call-auth, keyless-serial and plan-independence control;
+   - the existing `serial_plan_session_resend` tests
+     (`session_auth_resend_keeps_body_and_rereads_new_cookie_without_provider_work`,
+     `a_mixed_roots_preflight_create_resend_repeats_signing_without_session_fingerprint`,
+     `changed_session_resend_body_refuses_before_ids`,
+     `retiring_the_installed_session_before_resend_refuses_without_spend`) and the
+     serial fingerprint tests, all with assertions unchanged.
 
 Controls that pass on base are labelled PRESERVATION. Entry-gated suffixes are
 disclosed and executed at source, never counted.
@@ -135,3 +162,11 @@ disclosed and executed at source, never counted.
 - ddi2il (2026-10-28): scope matches the rulings. Leans to the separate
   `admit_session_plan`, to keep CallBound literals untouched during beta. fe7lgm
   decides the shape. The auth-slice length mismatch has its own original (7).
+- fe7lgm (2026-10-28): scope CLEAR with these corrections, now applied:
+  - a separate `admit_session_plan`;
+  - per-call auth `&[&[CallAuth]]`;
+  - `after_refusal` refused;
+  - per-entry `session_call` and fingerprint, serial through its existing slot;
+  - the complete resend as a new function;
+  - originals 8 and 9;
+  - the PRESERVATION list.
