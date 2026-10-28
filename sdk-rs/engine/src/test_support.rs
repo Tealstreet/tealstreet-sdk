@@ -292,34 +292,37 @@ pub mod error_corpus {
 
     pub const REDACTED: &str = "<redacted>";
 
-    /// Field names whose values identify an account, a credential or an order.
-    const SENSITIVE: &[&str] = &[
-        "apikey",
-        "api_key",
-        "key",
-        "secret",
-        "signature",
-        "sign",
-        "passphrase",
-        "token",
-        "jwt",
-        "listenkey",
-        "uid",
-        "userid",
-        "user_id",
-        "accountid",
-        "account_id",
-        "subaccount",
-        "address",
-        "wallet",
-        "orderid",
-        "order_id",
-        "ordid",
-        "clordid",
-        "clientoid",
-        "clientorderid",
-        "client_order_id",
-    ];
+    /// The shared redaction rules (`error_corpus_redaction.json`), which
+    /// `sdk-rs/harness/error-capture.mjs` also writes with.
+    #[derive(Deserialize)]
+    struct Rules {
+        names: Vec<String>,
+        suffixes: Vec<String>,
+    }
+
+    fn rules() -> &'static Rules {
+        static RULES: std::sync::OnceLock<Rules> = std::sync::OnceLock::new();
+        RULES.get_or_init(|| {
+            serde_json::from_str(include_str!("error_corpus_redaction.json"))
+                .expect("redaction rules")
+        })
+    }
+
+    /// A key that names an account, a credential or an order: lowercased with
+    /// `_` and `-` removed, it is a listed name or ends with a listed suffix.
+    pub fn is_sensitive(key: &str) -> bool {
+        let key: String = key
+            .chars()
+            .filter(|c| !matches!(c, '_' | '-'))
+            .flat_map(char::to_lowercase)
+            .collect();
+        let rules = rules();
+        rules.names.iter().any(|name| *name == key)
+            || rules
+                .suffixes
+                .iter()
+                .any(|suffix| key.ends_with(suffix.as_str()))
+    }
 
     /// Every `*.json` fixture in `dir`, sorted by file name. A missing or empty
     /// corpus panics, so a wrong or moved path can never pass a test vacuously.
@@ -398,8 +401,10 @@ pub mod error_corpus {
             })
     }
 
-    /// A sensitive field (JSON key or query parameter) with a value other than
-    /// [`REDACTED`], or a run of 40+ hex digits (keys, signatures, addresses).
+    /// A sensitive field (JSON key at any depth, including JSON inside a string,
+    /// or a query parameter) with a value other than blank or [`REDACTED`], or
+    /// identifying free text: 40+ hex digits, IPv4, IPv6, a UUID or a mixed-case
+    /// base58 run of 32+.
     fn unredacted(text: &str) -> Option<String> {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(text)
             && let Some(key) = sensitive_value(&value)
@@ -408,20 +413,14 @@ pub mod error_corpus {
         }
         for pair in text.split(['?', '&']).skip(1) {
             if let Some((key, value)) = pair.split_once('=')
-                && SENSITIVE.contains(&key.to_ascii_lowercase().as_str())
+                && is_sensitive(key)
+                && !value.is_empty()
                 && value != REDACTED
             {
                 return Some(format!("an unredacted {key}"));
             }
         }
-        let mut run = 0;
-        for c in text.chars() {
-            run = if c.is_ascii_hexdigit() { run + 1 } else { 0 };
-            if run >= 40 {
-                return Some("a 40+ digit hex run".into());
-            }
-        }
-        None
+        identifying_text(text)
     }
 
     fn sensitive_value(value: &serde_json::Value) -> Option<String> {
@@ -432,15 +431,74 @@ pub mod error_corpus {
                     serde_json::Value::String(text) => text.is_empty() || text == REDACTED,
                     _ => false,
                 };
-                if SENSITIVE.contains(&key.to_ascii_lowercase().as_str()) && !blank {
+                if is_sensitive(key) && !blank {
                     Some(key.clone())
                 } else {
                     sensitive_value(value)
                 }
             }),
             serde_json::Value::Array(items) => items.iter().find_map(sensitive_value),
+            serde_json::Value::String(text) if text.starts_with(['{', '[']) => {
+                serde_json::from_str::<serde_json::Value>(text)
+                    .ok()
+                    .and_then(|nested| sensitive_value(&nested))
+            }
             _ => None,
         }
+    }
+
+    /// Maximal runs of characters satisfying `keep`.
+    fn runs(text: &str, keep: impl Fn(char) -> bool) -> impl Iterator<Item = &str> {
+        text.split(move |c: char| !keep(c))
+            .filter(|run| !run.is_empty())
+    }
+
+    fn identifying_text(text: &str) -> Option<String> {
+        if runs(text, |c| c.is_ascii_hexdigit()).any(|run| run.len() >= 40) {
+            return Some("a 40+ digit hex run".into());
+        }
+        let ipv4 = |run: &str| {
+            let parts: Vec<_> = run.split('.').collect();
+            parts.len() == 4
+                && parts.iter().all(|part| {
+                    (1..=3).contains(&part.len())
+                        && part.bytes().all(|b| b.is_ascii_digit())
+                        && part.parse::<u16>().is_ok_and(|n| n <= 255)
+                })
+        };
+        if runs(text, |c| c.is_ascii_digit() || c == '.').any(|run| ipv4(run.trim_matches('.'))) {
+            return Some("an IPv4 address".into());
+        }
+        let ipv6 = |run: &str| {
+            let groups: Vec<_> = run.split(':').collect();
+            let filled = groups.iter().filter(|group| !group.is_empty()).count();
+            groups.iter().all(|group| group.len() <= 4)
+                && (groups.len() == 8 && filled == 8 || run.contains("::") && filled >= 2)
+        };
+        if runs(text, |c| c.is_ascii_hexdigit() || c == ':').any(ipv6) {
+            return Some("an IPv6 address".into());
+        }
+        let uuid = |run: &str| {
+            let lengths: Vec<_> = run.split('-').map(str::len).collect();
+            lengths == [8, 4, 4, 4, 12]
+        };
+        if runs(text, |c| c.is_ascii_hexdigit() || c == '-').any(uuid) {
+            return Some("a UUID".into());
+        }
+        let base58 = |c: char| c.is_ascii_alphanumeric() && !matches!(c, '0' | 'O' | 'I' | 'l');
+        let mixed = |run: &str| {
+            run.len() >= 32
+                && run.bytes().any(|b| b.is_ascii_digit())
+                && run.bytes().any(|b| b.is_ascii_uppercase())
+                && run.bytes().any(|b| b.is_ascii_lowercase())
+        };
+        if runs(text, |c| c.is_ascii_alphanumeric())
+            .filter(|run| run.chars().all(base58))
+            .any(mixed)
+        {
+            return Some("a base58 run".into());
+        }
+        None
     }
 
     #[cfg(test)]
@@ -521,6 +579,28 @@ pub mod error_corpus {
                 fixture(r#""source":"live","body":"x""#).replace("2026-10-28", "yesterday!");
             assert!(parse(&undated).unwrap_err().contains("captured_at"));
             assert!(parse(&fixture(r#""source":"live","body":"x","note":1"#)).is_err());
+        }
+
+        /// The shared vectors the JS writer is also tested against: every raw
+        /// text is refused, its redacted form and every keep text pass.
+        #[test]
+        fn the_loader_agrees_with_the_writer_on_the_shared_vectors() {
+            let rules: serde_json::Value =
+                serde_json::from_str(include_str!("error_corpus_redaction.json")).unwrap();
+            let vectors = &rules["vectors"];
+            for vector in vectors["redact"].as_array().unwrap() {
+                let raw = vector["raw"].as_str().unwrap();
+                assert!(unredacted(raw).is_some(), "not refused: {raw}");
+                let redacted = vector["redacted"].as_str().unwrap();
+                assert_eq!(unredacted(redacted), None, "{redacted}");
+            }
+            for keep in vectors["keep"].as_array().unwrap() {
+                let keep = keep.as_str().unwrap();
+                assert_eq!(unredacted(keep), None, "{keep}");
+            }
+            assert!(identifying_text("Your IP 203.0.113.7.").is_some());
+            assert!(is_sensitive("sub_account_id") && is_sensitive("orderLinkId"));
+            assert!(!is_sensitive("sCode") && !is_sensitive("code") && !is_sensitive("msg"));
         }
 
         #[test]
