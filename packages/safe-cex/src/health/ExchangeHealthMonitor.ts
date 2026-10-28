@@ -137,9 +137,13 @@ export class ExchangeHealthMonitor {
     return null;
   }
 
-  /** Classify native events without inspecting message wording. */
+  /**
+   * Classify native events without inspecting message wording. A classified
+   * notice carries its kind in `event.fields` (engine `notice_error`), used when
+   * the host passes no separate classification.
+   */
   processEvent(event: EngineEvent, classified?: ClassifiedError): ErrorCategory | null {
-    const typed = exchangeErrorCategory(classified);
+    const typed = exchangeErrorCategory(classified ?? event.fields);
     let category: ErrorCategory;
     switch (event.code) {
       case 'auth.rejected':

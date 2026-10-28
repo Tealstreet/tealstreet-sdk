@@ -73,6 +73,11 @@ pub enum Key {
     /// The exact native message, only for code-less venues. The venue codec
     /// strips only its documented suffix grammar before building `Native`.
     Message(&'static str),
+    /// One integer code and its exact message, for a code the venue reuses
+    /// across reasons. It wins over that code's plain row in its scope; any
+    /// other wording falls through to the plain row. Each needs a recorded
+    /// fixture carrying the text (`error_corpus::assert_message_rows_recorded`).
+    IntMessage(i64, &'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,6 +144,9 @@ impl Key {
             (Self::Range(low, high), NativeCode::Int(code)) => (low..=high).contains(&code),
             (Self::Text(key), NativeCode::Text(code)) => key == code,
             (Self::Message(message), NativeCode::None) => native.message == message,
+            (Self::IntMessage(key, message), NativeCode::Int(code)) => {
+                key == code && native.message == message
+            }
             _ => false,
         }
     }
@@ -160,11 +168,18 @@ impl CodeTable {
         scoped(verdict, intent)
     }
 
+    /// Within each intent scope a code-and-message row wins over the code's
+    /// plain row, so table order never shadows it.
     fn row(&self, native: &Native<'_>, intent: Intent) -> Option<&Row> {
         let scoped = |only: Option<Intent>| {
-            self.rows
-                .iter()
-                .find(|row| row.only == only && row.key.matches(native))
+            let candidates = || {
+                self.rows
+                    .iter()
+                    .filter(move |row| row.only == only && row.key.matches(native))
+            };
+            candidates()
+                .find(|row| matches!(row.key, Key::IntMessage(..)))
+                .or_else(|| candidates().next())
         };
         scoped(Some(intent)).or_else(|| scoped(None))
     }
@@ -616,6 +631,16 @@ pub fn assert_table(table: &CodeTable) {
         if let Key::Range(low, high) = row.key {
             assert!(low <= high, "row {index}: empty range");
         }
+        if let Key::IntMessage(_, message) = row.key {
+            assert!(
+                !message.is_empty(),
+                "row {index}: an empty message is no evidence"
+            );
+            assert!(
+                !matches!(row.verdict, Verdict::Satisfied(_) | Verdict::NonceRefused),
+                "row {index}: a code-and-message row cannot be Satisfied or a nonce refusal"
+            );
+        }
         for (other_index, other) in table.rows.iter().enumerate().skip(index + 1) {
             assert!(
                 row.only != other.only || !keys_overlap(row.key, other.key),
@@ -675,6 +700,7 @@ fn keys_overlap(a: Key, b: Key) -> bool {
         _ => match (a, b) {
             (Key::Text(a), Key::Text(b)) => a == b,
             (Key::Message(a), Key::Message(b)) => a == b,
+            (Key::IntMessage(a, m), Key::IntMessage(b, n)) => a == b && m == n,
             _ => false,
         },
     }

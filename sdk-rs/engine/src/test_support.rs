@@ -392,6 +392,41 @@ pub mod error_corpus {
         Ok(fixture)
     }
 
+    /// Every code-and-message row of `table` is backed by a recorded fixture whose
+    /// body carries that code and that exact message, so the row's text comes
+    /// from the venue and never from a hand-typed string (ruling on PR2b).
+    pub fn assert_message_rows_recorded(
+        table: &crate::classify::CodeTable,
+        corpus: &[(String, Fixture)],
+    ) {
+        for row in table.rows {
+            if let crate::classify::Key::IntMessage(code, message) = row.key {
+                let recorded = corpus.iter().any(|(_, fixture)| {
+                    serde_json::from_str::<serde_json::Value>(&fixture.body)
+                        .is_ok_and(|body| carries(&body, code, message))
+                });
+                assert!(recorded, "code {code} {message:?} has no recorded fixture");
+            }
+        }
+    }
+
+    /// One JSON object holding both the code (number or string) and the message.
+    fn carries(value: &serde_json::Value, code: i64, message: &str) -> bool {
+        match value {
+            serde_json::Value::Object(map) => {
+                let has_code = map.values().any(|value| {
+                    value.as_i64() == Some(code) || value.as_str() == Some(&code.to_string())
+                });
+                let has_message = map.values().any(|value| value.as_str() == Some(message));
+                (has_code && has_message) || map.values().any(|value| carries(value, code, message))
+            }
+            serde_json::Value::Array(items) => {
+                items.iter().any(|item| carries(item, code, message))
+            }
+            _ => false,
+        }
+    }
+
     fn is_date(text: &str) -> bool {
         let bytes = text.as_bytes();
         bytes.len() == 10
@@ -556,6 +591,56 @@ pub mod error_corpus {
             let dir = corpus("empty");
             std::fs::write(dir.join("README.md"), "notes").unwrap();
             load(&dir);
+        }
+
+        #[test]
+        fn message_rows_need_a_recording_of_their_exact_text() {
+            use crate::classify::{CodeTable, Key, Row, Verdict};
+            const TABLE: CodeTable = CodeTable {
+                rows: &[Row {
+                    key: Key::IntMessage(
+                        -2010,
+                        "Account has insufficient balance for requested action.",
+                    ),
+                    verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                    only: None,
+                }],
+                success: &[],
+                unlisted: Verdict::Unknown(None),
+                status: &[],
+            };
+            let recorded = |body: &str| {
+                let text = fixture(&format!(
+                    r#""source":"live","body":{}"#,
+                    serde_json::to_string(body).unwrap()
+                ));
+                vec![("case".to_owned(), parse(&text).unwrap())]
+            };
+            assert_message_rows_recorded(
+                &TABLE,
+                &recorded(
+                    r#"{"code":-2010,"msg":"Account has insufficient balance for requested action."}"#,
+                ),
+            );
+            let reworded = std::panic::catch_unwind(|| {
+                assert_message_rows_recorded(
+                    &TABLE,
+                    &recorded(r#"{"code":-2010,"msg":"Account has insufficient balance."}"#),
+                )
+            });
+            assert!(
+                reworded.is_err(),
+                "a different wording is no recording of the row"
+            );
+            let other_code = std::panic::catch_unwind(|| {
+                assert_message_rows_recorded(
+                    &TABLE,
+                    &recorded(
+                        r#"{"code":-2011,"msg":"Account has insufficient balance for requested action."}"#,
+                    ),
+                )
+            });
+            assert!(other_code.is_err(), "the text must come with its own code");
         }
 
         #[test]

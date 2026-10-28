@@ -739,3 +739,103 @@ fn a_cdn_refusal_is_a_block_not_a_bad_key() {
         Verdict::Refused(ErrorKind::AuthInvalid)
     );
 }
+
+const REUSED: CodeTable = CodeTable {
+    rows: &[
+        // The plain row first, so only the scope rule (not table order) can pick the message row.
+        Row {
+            key: Key::Int(-2010),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::IntMessage(
+                -2010,
+                "Account has insufficient balance for requested action.",
+            ),
+            verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+            only: None,
+        },
+        Row {
+            key: Key::IntMessage(-2020, "Unable to fill."),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+    ],
+    success: &[],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+
+#[test]
+fn a_code_and_message_row_wins_over_the_plain_code_row_whatever_the_order() {
+    assert_table(&REUSED);
+    let native = |code, message| Native {
+        code: NativeCode::Int(code),
+        message,
+    };
+    let balance = native(
+        -2010,
+        "Account has insufficient balance for requested action.",
+    );
+    assert_eq!(
+        REUSED.verdict(&balance, Intent::Place),
+        Verdict::Refused(ErrorKind::InsufficientBalance)
+    );
+    // Another reason on the same code, or a reworded balance text, keeps the plain row.
+    for other in [
+        "Order would immediately match and take.",
+        "Account has insufficient balance for requested action",
+    ] {
+        assert_eq!(
+            REUSED.verdict(&native(-2010, other), Intent::Place),
+            Verdict::Refused(ErrorKind::Rejected),
+            "{other}"
+        );
+    }
+    // With no plain row, a reworded text falls to `unlisted`, today's behaviour.
+    assert_eq!(
+        REUSED.verdict(&native(-2020, "Unable to fill"), Intent::Place),
+        Verdict::Unknown(None)
+    );
+    // The message never matches a code-less or text-coded native.
+    let codeless = Native {
+        code: NativeCode::None,
+        message: "Account has insufficient balance for requested action.",
+    };
+    assert_eq!(
+        REUSED.verdict(&codeless, Intent::Place),
+        Verdict::Unknown(None)
+    );
+}
+
+#[test]
+#[should_panic(expected = "cannot be Satisfied")]
+fn a_code_and_message_row_cannot_claim_success() {
+    assert_table(&CodeTable {
+        rows: &[Row {
+            key: Key::IntMessage(-2011, "Unknown order sent."),
+            verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+            only: Some(Intent::Cancel),
+        }],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}
+
+#[test]
+#[should_panic(expected = "overlap")]
+fn a_duplicate_code_and_message_row_is_refused() {
+    const ROW: Row = Row {
+        key: Key::IntMessage(-2010, "x"),
+        verdict: Verdict::Refused(ErrorKind::Rejected),
+        only: None,
+    };
+    assert_table(&CodeTable {
+        rows: &[ROW, ROW],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}

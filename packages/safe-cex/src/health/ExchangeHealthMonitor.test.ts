@@ -399,6 +399,23 @@ describe('coded native health', () => {
     monitor.dispose();
   });
 
+  it('reads the kind a classified notice carries in its fields', () => {
+    const monitor = new ExchangeHealthMonitor('binance');
+    const fields = { kind: 'insufficientBalance', venueCode: '-2019', venueMessage: 'Margin is insufficient.' };
+    expect(monitor.processEvent({ code: 'order.rejected', message: 'Margin is insufficient.', level: 'warn', fields }))
+      .toBe('insufficient_balance');
+    expect(monitor.processEvent({ code: 'auth.rejected', message: 'x', level: 'error', fields: { kind: 'authPermission' } }))
+      .toBe('auth_permissions');
+    expect(monitor.processEvent({ code: 'request.failed', message: 'x', level: 'warn', fields: { kind: 'rateLimited' } }))
+      .toBe('rate_limit');
+    // An explicit classification still wins, and an unknown field kind is ignored.
+    expect(monitor.processEvent({ code: 'order.rejected', message: 'x', level: 'warn', fields }, { kind: 'invalidInput' }))
+      .toBe('order_rejected');
+    expect(monitor.processEvent({ code: 'request.failed', message: 'x', level: 'warn', fields: { kind: 'made-up' } }))
+      .toBe('unknown');
+    monitor.dispose();
+  });
+
   it('keeps typed auth subcategories and ignores routine diagnostic text', () => {
     const monitor = new ExchangeHealthMonitor('bybit');
     expect(monitor.processEvent({ code: 'auth.rejected', message: '', level: 'error', fields: {} },
