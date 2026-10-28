@@ -954,6 +954,11 @@ mod tests {
             let Admission::Current(epoch) = result.admission else {
                 return;
             };
+            if text == "arm-skip" {
+                // Arms a route refusal's backoff skip without retiring the epoch.
+                self.driver.runtime_mut(epoch.feed()).route_refusal.skip_backoff = true;
+                return;
+            }
             let effects = if text == "stop" {
                 self.driver
                     .retire(cx, epoch.feed(), RetireReason::Stopped, false)
@@ -1114,6 +1119,23 @@ mod tests {
             recovery: AuthRecovery::RetrySameSocket { delay_ms: 2_000. },
             traffic: TrafficPolicy::TextAfterFirstPong,
             ..policy(AuthMode::Observe)
+        }
+    }
+
+    /// A route refusal skips backoff only when no close-code floor applies.
+    #[test]
+    fn a_close_floor_binds_over_an_armed_route_refusal_skip() {
+        let floored = || FeedPolicy {
+            close_floors: &[(1013, 30_000.)],
+            ..policy(AuthMode::None)
+        };
+        for (code, wait) in [(1013, 30_000.), (1000, 0.)] {
+            let mut h = Harness::at(vec![floored()], true, 100.);
+            h.open(0);
+            h.text(0, "arm-skip");
+            let socket = h.epoch(0).socket();
+            h.event(Event::WsClosed { socket, code });
+            assert_eq!(h.retry_at(0), h.now + wait, "close {code}");
         }
     }
 
