@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { GATE_SUITES, expectedGateCases } from './ci-gate-suites.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { performanceFailures, performanceMetricErrors } from './performance-policy.mjs';
 
@@ -56,17 +58,82 @@ export function validateKnownFailures(manifest) {
   return errors;
 }
 
-export const assessGateReport = (report, manifest) => assessReport(report, manifest, false);
-export const assessCorrectnessReport = (report, manifest) => assessReport(report, manifest, true);
+export const ACCEPTED_CATEGORIES = Object.freeze({
+  'rust-better': 'Rust is intentionally more correct or fresher than TS for this value.',
+  'ts-unsupported': 'TS cannot express the native value that Rust reports.',
+});
+// Only TS/Rust output comparisons may be accepted. Performance, coverage,
+// transport and harness integrity diagnostics never become accepted parity.
+const acceptableKey = /^(?:checkpoint \d+ )?(?:account[ .]|command results|books?[ .]|markets?[ .[]|tickers?[ .[])/;
 
-function assessReport(report, manifest, correctnessOnly) {
-  const errors = [...validateKnownFailures(manifest)];
-  if (errors.length) return { errors, known: [], resolved: [] };
+export const ACCEPTED_DIFFERENCES = JSON.parse(readFileSync(new URL('./accepted-differences.json', import.meta.url), 'utf8'));
+
+export function validateAcceptedDifferences(accepted, manifest) {
+  if (accepted?.schema !== 1 || !Array.isArray(accepted.differences)) return ['invalid accepted-difference manifest'];
+  const errors = [];
+  const seen = new Set();
+  for (const entry of accepted.differences) {
+    const identity = `${entry?.venue}:${entry?.tapeSha256}`;
+    if (!entry || typeof entry.venue !== 'string' || !/^[a-f0-9]{64}$/.test(entry.tapeSha256 ?? '') || typeof entry.tape !== 'string' ||
+        !Array.isArray(entry.diagnostics) || !entry.diagnostics.length || seen.has(identity)) {
+      errors.push(`invalid or duplicate accepted-difference entry ${identity}`);
+      continue;
+    }
+    seen.add(identity);
+    const known = new Set(declaredDiagnostics(manifest?.failures?.find((candidate) =>
+      candidate.venue === entry.venue && candidate.tapeSha256 === entry.tapeSha256)).map((item) => item.key));
+    const keys = new Set();
+    for (const diagnostic of entry.diagnostics) {
+      const text = (field) => typeof diagnostic?.[field] === 'string' && diagnostic[field].trim() !== '';
+      if (!Array.isArray(diagnostic?.failures) || !diagnostic.failures.length || !Object.hasOwn(ACCEPTED_CATEGORIES, diagnostic.category) ||
+          !text('rationale') || !text('evidence') || ['key', 'keys', 'condition'].some((field) => Object.hasOwn(diagnostic, field))) {
+        errors.push(`invalid accepted-difference declaration ${identity}`);
+        continue;
+      }
+      // Each entry is the exact failure line, values included, so a later
+      // change of either value at an accepted path is a new divergence.
+      for (const failure of diagnostic.failures) {
+        const path = typeof failure === 'string' ? diagnosticKey(failure) : '';
+        if (!path || path === failure || path.includes('*') || keys.has(path) || !acceptableKey.test(path))
+          errors.push(`invalid accepted-difference failure ${identity}: ${failure}`);
+        else if (known.has(path)) errors.push(`accepted difference is also a known failure ${identity}: ${path}`);
+        keys.add(path);
+      }
+    }
+  }
+  return errors;
+}
+
+export const assessGateReport = (report, manifest, accepted = ACCEPTED_DIFFERENCES) => assessReport(report, manifest, false, accepted);
+export const assessCorrectnessReport = (report, manifest, accepted = ACCEPTED_DIFFERENCES) => assessReport(report, manifest, true, accepted);
+
+const acceptedDiagnostics = (accepted, report) => new Map((accepted.differences.find((candidate) =>
+  candidate.venue === report.venue && candidate.tapeSha256 === report.tapeSha256 && candidate.tape === report.tape)?.diagnostics ?? [])
+  .flatMap((item) => item.failures.map((failure) => [diagnosticKey(failure),
+    { key: diagnosticKey(failure), failure, category: item.category, rationale: item.rationale, evidence: item.evidence }])));
+
+/** Every accepted entry must name a tape that a CI gate case replays. Private
+ * tapes are generated in CI, so their bytes are checked per suite at verification. */
+export function acceptedCoverageErrors(accepted, cases = GATE_SUITES.flatMap((suite) => expectedGateCases(suite))) {
+  return (accepted?.differences ?? []).filter((entry) => !cases.some((item) => item.venue === entry.venue && item.tape === entry.tape))
+    .map((entry) => `accepted difference ${entry.venue}:${entry.tapeSha256} names no CI gate case for ${entry.tape}`);
+}
+
+/** A suite's ledger must replay every accepted entry it owns at the recorded tape SHA. */
+export function acceptedReplayErrors(accepted, cases, reports) {
+  return (accepted?.differences ?? []).filter((entry) => cases.some((item) => item.venue === entry.venue && item.tape === entry.tape))
+    .filter((entry) => !reports.some((report) => report?.venue === entry.venue && report.tape === entry.tape && report.tapeSha256 === entry.tapeSha256))
+    .map((entry) => `accepted difference ${entry.venue}:${entry.tapeSha256} was not replayed at that tape SHA: ${entry.tape}`);
+}
+
+function assessReport(report, manifest, correctnessOnly, accepted) {
+  const errors = [...validateKnownFailures(manifest), ...validateAcceptedDifferences(accepted, manifest)];
+  if (errors.length) return { errors, known: [], accepted: [], resolved: [] };
   if (report?.schema !== 1 || !['PASS', 'FAIL'].includes(report.status) ||
       !Array.isArray(report.failures) || report.failures.some((failure) => typeof failure !== 'string') ||
       (report.status === 'PASS') !== (report.failures.length === 0) ||
       typeof report.private !== 'boolean' || !/^[a-f0-9]{64}$/.test(report.tapeSha256 ?? ''))
-    return { errors: [...errors, 'invalid strict gate report'], known: [], resolved: [] };
+    return { errors: [...errors, 'invalid strict gate report'], known: [], accepted: [], resolved: [] };
   if (correctnessOnly !== (report.correctnessOnly === true))
     errors.push('correctness-only reports cannot substitute for measured gate evidence');
   if (correctnessOnly && (report.runs !== 0 || report.correctnessRuns !== 1 ||
@@ -74,6 +141,7 @@ function assessReport(report, manifest, correctnessOnly) {
     errors.push('invalid correctness-only replay coverage');
   const entry = manifest.failures.find((candidate) => candidate.venue === report.venue && candidate.tapeSha256 === report.tapeSha256);
   const declarations = new Map(declaredDiagnostics(entry).map((item) => [item.key, item]));
+  const acceptances = acceptedDiagnostics(accepted, report);
   if (report.replayFailure) {
     const { kind, impl, command } = report.replayFailure;
     const key = `${impl} replay: command ${command} did not complete`;
@@ -83,7 +151,8 @@ function assessReport(report, manifest, correctnessOnly) {
         report.coverage?.correctness !== 'incomplete' || report.coverage?.performance !== 'not-run' || report.runs !== 0)
       errors.push('invalid incomplete command replay report');
     if (!declarations.has(key)) errors.push(`${report.venue}: unexpected ${key}`);
-    return { errors, known: declarations.has(key) ? [{ key, divergence: declarations.get(key).divergence }] : [], resolved: [] };
+    // An incomplete replay cannot reproduce or retire accepted differences.
+    return { errors, known: declarations.has(key) ? [{ key, divergence: declarations.get(key).divergence }] : [], accepted: [], resolved: [] };
   }
   // Missing performance work and harness integrity cannot become exemptions.
   // TS-versus-Rust frame/protocol differences may be declared venue failures;
@@ -106,6 +175,7 @@ function assessReport(report, manifest, correctnessOnly) {
       if (!report.failures.includes(missing)) errors.push(`strict report omitted ${missing}`);
   }
   const known = [];
+  const acceptedSeen = [];
   const observed = new Set();
   for (const failure of report.failures) {
     const key = diagnosticKey(failure);
@@ -113,9 +183,16 @@ function assessReport(report, manifest, correctnessOnly) {
     // Every implementation must reproduce its own audited replay. Snapshot
     // leaf and duplicate-row diagnostics have no common "workload" suffix.
     const ownReplayFailure = /^(?:ts|rust) performance run \d+(?:[ :]|$)/.test(failure);
-    if (ownReplayFailure || failure.startsWith('checkpoint coverage ') || protectedFailure.test(failure) ||
-        !declarations.has(key) || !matchesCondition(declarations.get(key), failure)) errors.push(`${report.venue}: unexpected ${failure}`);
+    if (ownReplayFailure || failure.startsWith('checkpoint coverage ') || protectedFailure.test(failure))
+      errors.push(`${report.venue}: unexpected ${failure}`);
+    else if (acceptances.has(key)) {
+      if (acceptances.get(key).failure === failure) acceptedSeen.push(acceptances.get(key));
+      else errors.push(`${report.venue}: accepted difference changed value ${failure}`);
+    }
+    else if (!declarations.has(key) || !matchesCondition(declarations.get(key), failure)) errors.push(`${report.venue}: unexpected ${failure}`);
     else known.push({ key, divergence: declarations.get(key).divergence });
   }
-  return { errors, known, resolved: [...declarations.keys()].filter((key) => !observed.has(key)) };
+  // A stale acceptance would silently cover a future regression at that path.
+  for (const key of acceptances.keys()) if (!observed.has(key)) errors.push(`${report.venue}: stale accepted difference ${key}`);
+  return { errors, known, accepted: acceptedSeen, resolved: [...declarations.keys()].filter((key) => !observed.has(key)) };
 }
