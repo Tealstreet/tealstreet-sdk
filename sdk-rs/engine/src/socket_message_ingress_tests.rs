@@ -314,13 +314,26 @@ fn interest_work_pending_at_a_frame_is_processed_before_the_venue_reads_it() {
 }
 
 /// A venue that retires its own socket while reading a frame has that
-/// retirement finished in the same event; later frames are not read.
+/// retirement finished in the same event, before the host drains actions;
+/// later frames are not read.
 #[test]
 fn a_venue_retiring_its_socket_inside_a_frame_finishes_in_that_event() {
     let mut h = Harness::new(control_free());
     let socket = h.open(0.);
     let armed = h.timer_ids();
-    h.frame(1., socket, "retire");
+    h.engine.handle(
+        1.,
+        Event::WsMessage {
+            socket,
+            text: "retire",
+        },
+    );
+    assert!(h.engine.io.core.socket_effects.is_empty());
+    assert_eq!(
+        h.engine.venue.log.last().unwrap(),
+        &format!("retired {:?} None", RetireReason::Closed)
+    );
+    h.collect();
     assert_eq!(h.closed, [socket]);
     assert_eq!(
         h.engine.venue.log.last().unwrap(),

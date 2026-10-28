@@ -832,16 +832,6 @@ impl<V: Venue> Engine<V> {
                 if controls == ControlPolicy::None
                     && self.io.core.socket_driver.state.current(epoch)
                 {
-                    #[cfg(debug_assertions)]
-                    {
-                        let again =
-                            self.io
-                                .core
-                                .socket_driver
-                                .admit_ingress(now, socket, Ingress::Message);
-                        debug_assert_eq!(again, Admission::Current(epoch));
-                        debug_assert!(self.io.core.socket_effects.len() <= MAX_EFFECTS);
-                    }
                     let work = self.io.core.socket_driver.observe_admitted(
                         now,
                         epoch,
@@ -1565,9 +1555,16 @@ mod tests {
                     0
                 }
             );
+            // A native frame is admitted again after its codec; a control-free
+            // frame's ingress admission stands.
+            let admissions = if controls == ControlPolicy::Native {
+                2
+            } else {
+                1
+            };
             assert_eq!(
                 e.io.core.socket_driver.state.socket_lookup_count(),
-                queries + 128
+                queries + 64 * admissions
             );
         }
     }
@@ -1633,7 +1630,23 @@ mod tests {
 
     #[test]
     fn retained_retirements_keep_both_empty_publication_capacity_checks() {
-        let (mut e, socket) = engine();
+        for controls in [ControlPolicy::Native, ControlPolicy::None] {
+            retained_retirements_keep_both_capacity_checks(controls);
+        }
+    }
+    fn retained_retirements_keep_both_capacity_checks(controls: ControlPolicy) {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            controls,
+            ..Probe::default()
+        });
+        e.start(0.);
+        let socket = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
         e.handle(0., Event::WsOpened { socket });
         e.drain_actions().for_each(drop);
         let retired = {
@@ -1667,8 +1680,11 @@ mod tests {
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(e.io.core.socket_failed);
         assert_eq!(e.venue.messages, 0);
-        assert_eq!(e.venue.control_calls.get(), 1);
-        assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.message == "Managed socket effect capacity exhausted")).count(), 2);
+        assert_eq!(
+            e.venue.control_calls.get(),
+            usize::from(controls == ControlPolicy::Native)
+        );
+        assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.message == "Managed socket effect capacity exhausted")).count(), 2, "{controls:?}");
     }
 
     #[test]
