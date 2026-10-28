@@ -133,3 +133,10 @@ test('{now} is stamped at send time in the url, headers and body strings', async
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('{now_iso} is the same send-time instant in ISO-8601', () => {
+  const item = { name: 'iso', url: 'https://api.venue.test/v1/x', headers: { 'OK-ACCESS-TIMESTAMP': '{now_iso}', 'X-T': '{now}' }, expect };
+  const sent = stamped(item, Date.parse('2026-10-28T02:00:00.123Z'));
+  assert.equal(sent.headers['OK-ACCESS-TIMESTAMP'], '2026-10-28T02:00:00.123Z');
+  assert.equal(sent.headers['X-T'], String(Date.parse('2026-10-28T02:00:00.123Z')));
+});

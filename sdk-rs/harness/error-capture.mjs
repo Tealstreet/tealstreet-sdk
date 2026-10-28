@@ -9,7 +9,8 @@
 //
 // cases.json is [{ name, method, url, headers?, body?, expect: { kind, outcome, path } }].
 // "{now}" anywhere in the url, a header value or a body string is replaced by the
-// send-time epoch milliseconds, so a signed timestamp is never stale on arrival.
+// send-time epoch milliseconds, and "{now_iso}" by the same instant in ISO-8601,
+// so a signed timestamp is never stale on arrival.
 // Redaction follows sdk-rs/engine/src/error_corpus_redaction.json, the same rules
 // the Rust loader (safe_cex_engine::test_support::error_corpus) re-checks with.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -216,11 +217,14 @@ export const fixture = (capture, status, text, now = new Date()) => ({
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const NOW = /\{now\}/g;
+const NOW_ISO = /\{now_iso\}/g;
 
-/** The case with every "{now}" replaced by `now`, taken immediately before sending. */
+/** The case with every "{now}" and "{now_iso}" set from `now`, taken immediately before sending. */
 export const stamped = (item, now) => {
   const stamp = (value) => {
-    if (typeof value === 'string') return value.replace(NOW, String(now));
+    if (typeof value === 'string') {
+      return value.replace(NOW, String(now)).replace(NOW_ISO, new Date(now).toISOString());
+    }
     if (Array.isArray(value)) return value.map(stamp);
     if (value !== null && typeof value === 'object') {
       return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, stamp(inner)]));
