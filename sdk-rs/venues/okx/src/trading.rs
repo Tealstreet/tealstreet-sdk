@@ -1642,6 +1642,9 @@ mod code_table_tests {
     fn the_okx_table_satisfies_the_engine_invariants() {
         safe_cex_engine::classify::assert_table(&CODES);
         for row in CODES.rows {
+            // Every row is unscoped, so rejection()'s Place lookup reads the
+            // same row any write intent would.
+            assert_eq!(row.only, None, "{row:?}");
             // 50113 (signature) is the one documented re-sign.
             if matches!(row.verdict, Verdict::RefusedResend(_)) {
                 assert_eq!(row.key, Key::Int(50113), "{row:?}");

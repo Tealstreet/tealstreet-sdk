@@ -355,3 +355,91 @@ fn an_invalid_candle_bar_keeps_the_soft_empty_result() {
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 4, .. })))
     );
 }
+
+/// Inline, not corpus: a write refused with a code the table does not list is
+/// unproven on a 4xx, as `CODES.unlisted` (Unknown) says.
+#[test]
+fn an_unlisted_code_on_a_4xx_write_is_unknown() {
+    let mut e = trading_engine();
+    e.handle(
+        5.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![
+                serde_json::from_str(
+                    r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#,
+                )
+                .unwrap(),
+            ],
+        }),
+    );
+    let out = prepared(&mut e, 5.0);
+    let Some(Action::Http(request)) = out.iter().find(|a| matches!(a, Action::Http(_))) else {
+        panic!("no order write");
+    };
+    e.handle(
+        6.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 400,
+                headers: "",
+                body: r#"{"code":"59999","msg":"unlisted","data":[]}"#,
+            },
+        },
+    );
+    let failure = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("the write fails");
+    assert_eq!(
+        failure.outcome,
+        Some(Outcome::Unknown),
+        "{}",
+        failure.message
+    );
+}
+
+/// Inline, not corpus: a non-key refusal on the account config read is
+/// `request.failed` carrying the table kind (a key refusal ends startup instead).
+#[test]
+fn a_rate_limited_config_read_carries_its_kind() {
+    let mut engine = crate::support::engine(Options {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Options::default()
+    });
+    engine.start(0.0);
+    let mut cycle = Cycle {
+        engine,
+        now: 0.0,
+        requests: Vec::new(),
+        notices: Vec::new(),
+    };
+    cycle.collect();
+    cycle.answer("instruments", 200, &envelope(MARKET));
+    cycle.answer("tickers", 200, &envelope(TICKER));
+    cycle.answer(
+        "/api/v5/account/config",
+        429,
+        r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
+    );
+    let event = cycle
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            Notice::Event(event) if event.code == code::REQUEST_FAILED => Some(event),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{:?}", cycle.notices));
+    assert!(
+        event.fields.contains(&("kind", "rateLimited".into())),
+        "{:?}",
+        event.fields
+    );
+    assert!(event.fields.contains(&("venueCode", "50011".into())));
+}

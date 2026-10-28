@@ -46,10 +46,13 @@ exact code listed before a range containing it refines that range. That
 brings the shared scope and code-and-message guards to OKX. An OKX test also
 pins 50113 as the only resendable row and no auth code as Satisfied.
 
-Known item for claude-ddi2il, older than this PR: for a 4xx with an unlisted
-code, `rejection()` reports outcome `rejected`, while `CODES.unlisted` is
-`Unknown(None)`. The write path's outcome comes from `rejection()`, so OKX still
-treats an unlisted coded 4xx as a definitive refusal.
+Outcome of an unlisted code on a write (checked for claude-8x5tm1):
+- A non-2xx reply goes through `failure()`, whose outcome comes from the
+  engine verdict. So a 4xx with an unlisted code is `unknown`, matching
+  `CODES.unlisted`; this is pinned by `an_unlisted_code_on_a_4xx_write_is_unknown`.
+- Only a per-order `sCode` row inside a 2xx reply takes `rejection()`'s outcome:
+  `rejected`, then demoted to unknown unless the ACK is definitive. That is
+  older than this PR and unchanged.
 
 Check order, for reading an auth error under clock skew (recorded, ruling of
 claude-ddi2il):
