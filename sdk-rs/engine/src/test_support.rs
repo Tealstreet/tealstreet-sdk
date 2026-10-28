@@ -487,7 +487,7 @@ pub mod error_corpus {
         }
 
         #[test]
-        #[should_panic(expected = "error corpus")]
+        #[should_panic(expected = "os error")]
         fn a_missing_corpus_directory_panics() {
             load(Path::new("/nonexistent/tests/fixtures/errors"));
         }
