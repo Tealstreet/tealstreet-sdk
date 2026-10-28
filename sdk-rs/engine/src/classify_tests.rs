@@ -897,3 +897,59 @@ fn a_code_and_message_row_in_the_plain_rows_scope_refines_it() {
         Verdict::Refused(ErrorKind::InsufficientBalance)
     );
 }
+
+#[test]
+fn an_exact_code_before_its_range_refines_it() {
+    const REFINED: CodeTable = CodeTable {
+        rows: &[
+            Row {
+                key: Key::Int(51008),
+                verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                only: None,
+            },
+            Row {
+                key: Key::Range(51000, 51999),
+                verdict: Verdict::Refused(ErrorKind::Rejected),
+                only: None,
+            },
+        ],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    };
+    assert_table(&REFINED);
+    let native = |code| Native {
+        code: NativeCode::Int(code),
+        message: "",
+    };
+    assert_eq!(
+        REFINED.verdict(&native(51008), Intent::Place),
+        Verdict::Refused(ErrorKind::InsufficientBalance)
+    );
+    assert_eq!(
+        REFINED.verdict(&native(51009), Intent::Place),
+        Verdict::Refused(ErrorKind::Rejected)
+    );
+}
+
+#[test]
+#[should_panic(expected = "overlap")]
+fn an_exact_code_after_its_range_is_dead_and_refused() {
+    assert_table(&CodeTable {
+        rows: &[
+            Row {
+                key: Key::Range(51000, 51999),
+                verdict: Verdict::Refused(ErrorKind::Rejected),
+                only: None,
+            },
+            Row {
+                key: Key::Int(51008),
+                verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                only: None,
+            },
+        ],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}

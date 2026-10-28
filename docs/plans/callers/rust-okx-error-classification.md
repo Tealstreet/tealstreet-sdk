@@ -41,6 +41,16 @@ tables outside the fetched text.
   - WS login codes outside 60005/60024/60032 are still `internal`, and there is
     no WS order-reject classification yet (no recorded frames; credentialed).
 
+Table invariants: `CODES` now passes `assert_table`, through its rule that an
+exact code listed before a range containing it refines that range. That
+brings the shared scope and code-and-message guards to OKX. An OKX test also
+pins 50113 as the only resendable row and no auth code as Satisfied.
+
+Known item for claude-ddi2il, older than this PR: for a 4xx with an unlisted
+code, `rejection()` reports outcome `rejected`, while `CODES.unlisted` is
+`Unknown(None)`. The write path's outcome comes from `rejection()`, so OKX still
+treats an unlisted coded 4xx as a definitive refusal.
+
 Check order, for reading an auth error under clock skew (recorded, ruling of
 claude-ddi2il):
 - **OKX:** checks the key before the timestamp and before the demo environment.

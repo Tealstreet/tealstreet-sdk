@@ -1636,6 +1636,37 @@ mod code_table_tests {
     use super::*;
     use safe_cex_engine::classify::Intent;
 
+    /// assert_table covers the status rows (never Satisfied or RefusedResend) and
+    /// shadowing (an exact row after its range panics); OKX adds two of its own.
+    #[test]
+    fn the_okx_table_satisfies_the_engine_invariants() {
+        safe_cex_engine::classify::assert_table(&CODES);
+        for row in CODES.rows {
+            // 50113 (signature) is the one documented re-sign.
+            if matches!(row.verdict, Verdict::RefusedResend(_)) {
+                assert_eq!(row.key, Key::Int(50113), "{row:?}");
+            }
+            // No auth or permission code ever proves a write landed.
+            if matches!(row.key, Key::Int(code) if (50100..=50199).contains(&code) || code == 50030)
+            {
+                assert!(!matches!(row.verdict, Verdict::Satisfied(_)), "{row:?}");
+            }
+        }
+        // Every exact 51xxx row sits before the range it refines.
+        let range = CODES
+            .rows
+            .iter()
+            .position(|row| row.key == Key::Range(51000, 51999))
+            .unwrap();
+        for (index, row) in CODES.rows.iter().enumerate() {
+            if let Key::Int(code) = row.key
+                && (51000..=51999).contains(&code)
+            {
+                assert!(index < range, "{code} is shadowed by the 51xxx range");
+            }
+        }
+    }
+
     #[test]
     fn exact_rows_win_over_their_range_and_unlisted_codes_prove_nothing() {
         let verdict = |code| CODES.verdict(&native(code, "native"), Intent::Place);

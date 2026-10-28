@@ -657,8 +657,12 @@ pub fn assert_table(table: &CodeTable) {
             );
         }
         for (other_index, other) in table.rows.iter().enumerate().skip(index + 1) {
+            // An exact code listed before a range that contains it refines the
+            // range: rows match first to last, so the exact row always wins.
+            let refines = matches!((row.key, other.key),
+                (Key::Int(code), Key::Range(low, high)) if (low..=high).contains(&code));
             assert!(
-                row.only != other.only || !keys_overlap(row.key, other.key),
+                row.only != other.only || refines || !keys_overlap(row.key, other.key),
                 "rows {index} and {other_index} overlap for the same intent scope"
             );
         }
