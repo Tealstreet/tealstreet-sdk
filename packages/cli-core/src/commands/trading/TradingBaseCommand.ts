@@ -92,6 +92,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
    *        when no `%bal`/`%pos` suffix is present. Entry commands
    *        (`buy`, non-reduce `chase`) pass `'balance'`; exit commands
    *        (`close`, reduce-only `stop`/`chase`) pass `'position'`.
+   * @param price resolved order price; omitted for market-price sizing.
    */
   protected parseSizeAndConvertIfUsd(
     exchange: ExchangeLike,
@@ -100,6 +101,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
     allowPercentage = false,
     side?: PositionSide,
     defaultPercentScope: 'position' | 'balance' = 'position',
+    price?: number,
   ): number {
     const trimmed = size.trim();
 
@@ -157,16 +159,16 @@ export abstract class TradingBaseCommand extends BaseCommand {
         const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
         return adjust(notional / contractSize, amountPrecisionOf(market));
       }
-      const ticker = exchange.store?.tickers?.find((t) => t.symbol === symbol);
-      if (!ticker?.last) {
+      const conversionPrice = price ?? exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
+      if (!conversionPrice) {
         throw new Error(`Price not available for ${symbol}`);
       }
       // See notionalToSize — linear venues can still carry a ctVal (OKX).
-      return adjust(baseToNativeContracts(market, notional / ticker.last), amountPrecisionOf(market));
+      return adjust(baseToNativeContracts(market, notional / conversionPrice), amountPrecisionOf(market));
     }
 
     if (this.looksLikeSize(trimmed)) {
-      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed));
+      return this.notionalToSize(exchange, symbol, this.parseUsdAmount(trimmed), price);
     }
 
     throw new Error(`Invalid size "${size}". Use $1000, 1000$, or NN% (or NN%bal / NN%pos).`);
@@ -197,7 +199,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * populate `contractSize` in their `fetchMarkets` mapping so this
    * formula stays correct without per-exchange branches here.
    */
-  protected notionalToSize(exchange: ExchangeLike, symbol: string, notional: number): number {
+  protected notionalToSize(exchange: ExchangeLike, symbol: string, notional: number, price?: number): number {
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
     const amountPrecision = amountPrecisionOf(market);
 
@@ -206,14 +208,14 @@ export abstract class TradingBaseCommand extends BaseCommand {
       return adjust(notional / contractSize, amountPrecision);
     }
 
-    const lastPrice = exchange.store?.tickers?.find((ticker) => ticker.symbol === symbol)?.last;
-    if (!lastPrice) {
+    const conversionPrice = price ?? exchange.store?.tickers?.find((ticker) => ticker.symbol === symbol)?.last;
+    if (!conversionPrice) {
       throw new Error('Price data is not available yet for a symbol');
     }
     // Linear is NOT always 1 contract = 1 base coin — OKX publishes a real ctVal
     // on its linear swaps (1000 DOGE, 0.01 BTC), so the base amount has to be
     // divided by it to get the native contract count.
-    const baseAmount = notional / lastPrice;
+    const baseAmount = notional / conversionPrice;
     return adjust(baseToNativeContracts(market ?? { contractSize: 1 }, baseAmount), amountPrecision);
   }
 
