@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:38:39.156Z",
+  "endpoint": "/api/v2/mix/account/accounts?productType=USDC-FUTURES",
+  "http_status": 400,
+  "body": "{\"code\":\"40037\",\"msg\":\"Apikey does not exist\",\"requestTime\":1793155119125,\"data\":null}",
+  "expect": {
+    "kind": "authInvalid",
+    "outcome": null,
+    "path": "read"
+  }
+}

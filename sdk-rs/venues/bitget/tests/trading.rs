@@ -1211,7 +1211,10 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             400,
             r#"{"code":"40762","msg":"The order amount exceeds the balance"}"#,
-            (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+            (
+                Some(ErrorKind::InsufficientBalance),
+                Some(Outcome::Rejected),
+            ),
         ),
         (
             429,
@@ -1230,6 +1233,15 @@ fn write_failures_are_classified_without_changing_their_text() {
             200,
             r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"balance"}]}}"#,
             (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+        ),
+        // A coded failed row keeps its code, so the table names the kind.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Insufficient balance","errorCode":"43012"}]}}"#,
+            (
+                Some(ErrorKind::InsufficientBalance),
+                Some(Outcome::Rejected),
+            ),
         ),
         // An acknowledgement that accounts for no order is the engine's unproven reply.
         (

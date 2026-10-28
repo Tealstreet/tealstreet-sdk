@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:38:35.962Z",
+  "endpoint": "/api/v2/mix/order/place-order",
+  "http_status": 400,
+  "body": "{\"code\":\"40037\",\"msg\":\"Apikey does not exist\",\"requestTime\":1793155115937,\"data\":null}",
+  "expect": {
+    "kind": "authInvalid",
+    "outcome": "rejected",
+    "path": "write"
+  }
+}
