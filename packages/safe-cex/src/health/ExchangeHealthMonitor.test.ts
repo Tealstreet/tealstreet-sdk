@@ -372,6 +372,17 @@ describe('typed classification', () => {
     expect(monitor.processMessage('invalid api key', true, { kind: 'rejected' })).toBe('auth_invalid');
     expect(monitor.processMessage('something unmatched', true, { kind: 'rejected' })).toBe('order_rejected');
   });
+
+  it('reports an insufficient balance by its kind, even when the text matches another pattern', () => {
+    const monitor = new ExchangeHealthMonitor('binance');
+    expect(monitor.processMessage('Margin is insufficient.', true, { kind: 'insufficientBalance' })).toBe(
+      'insufficient_balance',
+    );
+    expect(monitor.processMessage('rejected with 503', true, { kind: 'insufficientBalance' })).toBe(
+      'insufficient_balance',
+    );
+    expect(monitor.getState().errorCounts.insufficient_balance).toBe(2);
+  });
 });
 
 

@@ -28,6 +28,7 @@ export type HealthStatus = 'healthy' | 'degraded' | 'error';
 
 /** Kinds precise enough to override text classification. */
 const SPECIFIC_KINDS: ReadonlySet<string> = new Set([
+  'insufficientBalance',
   'authInvalid',
   'authExpired',
   'authPermission',

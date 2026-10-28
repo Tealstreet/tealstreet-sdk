@@ -1,14 +1,15 @@
 //! Structured command and lifecycle failures. `message` is the user-facing
 //! text hosts have always shown; the other fields let consumers classify a
 //! failure without matching that text.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorKind {
     Rejected,
     InvalidInput,
+    InsufficientBalance,
     AuthInvalid,
     AuthExpired,
     AuthPermission,
@@ -25,6 +26,7 @@ impl ErrorKind {
         match self {
             Self::Rejected => "rejected",
             Self::InvalidInput => "invalidInput",
+            Self::InsufficientBalance => "insufficientBalance",
             Self::AuthInvalid => "authInvalid",
             Self::AuthExpired => "authExpired",
             Self::AuthPermission => "authPermission",
@@ -40,7 +42,7 @@ impl ErrorKind {
 
 /// Whether a write reached the venue. `None` on [`VenueError`] means the site
 /// has not classified it, never that it is safe to resend.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Outcome {
     NotSent,

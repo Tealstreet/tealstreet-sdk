@@ -238,3 +238,273 @@ pub fn seeded_engine<V: Venue>(venue: V) -> Engine<V> {
 pub fn exhaust_order_snapshots(store: &mut crate::Store) {
     store.exhaust_order_snapshots_for_test();
 }
+
+/// The recorded venue error payloads that pin a family's classification
+/// (`tests/fixtures/errors/<case>.json`; RUST_ERROR_CLASSIFICATION.md, "Recorded-payload
+/// corpus"). Loading checks provenance and redaction; the venue test drives each body.
+pub mod error_corpus {
+    use crate::{ErrorKind, Outcome};
+    use serde::Deserialize;
+    use std::path::Path;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Fixture {
+        pub source: Source,
+        pub captured_at: String,
+        pub endpoint: String,
+        #[serde(default)]
+        pub channel: Option<String>,
+        #[serde(default)]
+        pub http_status: Option<u16>,
+        /// The reply text exactly as received, after redaction.
+        pub body: String,
+        #[serde(default)]
+        pub doc_url: Option<String>,
+        pub expect: Expect,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Source {
+        Live,
+        Docs,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Expect {
+        pub kind: Option<ErrorKind>,
+        pub outcome: Option<Outcome>,
+        pub path: Pinned,
+    }
+
+    /// The production path the fixture is driven through.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Pinned {
+        Write,
+        Read,
+        Startup,
+        WsLogin,
+        WsOrder,
+    }
+
+    pub const REDACTED: &str = "<redacted>";
+
+    /// Field names whose values identify an account, a credential or an order.
+    const SENSITIVE: &[&str] = &[
+        "apikey",
+        "api_key",
+        "key",
+        "secret",
+        "signature",
+        "sign",
+        "passphrase",
+        "token",
+        "jwt",
+        "listenkey",
+        "uid",
+        "userid",
+        "user_id",
+        "accountid",
+        "account_id",
+        "subaccount",
+        "address",
+        "wallet",
+        "orderid",
+        "order_id",
+        "ordid",
+        "clordid",
+        "clientoid",
+        "clientorderid",
+        "client_order_id",
+    ];
+
+    /// Every `*.json` fixture in `dir`, sorted by file name; a missing directory is empty.
+    pub fn load(dir: &Path) -> Vec<(String, Fixture)> {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut names: Vec<_> = entries
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect();
+        names.sort();
+        names
+            .into_iter()
+            .map(|path| {
+                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+                let text = std::fs::read_to_string(&path).unwrap();
+                let fixture = parse(&text).unwrap_or_else(|error| panic!("{name}: {error}"));
+                (name, fixture)
+            })
+            .collect()
+    }
+
+    /// One fixture, refused unless its provenance and redaction hold.
+    pub fn parse(text: &str) -> Result<Fixture, String> {
+        let fixture: Fixture = serde_json::from_str(text).map_err(|error| error.to_string())?;
+        if !fixture.captured_at.get(..10).is_some_and(is_date) {
+            return Err("captured_at must start with a YYYY-MM-DD date".into());
+        }
+        match fixture.source {
+            Source::Live if fixture.doc_url.is_some() => {
+                return Err("a live capture carries no doc_url".into());
+            }
+            Source::Docs => {
+                if !fixture
+                    .doc_url
+                    .as_deref()
+                    .is_some_and(|url| url.starts_with("https://"))
+                {
+                    return Err("a docs fixture needs an https doc_url".into());
+                }
+                let unavailable = fixture.http_status.is_some_and(|status| status >= 500)
+                    || matches!(
+                        fixture.expect.kind,
+                        Some(
+                            ErrorKind::RateLimited
+                                | ErrorKind::VenueUnavailable
+                                | ErrorKind::Timeout
+                        )
+                    );
+                if !unavailable {
+                    return Err("docs fixtures are only for rate limit, 5xx and maintenance".into());
+                }
+            }
+            Source::Live => {}
+        }
+        if let Some(found) = unredacted(&fixture.endpoint) {
+            return Err(format!("endpoint carries {found}"));
+        }
+        if let Some(found) = unredacted(&fixture.body) {
+            return Err(format!("body carries {found}"));
+        }
+        Ok(fixture)
+    }
+
+    fn is_date(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        bytes.len() == 10
+            && bytes.iter().enumerate().all(|(i, b)| match i {
+                4 | 7 => *b == b'-',
+                _ => b.is_ascii_digit(),
+            })
+    }
+
+    /// A sensitive field (JSON key or query parameter) with a value other than
+    /// [`REDACTED`], or a run of 40+ hex digits (keys, signatures, addresses).
+    fn unredacted(text: &str) -> Option<String> {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(text)
+            && let Some(key) = sensitive_value(&value)
+        {
+            return Some(format!("an unredacted {key}"));
+        }
+        for pair in text.split(['?', '&']).skip(1) {
+            if let Some((key, value)) = pair.split_once('=')
+                && SENSITIVE.contains(&key.to_ascii_lowercase().as_str())
+                && value != REDACTED
+            {
+                return Some(format!("an unredacted {key}"));
+            }
+        }
+        let mut run = 0;
+        for c in text.chars() {
+            run = if c.is_ascii_hexdigit() { run + 1 } else { 0 };
+            if run >= 40 {
+                return Some("a 40+ digit hex run".into());
+            }
+        }
+        None
+    }
+
+    fn sensitive_value(value: &serde_json::Value) -> Option<String> {
+        match value {
+            serde_json::Value::Object(map) => map.iter().find_map(|(key, value)| {
+                let blank = match value {
+                    serde_json::Value::Null => true,
+                    serde_json::Value::String(text) => text.is_empty() || text == REDACTED,
+                    _ => false,
+                };
+                if SENSITIVE.contains(&key.to_ascii_lowercase().as_str()) && !blank {
+                    Some(key.clone())
+                } else {
+                    sensitive_value(value)
+                }
+            }),
+            serde_json::Value::Array(items) => items.iter().find_map(sensitive_value),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn fixture(fields: &str) -> String {
+            format!(
+                r#"{{"captured_at":"2026-10-28T10:00:00Z","endpoint":"/api/v1/order",
+                "expect":{{"kind":"insufficientBalance","outcome":"rejected","path":"write"}},{fields}}}"#
+            )
+        }
+
+        #[test]
+        fn a_redacted_live_capture_loads() {
+            let fixture = parse(&fixture(
+                r#""source":"live","http_status":400,"body":"{\"code\":-2019,\"msg\":\"Margin is insufficient.\",\"orderId\":\"<redacted>\"}""#,
+            ))
+            .unwrap();
+            assert_eq!(fixture.source, Source::Live);
+            assert_eq!(fixture.expect.kind, Some(ErrorKind::InsufficientBalance));
+            assert_eq!(fixture.expect.outcome, Some(Outcome::Rejected));
+            assert_eq!(fixture.expect.path, Pinned::Write);
+        }
+
+        #[test]
+        fn provenance_is_enforced() {
+            let docs = |status: u16, url: &str| {
+                parse(&fixture(&format!(
+                    r#""source":"docs","http_status":{status},"body":"busy"{url}"#
+                )))
+            };
+            assert!(docs(503, r#","doc_url":"https://venue.example/errors""#).is_ok());
+            assert!(docs(503, "").unwrap_err().contains("doc_url"));
+            assert!(
+                docs(400, r#","doc_url":"https://venue.example/errors""#)
+                    .unwrap_err()
+                    .contains("only for rate limit")
+            );
+            let live_with_url =
+                fixture(r#""source":"live","body":"x","doc_url":"https://venue.example/errors""#);
+            assert!(parse(&live_with_url).unwrap_err().contains("no doc_url"));
+            let undated =
+                fixture(r#""source":"live","body":"x""#).replace("2026-10-28", "yesterday!");
+            assert!(parse(&undated).unwrap_err().contains("captured_at"));
+            assert!(parse(&fixture(r#""source":"live","body":"x","note":1"#)).is_err());
+        }
+
+        #[test]
+        fn unredacted_material_is_refused() {
+            let body = |body: &str| parse(&fixture(&format!(r#""source":"live","body":{body}"#)));
+            assert!(
+                body(r#""{\"data\":[{\"ordId\":\"6129383\"}]}""#)
+                    .unwrap_err()
+                    .contains("ordId")
+            );
+            assert!(
+                body(r#""{\"apiKey\":\"abc\"}""#)
+                    .unwrap_err()
+                    .contains("apiKey")
+            );
+            assert!(body(r#""{\"apiKey\":\"<redacted>\",\"uid\":null}""#).is_ok());
+            let hex = format!(r#""sig {}""#, "a".repeat(40));
+            assert!(body(&hex).unwrap_err().contains("hex run"));
+            let query = fixture(r#""source":"live","body":"x""#).replace(
+                "/api/v1/order",
+                "/api/v1/order?symbol=BTC&signature=deadbeef",
+            );
+            assert!(parse(&query).unwrap_err().contains("signature"));
+        }
+    }
+}
