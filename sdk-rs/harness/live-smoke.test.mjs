@@ -32,6 +32,14 @@ test('minimum resting order is aligned and covers notional at its lower amended 
   assert.ok((order.amount - market.precisionAmount) * order.amendPrice < 50);
 });
 
+test('fine ticks on high prices keep the floor-bound order and amendment one tick apart', () => {
+  // 57000.97 / 0.01 is 5700096.9999999 in binary; a fixed epsilon rounded it to 57000.96.
+  const order = smokeOrder({ ...market, precisionPrice: 0.01 }, { bids: [60000], asks: [60001] },
+    { minNotional: 5, lowerMultiplier: 0.95, notionalKnown: true });
+  assert.equal(order.price, 57000.97);
+  assert.equal(order.amendPrice, 57000.96);
+});
+
 test('inverse minimum notional uses quote contracts', () => {
   assert.equal(smokeOrder({ ...market, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.INVERSE,
     precisionAmount: 1, minAmount: 1, contractSize: 10 }, book, { minNotional: 21, notionalKnown: true }).amount, 3);

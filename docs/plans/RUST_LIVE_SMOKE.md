@@ -253,7 +253,7 @@ positions and one-way position mode, because cancel-all is intentional.
 
 | Entry | Fields | Venues | Notes |
 | --- | --- | --- | --- |
-| `BINANCE_TESTNET` | `KEY`, `SECRET` | binance (binanceinverse once profiled) | USD-M demo key from demo.binance.com |
+| `BINANCE_TESTNET` | `KEY`, `SECRET` | binance, binanceinverse | demo.binance.com futures key with USD-M and COIN-M enabled. COIN-M margin is the base coin, so the demo account needs some ETH (or BTC); run binanceinverse with `--symbol ETHUSD_PERP`, one 10 USD contract (BTCUSD_PERP's one contract is 100 USD, exactly the cap) |
 | `BINANCESPOT_TESTNET` | `KEY`, `SECRET` | binancespot | testnet.binance.vision key, separate from futures |
 | `BYBIT_TESTNET` | `KEY`, `SECRET` | bybit, bybitinverse, bybitspot | testnet unified account with testnet USDT and some BTC for inverse |
 | `BYBIT_DEMO` | `KEY`, `SECRET` | bybitdemo | Demo Trading key from a mainnet account |
@@ -261,7 +261,7 @@ positions and one-way position mode, because cancel-all is intentional.
 | `OKX_EEA_DEMO` | `KEY`, `SECRET`, `PASSPHRASE` | okxeu, okxeudemo | EEA (my.okx.com) Demo Trading key |
 | `BITGET_TESTNET` | `KEY`, `SECRET`, `PASSPHRASE` | bitget, bitgetusdc | Demo Trading key; simulated SUSDT/SUSDC products |
 | `KRAKEN_DEMO` | `KEY`, `SECRET` | kraken | demo-futures.kraken.com key |
-| `HYPERLIQUID_TESTNET` | `SIGNER_ADDRESS`, `PRIVATE_KEY`, `ACCOUNT_ADDRESS` | hyperliquid, hyperliquidspot | agent wallet key only, distinct from the funded account; Spot needs USDC in spot |
+| `HYPERLIQUID_TESTNET` | `SIGNER_ADDRESS`, `PRIVATE_KEY`, `ACCOUNT_ADDRESS`; optional `VAULT_ADDRESS` | hyperliquid, hyperliquidspot | See Hyperliquid below |
 | `LIGHTER_TESTNET` | `PRIVATE_KEY`, `ACCOUNT_INDEX`, `API_KEY_INDEX` | lighter | API key slot 2 or higher |
 | `PARADEX_TESTNET` | `PRIVATE_KEY`, `ACCOUNT_ADDRESS`, `SUBKEY_ADDRESS` | paradex | subkey private key |
 | `PHEMEX_TESTNET` | `KEY`, `SECRET` | phemex | testnet.phemex.com, USDT-M contract trade |
@@ -274,5 +274,37 @@ positions and one-way position mode, because cancel-all is intentional.
 | `KRAKEN_SPOT_MAINNET` | `KEY`, `SECRET` (Base64) | krakenspot | Query Funds, Query Open Orders and Trades, Create and Modify Orders, Cancel/Close Orders; XBT/USD ordermin 0.00006, costmin 0.5 USD; fund 20 USD cash |
 
 `binancepm` has no test environment and no profile yet. Whether it runs on
-mainnet or stays unsmoked is an open decision. `binanceinverse` gets its profile
-in a follow-up.
+mainnet or stays unsmoked is an open decision.
+
+### Hyperliquid
+
+codex-zs5e83 owns the Hyperliquid and Hyperliquid Spot entry and runs both
+smokes; its approved per-request list is the binding sequence. Its row, verbatim:
+
+> One shared set HYPERLIQUID_TESTNET, scope tealstreet-beta-livesmoke:
+> SIGNER_ADDRESS = agent/API-wallet address; PRIVATE_KEY = only that agent
+> private scalar, never the master-wallet key; ACCOUNT_ADDRESS = funded testnet
+> account, distinct from signer; optional VAULT_ADDRESS only when testing that
+> funded vault. Permissions: agent approved by the account for trading on
+> Hyperliquid testnet, including perps and spot as supported; no withdrawal,
+> transfer, agent-management or account-configuration operation is part of our
+> request list. Funding: testnet faucet USDC on the account, sufficient for the
+> approved minimum-size perps cycle and UBTC/USDC Spot cycle, with the required
+> USDC moved to Spot by the account owner before handoff; no funding transfer by
+> the harness. Environment: testnet first for both aliases, no mainnet unless Sam
+> explicitly asks. Handoff JSON through --credentials-stdin, oneshot-secret peek
+> only, values never logged; redact receipts. No credentialed call runs until Sam
+> supplies keys AND ddi approves our written per-request list.
+
+The Spot symbol differs by environment, so the row's "UBTC/USDC Spot cycle"
+applies to mainnet only:
+
+| Venue | Testnet symbol | Mainnet symbol |
+| --- | --- | --- |
+| hyperliquid | BTC-PERP | BTC-PERP |
+| hyperliquidspot | PURR/USDC | UBTC/USDC |
+
+The testnet Spot catalog has no UBTC/USDC, and its BTC/USDC has no quoted price
+or book. PURR/USDC passed a public testnet capture and correctness replay on the
+SDK 14f89490f7b pin. It is used only if its quoted rules are still present at
+smoke time, which the harness enforces before sizing.

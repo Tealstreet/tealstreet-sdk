@@ -19,6 +19,11 @@ const filters = [
 const fixtures = [
   ['binance', 'binance', market,
     http('https://demo-fapi.binance.com/fapi/v1/exchangeInfo', { symbols: [{ symbol: 'BTCUSDT', filters }] }), 5, 0.001, 0.001, 1],
+  ['binanceinverse', 'binanceinverse', { ...market, id: 'ETH/USD:ETH', symbol: 'ETHUSD_PERP', base: 'ETH', quote: 'USD' },
+    http('https://demo-dapi.binance.com/dapi/v1/exchangeInfo', { symbols: [{ symbol: 'ETHUSD_PERP', contractSize: 10, filters: [
+      { filterType: 'LOT_SIZE', minQty: '1', maxQty: '1000000', stepSize: '1' },
+      { filterType: 'PERCENT_PRICE', multiplierDown: '0.9500' },
+    ] }] }), 0, 1, 1, 10, true],
   ['phemex', 'phemex', market,
     http('https://api.phemex.com/public/products', { code: 0, data: { perpProductsV2: [{ symbol: 'BTCUSDT', type: 'PerpetualV2', status: 'Listed', quoteCurrency: 'USDT', settleCurrency: 'USDT', minOrderValueRv: '1', qtyStepSize: '0.001', maxOrderQtyRq: '1000' }] } }), 1, 0.001, 0.001, 1],
   ['binancespot', 'binancespot', market,
@@ -76,7 +81,7 @@ const fixtures = [
     http('https://api.coinbase.com/api/v3/brokerage/products', { products: [{ product_id: 'BTC-USDC', product_type: 'SPOT', base_min_size: '0.000001', base_increment: '0.000001', base_max_size: '100', quote_min_size: '1' }] }), 1, 0.000001, 0.000001, 1],
 ];
 
-for (const [family, venue, selected, record, notional, minimum, step, scale] of fixtures) {
+for (const [family, venue, selected, record, notional, minimum, step, scale, quoteQuantity = false] of fixtures) {
   test(`${family} documented discovery establishes monetary and placement-unit minima`, () => {
     assert.match(LIVE_SMOKE_RULE_SOURCES[family], /^https:\/\//);
     const result = venueMarketRules({ rust: venue }, [record], selected);
@@ -85,7 +90,7 @@ for (const [family, venue, selected, record, notional, minimum, step, scale] of 
     assert.equal(result.minimumAmount, minimum);
     assert.equal(result.amountStep, step);
     assert.equal(result.notionalPerAmount, scale);
-    assert.equal(result.quoteQuantity, false);
+    assert.equal(result.quoteQuantity, quoteQuantity);
     if (family === 'binance' || family === 'asterdex') assert.equal(result.lowerMultiplier, 0.85);
     const body = JSON.parse(record.body);
     assert.deepEqual(venueMarketRules(venue, [{ ...record, status: 500 }], selected), { notionalKnown: false, minNotional: 0 });
@@ -96,7 +101,7 @@ for (const [family, venue, selected, record, notional, minimum, step, scale] of 
 }
 
 test('coverage census includes every enabled rule family, unsupported names fail closed', () => {
-  assert.equal(fixtures.length, 25);
+  assert.equal(fixtures.length, 26);
   assert.deepEqual([...new Set(fixtures.map(([family]) => family))].sort(), Object.keys(LIVE_SMOKE_RULE_SOURCES).sort());
   for (const venue of [...Object.keys(LIVE_SMOKE_UNKNOWN_RULES), 'future-unknown-venue'])
     assert.deepEqual(venueMarketRules(venue, fixtures.map((fixture) => fixture[3]), market), { notionalKnown: false, minNotional: 0 });
@@ -124,6 +129,33 @@ test('zero monetary minimum is known only when explicitly present in a documente
     const body = JSON.parse(record.body); body.rows[0].min_notional = value;
     assert.equal(venueMarketRules('woo', [{ ...record, body: JSON.stringify(body) }], market).notionalKnown, false);
   }
+});
+
+test('Binance COIN-M sizes whole contracts of contractSize USD under the cap', () => {
+  const [, venue, selected, record] = fixtures.find(([name]) => name === 'binanceinverse');
+  const rules = venueMarketRules(venue, [record], selected);
+  assert.equal(rules.lowerMultiplier, 0.95);
+  assert.equal(rules.maximumAmount, 1000000);
+  const coinMarket = { ...selected, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.INVERSE, precisionPrice: 0.01,
+    minAmount: 1, precisionAmount: 1, maxAmount: 60000, contractSize: 10 };
+  const order = smokeOrder(coinMarket, { bids: [2000], asks: [2000.5], mark: 2000.2 }, rules);
+  assert.equal(order.amount, 1);
+  assert.ok(order.price >= 0.95 * 2000.2 && order.price < 0.98 * 2000);
+  const btc = { ...rules, notionalPerAmount: 100 };
+  assert.equal(smokeOrder({ ...coinMarket, contractSize: 100 }, { bids: [60000], asks: [60001] }, btc).amount, 1);
+  assert.throws(() => smokeOrder({ ...coinMarket, contractSize: 200 }, { bids: [60000], asks: [60001] },
+    { ...rules, notionalPerAmount: 200 }), /notional-cap-exceeded/);
+  const edit = (change) => {
+    const body = JSON.parse(record.body); change(body.symbols[0]);
+    return venueMarketRules(venue, [{ ...record, body: JSON.stringify(body) }], selected).notionalKnown;
+  };
+  assert.equal(edit((row) => { delete row.contractSize; }), false);
+  assert.equal(edit((row) => { row.contractSize = 0; }), false);
+  assert.equal(edit((row) => { row.filters.push({ ...row.filters[0] }); }), false);
+  assert.equal(edit((row) => { row.filters = row.filters.filter((f) => f.filterType !== 'LOT_SIZE'); }), false);
+  assert.equal(edit((row) => { row.filters[1].multiplierDown = 'x'; }), false);
+  assert.equal(venueMarketRules(venue, [{ ...record, url: record.url.replace('/dapi/', '/fapi/') }], selected).notionalKnown, false);
+  assert.equal(venueMarketRules('binance', [record], selected).notionalKnown, false);
 });
 
 test('OKX and BloFin maxima remain native lots despite base-sized engine minima', () => {

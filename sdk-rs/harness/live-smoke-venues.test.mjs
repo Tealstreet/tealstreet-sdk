@@ -25,7 +25,7 @@ test('OKX smoke profiles use default TLS on the exact live/demo entity host', ()
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
     // KuCoin Spot needs a separate host and sizing review.
-    if (['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'kucoinspot', 'txflow', 'lighter-robinhood'].includes(venue)) {
+    if (['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'kucoinspot', 'txflow', 'lighter-robinhood'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
@@ -43,7 +43,7 @@ test('every registry name has an explicitly reviewed environment or fails closed
 
 test('unreviewed profiles refuse all modes before credential access', () => {
   const env = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
-  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'kucoinspot', 'txflow', 'lighter-robinhood'])
+  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'kucoinspot', 'txflow', 'lighter-robinhood'])
     for (const mode of [undefined, 'testnet', 'demo', 'mainnet'])
       assert.throws(() => liveSmokeProfile(venue, mode, env), /no reviewed/);
 });
@@ -346,4 +346,20 @@ test('credential sets use the test environment where one exists and mainnet only
   assert.deepEqual(sets.OKX_EEA_DEMO.fields, ['KEY', 'SECRET', 'PASSPHRASE']);
   assert.ok(sets.ASTERDEX_TESTNET.optionalFields.includes('API_VERSION'));
   assert.throws(() => liveSmokeCredentialSets(['binancepm']), /no reviewed live-smoke endpoint profile/);
+  assert.deepEqual(liveSmokeCredentialSets(['binance', 'binanceinverse']).map((set) => [set.entry, set.venues]),
+    [['BINANCE_TESTNET', ['binance', 'binanceinverse']]]);
+});
+
+test('Binance COIN-M uses the futures demo keys on dapi hosts only', () => {
+  const inverse = liveSmokeProfile('binanceinverse', undefined, env);
+  assert.equal(inverse.mode, 'testnet');
+  assert.equal(inverse.credentialEnv.key, 'RUST_LIVE_SMOKE_BINANCE_TESTNET_KEY');
+  assert.equal(inverse.allowUrl('https://demo-dapi.binance.com/dapi/v1/order'), true);
+  assert.equal(inverse.allowUrl('wss://dstream.binancefuture.com/ws/listen-key', 'ws'), true);
+  for (const url of ['https://dapi.binance.com/dapi/v1/order', 'https://demo-fapi.binance.com/fapi/v1/order'])
+    assert.equal(inverse.allowUrl(url), false, url);
+  const mainnet = liveSmokeProfile('binanceinverse', 'mainnet', env);
+  assert.equal(mainnet.allowUrl('https://dapi.binance.com/dapi/v1/order'), true);
+  assert.equal(mainnet.allowUrl('wss://dstream.binance.com/ws', 'ws'), true);
+  assert.equal(mainnet.allowUrl('https://demo-dapi.binance.com/dapi/v1/order'), false);
 });

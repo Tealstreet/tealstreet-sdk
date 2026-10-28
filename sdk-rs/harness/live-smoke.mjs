@@ -21,7 +21,14 @@ const positive = (value) => Number.isFinite(value) && value > 0;
 class SmokeFailure extends Error {}
 const fail = (code) => { throw new SmokeFailure(code); };
 const snap = (value) => Number(value.toPrecision(14));
-const units = (value, step, ceil = false) => snap((ceil ? Math.ceil(value / step - 1e-10) : Math.floor(value / step + 1e-10)) * step);
+// The step-count tolerance is relative: a fixed epsilon is below one ULP once
+// value/step exceeds about 1e6, so an exact multiple could round a step away.
+const units = (value, step, ceil = false) => {
+  const count = value / step, nearest = Math.round(count);
+  const whole = Math.abs(count - nearest) <= 1e-9 * Math.max(1, Math.abs(count)) ? nearest :
+    ceil ? Math.ceil(count) : Math.floor(count);
+  return snap(whole * step);
+};
 
 export function accountSnapshot(buffer) {
   const frame = new Frame(buffer);
