@@ -600,8 +600,10 @@ impl Identity {
         credential: &crate::request_context::Credential,
         write: Option<&crate::request_context::Credential>,
     ) -> bool {
+        // A trusted ScalarOnly primary's only authority is its signing ref; for
+        // every credential-present identity `authority_ref()` is the credential.
         credential.slot == crate::CredentialSlot::Primary
-            && credential.reference == self.credential
+            && credential.reference == *self.authority_ref()
             && self.validate_credential().is_ok()
             && write.is_none_or(|write| write == credential && self.signing_ref().is_ok())
     }
