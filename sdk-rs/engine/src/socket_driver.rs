@@ -956,7 +956,10 @@ mod tests {
             };
             if text == "arm-skip" {
                 // Arms a route refusal's backoff skip without retiring the epoch.
-                self.driver.runtime_mut(epoch.feed()).route_refusal.skip_backoff = true;
+                self.driver
+                    .runtime_mut(epoch.feed())
+                    .route_refusal
+                    .skip_backoff = true;
                 return;
             }
             let effects = if text == "stop" {
