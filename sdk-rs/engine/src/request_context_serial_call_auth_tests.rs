@@ -754,7 +754,7 @@ mod serial_call_auth {
         primary
             .extra
             .insert(signing::ExtraKey::L1Wallet, KeyRef("primary.extra".into()));
-        signing::trusted_scalar_only(
+        signing::scalar_only_fixture::trusted_scalar_only(
             primary,
             Some(Identity::new(
                 secondary().reference,
@@ -1125,12 +1125,10 @@ mod serial_call_auth {
     #[test]
     fn a_started_engine_refuses_a_reinstalled_scalar_primary_and_the_root_still_runs() {
         let mut e = scalar_admitted(Mode::MixedResend, Scalar::Authority);
-        let mut rebuilt = scalar_identities();
-        rebuilt
-            .primary
-            .as_mut()
-            .unwrap()
-            .set_signing_ref(Some(KeyRef("primary.signing.b".into())));
+        let rebuilt = signing::scalar_only_fixture::trusted_scalar_only(
+            Identity::new(KeyRef(String::new()), Some(KeyRef("primary.signing.b".into()))),
+            None,
+        );
         assert!(e.set_identities(rebuilt).is_err());
         for stage in 0..3 {
             let packet = drive(&mut e, 1. + stage as f64).pop().unwrap();
@@ -1197,14 +1195,10 @@ mod serial_call_auth {
     }
     #[test]
     fn the_empty_credential_ref_never_opens_or_roots_a_login_session() {
-        let mut e = ready_with(Mode::Mixed, Some(Scalar::EmptyRef));
-        if e.venue.opened == Some(Ok(())) {
-            enter(&mut e);
-            assert_eq!(e.venue.entry, Some(Err(Error::Invalid)));
-        } else {
-            assert!(matches!(e.venue.opened, Some(Err(_))));
-            assert!(e.venue.work.is_empty());
-        }
+        // Sessions::open fires first; the matcher unit pins the root check.
+        let e = ready_with(Mode::Mixed, Some(Scalar::EmptyRef));
+        assert_eq!(e.venue.opened, Some(Err(Error::Invalid)));
+        assert!(e.venue.work.is_empty(), "no login was signed");
     }
     #[test]
     fn a_write_none_scalar_root_cannot_declare_preflight_auth() {
