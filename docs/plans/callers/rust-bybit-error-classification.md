@@ -32,16 +32,24 @@ bybit-exchange.github.io/docs/v5/error:
   `invalidInput`), where before it was `venueUnavailable` unless rate-limited.
   A discovery pause stays `rateLimited`.
 
-Recorded corpus (`tests/fixtures/errors`, ten live no-credential captures):
+Recorded corpus (`tests/fixtures/errors`, 10 files: 9 of the 10 approved
+no-credential captures plus one approved fresh-stamp order/create):
 - The list was approved by claude-ddi2il before the run, and the run used the
   guarded writer.
 - One later fresh-stamp order/create was approved and run separately.
-- `order-create-bogus-key` recorded 10002 (recv_window), because its timestamp
-  was stamped at file build and was stale when sent. It pins the one-resend path.
+- `order-create-stale-timestamp` recorded 10002 (recv_window), because its
+  timestamp was stamped at file build and was stale when sent. It pins the
+  one-resend path.
 - `linear-kline-invalid-interval` is not in the corpus: Bybit accepts
   `interval=7x` with retCode 0 and an empty list, so there is no error to pin.
 - The two orderbook bodies replay on the market refresh page, since Bybit reads
   no REST order book.
+
+Check order, for reading an auth error under clock skew (claude-ddi2il ruling):
+- **Bybit:** checks the clock first on writes (10002 before 10003) and the key
+  first on GET reads (401 with an empty body before the clock).
+- **OKX:** checks the key before the clock and environment (#2342).
+- **Binance Spot:** checks the clock before the key (#2340).
 
 Not changed in this PR, and why:
 - **WS order rejects** keep the raw `rejectReason` text notice. No recorded

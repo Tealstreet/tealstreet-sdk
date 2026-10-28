@@ -102,8 +102,8 @@ fn the_corpus_covers_every_recorded_case_with_its_production_path() {
             "instruments-invalid-category",
             "inverse-orderbook-invalid-symbol",
             "linear-orderbook-invalid-symbol",
-            "order-create-bogus-key",
             "order-create-bogus-key-fresh",
+            "order-create-stale-timestamp",
             "position-list-bogus-key",
             "spot-tickers-invalid-symbol",
             "wallet-balance-bogus-key",
@@ -236,7 +236,7 @@ fn a_rejected_key_on_an_order_is_a_rejected_auth_failure() {
 /// 10002 (recv_window) permits one re-signed resend; a second 10002 refuses.
 #[test]
 fn a_clock_refused_order_resends_once_then_fails_auth_invalid() {
-    let fixture = &corpus()["order-create-bogus-key"];
+    let fixture = &corpus()["order-create-stale-timestamp"];
     assert!(fixture.body.contains("\"retCode\":10002"));
     let mut h = awaiting_snapshot(Variant::Linear);
     h.requests
