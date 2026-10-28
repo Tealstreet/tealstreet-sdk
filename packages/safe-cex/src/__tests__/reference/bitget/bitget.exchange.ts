@@ -13,6 +13,29 @@ import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
 import { mapSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import {
+  BITGET_UTA_CATEGORY,
+  BITGET_UTA_ORDER,
+  BITGET_UTA_POSITION,
+  ENDPOINTS,
+  FETCH_POSITIONS_V2_RESPONSE,
+  FETCH_SINGLE_ACCOUNT_RESPONSE,
+  FETCH_UTA_ACCOUNT_ASSETS_RESPONSE,
+  FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE,
+  FETCH_UTA_FILLS_RESPONSE,
+  FETCH_UTA_ORDERS_RESPONSE,
+  FETCH_UTA_POSITIONS_RESPONSE,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  INTERVAL,
+  ORDER_SIDE,
+  ORDER_STATUS,
+  ORDER_TYPE,
+  TIME_IN_FORCE,
+} from '../../../exchanges/bitget/bitget.types';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { paginateIncomeRange } from '../../../exchanges/income-paging';
 import {
   Balance,
   Candle,
@@ -49,32 +72,9 @@ import { adjust, multiply, subtract } from '../../../utils/safe-math';
 import { splitTimeRange } from '../../../utils/splitTimeRange';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
-import { paginateIncomeRange } from '../../../exchanges/income-paging';
 import { createAPI, isBitgetUtaStrategyOrderNotFound } from './bitget.api';
 import { mapBitgetFills, mapBitgetUtaFills } from './bitget.fills';
 import { mapBitgetBills } from './bitget.income';
-import {
-  BITGET_UTA_CATEGORY,
-  BITGET_UTA_ORDER,
-  BITGET_UTA_POSITION,
-  ENDPOINTS,
-  FETCH_POSITIONS_V2_RESPONSE,
-  FETCH_SINGLE_ACCOUNT_RESPONSE,
-  FETCH_UTA_ACCOUNT_ASSETS_RESPONSE,
-  FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE,
-  FETCH_UTA_FILLS_RESPONSE,
-  FETCH_UTA_ORDERS_RESPONSE,
-  FETCH_UTA_POSITIONS_RESPONSE,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  INTERVAL,
-  ORDER_SIDE,
-  ORDER_STATUS,
-  ORDER_TYPE,
-  TIME_IN_FORCE,
-} from '../../../exchanges/bitget/bitget.types';
 import { BitgetPrivateWebsocket } from './bitget.ws-private';
 import { BitgetPublicWebsocket } from './bitget.ws-public';
 import { BitgetSecondaryPublicWebsocket } from './bitget.ws-secondary-public';
@@ -1454,46 +1454,56 @@ export class BitgetExchange extends BaseExchange {
     }
 
     const allOrders: Array<Record<string, any>> = [];
-    let endId: string | undefined;
     const maxIterations = 20; // Safety limit to prevent infinite loops
-    let iterations = 0;
 
-    while (iterations < maxIterations) {
-      const params: Record<string, any> = {
-        productType: this.apiProductType,
-        limit: '200', // Maximum allowed by Bitget API
-      };
+    for (const status of ['live', 'partially_filled']) {
+      let endId: string | undefined;
+      let iterations = 0;
 
-      if (endId) {
-        params.idLessThan = endId;
+      while (iterations < maxIterations) {
+        const params: Record<string, any> = {
+          productType: this.apiProductType,
+          status,
+          limit: '100', // Maximum allowed by Bitget Classic API
+        };
+
+        if (endId) {
+          params.idLessThan = endId;
+        }
+
+        const {
+          data: { data },
+        } = await this.xhr.get<{ data: { entrustedList: Array<Record<string, any>> | null; endId: string } }>(
+          ENDPOINTS.ORDERS,
+          {
+            params,
+          },
+        );
+
+        if (!Array.isArray(data?.entrustedList) || data.entrustedList.length === 0) {
+          break;
+        }
+
+        allOrders.push(...data.entrustedList);
+
+        // If endId is not provided or is the same, we've reached the end
+        if (!data.endId || data.endId === endId) {
+          break;
+        }
+
+        endId = data.endId;
+        iterations++;
       }
-
-      const {
-        data: { data },
-      } = await this.xhr.get<{ data: { entrustedList: Array<Record<string, any>>; endId: string } }>(ENDPOINTS.ORDERS, {
-        params,
-      });
-
-      if (!Array.isArray(data?.entrustedList) || data.entrustedList.length === 0) {
-        break;
-      }
-
-      allOrders.push(...data.entrustedList);
-
-      // If endId is not provided or is the same, we've reached the end
-      if (!data.endId || data.endId === endId) {
-        break;
-      }
-
-      endId = data.endId;
-      iterations++;
     }
 
     return allOrders.flatMap(this.mapOrder);
   };
 
   private fetchUtaOrders = async (): Promise<Order[]> => {
-    const [normalOrders, strategyOrders] = await Promise.all([this.fetchUtaNormalOrders(), this.fetchUtaStrategyOrders()]);
+    const [normalOrders, strategyOrders] = await Promise.all([
+      this.fetchUtaNormalOrders(),
+      this.fetchUtaStrategyOrders(),
+    ]);
     return [...normalOrders, ...strategyOrders];
   };
 
@@ -1562,7 +1572,7 @@ export class BitgetExchange extends BaseExchange {
       const params: Record<string, any> = {
         productType: this.apiProductType,
         planType: 'profit_loss',
-        limit: '200',
+        limit: '100',
       };
 
       if (endId) {
@@ -1605,7 +1615,7 @@ export class BitgetExchange extends BaseExchange {
       const params: Record<string, any> = {
         productType: this.apiProductType,
         planType: 'track_plan',
-        limit: '200', // Maximum allowed by Bitget API
+        limit: '100', // Maximum allowed by Bitget Classic API
       };
 
       if (endId) {
@@ -1708,7 +1718,10 @@ export class BitgetExchange extends BaseExchange {
     try {
       await this.ensureAccountTypeDetected();
       if (this.usesUtaRouting) {
-        const [normalOrders, strategyOrders] = await Promise.all([this.fetchUtaNormalOrders(), this.fetchUtaStrategyOrders()]);
+        const [normalOrders, strategyOrders] = await Promise.all([
+          this.fetchUtaNormalOrders(),
+          this.fetchUtaStrategyOrders(),
+        ]);
         await this.cancelUtaNormalOrders(normalOrders);
         await this.cancelUtaStrategyOrders(strategyOrders);
         return;
@@ -1993,7 +2006,10 @@ export class BitgetExchange extends BaseExchange {
       ).flat();
       const normalOrdersOpts = normalOrdersOptsWithEmpty.filter((o) => this.toFiniteNumber(o.qty) > 0);
       const strategyOrdersOpts = await Promise.all(algoOrders.map((o) => this.formatUtaStrategyOrder(o)));
-      return [...(await this.placeUtaOrders(normalOrdersOpts)), ...(await this.placeUtaStrategyOrders(strategyOrdersOpts))];
+      return [
+        ...(await this.placeUtaOrders(normalOrdersOpts)),
+        ...(await this.placeUtaStrategyOrders(strategyOrdersOpts)),
+      ];
     }
 
     const normalOrdersOptsWithEmpty = (await Promise.all(normalOrders.map((o) => this.formatCreateOrder(o)))).flat();
@@ -2845,7 +2861,8 @@ export class BitgetExchange extends BaseExchange {
       }
     } else if (!order.type && (this.toFiniteNumber(o.stopLoss) > 0 || this.toFiniteNumber(o.takeProfit) > 0)) {
       const strategySide =
-        ORDER_SIDE[o.side] || (o.posSide === 'short' ? OrderSide.Buy : o.posSide === 'long' ? OrderSide.Sell : order.side);
+        ORDER_SIDE[o.side] ||
+        (o.posSide === 'short' ? OrderSide.Buy : o.posSide === 'long' ? OrderSide.Sell : order.side);
       const strategyOrders: Writable<Order>[] = [];
 
       if (this.toFiniteNumber(o.stopLoss) > 0) {
@@ -2907,7 +2924,12 @@ export class BitgetExchange extends BaseExchange {
     const marginMode = this.normalizeBitgetMarginType(p.marginMode);
     const contracts = this.firstFiniteNumber([p.total, p.size]);
     const markPrice = this.firstFiniteNumber([p.markPrice, (p as Record<string, any>).marketPrice]);
-    const entryPrice = this.firstFiniteNumber([p.avgPrice, p.openPriceAvg, (p as Record<string, any>).openAvgPrice, (p as Record<string, any>).avgPx]);
+    const entryPrice = this.firstFiniteNumber([
+      p.avgPrice,
+      p.openPriceAvg,
+      (p as Record<string, any>).openAvgPrice,
+      (p as Record<string, any>).avgPx,
+    ]);
     const positionId = createPositionId(symbol, side, positionMode);
     const marginSize = this.firstFiniteNumber([p.positionBalance, p.marginSize], NaN);
 
@@ -2926,7 +2948,10 @@ export class BitgetExchange extends BaseExchange {
         this.toFiniteNumber(p.closeFeeTotal) -
         this.toFiniteNumber(p.deductedFee),
       contracts,
-      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice ?? (p as Record<string, any>).liqPx),
+      liquidationPrice: this.resolveLiquidationPrice(
+        positionId,
+        p.liquidationPrice ?? p.liqPrice ?? (p as Record<string, any>).liqPx,
+      ),
       marginSize: marginSize > 0 ? marginSize : undefined,
       positionMode,
       marginType: marginMode,
@@ -2960,7 +2985,13 @@ export class BitgetExchange extends BaseExchange {
     }
 
     const contracts = this.firstFiniteNumber([p.total, p.size, p.pos, p.openTotalPos, p.available]);
-    const entryPrice = this.firstFiniteNumber([p.openPriceAvg, p.openAvgPrice, p.avgPrice, p.avgPx, p.averageOpenPrice]);
+    const entryPrice = this.firstFiniteNumber([
+      p.openPriceAvg,
+      p.openAvgPrice,
+      p.avgPrice,
+      p.avgPx,
+      p.averageOpenPrice,
+    ]);
     const markPrice = this.firstFiniteNumber([p.markPrice, p.marketPrice], entryPrice);
     const symbol = this.normalizeBitgetSymbol(p.instId ?? p.symbol);
     const positionMode = this.normalizeBitgetPositionMode(p);
@@ -2985,9 +3016,7 @@ export class BitgetExchange extends BaseExchange {
       leverage: this.firstFiniteNumber([p.leverage, p.lever], 1),
       unrealizedPnl: this.firstFiniteNumber([p.unrealizedPL, p.unrealisedPnl, p.upl], 0),
       realizedPnl:
-        this.toFiniteNumber(p.achievedProfits) +
-        this.toFiniteNumber(p.totalFee) -
-        this.toFiniteNumber(p.deductedFee),
+        this.toFiniteNumber(p.achievedProfits) + this.toFiniteNumber(p.totalFee) - this.toFiniteNumber(p.deductedFee),
       contracts,
       liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice ?? p.liqPx),
       marginSize: marginSize && marginSize > 0 ? marginSize : undefined,
