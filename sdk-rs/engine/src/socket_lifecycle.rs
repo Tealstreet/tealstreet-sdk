@@ -123,8 +123,33 @@ pub struct FeedPolicy {
     pub controls: ControlPolicy,
     pub invalidation: Invalidation,
     pub subscription_interval_ms: f64,
+    /// Minimum reconnect delay, in ms, after the venue closes with each code.
+    /// The retry waits for the longer of this and the ordinary backoff.
+    pub close_floors: &'static [(u16, f64)],
 }
 impl FeedPolicy {
+    /// Longest floor a feed may declare: ten minutes.
+    pub(crate) const MAX_CLOSE_FLOOR_MS: f64 = 600_000.;
+    pub(crate) fn close_floor(&self, code: u16) -> f64 {
+        self.close_floors
+            .iter()
+            .find(|(declared, _)| *declared == code)
+            .map_or(0., |(_, floor)| *floor)
+    }
+    fn valid_close_floors(&self) -> bool {
+        self.close_floors
+            .iter()
+            .enumerate()
+            .all(|(i, &(code, floor))| {
+                (1000..=4999).contains(&code)
+                    && floor.is_finite()
+                    && floor > 0.
+                    && floor <= Self::MAX_CLOSE_FLOOR_MS
+                    && self.close_floors[..i]
+                        .iter()
+                        .all(|(other, _)| *other != code)
+            })
+    }
     fn validate(&self) -> Result<(), SocketError> {
         let c = self.supervision;
         let positive = |x: f64| x.is_finite() && x > 0.;
@@ -143,6 +168,7 @@ impl FeedPolicy {
             || self.auth == AuthMode::None && c.auth_timeout_ms.is_some()
             || self.controls == ControlPolicy::None
                 && (self.auth != AuthMode::None || self.traffic != TrafficPolicy::AnyText)
+            || !self.valid_close_floors()
         {
             return Err(SocketError::InvalidPolicy);
         }
@@ -196,6 +222,8 @@ pub enum LifecycleEvent {
     Retired {
         epoch: Epoch,
         reason: RetireReason,
+        /// The venue's close code, for a `Closed` retirement by a close frame.
+        close_code: Option<u16>,
     },
     Ping(Epoch),
     RetryLogin(Epoch),
@@ -1402,6 +1430,7 @@ mod tests {
             controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
         }
     }
     fn started(auth: AuthMode) -> (Lifecycle, FeedId, Epoch) {

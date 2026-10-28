@@ -53,6 +53,21 @@ fn assert_backoff(attempt: i32, delay: f64) {
     );
 }
 
+/// The reconnect notice names the venue's close code, as the legacy socket did.
+#[test]
+fn a_close_names_its_code_in_the_reconnect_notice() {
+    let mut h = Harness::new();
+    let socket = h.socket(PUBLIC).unwrap();
+    h.event(Event::WsClosed { socket, code: 1013 });
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log == "Bybit socket closed (1013); reconnecting"),
+        "{:?}",
+        h.logs
+    );
+}
+
 #[test]
 fn a_flapping_public_socket_backs_off_exponentially() {
     let mut h = Harness::new();

@@ -146,6 +146,7 @@ impl Hyperliquid {
                 controls: ControlPolicy::None,
                 invalidation: Invalidation::Required,
                 subscription_interval_ms: 0.,
+                close_floors: &[],
             })?;
             self.connection.feed = Some(feed);
             feed

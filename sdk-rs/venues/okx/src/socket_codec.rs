@@ -141,6 +141,7 @@ impl Okx {
                 } else {
                     0.
                 },
+                close_floors: &[],
             };
             let feed = cx.register_socket_feed(policy)?;
             self.connections[channel].feed = Some(feed);
