@@ -383,6 +383,14 @@ describe('venue codes land in the category the engine classifies them by', () =>
     }
   });
 
+  it('reads an OKX code labelled in a raw JSON body', () => {
+    const match = matcher('okx');
+    expect(match('OKX HTTP 401: {"code":"50111","msg":"Invalid OK-ACCESS-KEY","data":[]}')).toBe('auth_invalid');
+    expect(match('okx API error (HTTP 400): {"code":"50112","msg":"Invalid OK-ACCESS-TIMESTAMP"}')).toBe('time_sync');
+    expect(match('{"code": "50110", "msg": "Invalid IP"}')).toBe('auth_permissions');
+    expect(match('{"code":"51008","msg":"Order failed. Insufficient balance","price":"50111"}')).not.toBe('auth_invalid');
+  });
+
   it('never reads an OKX code inside a price', () => {
     const match = matcher('okx');
     expect(match('Order price 50111.5 is out of the limit range')).not.toBe('auth_invalid');

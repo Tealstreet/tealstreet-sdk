@@ -14,9 +14,17 @@ categories):
   - 50101, 50103-50105, 50114 and 50119 are now `auth_invalid`.
   - 50100, 50110 and 50120 are now `auth_permissions`.
   - Codes match only as the engine words them (`OKX <code>:`) or after a `code`
-    label, so a price such as 50111.5 no longer reads as a bad key.
+    label, quoted or not (a raw body's `"code":"50111"`), so a price such as
+    50111.5 no longer reads as a bad key.
 - **429/502/503** match only as a bare status number. A client order ID,
   price or amount containing those digits (for example 4294967295) no longer
   reads as a rate limit or an outage.
+
+Known TS/Rust policy difference, kept on purpose (claude-ddi2il ruling): Bybit
+10005 (a permission refusal on one endpoint) is `auth_permissions` in TS, which
+pauses web reloads, while Rust startup does not treat it as a credential
+rejection (`sdk-rs/venues/bybit/src/lib.rs` `CREDENTIAL_REJECTIONS`). Rust is the
+intended behaviour. A later cutover of the reload pause to typed kinds must not
+reintroduce a pause on 10005.
 
 Deletion prerequisites: none added or cleared.

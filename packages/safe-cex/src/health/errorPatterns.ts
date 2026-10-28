@@ -317,13 +317,13 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
   ],
   okx: [
     {
-      // Codes as the engine words them ("OKX 50111: ..."), never a bare number
-      // a BTC price such as 50111.5 contains. Each code sits in the category
-      // of the OKX CodeTable (sdk-rs/venues/okx/src/trading.rs).
+      // Codes as the engine words them ("OKX 50111: ...") or labelled in a raw
+      // body ("code":"50111"), never a bare number a BTC price such as 50111.5
+      // contains. Each code sits in the category of the OKX CodeTable.
       category: 'auth_invalid',
       severity: 'critical',
       patterns: [
-        /\b(?:OKX|code)[=:\s]+(?:50101|50103|50104|50105|50111|50113|50114|50119)\b/i,
+        /\b(?:OKX|code"?)[=:\s]+"?(?:50101|50103|50104|50105|50111|50113|50114|50119)\b/i,
         'Invalid sign',
         'Invalid OK-ACCESS-KEY',
         "API key doesn't exist",
@@ -332,13 +332,13 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
     {
       category: 'auth_permissions',
       severity: 'critical',
-      patterns: [/\b(?:OKX|code)[=:\s]+(?:50100|50110|50120)\b/i],
+      patterns: [/\b(?:OKX|code"?)[=:\s]+"?(?:50100|50110|50120)\b/i],
     },
     {
       // 50112 is an invalid OK-ACCESS-TIMESTAMP: a clock to resync, not a bad key.
       category: 'time_sync',
       severity: 'warning',
-      patterns: [/\b(?:OKX|code)[=:\s]+50112\b/i],
+      patterns: [/\b(?:OKX|code"?)[=:\s]+"?50112\b/i],
     },
   ],
   hyperliquid: [
