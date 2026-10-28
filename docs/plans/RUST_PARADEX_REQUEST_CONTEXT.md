@@ -633,3 +633,53 @@ no callers.
   RUST_SERIAL_CALL_AUTH.md separates an authority-bound credential from a presentable
   one. Q3 (a signed Direct login) stays a separate seam. Both go in the engine PR
   after PR-3a.
+- **Engine PRs (ddi2il).** The Q1 `authority_ref` change is its own engine PR: the
+  call-auth rule amendment, positive and negative originals, fe7lgm review, 8x GO.
+  The Session-calls-on-independent-complete-Plans change (Q2 cancels) is another.
+  Either order, one active at a time. Order: PR-3a, the engine PRs, then PR-3b.
+  The Q3 signed-Direct login seam is also its own engine change.
+
+### Plan corrections from codex-9czdjh (money/signing review of `22cd68938b4`)
+
+- **Q2 has more than two cases.** Today `complete()` continues to the SL after a
+  failed TP child, including an Unknown TP. A serial stop would leave an accepted
+  parent without its other protection. The frozen cases:
+  - independent entries and chunks;
+  - parent → its dependent children (a failed or lost entry still orphans its own
+    children, as today);
+  - protective sibling → sibling;
+  - independent 2-ID cancel chunks.
+  Pending a ruling from ddi2il, the default preserves protective-sibling
+  continuation and independent cancel chunks. Any stop change lists the exact
+  skipped calls. An Unknown leg is never resent. Accepted IDs and cancel effects are
+  journaled structurally: Unknown wins, unissued legs are NotSent, and nothing is
+  success or None after ambiguity.
+- **Classification correction.** `answer_failure()` gives a 2xx error envelope
+  outcome None today, not Refused. Under Option B an unlisted native code stays
+  Unknown even when the HTTP status looks definitive. The "every 2xx error body →
+  Refused" line above is withdrawn. Before source, freeze:
+  - CodeTable precedence and body extraction;
+  - loss, 408, 5xx and uncertain 429;
+  - an unknown native code;
+  - malformed or uncorrelated success;
+  - correlated accepted IDs plus errors.
+  Any definitive refusal cites its source. Mixed batches publish their accepted
+  native effects and carry IDs, without fabricated per-item correlation.
+- **Q1 boundary.** The engine's own installed Primary and live Session are rechecked.
+  There is no fake credential, no public-key-as-credential, no Present and no
+  borrowed owner. The signing ref stays signing-only.
+- **`/auth` bootstrap.** Pin that the login never parks waiting for the bearer it
+  creates. Renewal, revision and retirement keep real Session liveness and the
+  original deadlines.
+- **Q3 header move.** Moving `PARADEX-STARKNET-ACCOUNT` into `apply` keeps exact
+  URL, body and static-header attestation and rejects header collisions. There is
+  no wholesale provider header override.
+- **Q4 and evidence.**
+  - PR-3a keeps the read walk's root, window and cursor ownership. It never
+    publishes a partial malformed page or renews the overall budget per page.
+    public :1081 is claimed only as a lexical rename.
+  - Controls that already pass are labelled PRESERVATION; the existing
+    cancel-all-after-Unknown fence pin passes on master.
+  - Genuine managed-boundary and admission REDs are required, and every gated
+    suffix runs at source.
+  - Fresh JS/WASM EngineHost qualification, maps, sizes and correctness CI apply.
