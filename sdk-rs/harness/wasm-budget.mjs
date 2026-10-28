@@ -51,11 +51,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #2317 final HL/HLSpot: CI run 40506842978, job 122199595636 measures 1,418,513 B.
 // ddi2il rule: ceil KiB + 2 KiB = 1388 KiB; required correction and breakdown in PR.
 // One linked secp256k1/keccak implementation; dependency features and combined cap unchanged.
-// close_floors (#2327) run 40530278380: CI Bybit 1,453,469 (job 122281828327) and Kraken
-// 1,411,333 (job 122281828239), rounded up to 1420 and 1379 KiB under the <=2 KiB shared-code rule.
-// Merged with #2324, run 40543429650 (job 122330707530): CI AsterDEX 1,424,590 (+206 B),
-// rounded up to 1392 KiB under the same rule.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ hyperliquid: 1_421_312, hyperliquidspot: 1_421_312, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_454_080, asterdex: 1_425_408, kraken: 1_412_096, krakenspot: 1_412_096 });
+// #2334 hosted-signing feature split, run 40610920529 artifacts: Paradex 1,403,676 and HL/HLSpot
+// 1,363,789 B; each lowered to ceil KiB + 2 KiB (1373 and 1334 KiB).
+export const WASM_VENUE_OVERRIDES = Object.freeze({ hyperliquid: 1_366_016, hyperliquidspot: 1_366_016, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_405_952 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {

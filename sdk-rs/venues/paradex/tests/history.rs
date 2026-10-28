@@ -5,45 +5,20 @@ use safe_cex_venue_paradex::Options;
 use support::*;
 
 fn private() -> Harness {
-    private_with_signer(false)
-}
-fn private_with_signer(delegated: bool) -> Harness {
-    let mut h = Harness::empty(Options {
-        key: Some(if delegated {
-            "opaque-public-subkey".into()
-        } else {
-            format!("0x{}1", "0".repeat(63))
-        }),
-        paradex_address: Some("0x123".into()),
-        subkey_address: Some("0x456".into()),
-        payload_signer: delegated,
-        ..Options::default()
-    });
+    let mut h = Harness::keyed(
+        Options {
+            paradex_address: Some("0x123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Options::default()
+        },
+        STARK_KEY,
+    );
     h.reply("/markets", MARKETS);
     h.reply("summary", TICKERS);
     h.reply(
         "/system/config",
         r#"{"starknet_chain_id":"PRIVATE_SN_PARACLEAR_MAINNET"}"#,
     );
-    if delegated {
-        let request = h
-            .actions
-            .iter()
-            .find_map(|a| match a {
-                safe_cex_engine::Action::SignPayload { request, .. } => Some(*request),
-                _ => None,
-            })
-            .unwrap();
-        h.e.handle(
-            h.now,
-            safe_cex_engine::Event::PayloadSigned {
-                request,
-                signature: "fixture signature",
-                headers: vec![],
-            },
-        );
-        h.collect();
-    }
     h.reply("/auth/", r#"{"jwt_token":"test-jwt"}"#);
     h.reply("/account/margin", r#"{"configs":[]}"#);
     h.reply("/positions", r#"{"results":[]}"#);
@@ -933,9 +908,9 @@ fn capped_open_lookup_keeps_nondefinitive_proof_without_a_new_warning() {
 
 #[test]
 fn owned_history_preparation_refusal_after_accepted_rows_remains_strict() {
-    for delegated in [false, true] {
+    {
         for kind in 0..3 {
-            let mut h = private_with_signer(delegated);
+            let mut h = private();
             h.actions.clear();
             read(&mut h, 105, owned_history_query(kind));
             // Expire JWT before the first response schedules the next leg.
@@ -945,25 +920,7 @@ fn owned_history_preparation_refusal_after_accepted_rows_remains_strict() {
                 owned_history_path(kind),
                 &format!(r#"{{"results":[{row}],"next":"queued-auth"}}"#),
             );
-            if delegated {
-                let request = h
-                    .actions
-                    .iter()
-                    .rev()
-                    .find_map(|a| match a {
-                        safe_cex_engine::Action::SignPayload { request, .. } => Some(*request),
-                        _ => None,
-                    })
-                    .unwrap();
-                h.e.handle(
-                    h.now,
-                    safe_cex_engine::Event::PayloadSignFailed {
-                        request,
-                        error: "fixture signing refusal",
-                    },
-                );
-                h.collect();
-            } else {
+            {
                 let auth = h.take("/auth/");
                 h.respond(auth, 503, r#"{"error":"auth unavailable"}"#);
             }

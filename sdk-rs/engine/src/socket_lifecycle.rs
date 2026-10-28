@@ -200,7 +200,7 @@ pub enum RetireReason {
     Authentication,
     Stopped,
     /// A `reject_route` connect found no route left; nothing was dialled.
-    RouteRefused,
+    RouteExhausted,
 }
 
 #[derive(Clone, Debug)]

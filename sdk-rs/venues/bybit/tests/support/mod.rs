@@ -114,9 +114,7 @@ impl Harness {
                 Action::RetireAddressSetup { .. } => {
                     panic!("unexpected address setup retirement")
                 }
-                Action::Sign { .. }
-                | Action::SignedOutbound { .. }
-                | Action::SignPayload { .. } => {
+                Action::Sign { .. } | Action::SignedOutbound { .. } => {
                     panic!("immediate fixture provider must materialize signing")
                 }
                 Action::WsConnect { headers, .. } if !headers.is_empty() => {

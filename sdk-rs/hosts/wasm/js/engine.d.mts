@@ -56,8 +56,6 @@ export class WasmEngine implements WasmEngineLike {
   signed(attempt: number, resultJson: string, now: number): string;
   signFailed(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;
   prepareDispatch(now: number): string;
-  payloadSigned(request: number, signature: string, headers: string, now: number): string;
-  payloadSignFailed(request: number, error: string, now: number): string;
   timer(timer: number, now: number): string;
   free(): void;
 }

@@ -10,14 +10,13 @@ const POSITION: &str = r#"{"market":"BTC-USD-PERP","status":"OPEN","side":"LONG"
 const ORDER: &str = r#"{"id":"123","market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","side":"BUY","size":"2","remaining_size":"2","price":"99","instruction":"GTC","time_in_force":"GTC","created_at":1700000000000,"last_updated_at":1700000000000,"client_id":"caller-1"}"#;
 fn options() -> Options {
     Options {
-        key: Some(format!("0x{}1", "0".repeat(63))),
         paradex_address: Some("0x0123".into()),
         subkey_address: Some("0x456".into()),
         ..Options::default()
     }
 }
 fn seed() -> (Harness, SocketId) {
-    let mut h = Harness::empty(options());
+    let mut h = Harness::keyed(options(), STARK_KEY);
     h.reply("/markets", MARKETS);
     h.reply("summary", TICKERS);
     h.reply(

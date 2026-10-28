@@ -222,7 +222,7 @@ fn route_exhaustion_timeouts_and_stops_keep_their_retry() {
     let closed = h.engine.io.core.health.ws_closed;
     let before: Vec<TimerId> = h.timers.iter().map(|(t, _)| *t).collect();
     h.event(Event::WsRouteExhausted { socket });
-    assert_eq!(h.last_retirement(), (RetireReason::RouteRefused, None));
+    assert_eq!(h.last_retirement(), (RetireReason::RouteExhausted, None));
     assert!(
         h.timers.iter().all(|(t, _)| before.contains(t)),
         "an exhausted route arms no retry: {:?}",
@@ -308,7 +308,7 @@ fn retirement_reports_the_close_code_only_for_a_close_frame() {
     h.open();
     let socket = h.socket.unwrap();
     h.event(Event::WsRouteExhausted { socket });
-    assert_eq!(h.last_retirement(), (RetireReason::RouteRefused, None));
+    assert_eq!(h.last_retirement(), (RetireReason::RouteExhausted, None));
 }
 
 /// Malformed floors refuse the feed before it spends anything.

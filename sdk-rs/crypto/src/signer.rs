@@ -3,8 +3,8 @@
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
     Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity,
-    KeyPresence, KeyRef, Operation, PayloadPart, SetupFacts, SignError, SignFuture, SignRequest,
-    SignResult, Signer,
+    Incarnation, KeyPresence, KeyRef, Operation, PayloadPart, SetupFacts, SignError, SignFuture,
+    SignRequest, SignResult, Signer,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -278,8 +278,11 @@ impl DecodedIdentity {
     }
 }
 
-#[derive(Default)]
 pub struct LocalSigner {
+    /// This provider's setup lifetime. Re-drawn by every material mutation,
+    /// which must stay `&mut self` (pre-`Arc`): a borrowed incarnation may not
+    /// outlive a re-draw. `None` (allocation exhausted) never reads a seal.
+    incarnation: Option<Incarnation>,
     #[cfg(feature = "schnorr")]
     lighter_principal: Option<(KeyRef, LighterPrincipal)>,
     keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
@@ -294,9 +297,63 @@ pub struct LocalSigner {
     /// algorithm on the new material; only `remove` ends the binding.
     shared: HashMap<KeyRef, Option<Algorithm>>,
 }
+impl Default for LocalSigner {
+    fn default() -> Self {
+        Self {
+            incarnation: Incarnation::fresh().ok(),
+            #[cfg(feature = "schnorr")]
+            lighter_principal: None,
+            keys: HashMap::new(),
+            roles: HashMap::new(),
+            algorithms: HashMap::new(),
+            shared: HashMap::new(),
+        }
+    }
+}
 impl LocalSigner {
     pub fn new() -> Self {
         Self::default()
+    }
+    /// Ends every seal made under the previous material.
+    fn redraw(&mut self) {
+        self.incarnation = Incarnation::fresh().ok();
+    }
+    /// Seals the provider's own public-key answer for each declared Stark
+    /// signing ref; a key with no canonical public form refuses setup. Builds
+    /// that cannot sign Stark seal nothing, so nothing can read a seal.
+    fn seal_public_keys(&self, identities: &mut Identities) -> Result<(), SignError> {
+        if !cfg!(feature = "stark") {
+            return Ok(());
+        }
+        for identity in [identities.primary.as_mut(), identities.secondary.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            let Some(signing) = identity.signing_opt().cloned() else {
+                continue;
+            };
+            if self.algorithms.get(&signing) != Some(&Algorithm::StarkDigest) {
+                continue;
+            }
+            let incarnation = self.incarnation.as_ref().ok_or(SignError::Unavailable)?;
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![Operation::PublicKey {
+                    algorithm: Algorithm::StarkDigest,
+                    key: signing,
+                }],
+            };
+            let result = self.sign_now(&request)?;
+            let public = result
+                .values
+                .first()
+                .filter(|value| crate::starknet::is_public_key(value))
+                .and_then(|value| <[u8; 32]>::try_from(value.as_slice()).ok())
+                .ok_or(SignError::InvalidRequest)?;
+            identity.seal_public_key(Algorithm::StarkDigest, public, incarnation)?;
+        }
+        Ok(())
     }
     pub fn from_setup_with_lighter_principal(
         setup: LocalSetup,
@@ -351,6 +408,7 @@ impl LocalSigner {
             drop(Zeroizing::new(bytes));
             return;
         }
+        self.redraw();
         match self.shared.get(&reference) {
             Some(Some(algorithm)) => {
                 self.algorithms.insert(reference.clone(), *algorithm);
@@ -529,6 +587,8 @@ impl LocalSigner {
             let declared = signer.algorithms.get(signing).copied();
             signer.shared.insert(signing.clone(), declared);
         }
+        signer.redraw();
+        signer.seal_public_keys(&mut identities)?;
         Ok((signer, identities))
     }
     /// Own and wipe the setup input on both successful and malformed construction.
@@ -589,6 +649,7 @@ impl LocalSigner {
         Self::from_setup_with_facts(setup, policy, public_data_only)
     }
     pub fn remove(&mut self, reference: &KeyRef) {
+        self.redraw();
         #[cfg(feature = "schnorr")]
         if self.is_lighter_principal(reference) {
             self.lighter_principal = None;
@@ -665,6 +726,7 @@ impl LocalSigner {
         {
             return Err(SignError::InvalidRequest);
         }
+        self.redraw();
         self.keys.insert(reference.clone(), Zeroizing::new(bytes));
         self.algorithms.insert(reference, algorithm);
         Ok(())
@@ -934,7 +996,8 @@ fn implemented(algorithm: Algorithm) -> bool {
         Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
         Algorithm::SchnorrDigest => cfg!(feature = "schnorr"),
         Algorithm::Secp256k1Digest => cfg!(feature = "secp256k1"),
-        Algorithm::Ed25519 | Algorithm::Es256 | Algorithm::StarkDigest => false,
+        Algorithm::StarkDigest => cfg!(feature = "stark"),
+        Algorithm::Ed25519 | Algorithm::Es256 => false,
     }
 }
 
@@ -993,6 +1056,9 @@ impl safe_cex_engine::signing::OwnedSetupExecution for LocalAddressSetup {
 }
 
 impl Signer for LocalSigner {
+    fn incarnation(&self) -> Option<&Incarnation> {
+        self.incarnation.as_ref()
+    }
     fn owned_public_address_capability(&self) -> Capability {
         if cfg!(feature = "address-nonce") {
             Capability::Supported
@@ -2530,19 +2596,21 @@ mod tests {
 
     #[cfg(feature = "stark")]
     #[test]
-    fn stark_public_keys_refuse_zero_and_out_of_order_keys() {
+    fn stark_public_keys_refuse_zero_and_out_of_order_keys_at_setup() {
         for key in [
             "0".repeat(64),
             "0800000000000010ffffffffffffffffb781126dcae7b2321e66a241adc64d2f".into(),
             "f".repeat(64),
         ] {
-            let (signer, reference) = public_setup("starkDigest", &key);
-            let request = public_request(serde_json::json!([
-                {"kind": "publicKey", "algorithm": "starkDigest", "key": reference}
-            ]));
-            assert_eq!(
-                signer.sign_now(&request),
-                Err(SignError::InvalidRequest),
+            // Setup seals the declared key's public form, so it refuses first.
+            assert!(
+                matches!(
+                    try_public_setup(
+                        serde_json::json!({"primary": {"secretEncoding": "hex", "signingAlgorithm": "starkDigest"}}),
+                        serde_json::json!({"primary": {"key": "account", "secret": key}}),
+                    ),
+                    Err(SignError::InvalidRequest)
+                ),
                 "{key}"
             );
         }
@@ -2554,6 +2622,33 @@ mod tests {
         let (signer, key) = public_setup("secp256k1Digest", SCALAR);
         let request = public_request(serde_json::json!([{"kind": "publicAddress", "key": key}]));
         assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
+    }
+
+    #[cfg(feature = "stark")]
+    #[test]
+    fn declared_stark_ref_signs_a_digest_that_verifies_against_its_public_key() {
+        use starknet_crypto::Felt;
+        let scalar = format!("{}{}", "0".repeat(62), "2a");
+        let (signer, key) = public_setup("starkDigest", &scalar);
+        let digest = vec![7u8; 32];
+        let request = public_request(serde_json::json!([
+            {"kind": "publicKey", "algorithm": "starkDigest", "key": key},
+            {"kind": "sign", "algorithm": "starkDigest", "key": key,
+             "payload": [{"kind": "bytes", "bytes": digest}]},
+        ]));
+        let result = signer.sign_now(&request).unwrap();
+        request.validate_result(&result).unwrap();
+        assert_eq!(result.values[1].len(), 64);
+        let felt = |bytes: &[u8]| Felt::from_bytes_be(&<[u8; 32]>::try_from(bytes).unwrap());
+        assert!(
+            starknet_crypto::verify(
+                &felt(&result.values[0]),
+                &felt(&digest),
+                &felt(&result.values[1][..32]),
+                &felt(&result.values[1][32..]),
+            )
+            .unwrap()
+        );
     }
 
     #[cfg(feature = "secp256k1")]
@@ -3103,6 +3198,23 @@ mod tests {
         let (other, other_key) = public_setup("ed25519", SCALAR);
         assert_eq!(
             other.can_sign(&other_key, Algorithm::Secp256k1Digest),
+            Capability::Unsupported
+        );
+        assert_eq!(
+            other.can_sign(&other_key, Algorithm::StarkDigest),
+            Capability::Unsupported
+        );
+        let (stark, stark_key) = public_setup("starkDigest", &format!("{}2a", "0".repeat(62)));
+        assert_eq!(
+            stark.can_sign(&stark_key, Algorithm::StarkDigest),
+            if cfg!(feature = "stark") {
+                Capability::Supported
+            } else {
+                Capability::Unsupported
+            }
+        );
+        assert_eq!(
+            stark.can_sign(&stark_key, Algorithm::Secp256k1Digest),
             Capability::Unsupported
         );
 

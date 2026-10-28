@@ -249,9 +249,7 @@ impl Harness {
                 Action::ManagedHttp(_) => {
                     panic!("managed HTTP preparation is not configured in this harness yet")
                 }
-                Action::SignPayload { .. }
-                | Action::Sign { .. }
-                | Action::SignedOutbound { .. } => {
+                Action::Sign { .. } | Action::SignedOutbound { .. } => {
                     panic!("delegated signing is unsupported in the binance test harness")
                 }
                 Action::Http(request) => {
