@@ -1055,3 +1055,69 @@ fn fills_empty_traversal_fallback_retains_its_owner_and_single_page_shape() {
     assert_eq!(h.result(109), Ok("[]"));
     assert!(!h.pending.iter().any(|r| r.url.contains("orders-history")));
 }
+
+#[test]
+fn a_market_delisted_between_pages_fails_the_walk_unsent_without_rows() {
+    let mut h = private();
+    read(
+        &mut h,
+        110,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let listed: Vec<_> =
+        h.e.store()
+            .markets()
+            .iter()
+            .filter(|market| market.symbol != "BTC-USD-PERP")
+            .cloned()
+            .collect();
+    h.e.store_mut().set_markets(listed);
+    h.reply(
+        "/orders-history",
+        &format!(r#"{{"next":"page-2","results":[{ORDER}]}}"#),
+    );
+    assert_eq!(h.result(110), Err("Paradex market is no longer listed"));
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert!(!h.actions.iter().any(|a| matches!(a,
+        safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(e)) if e.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE
+    )));
+    assert!(!h.pending.iter().any(|r| r.url.contains("cursor=page-2")));
+}
+
+#[test]
+fn a_market_unlisted_at_admission_keeps_its_native_empty_answers() {
+    let mut h = private();
+    read(
+        &mut h,
+        111,
+        Query::OrderHistory {
+            symbol: Some("UNKNOWN-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    assert_eq!(h.result(111), Ok("[]"));
+    read(
+        &mut h,
+        112,
+        Query::OrderByClientId {
+            symbol: "UNKNOWN-USD-PERP".into(),
+            client_order_id: "caller".into(),
+        },
+    );
+    assert_eq!(h.result(112), Ok(r#"{"found":false,"definitive":false}"#));
+    assert!(
+        !h.pending
+            .iter()
+            .any(|r| r.url.contains("/orders-history") || r.url.contains("/orders?"))
+    );
+}
