@@ -66,13 +66,7 @@ import {
 import { WatchMode, ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, CURSOR_HOME } from './utils/watch-mode';
 import { registerRecordCommands, registerExportImportCommands } from './commands';
 
-import {
-  OrderSide,
-  type OrderFillEvent,
-  type Candle,
-  type Timeframe,
-  type Market,
-} from '../../../packages/safe-cex/src/types';
+import { OrderSide, type Candle, type Timeframe, type Market } from '../../../packages/safe-cex/src/types';
 import type { Exchange } from '../../../packages/safe-cex/src/exchanges/base';
 import { loadConfig, saveConfig, getAccount } from './config';
 // TWAP support for taskAction handling
@@ -108,6 +102,7 @@ import {
 import { getCurrentVersion, performUpdate, forceCheckForUpdates } from './updater';
 import { ExchangeManager } from './exchange-manager';
 import { classifyConnectError } from './connect-error';
+import { setupExchangeListeners, type ExchangeListenerContext } from './exchange-listeners';
 import { disableFooter, enableFooter, redrawFooter, setFooterRenderer } from './footer';
 import {
   DEFAULT_SEGMENTS,
@@ -119,7 +114,6 @@ import {
   type FooterState,
 } from './footer-segments';
 import { enableStatusLine } from './status-line';
-import { classifyForCLI, criticalErrorKey } from './error-classifier';
 import { startListener, stopListener } from './listener';
 import { webhookBodyRefusal, webhookChainRefusal, webhookRefusal } from '@tealstreet/cli-core';
 import { restartWebhookRelay, startWebhookRelay, stopWebhookRelay } from './listener/webhook-relay';
@@ -200,8 +194,15 @@ let stopMonitorFn: (() => void) | null = null;
 let chartUnsubscribe: (() => void) | null = null;
 let commandQueue: Promise<void> = Promise.resolve();
 
-// Track critical errors that have already been shown (account:category)
-const shownCriticalErrors = new Set<string>();
+const exchangeListenerContext: ExchangeListenerContext = {
+  adapter,
+  logger,
+  recordFill,
+  isMonitorMode: () => isMonitorMode,
+  getCurrentAccountName: () => session.currentAccountName,
+  getHealthMonitor: (accountName) => exchangeManager.getHealthMonitor(accountName),
+  addWatchMessage,
+};
 
 /**
  * Check if interactive mode is available.
@@ -910,120 +911,6 @@ function startWatchTable(exchange: Exchange, rl: readline.Interface, tableType: 
 
   // Store exit function for external cleanup
   stopMonitorFn = () => watch.exit();
-}
-
-/**
- * Format a fill event for display
- */
-function formatFill(fill: OrderFillEvent): string {
-  const side = fill.side === OrderSide.Buy ? 'Bought' : 'Sold';
-  const priceStr = fill.price?.toLocaleString() ?? 'market';
-  return `${side} ${fill.amount} ${fill.symbol} @ $${priceStr}`;
-}
-
-/**
- * Setup event listeners on an exchange
- */
-function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): void {
-  // Listen for command output. ExchangeLike.emitter is a generic
-  // `(...args: unknown[]) => void` shape, so per-event payload types are
-  // narrowed locally at each handler entry.
-  exchange.emitter.on('exec-log', (...args: unknown[]) => {
-    const { message } = args[0] as { message: string };
-    if (isMonitorMode) {
-      // Buffer messages during watch mode so they don't get wiped
-      addWatchMessage('info', message);
-    } else {
-      console.log(message);
-    }
-  });
-
-  // Listen for fills
-  exchange.emitter.on('fill', (...args: unknown[]) => {
-    const fill = args[0] as OrderFillEvent;
-    const fillMsg = formatFill(fill);
-    logger.info(`Fill: ${fillMsg}`, fill);
-    // TSBUG-107 slice 4: attribute the fill back to the run/command that
-    // placed the order (no-op when auditing is off or the order isn't
-    // tracked). Account comes from the remembered lineage. Independent of
-    // display mode.
-    recordFill(fill.orderId ?? fill.id, fillMsg);
-    if (isMonitorMode) {
-      addWatchMessage('fill', fillMsg);
-    } else {
-      adapter.printSuccess(`✓ Fill: ${fillMsg}`);
-    }
-  });
-
-  // Listen for errors — classify via health monitor before displaying
-  exchange.emitter.on('error', (...args: unknown[]) => {
-    const error = args[0] as string;
-    const acctName = accountName || session.currentAccountName || 'unknown';
-    const monitor = exchangeManager.getHealthMonitor(acctName);
-    const category = monitor ? monitor.processMessage(error, true) : null;
-    const action = classifyForCLI(category, 'error', error);
-
-    switch (action.action) {
-      case 'suppress':
-        // Don't print at all
-        return;
-      case 'critical': {
-        const key = criticalErrorKey(acctName, category!);
-        if (shownCriticalErrors.has(key)) return; // Already shown
-        shownCriticalErrors.add(key);
-        const msg = action.message || error;
-        if (isMonitorMode) {
-          addWatchMessage('error', `[${category!.toUpperCase()}] ${acctName}: ${msg}`);
-        } else {
-          adapter.printError(
-            `[${category!.toUpperCase()}] Account "${acctName}": ${msg}. Run "accounts disable ${acctName}" to stop.`,
-          );
-        }
-        return;
-      }
-      case 'warn':
-        if (isMonitorMode) {
-          addWatchMessage('warning', error);
-        } else {
-          console.warn(`Exchange warning: ${error}`);
-        }
-        return;
-      case 'error': {
-        const errMsg = action.message ? `${action.message}: ${error}` : error;
-        if (isMonitorMode) {
-          addWatchMessage('error', errMsg);
-        } else {
-          console.error(`Exchange error: ${errMsg}`);
-        }
-        return;
-      }
-      case 'passthrough':
-      default:
-        if (isMonitorMode) {
-          addWatchMessage('error', error);
-        } else {
-          console.error(`Exchange error: ${error}`);
-        }
-        return;
-    }
-  });
-
-  // Listen for warnings — classify via health monitor before displaying
-  exchange.emitter.on('warning', (...args: unknown[]) => {
-    const warning = args[0] as string;
-    const acctName = accountName || session.currentAccountName || 'unknown';
-    const monitor = exchangeManager.getHealthMonitor(acctName);
-    const category = monitor ? monitor.processMessage(warning, false) : null;
-    const action = classifyForCLI(category, 'warning', warning);
-
-    if (action.action === 'suppress') return;
-
-    if (isMonitorMode) {
-      addWatchMessage('warning', warning);
-    } else {
-      console.warn(`Exchange warning: ${warning}`);
-    }
-  });
 }
 
 /**
@@ -1846,7 +1733,11 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
 
     // Setup listeners for new exchange
     if (result.newSession.currentExchange) {
-      setupExchangeListeners(result.newSession.currentExchange, result.newSession.currentAccountName);
+      setupExchangeListeners(
+        result.newSession.currentExchange,
+        exchangeListenerContext,
+        result.newSession.currentAccountName,
+      );
       // Update network monitor with new exchange reference
       networkMonitor?.setExchange(result.newSession.currentExchange);
 
@@ -1884,7 +1775,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
           try {
             adapter.printInfo(`Enabling account "${name}"...`);
             const exchange = await exchangeManager.enable(accountConfig);
-            setupExchangeListeners(exchange, name);
+            setupExchangeListeners(exchange, exchangeListenerContext, name);
             adapter.printSuccess(`Account "${name}" enabled`);
           } catch (error) {
             adapter.printError(`Failed to enable account "${name}": ${(error as Error).message}`);
@@ -2469,7 +2360,7 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
           .enable(activeAccount)
           .then((exchange) => {
             connectionStates.set(activeAccount.name, 'connected');
-            setupExchangeListeners(exchange, activeAccount.name);
+            setupExchangeListeners(exchange, exchangeListenerContext, activeAccount.name);
             // If this is the primary account, update session
             if (activeAccount.name === session.currentAccountName) {
               session.currentExchange = exchange;
@@ -2813,7 +2704,7 @@ export async function runSingleCommand(
   }
 
   // Setup event listeners
-  setupExchangeListeners(session.currentExchange, session.currentAccountName);
+  setupExchangeListeners(session.currentExchange, exchangeListenerContext, session.currentAccountName);
 
   // A rejected key is terminal for anything that needs the venue — running it
   // anyway is what printed a zeroed balance table that read as an empty
@@ -2887,7 +2778,7 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
           return fail(connectFailureCode(errorLine, getAuthState()), errorLine ?? 'Could not connect to the account.');
         }
 
-        setupExchangeListeners(session.currentExchange, session.currentAccountName);
+        setupExchangeListeners(session.currentExchange, exchangeListenerContext, session.currentAccountName);
         ensureCommandsRegistered();
         const requestedCommand = commandRegistry.find(commandString.trim().split(/\s+/)[0]?.toLowerCase() ?? '');
         const needsKey = requestedCommand?.requiresConnection !== false;

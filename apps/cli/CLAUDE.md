@@ -143,6 +143,7 @@ src/
 ├── config.ts                # Config: ~/.tealstreet/config.json
 ├── exchange-factory.ts      # Exchange instantiation from config
 ├── exchange-manager.ts      # Multi-exchange lifecycle
+├── exchange-listeners.ts    # Exchange fill/exec-log/error/warning handlers (`setupExchangeListeners`)
 ├── auth.ts                  # OAuth2 login flow (port 9876 callback)
 ├── updater.ts               # Version checking + auto-update
 ├── logger.ts                # Rate-limited, deduplicated logging
@@ -437,6 +438,8 @@ and large payloads are truncated.
 
 **Convention:** Use `logger.*` for operational details (file only). Use `print()` for user-facing status lines (terminal only).
 
+**Exchange events (`✓ Fill:`, command output, `Exchange error:` / `warning:`) are wired by `setupExchangeListeners`, once per emitter** — `use` on an already enabled account returns the same exchange, and re-wiring it printed every fill once per switch. Add handlers there; never call `exchange.emitter.on(...)` at a call site.
+
 **`logger.ts` must add no module-level timers at all.** `src/index.ts` imports
 it at the top, so every subcommand pays for it: a ref'd `setInterval` here meant
 `account add`, `exec` and friends printed their output, finished, and then hung
@@ -584,7 +587,8 @@ name}` footer segment auto-runs the named script ~1×/sec
   bounded in-memory `orderId → {runId, command, account}` map
   (`rememberOrderLineage`, gated on audit-on so it can't grow unbounded,
   oldest evicted past `MAX_LINEAGE`). The exchange `fill` handler in
-  `setupExchangeListeners` calls `recordFill(fill.orderId ?? fill.id, …)`;
+  `setupExchangeListeners` (`src/exchange-listeners.ts`) calls
+  `recordFill(fill.orderId ?? fill.id, …)`;
   on a hit it appends a `[fill]` entry stamped with the lineage's `runId`
   (set explicitly — fills arrive async, outside the run scope) and a
   `← <originating command>` pointer. Unattributable fills (placed before
