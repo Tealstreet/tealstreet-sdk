@@ -8,6 +8,8 @@
 //   node sdk-rs/harness/error-capture.mjs <cases.json> <venue tests/fixtures/errors dir>
 //
 // cases.json is [{ name, method, url, headers?, body?, expect: { kind, outcome, path } }].
+// "{now}" anywhere in the url, a header value or a body string is replaced by the
+// send-time epoch milliseconds, so a signed timestamp is never stale on arrival.
 // Redaction follows sdk-rs/engine/src/error_corpus_redaction.json, the same rules
 // the Rust loader (safe_cex_engine::test_support::error_corpus) re-checks with.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -213,12 +215,32 @@ export const fixture = (capture, status, text, now = new Date()) => ({
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const capture = async (cases, outDir, { fetch = globalThis.fetch, pace = PACE_MS } = {}) => {
+const NOW = /\{now\}/g;
+
+/** The case with every "{now}" replaced by `now`, taken immediately before sending. */
+export const stamped = (item, now) => {
+  const stamp = (value) => {
+    if (typeof value === 'string') return value.replace(NOW, String(now));
+    if (Array.isArray(value)) return value.map(stamp);
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, stamp(inner)]));
+    }
+    return value;
+  };
+  return { ...item, url: stamp(item.url), headers: stamp(item.headers), body: stamp(item.body) };
+};
+
+export const capture = async (
+  cases,
+  outDir,
+  { fetch = globalThis.fetch, pace = PACE_MS, now = Date.now } = {},
+) => {
   checkCases(cases);
   mkdirSync(outDir, { recursive: true });
   const written = [];
-  for (const [index, item] of cases.entries()) {
+  for (const [index, original] of cases.entries()) {
     if (index > 0) await sleep(pace);
+    const item = stamped(original, now());
     const response = await fetch(item.url, {
       method: item.method ?? 'GET',
       headers: item.headers ?? {},

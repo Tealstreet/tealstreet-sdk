@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
-  MAX_CASES, REDACTED, RULES, capture, checkCases, fixture, isSensitive, redactBody, redactEndpoint,
+  MAX_CASES, REDACTED, RULES, capture, checkCases, fixture, isSensitive, redactBody, redactEndpoint, stamped,
 } from './error-capture.mjs';
 
 const expect = { kind: 'authInvalid', outcome: 'rejected', path: 'startup' };
@@ -95,6 +95,40 @@ test('capture paces its requests, never follows a redirect and writes one fixtur
     const saved = JSON.parse(readFileSync(written[0], 'utf8'));
     assert.equal(saved.endpoint, '/v1/depth?symbol=NOPE');
     assert.equal(saved.body, '{"code":-1121,"msg":"Invalid symbol."}');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('{now} is stamped at send time in the url, headers and body strings', async () => {
+  const item = {
+    name: 'fresh',
+    url: 'https://api.venue.test/v1/order?timestamp={now}',
+    headers: { 'X-TIMESTAMP': '{now}', 'X-API-KEY': 'bogus-key' },
+    body: { args: [{ expires: '{now}', qty: 1 }] },
+    expect,
+  };
+  assert.deepEqual(stamped(item, 42), {
+    ...item,
+    url: 'https://api.venue.test/v1/order?timestamp=42',
+    headers: { 'X-TIMESTAMP': '42', 'X-API-KEY': 'bogus-key' },
+    body: { args: [{ expires: '42', qty: 1 }] },
+  });
+  const dir = mkdtempSync(join(tmpdir(), 'error-capture-now-'));
+  const sent = [];
+  let clock = 1_000;
+  try {
+    await capture([item, { ...item, name: 'later' }], dir, {
+      pace: 1,
+      now: () => (clock += 500),
+      fetch: async (url, init) => {
+        sent.push({ url, stamp: init.headers['X-TIMESTAMP'], body: init.body });
+        return { status: 200, text: async () => '{"retCode":10003}' };
+      },
+    });
+    assert.deepEqual(sent.map(({ stamp }) => stamp), ['1500', '2000'], 'each request is stamped when sent');
+    assert.equal(sent[1].url, 'https://api.venue.test/v1/order?timestamp=2000');
+    assert.equal(sent[1].body, '{"args":[{"expires":"2000","qty":1}]}');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
