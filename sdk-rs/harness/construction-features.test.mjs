@@ -15,6 +15,7 @@ const setupFeatures = {
   mexc: ['dispatch-signing'],
   lighter: ['dispatch-signing'],
   hyperliquid: ['dispatch-signing', 'address-nonce'],
+  paradex: ['dispatch-signing'],
   asterdex: ['dispatch-signing', 'address-nonce', 'sign-meta'],
 };
 

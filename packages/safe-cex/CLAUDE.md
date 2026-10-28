@@ -89,6 +89,15 @@ and caller trimming metadata remains refused. Legacy top-level HL passphrases
 are consumed and ignored before provider construction; explicit provider
 passphrases and secondary setup remain refused.
 
+Paradex local signing maps the account `key` into a trusted ScalarOnly
+`starkDigest` primary through `paradexSignerSetup.ts`; the capsule is exactly
+`{primary: {secret: key}}`. Rust setup reads a 66-character key as the Stark
+scalar (the venue's existing parse) and derives any other from an Ethereum key on
+the network's fixed chain, then seals the provider's public key to that provider.
+`paradexAddress`/`subkeyAddress` stay public options; legacy `secret` and
+`passphrase` are ignored. `/auth` and every write are signed at dispatch and fully
+verified against the sealed key. Hosted and delegated Paradex stay refused.
+
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
 `stableId` per primary/secondary identity. It is consumed with passphrases through
@@ -927,18 +936,15 @@ deterministic request/response regressions; live startup and authentication
 additionally need network or credentialed probes. Do not replace that evidence
 with source-text grep.
 
-## `payloadSigner` (Bybit, Binance, Paradex)
+## `payloadSigner` (Bybit, Binance)
 
 `ExchangeOptions.payloadSigner` replaces `secret` for callers that hold no
 secret and sign elsewhere. It receives the exact bytes the venue would HMAC
 and returns the value for the signature slot, plus headers to add to the same
-request. Paradex is covered in `exchanges/paradex/CLAUDE.md`.
-`utils/payloadSigner.ts` routes both modes through one function, so local
-signing and delegated signing share the same payload. Binance and Bybit skip
-the private websocket with this REST signer. Paradex obtains its JWT through
-the payload signer and uses that JWT on its private websocket too.
-The Rust Paradex host returns signatures as typed engine events; callers keep
-the same callback contract. No other Rust venue consumes a payload signer. `runsOnRustEngine` keeps
+request. `utils/payloadSigner.ts` routes both modes through one function, so
+local signing and delegated signing share the same payload. Binance and Bybit
+skip the private websocket with this REST signer. No Rust venue consumes a
+payload signer; the engine's payload-signing actions and events are removed. `runsOnRustEngine` keeps
 Bybit- and Binance-family accounts with one on TS, whose signers honour it.
 Every other TS venue, including the hosted Coinbase/Orderly classes, ignores a
 payload signer while `canSign` counts it, so those accounts stay on the engine.

@@ -439,12 +439,6 @@ enum ActionOut<'a> {
         #[serde(rename = "timeoutMs")]
         timeout_ms: u32,
     },
-    SignPayload {
-        request: u64,
-        payload: &'a safe_cex_engine::PayloadSignRequest,
-        #[serde(rename = "timeoutMs")]
-        timeout_ms: u32,
-    },
     SetTimer {
         timer: u64,
         at: f64,
@@ -563,15 +557,6 @@ fn encode(actions: &[Action]) -> String {
             } => ActionOut::Sign {
                 attempt: attempt.0,
                 work,
-                timeout_ms: *timeout_ms,
-            },
-            Action::SignPayload {
-                request,
-                payload,
-                timeout_ms,
-            } => ActionOut::SignPayload {
-                request: request.0,
-                payload,
                 timeout_ms: *timeout_ms,
             },
             Action::SetTimer { timer, at_ms } => ActionOut::SetTimer {
@@ -978,10 +963,10 @@ impl WasmEngine {
                     "Local signer setup is not supported for this venue yet",
                 ));
             }
-            let (signer, identities) = safe_cex_venues::local_signer_from_json_for_mode(
+            let (signer, identities) = safe_cex_venues::local_signer_from_capsule(
                 venue,
                 std::mem::take(&mut *input),
-                &options,
+                &mut options,
             )
             .map_err(construction_error)?;
             options.signing = Some(identities);
@@ -1354,54 +1339,6 @@ impl WasmEngine {
         Ok(self.flush())
     }
 
-    #[wasm_bindgen(js_name = payloadSigned)]
-    pub fn payload_signed(
-        &mut self,
-        request: f64,
-        signature: &str,
-        headers: &str,
-        now: f64,
-    ) -> Result<String, js_sys::Error> {
-        let request = host_resource_id(request)?;
-        let request = RequestId(request);
-        match payload_headers(headers) {
-            Some(headers) => self.inner.handle(
-                now,
-                Event::PayloadSigned {
-                    request,
-                    signature,
-                    headers,
-                },
-            ),
-            None => self.inner.handle(
-                now,
-                Event::PayloadSignFailed {
-                    request,
-                    error: "Invalid payload signer headers",
-                },
-            ),
-        }
-        Ok(self.flush())
-    }
-
-    #[wasm_bindgen(js_name = payloadSignFailed)]
-    pub fn payload_sign_failed(
-        &mut self,
-        request: f64,
-        error: &str,
-        now: f64,
-    ) -> Result<String, js_sys::Error> {
-        let request = host_resource_id(request)?;
-        self.inner.handle(
-            now,
-            Event::PayloadSignFailed {
-                request: RequestId(request),
-                error,
-            },
-        );
-        Ok(self.flush())
-    }
-
     pub fn timer(&mut self, timer: f64, now: f64) -> Result<String, js_sys::Error> {
         let timer = host_resource_id(timer)?;
         let timer = TimerId(timer);
@@ -1513,17 +1450,6 @@ impl WasmEngine {
 
 fn is_false(value: &bool) -> bool {
     !*value
-}
-
-fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
-    let mut headers = Vec::new();
-    if !text.is_empty() {
-        for line in text.split('\n') {
-            let (name, value) = line.split_once(':')?;
-            headers.push((name.into(), value.into()));
-        }
-    }
-    Some(headers)
 }
 
 #[cfg(test)]
@@ -2005,17 +1931,13 @@ mod tests {
                 r#"{"status":"released"}"#
             );
             assert!(bound.iter().all(|action| {
-                !matches!(
-                    action.op.as_str(),
-                    "http" | "sign" | "signPayload" | "signedOutbound"
-                )
+                !matches!(action.op.as_str(), "http" | "sign" | "signedOutbound")
             }));
-            assert!(actions.iter().all(|action| {
-                !matches!(
-                    action.op.as_str(),
-                    "sign" | "signPayload" | "signedOutbound"
-                )
-            }));
+            assert!(
+                actions
+                    .iter()
+                    .all(|action| { !matches!(action.op.as_str(), "sign" | "signedOutbound") })
+            );
             assert!(!engine.requires_external_signer());
         }
     }
@@ -2679,21 +2601,6 @@ mod tests {
     use safe_cex_engine::model::CancelOrderRef;
     #[cfg(feature = "asterdex")]
     use safe_cex_engine::model::StpMode;
-
-    #[test]
-    fn delegated_header_lines_preserve_value_bytes_and_reject_malformed_lines() {
-        assert_eq!(payload_headers(""), Some(vec![]));
-        assert_eq!(
-            payload_headers("X-Empty:\nX-Exact:  a:b:c \t"),
-            Some(vec![
-                ("X-Empty".into(), String::new()),
-                ("X-Exact".into(), "  a:b:c \t".into()),
-            ])
-        );
-        for invalid in ["missing-colon", "\n", "X-Proof:a\n", "X-Proof:a\ninvalid"] {
-            assert_eq!(payload_headers(invalid), None);
-        }
-    }
 
     #[test]
     fn amendment_symbol_context_is_preserved_for_spot_builds() {

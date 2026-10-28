@@ -129,10 +129,9 @@ fn preparation(actions: &[Action]) -> (Preparation, HttpRequest) {
         "perps candle JSON POST must await managed preparation, with no legacy HTTP"
     );
     assert!(
-        !actions.iter().any(|a| matches!(
-            a,
-            Action::Sign { .. } | Action::SignPayload { .. } | Action::SignedOutbound { .. }
-        )),
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::SignedOutbound { .. })),
         "public candle read requires no signer or fabricated credential"
     );
     let mut prepares = actions.iter().filter_map(|a| match a {
@@ -196,10 +195,11 @@ fn bind(e: &mut Engine<Hyperliquid>, token: Preparation, now: f64) -> (Permit, H
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. }
-    )));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+    );
     actions
         .into_iter()
         .find_map(|a| match a {
@@ -342,10 +342,11 @@ fn perps_candle_typed_preparation_refusal_is_preserved_once() {
     assert_eq!(error.kind, Some(ErrorKind::AuthPermission));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     assert_eq!(error.message, "public route denied");
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. }
-    )));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+    );
     e.http_preparation_failed(NOW + 2., token, Error::State, VenueError::new("duplicate"));
     assert!(results(&e.drain_actions().collect::<Vec<_>>(), 502).is_empty());
 }
@@ -533,11 +534,7 @@ fn capacity_denial_precedes_invalid_input_and_does_not_retire_a_peer() {
     assert_eq!(error.message, "Engine request capacity reached");
     assert!(!actions.iter().any(|a| matches!(
         a,
-        Action::Http(_)
-            | Action::ManagedHttp(_)
-            | Action::SetTimer { .. }
-            | Action::Sign { .. }
-            | Action::SignPayload { .. }
+        Action::Http(_) | Action::ManagedHttp(_) | Action::SetTimer { .. } | Action::Sign { .. }
     )));
     assert!(e.http_preparation_pending(tokens[1]));
     e.http_preparation_failed(

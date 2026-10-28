@@ -1,9 +1,16 @@
+//! Provider-signed Paradex hashes and signatures against the independent
+//! starknet.js / ethers oracle, for both key forms on both networks.
+mod support;
+use safe_cex_engine::signing::{Algorithm, Operation, PayloadPart, SignRequest};
+use safe_cex_venue_paradex::Options;
+use safe_cex_venue_paradex::sign::dispatch::Preimage;
 use safe_cex_venue_paradex::sign::{Credentials, SystemConfig, quantum};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Case {
+    environment: String,
     chain: String,
     eth_chain: String,
     key: String,
@@ -36,55 +43,6 @@ struct Order {
     hash: String,
 }
 
-#[test]
-fn delegated_hashes_match_independent_starknet_js_without_a_private_key() {
-    for case in corpus() {
-        let credentials = Credentials::delegated(
-            "opaque-public-key",
-            &case.address,
-            &case.subkey,
-            &config(&case),
-        )
-        .unwrap();
-        assert!(credentials.is_delegated());
-        let auth = credentials.auth(case.now).unwrap();
-        assert_eq!(auth.signature, case.auth.hash);
-        let request = credentials.payload_request(&auth.signature).unwrap();
-        assert_eq!(request.key, "opaque-public-key");
-        assert_eq!(request.exchange_name, "paradex");
-        assert_eq!(request.scheme, "stark");
-        assert_eq!(request.encoding, "felt-pair");
-        for order in case.orders {
-            let signed = if let Some(id) = &order.id {
-                credentials.modify(
-                    case.now,
-                    &order.market,
-                    &order.side,
-                    &order.kind,
-                    &order.size,
-                    order.price.as_deref().unwrap(),
-                    id,
-                )
-            } else {
-                credentials.order(
-                    case.now,
-                    &order.market,
-                    &order.side,
-                    &order.kind,
-                    &order.size,
-                    order.price.as_deref(),
-                )
-            }
-            .unwrap();
-            assert_eq!(
-                signed.signature, order.hash,
-                "{} {}",
-                case.chain, order.name
-            );
-        }
-    }
-}
-
 #[derive(Deserialize)]
 struct Ethereum {
     key: String,
@@ -112,50 +70,101 @@ fn config(case: &Case) -> SystemConfig {
     }
 }
 
+/// Trusted setup's provider and the account facts it seals, for `key`.
+fn installed(
+    key: &str,
+    case: &Case,
+) -> (
+    safe_cex_engine::signing::Provider,
+    Result<Credentials, String>,
+) {
+    let testnet = case.environment == "testnet";
+    let (options, provider, identities) = support::keyed(
+        Options {
+            testnet,
+            ..Options::default()
+        },
+        key,
+    );
+    let identity = identities.primary.unwrap();
+    let public = identity
+        .public_key_sealed_by(Algorithm::StarkDigest, provider.incarnation())
+        .unwrap();
+    let credentials = Credentials::new(
+        identity.signing_ref().unwrap().clone(),
+        public,
+        &case.address,
+        &case.subkey,
+        options.ethereum_key.then_some(testnet),
+        &config(case),
+    );
+    (provider, credentials)
+}
+
+/// The provider's signature over `hash`, in the venue's wire text.
+fn signed(provider: &safe_cex_engine::signing::Provider, hash: starknet_crypto::Felt) -> String {
+    let request = SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations: vec![Operation::Sign {
+            algorithm: Algorithm::StarkDigest,
+            key: safe_cex_engine::signing::KeyRef("primary.signing".into()),
+            payload: vec![PayloadPart::Bytes {
+                bytes: hash.to_bytes_be().to_vec(),
+            }],
+        }],
+    };
+    let value = provider
+        .sign_ready(&request)
+        .unwrap()
+        .unwrap()
+        .values
+        .remove(0);
+    Credentials::signature_text(
+        value[..32].try_into().unwrap(),
+        value[32..].try_into().unwrap(),
+    )
+}
+
 #[test]
 fn auth_orders_and_amendments_match_independent_starknet_js_for_both_environments() {
     for case in corpus() {
-        let credentials =
-            Credentials::new(&case.key, &case.address, &case.subkey, &config(&case)).unwrap();
+        let (provider, credentials) = installed(&case.key, &case);
+        let credentials = credentials.unwrap();
         assert_eq!(credentials.address(), case.address);
         assert_eq!(credentials.subkey(), case.subkey);
-        let auth = credentials.auth(case.now).unwrap();
-        assert_eq!(auth.signature, case.auth.signature);
-        assert_eq!(auth.timestamp, 1717171717);
-        assert_eq!(auth.expiration, 1717172017);
-        assert!(
-            auth.headers(credentials.address())
-                .iter()
-                .any(|(name, value)| *name == "PARADEX-STARKNET-ACCOUNT" && value == &case.address)
-        );
+        let timestamp = case.now / 1000;
+        let hash = credentials.auth_hash(timestamp, timestamp + 300).unwrap();
+        assert_eq!(format!("{hash:#x}"), case.auth.hash);
+        assert_eq!(signed(&provider, hash), case.auth.signature);
         for order in &case.orders {
-            let result = if let Some(id) = &order.id {
-                credentials.modify(
+            let hash = credentials
+                .order_hash(
                     case.now,
-                    &order.market,
-                    &order.side,
-                    &order.kind,
-                    &order.size,
-                    order.price.as_deref().unwrap(),
-                    id,
+                    &Preimage {
+                        market: &order.market,
+                        side: &order.side,
+                        kind: &order.kind,
+                        size: &order.size,
+                        price: order.price.as_deref(),
+                        id: order.id.as_deref(),
+                    },
                 )
-            } else {
-                credentials.order(
-                    case.now,
-                    &order.market,
-                    &order.side,
-                    &order.kind,
-                    &order.size,
-                    order.price.as_deref(),
-                )
-            }
-            .unwrap();
+                .unwrap();
             assert_eq!(
-                result.signature, order.signature,
+                format!("{hash:#x}"),
+                order.hash,
                 "{} {}",
-                case.chain, order.name
+                case.chain,
+                order.name
             );
-            assert_eq!(result.signature_timestamp, case.now);
+            assert_eq!(
+                signed(&provider, hash),
+                order.signature,
+                "{} {}",
+                case.chain,
+                order.name
+            );
         }
     }
 }
@@ -163,18 +172,12 @@ fn auth_orders_and_amendments_match_independent_starknet_js_for_both_environment
 #[test]
 fn ethereum_derivation_matches_ethers_and_vendored_sdk_grinding() {
     for case in corpus() {
-        let credentials = Credentials::new(
-            &case.ethereum.key,
-            &case.address,
-            &case.subkey,
-            &config(&case),
-        )
-        .unwrap();
+        let (provider, credentials) = installed(&case.ethereum.key, &case);
+        let credentials = credentials.unwrap();
         assert_eq!(credentials.address(), case.ethereum.address);
-        assert_eq!(
-            credentials.auth(case.now).unwrap().signature,
-            case.ethereum.auth.signature
-        );
+        let timestamp = case.now / 1000;
+        let hash = credentials.auth_hash(timestamp, timestamp + 300).unwrap();
+        assert_eq!(signed(&provider, hash), case.ethereum.auth.signature);
     }
 }
 
@@ -213,18 +216,23 @@ fn decimal_quantum_is_exact_and_truncates_toward_zero() {
 #[test]
 fn invalid_credentials_fail_without_revealing_secret_material() {
     let case = corpus().remove(0);
-    let config = config(&case);
     for key in [
         format!("0x{}", "0".repeat(64)),
         format!("0x{}", "f".repeat(64)),
         format!("0x{}", "q".repeat(64)),
-        "private-test-key-never-print".into(),
     ] {
-        let error = Credentials::new(&key, &case.address, &case.subkey, &config)
+        let error = safe_cex_crypto::starknet::parse_stark_key(&key)
             .err()
             .unwrap();
         assert!(!error.contains(&key));
     }
+    let error =
+        safe_cex_crypto::starknet::derive_from_ethereum("private-test-key-never-print", "1")
+            .err()
+            .unwrap();
+    assert!(!error.contains("private-test-key-never-print"));
+    let (_, credentials) = installed(&case.key, &case);
+    let credentials = credentials.unwrap();
     for address in [
         "0x0",
         "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
@@ -232,17 +240,22 @@ fn invalid_credentials_fail_without_revealing_secret_material() {
         " 0x123",
         "-1",
     ] {
-        assert!(Credentials::new(&case.key, address, &case.subkey, &config).is_err());
+        let (_, refused) = installed(
+            &case.key,
+            &Case {
+                address: address.into(),
+                ..corpus().remove(0)
+            },
+        );
+        assert!(refused.is_err(), "{address}");
     }
-    let credentials = Credentials::new(&case.key, &case.address, &case.subkey, &config).unwrap();
-    assert!(
-        credentials
-            .order(case.now, "BTC-USD-PERP", "BAD", "LIMIT", "1", Some("2"))
-            .is_err()
-    );
-    assert!(
-        credentials
-            .modify(case.now, "BTC-USD-PERP", "BUY", "LIMIT", "1", "2", "")
-            .is_err()
-    );
+    let bad_side = Preimage {
+        market: "BTC-USD-PERP",
+        side: "BAD",
+        kind: "LIMIT",
+        size: "1",
+        price: Some("2"),
+        id: None,
+    };
+    assert!(credentials.order_hash(case.now, &bad_side).is_err());
 }

@@ -26,7 +26,6 @@ fn no_command_or_signing(out: &[Action]) {
             a,
             Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
                 | Action::Sign { .. }
-                | Action::SignPayload { .. }
         )),
         "seed cannot borrow command/signing authority: {out:?}"
     );

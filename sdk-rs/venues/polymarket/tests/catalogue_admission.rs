@@ -132,7 +132,7 @@ fn retry(a: &[Action], now: f64) -> TimerId {
 }
 fn no_work(a: &[Action]) {
     assert!(!a.iter().any(|a| match a {
-        Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. } => true,
+        Action::Http(_) | Action::Sign { .. } => true,
         Action::ManagedHttp(a) => !matches!(a.as_ref(), HttpAction::Cancel { .. }),
         Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) => true,
         _ => false,
