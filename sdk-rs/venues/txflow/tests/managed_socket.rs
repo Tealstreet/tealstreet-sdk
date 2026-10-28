@@ -862,6 +862,7 @@ impl Venue for Pressure {
                 controls: ControlPolicy::None,
                 invalidation: Invalidation::None,
                 subscription_interval_ms: 0.,
+                close_floors: &[],
             })?;
             self.spare = Some(spare);
             for _ in 0..MAX_FEEDS {

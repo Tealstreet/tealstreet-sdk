@@ -167,10 +167,10 @@ fn released(e: &mut Driver, now: f64) -> Vec<HttpRequest> {
 }
 fn no_work(out: &[Action]) {
     assert!(!out.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
-    assert!(!out.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. }
-    )));
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+    );
     assert!(!out.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })

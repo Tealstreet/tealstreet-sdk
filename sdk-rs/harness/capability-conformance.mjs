@@ -145,7 +145,6 @@ export function probeCapabilityCommand(instance, command, label) {
       case 'http': valid = integer(action.request) && ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(action.method)
         && typeof action.url === 'string' && headers(action.headers) && optional('body', (v) => typeof v === 'string'); break;
       case 'sign': valid = integer(action.attempt) && object(action.work) && Number.isFinite(action.timeoutMs); break;
-      case 'signPayload': valid = integer(action.request) && object(action.payload) && Number.isFinite(action.timeoutMs); break;
       case 'wsSend': valid = integer(action.socket) && typeof action.text === 'string'; break;
       case 'wsConnect': valid = integer(action.socket) && typeof action.url === 'string' && optional('headers', headers); break;
       case 'wsClose': valid = integer(action.socket); break;
@@ -190,7 +189,7 @@ export function probeCapabilityCommand(instance, command, label) {
   // This result is ingress evidence, not valid-state positive handler proof.
   const terminal = actions.find((action) => action.op === 'done');
   const evidence = terminal ? (Object.hasOwn(terminal, 'error') ? 'precondition' : 'terminal')
-    : actions.some((action) => ['http', 'sign', 'signPayload', 'wsSend'].includes(action.op)
+    : actions.some((action) => ['http', 'sign', 'wsSend'].includes(action.op)
       || (action.op === 'managedHttp' && ['prepare', 'bind'].includes(action.phase))) ? 'request' : 'deferred';
   return { evidence, actions };
 }

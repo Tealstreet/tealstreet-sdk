@@ -999,9 +999,7 @@ impl Paradex {
                 self.public.seed_retry.succeeded(cx, &false);
                 self.public.live_tickers.finish(cx.store, &mut rows);
                 cx.store.set_tickers(rows);
-                if self.options.public_data_only
-                    || self.options.key.as_ref().is_none_or(String::is_empty)
-                {
+                if self.options.public_data_only || self.options.credentials.is_none() {
                     cx.store.set_orders(vec![]);
                     cx.store.set_positions(vec![]);
                     cx.store.set_balance(Default::default());
@@ -1079,8 +1077,8 @@ impl Paradex {
                 let _ = cx.finish_http_context(&context);
                 self.public_failed(cx, *seed, error);
             }
-            Request::Markets { .. } | Request::Tickers { .. } => {
-                let markets = matches!(request, Request::Markets { .. });
+            seed @ (Request::Markets { .. } | Request::Tickers { .. }) => {
+                let markets = matches!(seed, Request::Markets { .. });
                 cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
                 self.public.seed_retry.failed(cx, markets);
             }

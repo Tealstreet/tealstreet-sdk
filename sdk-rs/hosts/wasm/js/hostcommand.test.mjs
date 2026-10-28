@@ -216,7 +216,6 @@ test('normal disposal settles all callers despite failures in every cleanup adap
   r.transport.clearTimeout = () => { throw new Error('clear failed'); };
   r.transport.dispose = () => { disposed++; throw new Error('dispose failed'); };
   r.host.requests.set(1, { abort() { aborted++; throw new Error('abort failed'); } });
-  r.host.signings.set(2, { controller: { abort() { aborted++; throw new Error('sign abort failed'); } }, timer: 99 });
   r.host.sockets.set(3, { close() { closed++; throw new Error('close failed'); } });
   r.host.timers.set(4, 100);
   const pending = Promise.allSettled([
@@ -231,10 +230,10 @@ test('normal disposal settles all callers despite failures in every cleanup adap
   assert.equal(write.reason.clientOrderId, 'one');
   assert.deepEqual(write.reason.clientOrderIds, ['one']);
   assert.equal(read.reason.outcome, undefined);
-  assert.equal(aborted, 2);
+  assert.equal(aborted, 1);
   assert.equal(closed, 1);
   assert.equal(disposed, 1);
-  for (const key of ['commands', 'requests', 'signings', 'sockets', 'timers']) assert.equal(r.host[key].size, 0);
+  for (const key of ['commands', 'requests', 'sockets', 'timers']) assert.equal(r.host[key].size, 0);
   r.advance(DEFAULT_COMMAND_TIMEOUT_MS);
   assert.equal(r.host.dead, false);
   await assert.rejects(r.host.command({ op: 'placeOrders' }), (error) => error.code === 'ENGINE_DISPOSED' && error.outcome === undefined);

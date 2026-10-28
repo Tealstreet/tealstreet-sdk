@@ -150,7 +150,6 @@ fn no_outbound(actions: &[Action]) {
         a,
         Action::Http(_)
             | Action::Sign { .. }
-            | Action::SignPayload { .. }
             | Action::SignedOutbound { .. }
             | Action::WsSend { .. }
             | Action::WsConnect { .. }

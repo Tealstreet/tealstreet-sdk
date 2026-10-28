@@ -132,7 +132,9 @@ export const DEFAULT_ERROR_PATTERNS: ErrorPattern[] = [
     patterns: [
       'rate limit',
       'too many requests',
-      '429',
+      // A bare status number only, never digits inside an id, price or amount:
+      // a substring '429' read client order 4294967295 as a rate limit.
+      /(?<![\w.])429(?![\w.])/,
       'request limit',
       'throttle',
       'exceed.*limit',
@@ -165,8 +167,7 @@ export const DEFAULT_ERROR_PATTERNS: ErrorPattern[] = [
     patterns: [
       'service unavailable',
       'maintenance',
-      '503',
-      '502',
+      /(?<![\w.])50[23](?![\w.])/,
       'temporarily unavailable',
       'server error',
       'internal error',
@@ -287,12 +288,14 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
     {
       category: 'auth_invalid',
       severity: 'critical',
-      patterns: ['-2014', '-2015', 'API-key format invalid'],
+      // -1022 is an invalid signature, not a clock error (-1021): the engine
+      // classifies it authInvalid after its one re-signed resend.
+      patterns: ['-2014', '-2015', '-1022', 'API-key format invalid'],
     },
     {
       category: 'time_sync',
       severity: 'warning',
-      patterns: ['-1021', '-1022', 'Timestamp for this request'],
+      patterns: ['-1021', 'Timestamp for this request'],
     },
     {
       category: 'rate_limit',
@@ -314,9 +317,31 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
   ],
   okx: [
     {
+      // Codes as the engine words them ("OKX 50111: ...") or labelled in a raw
+      // body ("code":"50111"), never a bare number a BTC price such as 50111.5
+      // contains. Each code sits in the category of the OKX CodeTable.
       category: 'auth_invalid',
       severity: 'critical',
-      patterns: ['50111', '50112', '50113', 'Invalid sign', 'Invalid OK-ACCESS-KEY', "API key doesn't exist"],
+      patterns: [
+        /\b(?:OKX|code"?)[=:\s]+"?(?:50101|50103|50104|50105|50111|50113|50114|50119)\b/i,
+        'Invalid sign',
+        'Invalid OK-ACCESS-KEY',
+        "API key doesn't exist",
+      ],
+    },
+    {
+      // 50030 (no permission for one API) gets no code row: like Bybit 10005 it
+      // is one endpoint's scope, which Rust startup does not treat as a bad key.
+      category: 'auth_permissions',
+      severity: 'critical',
+      patterns: [/\b(?:OKX|code"?)[=:\s]+"?(?:50100|50110|50120)\b/i],
+    },
+    {
+      // 50102 (expired) and 50112 (invalid) OK-ACCESS-TIMESTAMP: a clock to
+      // resync, not a bad key.
+      category: 'time_sync',
+      severity: 'warning',
+      patterns: [/\b(?:OKX|code"?)[=:\s]+"?(?:50102|50112)\b/i],
     },
   ],
   hyperliquid: [

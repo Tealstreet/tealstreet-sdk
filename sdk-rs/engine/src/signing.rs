@@ -41,7 +41,7 @@ pub struct IdentitySetupPolicy {
 }
 
 /// `Required` keeps today's behaviour exactly. `ScalarOnly` (primary only,
-/// declared `Secp256k1Digest`) lets trusted local setup install a signing-only
+/// declared `Secp256k1Digest` or `StarkDigest`) lets trusted local setup install a signing-only
 /// primary whose credential is explicitly absent; injected identities never are.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -286,8 +286,10 @@ impl CredentialSetupPolicy {
         let Some(policy) = self.primary.filter(|policy| scalar_only(Some(*policy))) else {
             return Ok(());
         };
-        if policy.signing_algorithm != Some(Algorithm::Secp256k1Digest)
-            || !policy.signing.is_required()
+        if !matches!(
+            policy.signing_algorithm,
+            Some(Algorithm::Secp256k1Digest | Algorithm::StarkDigest)
+        ) || !policy.signing.is_required()
         {
             return Err(SignError::InvalidRequest);
         }
@@ -360,6 +362,35 @@ pub enum PrimaryLogin {
 #[serde(transparent)]
 pub struct KeyRef(pub String);
 
+/// One trusted local provider's setup lifetime. Not Clone, Copy or comparable:
+/// only the installed provider can present it, so a seal cannot outlive it.
+#[derive(Debug)]
+pub struct Incarnation(u64);
+impl Incarnation {
+    /// Process-wide unique; refuses permanently rather than reuse a value.
+    pub fn fresh() -> Result<Self, SignError> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self::allocate(&NEXT)
+    }
+    fn allocate(next: &std::sync::atomic::AtomicU64) -> Result<Self, SignError> {
+        next.try_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |value| value.checked_add(1),
+        )
+        .map(Self)
+        .map_err(|_| SignError::Unavailable)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SealedPublicKey {
+    signing: KeyRef,
+    algorithm: Algorithm,
+    bytes: [u8; 32],
+    incarnation: u64,
+}
+
 /// A venue's non-sensitive references to credential presentation and signing.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -385,6 +416,10 @@ pub struct Identity {
     /// trusted local setup, never transported: a serialized copy loses it.
     #[serde(skip)]
     credential_absent: bool,
+    /// The trusted local provider's public key for `signing`, sealed at
+    /// setup and never transported: a serialized copy loses it.
+    #[serde(skip)]
+    sealed_public_key: Option<Box<SealedPublicKey>>,
     #[cfg(feature = "address-nonce")]
     #[serde(skip)]
     pub(crate) address: crate::engine::address_nonce_setup::AddressCapability,
@@ -403,6 +438,7 @@ impl Identity {
             extra: Default::default(),
             signing_not_configured: false,
             credential_absent: false,
+            sealed_public_key: None,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
             #[cfg(feature = "nonce-handoff")]
@@ -449,6 +485,7 @@ impl Identity {
     #[inline]
     pub fn set_signing_ref(&mut self, signing: Option<KeyRef>) {
         self.signing = signing;
+        self.sealed_public_key = None;
         #[cfg(feature = "nonce-handoff")]
         {
             self.nonce_owner = None;
@@ -456,6 +493,53 @@ impl Identity {
         #[cfg(feature = "address-nonce")]
         {
             self.address = Default::default();
+        }
+    }
+
+    /// Trusted local setup only (credential-only-scoped): seals the concrete
+    /// provider's own public-key answer for the installed signing ref.
+    /// The caller validates `bytes` as a canonical public key of `algorithm`.
+    pub fn seal_public_key(
+        &mut self,
+        algorithm: Algorithm,
+        bytes: [u8; 32],
+        incarnation: &Incarnation,
+    ) -> Result<(), SignError> {
+        let signing = self.signing_ref()?.clone();
+        self.sealed_public_key = Some(Box::new(SealedPublicKey {
+            signing,
+            algorithm,
+            bytes,
+            incarnation: incarnation.0,
+        }));
+        Ok(())
+    }
+
+    fn sealed_under(&self, installed: Option<&Incarnation>) -> Result<&SealedPublicKey, SignError> {
+        let signing = self.signing_ref()?;
+        match &self.sealed_public_key {
+            Some(sealed)
+                if sealed.signing == *signing
+                    && installed.is_some_and(|current| current.0 == sealed.incarnation) =>
+            {
+                Ok(sealed)
+            }
+            _ => Err(SignError::Unsupported),
+        }
+    }
+
+    /// The sealed public key while its ref is current and `installed`, the
+    /// engine's provider, is the trusted local provider that sealed it.
+    pub fn public_key_sealed_by(
+        &self,
+        algorithm: Algorithm,
+        installed: Option<&Incarnation>,
+    ) -> Result<[u8; 32], SignError> {
+        let sealed = self.sealed_under(installed)?;
+        if sealed.algorithm == algorithm {
+            Ok(sealed.bytes)
+        } else {
+            Err(SignError::Unsupported)
         }
     }
 
@@ -516,8 +600,10 @@ impl Identity {
         credential: &crate::request_context::Credential,
         write: Option<&crate::request_context::Credential>,
     ) -> bool {
+        // A trusted ScalarOnly primary's only authority is its signing ref; for
+        // every credential-present identity `authority_ref()` is the credential.
         credential.slot == crate::CredentialSlot::Primary
-            && credential.reference == self.credential
+            && credential.reference == *self.authority_ref()
             && self.validate_credential().is_ok()
             && write.is_none_or(|write| write == credential && self.signing_ref().is_ok())
     }
@@ -1111,6 +1197,11 @@ pub trait Signer: ProviderBounds {
     ) -> Result<crate::nonce::handoff::LegacyNonceProof, SignError> {
         Err(SignError::Unsupported)
     }
+    /// A trusted local provider's setup lifetime. Every other provider, and any
+    /// wrapper around a local one, has none, so no setup seal reads under it.
+    fn incarnation(&self) -> Option<&Incarnation> {
+        None
+    }
 }
 pub type Provider = Arc<dyn Signer>;
 
@@ -1148,6 +1239,84 @@ macro_rules! redacted_debug {
     )+};
 }
 redacted_debug!(PayloadPart, Operation, SignRequest, SignResult);
+
+#[cfg(test)]
+mod sealed_public_key_tests {
+    use super::*;
+
+    fn sealed(incarnation: &Incarnation) -> Identity {
+        let mut identity = Identity::new(KeyRef(String::new()), Some(KeyRef("stark".into())));
+        identity
+            .seal_public_key(Algorithm::StarkDigest, [7; 32], incarnation)
+            .unwrap();
+        identity
+    }
+
+    #[test]
+    fn a_seal_reads_only_for_its_provider_ref_and_algorithm_and_survives_a_clone() {
+        let a = Incarnation::fresh().unwrap();
+        let identity = sealed(&a);
+        assert_eq!(
+            identity.public_key_sealed_by(Algorithm::StarkDigest, Some(&a)),
+            Ok([7; 32])
+        );
+        assert_eq!(
+            identity
+                .clone()
+                .public_key_sealed_by(Algorithm::StarkDigest, Some(&a)),
+            Ok([7; 32])
+        );
+        assert_eq!(
+            identity.public_key_sealed_by(Algorithm::Secp256k1Digest, Some(&a)),
+            Err(SignError::Unsupported)
+        );
+        // Another provider under the same ref text, or none, never reads it.
+        let b = Incarnation::fresh().unwrap();
+        for installed in [Some(&b), None] {
+            assert_eq!(
+                identity.public_key_sealed_by(Algorithm::StarkDigest, installed),
+                Err(SignError::Unsupported)
+            );
+        }
+    }
+
+    #[test]
+    fn incarnations_are_never_shared_and_exhaustion_refuses_for_good() {
+        let (a, b) = (Incarnation::fresh().unwrap(), Incarnation::fresh().unwrap());
+        assert_ne!(a.0, b.0);
+        let next = std::sync::atomic::AtomicU64::new(u64::MAX - 1);
+        assert_eq!(Incarnation::allocate(&next).unwrap().0, u64::MAX - 1);
+        for _ in 0..2 {
+            assert_eq!(
+                Incarnation::allocate(&next).map(|_| ()),
+                Err(SignError::Unavailable)
+            );
+        }
+    }
+
+    #[test]
+    fn a_new_signing_ref_or_a_transported_copy_has_no_seal() {
+        let a = Incarnation::fresh().unwrap();
+        let mut identity = sealed(&a);
+        let copy: Identity =
+            serde_json::from_str(&serde_json::to_string(&identity).unwrap()).unwrap();
+        assert_eq!(
+            copy.public_key_sealed_by(Algorithm::StarkDigest, Some(&a)),
+            Err(SignError::Unsupported)
+        );
+        // Even the same ref text re-set clears it: A -> B -> A never resurrects.
+        identity.set_signing_ref(Some(KeyRef("stark".into())));
+        assert_eq!(
+            identity.public_key_sealed_by(Algorithm::StarkDigest, Some(&a)),
+            Err(SignError::Unsupported)
+        );
+        let mut unsigned = Identity::new(KeyRef("api".into()), None);
+        assert_eq!(
+            unsigned.seal_public_key(Algorithm::StarkDigest, [7; 32], &a),
+            Err(SignError::MissingKey)
+        );
+    }
+}
 
 #[cfg(test)]
 mod setup_field_policy_tests {
@@ -1203,6 +1372,7 @@ mod setup_field_policy_tests {
             extra: Default::default(),
             signing_not_configured: false,
             credential_absent: false,
+            sealed_public_key: None,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
             #[cfg(feature = "nonce-handoff")]
@@ -1260,6 +1430,7 @@ mod setup_field_policy_tests {
                 extra: Default::default(),
                 signing_not_configured: false,
                 credential_absent: false,
+                sealed_public_key: None,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
                 #[cfg(feature = "nonce-handoff")]
@@ -1283,6 +1454,7 @@ mod setup_field_policy_tests {
                 extra: Default::default(),
                 signing_not_configured: false,
                 credential_absent: false,
+                sealed_public_key: None,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
                 #[cfg(feature = "nonce-handoff")]
@@ -1475,6 +1647,120 @@ mod setup_field_policy_tests {
                     ]
                     .map(|bytes| PayloadPart::Bytes { bytes })
             );
+        }
+    }
+}
+
+/// Test fixture: a ScalarOnly primary marked through trusted setup's own
+/// `install_scalar_only_primary`, never by setting the private flag.
+#[cfg(test)]
+pub(crate) mod scalar_only_fixture {
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    use super::*;
+
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(crate) fn trusted_scalar_only(
+        primary: Identity,
+        secondary: Option<Identity>,
+    ) -> Identities {
+        let mut identities = Identities {
+            primary: Some(primary),
+            secondary,
+        };
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                source: PrimarySource::ScalarOnly,
+                signing_algorithm: Some(Algorithm::Secp256k1Digest),
+                ..Default::default()
+            }),
+            secondary: None,
+        }
+        .install_scalar_only_primary(&mut identities)
+        .expect("trusted ScalarOnly setup");
+        assert!(identities.primary.as_ref().unwrap().credential_absent);
+        identities
+    }
+}
+
+#[cfg(test)]
+mod scalar_only_session_root_tests {
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    mod gated {
+        use super::super::scalar_only_fixture::trusted_scalar_only;
+        use super::super::*;
+        use crate::CredentialSlot;
+        use crate::request_context::Credential;
+
+        fn scalar(signing: &str) -> Identity {
+            let mut identity = Identity::new(KeyRef(String::new()), Some(KeyRef(signing.into())));
+            identity.passphrase = Some(KeyRef("scalar.passphrase".into()));
+            identity
+                .extra
+                .insert(ExtraKey::L1Wallet, KeyRef("scalar.extra".into()));
+            trusted_scalar_only(identity, None).primary.unwrap()
+        }
+        fn root(slot: CredentialSlot, reference: &str) -> Credential {
+            Credential {
+                slot,
+                reference: KeyRef(reference.into()),
+            }
+        }
+
+        #[test]
+        fn a_scalar_only_primary_binds_its_authority_as_the_session_root() {
+            let identity = scalar("scalar.a");
+            let session = root(CredentialSlot::Primary, "scalar.a");
+            assert!(identity.accepts_session_root(&session, None));
+            assert!(identity.accepts_session_root(&session, Some(&session)));
+        }
+
+        #[test]
+        fn a_session_bound_to_another_signing_ref_never_binds_a_rebuilt_primary() {
+            let identity = scalar("scalar.b");
+            let session = root(CredentialSlot::Primary, "scalar.a");
+            assert!(!identity.accepts_session_root(&session, None));
+            assert!(!identity.accepts_session_root(&session, Some(&session)));
+        }
+
+        #[test]
+        fn the_empty_credential_field_never_binds_through_the_fallback() {
+            let identity = scalar("scalar.a");
+            let empty = root(CredentialSlot::Primary, "");
+            assert!(!identity.accepts_session_root(&empty, None));
+            assert!(!identity.accepts_session_root(&empty, Some(&empty)));
+        }
+
+        #[test]
+        fn passphrase_extra_secondary_and_mismatched_write_refs_never_bind() {
+            let identity = scalar("scalar.a");
+            for reference in ["scalar.passphrase", "scalar.extra"] {
+                let session = root(CredentialSlot::Primary, reference);
+                assert!(
+                    !identity.accepts_session_root(&session, None),
+                    "{reference}"
+                );
+            }
+            let secondary = root(CredentialSlot::Secondary, "scalar.a");
+            assert!(!identity.accepts_session_root(&secondary, None));
+            let session = root(CredentialSlot::Primary, "scalar.a");
+            let write = root(CredentialSlot::Primary, "scalar.extra");
+            assert!(!identity.accepts_session_root(&session, Some(&write)));
+        }
+
+        /// PRESERVATION: a credential-present identity still binds only its
+        /// credential; its signing ref cannot stand in.
+        #[test]
+        fn an_ordinary_identity_still_refuses_its_signing_ref_as_the_root() {
+            let identity = Identity::new(
+                KeyRef("ordinary.credential".into()),
+                Some(KeyRef("ordinary.signing".into())),
+            );
+            assert!(
+                !identity
+                    .accepts_session_root(&root(CredentialSlot::Primary, "ordinary.signing"), None)
+            );
+            let credential = root(CredentialSlot::Primary, "ordinary.credential");
+            assert!(identity.accepts_session_root(&credential, Some(&credential)));
         }
     }
 }

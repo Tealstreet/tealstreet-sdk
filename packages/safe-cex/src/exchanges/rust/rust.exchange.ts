@@ -102,6 +102,7 @@ import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { mapAsterDEXSignerSetup } from './asterdexSignerSetup';
 import { mapHyperliquidSignerSetup } from './hyperliquidSignerSetup';
+import { mapParadexSignerSetup } from './paradexSignerSetup';
 import { assertBetaAccount, BETA_VENUES, isBetaVenue } from './betaVenues';
 import {
   deriveBridgeConstruction,
@@ -114,7 +115,6 @@ import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigni
 import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
 import { mapMEXCSignerSetup } from './mexcSignerSetup';
-import { paradexSigningTransport } from './paradex.signing';
 import {
   IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
   inProcessPortPair,
@@ -553,6 +553,14 @@ export class RustEngineExchange extends BaseExchange {
         setupError = error;
       }
     }
+    let paradexSetup: ExchangeOptions | undefined;
+    if (bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'paradex') {
+      try { paradexSetup = mapParadexSignerSetup(options); }
+      catch (error) {
+        if (!(error instanceof ExchangeError)) throw error;
+        setupError = error;
+      }
+    }
     if (bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'asterdex') {
       try {
         aster = mapAsterDEXSignerSetup(options);
@@ -579,7 +587,8 @@ export class RustEngineExchange extends BaseExchange {
                   options.omniKeySeed || undefined,
                 )
               : new LocalSignerSetup(
-                  hyperliquidSetup ?? (deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options),
+                  hyperliquidSetup ?? paradexSetup
+                    ?? (deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options),
                   deriveSignerSetupPolicy(exchangeName),
                 )
         : undefined;
@@ -884,17 +893,12 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    let transport = createEngineTransport(
+    const transport = createEngineTransport(
       this.name,
       this.options,
       (transportFactory ?? synchronizedEngineTransport)(),
       this.signerSetup,
     );
-    if (this.bridgeConstruction.payloadSigning) {
-      transport = paradexSigningTransport(this.options, transport);
-      if (this.options.payloadSigner)
-        transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
-    }
     const engine = constructEngine(
       WasmEngine,
       this.name,
