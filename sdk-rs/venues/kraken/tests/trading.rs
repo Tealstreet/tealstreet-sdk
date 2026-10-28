@@ -1465,6 +1465,7 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
     reply(&mut e, &old, 200, OPEN);
     let fresh = http(&mut e, "openorders");
     assert_ne!(old.id, fresh.id);
+    reply(&mut e, &old, 200, OPEN);
     refused(
         &mut e,
         Command::PlaceOrders {
@@ -1474,6 +1475,7 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
         83,
     );
     reply(&mut e, &fresh, 200, OPEN);
+    reply(&mut e, &old, 200, OPEN);
     command(
         &mut e,
         Command::PlaceOrders {
