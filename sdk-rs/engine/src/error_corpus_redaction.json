@@ -15,6 +15,7 @@
       { "raw": "{\"code\":\"50110\",\"msg\":\"Your IP 203.0.113.7 is not included in your API key's IP whitelist.\"}", "redacted": "{\"code\":\"50110\",\"msg\":\"Your IP <redacted> is not included in your API key's IP whitelist.\"}" },
       { "raw": "{\"code\":40018,\"msg\":\"Invalid IP 2001:db8::7 for this key\"}", "redacted": "{\"code\":40018,\"msg\":\"Invalid IP <redacted> for this key\"}" },
       { "raw": "{\"error\":\"order 3f2504e0-4f89-11d3-9a0c-0305e82c3301 not found\"}", "redacted": "{\"error\":\"order <redacted> not found\"}" },
+      { "raw": "{\"error\":\"orderId-3f2504e0-4f89-11d3-9a0c-0305e82c3301-dead not found\"}", "redacted": "{\"error\":\"orderId-<redacted>-dead not found\"}" },
       { "raw": "{\"error\":\"account 7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV not funded\"}", "redacted": "{\"error\":\"account <redacted> not funded\"}" },
       { "raw": "{\"error\":\"bad sig 3045022100aabbccddeeff00112233445566778899aabbccddeeff\"}", "redacted": "{\"error\":\"bad sig <redacted>\"}" }
     ],
