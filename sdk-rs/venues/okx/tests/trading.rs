@@ -1490,9 +1490,34 @@ fn trading_failures_are_classified_without_changing_their_text() {
     for (body, kind, outcome, code) in [
         (
             r#"{"code":"1","msg":"","data":[{"ordId":"","sCode":"51008","sMsg":"Insufficient margin"}]}"#,
-            Some(ErrorKind::Rejected),
+            Some(ErrorKind::InsufficientBalance),
             Some(Outcome::Rejected),
             Some("51008"),
+        ),
+        // The table, not a local ladder, gives these their kinds.
+        (
+            r#"{"code":"50101","msg":"APIKey does not match current environment","data":[]}"#,
+            Some(ErrorKind::AuthInvalid),
+            Some(Outcome::Rejected),
+            Some("50101"),
+        ),
+        (
+            r#"{"code":"50030","msg":"Illegal operation","data":[]}"#,
+            Some(ErrorKind::AuthPermission),
+            Some(Outcome::Rejected),
+            Some("50030"),
+        ),
+        (
+            r#"{"code":"50016","msg":"Parameter does not match","data":[]}"#,
+            Some(ErrorKind::InvalidInput),
+            Some(Outcome::Rejected),
+            Some("50016"),
+        ),
+        (
+            r#"{"code":"1","msg":"","data":[{"ordId":"","sCode":"51006","sMsg":"Order price out of the limit"}]}"#,
+            Some(ErrorKind::InvalidInput),
+            Some(Outcome::Rejected),
+            Some("51006"),
         ),
         (
             r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,

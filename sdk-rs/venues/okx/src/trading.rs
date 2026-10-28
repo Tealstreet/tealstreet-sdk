@@ -32,8 +32,36 @@ const SERIAL: SerialCall = SerialCall {
 /// 50xxx are documented pre-processing refusals. Unavailable, timeout, busy and
 /// system errors prove nothing, and an unlisted code is not proof of refusal.
 pub(crate) const CODES: CodeTable = CodeTable {
+    // Rows match first to last, so the exact codes below win over the 51xxx range.
     rows: &[
         refused(51000, ErrorKind::InvalidInput),
+        // Balance and margin refusals (place, amend, and account-wide).
+        refused(51008, ErrorKind::InsufficientBalance),
+        refused(51119, ErrorKind::InsufficientBalance),
+        refused(51127, ErrorKind::InsufficientBalance),
+        refused(51131, ErrorKind::InsufficientBalance),
+        refused(51502, ErrorKind::InsufficientBalance),
+        refused(59103, ErrorKind::InsufficientBalance),
+        refused(59108, ErrorKind::InsufficientBalance),
+        refused(59200, ErrorKind::InsufficientBalance),
+        // Order rules the order itself broke: unknown instrument, price out of
+        // its limit, size below the minimum or off the lot size, market order
+        // value or amount over its cap.
+        refused(51001, ErrorKind::InvalidInput),
+        refused(51006, ErrorKind::InvalidInput),
+        refused(51007, ErrorKind::InvalidInput),
+        refused(51020, ErrorKind::InvalidInput),
+        refused(51100, ErrorKind::InvalidInput),
+        refused(51116, ErrorKind::InvalidInput),
+        refused(51118, ErrorKind::InvalidInput),
+        refused(51120, ErrorKind::InvalidInput),
+        refused(51121, ErrorKind::InvalidInput),
+        refused(51122, ErrorKind::InvalidInput),
+        refused(51137, ErrorKind::InvalidInput),
+        refused(51138, ErrorKind::InvalidInput),
+        refused(51201, ErrorKind::InvalidInput),
+        refused(51202, ErrorKind::InvalidInput),
+        refused(51203, ErrorKind::InvalidInput),
         Row {
             key: Key::Range(51000, 51999),
             verdict: Verdict::Refused(ErrorKind::Rejected),
@@ -77,7 +105,7 @@ const fn refused(code: i64, kind: ErrorKind) -> Row {
         only: None,
     }
 }
-fn native<'a>(code: &'a str, message: &'a str) -> Native<'a> {
+pub(crate) fn native<'a>(code: &'a str, message: &'a str) -> Native<'a> {
     Native {
         code: code.parse().map_or(NativeCode::Text(code), NativeCode::Int),
         message,
@@ -1430,15 +1458,22 @@ pub(crate) fn trade_reconciliation(
     ReconciliationData::new(request.path.to_owned())
 }
 
-/// A definitive OKX refusal, classified by its code or HTTP status.
+/// A definitive OKX refusal. Its kind comes from the table (the native code,
+/// else a documented status row), `rejected` when neither names one.
 fn rejection(message: String, code: Option<&str>, status: u16) -> VenueError {
-    let kind = match (code, status) {
-        (Some("50011" | "50061"), _) | (_, 429) => ErrorKind::RateLimited,
-        (Some("50111" | "50113" | "50114" | "50119"), _) | (_, 401) => ErrorKind::AuthInvalid,
-        (Some("50110" | "50120"), _) | (_, 403) => ErrorKind::AuthPermission,
-        (Some("50014" | "51000"), _) => ErrorKind::InvalidInput,
-        _ => ErrorKind::Rejected,
+    let by_code = code.filter(|code| !code.is_empty()).and_then(|code| {
+        CODES
+            .verdict(&native(code, ""), safe_cex_engine::classify::Intent::Place)
+            .kind()
+    });
+    let by_status = || {
+        CODES
+            .status
+            .iter()
+            .find(|(documented, _)| *documented == status)
+            .and_then(|(_, verdict)| verdict.kind())
     };
+    let kind = by_code.or_else(by_status).unwrap_or(ErrorKind::Rejected);
     // System errors and busy replies do not prove the venue refused the write.
     let outcome = if matches!(code, Some("50001" | "50013" | "50026")) {
         Outcome::Unknown
@@ -1605,7 +1640,28 @@ mod code_table_tests {
     fn exact_rows_win_over_their_range_and_unlisted_codes_prove_nothing() {
         let verdict = |code| CODES.verdict(&native(code, "native"), Intent::Place);
         assert_eq!(verdict("51000"), Verdict::Refused(ErrorKind::InvalidInput));
-        assert_eq!(verdict("51008"), Verdict::Refused(ErrorKind::Rejected));
+        assert_eq!(
+            verdict("51008"),
+            Verdict::Refused(ErrorKind::InsufficientBalance)
+        );
+        for code in ["51119", "51127", "51131", "51502", "59200"] {
+            assert_eq!(
+                verdict(code),
+                Verdict::Refused(ErrorKind::InsufficientBalance),
+                "{code}"
+            );
+        }
+        for code in [
+            "51001", "51006", "51020", "51121", "51122", "51137", "51203",
+        ] {
+            assert_eq!(
+                verdict(code),
+                Verdict::Refused(ErrorKind::InvalidInput),
+                "{code}"
+            );
+        }
+        // State and risk refusals in the range stay plain rejections.
+        assert_eq!(verdict("51004"), Verdict::Refused(ErrorKind::Rejected));
         assert_eq!(verdict("51999"), Verdict::Refused(ErrorKind::Rejected));
         assert_eq!(verdict("50011"), Verdict::Refused(ErrorKind::RateLimited));
         assert_eq!(
