@@ -624,7 +624,10 @@ fn account_snapshot_started_during_settings_write_cannot_undo_acknowledgement() 
             MarginType::Isolated,
         ),
     ] {
-        let (mut e, socket) = ready_unattributed();
+        // The private socket's first open is the resync this race needs.
+        let mut opts = options();
+        opts.testnet = true;
+        let (mut e, socket) = ready_unopened_meta(opts, META);
         e.handle(NOW, Event::Command(command));
         let nonce = http(&mut e, "nextNonce");
         reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);

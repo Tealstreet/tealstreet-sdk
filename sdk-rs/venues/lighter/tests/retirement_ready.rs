@@ -2,6 +2,9 @@
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{HttpOwnerRetirement, Plan, Preflight, ReconciliationData};
+use safe_cex_engine::socket_lifecycle::{
+    EncodedBatch, FeedId, Interest, LifecycleEvent, SocketCapabilities, SocketError,
+};
 use safe_cex_engine::{
     Action, Command, Cx, Engine, HttpRequest, Notice, Response, SocketId, TimerId, Venue,
     VenueError,
@@ -99,6 +102,30 @@ impl Venue for ReadyFirst {
     }
     fn guard_order_mutations(&self) -> bool {
         false
+    }
+    fn managed_sockets() -> bool {
+        Lighter::managed_sockets()
+    }
+    fn socket_capabilities() -> SocketCapabilities {
+        Lighter::socket_capabilities()
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        self.inner.on_socket_event(cx, event)
+    }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: FeedId,
+        subscribe: bool,
+        interests: &[Interest],
+        emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+    ) -> Result<(), SocketError> {
+        self.inner
+            .encode_socket_interests(store, feed, subscribe, interests, emit)
     }
 }
 fn http(engine: &mut Engine<ReadyFirst>, path: &str) -> HttpRequest {

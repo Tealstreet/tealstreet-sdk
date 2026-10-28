@@ -6,7 +6,6 @@ use safe_cex_engine::de::number;
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -75,34 +74,13 @@ pub struct Execution {
     timestamp: f64,
     fill: Fill,
 }
-struct Connection {
-    socket: Option<SocketId>,
-    open: bool,
+#[derive(Default)]
+pub(crate) struct Connection {
+    pub(crate) stream: crate::Connection,
     connected_at: f64,
     last_payload: Option<f64>,
     last_recovery: Option<f64>,
     recovery_started: Option<f64>,
-    supervisor: Supervisor,
-}
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            connected_at: 0.0,
-            last_payload: None,
-            last_recovery: None,
-            recovery_started: None,
-            supervisor: Supervisor::new(Config {
-                connect_timeout_ms: 180_000.0,
-                idle_timeout_ms: 180_000.0,
-                ping_interval_ms: Some(10_000.0),
-                backoff_base_ms: 1_000.0,
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
-        }
-    }
 }
 struct OrderBatch {
     revision: u64,
@@ -116,7 +94,7 @@ pub struct Account {
     pub identity: Option<safe_cex_engine::signing::Identity>,
     setting_epochs: HashMap<String, u64>,
     pub records: HashMap<String, Order>,
-    connection: Connection,
+    pub(crate) connection: Connection,
     started: bool,
     revision: u64,
     position_revision: HashMap<String, u64>,
@@ -728,8 +706,8 @@ impl Lighter {
             return;
         }
         self.account.account_index = Some(account);
-        if self.account.identity.is_some() {
-            self.connect_private(cx);
+        if self.account.identity.is_some() && self.account.connection.stream.idle() {
+            self.open_feed(cx, crate::Channel::Private);
         }
         self.refresh_account(cx);
         self.refresh_orders(cx);
@@ -951,16 +929,6 @@ impl Lighter {
             self.account.heal = Some(cx.set_timer(500.0));
         }
     }
-    fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.connection.open = false;
-        self.account.connection.supervisor.connecting(cx);
-        self.account.connection.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(self.ws_url())
-                    .channel(safe_cex_engine::SocketChannel::Private),
-            ),
-        );
-    }
     fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let account = self.account.account_index.unwrap();
         cx.send(
@@ -986,12 +954,7 @@ impl Lighter {
             }
         }
     }
-    pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
-        if self.account.connection.socket != Some(socket) {
-            return false;
-        }
-        self.account.connection.open = true;
-        self.account.connection.supervisor.opened(cx);
+    pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         self.account.connection.connected_at = cx.now;
         self.account.connection.last_payload = None;
         self.account.connection.last_recovery = None;
@@ -1018,35 +981,21 @@ impl Lighter {
             };
             self.request_backfill(cx, run);
         }
-        true
     }
-    pub(crate) fn account_close(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        socket: SocketId,
-        code: u16,
-    ) -> bool {
-        if self.account.connection.socket != Some(socket) {
-            return false;
-        }
-        self.account.connection.open = false;
-        self.account.connection.socket = None;
+    /// The engine has closed the epoch and owns the retry.
+    pub(crate) fn account_retired(&mut self, cx: &mut Cx<'_, Pending>) {
         let connection = &self.account.connection;
         self.arm_outage(connection.last_payload.unwrap_or(connection.connected_at));
-        let minimum = if code == 1013 { 30_000.0 } else { 0.0 };
-        self.account.connection.supervisor.retry_after(cx, minimum);
         self.trade_stream_lost(cx);
-        true
     }
     // Payload staleness is checked on the same 10s cadence as the heartbeat.
-    fn private_heartbeat(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+    pub(crate) fn private_heartbeat(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let connection = &self.account.connection;
         if connection
             .recovery_started
             .is_some_and(|at| cx.now - at >= 20_000.0)
         {
-            cx.close(socket);
-            self.account_close(cx, socket, 1006);
+            self.retire(cx, crate::Channel::Private);
             return;
         }
         let payload_age = cx.now - connection.last_payload.unwrap_or(connection.connected_at);
@@ -1074,32 +1023,6 @@ impl Lighter {
         );
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.account.connection.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => {}
-            Tick::Reconnect => {
-                self.connect_private(cx);
-                return true;
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.close(socket);
-                    self.account_close(cx, socket, 1006);
-                }
-                return true;
-            }
-            Tick::Ping => {
-                if let Some(socket) = self
-                    .account
-                    .connection
-                    .socket
-                    .filter(|_| self.account.connection.open)
-                {
-                    self.private_heartbeat(cx, socket);
-                }
-                return true;
-            }
-            Tick::Handled => return true,
-        }
         if self.account.sync == Some(timer) {
             self.account.sync = Some(cx.set_poll_timer(2_000.0));
             self.refresh_account(cx);
@@ -2245,10 +2168,9 @@ impl Lighter {
         socket: SocketId,
         text: &str,
     ) -> bool {
-        if self.account.connection.socket != Some(socket) {
+        if self.account.connection.stream.socket != Some(socket) {
             return false;
         }
-        self.account.connection.supervisor.received(cx.now);
         let Ok(frame) = serde_json::from_str::<Frame<'_>>(text) else {
             cx.notice(
                 Level::Warn,

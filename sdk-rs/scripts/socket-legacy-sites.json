@@ -54,13 +54,6 @@
   "venues/kucoin/src/spot/mod.rs": {
     "28a064fa5dcf2d763ad4d0384ff20ec72c72c2117c5ee7c55907f7da532066ed": 1
   },
-  "venues/lighter/src/account.rs": {
-    "32c99b76d67bb3a1e28961ec12ac6c84fcebf54acd8370f7a623cc9c4b97368c": 1
-  },
-  "venues/lighter/src/lib.rs": {
-    "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2,
-    "9c4c61bb86514a42d66f7759e997851b94250fc5a10ae1cfd919af3324c07cba": 1
-  },
   "venues/mexc/src/account.rs": {
     "a11771673f092a01c7fac3d204d1c1f3dd8424214a324efce5390248d48ecfbe": 1
   },
