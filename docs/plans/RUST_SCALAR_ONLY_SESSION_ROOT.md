@@ -11,7 +11,7 @@ zs5e83; see "Q1 final" in RUST_PARADEX_REQUEST_CONTEXT.md.
 `Identity::accepts_session_root` (`engine/src/signing.rs`) binds a credential-bearing
 login Session and its serial root to the installed Primary identity by comparing
 `credential.reference == self.credential`. For a trusted ScalarOnly primary
-(`credential_absent`, as Paradex's Stark key and Lighter's key are), `credential` is
+(`credential_absent`, as Paradex's Stark key is), `credential` is
 empty, and the only authority is the signing ref (`authority_ref()`).
 `Selection::authority` already binds that ref for ScalarOnly Mutations. So a
 ScalarOnly login Session, which `Sessions::open` admits with that non-empty ref,
