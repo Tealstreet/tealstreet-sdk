@@ -375,6 +375,7 @@ describe('venue codes land in the category the engine classifies them by', () =>
   it('reads OKX 50112 as clock skew and the auth and permission codes by their CodeTable kind', () => {
     const match = matcher('okx');
     expect(match('OKX 50112: Invalid OK-ACCESS-TIMESTAMP')).toBe('time_sync');
+    expect(match('OKX 50102: Timestamp request expired')).toBe('time_sync');
     for (const code of ['50101', '50103', '50104', '50105', '50111', '50113', '50114', '50119']) {
       expect(match(`OKX ${code}: refused`)).toBe('auth_invalid');
     }

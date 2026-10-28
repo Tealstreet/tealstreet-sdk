@@ -330,15 +330,18 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
       ],
     },
     {
+      // 50030 (no permission for one API) gets no code row: like Bybit 10005 it
+      // is one endpoint's scope, which Rust startup does not treat as a bad key.
       category: 'auth_permissions',
       severity: 'critical',
       patterns: [/\b(?:OKX|code"?)[=:\s]+"?(?:50100|50110|50120)\b/i],
     },
     {
-      // 50112 is an invalid OK-ACCESS-TIMESTAMP: a clock to resync, not a bad key.
+      // 50102 (expired) and 50112 (invalid) OK-ACCESS-TIMESTAMP: a clock to
+      // resync, not a bad key.
       category: 'time_sync',
       severity: 'warning',
-      patterns: [/\b(?:OKX|code"?)[=:\s]+"?50112\b/i],
+      patterns: [/\b(?:OKX|code"?)[=:\s]+"?(?:50102|50112)\b/i],
     },
   ],
   hyperliquid: [

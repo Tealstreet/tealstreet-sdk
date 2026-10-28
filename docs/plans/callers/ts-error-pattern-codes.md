@@ -9,8 +9,9 @@ categories):
 - **Binance -1022** moves from `time_sync` to `auth_invalid` (invalid
   signature; the engine reports it `authInvalid` after one re-signed resend).
 - **OKX:**
-  - 50112 moves from `auth_invalid` to `time_sync` (invalid timestamp), so a
-    clock skew no longer pauses reloads.
+  - 50112 moves from `auth_invalid` to `time_sync` (invalid timestamp), and
+    50102 (expired timestamp) is `time_sync` too, so a clock skew no longer
+    pauses reloads.
   - 50101, 50103-50105, 50114 and 50119 are now `auth_invalid`.
   - 50100, 50110 and 50120 are now `auth_permissions`.
   - Codes match only as the engine words them (`OKX <code>:`) or after a `code`
@@ -21,9 +22,11 @@ categories):
   reads as a rate limit or an outage.
 
 Known TS/Rust policy difference, kept on purpose (claude-ddi2il ruling): Bybit
-10005 (a permission refusal on one endpoint) is `auth_permissions` in TS, which
-pauses web reloads, while Rust startup does not treat it as a credential
-rejection (`sdk-rs/venues/bybit/src/lib.rs` `CREDENTIAL_REJECTIONS`). Rust is the
+10005 and OKX 50030 (a permission refusal on one endpoint) read as
+`auth_permissions` in TS through the generic permission text, which pauses web
+reloads. Rust startup does not treat either as a credential rejection
+(`sdk-rs/venues/bybit/src/lib.rs` `CREDENTIAL_REJECTIONS`,
+`sdk-rs/venues/okx/src/account.rs` `rest_key_rejection`). Rust is the
 intended behaviour. A later cutover of the reload pause to typed kinds must not
 reintroduce a pause on 10005.
 
