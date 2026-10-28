@@ -13,10 +13,12 @@ import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 
-// Regenerate with `corepack yarn workspace @tealstreet/safe-cex capability-manifest`;
-// `test-wasm` fails on any difference, so the file is exactly what the runtime reports.
+// Regenerate with `corepack yarn workspace @tealstreet/safe-cex capability-manifest`, which rebuilds
+// the wasm first; `test-wasm` fails on any difference, so the file is exactly what the runtime reports.
 const MANIFEST_PATH = resolve(__dirname, '../exchanges/rust/capabilityManifest.json');
 const WRITE_MANIFEST = process.env.SAFE_CEX_WRITE_CAPABILITY_MANIFEST === '1';
+// Two engine constructions per beta venue; a cold runner can exceed the 5 s default.
+const MANIFEST_TIMEOUT_MS = 120_000;
 
 const ACCOUNT_OPTIONS: ExchangeOptions = {
   key: '0x1111111111111111111111111111111111111111',
@@ -61,24 +63,29 @@ const loadCapabilities = async (name: ExchangeName, options: ExchangeOptions): P
   return exchange.loadCapabilities();
 };
 
-it('the committed capability manifest is what every beta venue reports at runtime', async () => {
-  setWasmEngineLoader(loadNodeEngine);
-  setRustEngineTransport(() => transport);
-  const generated: Record<string, ExchangeCapabilities> = {};
-  const credentialDependent: string[] = [];
-  for (const name of [...BETA_VENUES].sort()) {
-    const account = await loadCapabilities(name, { ...ACCOUNT_OPTIONS, ...CREDENTIAL_SHAPES[name] });
-    const publicOnly = await loadCapabilities(name, { key: '', secret: '', publicDataOnly: true });
-    const axes = new Set([...Object.keys(account), ...Object.keys(publicOnly)]) as Set<keyof ExchangeCapabilities>;
-    for (const axis of axes) if (account[axis] !== publicOnly[axis]) credentialDependent.push(`${name}.${axis}`);
-    generated[name] = account;
-  }
-  // An account-dependent axis would make the manifest describe one account, not the venue.
-  expect(credentialDependent).toEqual([]);
+it(
+  'the committed capability manifest is what every beta venue reports at runtime',
+  async () => {
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => transport);
+    const generated: Record<string, ExchangeCapabilities> = {};
+    const credentialDependent: string[] = [];
+    for (const name of [...BETA_VENUES].sort()) {
+      const account = await loadCapabilities(name, { ...ACCOUNT_OPTIONS, ...CREDENTIAL_SHAPES[name] });
+      const publicOnly = await loadCapabilities(name, { key: '', secret: '', publicDataOnly: true });
+      const axes = new Set([...Object.keys(account), ...Object.keys(publicOnly)]) as Set<keyof ExchangeCapabilities>;
+      for (const axis of axes) if (account[axis] !== publicOnly[axis]) credentialDependent.push(`${name}.${axis}`);
+      generated[name] = account;
+    }
+    // An account-dependent axis would make the manifest describe one account, not the venue.
+    expect(credentialDependent).toEqual([]);
 
-  const serialized = `${JSON.stringify(generated, null, 2)}\n`;
-  if (WRITE_MANIFEST) writeFileSync(MANIFEST_PATH, serialized);
-  expect(readFileSync(MANIFEST_PATH, 'utf8'), 'stale capabilityManifest.json: run the capability-manifest script').toBe(
-    serialized,
-  );
-});
+    const serialized = `${JSON.stringify(generated, null, 2)}\n`;
+    if (WRITE_MANIFEST) writeFileSync(MANIFEST_PATH, serialized);
+    expect(
+      readFileSync(MANIFEST_PATH, 'utf8'),
+      'stale capabilityManifest.json: run the capability-manifest script',
+    ).toBe(serialized);
+  },
+  MANIFEST_TIMEOUT_MS,
+);

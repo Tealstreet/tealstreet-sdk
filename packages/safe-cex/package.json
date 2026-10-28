@@ -5,7 +5,7 @@
   "scripts": {
     "build": "echo \"Unrequired and disabled when using tsconfig paths aliases, run 'build-force' to test a build.\"",
     "build-force": "tsup",
-    "capability-manifest": "SAFE_CEX_WASM_TESTS=1 SAFE_CEX_WRITE_CAPABILITY_MANIFEST=1 vitest run src/__tests__/rust.capability-manifest.wasm.test.ts",
+    "capability-manifest": "corepack yarn --cwd ../.. rust:build-wasm && SAFE_CEX_WASM_TESTS=1 SAFE_CEX_WRITE_CAPABILITY_MANIFEST=1 vitest run src/__tests__/rust.capability-manifest.wasm.test.ts",
     "clean": "rimraf ./dist ./coverage ./tsconfig.tsbuildinfo",
     "dev": "echo \"Unrequired and disabled when using tsconfig paths aliases, run 'dev-force' to watch a dev version.\"",
     "dev-force": "tsup --watch",
