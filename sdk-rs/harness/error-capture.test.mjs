@@ -35,6 +35,13 @@ test('cases outside ruling R4 are refused before any request', () => {
   assert.throws(() => checkCases([{ ...ok, url: 'http://api.venue.test/' }]), /https only/);
   assert.throws(() => checkCases([ok, ok]), /duplicate/);
   assert.throws(() => checkCases([{ ...ok, expect: {} }]), /expect.path/);
+  assert.throws(() => checkCases([{ ...ok, url: 'https://api.venue.test/v1/account?apiKey=live&signature=bogus-s' }]), /query apiKey/);
+  assert.throws(() => checkCases([{ ...ok, url: 'https://api.venue.test/v1/account?signature=3f9a' }]), /query signature/);
+  assert.equal(checkCases([{ ...ok, url: 'https://api.venue.test/v1/account?timestamp=1&signature=bogus-s' }]).length, 1);
+  assert.throws(() => checkCases([{ ...ok, body: { login: { username: 'trader', password: 'hunter2' } } }]), /body password/);
+  assert.throws(() => checkCases([{ ...ok, body: [{ args: [{ apiKey: 'live' }] }] }]), /body apiKey/);
+  assert.equal(checkCases([{ ...ok, body: { op: 'login', args: [{ apiKey: 'bogus-k', sign: 'bogus-s' }] } }]).length, 1);
+  assert.throws(() => checkCases([{ ...ok, headers: { Cookie: 'session=abc' } }]), /header Cookie/);
   const many = Array.from({ length: MAX_CASES + 1 }, (_, i) => ({ ...ok, name: `case-${i}` }));
   assert.throws(() => checkCases(many), /at most/);
 });
@@ -69,6 +76,7 @@ test('capture paces its requests and writes one fixture per case', async () => {
     assert.deepEqual(written.map((path) => path.slice(dir.length + 1)), ['invalid-symbol.json', 'bogus-key.json']);
     assert.equal(seen.length, 2);
     assert.equal(seen[1].init.headers['X-MBX-APIKEY'], 'bogus-key');
+    assert.equal(seen[0].init.redirect, 'error');
     const saved = JSON.parse(readFileSync(written[0], 'utf8'));
     assert.equal(saved.endpoint, '/v1/depth?symbol=NOPE');
     assert.equal(saved.body, '{"code":-1121,"msg":"Invalid symbol."}');

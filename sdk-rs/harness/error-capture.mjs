@@ -25,7 +25,21 @@ export const SENSITIVE = new Set([
   'clientorderid', 'client_order_id',
 ]);
 
-const CREDENTIAL_HEADER = /key|sign|secret|passphrase|token|auth/i;
+const CREDENTIAL_HEADER = /key|sign|secret|passphrase|token|auth|cookie/i;
+const CREDENTIAL_FIELD = (name) => SENSITIVE.has(name.toLowerCase()) || name.toLowerCase() === 'password';
+const bogus = (value) => String(value).startsWith('bogus-');
+
+/** The first credential-named field at any depth whose value is not a bogus- placeholder. */
+const realCredential = (value) => {
+  if (Array.isArray(value)) return value.map(realCredential).find(Boolean);
+  if (value === null || typeof value !== 'object') return undefined;
+  for (const [key, inner] of Object.entries(value)) {
+    if (CREDENTIAL_FIELD(key) && (inner === null || typeof inner !== 'object') && !bogus(inner)) return key;
+    const nested = realCredential(inner);
+    if (nested) return nested;
+  }
+  return undefined;
+};
 const HEX_RUN = /[0-9a-fA-F]{40,}/g;
 
 // A JSON "key": value pair; the value is a string or a bare number.
@@ -63,10 +77,17 @@ export const checkCases = (cases) => {
     names.add(capture.name);
     if (!String(capture.url).startsWith('https://')) throw new Error(`${capture.name}: https only`);
     for (const [header, value] of Object.entries(capture.headers ?? {})) {
-      if (CREDENTIAL_HEADER.test(header) && !String(value).startsWith('bogus-')) {
+      if (CREDENTIAL_HEADER.test(header) && !bogus(value)) {
         throw new Error(`${capture.name}: header ${header} must carry a bogus- value; no real credentials`);
       }
     }
+    for (const [param, value] of new URL(capture.url).searchParams) {
+      if (CREDENTIAL_FIELD(param) && !bogus(value)) {
+        throw new Error(`${capture.name}: query ${param} must carry a bogus- value; no real credentials`);
+      }
+    }
+    const field = realCredential(capture.body);
+    if (field) throw new Error(`${capture.name}: body ${field} must carry a bogus- value; no real credentials`);
     if (!capture.expect?.path) throw new Error(`${capture.name}: expect.path is required`);
   }
   return cases;
@@ -94,6 +115,8 @@ export const capture = async (cases, outDir, { fetch = globalThis.fetch, pace = 
       method: item.method ?? 'GET',
       headers: item.headers ?? {},
       body: item.body === undefined ? undefined : JSON.stringify(item.body),
+      // A redirect could carry the case off its https host.
+      redirect: 'error',
     });
     const path = join(outDir, `${item.name}.json`);
     writeFileSync(path, `${JSON.stringify(fixture(item, response.status, await response.text()), null, 2)}\n`);
