@@ -615,3 +615,21 @@ no callers.
   for either way is its own PR.
 - **Q1: routed to fe7lgm and zs5e83.** No RED on the login Session root until they answer.
 - Each PR needs an exact-tree 8x GO. Paradex bytes are re-measured against 1,405,952.
+- **Q1 final (fe7lgm and zs5e83, joint).** `accepts_session_root` (engine `signing.rs:598`)
+  compares the credential against `*self.authority_ref()`. These conjuncts stay: the
+  Primary slot, `validate_credential`, write == Session credential, and
+  `signing_ref().is_ok()`. Only the trusted ScalarOnly marker changes behaviour. The
+  Session policy credential and the root write are `Selection::authority(Primary)`,
+  and `private_egress` is None. Signing-only protection stays at dispatch prepare
+  (`signing_only_ref` and `work.presents`).
+  Originals required:
+  - controls (a) to (d);
+  - a genuine control: signed login, then an unsigned Session call, then a signed
+    Preflight;
+  - Present and interpolation negatives;
+  - same-account stale and foreign Session negatives;
+  - Secondary-slot, passphrase and extra negatives;
+  - no downgrade from write None to Preflight.
+  RUST_SERIAL_CALL_AUTH.md separates an authority-bound credential from a presentable
+  one. Q3 (a signed Direct login) stays a separate seam. Both go in the engine PR
+  after PR-3a.
