@@ -352,8 +352,13 @@ family table and puts the kind on the notice.
 - Binance: POST_ONLY/GTX/MAKER.
 - Lighter: "market"/"invalid param".
 
-Each is replaced by a code row, or by an exact `Message` row with a cited
-reason.
+Each is replaced by a code row. Message text classifies only through an
+exact key with a cited reason:
+- `Key::Message` is the exact native message, for code-less venues only (see
+  "Exact message rows" below).
+- `Key::IntMessage(code, text)`, added in PR2b, is for venues with native codes.
+  It needs a recorded fixture with the exact text. Within a scope it wins over
+  the plain code row, and a text mismatch falls through to that row.
 
 **Tests.** No beta family has a recorded error payload. Every pinned payload is
 hand-written inline, and some are synthetic: Phemex and ApeX `10003
@@ -392,7 +397,10 @@ category and its kind mapping are bridge work and land in PR2.
   corpus.
 - **Tests.** Each fixture is driven through the venue's production funnel
   (write fact, `classify::read`, startup, or WS ingress), not through the table
-  alone. The test asserts the kind, the outcome and the visible message. A
+  alone. The test asserts the kind, the outcome and the visible message. The
+  fixture stores no expected message: classification never rewrites text, so
+  the test derives it from `body` (the venue's native code and message, with
+  the venue's existing prefix, e.g. `Bitget 400171: `). A
   shared loader in `safe_cex_engine::test_support` parses each file and checks
   its provenance and redaction.
 
@@ -488,7 +496,7 @@ status is below.
 | 13 | kucoin | `trading.rs:781`; `spot/trading.rs:228` | Accepted IDs are dropped (futures and spot). |
 | ~~14~~ | ~~weex~~ | ~~`trading.rs:1536-1575`~~ | ~~Accepted batch row IDs never reach `job.ids` or a partial, though the orders are already stored.~~ Fixed #1934. |
 | ~~15~~ | ~~phemex~~ | ~~`trading.rs:1479-1492`~~ | ~~Accepted IDs are dropped.~~ Fixed #2130. |
-| 16 | bybit, bitget | `trading.rs:800-830`; `trading.rs:1710,1749,1519` | No partial. Bitget keeps IDs only as Debug text. |
+| ~~16~~ | ~~bybit, bitget~~ | ~~`trading.rs:800-830`; `trading.rs:1710,1749,1519`~~ | ~~No partial. Bitget keeps IDs only as Debug text.~~ Fixed #1914 (bybit) and #2122 (bitget). |
 | 17 | hyperliquid, paradex | `trading.rs:993-1003`; `trading.rs:93-120` | A mixed batch returns before recording accepted oids. |
 | 18 | kraken spot, breakoutprop, txflow | `spot/trading.rs:351-362`; `trading.rs:670-681`; `trading.rs:864-877` | Accepted IDs are dropped entirely. |
 | ~~19~~ | ~~asterdex~~ | ~~`trading.rs:426`~~ | ~~`continue_on_error` PlaceOrders with any success reaches `done`. Failed legs appear only in `command_error`.~~ Fixed #2166. |
