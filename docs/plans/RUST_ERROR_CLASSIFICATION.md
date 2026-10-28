@@ -482,7 +482,7 @@ status is below.
 
 | # | Venue | Site | Defect |
 | --- | --- | --- | --- |
-| ~~11~~ | ~~okx~~ | ~~`trading.rs:1001-1023`~~ | ~~`refused()` erases explicit Unknown for 50001/50013/50026 ACKs to None. Accepted IDs are dropped (no partial).~~ Fixed #2117. |
+| ~~11~~ | ~~okx~~ | ~~`trading.rs:1001-1023`~~ | ~~`refused()` erases explicit Unknown for 50001/50013/50026 ACKs to None. Accepted IDs are dropped (no partial).~~ Fixed #2117 (merge 702afdffef3; its code commit 95d82c013c9 adds the OKX CodeTable, where 50001/50013/50026 are `Unknown(None)`, and one journal fact per call on the serial Plan, so accepted IDs are kept. The PR title says docs, but it merged code). |
 | ~~12~~ | ~~blofin~~ | ~~`trading.rs:1385-1406,1505`~~ | ~~Accepted row IDs are dropped on failure, and optimistic rows are removed.~~ Fixed #2157. |
 | 13 | kucoin | `trading.rs:781`; `spot/trading.rs:228` | Accepted IDs are dropped (futures and spot). |
 | ~~14~~ | ~~weex~~ | ~~`trading.rs:1536-1575`~~ | ~~Accepted batch row IDs never reach `job.ids` or a partial, though the orders are already stored.~~ Fixed #1934. |
