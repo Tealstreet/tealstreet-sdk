@@ -34,6 +34,21 @@ mod serial_call_auth {
         #[cfg(feature = "sign-meta")]
         SelectedRecipe,
     }
+    /// A trusted ScalarOnly primary (credential-absent), whose only authority
+    /// is its signing ref; the variant names the Session/root credential.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Scalar {
+        Authority,
+        Present,
+        Interpolate,
+        Passphrase,
+        Extra,
+        Secondary,
+        Foreign,
+        Stale,
+        WriteNone,
+        EmptyRef,
+    }
     enum Pending {
         Login(Context),
         Call(Context, Slot, usize),
@@ -43,6 +58,7 @@ mod serial_call_auth {
         key: KeyRef,
         login: bool,
         prepared: Option<SignRequest>,
+        scalar: Option<Scalar>,
     }
     impl crate::SignStep for Recipe {
         fn freshness_ms(&self) -> f64 {
@@ -53,22 +69,40 @@ mod serial_call_auth {
             _: &mut Action,
             _: &crate::DispatchContext<'_>,
         ) -> Result<SignRequest, SignError> {
+            let operation = match self.scalar {
+                // A signing-only ref is never presented: the login signs.
+                Some(Scalar::Present) if !self.login => signing::Operation::Present {
+                    key: self.key.clone(),
+                },
+                Some(Scalar::Interpolate) if !self.login => signing::Operation::Sign {
+                    algorithm: signing::Algorithm::Secp256k1Digest,
+                    key: self.key.clone(),
+                    payload: vec![signing::PayloadPart::Credential {
+                        key: self.key.clone(),
+                    }],
+                },
+                Some(_) => signing::Operation::Sign {
+                    algorithm: signing::Algorithm::Secp256k1Digest,
+                    key: self.key.clone(),
+                    payload: vec![signing::PayloadPart::Bytes {
+                        bytes: vec![0x11; 32],
+                    }],
+                },
+                None if self.login => signing::Operation::Present {
+                    key: self.key.clone(),
+                },
+                None => signing::Operation::Sign {
+                    algorithm: signing::Algorithm::HmacSha256,
+                    key: self.key.clone(),
+                    payload: vec![signing::PayloadPart::Bytes {
+                        bytes: b"frozen-create".to_vec(),
+                    }],
+                },
+            };
             let work = SignRequest {
                 receipt: Default::default(),
                 context: Default::default(),
-                operations: vec![if self.login {
-                    signing::Operation::Present {
-                        key: self.key.clone(),
-                    }
-                } else {
-                    signing::Operation::Sign {
-                        algorithm: signing::Algorithm::HmacSha256,
-                        key: self.key.clone(),
-                        payload: vec![signing::PayloadPart::Bytes {
-                            bytes: b"frozen-create".to_vec(),
-                        }],
-                    }
-                }],
+                operations: vec![operation],
             };
             work.validate()?;
             self.prepared = Some(work.clone());
@@ -123,6 +157,27 @@ mod serial_call_auth {
             reference: KeyRef("secondary.credential".into()),
         }
     }
+    /// A ScalarOnly primary's authority: its signing ref, never presented.
+    fn scalar_root() -> crate::request_context::Credential {
+        crate::request_context::Credential {
+            slot: crate::CredentialSlot::Primary,
+            reference: KeyRef("primary.signing".into()),
+        }
+    }
+    fn scalar_session(scalar: Scalar) -> crate::request_context::Credential {
+        let primary = |reference: &str| crate::request_context::Credential {
+            slot: crate::CredentialSlot::Primary,
+            reference: KeyRef(reference.into()),
+        };
+        match scalar {
+            Scalar::Passphrase => primary("primary.passphrase"),
+            Scalar::Extra => primary("primary.extra"),
+            Scalar::Secondary => secondary(),
+            Scalar::Foreign => primary("foreign.signing"),
+            Scalar::EmptyRef => primary(""),
+            _ => scalar_root(),
+        }
+    }
     fn terms(auth: CallAuth, operation: Operation) -> SerialCall {
         SerialCall {
             auth,
@@ -135,6 +190,8 @@ mod serial_call_auth {
     #[derive(Default)]
     struct Probe {
         mode: Mode,
+        scalar: Option<Scalar>,
+        opened: Option<Result<(), Error>>,
         session: Option<Session>,
         plan: Option<Plan>,
         entry: Option<Result<(), Error>>,
@@ -217,6 +274,7 @@ mod serial_call_auth {
                         key: KeyRef("primary.signing".into()),
                         login: false,
                         prepared: None,
+                        scalar: self.scalar,
                     }),
                     pending,
                 )
@@ -245,7 +303,9 @@ mod serial_call_auth {
         }
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
             let empty = matches!(self.mode, Mode::EmptyMixed | Mode::KeylessPreflight);
-            let credential = if empty {
+            let credential = if let Some(scalar) = self.scalar {
+                Some(scalar_session(scalar))
+            } else if empty {
                 None
             } else if self.mode == Mode::SecondarySession {
                 Some(secondary())
@@ -265,13 +325,13 @@ mod serial_call_auth {
             let (selection, _) = slots
                 .select(crate::credential_selection::CredentialRole::SessionAuth)
                 .unwrap();
-            let session = cx
-                .open_session(SessionPolicy {
-                    credential: credential.clone(),
-                    repeat_safe: true,
-                    private_egress: empty.then(|| selection.session_egress()).flatten(),
-                })
-                .unwrap();
+            let opened = cx.open_session(SessionPolicy {
+                credential: credential.clone(),
+                repeat_safe: true,
+                private_egress: empty.then(|| selection.session_egress()).flatten(),
+            });
+            self.opened = Some(opened.as_ref().map(drop).map_err(|error| *error));
+            let Ok(session) = opened else { return };
             let context = cx
                 .session_context(
                     &session,
@@ -292,9 +352,15 @@ mod serial_call_auth {
                     "https://venue.test/login".into(),
                     None,
                     Box::new(Recipe {
-                        key: credential.reference,
+                        // A ScalarOnly login signs with the authority itself.
+                        key: if self.scalar.is_some() {
+                            scalar_root().reference
+                        } else {
+                            credential.reference
+                        },
                         login: true,
                         prepared: None,
+                        scalar: self.scalar,
                     }),
                     Pending::Login(context),
                 )
@@ -313,10 +379,15 @@ mod serial_call_auth {
         }
         fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
             if command.completion_id() == Some(8) {
+                let later = if self.scalar.is_some() {
+                    scalar_root()
+                } else {
+                    primary()
+                };
                 let context = cx
                     .admit_http_command(Policy {
                         operation: Operation::Read,
-                        credential: Some(primary()),
+                        credential: Some(later.clone()),
                         timeout_ms: 20_000,
                         pacing: None,
                         retry: RetryPolicy::Never,
@@ -329,9 +400,10 @@ mod serial_call_auth {
                     "https://venue.test/later".into(),
                     None,
                     Box::new(Recipe {
-                        key: primary().reference,
-                        login: true,
+                        key: later.reference,
+                        login: self.scalar.is_none(),
                         prepared: None,
+                        scalar: self.scalar.map(|_| Scalar::Authority),
                     }),
                     Pending::Later(context),
                 )
@@ -339,7 +411,9 @@ mod serial_call_auth {
                 .unwrap();
                 return;
             }
-            let write = if matches!(self.mode, Mode::UnsignedOnly | Mode::KeylessPreflight) {
+            let write = if let Some(scalar) = self.scalar {
+                (scalar != Scalar::WriteNone).then(|| scalar_session(scalar))
+            } else if matches!(self.mode, Mode::UnsignedOnly | Mode::KeylessPreflight) {
                 None
             } else if self.mode == Mode::WrongWrite {
                 Some(crate::request_context::Credential {
@@ -359,6 +433,10 @@ mod serial_call_auth {
                 read_credential: None,
                 write_credential: write.clone(),
             };
+            if self.scalar == Some(Scalar::Stale) {
+                // The same account's retired login generation.
+                let _ = cx.retire_session(self.session.as_ref().unwrap());
+            }
             self.before = Some(cx.io.core.next_id);
             let result = if self.mode == Mode::NoSessionRoot {
                 cx.begin_preflight(policy)
@@ -374,7 +452,8 @@ mod serial_call_auth {
             let auth = if matches!(
                 self.mode,
                 Mode::KeylessPreflight | Mode::UnsignedPreflightCall
-            ) {
+            ) || self.scalar == Some(Scalar::WriteNone)
+            {
                 CallAuth::Preflight
             } else {
                 CallAuth::Session
@@ -626,6 +705,10 @@ mod serial_call_auth {
                         .iter()
                         .map(|operation| match operation {
                             signing::Operation::Present { .. } => b"fixture-api-key".to_vec(),
+                            signing::Operation::Sign {
+                                algorithm: signing::Algorithm::Secp256k1Digest,
+                                ..
+                            } => vec![0x44; 65],
                             signing::Operation::Sign { .. } => vec![0x44; 32],
                             _ => panic!("no filler public-address operation"),
                         })
@@ -663,22 +746,47 @@ mod serial_call_auth {
         );
     }
     fn ready(mode: Mode) -> Engine<Probe> {
-        let mut e = crate::test_support::seeded_engine(Probe {
-            mode,
-            ..Default::default()
-        });
-        let empty = matches!(mode, Mode::EmptyMixed | Mode::KeylessPreflight);
-        e.set_identities(signing::Identities {
-            primary: (!empty).then(|| {
-                Identity::new(primary().reference, Some(KeyRef("primary.signing".into())))
-            }),
-            secondary: Some(Identity::new(
+        ready_with(mode, None)
+    }
+    fn scalar_identities() -> signing::Identities {
+        let mut primary = Identity::new(KeyRef(String::new()), Some(KeyRef("primary.signing".into())));
+        primary.passphrase = Some(KeyRef("primary.passphrase".into()));
+        primary
+            .extra
+            .insert(signing::ExtraKey::L1Wallet, KeyRef("primary.extra".into()));
+        signing::trusted_scalar_only(
+            primary,
+            Some(Identity::new(
                 secondary().reference,
                 Some(KeyRef("secondary.signing".into())),
             )),
-        })
-        .unwrap();
+        )
+    }
+    fn ready_with(mode: Mode, scalar: Option<Scalar>) -> Engine<Probe> {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            mode,
+            scalar,
+            ..Default::default()
+        });
+        let empty = matches!(mode, Mode::EmptyMixed | Mode::KeylessPreflight);
+        let identities = if scalar.is_some() {
+            scalar_identities()
+        } else {
+            signing::Identities {
+                primary: (!empty).then(|| {
+                    Identity::new(primary().reference, Some(KeyRef("primary.signing".into())))
+                }),
+                secondary: Some(Identity::new(
+                    secondary().reference,
+                    Some(KeyRef("secondary.signing".into())),
+                )),
+            }
+        };
+        e.set_identities(identities).unwrap();
         e.start(0.);
+        if e.venue.opened != Some(Ok(())) {
+            return e;
+        }
         let login = drive(&mut e, 0.).pop().expect("actual released login");
         reply(&mut e, login.id, 0.5);
         e.drain_actions().for_each(drop);
@@ -979,5 +1087,131 @@ mod serial_call_auth {
             "later ordinary signed work releases"
         );
         assert_eq!(e.venue.work.len(), 2);
+    }
+
+    fn scalar_admitted(mode: Mode, scalar: Scalar) -> Engine<Probe> {
+        let mut e = ready_with(mode, Some(scalar));
+        assert_eq!(e.venue.opened, Some(Ok(())), "a real ScalarOnly login Session");
+        assert_eq!(e.venue.work.len(), 1, "the login signed with the authority");
+        enter(&mut e);
+        assert_eq!(e.venue.entry, Some(Ok(())), "ScalarOnly login Session root entry");
+        assert_eq!(e.venue.admitted, Some(Ok(())), "explicit call auth admission");
+        e
+    }
+    #[test]
+    fn a_scalar_only_login_root_runs_session_calls_then_a_signed_preflight() {
+        let mut e = scalar_admitted(Mode::Mixed, Scalar::Authority);
+        for stage in 0..4 {
+            let packet = drive(&mut e, 1. + stage as f64)
+                .pop()
+                .expect("one real physical call");
+            let context = &e.venue.observed[stage];
+            if stage < 3 {
+                assert!(context.credential().is_none());
+                assert!(matches!(context.egress(), Some(Egress::Session(_))));
+                assert_eq!(e.venue.work.len(), 1, "Session calls carry no provider work");
+            } else {
+                assert_eq!(context.credential(), Some(&scalar_root()));
+                assert_eq!(e.venue.work.len(), 2, "exactly the signed create's work");
+            }
+            reply(&mut e, packet.id, 1.5 + stage as f64);
+        }
+        assert!(e.venue.errors.is_empty());
+        assert!(!e.io.core.signing.refused());
+    }
+    /// PRESERVATION (rebind, fe7lgm 6a): a started engine refuses a reinstalled
+    /// ScalarOnly primary, and the open authority root still runs its issue,
+    /// continuation and resend.
+    #[test]
+    fn a_started_engine_refuses_a_reinstalled_scalar_primary_and_the_root_still_runs() {
+        let mut e = scalar_admitted(Mode::MixedResend, Scalar::Authority);
+        let mut rebuilt = scalar_identities();
+        rebuilt
+            .primary
+            .as_mut()
+            .unwrap()
+            .set_signing_ref(Some(KeyRef("primary.signing.b".into())));
+        assert!(e.set_identities(rebuilt).is_err());
+        for stage in 0..3 {
+            let packet = drive(&mut e, 1. + stage as f64).pop().unwrap();
+            reply(&mut e, packet.id, 1.5 + stage as f64);
+        }
+        let create = drive(&mut e, 4.).pop().unwrap();
+        auth_reply(&mut e, create.id, 5.);
+        assert_eq!(e.venue.selected, Some(Ok(())));
+        let retry = drive(&mut e, 5.).pop().unwrap();
+        assert_eq!(e.venue.observed.last().unwrap().credential(), Some(&scalar_root()));
+        assert_eq!(e.venue.work.len(), 3);
+        reply(&mut e, retry.id, 6.);
+        assert!(e.venue.errors.is_empty());
+    }
+    fn scalar_dispatch_refuses(scalar: Scalar) {
+        let mut e = scalar_admitted(Mode::Mixed, scalar);
+        for stage in 0..3 {
+            let packet = drive(&mut e, 1. + stage as f64).pop().unwrap();
+            reply(&mut e, packet.id, 1.5 + stage as f64);
+        }
+        assert_eq!(e.venue.issue, Some(Ok(())), "the signed call was queued on the root");
+        assert!(drive(&mut e, 4.).is_empty(), "nothing presents or interpolates the authority");
+        assert_eq!(e.venue.work.len(), 1, "no provider callback");
+        assert!(!e.venue.errors.is_empty());
+    }
+    #[test]
+    fn a_scalar_root_never_presents_its_authority() {
+        scalar_dispatch_refuses(Scalar::Present)
+    }
+    #[test]
+    fn a_scalar_root_never_interpolates_its_authority() {
+        scalar_dispatch_refuses(Scalar::Interpolate)
+    }
+    fn scalar_entry_refuses(scalar: Scalar) {
+        let mut e = ready_with(Mode::Mixed, Some(scalar));
+        if e.venue.opened != Some(Ok(())) {
+            return;
+        }
+        enter(&mut e);
+        assert!(matches!(e.venue.entry, Some(Err(_))), "{:?}", e.venue.entry);
+        assert_eq!(e.venue.before, e.venue.after);
+        assert!(drive(&mut e, 2.).is_empty());
+        assert!(!e.io.core.signing.refused());
+    }
+    #[test]
+    fn a_scalar_passphrase_ref_never_roots_a_login_session() {
+        scalar_entry_refuses(Scalar::Passphrase)
+    }
+    #[test]
+    fn a_scalar_extra_ref_never_roots_a_login_session() {
+        scalar_entry_refuses(Scalar::Extra)
+    }
+    #[test]
+    fn a_secondary_session_never_roots_a_scalar_primary() {
+        scalar_entry_refuses(Scalar::Secondary)
+    }
+    #[test]
+    fn a_foreign_ref_never_roots_a_scalar_primary() {
+        scalar_entry_refuses(Scalar::Foreign)
+    }
+    #[test]
+    fn a_retired_scalar_login_generation_never_roots_a_command() {
+        scalar_entry_refuses(Scalar::Stale)
+    }
+    #[test]
+    fn the_empty_credential_ref_never_opens_or_roots_a_login_session() {
+        let mut e = ready_with(Mode::Mixed, Some(Scalar::EmptyRef));
+        if e.venue.opened == Some(Ok(())) {
+            enter(&mut e);
+            assert_eq!(e.venue.entry, Some(Err(Error::Invalid)));
+        } else {
+            assert!(matches!(e.venue.opened, Some(Err(_))));
+            assert!(e.venue.work.is_empty());
+        }
+    }
+    #[test]
+    fn a_write_none_scalar_root_cannot_declare_preflight_auth() {
+        let mut e = ready_with(Mode::Mixed, Some(Scalar::WriteNone));
+        assert_eq!(e.venue.opened, Some(Ok(())));
+        enter(&mut e);
+        assert_eq!(e.venue.admitted, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.before, e.venue.after);
     }
 }
