@@ -401,30 +401,58 @@ pub mod error_corpus {
     ) {
         for row in table.rows {
             if let crate::classify::Key::IntMessage(code, message) = row.key {
-                let recorded = corpus.iter().any(|(_, fixture)| {
-                    serde_json::from_str::<serde_json::Value>(&fixture.body)
-                        .is_ok_and(|body| carries(&body, code, message))
-                });
+                let recorded = corpus
+                    .iter()
+                    .any(|(_, fixture)| carries(&fixture.body, code, message));
                 assert!(recorded, "code {code} {message:?} has no recorded fixture");
             }
         }
     }
 
-    /// One JSON object holding both the code (number or string) and the message.
-    fn carries(value: &serde_json::Value, code: i64, message: &str) -> bool {
-        match value {
-            serde_json::Value::Object(map) => {
-                let has_code = map.values().any(|value| {
-                    value.as_i64() == Some(code) || value.as_str() == Some(&code.to_string())
-                });
-                let has_message = map.values().any(|value| value.as_str() == Some(message));
-                (has_code && has_message) || map.values().any(|value| carries(value, code, message))
+    /// Some JSON object in `text` whose own members hold both the code (number
+    /// or string) and the exact message.
+    fn carries(text: &str, code: i64, message: &str) -> bool {
+        let bytes = text.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'"' => index = string_end(bytes, index),
+                b'{' => {
+                    let end = value_end(bytes, index);
+                    if object_carries(&text[index..end], code, message) {
+                        return true;
+                    }
+                    index += 1;
+                }
+                _ => index += 1,
             }
-            serde_json::Value::Array(items) => {
-                items.iter().any(|item| carries(item, code, message))
-            }
-            _ => false,
         }
+        false
+    }
+
+    /// The object's direct members, never those of a nested value.
+    fn object_carries(object: &str, code: i64, message: &str) -> bool {
+        let bytes = object.as_bytes();
+        let (codes, mut has_code, mut has_message) =
+            ([code.to_string(), format!("\"{code}\"")], false, false);
+        let mut index = skip_space(bytes, 1);
+        while bytes.get(index) == Some(&b'"') {
+            let colon = skip_space(bytes, string_end(bytes, index));
+            if bytes.get(colon) != Some(&b':') {
+                break;
+            }
+            let start = skip_space(bytes, colon + 1);
+            let stop = value_end(bytes, start);
+            let value = &object[start..stop];
+            has_code |= codes.iter().any(|token| token == value);
+            has_message |= serde_json::from_str::<String>(value).is_ok_and(|text| text == message);
+            index = skip_space(bytes, stop);
+            if bytes.get(index) != Some(&b',') {
+                break;
+            }
+            index = skip_space(bytes, index + 1);
+        }
+        has_code && has_message
     }
 
     fn is_date(text: &str) -> bool {
