@@ -102,15 +102,16 @@ RUST_SERIAL_CALL_AUTH sentence is amended to name this one route.
    - a Session step without a root;
    - a Preflight step without the write credential;
    - `independent_calls: false`;
-   - a Read Plan;
-   - `auth.len() != steps.len()`.
+   - a Read Plan.
 5. **Retirement between legs.** Unreleased legs end NotSent through the venue's
    `finish_plan_failed_call`. There is no auth latch, and later ordinary signed
    work still releases.
 6. **Resend.** A Session leg's auth resend keeps its body and rereads the new
    bearer revision. A signed leg's resend repeats its signing. A changed Session
    body refuses.
-7. **PRESERVATION:**
+7. **Length mismatch (ddi2il).** `auth.len() != steps.len()`, either shorter or
+   longer, refuses Invalid before any IDs, with `next_id` unchanged.
+8. **PRESERVATION:**
    - `complete_plan_refusal_preserves_serial_opportunity` and Mode::Complete:
      `admit_plan`, physical and barrier routes still refuse a Session root,
      assertions unchanged;
@@ -128,3 +129,9 @@ disclosed and executed at source, never counted.
 - The CI wasm byte delta for every beta family against master; any family over its
   cap stops the PR (ddi2il).
 - Exact-tree 8x GO.
+
+## Review notes
+
+- ddi2il (2026-10-28): scope matches the rulings. Leans to the separate
+  `admit_session_plan`, to keep CallBound literals untouched during beta. fe7lgm
+  decides the shape. The auth-slice length mismatch has its own original (7).
