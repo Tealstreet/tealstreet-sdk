@@ -177,6 +177,14 @@ impl<P> Cx<'_, P> {
 }
 
 impl ContextRegistry {
+    /// A complete Session Plan leg's call, counted from 0 in declaration order.
+    pub(in crate::engine) fn session_plan_call(&self, context: &Context) -> Option<usize> {
+        let plan = self.plan_from_context(context)?;
+        let body = self.plan_body(&plan).ok()?;
+        body.session.as_ref()?;
+        body.entry_of(context)
+    }
+
     /// A selected Session resend's bound generation and revision floor.
     pub(in super::super::super) fn plan_session_seed(
         &self,

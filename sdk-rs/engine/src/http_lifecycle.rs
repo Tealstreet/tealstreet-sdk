@@ -648,11 +648,26 @@ impl<P> Cx<'_, P> {
         #[cfg(not(feature = "session-bearer"))]
         let refusal = bearer.is_some().then_some(SESSION_BEARER_DISABLED);
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let complete = self
+            .io
+            .core
+            .request_contexts
+            .session_plan_call(&context)
+            .is_some();
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         let refusal = refusal.or_else(|| {
             if forbids_recipe {
-                Some("Keyless Session serial calls cannot sign")
+                Some(if complete {
+                    "Session Plan Session calls cannot sign"
+                } else {
+                    "Keyless Session serial calls cannot sign"
+                })
             } else if wire.is_err() {
-                Some("Keyless serial resend changed its request")
+                Some(if complete {
+                    "Session Plan resend changed its request"
+                } else {
+                    "Keyless serial resend changed its request"
+                })
             } else if self
                 .io
                 .core
@@ -661,7 +676,11 @@ impl<P> Cx<'_, P> {
                 .is_some()
                 && resolved.is_err()
             {
-                Some("Keyless serial call requires its admitted Session")
+                Some(if complete {
+                    "Session Plan call requires its admitted Session"
+                } else {
+                    "Keyless serial call requires its admitted Session"
+                })
             } else {
                 None
             }

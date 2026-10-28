@@ -11,5 +11,17 @@ continue-on-error writes:
   chunk;
 - the TP and SL of an accepted parent continue after a failed or Unknown sibling.
 
+Continuing past a failure covers native outcomes only: a failed, refused or
+Unknown call. It does not cover a venue's own declaration error.
+- **A refused issue ends the Plan.** A refused issue on any call ends the whole
+  Plan by the existing rule. A changed resend body is one example, and so is a
+  signed recipe on a Session call. Calls already in flight project Unknown, and
+  unissued calls are NotSent.
+- **The refusal names its call.** The call is counted from 0 in declaration
+  order: steps in order, then calls within each step. For example, "Session Plan
+  resend changed its request (call 1)".
+- **A refused resend stays uncertain.** A refused call whose resend was never
+  sent stays uncertain in the journal, as it does for serial Plans.
+
 Every other Plan route still refuses a Session root, so behaviour is unchanged
 for every current venue.

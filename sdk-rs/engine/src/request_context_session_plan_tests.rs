@@ -698,6 +698,9 @@ mod session_plan_calls {
         );
         pump(e, now)
     }
+    fn drive_idle(e: &mut Engine<Probe>, now: f64) -> bool {
+        pump(e, now).packets.is_empty()
+    }
     fn command(e: &mut Engine<Probe>, command: u32, now: f64) -> Flow {
         e.handle_command(
             now,
@@ -900,6 +903,28 @@ mod session_plan_calls {
         answer(&mut e, signed.leg(0), 3., "ok");
         let end = answer(&mut e, retry, 3., "ok");
         assert_eq!(end.terminal(), Some(Ok("[]".into())));
+    }
+    /// ddi2il: a changed body is a local integrity breach, so it ends the
+    /// Plan: the refusal names its call, and the unsent legs are NotSent.
+    #[test]
+    fn a_changed_resend_ends_a_cancel_plan_naming_the_call() {
+        let (mut e, sent) = admitted(probe(Shape::Cancels, Venue::ChangedResend));
+        let second = answer(&mut e, sent.leg(0), 2., "ok");
+        let flow = answer(&mut e, second.leg(1), 3., "auth");
+        assert_eq!(e.venue.issues.last(), Some(&(1, Err(Error::Invalid))));
+        assert!(flow.packets.is_empty(), "neither the changed body nor leg 2 is sent");
+        let error = flow.terminal().expect("one terminal").unwrap_err();
+        assert_eq!(error.message, "Session Plan resend changed its request (call 1)");
+        assert_eq!(error.kind, Some(crate::ErrorKind::InvalidInput));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["id-0"]);
+        // Call 1's refused attempt is followed by an unsent resend, which the
+        // journal keeps uncertain, as for serial Plans.
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert!(
+            e.venue.observed.iter().all(|(ordinal, _)| *ordinal < 2),
+            "call 2 was never issued, so it is NotSent"
+        );
+        assert!(drive_idle(&mut e, 4.), "no unsent leg is released later");
     }
     #[test]
     fn a_changed_session_resend_body_refuses() {

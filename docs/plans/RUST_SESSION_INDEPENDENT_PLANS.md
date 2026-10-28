@@ -183,7 +183,7 @@ disclosed and executed at source, never counted.
 | 3 | `a_lost_parent_orphans_its_children_unsent` |
 | 4 | `declaration_faults_refuse_before_any_id` and `a_session_leg_refuses_a_signing_recipe_and_a_preflight_leg_an_unsigned_one` |
 | 5 | `retiring_the_root_between_legs_ends_the_rest_unsent_without_a_latch` |
-| 6 | `session_and_signed_resends_keep_their_own_auth` and `a_changed_session_resend_body_refuses` |
+| 6 | `session_and_signed_resends_keep_their_own_auth`, `a_changed_session_resend_body_refuses` and `a_changed_resend_ends_a_cancel_plan_naming_the_call` |
 | 7 | `an_auth_length_mismatch_at_either_level_refuses_before_any_id` |
 | 8 | `a_concurrent_mixed_step_gives_each_leg_its_own_auth` |
 | 9 | `session_resends_are_fingerprinted_per_leg` and `a_changed_resend_on_one_session_leg_is_refused_for_that_leg` |
@@ -203,6 +203,14 @@ that leg only, before release. The Plan then ends by the existing issue-refusal
 rule (`fail_owned_admission`), which applies to every Plan and is unchanged here,
 with the in-flight sibling Unknown. The isolation item 9 pins is the per-leg
 wire: leg 0's unchanged resend passes after leg 1 has committed its own wire.
+
+fe7lgm and zs5e83 accepted this. ddi2il added three conditions, now met:
+- the refusal names its call (`... (call N)`);
+- unissued calls are NotSent;
+- a cancel-shaped Plan pins it (`a_changed_resend_ends_a_cancel_plan_naming_the_call`).
+
+The terminal outcome there is Unknown, because a refused attempt followed by an
+unsent resend stays uncertain in the journal, as it does for serial Plans.
 
 ## Review notes
 

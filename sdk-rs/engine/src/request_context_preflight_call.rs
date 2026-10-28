@@ -466,8 +466,21 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .plan_from_context(&admission.context)
         {
+            // A Session Plan refusal names its call.
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            let call = self
+                .io
+                .core
+                .request_contexts
+                .session_plan_call(&admission.context);
+            #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+            let call: Option<usize> = None;
             let error = match refusal {
-                Some(refusal) => VenueError::new(refusal).kind(crate::ErrorKind::InvalidInput),
+                Some(refusal) => VenueError::new(match call {
+                    Some(call) => format!("{refusal} (call {call})"),
+                    None => refusal.into(),
+                })
+                .kind(crate::ErrorKind::InvalidInput),
                 None => VenueError::new("HTTP plan admission failed").kind(
                     if reason == Error::TimedOut {
                         crate::ErrorKind::Timeout
