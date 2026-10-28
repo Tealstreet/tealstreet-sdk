@@ -66,3 +66,24 @@ Controls that already pass on base are labelled PRESERVATION.
 - Byte deltas: Paradex (which links `session-bearer` without `serial-plans`, so
   expect 0) and the GRVT family.
 - No venue changes, no Paradex rows, no caps changed.
+
+## Review additions (fe7lgm core CLEAR, zs5e83 plan CLEAR)
+
+6. **Identity rebind (fe7lgm).** A Session opened for a ScalarOnly primary with
+   signing ref A refuses at the root check after the Primary is reinstalled with
+   signing ref B. That holds at issue, at continuation and at resend. Binding to the
+   signing ref creates this stale case, and a same-account stale generation does not
+   cover it.
+7. **Empty ref (fe7lgm).** A login Session whose credential is the empty KeyRef (the
+   ScalarOnly primary's own `credential` field) refuses, at `Sessions::open` or at
+   the root check, whichever fires first. It never binds through the fallback.
+
+Evidence precision (zs5e83):
+- On base, the root itself is Invalid, which gates the Present and interpolation
+  suffixes. At source they must prove root admission and then the dispatch
+  rejection. The base root rejection is not counted as a dispatch RED or
+  PRESERVATION.
+- The login runs the existing signed Session flow. It borrows nothing from the
+  future Direct seam and never waits on its own not-ready bearer.
+- Existing ordinary-identity, wrong-ref, stale and foreign controls stay unchanged.
+- The Paradex byte delta is quoted as measured; 0 is only the expectation.
