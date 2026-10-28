@@ -2629,24 +2629,20 @@ impl<P> Cx<'_, P> {
         self.notice(level, log_code::REQUEST_FAILED, message);
     }
 
-    /// [`Self::retried_failure`] for a classified read failure: the event carries
-    /// the error's fields ([`Self::notice_error`]), and an auth kind is
-    /// `auth.rejected` rather than `request.failed`.
+    /// [`Self::retried_failure`] for a classified read failure: still
+    /// `request.failed`, now carrying the error's fields ([`Self::notice_error`]).
+    /// An auth kind stays here: account auth evidence is `AccountAuth`, and
+    /// consumers read `auth.rejected` as account-level (bitunix `recovery.rs`).
     pub fn retried_failure_error(&mut self, site: &'static str, error: &VenueError) {
         let level = self.retried_failure_level(site, &error.message);
         self.notice_error(level, log_code::REQUEST_FAILED, error);
     }
 
-    /// A notice for a classified failure. Like `startup.degraded`, the event
-    /// carries `kind`, `venueCode`, `venueMessage` and `retryAfterMs` when the
-    /// error has them; an auth kind is `auth.rejected` whatever `code` says.
+    /// A notice for a classified failure under the caller's `code`. Like
+    /// `startup.degraded`, the event carries `kind`, `venueCode`, `venueMessage`
+    /// and `retryAfterMs` when the error has them. It never becomes
+    /// `auth.rejected`, which counts an auth failure and slows account polling.
     pub fn notice_error(&mut self, level: Level, code: &'static str, error: &VenueError) {
-        let code = match error.kind {
-            Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission) => {
-                log_code::AUTH_REJECTED
-            }
-            _ => code,
-        };
         let mut fields = Vec::new();
         if let Some(kind) = error.kind {
             fields.push(("kind", kind.as_str().into()));
@@ -8980,7 +8976,7 @@ mod public_retry_tests {
     }
 
     #[test]
-    fn classified_notices_carry_the_startup_degraded_fields_and_auth_is_auth_rejected() {
+    fn classified_notices_carry_the_startup_degraded_fields_under_the_callers_code() {
         let mut io = Io::<()>::default();
         let mut store = Store::default();
         let mut cx = Cx {
@@ -9020,15 +9016,27 @@ mod public_retry_tests {
         cx.notice_error(Level::Warn, log_code::ORDER_REJECTED, &limited);
         let notice = event(std::mem::take(&mut cx.io.core.actions));
         assert!(notice.fields.contains(&("retryAfterMs", 1_000.0.into())));
-        // A read failure keeps retried_failure's Error-then-Warn cadence.
+        // An auth kind keeps the caller's code and counts no auth failure.
+        let scoped =
+            VenueError::new("No permission to trade this symbol").kind(ErrorKind::AuthPermission);
+        cx.notice_error(Level::Warn, log_code::ORDER_REJECTED, &scoped);
+        let notice = event(std::mem::take(&mut cx.io.core.actions));
+        assert_eq!(notice.code, log_code::ORDER_REJECTED);
+        assert_eq!(notice.fields, vec![("kind", "authPermission".into())]);
+        assert!(
+            !cx.io.core.auth_failure_counted,
+            "an order refusal is no auth evidence"
+        );
+        // A read failure stays request.failed, with retried_failure's cadence.
         let rejected = VenueError::new("API-key format invalid.").kind(ErrorKind::AuthInvalid);
         cx.retried_failure_error("site", &rejected);
         let first = event(std::mem::take(&mut cx.io.core.actions));
         assert_eq!(
             (first.code, first.level),
-            (log_code::AUTH_REJECTED, Level::Error)
+            (log_code::REQUEST_FAILED, Level::Error)
         );
         assert_eq!(first.fields, vec![("kind", "authInvalid".into())]);
+        assert!(!cx.io.core.auth_failure_counted);
         cx.retried_failure_error("site", &rejected);
         assert_eq!(
             event(std::mem::take(&mut cx.io.core.actions)).level,

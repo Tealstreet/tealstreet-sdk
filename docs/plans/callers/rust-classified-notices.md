@@ -5,27 +5,35 @@ Owner: claude-dazzy3. Plan: [RUST_ERROR_CLASSIFICATION.md](../RUST_ERROR_CLASSIF
 
 - **Engine notices.**
   - `Cx::notice_error(level, code, &VenueError)` and
-    `Cx::retried_failure_error(site, &VenueError)` emit events with the same four
+    `Cx::retried_failure_error(site, &VenueError)` emit the caller's code
+    (`retried_failure_error` always `request.failed`). They carry the same four
     optional fields as `startup.degraded`: `kind`, `venueCode`, `venueMessage` and
     `retryAfterMs`, each present only when the error has it.
-  - An auth kind (`authInvalid`, `authExpired`, `authPermission`) is emitted as
-    the existing `auth.rejected` event, which counts one auth failure.
-  - No other event name is new or changed.
+  - An auth kind is never promoted to `auth.rejected`. That event counts an auth
+    failure and slows account polling, and account auth evidence is
+    `AccountAuth` (as Bitunix's `recovery.rs` already does). No event name is
+    new or changed.
   - `retried_failure_error` keeps `retried_failure`'s Error-then-Warn cadence.
-  - No venue calls these yet; each family PR adopts them for its read failures
-    and WS order rejects (the kind rides on `order.rejected`, ruling R2).
+  - No venue calls these yet; each family PR adopts them for read failures and
+    WS order rejects (the kind rides on `order.rejected`, ruling R2).
 - **Engine table rows.** `classify::Key::IntMessage(code, message)` matches one
   integer code with its exact message.
-  - Within its intent scope it wins over the code's plain row whatever the
-    table order. Any other wording falls through to the plain row, or to
-    `unlisted` when there is none, which is today's behaviour.
-  - It can never be `Satisfied` or a nonce refusal.
-  - A family adopting one must back it with a recorded fixture
+  - It wins over that code's plain row within the same intent scope, whatever
+    the table order. Precedence stays per scope, so an intent-scoped plain row
+    still beats an unscoped code-and-message row.
+  - Any other wording falls through to the plain row, or to `unlisted`, which is
+    today's behaviour.
+  - It can never be `Satisfied` or a nonce refusal, and every such row needs a
+    recorded fixture with its exact text
     (`error_corpus::assert_message_rows_recorded`).
 - **SDK TS.** `ExchangeHealthMonitor.processEvent` reads `event.fields.kind` when
-  no `classified` is passed. An `order.rejected` carrying `insufficientBalance` is
-  then `insufficient_balance`, and a `request.failed` carrying `rateLimited` is
-  `rate_limit`.
+  no `classified` is passed. An auth kind there counts only on `auth.rejected`,
+  so a read or order refusal never latches an auth category.
+  - **Behaviour change at landing:** events that already carry a `kind` field
+    are now typed. Bitunix's `request.failed` with a non-auth kind becomes, for
+    example, `rate_limit` instead of `unknown`, and `startup.degraded` becomes
+    `exchange_down` or `rate_limit` instead of `unknown`. Bitunix auth kinds on
+    `request.failed` stay `unknown`.
 - **NX:** consumers of `engine-event` may read the four fields; none is required.
 
 Deletion prerequisites: none added or cleared.

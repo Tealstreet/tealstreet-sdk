@@ -406,8 +406,19 @@ describe('coded native health', () => {
       .toBe('insufficient_balance');
     expect(monitor.processEvent({ code: 'auth.rejected', message: 'x', level: 'error', fields: { kind: 'authPermission' } }))
       .toBe('auth_permissions');
-    expect(monitor.processEvent({ code: 'request.failed', message: 'x', level: 'warn', fields: { kind: 'rateLimited' } }))
+    // Behaviour change: Bitunix's request.failed already carries a kind, which now types it.
+    expect(monitor.processEvent({ code: 'request.failed', message: 'x', level: 'warn', fields: { kind: 'rateLimited', venueCode: '10006' } }))
       .toBe('rate_limit');
+    expect(monitor.processEvent({ code: 'startup.degraded', message: 'x', level: 'warn', fields: { read: 'markets', kind: 'venueUnavailable' } }))
+      .toBe('exchange_down');
+    monitor.reset();
+    // A field-carried auth kind never latches an auth category: request.failed and
+    // order.rejected stay what they were, and the monitor stays healthy of auth.
+    expect(monitor.processEvent({ code: 'request.failed', message: 'x', level: 'error', fields: { kind: 'authInvalid', venueCode: '10003' } }))
+      .toBe('unknown');
+    expect(monitor.processEvent({ code: 'order.rejected', message: 'x', level: 'warn', fields: { kind: 'authPermission' } }))
+      .toBe('order_rejected');
+    expect(monitor.hasAuthError()).toBe(false);
     // An explicit classification still wins, and an unknown field kind is ignored.
     expect(monitor.processEvent({ code: 'order.rejected', message: 'x', level: 'warn', fields }, { kind: 'invalidInput' }))
       .toBe('order_rejected');

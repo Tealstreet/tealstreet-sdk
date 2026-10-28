@@ -26,6 +26,9 @@ import {
 
 export type HealthStatus = 'healthy' | 'degraded' | 'error';
 
+/** Account-level kinds; only an `auth.rejected` event or a host classification asserts them. */
+const AUTH_KINDS: ReadonlySet<string> = new Set(['authInvalid', 'authExpired', 'authPermission']);
+
 /** Kinds precise enough to override text classification. */
 const SPECIFIC_KINDS: ReadonlySet<string> = new Set([
   'insufficientBalance',
@@ -140,10 +143,13 @@ export class ExchangeHealthMonitor {
   /**
    * Classify native events without inspecting message wording. A classified
    * notice carries its kind in `event.fields` (engine `notice_error`), used when
-   * the host passes no separate classification.
+   * the host passes no separate classification. An auth kind counts only on
+   * `auth.rejected`, the account-level evidence, so a read or order refusal
+   * never latches an auth category.
    */
   processEvent(event: EngineEvent, classified?: ClassifiedError): ErrorCategory | null {
-    const typed = exchangeErrorCategory(classified ?? event.fields);
+    const accountAuth = event.code === 'auth.rejected' || !AUTH_KINDS.has(String(event.fields.kind));
+    const typed = exchangeErrorCategory(classified ?? (accountAuth ? event.fields : undefined));
     let category: ErrorCategory;
     switch (event.code) {
       case 'auth.rejected':
