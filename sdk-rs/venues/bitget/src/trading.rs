@@ -2343,6 +2343,8 @@ impl BitgetFutures {
                 Ok(reply) if explicit_rejection => {
                     // The table's kind for the native code, else its documented
                     // status row; a 401/403/429 carries no code (`native_code`).
+                    // Place reads the row any intent would: every row is unscoped
+                    // (pinned in code_table_tests).
                     let kind = native
                         .as_ref()
                         .and_then(|native| CODES.verdict(native, Intent::Place).kind())
@@ -3331,6 +3333,25 @@ impl Planned {
             Effect::Cancel { .. } => Intent::Cancel,
             Effect::Amend { .. } => Intent::Amend,
             Effect::Leverage { .. } | Effect::Margin { .. } | Effect::Mode(_) => Intent::Setting,
+        }
+    }
+}
+
+#[cfg(test)]
+mod code_table_tests {
+    use super::*;
+
+    /// assert_table covers the status rows (never Satisfied or RefusedResend);
+    /// Bitget pins 40009 as its one documented re-sign and every row unscoped.
+    #[test]
+    fn the_bitget_table_satisfies_the_engine_invariants() {
+        safe_cex_engine::classify::assert_table(&CODES);
+        for row in CODES.rows {
+            assert_eq!(row.only, None, "{row:?}");
+            if matches!(row.verdict, Verdict::RefusedResend(_)) {
+                assert_eq!(row.key, Key::Int(40009), "{row:?}");
+            }
+            assert!(!matches!(row.verdict, Verdict::Satisfied(_)), "{row:?}");
         }
     }
 }
