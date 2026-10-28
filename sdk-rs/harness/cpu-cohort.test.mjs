@@ -116,6 +116,26 @@ test('all-attempt pagination follows every page without latest-only selection', 
   assert.equal(calls.length, 2); assert.ok(calls.every(url => new URL(url).searchParams.get('filter') === 'all'));
 });
 
+test('a live run whose job total grows between pages is re-listed from page 1, bounded', async () => {
+  // Run 40628139520 attempt 1: runtime matrices expanded while certification listed the same run.
+  const jobs = Array.from({ length: 102 }, (_, index) => ({ id: index + 1 }));
+  const calls = [], waits = [];
+  const growing = createGithubReader({ sleep: async ms => { waits.push(ms); }, repository: 'org/repo', fetch: async url => {
+    calls.push(url); const page = Number(new URL(url).searchParams.get('page')), visible = calls.length === 1 ? 101 : 102;
+    return jsonResponse({ total_count: visible, jobs: jobs.slice(0, visible).slice((page - 1) * 100, page * 100) });
+  } });
+  assert.deepEqual(await growing.listJobs(10), jobs);
+  assert.deepEqual(calls.map(url => new URL(url).searchParams.get('page')), ['1', '2', '1', '2']);
+  assert.deepEqual(waits, [2000]);
+  let total = 100;
+  const unstable = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async () => {
+    total += 1; return jsonResponse({ total_count: total, jobs: jobs.slice(0, 100) });
+  } });
+  await assert.rejects(unstable.listJobs(10), /pagination unstable after 3 passes/);
+  const huge = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async () => jsonResponse({ total_count: 12_801, jobs: jobs.slice(0, 100) }) });
+  await assert.rejects(huge.listJobs(10), /exceeds hard limit/);
+});
+
 test('artifact CDN receives no token; immutable original bytes retained', async () => {
   const calls = [], raw = Buffer.from('\ufefforiginal log\r\n');
   const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', token: 'secret', fetch: async (url, options) => { calls.push({ url, options }); return calls.length === 1 ? new Response(null, { status: 302, headers: { location: 'https://fixture.blob.core.windows.net/log' } }) : new Response(raw); } });
