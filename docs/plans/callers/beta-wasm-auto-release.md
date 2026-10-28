@@ -21,3 +21,16 @@ Obligations, in order:
    (bundle-cut lane).
 
 Deletion prerequisites: none added or cleared.
+
+Known gap: a master commit whose Rust run was cancelled because a newer push
+superseded it gets no release of its own. If Copybara imports exactly that
+commit, NX has no matching pin and the prebuild refuses until the next import
+of a released commit. To recover sooner, re-run the cancelled master push run
+(`gh run rerun <id>`; it stays a push run, so `certified` accepts it once
+required coverage passes), then dispatch `rust-beta-wasm-release.yml` with that
+commit and pin the result. A plain dispatch alone is refused as uncertified.
+The rerun is attempt 2, so its CPU measurement jobs fail by design (cpu-ci
+requires the original attempt 1) and the run concludes failure. That is
+expected: no CPU result is produced or trusted from attempt 2, `certified`
+accepts the run on required coverage alone, and the CPU red is not a reason to
+rerun again.

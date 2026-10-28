@@ -39,10 +39,14 @@ jobs:
     name: Beta wasm roster
     # Automatic runs follow a Rust SDK push run on master; the certified guard then
     # requires its required coverage job, so non-blocking CPU noise cannot stop a release.
+    # A superseded master run is cancelled before it finishes; the newer commit's release
+    # covers its inputs, so it is skipped rather than refused.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'master')
+       github.event.workflow_run.head_branch == 'master' &&
+       github.event.workflow_run.conclusion != 'cancelled' &&
+       github.event.workflow_run.conclusion != 'skipped')
     runs-on: ubuntu-latest
     outputs:
       families: ${{ steps.roster.outputs.families }}
