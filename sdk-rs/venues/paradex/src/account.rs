@@ -579,8 +579,14 @@ impl Account {
     pub(crate) fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
         (self.token.is_some() && self.serves(generation)).then_some(self.bearer_revision)
     }
-    pub(crate) fn is_auth_rejected(&self) -> bool {
-        self.auth_rejected
+    /// An unsent read after a refused `/auth` failed because its Session was
+    /// retired: that is the account's terminal credential refusal.
+    pub(crate) fn read_error(&self, error: VenueError) -> VenueError {
+        if self.auth_rejected && error.outcome == Some(safe_cex_engine::Outcome::NotSent) {
+            auth_rejected_error()
+        } else {
+            error
+        }
     }
     fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, mut request: Queued) {
         if let Pending::Trade(trade) = &request.pending {

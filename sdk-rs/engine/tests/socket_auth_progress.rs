@@ -50,6 +50,7 @@ impl Venue for Native {
             controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
         };
         let feed = if self.snapshot {
             cx.register_socket_feed_with_snapshot(policy)

@@ -600,8 +600,10 @@ impl Identity {
         credential: &crate::request_context::Credential,
         write: Option<&crate::request_context::Credential>,
     ) -> bool {
+        // A trusted ScalarOnly primary's only authority is its signing ref; for
+        // every credential-present identity `authority_ref()` is the credential.
         credential.slot == crate::CredentialSlot::Primary
-            && credential.reference == self.credential
+            && credential.reference == *self.authority_ref()
             && self.validate_credential().is_ok()
             && write.is_none_or(|write| write == credential && self.signing_ref().is_ok())
     }
@@ -1645,6 +1647,120 @@ mod setup_field_policy_tests {
                     ]
                     .map(|bytes| PayloadPart::Bytes { bytes })
             );
+        }
+    }
+}
+
+/// Test fixture: a ScalarOnly primary marked through trusted setup's own
+/// `install_scalar_only_primary`, never by setting the private flag.
+#[cfg(test)]
+pub(crate) mod scalar_only_fixture {
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    use super::*;
+
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(crate) fn trusted_scalar_only(
+        primary: Identity,
+        secondary: Option<Identity>,
+    ) -> Identities {
+        let mut identities = Identities {
+            primary: Some(primary),
+            secondary,
+        };
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                source: PrimarySource::ScalarOnly,
+                signing_algorithm: Some(Algorithm::Secp256k1Digest),
+                ..Default::default()
+            }),
+            secondary: None,
+        }
+        .install_scalar_only_primary(&mut identities)
+        .expect("trusted ScalarOnly setup");
+        assert!(identities.primary.as_ref().unwrap().credential_absent);
+        identities
+    }
+}
+
+#[cfg(test)]
+mod scalar_only_session_root_tests {
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    mod gated {
+        use super::super::scalar_only_fixture::trusted_scalar_only;
+        use super::super::*;
+        use crate::CredentialSlot;
+        use crate::request_context::Credential;
+
+        fn scalar(signing: &str) -> Identity {
+            let mut identity = Identity::new(KeyRef(String::new()), Some(KeyRef(signing.into())));
+            identity.passphrase = Some(KeyRef("scalar.passphrase".into()));
+            identity
+                .extra
+                .insert(ExtraKey::L1Wallet, KeyRef("scalar.extra".into()));
+            trusted_scalar_only(identity, None).primary.unwrap()
+        }
+        fn root(slot: CredentialSlot, reference: &str) -> Credential {
+            Credential {
+                slot,
+                reference: KeyRef(reference.into()),
+            }
+        }
+
+        #[test]
+        fn a_scalar_only_primary_binds_its_authority_as_the_session_root() {
+            let identity = scalar("scalar.a");
+            let session = root(CredentialSlot::Primary, "scalar.a");
+            assert!(identity.accepts_session_root(&session, None));
+            assert!(identity.accepts_session_root(&session, Some(&session)));
+        }
+
+        #[test]
+        fn a_session_bound_to_another_signing_ref_never_binds_a_rebuilt_primary() {
+            let identity = scalar("scalar.b");
+            let session = root(CredentialSlot::Primary, "scalar.a");
+            assert!(!identity.accepts_session_root(&session, None));
+            assert!(!identity.accepts_session_root(&session, Some(&session)));
+        }
+
+        #[test]
+        fn the_empty_credential_field_never_binds_through_the_fallback() {
+            let identity = scalar("scalar.a");
+            let empty = root(CredentialSlot::Primary, "");
+            assert!(!identity.accepts_session_root(&empty, None));
+            assert!(!identity.accepts_session_root(&empty, Some(&empty)));
+        }
+
+        #[test]
+        fn passphrase_extra_secondary_and_mismatched_write_refs_never_bind() {
+            let identity = scalar("scalar.a");
+            for reference in ["scalar.passphrase", "scalar.extra"] {
+                let session = root(CredentialSlot::Primary, reference);
+                assert!(
+                    !identity.accepts_session_root(&session, None),
+                    "{reference}"
+                );
+            }
+            let secondary = root(CredentialSlot::Secondary, "scalar.a");
+            assert!(!identity.accepts_session_root(&secondary, None));
+            let session = root(CredentialSlot::Primary, "scalar.a");
+            let write = root(CredentialSlot::Primary, "scalar.extra");
+            assert!(!identity.accepts_session_root(&session, Some(&write)));
+        }
+
+        /// PRESERVATION: a credential-present identity still binds only its
+        /// credential; its signing ref cannot stand in.
+        #[test]
+        fn an_ordinary_identity_still_refuses_its_signing_ref_as_the_root() {
+            let identity = Identity::new(
+                KeyRef("ordinary.credential".into()),
+                Some(KeyRef("ordinary.signing".into())),
+            );
+            assert!(
+                !identity
+                    .accepts_session_root(&root(CredentialSlot::Primary, "ordinary.signing"), None)
+            );
+            let credential = root(CredentialSlot::Primary, "ordinary.credential");
+            assert!(identity.accepts_session_root(&credential, Some(&credential)));
         }
     }
 }

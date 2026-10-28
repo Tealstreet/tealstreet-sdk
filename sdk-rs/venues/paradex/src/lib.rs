@@ -49,6 +49,8 @@ pub enum Pending {
     History(history::Request),
     PublicTrades(history::public_trades::Request),
     Identity(safe_cex_engine::request_context::Context),
+    /// A FetchLeverage command Read and its symbol.
+    Leverage(safe_cex_engine::request_context::Context, String),
 }
 
 pub struct Paradex {
@@ -175,7 +177,10 @@ impl Venue for Paradex {
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::History(request) => self.history.on_item(cx, request, item),
             Pending::PublicTrades(read) => history::public_trades::item(cx, read, item),
-            Pending::Trade(_) | Pending::Identity(_) | Pending::BookQuery(_) => {}
+            Pending::Trade(_)
+            | Pending::Identity(_)
+            | Pending::Leverage(..)
+            | Pending::BookQuery(_) => {}
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -186,6 +191,10 @@ impl Venue for Paradex {
             }
             Pending::PublicTrades(read) => history::public_trades::response(cx, read, response),
             Pending::Identity(context) => self.identity_response(cx, context, response),
+            Pending::Leverage(context, symbol) => {
+                self.trading
+                    .leverage_response(cx, &mut self.account, &context, &symbol, response)
+            }
             Pending::Public(request) => {
                 self.public_response(cx, request, response);
                 if cx.store.loaded().markets {
@@ -265,6 +274,12 @@ impl Venue for Paradex {
             }
             Pending::PublicTrades(read) => history::public_trades::failed(cx, read, error),
             Pending::Identity(context) => self.identity_failed(cx, context, error),
+            Pending::Leverage(context, _) => self.leverage_failed(cx, &context, error),
+            Pending::History(request) => {
+                let error = self.account.read_error(error);
+                self.history.rejected(cx, request, error);
+                self.failures(cx);
+            }
             Pending::Public(request) if request.is_command_candle() => {
                 request.reject_command_candle(cx, error);
                 self.failures(cx);
@@ -300,6 +315,12 @@ impl Venue for Paradex {
         match pending {
             Pending::PublicTrades(read) => history::public_trades::failed(cx, read, error),
             Pending::Identity(context) => self.identity_failed(cx, context, error),
+            Pending::Leverage(context, _) => self.leverage_failed(cx, &context, error),
+            Pending::History(request) => {
+                let error = self.account.read_error(error);
+                self.history.failed(cx, request, error);
+                self.failures(cx);
+            }
             Pending::Public(request) if request.is_command_candle() => {
                 self.command_candles_failed(cx, request, error);
                 self.failures(cx);
@@ -360,6 +381,14 @@ impl Venue for Paradex {
 }
 
 impl Paradex {
+    fn leverage_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        context: &safe_cex_engine::request_context::Context,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let _ = cx.fail_context(context, self.account.read_error(error));
+    }
     fn dispatch_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::BookQuery(context) => {
@@ -374,6 +403,11 @@ impl Paradex {
             Pending::Identity(context) => {
                 self.identity_failed(cx, context, safe_cex_engine::VenueError::new(error))
             }
+            Pending::Leverage(context, _) => self.leverage_failed(
+                cx,
+                &context,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+            ),
             Pending::Public(request) => self.public_failed(cx, request, error),
             Pending::Account(request) => self.account.on_failed(cx, request, error),
             Pending::Trade(request) => {
@@ -395,10 +429,9 @@ impl Paradex {
                         self.trading
                             .on_refused(cx, &mut self.account, request, error)
                     }
-                    Pending::History(request) => {
-                        self.history.on_rejected(cx, request, &error.message)
-                    }
+                    Pending::History(request) => self.history.rejected(cx, request, error),
                     Pending::Identity(context) => self.identity_failed(cx, context, error),
+                    Pending::Leverage(context, _) => self.leverage_failed(cx, &context, error),
                     other => self.dispatch_failed(cx, other, &error.message),
                 }
             }

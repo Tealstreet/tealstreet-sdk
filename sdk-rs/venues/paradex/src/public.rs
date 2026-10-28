@@ -1077,8 +1077,8 @@ impl Paradex {
                 let _ = cx.finish_http_context(&context);
                 self.public_failed(cx, *seed, error);
             }
-            Request::Markets { .. } | Request::Tickers { .. } => {
-                let markets = matches!(request, Request::Markets { .. });
+            seed @ (Request::Markets { .. } | Request::Tickers { .. }) => {
+                let markets = matches!(seed, Request::Markets { .. });
                 cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
                 self.public.seed_retry.failed(cx, markets);
             }
