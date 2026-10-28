@@ -242,9 +242,14 @@ fn a_clock_refused_order_resends_once_then_fails_auth_invalid() {
     h.requests
         .retain(|request| request.url.contains("/v5/order/create"));
     placed(&mut h, 8);
-    reply(&mut h, "/v5/order/create", fixture);
-    assert!(h.has_request("/v5/order/create"), "one re-signed resend");
-    reply(&mut h, "/v5/order/create", fixture);
+    let first = h.take("/v5/order/create");
+    h.reply(first.id, fixture.http_status.unwrap(), &fixture.body);
+    // 10002 is refused at the gateway before any order processing (Bybit: "The
+    // request time exceeds the time window range"), so the one re-signed resend
+    // repeats an order the venue never accepted: the same body, new signature.
+    let resend = h.take("/v5/order/create");
+    assert_eq!(resend.body, first.body, "only the signature headers change");
+    h.reply(resend.id, fixture.http_status.unwrap(), &fixture.body);
     assert!(!h.has_request("/v5/order/create"), "only one resend");
     let error = command_failure(&h, 8);
     assert_eq!(
@@ -254,5 +259,28 @@ fn a_clock_refused_order_resends_once_then_fails_auth_invalid() {
             Some(Outcome::Rejected),
             Some("10002")
         )
+    );
+}
+
+/// HTTP 403 is Bybit's IP ban: `Unknown(RateLimited)`, which never earns a
+/// resend (only `RefusedResend` does, ordinary.rs Decision::Resend, and
+/// assert_table refuses a resendable status row). One dispatch, outcome unknown.
+#[test]
+fn a_403_on_an_order_is_dispatched_once_and_left_unknown() {
+    let mut h = awaiting_snapshot(Variant::Linear);
+    h.requests
+        .retain(|request| request.url.contains("/v5/order/create"));
+    placed(&mut h, 9);
+    let create = h.take("/v5/order/create");
+    h.reply(create.id, 403, "<html>403 Forbidden</html>");
+    let error = command_failure(&h, 9).clone();
+    assert_eq!(
+        (error.kind, error.outcome, error.venue_code.as_deref()),
+        (Some(ErrorKind::RateLimited), Some(Outcome::Unknown), None)
+    );
+    h.advance(120_000.0);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "a 403 write is never re-dispatched"
     );
 }
