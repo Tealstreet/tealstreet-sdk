@@ -27,12 +27,13 @@ export function entityOf(key) {
 /** Classify every strict diagnostic of one gate report as accepted, known or new. */
 export function reportCase(report, manifest, accepted = ACCEPTED_DIFFERENCES) {
   const assessment = (report?.correctnessOnly === true ? assessCorrectnessReport : assessGateReport)(report, manifest, accepted);
-  const acceptedKeys = new Set(assessment.accepted.map((item) => item.key));
+  // Accepted lines match exactly, so a changed value at an accepted path counts as new.
+  const acceptedLines = new Set(assessment.accepted.map((item) => item.failure));
   const knownKeys = new Set(assessment.known.map((item) => item.key));
   const entities = {};
   for (const failure of Array.isArray(report?.failures) ? report.failures : []) {
-    const key = diagnosticKey(failure);
-    const kind = acceptedKeys.has(key) ? 'accepted' : knownKeys.has(key) ? 'known' : 'new';
+    const key = typeof failure === 'string' ? diagnosticKey(failure) : String(failure);
+    const kind = acceptedLines.has(failure) ? 'accepted' : knownKeys.has(key) ? 'known' : 'new';
     const row = entities[entityOf(key)] ??= Object.fromEntries(CLASSES.map((name) => [name, { count: 0, samples: [] }]));
     row[kind].count++;
     if (row[kind].samples.length < SAMPLES) row[kind].samples.push(failure);

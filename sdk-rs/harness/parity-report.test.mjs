@@ -61,6 +61,17 @@ test('the report counts accepted, known and new diagnostics per venue and entity
   assert.match(markdown, /alpha: unexpected command results\[0\]\.error\.kind/);
 });
 
+test('a changed value beside the accepted line counts as new, and invalid failures do not crash', () => {
+  const line = 'checkpoint 2 account.positions[0].updatedAt: ts=1 rust=2';
+  const accepted = { schema: 1, differences: [{ venue: 'alpha', tapeSha256: 'a'.repeat(64), tape: 'sdk-rs/harness/tapes/alpha-private.jsonl',
+    diagnostics: [{ failures: [line], category: 'rust-better', rationale: 'Fresher epoch.', evidence: 'frame 12' }] }] };
+  const changed = buildParityReport([report('alpha', [line, 'checkpoint 2 account.positions[0].updatedAt: ts=1 rust=3'])], { schema: 1, failures: [] }, accepted);
+  assert.deepEqual(changed.totals, { accepted: 1, known: 0, new: 1 });
+  const invalid = buildParityReport([report('alpha', [null])], { schema: 1, failures: [] }, accepted);
+  assert.equal(invalid.cases[0].status, 'NEW DIVERGENCE OR INVALID');
+  assert.equal(invalid.totals.new, 1);
+});
+
 test('a gate with only accepted differences reports as accepted, not as debt', () => {
   const accepted = { schema: 1, differences: [{ venue: 'alpha', tapeSha256: 'a'.repeat(64), tape: 'sdk-rs/harness/tapes/alpha-private.jsonl',
     diagnostics: [{ failures: ['account fills[0].timestamp: ts=null rust=5'], category: 'ts-unsupported', rationale: 'TS drops the native fill time.', evidence: 'frame 4' }] }] };

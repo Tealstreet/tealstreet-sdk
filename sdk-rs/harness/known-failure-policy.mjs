@@ -108,7 +108,7 @@ export const assessGateReport = (report, manifest, accepted = ACCEPTED_DIFFERENC
 export const assessCorrectnessReport = (report, manifest, accepted = ACCEPTED_DIFFERENCES) => assessReport(report, manifest, true, accepted);
 
 const acceptedDiagnostics = (accepted, report) => new Map((accepted.differences.find((candidate) =>
-  candidate.venue === report.venue && candidate.tapeSha256 === report.tapeSha256)?.diagnostics ?? [])
+  candidate.venue === report.venue && candidate.tapeSha256 === report.tapeSha256 && candidate.tape === report.tape)?.diagnostics ?? [])
   .flatMap((item) => item.failures.map((failure) => [diagnosticKey(failure),
     { key: diagnosticKey(failure), failure, category: item.category, rationale: item.rationale, evidence: item.evidence }])));
 

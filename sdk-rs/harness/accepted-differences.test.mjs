@@ -57,6 +57,7 @@ test('accepted entries are bound to venue, tape hash and exact path', () => {
   for (const mutate of [
     (value) => { value.venue = 'other'; },
     (value) => { value.tapeSha256 = 'b'.repeat(64); },
+    (value) => { value.tape = 'sdk-rs/harness/tapes/other-private.jsonl'; },
     (value) => { value.failures.push('checkpoint 2 account.positions[0].contracts: ts=1 rust=2'); },
   ]) {
     const value = report(); mutate(value);
