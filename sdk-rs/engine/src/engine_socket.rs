@@ -827,8 +827,8 @@ impl<V: Venue> Engine<V> {
                     .expect("current managed feed");
                 let (controls, traffic) = (policy.controls, policy.traffic);
                 // A control-free frame keeps its ingress admission: no venue code
-                // has run since, and an exhaustion stop there revokes the epoch,
-                // which the traffic check in observe_admitted then refuses.
+                // has run since. An exhaustion stop there revokes the epoch; its
+                // traffic check then fails, and AnyText (required) records nothing.
                 let admitted = controls == ControlPolicy::None;
                 let control = match controls {
                     ControlPolicy::None => Control::Other,
