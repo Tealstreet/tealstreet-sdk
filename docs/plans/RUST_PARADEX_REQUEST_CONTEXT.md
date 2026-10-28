@@ -596,3 +596,22 @@ no callers.
    and nothing is written.
 6. FetchLeverage and history reads complete through `done_context`/`fail_context`.
 7. Inventory: Paradex 19 → 0, RULED_GROWTH empty, signing-legacy unchanged (0 rows).
+
+### Rulings (claude-ddi2il, 2026-10-28)
+
+- **Q4: slice.** PR-3a takes the read rows with no engine dependency and goes first.
+  That is history :459/:477, public :1081, and FetchLeverage's terminals
+  (trading :1021/:1022) with its read leaving the write queue. PR-3b takes the rest.
+- **Q2: placements take (b).** Place and amend legs stop at an Unknown on a serial
+  Plan. A plainly rejected leg still lets later legs run. The caller fragment states
+  the change.
+- **Q2: cancels keep native continuation.** A cancel or cancel-all keeps attempting
+  every chunk after a failed or Unknown chunk. That needs a separate engine PR
+  admitting Session calls on independent complete Plans (fe7lgm review, 8x GO),
+  landed before PR-3b's cancel rows. If it slips, PR-3b leaves the cancel rows on
+  legacy and says so.
+- **Q3: Direct stays the default** for `/auth`. It is dropped only if fe7lgm confirms
+  the Session private egress matches TS `directHttp` for `/auth`. Any engine change
+  for either way is its own PR.
+- **Q1: routed to fe7lgm and zs5e83.** No RED on the login Session root until they answer.
+- Each PR needs an exact-tree 8x GO. Paradex bytes are re-measured against 1,405,952.
