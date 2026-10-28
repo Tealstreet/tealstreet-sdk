@@ -941,8 +941,9 @@ next to the known failures.
 - **Accepted differences** (`sdk-rs/harness/accepted-differences.json`) are
   TS/Rust output differences kept on purpose: `rust-better` (Rust is more
   correct or fresher, such as a later freshness epoch) or `ts-unsupported`
-  (TS cannot express the native value). Each entry names the exact venue,
-  tape SHA and diagnostic paths, and carries a rationale and evidence. The
+  (TS cannot express the native value). Each entry names the exact venue
+  and tape SHA, lists the exact failure lines with both values, and carries
+  a rationale and evidence. The
   auditor's exact-tree GO on the PR that adds an entry is its sign-off.
 - **Known failures** (`known-gate-failures.json`) stay debt: they never
   certify parity.
@@ -953,7 +954,11 @@ must be an output comparison (account, command results, books, markets or
 tickers). Performance, coverage, transport and harness-integrity diagnostics
 can never be accepted. A path cannot be both known and accepted, and an
 accepted key that a complete replay no longer reproduces fails verification
-as stale. `verify-gates.mjs` labels a gate whose only differences are
+as stale. The values are pinned too: if either value at an accepted path
+changes, that is a new divergence. A harness test requires each entry's tape
+to be replayed by a CI gate case and to still hash to its recorded SHA, so a
+re-recorded or dropped tape cannot leave an acceptance unchecked.
+`verify-gates.mjs` labels a gate whose only differences are
 accepted `PARITY WITH ACCEPTED DIFFERENCES` and counts those gates separately
 from known failures.
 

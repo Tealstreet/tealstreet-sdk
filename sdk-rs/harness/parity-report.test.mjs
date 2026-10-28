@@ -38,7 +38,7 @@ test('the report counts accepted, known and new diagnostics per venue and entity
     { key: 'account orders[0].clientOrderId', divergence: 'Debt.' },
   ] }] };
   const accepted = { schema: 1, differences: [{ venue: 'alpha', tapeSha256: 'a'.repeat(64), tape: 'sdk-rs/harness/tapes/alpha-private.jsonl',
-    diagnostics: [{ keys: ['checkpoint 2 account.positions[0].updatedAt'], category: 'rust-better', rationale: 'Fresher epoch.', evidence: 'frame 12' }] }] };
+    diagnostics: [{ failures: ['checkpoint 2 account.positions[0].updatedAt: ts=1 rust=2'], category: 'rust-better', rationale: 'Fresher epoch.', evidence: 'frame 12' }] }] };
   const result = buildParityReport([
     report('beta', []),
     report('alpha', [
@@ -63,7 +63,7 @@ test('the report counts accepted, known and new diagnostics per venue and entity
 
 test('a gate with only accepted differences reports as accepted, not as debt', () => {
   const accepted = { schema: 1, differences: [{ venue: 'alpha', tapeSha256: 'a'.repeat(64), tape: 'sdk-rs/harness/tapes/alpha-private.jsonl',
-    diagnostics: [{ keys: ['account fills[0].timestamp'], category: 'ts-unsupported', rationale: 'TS drops the native fill time.', evidence: 'frame 4' }] }] };
+    diagnostics: [{ failures: ['account fills[0].timestamp: ts=null rust=5'], category: 'ts-unsupported', rationale: 'TS drops the native fill time.', evidence: 'frame 4' }] }] };
   const result = buildParityReport([report('alpha', ['account fills[0].timestamp: ts=null rust=5'])], { schema: 1, failures: [] }, accepted);
   assert.equal(result.cases[0].status, 'ACCEPTED DIFFERENCES');
 });

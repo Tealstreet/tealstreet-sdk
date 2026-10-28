@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { ACCEPTED_DIFFERENCES, assessGateReport, validateAcceptedDifferences } from './known-failure-policy.mjs';
+import { createHash } from 'node:crypto';
+import { ACCEPTED_DIFFERENCES, acceptedCoverageErrors, assessGateReport, validateAcceptedDifferences } from './known-failure-policy.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
 
@@ -15,20 +16,38 @@ const metric = (mode = 'correctness', amount = 10) => ({
   wasmBeforeBytes: 0, wasmBytes: 0, wasmRetainedBytes: 0, retainedBytes: amount,
 });
 const freshness = 'checkpoint 2 account.positions[0].updatedAt';
-const report = (failures = [`${freshness}: ts=100 rust=250`]) => ({
+const observed = `${freshness}: ts=100 rust=250`;
+const report = (failures = [observed]) => ({
   schema: 1, venue: 'example', tape: 'sdk-rs/harness/tapes/example-private.jsonl', tapeSha256: 'a'.repeat(64), private: true,
   status: failures.length ? 'FAIL' : 'PASS', failures, correctnessRuns: 1, runs: 0, samples: { ts: [metric()], rust: [metric()] },
 });
 const none = () => ({ schema: 1, failures: [] });
-const accepted = (keys = [freshness], extra = {}) => ({ schema: 1, differences: [{
+const accepted = (failures = [observed], extra = {}) => ({ schema: 1, differences: [{
   venue: 'example', tapeSha256: 'a'.repeat(64), tape: 'sdk-rs/harness/tapes/example-private.jsonl',
-  diagnostics: [{ keys, category: 'rust-better', rationale: 'Rust stamps the later freshness epoch from the WS frame.',
+  diagnostics: [{ failures, category: 'rust-better', rationale: 'Rust stamps the later freshness epoch from the WS frame.',
     evidence: 'sdk-rs/harness/tapes/example-private.jsonl frame 12', ...extra }],
 }] });
 
-test('the committed accepted-difference manifest is valid against the known-failure manifest', () => {
+test('the committed accepted-difference manifest is valid and names current CI tapes', () => {
   const known = JSON.parse(readFileSync(new URL('./known-gate-failures.json', import.meta.url), 'utf8'));
   assert.deepEqual(validateAcceptedDifferences(ACCEPTED_DIFFERENCES, known), []);
+  assert.deepEqual(acceptedCoverageErrors(ACCEPTED_DIFFERENCES), []);
+});
+
+test('an accepted entry must name a CI gate case at its current tape bytes', () => {
+  const tape = 'sdk-rs/harness/tapes/bitget-private.jsonl';
+  const sha = createHash('sha256').update(readFileSync(new URL(`../../${tape}`, import.meta.url))).digest('hex');
+  const entry = (extra) => ({ schema: 1, differences: [{ ...accepted().differences[0], venue: 'bitget', tape, tapeSha256: sha, ...extra }] });
+  assert.deepEqual(acceptedCoverageErrors(entry()), []);
+  assert.match(acceptedCoverageErrors(entry({ tapeSha256: 'b'.repeat(64) })).join('\n'), /re-recorded/);
+  assert.match(acceptedCoverageErrors(entry({ venue: 'example' })).join('\n'), /no CI gate case/);
+  assert.match(acceptedCoverageErrors(entry({ tape: 'sdk-rs/harness/tapes/missing.jsonl' }),
+    { cases: [{ venue: 'bitget', tape: 'sdk-rs/harness/tapes/missing.jsonl' }] }).join('\n'), /tape is missing/);
+});
+
+test('an accepted path pins its observed values: a changed value is a new divergence', () => {
+  assert.match(assessGateReport(report([`${freshness}: ts=100 rust=999`]), none(), accepted()).errors.join('\n'), /accepted difference changed value/);
+  assert.match(assessGateReport(report([`${freshness}: ts=101 rust=250`]), none(), accepted()).errors.join('\n'), /accepted difference changed value/);
 });
 
 test('an exact accepted key classifies as accepted, not known or new', () => {
@@ -55,15 +74,17 @@ test('a stale accepted difference fails verification', () => {
 
 test('accepted declarations require a category, rationale, evidence and an output-comparison path', () => {
   for (const invalid of [
-    accepted([freshness], { category: 'debt' }),
-    accepted([freshness], { rationale: ' ' }),
-    accepted([freshness], { evidence: '' }),
-    accepted(['checkpoint 2 account.positions[*].updatedAt']),
-    accepted([freshness, freshness]),
-    accepted(['performance cpuMs: Rust must be at least 10% below TS']),
+    accepted([observed], { category: 'debt' }),
+    accepted([observed], { rationale: ' ' }),
+    accepted([observed], { evidence: '' }),
+    accepted([freshness]),
+    accepted(['checkpoint 2 account.positions[*].updatedAt: ts=1 rust=2']),
+    accepted([observed, `${freshness}: ts=1 rust=2`]),
+    accepted(['performance cpuMs: Rust must be at least 10% below TS (ts=1, rust=2)']),
     accepted(['checkpoint coverage replay: count 1; expected 2']),
-    accepted(['HTTP write sequence run 1']),
-    accepted([freshness], { condition: 'lighter-zero-bootstrap' }),
+    accepted(['HTTP write sequence run 1: ts=[] rust=[1]']),
+    accepted([observed], { condition: 'lighter-zero-bootstrap' }),
+    accepted([observed], { keys: [freshness] }),
     { schema: 2, differences: [] },
   ]) assert.ok(validateAcceptedDifferences(invalid, none()).length, JSON.stringify(invalid));
 });
@@ -77,7 +98,7 @@ test('one path cannot be both a known failure and an accepted difference', () =>
 });
 
 test('protected harness diagnostics are never accepted even at an accepted path', () => {
-  const value = report([`${freshness}: ts=100 rust=250`, 'checkpoint coverage replay: count 1; expected 2']);
+  const value = report([observed, 'checkpoint coverage replay: count 1; expected 2']);
   assert.match(assessGateReport(value, none(), accepted()).errors.join('\n'), /unexpected checkpoint coverage/);
 });
 
@@ -92,7 +113,7 @@ test('verifyGateSuite labels a gate whose only differences are accepted', () => 
       runs: isPrivate ? 0 : 9, correctnessRuns: 1, requiredImprovement: 0.1, samples, status: 'PASS', failures: [] }, exitCode: 0 };
   });
   const target = entries.find((entry) => entry.report.private).report;
-  Object.assign(target, { status: 'FAIL', failures: [`${freshness}: ts=100 rust=250`] });
+  Object.assign(target, { status: 'FAIL', failures: [observed] });
   entries.find((entry) => entry.report === target).exitCode = 1;
   const declared = accepted();
   Object.assign(declared.differences[0], { venue: target.venue, tapeSha256: target.tapeSha256, tape: target.tape });
