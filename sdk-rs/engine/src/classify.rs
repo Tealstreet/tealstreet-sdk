@@ -631,10 +631,25 @@ pub fn assert_table(table: &CodeTable) {
         if let Key::Range(low, high) = row.key {
             assert!(low <= high, "row {index}: empty range");
         }
-        if let Key::IntMessage(_, message) = row.key {
+        if let Key::IntMessage(code, message) = row.key {
             assert!(
                 !message.is_empty(),
                 "row {index}: an empty message is no evidence"
+            );
+            // Precedence is per scope: an intent-scoped plain row for the same code
+            // would win before an unscoped code-and-message row is ever tried.
+            let shadowed = row.only.is_none()
+                && table.rows.iter().any(|other| {
+                    other.only.is_some()
+                        && match other.key {
+                            Key::Int(plain) => plain == code,
+                            Key::Range(low, high) => (low..=high).contains(&code),
+                            _ => false,
+                        }
+                });
+            assert!(
+                !shadowed,
+                "row {index}: an intent-scoped plain row for {code} shadows this unscoped message row"
             );
             assert!(
                 !matches!(row.verdict, Verdict::Satisfied(_) | Verdict::NonceRefused),

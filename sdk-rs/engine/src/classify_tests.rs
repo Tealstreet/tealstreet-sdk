@@ -839,3 +839,61 @@ fn a_duplicate_code_and_message_row_is_refused() {
         status: &[],
     });
 }
+
+#[test]
+#[should_panic(expected = "shadows this unscoped message row")]
+fn an_unscoped_code_and_message_row_under_a_scoped_plain_row_is_refused() {
+    assert_table(&CodeTable {
+        rows: &[
+            Row {
+                key: Key::Int(-2010),
+                verdict: Verdict::Refused(ErrorKind::Rejected),
+                only: Some(Intent::Place),
+            },
+            Row {
+                key: Key::IntMessage(
+                    -2010,
+                    "Account has insufficient balance for requested action.",
+                ),
+                verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                only: None,
+            },
+        ],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}
+
+#[test]
+fn a_code_and_message_row_in_the_plain_rows_scope_refines_it() {
+    const SCOPED: CodeTable = CodeTable {
+        rows: &[
+            Row {
+                key: Key::Int(-2010),
+                verdict: Verdict::Refused(ErrorKind::Rejected),
+                only: Some(Intent::Place),
+            },
+            Row {
+                key: Key::IntMessage(
+                    -2010,
+                    "Account has insufficient balance for requested action.",
+                ),
+                verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                only: Some(Intent::Place),
+            },
+        ],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    };
+    assert_table(&SCOPED);
+    let balance = Native {
+        code: NativeCode::Int(-2010),
+        message: "Account has insufficient balance for requested action.",
+    };
+    assert_eq!(
+        SCOPED.verdict(&balance, Intent::Place),
+        Verdict::Refused(ErrorKind::InsufficientBalance)
+    );
+}

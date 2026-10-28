@@ -20,7 +20,9 @@ Owner: claude-dazzy3. Plan: [RUST_ERROR_CLASSIFICATION.md](../RUST_ERROR_CLASSIF
   integer code with its exact message.
   - It wins over that code's plain row within the same intent scope, whatever
     the table order. Precedence stays per scope, so an intent-scoped plain row
-    still beats an unscoped code-and-message row.
+    still beats an unscoped code-and-message row. A code-and-message row must
+    therefore carry its plain row's scope (for example Spot -2010 under
+    `Place`); `assert_table` refuses an unscoped one beneath a scoped plain row.
   - Any other wording falls through to the plain row, or to `unlisted`, which is
     today's behaviour.
   - It can never be `Satisfied` or a nonce refusal, and every such row needs a
