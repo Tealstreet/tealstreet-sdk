@@ -317,7 +317,7 @@ pub mod error_corpus {
             .flat_map(char::to_lowercase)
             .collect();
         let rules = rules();
-        rules.names.iter().any(|name| *name == key)
+        rules.names.contains(&key)
             || rules
                 .suffixes
                 .iter()
