@@ -300,6 +300,8 @@ test('stdin credentials replace the environment and refuse unknown or missing fi
     /^Error: Missing credential field SECRET$/);
   assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', {}, { credentials: { KEY: 'stdin-key', SECRET: 'stdin-secret', PASSWORD: 'value-must-not-appear' } }),
     (error) => error.message === 'Unknown credential field PASSWORD');
+  assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', {}, { credentials: { 'inverted-secret-value': 'KEY', SECRET: 'stdin-secret' } }),
+    (error) => error.message === 'Unknown credential field');
   assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', {}, { credentials: { KEY: 'stdin-key', SECRET: 'abc' } }),
     (error) => error.message.includes('at least four') && !error.message.includes('abc'));
   for (const credentials of [null, [], 'text']) assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', {}, { credentials }), /one JSON object/);

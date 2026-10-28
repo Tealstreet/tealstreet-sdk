@@ -190,7 +190,9 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env, { crede
     if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials))
       throw new Error('Credentials must be one JSON object of field names');
     for (const field of Object.keys(credentials))
-      if (!suffixes.includes(field)) throw new Error(`Unknown credential field ${field.slice(0, 40)}`);
+      // An inverted object would put a value in the name, so echo only name-shaped fields.
+      if (!suffixes.includes(field))
+        throw new Error(/^[A-Z0-9_]{1,40}$/.test(field) ? `Unknown credential field ${field}` : 'Unknown credential field');
   }
   const read = (path, suffix, required) => {
     const variable = `RUST_LIVE_SMOKE_${profile.family}_${mode.toUpperCase()}_${suffix}`;
