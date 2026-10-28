@@ -818,15 +818,55 @@ impl<V: Venue> Engine<V> {
                     .core
                     .sockets
                     .received(socket, now, &mut self.io.core.health);
-                let control = match self
+                let policy = self
                     .io
                     .core
                     .socket_driver
                     .state
                     .policy(epoch.feed())
-                    .expect("current managed feed")
-                    .controls
+                    .expect("current managed feed");
+                let (controls, traffic) = (policy.controls, policy.traffic);
+                // The admission above stands for a control-free frame: only an
+                // exhaustion stop at that boundary could revoke it, and no venue
+                // code has run since.
+                if controls == ControlPolicy::None
+                    && self.io.core.socket_driver.state.current(epoch)
                 {
+                    #[cfg(debug_assertions)]
+                    {
+                        let again =
+                            self.io
+                                .core
+                                .socket_driver
+                                .admit_ingress(now, socket, Ingress::Message);
+                        debug_assert_eq!(again, Admission::Current(epoch));
+                        debug_assert!(self.io.core.socket_effects.len() <= MAX_EFFECTS);
+                    }
+                    let work = self.io.core.socket_driver.observe_admitted(
+                        now,
+                        epoch,
+                        &Control::Other,
+                        traffic,
+                    );
+                    if !matches!(work, ControlWork::Complete) {
+                        let ready = self.venue.socket_startup_ready(&self.store);
+                        let effects = self.socket_mutate(now, |d, cx| {
+                            d.finish_control(cx, epoch, Control::Other, ready, work)
+                        });
+                        self.socket_enqueue(now, effects);
+                    }
+                    if !self.io.core.socket_effects.is_empty()
+                        || !self.io.socket_proposals.is_empty()
+                    {
+                        self.process_pending_socket_work(now);
+                    }
+                    if self.io.core.socket_driver.state.current(epoch) {
+                        self.deliver_current_socket_message(now, epoch, socket, text);
+                    }
+                    self.process_socket_work(now);
+                    return true;
+                }
+                let control = match controls {
                     ControlPolicy::None => Control::Other,
                     ControlPolicy::Native => self.venue.socket_control(
                         &self.store,
@@ -861,15 +901,7 @@ impl<V: Venue> Engine<V> {
                 }
                 self.process_socket_work(now);
                 if other && self.io.core.socket_driver.state.current(epoch) {
-                    let mut cx = Cx {
-                        now,
-                        store: &mut self.store,
-                        io: &mut self.io,
-                    };
-                    assert!(cx.io.core.socket_message.is_none());
-                    cx.io.core.socket_message = Some((epoch, now));
-                    Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
-                    cx.io.core.socket_message = None;
+                    self.deliver_current_socket_message(now, epoch, socket, text);
                 }
             }
             Event::WsBinary { data, .. } => {
@@ -888,6 +920,24 @@ impl<V: Venue> Engine<V> {
         }
         self.process_socket_work(now);
         true
+    }
+    #[inline(always)]
+    fn deliver_current_socket_message(
+        &mut self,
+        now: f64,
+        epoch: Epoch,
+        socket: SocketId,
+        text: &str,
+    ) {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        assert!(cx.io.core.socket_message.is_none());
+        cx.io.core.socket_message = Some((epoch, now));
+        Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
+        cx.io.core.socket_message = None;
     }
     pub(super) fn socket_gate(&mut self, now: f64, socket: SocketId, connect: bool) -> bool {
         if !V::managed_sockets() {

@@ -582,6 +582,19 @@ impl Driver {
             .policy(epoch.feed())
             .expect("current feed")
             .traffic;
+        self.observe_admitted(now, epoch, control, traffic)
+    }
+
+    /// Traffic and receive bookkeeping for a frame whose admission at `now`
+    /// returned `Current(epoch)`, with the feed's declared traffic policy.
+    #[inline(always)]
+    pub(crate) fn observe_admitted(
+        &mut self,
+        now: f64,
+        epoch: Epoch,
+        control: &Control,
+        traffic: TrafficPolicy,
+    ) -> ControlWork {
         let refresh = self
             .state
             .traffic(epoch, true, matches!(control, Control::Pong));
