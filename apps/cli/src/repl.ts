@@ -96,6 +96,7 @@ import { TwapInstance } from '../../../packages/safe-cex/src/webworker/twap/Twap
 import { createStandalonePlatformAdapter } from './platform-adapter';
 import { logger, originalConsoleLog, setConsoleTap, setPromptController } from './logger';
 import type { ExchangeLike, ExchangeAccountConfig } from '../../../packages/cli-core/src/types';
+import { formatBaseSize } from '../../../packages/cli-core/src/utils/formatBaseSize';
 import {
   login,
   logout,
@@ -551,14 +552,14 @@ async function startWatchChart(
     const orders = exchange.store.orders.filter((o) => o.symbol === symbol && o.status === 'open');
 
     const chartLines: ChartLine[] = [];
-    const positionLine = position ? formatPositionLine(position, pricePrecision) : null;
+    const positionLine = position ? formatPositionLine(position, market) : null;
     if (positionLine) chartLines.push(positionLine);
     for (const order of orders) {
       const orderLine = formatOrderLine(order, pricePrecision);
       if (orderLine) chartLines.push(orderLine);
     }
 
-    const positionSummary = formatPositionSummary(position, pricePrecision);
+    const positionSummary = formatPositionSummary(position, market);
 
     let countdown: string | undefined;
     const tfMs = TIMEFRAME_MS[timeframe];
@@ -1099,11 +1100,12 @@ function buildFooterState(): FooterState {
       state.totalUpnl = positions.reduce((sum, p) => sum + (p.unrealizedPnl ?? 0), 0);
     }
     if (symbol) {
+      const market = (store.markets ?? []).find((m) => m.symbol === symbol);
       const pos = positions.find((p) => p.symbol === symbol && p.contracts !== 0);
       if (pos) {
         state.position = {
           side: pos.side as 'long' | 'short',
-          contracts: pos.contracts,
+          size: `${formatBaseSize(pos.contracts, market)}${market?.base ? ' ' + market.base : ''}`,
           entryPrice: pos.entryPrice,
           notional: pos.notional,
           unrealizedPnl: pos.unrealizedPnl,

@@ -39,7 +39,7 @@ export const formatPriceCompact = (price: number, precision?: number): string =>
  * Uses k/M/B suffixes for large values.
  *
  * @param size - The size value
- * @param precision - Step size precision (e.g., 0.001)
+ * @param precision - Step size precision (e.g., 0.001); steps >= 1 use no fractional digits
  *
  * @example
  * formatSizeCompact(0.005) // "0.0050"
@@ -47,7 +47,7 @@ export const formatPriceCompact = (price: number, precision?: number): string =>
  * formatSizeCompact(1500000) // "1.50M"
  */
 export const formatSizeCompact = (size: number, precision?: number): string => {
-  const decimals = precision ? getSigDigitsFromPrecision(precision) : size >= 1 ? 2 : 4;
+  const decimals = precision ? (precision >= 1 ? 0 : getSigDigitsFromPrecision(precision)) : size >= 1 ? 2 : 4;
 
   if (size >= 1_000_000) {
     return (size / 1_000_000).toFixed(2) + 'M';

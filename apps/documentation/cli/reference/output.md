@@ -95,6 +95,10 @@ Both **no-op on a non-TTY** (pipes / CI) and suspend/resume cleanly around
 watch-mode alt-screen. Source: `apps/cli/src/scroll-region.ts` (the single
 region owner), `status-line.ts`, `footer.ts`, `footer-segments.ts`.
 
+Order and position sizes (`o`, `ps`, `p`, the prompt, charts, and the footer
+`position` segment) are base-asset amounts, shown to the market's base lot step
+(lot step × contract size); a step of 1 or more shows whole units.
+
 ---
 
 ## Command audit & tracing {#audit-tracing}
@@ -130,7 +134,7 @@ prompt preview                  # render the current format with live data
 | `{account}`  | Account name                        |
 | `{price}`    | Last price for focused symbol       |
 | `{side}`     | Position side (`L` / `S` / `—`)     |
-| `{size}`     | Position size                       |
+| `{size}`     | Base amount + asset (`240 DOGE`)    |
 | `{entry}`    | Entry price                         |
 | `{pnl}`      | Unrealized PnL (currency)           |
 | `{pnl%}`     | Unrealized PnL (percent)            |

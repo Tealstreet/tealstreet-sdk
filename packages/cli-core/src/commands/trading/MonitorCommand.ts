@@ -2,6 +2,7 @@ import { formatPrice } from '@tealstreet/utils/src/formatting/formatPrice';
 import { OrderStatus, OrderType, PositionSide, type Position, type Order } from '@tealstreet/safe-cex/src/types';
 import { calculatePositionAccountLeverage } from '@tealstreet/safe-cex/src/utils/leverage';
 import type { ExchangeLike } from '../../types';
+import { formatBaseSize } from '../../utils/formatBaseSize';
 import { RESET, DIM, CLEAR_SCREEN } from './colors';
 import {
   type TableData,
@@ -86,7 +87,7 @@ export function formatPositionsTable(exchange: ExchangeLike): string {
       cells: [
         cell(pos.symbol),
         cell(side, sideStyle),
-        cell(formatPrice(Math.abs(pos.notional))),
+        cell(formatBaseSize(pos.contracts, market)),
         cell(formatPrice(pos.entryPrice, pricePrecision)),
         cell(formatPrice(markPrice, pricePrecision), 'cyan'),
         cell(pnlStr, pnlStyle),
@@ -130,7 +131,6 @@ export function formatOrdersTable(exchange: ExchangeLike): string {
   for (const order of orders) {
     const market = exchange.store?.markets?.find((m) => m.symbol === order.symbol);
     const pricePrecision = market?.precision?.price;
-    const amountPrecision = market?.precision?.amount;
     const sideStyle: TextStyle = order.side === 'buy' ? 'green' : 'red';
     const side = order.side === 'buy' ? 'BUY' : 'SELL';
     const type = formatOrderTypeLabel(order.type);
@@ -145,7 +145,7 @@ export function formatOrdersTable(exchange: ExchangeLike): string {
         cell(order.symbol),
         cell(side, sideStyle),
         cell(type),
-        cell(formatPrice(order.amount, amountPrecision)),
+        cell(formatBaseSize(order.remaining, market)),
         cell(order.price ? formatPrice(order.price, pricePrecision) : 'Market', 'cyan'),
         cell(trigger),
       ],
@@ -307,7 +307,7 @@ export function formatMultiAccountPositionsTable(accounts: AccountExchange[]): s
         cell(accountName),
         cell(pos.symbol),
         cell(side, sideStyle),
-        cell(formatPrice(Math.abs(pos.notional))),
+        cell(formatBaseSize(pos.contracts, market)),
         cell(formatPrice(pos.entryPrice, pricePrecision)),
         cell(formatPrice(markPrice, pricePrecision), 'cyan'),
         cell(pnlStr, pnlStyle),
@@ -379,7 +379,6 @@ export function formatMultiAccountOrdersTable(accounts: AccountExchange[]): stri
 
     const market = exchange.store?.markets?.find((m) => m.symbol === order.symbol);
     const pricePrecision = market?.precision?.price;
-    const amountPrecision = market?.precision?.amount;
     const sideStyle: TextStyle = order.side === 'buy' ? 'green' : 'red';
     const side = order.side === 'buy' ? 'BUY' : 'SELL';
     const type = formatOrderTypeLabel(order.type);
@@ -395,7 +394,7 @@ export function formatMultiAccountOrdersTable(accounts: AccountExchange[]): stri
         cell(order.symbol),
         cell(side, sideStyle),
         cell(type),
-        cell(formatPrice(order.amount, amountPrecision)),
+        cell(formatBaseSize(order.remaining, market)),
         cell(order.price ? formatPrice(order.price, pricePrecision) : 'Market', 'cyan'),
         cell(trigger),
       ],
