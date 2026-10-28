@@ -118,20 +118,25 @@ fn a_history_page_that_never_answers_fails_at_its_window() {
     ends_at_its_window(order_history(81), 81, "/orders-history");
 }
 
+/// The walk has one window from admission; a later page does not renew it.
 #[test]
-fn a_later_history_page_that_never_answers_fails_at_its_own_window() {
+fn a_later_history_page_that_never_answers_ends_at_the_walk_window() {
     let mut h = private();
+    let from = h.actions.len();
     h.command(order_history(82));
     let first = h.take("/orders-history");
+    let deadline = h.now + 20_000.;
+    window(&h, from, 20_000.).expect("the history walk has no deadline");
+    h.now += 5_000.;
+    let page = h.actions.len();
     h.respond(first, 200, r#"{"next":"page-2","results":[]}"#);
-    let from = h.actions.len();
     let second = h.take("cursor=page-2");
     assert_eq!(header(&second, "Authorization"), Some("Bearer jwt"));
-    let timer = window(&h, from, 20_000.).expect("the second page has no deadline");
-    h.now += 20_000.;
+    let timer = window(&h, page, deadline - h.now).expect("the second page has no deadline");
+    h.now = deadline;
     h.e.handle(h.now, Event::TimerFired { timer });
     h.collect();
-    let error = failed(&h, 82).expect("the walk never ended");
+    let error = failed(&h, 82).expect("the walk outlived its window");
     assert_eq!(error.outcome, None);
 }
 
