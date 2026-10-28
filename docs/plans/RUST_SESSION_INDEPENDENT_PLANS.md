@@ -8,7 +8,7 @@ GO. Ruled by claude-ddi2il:
 - the protective siblings (TP and SL of an accepted parent) continue after a failed
   or Unknown sibling;
 - both run on this engine support.
-This scope is drafted while #2348 (engine PR 1) is held. No source until it lands.
+Source began after #2348 landed (93082e901fa). See Implementation below.
 
 ## Problem
 
@@ -156,6 +156,53 @@ disclosed and executed at source, never counted.
 - The CI wasm byte delta for every beta family against master; any family over its
   cap stops the PR (ddi2il).
 - Exact-tree 8x GO.
+
+## Implementation
+
+- `request_context_session_plan.rs` holds `admit_session_plan`, `SessionLegs`
+  and `plan_session_resend`. `SessionLegs` stores the root, plus each entry's auth,
+  frozen wire and resend seed, all by schedule ordinal. Without fallbacks, an
+  ordinal is the steps in order, calls within each step.
+- `ContextRegistry::session_call` takes the leg's Context, so the recipe gate
+  decides per entry. `keyless_session_egress` returns the root's egress, and
+  `make_plan_leg_context` keeps it only for a Session leg. A Session leg gets
+  credential None.
+- Admission reserves signing IDs only for Preflight entries.
+- The serial resend now calls `select_session_resend`, a helper it shares with
+  `plan_session_resend`. Its checks and their order are unchanged.
+  `serial_session_seed` is renamed `plan_session_seed` and covers both kinds of
+  Plan.
+
+**Originals:** the tests are in `request_context_session_plan_tests.rs`
+(`session_plan_calls`).
+
+| Original | Test |
+|---|---|
+| 1 | `session_cancels_continue_past_a_lost_cancel_and_project_unknown`, which also checks that Session legs reserve no signing IDs |
+| 2 | `signed_protective_siblings_continue_past_a_lost_take_profit` |
+| 3 | `a_lost_parent_orphans_its_children_unsent` |
+| 4 | `declaration_faults_refuse_before_any_id` and `a_session_leg_refuses_a_signing_recipe_and_a_preflight_leg_an_unsigned_one` |
+| 5 | `retiring_the_root_between_legs_ends_the_rest_unsent_without_a_latch` |
+| 6 | `session_and_signed_resends_keep_their_own_auth` and `a_changed_session_resend_body_refuses` |
+| 7 | `an_auth_length_mismatch_at_either_level_refuses_before_any_id` |
+| 8 | `a_concurrent_mixed_step_gives_each_leg_its_own_auth` |
+| 9 | `session_resends_are_fingerprinted_per_leg` and `a_changed_resend_on_one_session_leg_is_refused_for_that_leg` |
+
+**RED on base.** `admit_session_plan` does not exist on base, so every original
+fails to compile there. Base's only equivalent route, `admit_plan` on a Session
+root, refuses Invalid. That refusal is PRESERVATION and stays asserted. To show
+the originals pin the per-leg decisions, three source mutants were run, each
+reverted afterwards:
+- **Per-owner egress** (complete Session legs off the Session): 7 originals fail,
+  including 1, 5, 6, 8 and 9.
+- **One shared wire slot:** 9 and 1 fail.
+- **Signing IDs reserved for Session legs:** 1 fails.
+
+**One deviation from item 9 as worded.** A changed resend body is refused for
+that leg only, before release. The Plan then ends by the existing issue-refusal
+rule (`fail_owned_admission`), which applies to every Plan and is unchanged here,
+with the in-flight sibling Unknown. The isolation item 9 pins is the per-leg
+wire: leg 0's unchanged resend passes after leg 1 has committed its own wire.
 
 ## Review notes
 

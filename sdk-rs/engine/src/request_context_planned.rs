@@ -34,6 +34,8 @@ struct Body {
     history_latest_release: Option<Attempt>,
     #[cfg(feature = "serial-plans")]
     serial: Option<Box<serial::Serial>>,
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    session: Option<Box<session_plan::SessionLegs>>,
 }
 
 struct Entry {
@@ -59,6 +61,8 @@ struct PreparedAdmission {
     has_barriers: bool,
     #[cfg(feature = "http-mutation-barriers")]
     barriers: Result<Vec<Range<usize>>, Error>,
+    #[cfg(feature = "session-bearer")]
+    session: Option<session_plan::SessionLegs>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -81,7 +85,11 @@ fn take(ids: &mut Range<u64>, count: u64) -> Range<u64> {
 impl State {
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     pub(super) fn session_root(&self) -> Option<&crate::request_context::Session> {
-        self.body.first()?.serial.as_ref()?.session_root.as_ref()
+        let body = self.body.first()?;
+        match body.session.as_ref() {
+            Some(session) => Some(&session.root),
+            None => body.serial.as_ref()?.session_root.as_ref(),
+        }
     }
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     pub(in crate::engine) fn session_write(&self) -> Option<&crate::request_context::Credential> {
@@ -89,11 +97,19 @@ impl State {
     }
 
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-    pub(in crate::engine) fn session_call(&self) -> bool {
-        self.body
-            .first()
-            .and_then(|body| body.serial.as_ref())
-            .is_some_and(|serial| serial.session_call())
+    pub(in crate::engine) fn session_call(&self, context: &Context) -> bool {
+        let Some(body) = self.body.first() else {
+            return false;
+        };
+        match body.session.as_ref() {
+            Some(session) => body
+                .entry_of(context)
+                .is_some_and(|index| session.session_call(index)),
+            None => body
+                .serial
+                .as_ref()
+                .is_some_and(|serial| serial.session_call()),
+        }
     }
 
     /// A Mutation Plan's admitted credential, for repair mint custody.
@@ -439,44 +455,54 @@ impl<P> Cx<'_, P> {
         }
         #[cfg(feature = "serial-plans")]
         {
-            let AdmissionDeclaration {
-                steps,
-                policy,
-                terminals,
-                barriers,
-            } = declaration;
-            // Effective domain pacing first, so barrier validation sees it.
-            #[cfg(feature = "release-domains")]
-            let policy = PlanPolicy {
-                pacing: self
-                    .io
-                    .core
-                    .domain_pacing(policy.operation, policy.pacing)?,
-                ..policy
-            };
-            // An atomic group releases together, so it cannot take one FIFO
-            // turn per member; refused before any Plan ID is spent.
-            #[cfg(all(feature = "release-domains", feature = "http-mutation-barriers"))]
-            if !barriers.is_empty() && self.io.core.domain_member(policy.operation).is_some() {
-                return Err(Error::Invalid);
-            }
-            let prepared = PreparedAdmission {
-                schedule: Schedule::from_steps(steps),
-                terminals: terminal_ordinals(steps, &policy, terminals),
-                has_barriers: !barriers.is_empty(),
-                #[cfg(feature = "http-mutation-barriers")]
-                barriers: mutation_group::normalize(
-                    steps,
-                    &policy,
-                    barriers,
-                    &self.io.core.http_pacing,
-                ),
-                policy,
-            };
+            let prepared = self.prepare_admission(declaration)?;
             self.admit_plan_root(preflight, prepared, physical, None)
         }
         #[cfg(not(feature = "serial-plans"))]
         self.admit_plan_root(preflight, declaration, physical)
+    }
+
+    #[cfg(feature = "serial-plans")]
+    fn prepare_admission(
+        &self,
+        declaration: AdmissionDeclaration<'_, '_, '_>,
+    ) -> Result<PreparedAdmission, Error> {
+        let AdmissionDeclaration {
+            steps,
+            policy,
+            terminals,
+            barriers,
+        } = declaration;
+        // Effective domain pacing first, so barrier validation sees it.
+        #[cfg(feature = "release-domains")]
+        let policy = PlanPolicy {
+            pacing: self
+                .io
+                .core
+                .domain_pacing(policy.operation, policy.pacing)?,
+            ..policy
+        };
+        // An atomic group releases together, so it cannot take one FIFO
+        // turn per member; refused before any Plan ID is spent.
+        #[cfg(all(feature = "release-domains", feature = "http-mutation-barriers"))]
+        if !barriers.is_empty() && self.io.core.domain_member(policy.operation).is_some() {
+            return Err(Error::Invalid);
+        }
+        Ok(PreparedAdmission {
+            schedule: Schedule::from_steps(steps),
+            terminals: terminal_ordinals(steps, &policy, terminals),
+            has_barriers: !barriers.is_empty(),
+            #[cfg(feature = "http-mutation-barriers")]
+            barriers: mutation_group::normalize(
+                steps,
+                &policy,
+                barriers,
+                &self.io.core.http_pacing,
+            ),
+            policy,
+            #[cfg(feature = "session-bearer")]
+            session: None,
+        })
     }
 
     /// A serial Plan shares the whole declared admission transaction, with its
@@ -498,6 +524,8 @@ impl<P> Cx<'_, P> {
             has_barriers,
             #[cfg(feature = "http-mutation-barriers")]
             barriers,
+            #[cfg(feature = "session-bearer")]
+            session,
         } = prepared;
         #[cfg(not(feature = "serial-plans"))]
         let AdmissionDeclaration {
@@ -521,6 +549,7 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .keyless_session(preflight.owner())
             .is_some()
+            && session.is_none()
             && serial
                 .as_ref()
                 .is_none_or(|serial| serial.session_root.is_none())
@@ -693,9 +722,24 @@ impl<P> Cx<'_, P> {
             .try_reserve(1)
             .map_err(|_| Error::Capacity)?;
         let io_count = 1 + count as u64 + 3 * attempts as u64 + extra as u64;
-        let signed = policy.credential.is_some();
+        // A Session entry carries no signing reservation.
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let signs = |index: usize| {
+            session
+                .as_ref()
+                .is_none_or(|legs| !legs.session_call(index))
+        };
+        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+        let signs = |_: usize| true;
+        let signed_attempts: u64 = entries
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| signs(*index))
+            .map(|(_, entry)| u64::from(entry.terms.attempts))
+            .sum();
+        let signed = policy.credential.is_some() && signed_attempts > 0;
         if !self.io.core.next_id.available(io_count)
-            || (signed && !self.io.core.signing.available_ids(attempts as u64))
+            || (signed && !self.io.core.signing.available_ids(signed_attempts))
         {
             return Err(Error::Capacity);
         }
@@ -710,7 +754,7 @@ impl<P> Cx<'_, P> {
             self.io
                 .core
                 .signing
-                .reserve_ids(attempts as u64)
+                .reserve_ids(signed_attempts)
                 .expect("preflighted whole signing plan")
         });
         for (index, entry) in entries.iter_mut().enumerate() {
@@ -718,6 +762,7 @@ impl<P> Cx<'_, P> {
             entry.ids = take(&mut ids, 3 * u64::from(entry.terms.attempts));
             entry.signing = signing
                 .as_mut()
+                .filter(|_| signs(index))
                 .map(|ids| take(ids, u64::from(entry.terms.attempts)));
         }
         // The execution identity and the founder's observer root leg.
@@ -764,6 +809,8 @@ impl<P> Cx<'_, P> {
             history_latest_release: None,
             #[cfg(feature = "serial-plans")]
             serial: serial.map(Box::new),
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            session: session.map(Box::new),
         });
         if let Some(context) = old_read {
             self.io.retire_http_leg(&context);
@@ -1186,14 +1233,25 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         let window = entry.terms.window(self.now, plan.deadline())?;
+        // Which entry rides the login Session is declared per call.
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let session_leg = match body.session.as_ref() {
+            Some(session) => session.session_call(index),
+            None => body
+                .serial
+                .as_ref()
+                .is_some_and(|serial| serial.session_call()),
+        };
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let session_egress = session_egress.filter(|_| session_leg);
         #[cfg(feature = "serial-plans")]
         let (operation, retry, credential) = body.serial.as_ref().map_or_else(
             || {
-                (
-                    body.policy.operation,
-                    body.policy.retry,
-                    body.policy.credential.clone(),
-                )
+                #[cfg(feature = "session-bearer")]
+                let credential = body.policy.credential.clone().filter(|_| !session_leg);
+                #[cfg(not(feature = "session-bearer"))]
+                let credential = body.policy.credential.clone();
+                (body.policy.operation, body.policy.retry, credential)
             },
             |serial| serial.terms(&body.policy.credential),
         );
@@ -1839,6 +1897,16 @@ impl crate::engine::CoreRef<'_> {
 }
 
 impl Body {
+    /// The entry whose current call is this leg.
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    fn entry_of(&self, context: &Context) -> Option<usize> {
+        self.entries.iter().position(|entry| {
+            entry
+                .call
+                .as_ref()
+                .is_some_and(|call| call.context == *context)
+        })
+    }
     fn refresh_availability(&mut self, now: f64) {
         for slot in self.schedule.available() {
             let index = self.schedule.ordinal(&slot).expect("own available slot");
@@ -2415,6 +2483,10 @@ mod history;
 #[path = "request_context_serial_plan.rs"]
 mod serial;
 
+#[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+#[path = "request_context_session_plan.rs"]
+mod session_plan;
+
 #[cfg(feature = "condition-waits")]
 #[path = "request_context_condition_wait.rs"]
 mod condition_wait;
@@ -2444,27 +2516,54 @@ impl ContextRegistry {
             return Ok(None);
         };
         let current = self.plan_body(&plan)?;
-        let Some(serial) = current.serial.as_ref().filter(|s| s.session_call()) else {
-            return Ok(None);
+        // A complete Plan freezes each Session entry's wire on its own.
+        let frozen = match current.session.as_ref() {
+            Some(session) => {
+                let index = current.entry_of(context).ok_or(Error::Revoked)?;
+                if !session.session_call(index) {
+                    return Ok(None);
+                }
+                session.wire[index]
+            }
+            None => match current.serial.as_ref().filter(|s| s.session_call()) {
+                Some(serial) => serial.wire_fingerprint,
+                None => return Ok(None),
+            },
         };
         let fingerprint = super::keyless_session::wire_fingerprint(method, url, headers, body);
-        if serial
-            .wire_fingerprint
-            .is_some_and(|expected| expected != fingerprint)
-        {
+        if frozen.is_some_and(|expected| expected != fingerprint) {
             return Err(Error::Invalid);
         }
         Ok(Some(fingerprint))
     }
 
-    pub(in crate::engine) fn commit_keyless_wire(&mut self, owner: Owner, fingerprint: [u8; 32]) {
+    pub(in crate::engine) fn commit_keyless_wire(
+        &mut self,
+        owner: Owner,
+        leg: u64,
+        fingerprint: [u8; 32],
+    ) {
         let CommandPhase::Planned(state) =
             &mut self.owner_entry_mut(owner).expect("queued owner").phase
         else {
             unreachable!("queued serial Plan");
         };
-        state.body[0]
-            .serial
+        let body = &mut state.body[0];
+        if let Some(session) = body.session.as_mut() {
+            let index = body
+                .entries
+                .iter()
+                .position(|entry| {
+                    entry
+                        .call
+                        .as_ref()
+                        .is_some_and(|call| call.context.leg() == leg)
+                })
+                .expect("queued Session entry");
+            session.wire[index] = Some(fingerprint);
+            return;
+        }
+        body.serial
             .as_mut()
             .expect("queued keyless serial")
             .wire_fingerprint = Some(fingerprint);
