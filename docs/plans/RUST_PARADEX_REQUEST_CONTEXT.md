@@ -502,10 +502,16 @@ Overseer claude-ddi2il. Reviewers: claude-fe7lgm (engine surface), codex-9czdjh
 
 | File | Rows | Content |
 | --- | ---: | --- |
-| `account.rs` | 5 | `sign` helper (the ruled interim `de9d09fa…`), `dispatch` (`request` and `request_streamed_body`), the `/auth` `refresh` (`request` plus `route_request(Direct)`), and one more queued-dispatch row |
-| `trading.rs` | 11 | job entry `fail`s, the capped-placement orderbook quote read, `account.request` for every write, terminal `done`/`fail` (writes and FetchLeverage) |
-| `history.rs` | 2 | the private fills/orders page read (`account.request`), plus its macro row |
-| `public.rs` | 1 | the `public_failed` macro row |
+| `account.rs` | 5 | `sign` helper :223 (the ruled interim `de9d09fa…`); `dispatch` :613 `request_streamed_body` and :622 `request`; the `/auth` `refresh` :643 `request` (then `route_request(Direct)`); and the macro row :611 `format!("{}{}", self.rest(), request.path)` |
+| `trading.rs` | 11 | entry `fail`s :566 and :784; the capped-placement orderbook quote read :795; preparation and amend-lock `fail`s :827 and :840 (one digest, count 2); `account.request` for every write :847; terminal `done`/`fail` :877, :878 and :882; FetchLeverage `done`/`fail` :1021 and :1022 |
+| `history.rs` | 2 | the private page read :477 (`account.request`) and the macro row :459 (`format!` over `request.fallback`) |
+| `public.rs` | 1 | the macro row :1081 `matches!(request, Request::Markets ..)` |
+
+The three macro rows are the scan's conservative freeze of any macro whose tokens
+name a legacy method (here, a local called `request`). They are not calls.
+account :611 and history :459 go with their converted code. public :1081 sits in
+unrelated public code. Clearing it needs only a binding rename, and I'll present
+that as such, not as a conversion.
 
 Target: 0 rows. `RULED_GROWTH` loses its tuple in the same commit as the site, and
 the trading `hash` field is renamed. `Account::queue`, `dispatch`, `Queued`, the
