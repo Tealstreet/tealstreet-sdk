@@ -683,3 +683,13 @@ no callers.
   - Genuine managed-boundary and admission REDs are required, and every gated
     suffix runs at source.
   - Fresh JS/WASM EngineHost qualification, maps, sizes and correctness CI apply.
+- **Q2 final (ddi2il).**
+  - (1) Protective siblings (the TP and SL of an accepted parent) continue after a
+    failed or Unknown sibling, as cancels do. They share the independent-continuation
+    engine PR, whose tests cover both cases.
+  - (2) Independent later entries stop after an Unknown earlier entry. A plainly
+    rejected earlier entry still lets later entries run. The caller fragment states
+    this.
+  - (3) Parent to children stays as today.
+  - (4) The Q3 signed-Direct login is a third engine change. Only one engine PR is
+    active at a time.
