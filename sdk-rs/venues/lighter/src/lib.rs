@@ -168,6 +168,8 @@ fn feed_policy(channel: Channel) -> FeedPolicy {
         controls: ControlPolicy::None,
         invalidation: Invalidation::Required,
         subscription_interval_ms: 0.0,
+        // 1013 (try again later) waits 30 s on both feeds, as the TS onClose overrides do.
+        close_floors: &[(1013, 30_000.0)],
     }
 }
 fn socket_failed(cx: &mut Cx<'_, Pending>, error: SocketError) {
@@ -1195,6 +1197,7 @@ impl Venue for Lighter {
                     }
                     RetireReason::Closed => "Lighter socket closed; reconnecting",
                     RetireReason::Stopped => "Lighter socket stopped",
+                    RetireReason::RouteExhausted => "Lighter socket refused on every route",
                 };
                 cx.notice(safe_cex_engine::Level::Warn, code::WS_DISCONNECTED, message);
             }

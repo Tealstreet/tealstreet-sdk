@@ -141,6 +141,30 @@ fn a_private_frame_after_the_silence_bound_is_refused_and_the_feed_reconnects() 
 }
 
 #[test]
+fn try_again_later_close_on_the_public_feed_waits_thirty_seconds() {
+    let (mut e, feeds, mut timers) = ready_feeds(options(), true);
+    let at = NOW + 1_000.0;
+    e.handle(
+        at,
+        Event::WsClosed {
+            socket: feeds.public,
+            code: 1013,
+        },
+    );
+    drain_at(&mut e, &mut timers, at);
+    let early = advance(&mut e, &mut timers, at + 29_999.0);
+    assert!(
+        connected(&early, SocketChannel::Public).is_none(),
+        "{early:?}"
+    );
+    let retry = advance(&mut e, &mut timers, at + 30_000.0);
+    assert!(
+        connected(&retry, SocketChannel::Public).is_some(),
+        "{retry:?}"
+    );
+}
+
+#[test]
 fn dropped_public_feed_replays_each_current_subscription_once_then_pings() {
     let (mut e, feeds, mut timers) = ready_feeds(options(), true);
     for command in [
