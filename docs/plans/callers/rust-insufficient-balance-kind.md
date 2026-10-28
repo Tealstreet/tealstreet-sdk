@@ -15,6 +15,9 @@ unchanged until a family PR re-points its balance rows.
   - `exchangeErrorCategory` and the Sentry tags map the kind to that category.
   - `ExchangeHealthMonitor` treats it as a specific kind, so it wins over text
     patterns.
+  - The CLI's `'error'` listener now passes the event's `opts.classified` to
+    `processMessage`, which before classified CLI errors by text only. This
+    applies to every typed kind, not only the new one.
 - **NX (after mirroring):**
   - Exhaustive `switch`es or `Record<ErrorCategory, ...>` maps over these unions
     must add the new member.

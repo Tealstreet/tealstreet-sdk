@@ -613,9 +613,10 @@ pub mod error_corpus {
         if runs(text, |c| c.is_ascii_hexdigit() || c == ':').any(ipv6) {
             return Some("an IPv6 address".into());
         }
+        // Any five consecutive segments, so a hex word joined by `-` cannot hide one.
         let uuid = |run: &str| {
             let lengths: Vec<_> = run.split('-').map(str::len).collect();
-            lengths == [8, 4, 4, 4, 12]
+            lengths.windows(5).any(|window| window == [8, 4, 4, 4, 12])
         };
         if runs(text, |c| c.is_ascii_hexdigit() || c == '-').any(uuid) {
             return Some("a UUID".into());
