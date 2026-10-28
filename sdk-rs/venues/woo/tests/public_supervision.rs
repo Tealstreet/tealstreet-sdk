@@ -248,3 +248,24 @@ fn suppressed_public_feed_is_not_supervised() {
     assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
     assert_eq!(h.fired, 10, "only the minute funding refresh fires");
 }
+
+/// The control-free public feed reads a frame one millisecond before the idle
+/// deadline and refreshes it; a frame exactly at the deadline, before the
+/// watchdog fires, is not reduced and retires the socket.
+#[test]
+fn a_public_frame_at_the_idle_deadline_is_not_reduced() {
+    const LATE: &str = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":"62000","volume":5,"amount":305000}]}"#;
+    let mut h = Harness::new();
+    let socket = h.open();
+    let opened = h.now;
+    h.now = opened + 19_999.0;
+    h.message(socket, TICKER);
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 61000.0);
+    h.now = opened + 39_999.0;
+    h.message(socket, LATE);
+    assert!(h.closed.contains(&socket));
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 61000.0);
+    let until = h.now + 1_000.0;
+    h.advance(until);
+    assert_eq!(h.public.len(), 2, "idle timeout retries");
+}

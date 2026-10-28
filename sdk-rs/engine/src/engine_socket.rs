@@ -818,15 +818,19 @@ impl<V: Venue> Engine<V> {
                     .core
                     .sockets
                     .received(socket, now, &mut self.io.core.health);
-                let control = match self
+                let policy = self
                     .io
                     .core
                     .socket_driver
                     .state
                     .policy(epoch.feed())
-                    .expect("current managed feed")
-                    .controls
-                {
+                    .expect("current managed feed");
+                let (controls, traffic) = (policy.controls, policy.traffic);
+                // A control-free frame keeps its ingress admission: no venue code
+                // has run since. An exhaustion stop there revokes the epoch; its
+                // traffic check then fails, and AnyText (required) records nothing.
+                let admitted = controls == ControlPolicy::None;
+                let control = match controls {
                     ControlPolicy::None => Control::Other,
                     ControlPolicy::Native => self.venue.socket_control(
                         &self.store,
@@ -841,19 +845,27 @@ impl<V: Venue> Engine<V> {
                 );
                 #[cfg(feature = "socket-native-timing")]
                 let other = other || matches!(control, Control::Traffic);
-                let ready = self.venue.socket_startup_ready(&self.store);
-                self.assert_live();
-                let work = self
-                    .io
-                    .core
-                    .socket_driver
-                    .observe_control(now, epoch, &control);
-                self.assert_live();
+                let work = if admitted {
+                    self.io
+                        .core
+                        .socket_driver
+                        .observe_admitted(now, epoch, &control, traffic)
+                } else {
+                    self.assert_live();
+                    let work = self
+                        .io
+                        .core
+                        .socket_driver
+                        .observe_control(now, epoch, &control);
+                    self.assert_live();
+                    work
+                };
                 if matches!(work, ControlWork::Complete) {
                     if self.io.core.socket_effects.len() > MAX_EFFECTS {
                         self.socket_enqueue(now, Vec::new());
                     }
                 } else {
+                    let ready = self.venue.socket_startup_ready(&self.store);
                     let effects = self.socket_mutate(now, |d, cx| {
                         d.finish_control(cx, epoch, control, ready, work)
                     });
@@ -1515,9 +1527,16 @@ mod tests {
                     0
                 }
             );
+            // A native frame is admitted again after its codec; a control-free
+            // frame's ingress admission stands.
+            let admissions = if controls == ControlPolicy::Native {
+                2
+            } else {
+                1
+            };
             assert_eq!(
                 e.io.core.socket_driver.state.socket_lookup_count(),
-                queries + 128
+                queries + 64 * admissions
             );
         }
     }
@@ -1583,7 +1602,23 @@ mod tests {
 
     #[test]
     fn retained_retirements_keep_both_empty_publication_capacity_checks() {
-        let (mut e, socket) = engine();
+        for controls in [ControlPolicy::Native, ControlPolicy::None] {
+            retained_retirements_keep_both_capacity_checks(controls);
+        }
+    }
+    fn retained_retirements_keep_both_capacity_checks(controls: ControlPolicy) {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            controls,
+            ..Probe::default()
+        });
+        e.start(0.);
+        let socket = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
         e.handle(0., Event::WsOpened { socket });
         e.drain_actions().for_each(drop);
         let retired = {
@@ -1617,8 +1652,11 @@ mod tests {
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(e.io.core.socket_failed);
         assert_eq!(e.venue.messages, 0);
-        assert_eq!(e.venue.control_calls.get(), 1);
-        assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.message == "Managed socket effect capacity exhausted")).count(), 2);
+        assert_eq!(
+            e.venue.control_calls.get(),
+            usize::from(controls == ControlPolicy::Native)
+        );
+        assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.message == "Managed socket effect capacity exhausted")).count(), 2, "{controls:?}");
     }
 
     #[test]
@@ -2386,6 +2424,9 @@ mod declaration_tests;
 #[cfg(test)]
 #[path = "socket_close_floor_tests.rs"]
 mod close_floor_tests;
+#[cfg(test)]
+#[path = "socket_message_ingress_tests.rs"]
+mod message_ingress_tests;
 
 #[cfg(all(test, feature = "socket-native-timing"))]
 #[path = "socket_native_timing_tests.rs"]
