@@ -7,6 +7,10 @@ const BYBIT_ENV_MISMATCH_MESSAGE =
   'Bybit API key environment mismatch: this key is valid for Bybit Demo Trading, but this account is configured for live Bybit. Create a live Bybit API key or switch the account to Bybit Demo Trading. [HTTP 403 Forbidden — API key rejected]';
 
 describe('classifyForCLI', () => {
+  it('shows an insufficient-balance refusal as an order error', () => {
+    expect(classifyForCLI('insufficient_balance', 'error')).toEqual({ action: 'error' });
+  });
+
   it('keeps the generic message for ordinary invalid auth', () => {
     expect(classifyForCLI('auth_invalid', 'error')).toEqual({
       action: 'critical',
