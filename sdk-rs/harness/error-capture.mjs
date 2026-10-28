@@ -132,7 +132,15 @@ const ipv6 = (run) => {
   return groups.every((group) => group.length <= 4)
     && ((groups.length === 8 && filled === 8) || (run.includes('::') && filled >= 2));
 };
-const uuid = (run) => run.split('-').map((part) => part.length).join() === '8,4,4,4,12';
+// Any five consecutive segments, so a hex word joined by `-` cannot hide one.
+const UUID_SEGMENTS = '8,4,4,4,12';
+const redactUuids = (run) => {
+  const parts = run.split('-');
+  for (let i = 0; i + 5 <= parts.length; i += 1) {
+    if (parts.slice(i, i + 5).map((part) => part.length).join() === UUID_SEGMENTS) parts.splice(i, 5, REDACTED);
+  }
+  return parts.join('-');
+};
 const base58 = (run) => run.length >= 32 && !/[0OIl]/.test(run)
   && /\d/.test(run) && /[A-Z]/.test(run) && /[a-z]/.test(run);
 
@@ -141,7 +149,7 @@ export const redactText = (text) => text
   .replace(/[0-9a-fA-F]+/g, (run) => (run.length >= 40 ? REDACTED : run))
   .replace(/[0-9.]+/g, (run) => (ipv4(run) ? run.replace(/^(\.*).*?(\.*)$/, `$1${REDACTED}$2`) : run))
   .replace(/[0-9a-fA-F:]+/g, (run) => (ipv6(run) ? REDACTED : run))
-  .replace(/[0-9a-fA-F-]+/g, (run) => (uuid(run) ? REDACTED : run))
+  .replace(/[0-9a-fA-F-]+/g, redactUuids)
   .replace(/[0-9A-Za-z]+/g, (run) => (base58(run) ? REDACTED : run));
 
 /** The reply text with sensitive JSON values and identifying text replaced; nothing re-serialized. */
@@ -185,6 +193,7 @@ export const checkCases = (cases) => {
     names.add(capture.name);
     if (!String(capture.url).startsWith('https://')) throw new Error(`${capture.name}: https only`);
     const url = new URL(capture.url);
+    if (url.username || url.password) throw new Error(`${capture.name}: no userinfo in the URL; no real credentials`);
     perHost.set(url.host, (perHost.get(url.host) ?? 0) + 1);
     if (perHost.get(url.host) > MAX_PER_HOST) throw new Error(`at most ${MAX_PER_HOST} captures per host per run`);
     for (const [header, value] of Object.entries(capture.headers ?? {})) {

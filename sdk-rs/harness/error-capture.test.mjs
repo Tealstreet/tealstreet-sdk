@@ -53,6 +53,8 @@ test('cases outside ruling R4 are refused before any request', () => {
   assert.throws(() => checkCases([{ ...ok, body: { vaultAddress: '0xabc' } }]), /body vaultAddress/);
   assert.equal(checkCases([{ ...ok, body: { op: 'login', args: [{ apiKey: 'bogus-k', sign: '' }] } }]).length, 1);
   assert.throws(() => checkCases([{ ...ok, url: 'http://api.venue.test/' }]), /https only/);
+  assert.throws(() => checkCases([{ ...ok, url: 'https://user:pass@api.venue.test/' }]), /no userinfo/);
+  assert.throws(() => checkCases([{ ...ok, url: 'https://bogus-user@api.venue.test/' }]), /no userinfo/);
   assert.throws(() => checkCases([ok, ok]), /duplicate/);
   assert.throws(() => checkCases([{ ...ok, expect: {} }]), /expect.path/);
   const many = (count, host) => Array.from({ length: count }, (_, i) => ({ ...ok, name: `case-${i}`, url: `https://${host(i)}/v1` }));
