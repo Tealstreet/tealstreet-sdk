@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { ACCEPTED_DIFFERENCES, acceptedCoverageErrors, assessGateReport, validateAcceptedDifferences } from './known-failure-policy.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
@@ -34,15 +33,12 @@ test('the committed accepted-difference manifest is valid and names current CI t
   assert.deepEqual(acceptedCoverageErrors(ACCEPTED_DIFFERENCES), []);
 });
 
-test('an accepted entry must name a CI gate case at its current tape bytes', () => {
+test('an accepted entry must name a CI gate case', () => {
   const tape = 'sdk-rs/harness/tapes/bitget-private.jsonl';
-  const sha = createHash('sha256').update(readFileSync(new URL(`../../${tape}`, import.meta.url))).digest('hex');
-  const entry = (extra) => ({ schema: 1, differences: [{ ...accepted().differences[0], venue: 'bitget', tape, tapeSha256: sha, ...extra }] });
+  const entry = (extra) => ({ schema: 1, differences: [{ ...accepted().differences[0], venue: 'bitget', tape, ...extra }] });
   assert.deepEqual(acceptedCoverageErrors(entry()), []);
-  assert.match(acceptedCoverageErrors(entry({ tapeSha256: 'b'.repeat(64) })).join('\n'), /re-recorded/);
   assert.match(acceptedCoverageErrors(entry({ venue: 'example' })).join('\n'), /no CI gate case/);
-  assert.match(acceptedCoverageErrors(entry({ tape: 'sdk-rs/harness/tapes/missing.jsonl' }),
-    { cases: [{ venue: 'bitget', tape: 'sdk-rs/harness/tapes/missing.jsonl' }] }).join('\n'), /tape is missing/);
+  assert.match(acceptedCoverageErrors(entry({ tape: 'sdk-rs/harness/tapes/missing.jsonl' })).join('\n'), /no CI gate case/);
 });
 
 test('an accepted path pins its observed values: a changed value is a new divergence', () => {
@@ -122,4 +118,22 @@ test('verifyGateSuite labels a gate whose only differences are accepted', () => 
   assert.equal(result.acceptedGates, 1);
   assert.equal(result.knownFailures, 0);
   assert.ok(result.rows.some((row) => row.label === 'PARITY WITH ACCEPTED DIFFERENCES'));
+});
+
+test('verifyGateSuite fails an accepted entry whose tape was re-recorded or not replayed', () => {
+  const entries = expectedGateCases('mexc').map((item, index) => {
+    const isPrivate = !item.books;
+    const samples = Object.fromEntries(['ts', 'rust'].map((impl) => [impl, Array.from({ length: isPrivate ? 1 : 9 }, () => ({
+      ...metric(isPrivate ? 'correctness' : 'performance', impl === 'ts' ? 200 : 180),
+      ...(impl === 'ts' ? { heapUsedBytes: 400, heapRetainedBytes: 300, retainedBytes: 300 } : {}),
+    }))]));
+    return { report: { ...item, schema: 1, tapeSha256: String(index + 1).repeat(64), private: isPrivate,
+      runs: isPrivate ? 0 : 9, correctnessRuns: 1, requiredImprovement: 0.1, samples, status: 'PASS', failures: [] }, exitCode: 0 };
+  });
+  const target = entries.find((entry) => entry.report.private).report;
+  const declared = accepted();
+  Object.assign(declared.differences[0], { venue: target.venue, tapeSha256: 'f'.repeat(64), tape: target.tape });
+  const result = verifyGateSuite({ suite: 'mexc', entries, manifest: none(), accepted: declared });
+  assert.match(result.errors.join('\n'), /was not replayed at that tape SHA/);
+  assert.deepEqual(verifyGateSuite({ suite: 'mexc', entries, manifest: none(), accepted: { schema: 1, differences: [] } }).errors, []);
 });

@@ -3,8 +3,8 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
-import { assessGateReport, assessCorrectnessReport, ACCEPTED_DIFFERENCES } from './known-failure-policy.mjs';
-import { validateGateCoverage } from './ci-gate-suites.mjs';
+import { assessGateReport, assessCorrectnessReport, acceptedReplayErrors, ACCEPTED_DIFFERENCES } from './known-failure-policy.mjs';
+import { expectedGateCases, validateGateCoverage } from './ci-gate-suites.mjs';
 import { assessEligibility } from './cpu-remeasure.mjs';
 import { cpuRemeasureEnabled } from './cpu-rollout.mjs';
 import { readEvidenceText } from './recorded-replay.mjs';
@@ -47,6 +47,7 @@ export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_
     rows.push({ label, identity, assessment });
   }
   errors.push(...validateGateCoverage(suite, cases));
+  if (!errors.length) errors.push(...acceptedReplayErrors(accepted, expectedGateCases(suite), entries.map((entry) => entry.report)));
   return { errors, rows, pending, passes, strictFailures, knownFailures, acceptedGates };
 }
 

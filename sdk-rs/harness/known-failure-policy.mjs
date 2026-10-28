@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { GATE_SUITES, expectedGateCases } from './ci-gate-suites.mjs';
 import { memoryMetricErrors } from './memory.mjs';
@@ -113,22 +112,18 @@ const acceptedDiagnostics = (accepted, report) => new Map((accepted.differences.
   .flatMap((item) => item.failures.map((failure) => [diagnosticKey(failure),
     { key: diagnosticKey(failure), failure, category: item.category, rationale: item.rationale, evidence: item.evidence }])));
 
-/** Every accepted entry must name a tape that a CI gate case replays, at its current bytes. */
-export function acceptedCoverageErrors(accepted, { root = new URL('../../', import.meta.url), cases } = {}) {
-  const gateCases = cases ?? GATE_SUITES.flatMap((suite) => expectedGateCases(suite));
-  const errors = [];
-  for (const entry of accepted?.differences ?? []) {
-    const identity = `${entry.venue}:${entry.tapeSha256}`;
-    if (!gateCases.some((item) => item.venue === entry.venue && item.tape === entry.tape)) {
-      errors.push(`accepted difference ${identity} names no CI gate case for ${entry.tape}`);
-      continue;
-    }
-    let sha;
-    try { sha = createHash('sha256').update(readFileSync(new URL(entry.tape, root))).digest('hex'); }
-    catch { errors.push(`accepted difference ${identity} tape is missing: ${entry.tape}`); continue; }
-    if (sha !== entry.tapeSha256) errors.push(`accepted difference ${identity} tape was re-recorded (now ${sha}): ${entry.tape}`);
-  }
-  return errors;
+/** Every accepted entry must name a tape that a CI gate case replays. Private
+ * tapes are generated in CI, so their bytes are checked per suite at verification. */
+export function acceptedCoverageErrors(accepted, cases = GATE_SUITES.flatMap((suite) => expectedGateCases(suite))) {
+  return (accepted?.differences ?? []).filter((entry) => !cases.some((item) => item.venue === entry.venue && item.tape === entry.tape))
+    .map((entry) => `accepted difference ${entry.venue}:${entry.tapeSha256} names no CI gate case for ${entry.tape}`);
+}
+
+/** A suite's ledger must replay every accepted entry it owns at the recorded tape SHA. */
+export function acceptedReplayErrors(accepted, cases, reports) {
+  return (accepted?.differences ?? []).filter((entry) => cases.some((item) => item.venue === entry.venue && item.tape === entry.tape))
+    .filter((entry) => !reports.some((report) => report?.venue === entry.venue && report.tape === entry.tape && report.tapeSha256 === entry.tapeSha256))
+    .map((entry) => `accepted difference ${entry.venue}:${entry.tapeSha256} was not replayed at that tape SHA: ${entry.tape}`);
 }
 
 function assessReport(report, manifest, correctnessOnly, accepted) {

@@ -956,8 +956,10 @@ can never be accepted. A path cannot be both known and accepted, and an
 accepted key that a complete replay no longer reproduces fails verification
 as stale. The values are pinned too: if either value at an accepted path
 changes, that is a new divergence. A harness test requires each entry's tape
-to be replayed by a CI gate case and to still hash to its recorded SHA, so a
-re-recorded or dropped tape cannot leave an acceptance unchecked.
+to belong to a CI gate case. Private tapes are generated in CI, so
+`verify-gates.mjs` then requires each suite's ledger to replay every accepted
+entry it owns at the recorded tape SHA. A re-recorded or dropped tape cannot
+leave an acceptance unchecked.
 `verify-gates.mjs` labels a gate whose only differences are
 accepted `PARITY WITH ACCEPTED DIFFERENCES` and counts those gates separately
 from known failures.
