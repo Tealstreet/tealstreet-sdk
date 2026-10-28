@@ -42,7 +42,9 @@ tables outside the fetched text.
     no WS order-reject classification yet (no recorded frames; credentialed).
 
 Table invariants: `CODES` now passes `assert_table`, through its rule that an
-exact code listed before a range containing it refines that range. That
+exact code listed before a range containing it refines that range. Refinement
+holds only within one scope: rows scoped to the intent match before every
+unscoped row, so an unscoped exact code never refines a scoped range. That
 brings the shared scope and code-and-message guards to OKX. An OKX test also
 pins 50113 as the only resendable row and no auth code as Satisfied.
 
