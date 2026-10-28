@@ -147,3 +147,41 @@ required workspace compatibility check, fmt/full bans/ratchets/selection and
 preservation receipts; uufub4 dispatch review plus setup/HMAC/socket fit for the
 changed surfaces. One freeze push and one PR-triggered run; READY to 8x5tm1 only
 when green and reviewed, then exact-tree GO and guarded head-matched landing.
+
+## Beta hardening refresh on master
+
+The 2026-10-27 assignment starts from `origin/master`; #2300 landed at
+`97cfa6d90a1`. The remaining request inventory is 14 distinct path/fingerprint
+rows and 16 occurrences across five source files: account (2), history (5),
+Spot account (4), Spot trading (2), and Futures trading (3). These numbers count
+occurrences; the two account helpers and Spot private sender are three physical
+funnels. No inventory entry is removed by an original test or a fixture repair.
+
+The request cutover is first, followed by remaining credential/signing custody
+and `order_read_epoch` adoption. All share this venue lane, with one open PR at
+a time. Hosted signing remains post-beta. Native execution does not establish
+browser or credentialed live-smoke readiness.
+
+The existing preparation originals reach ordinary Futures account requests,
+streamed account requests and Spot private POSTs. Three additional originals
+drive actual Futures placement, Spot placement and Futures order history into
+the same host boundary. Each requires an unsigned managed preparation and no
+provider work while preparation is held. The native token probe now delegates
+the real managed-socket callbacks, so its existing live/closed token assertions
+reach the actual token request rather than failing during bootstrap.
+
+On unchanged production at this base, the opt-in target has 16 assertion REDs
+and 13 native GREENs, with no ignored tests. Six REDs specifically prove private
+HTTP escapes before preparation. The added authentication-header and held-
+provider assertions remain gated behind those first preparation assertions.
+The initial two token-fixture bootstrap failures and a corrected wrapper trait
+signature are excluded from behavioral RED evidence.
+
+Nonce continuity is still a shared prerequisite. `reserve_kraken_legacy` and
+dispatch reservations share storage but use different subject keys; there is no
+landed association, legacy-issuance fence, actual-owner join or atomic import of
+reserved and released maxima. The nonce owner independently confirmed this on
+the master base. No secret digest becomes `stable_id`, and a nonce-bearing work
+receipt without its genuine claim is explicitly refused by dispatch. The
+production path is retained while that shared prerequisite is assigned. These
+originals authorize no new namespace or partial private activation.
