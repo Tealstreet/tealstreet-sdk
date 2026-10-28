@@ -12,8 +12,10 @@ attached by the engine.
 
 - **One window per walk.** The whole page walk has one 20 s window from admission,
   and a later page does not renew it. Unanswered pages used to wait indefinitely.
-  When the window ends, the query fails as a read (no outcome). A walk of several
-  pages must therefore finish within 20 s in total.
+  When the window ends on a sent page, the query ends like any lost page. With no
+  accepted rows it fails as a read (no outcome). After earlier pages were accepted,
+  it returns those rows marked INCOMPLETE. A walk of several pages must therefore
+  finish within 20 s in total.
 - **A page never sent stays strict.** A page held behind a JWT refresh that is
   refused, or that reaches the window unsent, fails the query NotSent. Accepted
   earlier pages are not published. A page that was sent and then lost publishes
