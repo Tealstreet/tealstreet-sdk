@@ -286,7 +286,7 @@ Paths are relative to `sdk-rs/venues/<venue>/src/`.
 | okx | 51008 (range 51000-51999) |
 | bitget | 40762 (via `unlisted`) |
 | kraken | futures `insufficientFunds`, `insufficientAvailableFunds` (`status_failure`); spot `EOrder:Insufficient funds` (local ladder) |
-| hyperliquid | "Insufficient margin to place order." as a batch row only; a top-level err is `Unknown` (`trading/custody.rs:400-416`) |
+| hyperliquid | "Insufficient margin to place order." is `Refused(Rejected)` as a batch row only. A top-level err differs by layer: the caller sees `Rejected`/Refused on a 2xx (`trading.rs:969`), but the journal fact is `NATIVE_ERROR` `Unknown(None)` (`trading/custody.rs:400-405,486-505`). The HL PR aligns the fact; the caller behaviour does not flip under R3. |
 | lighter | none in the table; only the WS `RejectReason::InsufficientBalance` (`account.rs:1686-1696`) |
 | paradex | `INSUFFICIENT_MARGIN` has no kind on a 2xx (no table) |
 | bitunix | 20003 |
@@ -368,10 +368,10 @@ The legacy adapters are test-only references under
   - OKX 50100, 50101 and 50103-50105 are missing.
   - The Bybit auth streak counts 10005.
   - Bare `429`/`502`/`503` substrings match numbers inside messages.
-- Missing: there are no Bitget, Kraken, Lighter or Paradex patterns, and no
-  insufficient-balance category.
+- Missing: there are no Bitget, Kraken, Lighter or Paradex patterns.
 
-These are fixed in the R5 TS PR.
+These text-pattern fixes are the R5 TS PR. The `insufficient_balance`
+category and its kind mapping are bridge work and land in PR2.
 
 ### Recorded-payload corpus
 
@@ -455,8 +455,9 @@ status is below.
 - Row 35: apexomni, bitrue, cryptocom, blofin, bingx and backpack fixed (their
   tables declare `unlisted`); kraken, woo, mexc and polymarket open (no
   CodeTable).
-- Row 36: binance fixed for writes (#1837); asterdex partly fixed (#2166: code 0
-  is filtered, but the status table is empty); bybit open.
+- Row 36: binance fixed for writes (#1837); asterdex fixed (#2166 filters code 0,
+  and #2270 adds `ASTER_STATUS` 400/401/403/418/429; re-verified at
+  `bbffd5e2e42`); bybit open.
 - Row 37: backpack fixed (#1946); kraken futures, breakoutprop and coinbase open.
 - Expected to close at landing, to be re-checked then: lighter rows 10, 21 and
   23 and the 21104 resend (#2230); orderly row 24 (Orderly O2).
