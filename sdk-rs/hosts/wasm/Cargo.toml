@@ -17,6 +17,7 @@ sign-meta = ["safe-cex-engine/sign-meta"]
 dispatch-signing = ["safe-cex-venues/dispatch-signing"]
 # Browser hosted signing captures, for families with a hosted codec only.
 hosted-signing = ["dispatch-signing", "safe-cex-venues/hosted-signing"]
+hosted-wallet = ["dispatch-signing", "safe-cex-venues/hosted-wallet"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing", "hosted-signing"]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
@@ -76,7 +77,7 @@ binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing", "hoste
 kucoin = ["safe-cex-venues/kucoin", "text-ingress"]
 kucoinspot = ["safe-cex-venues/kucoinspot", "text-ingress", "safe-cex-engine/command-kucoinspot"]
 bybit = ["safe-cex-venues/bybit", "text-ingress", "dispatch-signing", "hosted-signing"]
-hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress", "dispatch-signing", "address-nonce", "hosted-signing"]
+hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress", "dispatch-signing", "address-nonce", "hosted-wallet"]
 okx = ["safe-cex-venues/okx", "text-ingress", "dispatch-signing", "hosted-signing"]
 orderly = ["safe-cex-venues/orderly", "text-ingress"]
 

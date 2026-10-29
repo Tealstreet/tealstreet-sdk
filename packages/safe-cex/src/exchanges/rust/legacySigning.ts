@@ -198,9 +198,10 @@ export const signHostedWsAuth = async (
 ): Promise<RemoteSignerResponse> => {
   const { toSign, outputFormat } = request.wsAuth ?? {};
   if (!toSign || !outputFormat) return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
+  if (outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address')
+    return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
   if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64'
-    && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'hyperliquid-l1'
-    && outputFormat !== 'hyperliquid-address')
+    && outputFormat !== 'bitunix-double-sha256')
     return { id: request.id, error: 'Unsupported WS auth output format' };
   const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
   if (!output.signature) throw new Error('Signing result is unavailable');
