@@ -69,7 +69,14 @@ function validRef(value: unknown): value is string {
     && utf8(value).length <= 256;
 }
 
-function mac(value: unknown, encoding: 'hex' | 'base64'): number[] {
+function mac(value: unknown, encoding: 'hex' | 'base64' | 'hex-base64'): number[] {
+  if (encoding === 'hex-base64') {
+    // Exactly the canonical padded base64 of 64 lowercase hex characters.
+    if (typeof value !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(value)) throw refused();
+    const text = atob(value);
+    if (!/^[0-9a-f]{64}$/.test(text) || btoa(text) !== value) throw refused();
+    return mac(text, 'hex');
+  }
   if (encoding === 'base64') {
     // A SHA-256 MAC has 32 bytes: exactly 43 data characters and one '='.
     // Nonzero unused pad bits are not a second spelling of the same MAC.
@@ -233,7 +240,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
   // Passphrases may be presented with owned signing work, never interpolated.
   const passphrases = new Map<string, number[]>();
   try {
-    if (encoding !== 'hex' && encoding !== 'base64') throw refused();
+    if (encoding !== 'hex' && encoding !== 'base64' && encoding !== 'hex-base64') throw refused();
     if ((wire?.extraData === 'secondsTimestamp') !== (wire?.secondsSuffix !== undefined)) throw refused();
     accountName = remoteSigner?.accountName;
     if (accountName !== undefined && (typeof accountName !== 'string' || accountName.length > 4096)) throw refused();
@@ -459,6 +466,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
             || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
           values.push(mac(response.wsAuthSignature, encoding));
         } else {
+          // The PayloadSigner wire names only raw hex or base64 MAC encodings.
+          if (encoding === 'hex-base64') throw refused();
           const response = await guarded(signal, undefined, () => payloadSigner!.call(item.entry.receiver, {
             exchangeName, key: item.entry.identity.publicCredential, payload: item.payload,
             scheme: 'hmac-sha256', encoding,

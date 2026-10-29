@@ -299,6 +299,7 @@ fn family(venue: &str) -> bool {
         || okx
         || bitget
         || (cfg!(feature = "bingx") && venue == "bingx")
+        || (cfg!(feature = "blofin") && venue == "blofin")
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
@@ -555,6 +556,10 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
                 SignatureEncoding::Base64 => {
                     safe_cex_crypto::encode(mac, safe_cex_crypto::Encoding::Base64)
                 }
+                SignatureEncoding::Base64Hex => safe_cex_crypto::encode(
+                    safe_cex_crypto::hex(mac).as_bytes(),
+                    safe_cex_crypto::Encoding::Base64,
+                ),
             }
         }
         OutputKind::WsAuth(OutputFormat::Hex) => safe_cex_crypto::hex(mac),
