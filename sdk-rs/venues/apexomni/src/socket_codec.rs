@@ -54,6 +54,7 @@ fn policy(private: bool) -> FeedPolicy {
             Invalidation::Required
         },
         subscription_interval_ms: 0.0,
+        close_floors: &[],
     }
 }
 

@@ -48,6 +48,13 @@ behavior changes, update or delete that snapshot in the same PR.
   which must stay pure** for the same reason as `egressRegion.ts`: safe-cex's
   routing resolver imports `buildRelayUrl` from it. `RelayWebSocket.ts` itself
   `require`s `ws` at load in Node — never import it from a pure consumer.
+- **One tunnel host for every region since AWS_EXIT step 3e**:
+  `TOKYO_HOW_EGRESS` and `SINGAPORE_HOW_EGRESS` are both
+  `wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel`. A host app that must keep its
+  own tunnel (the hosted exchange server) calls `setTunnelEgressUrls` at boot,
+  so every consumer reads `tunnelEgressUrl(egress)` at dial time, and the
+  module-level `howWebSocketSG`/`howWebSocketJA` singletons take a URL getter
+  for that reason. Do not reintroduce a constant read at construction.
 - `ReconnectingWebSocket` handles connection resilience
 - Token-based authentication with expiry checking
 - Latency tracking for tunnel (client↔proxy) and exchange (proxy↔exchange)

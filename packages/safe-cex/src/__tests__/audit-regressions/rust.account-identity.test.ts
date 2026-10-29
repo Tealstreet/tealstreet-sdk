@@ -55,6 +55,7 @@ const commandAliases: ExchangeName[] = [
 const coinbaseAliases = ['coinbase', 'coinbasespot'] as const;
 const orderlyAliases = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'] as const;
 const unsupportedAliases: ExchangeName[] = [
+  'binanceoptions',
   'binancespot',
   'binanceinverse',
   'bitrue',
@@ -195,7 +196,7 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
 
 it('retains all historical identity cases and covers the beta alias subset', () => {
   const inventory = [...commandAliases, ...coinbaseAliases, ...orderlyAliases, ...unsupportedAliases];
-  expect(new Set(inventory).size).toBe(49);
+  expect(new Set(inventory).size).toBe(50);
   expect(inventory.filter((name) => RUST_VENUES.has(name)).sort()).toEqual([...RUST_VENUES].sort());
   expect(commandAliases.length + coinbaseAliases.length + orderlyAliases.length).toBe(33);
 });

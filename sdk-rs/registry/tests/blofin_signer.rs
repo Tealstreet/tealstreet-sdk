@@ -1,6 +1,6 @@
-//! BloFin's single provider setup (RUST_BLOFIN_HMAC_DISPATCH_RECIPE.md): the
-//! registry installs identities built from the configured strings, and the
-//! venue holds the same refs for its adopted FetchLeverage Read.
+//! BloFin's provider setup (RUST_BLOFIN_HMAC_DISPATCH_RECIPE.md): the shared
+//! dispatch signer setup installs identities from the configured strings under
+//! the declared passphrase policy; the venue holds only the refs.
 #![cfg(feature = "blofin")]
 
 use safe_cex_engine::signing::{Identities, Identity, Operation, Provider, SignRequest};
@@ -87,15 +87,12 @@ fn an_explicit_secondary_passphrase_is_its_own() {
 
 #[test]
 fn public_and_keyless_accounts_install_nothing() {
-    for options in [
-        json!({ "publicDataOnly": true, "key": "k", "secret": "s", "passphrase": "p" }),
-        json!({ "passphrase": "p", "readCredentials": { "key": "k", "secret": "s" } }),
-        json!({}),
-    ] {
-        let (identities, signer) = construct(options);
-        assert_eq!(identities, Identities::default());
-        assert!(signer.is_none());
-    }
+    let (identities, _) = construct(json!({}));
+    assert_eq!(identities, Identities::default());
+    // Without a Primary key the account resolves public, as for OKX and Bitget,
+    // and public mode bypasses the Primary passphrase requirement.
+    construct(json!({ "passphrase": "p", "readCredentials": { "key": "k", "secret": "s" } }));
+    construct(json!({ "publicDataOnly": true, "key": "k", "secret": "s" }));
 }
 
 /// BloFin's venue holds no raw read material, so an invalid read key is refused
@@ -120,39 +117,47 @@ fn an_invalid_read_key_is_refused_at_construction() {
     );
 }
 
+/// The shared OKX/Bitget passphrase policy: a private Primary requires its
+/// own; an absent Secondary inherits it; an explicit empty never falls back.
 #[test]
-fn passphrase_refs_mirror_native_eligibility() {
-    let read = |passphrase: Option<&str>| {
-        let mut read = json!({ "key": "secondary-key", "secret": "secondary-secret" });
-        if let Some(passphrase) = passphrase {
-            read["passphrase"] = json!(passphrase);
-        }
-        read
-    };
-    let base = |passphrase: Option<&str>, secondary: serde_json::Value| {
-        let mut options = json!({
-            "key": "primary-key", "secret": "primary-secret", "readCredentials": secondary,
-        });
-        if let Some(passphrase) = passphrase {
-            options["passphrase"] = json!(passphrase);
-        }
-        options
-    };
-    for (options, primary, secondary) in [
-        // No Primary passphrase: refused natively even with the read key's own.
-        (base(None, read(Some("secondary-pass"))), false, false),
-        // An empty Primary passphrase is refused, as is its inheritance.
-        (base(Some(""), read(None)), false, false),
-        // An explicit empty Secondary passphrase never falls back to Primary.
-        (base(Some("primary-pass"), read(Some(""))), true, false),
-        // An empty Primary with an explicit nonempty Secondary signs the GET natively.
-        (base(Some(""), read(Some("secondary-pass"))), false, true),
+fn missing_or_explicit_empty_passphrases_are_refused_before_engine_startup() {
+    for options in [
+        json!({ "key": "primary-key", "secret": "primary-secret",
+            "readCredentials": { "key": "secondary-key", "secret": "secondary-secret", "passphrase": "secondary-pass" } }),
+        json!({ "key": "primary-key", "secret": "primary-secret", "passphrase": "" }),
+        json!({ "key": "primary-key", "secret": "primary-secret", "passphrase": "primary-pass",
+            "readCredentials": { "key": "secondary-key", "secret": "secondary-secret", "passphrase": "" } }),
     ] {
-        let (identities, _) = construct(options);
-        assert_eq!(identities.primary.unwrap().passphrase.is_some(), primary);
-        assert_eq!(
-            identities.secondary.unwrap().passphrase.is_some(),
-            secondary
-        );
+        let options: EngineOptions = serde_json::from_value(options).unwrap();
+        let error = build(
+            "blofin",
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(5)),
+            Capture,
+        )
+        .map(|_| ())
+        .unwrap_err();
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+        assert!(!error.message.contains("primary-secret"));
+    }
+}
+
+/// As for Bitget, any engine-options passphrase is refused once identities
+/// come from signer setup, even an empty one that would otherwise be ignored.
+#[test]
+fn an_engine_options_passphrase_is_refused_even_when_empty() {
+    for passphrase in ["", "p"] {
+        let options: EngineOptions =
+            serde_json::from_value(json!({ "passphrase": passphrase })).unwrap();
+        let error = safe_cex_venues::build_with_signer(
+            "blofin",
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(5)),
+            None,
+            Capture,
+        )
+        .map(|_| ())
+        .unwrap_err();
+        assert!(error.message.contains("signer setup"), "{}", error.message);
     }
 }

@@ -135,5 +135,7 @@ pub fn origin(spot: bool, subject: String) -> Result<WasmEngine, JsError> {
         hosted_identity: None,
         #[cfg(feature = "dispatch-signing")]
         hosted_captures: Default::default(),
+        #[cfg(feature = "hosted-wallet")]
+        hosted_wallet: None,
     })
 }

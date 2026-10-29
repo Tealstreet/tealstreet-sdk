@@ -35,6 +35,7 @@ export class WasmEngine implements WasmEngineLike {
   setAddressSetupSupport?(protocol: 'publicAddressOwned'): void;
   initializeAddressSetup?(now: number, reinitialize: boolean): string;
   addressSetupReady?(): boolean;
+  hostedWalletSigning?(toSign: string, outputFormat: string, now: number): string;
   addressSetupRetired?(token: string, now: number): string;
   /** Present only in builds with the sign-meta feature. */
   signMeta?(attempt: number): string | undefined;

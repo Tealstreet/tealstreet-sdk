@@ -5,6 +5,7 @@ import {
   privateProxyIpsSingapore,
   privateProxyIpsTokyo,
   privateProxyIpsTokyoSmallPP,
+  privateProxyIpsVultrTokyo,
   tokyoK8sNatGatewayIp,
   wsProxyIps,
 } from './index';
@@ -23,6 +24,19 @@ function isValidIPv4(ip: string): boolean {
   }
   return true;
 }
+
+describe('privateProxyIpsVultrTokyo', () => {
+  it('holds the nine fleet IPs, valid and unique', () => {
+    expect(privateProxyIpsVultrTokyo).toHaveLength(9);
+    privateProxyIpsVultrTokyo.forEach((ip) => expect(isValidIPv4(ip)).toBe(true));
+    expect(new Set(privateProxyIpsVultrTokyo).size).toBe(privateProxyIpsVultrTokyo.length);
+  });
+
+  it('shares no address with the AWS pools it replaces', () => {
+    const aws = [...privateProxyIpsSingapore, ...privateProxyIpsTokyo, tokyoK8sNatGatewayIp, ...wsProxyIps];
+    expect(privateProxyIpsVultrTokyo.filter((ip) => aws.includes(ip))).toEqual([]);
+  });
+});
 
 describe('privateProxyIpsSingapore', () => {
   it('should export a non-empty array', () => {
@@ -103,9 +117,10 @@ describe('wsProxyIps', () => {
 });
 
 describe('exchangesRequireWsIp', () => {
-  it('should export a non-empty array', () => {
-    expect(Array.isArray(exchangesRequireWsIp)).toBe(true);
-    expect(exchangesRequireWsIp.length).toBeGreaterThan(0);
+  // Was 'should export a non-empty array': the last entry, coinbase, moved to the
+  // tunnel relay (AWS_EXIT.md 5a), so no browser socket needs the ws-proxy IP.
+  it('is empty now that every private socket uses the relay', () => {
+    expect(exchangesRequireWsIp).toEqual([]);
   });
 
   it('should contain only strings', () => {

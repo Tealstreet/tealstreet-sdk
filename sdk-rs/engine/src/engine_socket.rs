@@ -231,6 +231,9 @@ impl<P> Cx<'_, P> {
         spec.channel = Some(role);
         let socket = SocketId(self.io.next());
         let epoch = self.with_socket_driver(|d, cx| d.begin(cx, feed, socket))?;
+        if self.io.core.socket_driver.take_reject_route(feed) {
+            spec = spec.reject_route();
+        }
         self.queue_socket_transport(socket, spec);
         Ok(epoch)
     }
@@ -604,6 +607,7 @@ impl<V: Venue> Engine<V> {
                     retirement,
                     reason,
                     retry,
+                    close_code,
                 } = effect
                 {
                     if V::socket_capabilities().handoff {
@@ -643,13 +647,14 @@ impl<V: Venue> Engine<V> {
                         LifecycleEvent::Retired {
                             epoch: retirement.epoch,
                             reason,
+                            close_code,
                         },
                     );
                     if let Err(error) = result {
                         self.socket_refused(now, "invalidation", error);
                     }
                     if let Err(error) = self.socket_mutate(now, |d, cx| {
-                        d.acknowledge_retirement(cx, retirement, result.is_ok(), retry)
+                        d.acknowledge_retirement(cx, retirement, result.is_ok(), retry, close_code)
                     }) {
                         self.socket_refused(now, "retirement", error);
                     }
@@ -770,14 +775,13 @@ impl<V: Venue> Engine<V> {
                 }
             }
         }
-        let (socket, kind) = match event {
-            Event::WsOpened { socket } => (*socket, Ingress::Open),
+        let (socket, kind, close_code) = match event {
+            Event::WsOpened { socket } => (*socket, Ingress::Open, None),
             Event::WsMessage { socket, .. } | Event::WsBinary { socket, .. } => {
-                (*socket, Ingress::Message)
+                (*socket, Ingress::Message, None)
             }
-            Event::WsClosed { socket, .. } | Event::WsRouteExhausted { socket } => {
-                (*socket, Ingress::Close)
-            }
+            Event::WsClosed { socket, code } => (*socket, Ingress::Close, Some(*code)),
+            Event::WsRouteExhausted { socket } => (*socket, Ingress::Close, None),
             _ => return false,
         };
         let admission = if kind == Ingress::Message {
@@ -785,7 +789,8 @@ impl<V: Venue> Engine<V> {
             let admission = self.io.core.socket_driver.admit_ingress(now, socket, kind);
             self.assert_live();
             if matches!(admission, Admission::Expired(..)) {
-                let result = self.socket_mutate(now, |d, cx| d.finish_ingress(cx, admission, kind));
+                let result =
+                    self.socket_mutate(now, |d, cx| d.finish_ingress(cx, admission, kind, None));
                 self.socket_enqueue(now, result.effects);
             } else if self.io.core.socket_effects.len() > MAX_EFFECTS {
                 // Empty publication still owns exhaustion cleanup at this
@@ -795,12 +800,10 @@ impl<V: Venue> Engine<V> {
             admission
         } else {
             let exhausted = matches!(event, Event::WsRouteExhausted { .. });
-            let result = self.socket_mutate(now, |d, cx| {
-                if exhausted {
-                    d.route_exhausted(cx, socket)
-                } else {
-                    d.ingress(cx, socket, kind)
-                }
+            let result = self.socket_mutate(now, |d, cx| match close_code {
+                _ if exhausted => d.route_exhausted(cx, socket),
+                Some(code) => d.close(cx, socket, code),
+                None => d.ingress(cx, socket, kind),
             });
             self.socket_enqueue(now, result.effects);
             result.admission
@@ -1245,7 +1248,9 @@ impl<V: Venue> Engine<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::socket_lifecycle::{AuthMode, AuthRecovery, Invalidation, TrafficPolicy};
+    use crate::socket_lifecycle::{
+        AuthEvidence, AuthMode, AuthRecovery, Invalidation, TrafficPolicy,
+    };
     use crate::{book::Book, socket::Config};
 
     #[derive(Default)]
@@ -1262,6 +1267,8 @@ mod tests {
         borrowed_http_delivery: bool,
         catch_fatal_on_ping: bool,
         caught_fatal: bool,
+        /// Login-gated feed whose "refused" frame is a route refusal.
+        route_auth: bool,
     }
     fn policy() -> FeedPolicy {
         FeedPolicy {
@@ -1274,6 +1281,7 @@ mod tests {
             controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
         }
     }
     impl Venue for Probe {
@@ -1284,13 +1292,22 @@ mod tests {
         fn start(&mut self, cx: &mut Cx<'_, ()>) {
             let mut declared = policy();
             declared.controls = self.controls;
+            if self.route_auth {
+                declared.auth = AuthMode::Required;
+            }
             let feed = cx.register_socket_feed(declared).unwrap();
             self.feed = Some(feed);
-            cx.connect_socket(feed, "wss://socket.test").unwrap();
+            cx.connect_socket(feed, self.spec()).unwrap();
         }
-        fn socket_control(&self, _: &Store, _: FeedId, _: bool, _: &str) -> Control {
+        fn socket_control(&self, _: &Store, _: FeedId, _: bool, text: &str) -> Control {
             self.control_calls.set(self.control_calls.get() + 1);
-            Control::Other
+            match text {
+                "refused" if self.route_auth => Control::Auth(AuthEvidence::RouteRefused(
+                    VenueError::new("egress refused"),
+                )),
+                "login" if self.route_auth => Control::Auth(AuthEvidence::Accepted),
+                _ => Control::Other,
+            }
         }
         fn on_socket_event(
             &mut self,
@@ -1316,7 +1333,7 @@ mod tests {
             }
             match event {
                 LifecycleEvent::Reconnect(feed) => {
-                    cx.connect_socket(feed, "wss://socket.test")?;
+                    cx.connect_socket(feed, self.spec())?;
                 }
                 LifecycleEvent::Ready { .. } if self.refuse_ready => {
                     return Err(SocketError::InvalidInterest);
@@ -1368,6 +1385,16 @@ mod tests {
         }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
+        }
+    }
+    impl Probe {
+        fn spec(&self) -> SocketSpec {
+            let spec = SocketSpec::new("wss://socket.test");
+            if self.route_auth {
+                spec.feed("private", false)
+            } else {
+                spec
+            }
         }
     }
     fn engine() -> (Engine<Probe>, SocketId) {
@@ -1770,6 +1797,231 @@ mod tests {
                 .count(),
             1,
             "a stale exhaustion is not admitted twice"
+        );
+    }
+    /// Opens `socket`, sends `frame`, and returns the reconnect timer's due
+    /// time and the WsConnect it fires, with that connect's reject_route.
+    fn refuse_and_redial(
+        e: &mut Engine<Probe>,
+        socket: SocketId,
+        now: f64,
+        frame: &str,
+    ) -> (f64, SocketId, bool) {
+        e.handle(now, Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.handle(
+            now,
+            Event::WsMessage {
+                socket,
+                text: frame,
+            },
+        );
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .expect("a refused route schedules exactly one redial");
+        e.handle(at, Event::TimerFired { timer });
+        let (next, reject) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket, context, ..
+                } => Some((socket, context.is_some_and(|c| c.reject_route))),
+                _ => None,
+            })
+            .expect("the redial connects");
+        (at, next, reject)
+    }
+    fn route_engine() -> (Engine<Probe>, SocketId) {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            route_auth: true,
+            ..Probe::default()
+        });
+        e.start(0.);
+        let socket = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        (e, socket)
+    }
+    #[test]
+    fn route_refusal_redials_at_once_then_backoff_paced_with_reject_route() {
+        let (mut e, socket) = route_engine();
+        let (first_at, second, reject) = refuse_and_redial(&mut e, socket, 10., "refused");
+        assert_eq!(
+            first_at, 10.,
+            "the first refusal of a streak switches route at once"
+        );
+        assert!(reject, "the redial asks the host for another route");
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::RouteRefused,
+                ..
+            }
+        )));
+        // A host that ignores reject_route refuses again: later refusals pay backoff.
+        let (second_at, third, reject) = refuse_and_redial(&mut e, second, 20., "refused");
+        assert!(
+            second_at > 20.,
+            "a second refusal in the streak is backoff-paced"
+        );
+        assert!(reject);
+        let (third_at, _, _) = refuse_and_redial(&mut e, third, second_at, "refused");
+        // Each later refusal counts a failure, so the backoff gap keeps growing.
+        assert!(
+            third_at - second_at > second_at - 20.,
+            "the streak's backoff grows: {second_at} then {third_at}"
+        );
+    }
+    #[test]
+    fn a_login_ends_the_route_refusal_streak() {
+        let (mut e, socket) = route_engine();
+        let (_, second, _) = refuse_and_redial(&mut e, socket, 10., "refused");
+        e.handle(10., Event::WsOpened { socket: second });
+        e.handle(
+            10.,
+            Event::WsMessage {
+                socket: second,
+                text: "login",
+            },
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            11.,
+            Event::WsClosed {
+                socket: second,
+                code: 1006,
+            },
+        );
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(at, Event::TimerFired { timer });
+        let (third, reject) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket, context, ..
+                } => Some((socket, context.is_some_and(|c| c.reject_route))),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            !reject,
+            "an ordinary close after a login does not leave the route"
+        );
+        let (redial_at, _, reject) = refuse_and_redial(&mut e, third, at, "refused");
+        assert_eq!(
+            redial_at, at,
+            "a new streak's first refusal is immediate again"
+        );
+        assert!(reject);
+    }
+    #[test]
+    fn a_refusal_surfaces_the_venue_error_but_never_burns_a_logged_in_route() {
+        let (mut e, socket) = route_engine();
+        e.handle(10., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.handle(
+            10.,
+            Event::WsMessage {
+                socket,
+                text: "refused",
+            },
+        );
+        assert!(
+            e.drain_actions().any(|a| matches!(
+                a,
+                Action::Notice(Notice::Event(LogEvent { level: Level::Warn, ref message, .. }))
+                    if message == "egress refused; trying the next route"
+            )),
+            "the venue's refusal text reaches the user, as TS warns"
+        );
+
+        let (mut e, socket) = route_engine();
+        e.handle(10., Event::WsOpened { socket });
+        e.handle(
+            10.,
+            Event::WsMessage {
+                socket,
+                text: "login",
+            },
+        );
+        e.drain_actions().for_each(drop);
+        e.venue.events.clear();
+        e.handle(
+            11.,
+            Event::WsMessage {
+                socket,
+                text: "refused",
+            },
+        );
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::AuthFailure {
+                evidence: AuthEvidence::Rejected(_),
+                ..
+            }
+        )));
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::Authentication,
+                ..
+            }
+        )));
+        assert!(!e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::RouteRefused,
+                ..
+            }
+        )));
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(at, Event::TimerFired { timer });
+        assert!(
+            e.drain_actions().any(|a| matches!(
+                a,
+                Action::WsConnect { context: Some(ref c), .. } if !c.reject_route
+            )),
+            "a logged-in route is proven; the redial stays on it"
+        );
+    }
+    #[test]
+    fn refusal_on_every_route_ends_in_route_exhausted() {
+        let (mut e, socket) = route_engine();
+        let (_, second, reject) = refuse_and_redial(&mut e, socket, 10., "refused");
+        assert!(reject);
+        e.venue.events.clear();
+        e.handle(10., Event::WsRouteExhausted { socket: second });
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::RouteExhausted,
+                ..
+            }
+        )));
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. } | Action::WsConnect { .. })),
+            "exhaustion stays down"
         );
     }
     #[test]
@@ -2381,6 +2633,10 @@ mod capability_tests;
 #[cfg(test)]
 #[path = "socket_declaration_tests.rs"]
 mod declaration_tests;
+
+#[cfg(test)]
+#[path = "socket_close_floor_tests.rs"]
+mod close_floor_tests;
 
 #[cfg(all(test, feature = "socket-native-timing"))]
 #[path = "socket_native_timing_tests.rs"]

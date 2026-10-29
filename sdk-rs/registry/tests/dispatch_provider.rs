@@ -462,10 +462,10 @@ fn mexc_provider_injection_requires_its_installed_provider() {
     }
 }
 
-// Blofin remains a provider-injection refusal control after MEXC adoption.
-#[cfg(feature = "blofin")]
+// KuCoin futures remains a provider-injection refusal control after BloFin adoption.
+#[cfg(feature = "kucoin")]
 #[test]
-fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_blofin() {
+fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_kucoin() {
     struct NeverConstruct;
     impl safe_cex_venues::Visit for NeverConstruct {
         type Output = ();
@@ -477,7 +477,7 @@ fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_blofin() {
         r#"{"primary":{"key":"primary-key","secret":"primary-secret"}}"#.into(),
     )
     .unwrap();
-    for venue in ["blofin"] {
+    for venue in ["kucoin"] {
         for (refs, supplied_provider) in [(true, false), (false, true), (true, true)] {
             let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
             options.signing = refs.then(|| identities.clone());

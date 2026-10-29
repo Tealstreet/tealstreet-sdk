@@ -3152,6 +3152,11 @@ pub trait Venue {
     fn public_address_slots(&self) -> AddressSetupSlots {
         AddressSetupSlots::None
     }
+    /// Slots whose public key a host-answered provider binds at setup, in place
+    /// of an address; a venue declares at most one of the two.
+    fn public_key_setup(&self) -> Option<(AddressSetupSlots, crate::signing::Algorithm)> {
+        None
+    }
     /// A fully parsed native refusal may exempt this delivery from unproven
     /// HTTP status handling. The default keeps the strict shared policy.
     fn status_exempt_refusal(&self, _pending: &Self::Pending, _response: Response<'_>) -> bool {

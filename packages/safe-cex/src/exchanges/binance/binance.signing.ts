@@ -68,7 +68,9 @@ export const signBinanceRequest = async (
   return finishBinanceRequest(prepared, result);
 };
 
-const binanceSigningPolicy = (exchangeName: ExchangeName) => exchangeName === 'binanceinverse'
+const binanceSigningPolicy = (exchangeName: ExchangeName) => exchangeName === 'binanceoptions'
+    ? { publicEndpoints: ['/eapi/v1/exchangeInfo', '/eapi/v1/ticker', '/eapi/v1/mark', '/eapi/v1/klines'], listenKey: '/eapi/v1/listenKey', unsignedTestnetListenKey: false, recvWindow: 5_000 }
+    : exchangeName === 'binanceinverse'
     ? { publicEndpoints: INVERSE_PUBLIC, listenKey: INVERSE_ENDPOINTS.LISTEN_KEY, unsignedTestnetListenKey: true, recvWindow: INVERSE_WINDOW }
     : exchangeName === 'binancepm'
       ? { publicEndpoints: PM_PUBLIC, listenKey: PM_ENDPOINTS.LISTEN_KEY, unsignedTestnetListenKey: false, recvWindow: PM_WINDOW }

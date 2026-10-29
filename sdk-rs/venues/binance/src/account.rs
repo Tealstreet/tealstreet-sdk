@@ -190,7 +190,20 @@ pub struct AccountState {
 }
 
 impl AccountState {
-    fn order_terminal(&self, order: &Order) -> bool {
+    pub(crate) fn observe_snapshot_orders(&mut self, orders: &[Order]) {
+        for order in orders {
+            if let Ok(native) = order.id.parse::<u64>() {
+                let evidence = self
+                    .native_executed
+                    .entry((order.symbol.clone(), native))
+                    .or_default();
+                evidence.0 = evidence.0.max(order.filled);
+                evidence.1 |= matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled);
+            }
+        }
+    }
+
+    pub(crate) fn order_terminal(&self, order: &Order) -> bool {
         self.terminal_algo_ids.contains(&order.id)
             || order.id.parse().is_ok_and(|native: u64| {
                 self.native_executed
@@ -496,6 +509,10 @@ impl BinanceFutures {
     }
 
     pub(crate) fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.options_read(cx, crate::options::Kind::Orders);
+            return;
+        }
         if self.account.orders.is_some() {
             return;
         }
@@ -575,6 +592,10 @@ impl BinanceFutures {
     }
 
     pub(crate) fn on_private_open(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.options_refresh(cx);
+            return;
+        }
         if self.is_spot() {
             self.subscribe_spot_account(cx);
             return;

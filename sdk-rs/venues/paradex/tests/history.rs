@@ -912,17 +912,39 @@ fn owned_history_preparation_refusal_after_accepted_rows_remains_strict() {
         for kind in 0..3 {
             let mut h = private();
             h.actions.clear();
+            // The first page is sent just before the JWT refresh point and
+            // answered within its window, just after it: the next leg waits for
+            // `/auth`, which fails, so that page is never sent. It ends at the
+            // walk's window, which a later page does not renew.
+            h.now += 179_995.0;
             read(&mut h, 105, owned_history_query(kind));
-            // Expire JWT before the first response schedules the next leg.
-            h.now += 180_001.0;
+            h.now += 6.0;
             let row = if kind == 1 { ORDER } else { FILL };
             h.reply(
                 owned_history_path(kind),
                 &format!(r#"{{"results":[{row}],"next":"queued-auth"}}"#),
             );
+            let from = h.actions.len();
             {
                 let auth = h.take("/auth/");
                 h.respond(auth, 503, r#"{"error":"auth unavailable"}"#);
+            }
+            let windows: Vec<_> = h.actions[..from]
+                .iter()
+                .filter_map(|a| match a {
+                    safe_cex_engine::Action::SetTimer { timer, at_ms }
+                        if *at_ms == h.now + 19_994. =>
+                    {
+                        Some(*timer)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(!windows.is_empty(), "the parked page has the walk's window");
+            h.now += 19_994.;
+            for timer in windows {
+                h.e.handle(h.now, safe_cex_engine::Event::TimerFired { timer });
+                h.collect();
             }
             assert!(h.result(105).is_err());
             assert_eq!(
@@ -1032,4 +1054,70 @@ fn fills_empty_traversal_fallback_retains_its_owner_and_single_page_shape() {
     h.reply("/fills?", r#"{"results":[]}"#);
     assert_eq!(h.result(109), Ok("[]"));
     assert!(!h.pending.iter().any(|r| r.url.contains("orders-history")));
+}
+
+#[test]
+fn a_market_delisted_between_pages_fails_the_walk_unsent_without_rows() {
+    let mut h = private();
+    read(
+        &mut h,
+        110,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let listed: Vec<_> =
+        h.e.store()
+            .markets()
+            .iter()
+            .filter(|market| market.symbol != "BTC-USD-PERP")
+            .cloned()
+            .collect();
+    h.e.store_mut().set_markets(listed);
+    h.reply(
+        "/orders-history",
+        &format!(r#"{{"next":"page-2","results":[{ORDER}]}}"#),
+    );
+    assert_eq!(h.result(110), Err("Paradex market is no longer listed"));
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert!(!h.actions.iter().any(|a| matches!(a,
+        safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(e)) if e.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE
+    )));
+    assert!(!h.pending.iter().any(|r| r.url.contains("cursor=page-2")));
+}
+
+#[test]
+fn a_market_unlisted_at_admission_keeps_its_native_empty_answers() {
+    let mut h = private();
+    read(
+        &mut h,
+        111,
+        Query::OrderHistory {
+            symbol: Some("UNKNOWN-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    assert_eq!(h.result(111), Ok("[]"));
+    read(
+        &mut h,
+        112,
+        Query::OrderByClientId {
+            symbol: "UNKNOWN-USD-PERP".into(),
+            client_order_id: "caller".into(),
+        },
+    );
+    assert_eq!(h.result(112), Ok(r#"{"found":false,"definitive":false}"#));
+    assert!(
+        !h.pending
+            .iter()
+            .any(|r| r.url.contains("/orders-history") || r.url.contains("/orders?"))
+    );
 }

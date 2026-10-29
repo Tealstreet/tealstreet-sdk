@@ -94,7 +94,8 @@ describe('real HOW and relay protocols over Workers fetch upgrades', () => {
     expect(upgrades).toHaveLength(1);
     const { url, init, socket } = upgrades[0];
     const target = new URL(url);
-    expect(target.origin + target.pathname).toBe('https://fsjnpy143pbz.jp.tealstreet.io/tunnel');
+    // Was fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e put every region on the Vultr host.
+    expect(target.origin + target.pathname).toBe('https://fsjnpy143pbz-tyo.tealstreet.io/tunnel');
     expect(target.searchParams.get('v')).toBe('2');
     expect(Number(target.searchParams.get('t'))).toBeGreaterThan(0);
     expect(init.headers).toEqual({ ...upgradeHeaders, Upgrade: 'websocket' });
