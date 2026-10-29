@@ -74,13 +74,26 @@ export function buildBitgetInverseTape() {
     normal('inverse-rest-btc', 'BTCUSD', '1000', '50000', 'resting-btc', '100'),
     normal('inverse-rest-eth', 'ETHUSD', '500', '2500', 'resting-eth'),
   ];
+  // Rust reads pending orders unfiltered at limit=200; the TS reference reads
+  // each documented status at the Classic maximum of 100. Same venue rows.
+  const tagged = (impl) => Object.assign(records.at(-1), { impl });
   http('GET', '/api/v2/mix/order/orders-pending', 'productType=coin-futures&limit=200', {
     entrustedList: resting, endId: '',
   });
-  for (const planType of ['profit_loss', 'track_plan']) {
-    http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=coin-futures&planType=${planType}&limit=200`, {
-      entrustedList: [], endId: '',
+  tagged('rust');
+  for (const status of ['live', 'partially_filled']) {
+    http('GET', '/api/v2/mix/order/orders-pending', `productType=coin-futures&status=${status}&limit=100`, {
+      entrustedList: resting.filter((row) => row.status === status), endId: '',
     });
+    tagged('ts');
+  }
+  for (const planType of ['profit_loss', 'track_plan']) {
+    for (const [impl, limit] of [['rust', 200], ['ts', 100]]) {
+      http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=coin-futures&planType=${planType}&limit=${limit}`, {
+        entrustedList: [], endId: '',
+      });
+      tagged(impl);
+    }
   }
   for (const base of ['BTC', 'ETH']) {
     http('GET', '/api/v2/mix/account/account', `symbol=${base}USD&productType=coin-futures&marginCoin=${base}`, {

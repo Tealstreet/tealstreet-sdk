@@ -132,9 +132,17 @@ export function buildBitgetUsdcPrivateTape() {
   get('/api/v3/account/settings', null, { body: JSON.stringify({ code: '40084', msg: 'Classic Account mode', data: null }) });
   get(`/api/v2/mix/position/all-position?productType=${PRODUCT}&marginCoin=USDC`, positions);
   get(`/api/v2/mix/account/accounts?productType=${PRODUCT}`, [{ marginCoin: 'USDC', unionTotalMargin: '10200', unionAvailable: '9000', unrealizedPL: '200', accountEquity: '10200', available: '9000' }]);
-  get(`/api/v2/mix/order/orders-pending?productType=${PRODUCT}&limit=200`, { entrustedList: resting, endId: '' });
+  // Rust reads pending orders unfiltered at limit=200; the TS reference reads
+  // each documented status at the Classic maximum of 100. Same venue rows.
+  const pending = (rows, extras = {}) => {
+    get(`/api/v2/mix/order/orders-pending?productType=${PRODUCT}&limit=200`, { entrustedList: rows, endId: '' }, { ...extras, impl: 'rust' });
+    for (const status of ['live', 'partially_filled'])
+      get(`/api/v2/mix/order/orders-pending?productType=${PRODUCT}&status=${status}&limit=100`, { entrustedList: rows.filter((row) => row.status === status), endId: '' }, { ...extras, impl: 'ts' });
+  };
+  pending(resting);
   for (const planType of ['profit_loss', 'track_plan'])
-    get(`/api/v2/mix/order/orders-plan-pending?productType=${PRODUCT}&planType=${planType}&limit=200`, { entrustedList: [], endId: '' });
+    for (const [impl, limit] of [['rust', 200], ['ts', 100]])
+      get(`/api/v2/mix/order/orders-plan-pending?productType=${PRODUCT}&planType=${planType}&limit=${limit}`, { entrustedList: [], endId: '' }, { impl });
   for (const symbol of BITGET_USDC_SYMBOLS)
     get(`/api/v2/mix/account/account?symbol=${symbol}&productType=${PRODUCT}&marginCoin=USDC`, { symbol, marginCoin: 'USDC', posMode: 'one_way_mode', marginMode: 'crossed', leverage: '20' });
   records.push({ t: 0, type: 'ws', url: PRIVATE, text: JSON.stringify({ event: 'login', code: '0', connId: 'synthetic-usdc' }) });
@@ -165,7 +173,7 @@ export function buildBitgetUsdcPrivateTape() {
   command(7000, 'getAccount');
   get('/api/v2/spot/account/info', { userId: 'usdc-user', parentId: '', inviterId: 'synthetic-referrer' });
   const finalOrders = [order('usdc-1004', 'BTCUSDC', '49300', '0.004', 'external-usdc'), resting[1]];
-  get(`/api/v2/mix/order/orders-pending?productType=${PRODUCT}&limit=200`, { entrustedList: finalOrders, endId: '' }, { availableAfter: 10000 });
+  pending(finalOrders, { availableAfter: 10000 });
   message(10000, 'orders', finalOrders);
   return records;
 }

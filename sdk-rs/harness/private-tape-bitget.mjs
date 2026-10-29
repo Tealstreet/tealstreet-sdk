@@ -94,18 +94,31 @@ const normal = {
   cTime: '1760880000000',
   uTime: '1760880000000',
 };
-http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&limit=200', {
-  entrustedList: [normal],
-  endId: '',
-});
-http('GET', '/api/v2/mix/order/orders-plan-pending', 'productType=usdt-futures&planType=profit_loss&limit=200', {
-  entrustedList: [],
-  endId: '',
-});
-http('GET', '/api/v2/mix/order/orders-plan-pending', 'productType=usdt-futures&planType=track_plan&limit=200', {
-  entrustedList: [],
-  endId: '',
-});
+// Rust reads pending orders unfiltered at limit=200; the TS reference reads
+// each documented status at the Classic maximum of 100. Same venue rows.
+const tagged = (impl) => Object.assign(records.at(-1), { impl });
+const pending = (rows) => {
+  http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&limit=200', { entrustedList: rows, endId: '' });
+  tagged('rust');
+  http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&status=live&limit=100', {
+    entrustedList: rows.filter((row) => row.status === 'live'), endId: '',
+  });
+  tagged('ts');
+  http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&status=partially_filled&limit=100', {
+    entrustedList: rows.filter((row) => row.status === 'partially_filled'), endId: '',
+  });
+  tagged('ts');
+};
+pending([normal]);
+for (const planType of ['profit_loss', 'track_plan']) {
+  for (const [impl, limit] of [['rust', 200], ['ts', 100]]) {
+    http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=usdt-futures&planType=${planType}&limit=${limit}`, {
+      entrustedList: [],
+      endId: '',
+    });
+    tagged(impl);
+  }
+}
 http('GET', '/api/v2/mix/account/account', 'symbol=BTCUSDT&productType=usdt-futures&marginCoin=USDT', {
   symbol: 'BTCUSDT',
   posMode: 'one_way_mode',
@@ -199,10 +212,9 @@ orderEvent(3200, {
 // Allow the 3-RPS TS client's queued reconciliation reads to complete.
 // Terminal rows are ephemeral; finish with consistent live REST/WS state.
 const finalOrder = { ...normal, orderId: '1004', clientOid: 'external-live', size: '0.004', price: '93' };
-http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&limit=200', {
-  entrustedList: [finalOrder], endId: '',
-});
-records.at(-1).availableAfter = 10_000;
+const final = records.length;
+pending([finalOrder]);
+for (const record of records.slice(final)) record.availableAfter = 10_000;
 orderEvent(10_000, finalOrder);
 mkdirSync(dirname(values.out), { recursive: true });
 writeFileSync(values.out, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
