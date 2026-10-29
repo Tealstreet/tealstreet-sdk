@@ -170,6 +170,14 @@ pub fn translate(method: &str, args: &Value, id: CommandId) -> Result<Command, S
         "placeOrder" => {
             json!({"op":"placeOrders","command":id,"orders":[args.first().ok_or("Missing order")?]})
         }
+        "updateOrder" => {
+            let input = args.first().ok_or("Missing order update")?;
+            let order_id = input["order"]["id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or("Missing order ID")?;
+            json!({"op":"amendOrder","command":id,"id":order_id,"price":input["update"]["price"]})
+        }
         "setLeverage" => {
             json!({"op":"setLeverage","command":id,"symbol":symbol()?,"leverage":args.get(1).ok_or("Missing leverage")?})
         }
