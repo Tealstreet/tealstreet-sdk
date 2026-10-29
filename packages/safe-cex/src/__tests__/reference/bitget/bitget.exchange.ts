@@ -1453,10 +1453,12 @@ export class BitgetExchange extends BaseExchange {
       return this.fetchUtaNormalOrders();
     }
 
-    const allOrders: Array<Record<string, any>> = [];
     const maxIterations = 20; // Safety limit to prevent infinite loops
 
-    for (const status of ['live', 'partially_filled']) {
+    // Walk both statuses together: the snapshot keeps a single walk's round-trip
+    // depth, and rows keep status order.
+    const walk = async (status: 'live' | 'partially_filled') => {
+      const orders: Array<Record<string, any>> = [];
       let endId: string | undefined;
       let iterations = 0;
 
@@ -1484,7 +1486,7 @@ export class BitgetExchange extends BaseExchange {
           break;
         }
 
-        allOrders.push(...data.entrustedList);
+        orders.push(...data.entrustedList);
 
         // If endId is not provided or is the same, we've reached the end
         if (!data.endId || data.endId === endId) {
@@ -1494,8 +1496,10 @@ export class BitgetExchange extends BaseExchange {
         endId = data.endId;
         iterations++;
       }
-    }
+      return orders;
+    };
 
+    const allOrders = (await Promise.all([walk('live'), walk('partially_filled')])).flat();
     return allOrders.flatMap(this.mapOrder);
   };
 
