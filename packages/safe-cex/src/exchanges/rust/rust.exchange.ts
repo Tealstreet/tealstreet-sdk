@@ -278,6 +278,15 @@ const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', '
 type NativeAccountRead = (typeof NATIVE_ACCOUNT_READS)[number];
 const MULTI_COMMAND_WAIT_FACTOR = 5;
 const WORKER_CAPABILITY_RETRY_MS = 30_000;
+const WORKER_BRIDGE_WAIT_MS = 30_000;
+const WORKER_BRIDGE_POLL_MS = 25;
+const LOADED_SECTIONS = [
+  [LOADED_FLAG.MARKETS, 'markets'],
+  [LOADED_FLAG.TICKERS, 'tickers'],
+  [LOADED_FLAG.ORDERS, 'orders'],
+  [LOADED_FLAG.POSITIONS, 'positions'],
+  [LOADED_FLAG.BALANCE, 'balance'],
+] as const;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -321,7 +330,7 @@ export class RustEngineExchange extends BaseExchange {
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
-        await this.ensureHost();
+        await this.ensureSigningHost();
         return await signHostedHttp(
           this.name,
           this.options,
@@ -339,7 +348,7 @@ export class RustEngineExchange extends BaseExchange {
   override signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
-        await this.ensureHost();
+        await this.ensureSigningHost();
         return await signHostedWsAuth(this.host!, request);
       } catch {
         return { id: request.id, error: 'Hosted WS auth signing failed' };
@@ -405,6 +414,10 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Worker side of `loadCapabilities` for a main-thread mirror. */
   fetchEngineCapabilities = async (): Promise<EngineCapabilities | undefined> => {
+    if (this.isWorkerMirror) {
+      await this.loadWorkerCapabilities();
+      return this.capabilityRecord;
+    }
     await this.ensureHost();
     return this.capabilityRecord;
   };
@@ -801,6 +814,8 @@ export class RustEngineExchange extends BaseExchange {
   // Startup is single-use, including failures; a retry needs a new account instance.
   start = (): Promise<void> => {
     if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
+    // The worker starts the account; the mirror's store fills from its frames.
+    if (this.isWorkerMirror) return Promise.resolve();
     if (!this.startup) {
       this.startupState = 'pending';
       this.startup = this.startEngine().then(
@@ -817,6 +832,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private ensureHost = (): Promise<void> => {
+    if (this.isWorkerMirror) return Promise.reject(new Error(`${this.name} worker mirror never runs an engine`));
+    return this.ensureSigningHost();
+  };
+
+  /** Hosted signing builds the engine without starting it; a mirror still drops its frames. */
+  private ensureSigningHost = (): Promise<void> => {
     if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
     return (this.hostInitialization ??= this.createHost().catch((error: unknown) => {
       this.signerSetup?.dispose();
@@ -1069,12 +1090,28 @@ export class RustEngineExchange extends BaseExchange {
    * authoritative state, even if a main-thread read started a local engine.
    */
   private get routesToWorker(): boolean {
-    return this.emitter.hasListeners('callMethod');
+    return this.isWorkerMirror || this.emitter.hasListeners('callMethod');
+  }
+
+  private get isWorkerMirror(): boolean {
+    return this.options.workerMirror === true;
   }
 
   /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
-  private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
-    (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+  private callWorker = async (method: string, ...args: unknown[]): Promise<unknown> => {
+    await this.untilWorkerBridge();
+    return (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+  };
+
+  /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
+  private untilWorkerBridge = async (): Promise<void> => {
+    const deadline = Date.now() + WORKER_BRIDGE_WAIT_MS;
+    while (!this.emitter.hasListeners('callMethod')) {
+      if (this.isDisposed) throw new Error(`${this.name} disposed before its worker bridge was wired`);
+      if (Date.now() >= deadline) throw new Error(`${this.name} worker bridge was not wired`);
+      await new Promise((resolve) => setTimeout(resolve, WORKER_BRIDGE_POLL_MS));
+    }
+  };
 
   private forwardToWorker() {
     // A branded fallback answers locally; wrapping it would hide the brand `capabilities` reads.
@@ -1317,7 +1354,11 @@ export class RustEngineExchange extends BaseExchange {
 
   private frameRecoveryPending = false;
 
-  private receiveFrame = (buffer: ArrayBuffer) => this.applyEngineFrame(buffer, true);
+  private receiveFrame = (buffer: ArrayBuffer) => {
+    // Only the worker's frames, applied through `applyWorkerFrame`, own a mirror's store.
+    if (this.isWorkerMirror) return;
+    this.applyEngineFrame(buffer, true);
+  };
 
   private applyEngineFrame(buffer: ArrayBuffer, recover: boolean) {
     let frame: Frame;
@@ -1831,6 +1872,7 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Identity reads leave failure visibility to their caller. */
   getAccount = async (): Promise<ExchangeAccount> => {
+    if (this.isWorkerMirror) return (await this.callWorker('getAccount')) as ExchangeAccount;
     this.assertEngineAlive();
     await this.ensureHost();
     const lookup = this.capabilityRecord?.account;
@@ -1888,7 +1930,27 @@ export class RustEngineExchange extends BaseExchange {
 
   // The engine reconciles orders and positions itself; reads serve its state.
   /** Reads wait only for their native sections, independently of unrelated reconciliation. */
+  /** A mirror's sections load from the worker's frames; it never starts its own engine. */
+  private untilWorkerData = (flag: number, label: string): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const loaded = () =>
+        LOADED_SECTIONS.every(([section, key]) => !(flag & section) || this.store.loaded[key]);
+      if (loaded()) return resolve();
+      const finish = (error?: Error) => {
+        clearTimeout(timeout);
+        unsubscribe();
+        if (error) reject(error);
+        else resolve();
+      };
+      const unsubscribe = this.store.subscribe(() => {
+        if (this.isDisposed) finish(new Error('Exchange disposed during native read'));
+        else if (loaded()) finish();
+      });
+      const timeout = setTimeout(() => finish(new Error(`Timed out waiting for worker ${label}`)), 30_000);
+    });
+
   private untilNativeData = (flag: number, label: string): Promise<void> => {
+    if (this.isWorkerMirror) return this.untilWorkerData(flag, label);
     const ready = new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
         clearTimeout(timeout);

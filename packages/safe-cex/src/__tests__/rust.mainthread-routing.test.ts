@@ -34,6 +34,60 @@ describe('main-thread Rust trading routing', () => {
     expect(calls).toEqual(['placeOrder']);
   });
 
+  it('never runs an engine on a worker mirror used before its bridge is wired', async () => {
+    const loader = vi.fn(() => new Promise<never>(() => {}));
+    setWasmEngineLoader(loader);
+    const store = new DefaultStore();
+    main = new RustEngineExchange('bybit', { key: '', secret: '', workerMirror: true }, store);
+    const calls: string[] = [];
+    const replies: Record<string, unknown> = {
+      fetchEngineCapabilities: undefined,
+      fetchOrders: [{ id: 'o1' }],
+      fetchPositions: [],
+      getAccount: { userId: 'u1' },
+      placeOrder: ['p1'],
+    };
+    // The warm start runs before the host wires `callMethod`.
+    const capabilities = main.loadCapabilities();
+    const orders = main.fetchOrders();
+    const positions = main.fetchPositions();
+    const account = main.getAccount();
+    const markets = main.fetchMarkets();
+    void main.start();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls).toEqual([]);
+    main.on('callMethod', (event: { requestId: string; method: string }) => {
+      calls.push(event.method);
+      main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: replies[event.method] });
+    });
+    await expect(capabilities).resolves.toBeDefined();
+    await expect(orders).resolves.toEqual([{ id: 'o1' }]);
+    await expect(positions).resolves.toEqual([]);
+    await expect(account).resolves.toEqual({ userId: 'u1' });
+    await expect(main.placeOrder(order)).resolves.toEqual(['p1']);
+    // The worker's frames, not a local engine, load the mirror's catalogue.
+    store.update({ markets: [], loaded: { ...store.loaded, markets: true } });
+    await expect(markets).resolves.toEqual([]);
+    expect(loader).not.toHaveBeenCalled();
+    expect(calls.sort()).toEqual(['fetchEngineCapabilities', 'fetchOrders', 'fetchPositions', 'getAccount', 'placeOrder']);
+    expect(main.hasStarted).toBe(false);
+    expect(store.orders).toEqual([]);
+  });
+
+  it('strips the mirror flag from the options a worker runs its engine with', () => {
+    const worker = new ExchangeWorker(
+      { postMessage: vi.fn() } as unknown as Worker,
+      'mirror',
+      'bybit',
+      { key: 'k', secret: 's', workerMirror: true },
+      {} as AppSettingsWorkerType,
+      {} as ExchangeMetadataWorkerType,
+      'session',
+    );
+    expect((worker as unknown as { _options: { workerMirror?: boolean } })._options.workerMirror).toBeUndefined();
+    worker.dispose();
+  });
+
   it('waits longer for multi-command methods than for one command', async () => {
     vi.useFakeTimers();
     main = new RustEngineExchange(
