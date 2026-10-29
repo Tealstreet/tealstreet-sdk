@@ -287,8 +287,163 @@ impl Drop for FrameServer {
     }
 }
 
+/// One account actor reached in-process, for hosts that own their client wire.
+/// Spawn it inside a tokio `LocalSet`; the handle is `Send` and may cross threads.
 #[derive(Clone)]
-enum Outgoing {
+pub struct AccountHandle {
+    commands: mpsc::Sender<Control>,
+    stop: Arc<watch::Sender<bool>>,
+    config: ServerConfig,
+}
+
+/// A joined client's stream: a full snapshot frame first, then ordered flush
+/// frames and JSON notices exactly as the frame-server wire sends them.
+pub struct ClientLink {
+    pub outgoing: mpsc::Receiver<Outgoing>,
+    /// Becomes true when the account drops this client (slow peer, oversized frame, dispose).
+    pub canceled: watch::Receiver<bool>,
+}
+
+/// Starts an account actor without a frame-server listener. The task ends after
+/// `dispose` or when every handle is dropped; await it to observe teardown.
+pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
+    host: Host<V, T>,
+    config: ServerConfig,
+) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
+    config.validate()?;
+    if host.engine.has_received_commands() {
+        return Err(invalid(
+            "account engine must not receive commands before server registration",
+        ));
+    }
+    let (commands, inbox) = mpsc::channel(256);
+    let (stop, stopped) = watch::channel(false);
+    let actor = Account::new(host, config.clone());
+    let task = tokio::task::spawn_local(async move {
+        #[cfg(not(feature = "address-nonce"))]
+        {
+            actor.run(inbox, stopped).await;
+            Ok(())
+        }
+        #[cfg(feature = "address-nonce")]
+        actor.run(inbox, stopped).await
+    });
+    let handle = AccountHandle {
+        commands,
+        stop: Arc::new(stop),
+        config,
+    };
+    Ok((handle, task))
+}
+
+/// `spawn_account` for a venue named as in `FrameServer::add_venue`, with an
+/// optional deployment-owned signer.
+#[cfg(feature = "venues")]
+pub fn spawn_venue_account<T: Transport + 'static>(
+    venue: &str,
+    options_json: &str,
+    transport: T,
+    signer: Option<safe_cex_engine::signing::Provider>,
+    config: ServerConfig,
+) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
+    struct Spawn<T> {
+        transport: T,
+        config: ServerConfig,
+    }
+    impl<T: Transport + 'static> safe_cex_venues::Visit for Spawn<T> {
+        type Output = io::Result<(AccountHandle, JoinHandle<io::Result<()>>)>;
+        fn visit<V: Venue + 'static>(self, engine: safe_cex_engine::Engine<V>) -> Self::Output {
+            spawn_account(Host::new(engine, self.transport), self.config)
+        }
+    }
+    let options = serde_json::from_str(options_json)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let spawn = Spawn { transport, config };
+    let entropy = Some(crate::production_entropy());
+    let result = match signer {
+        Some(signer) => {
+            safe_cex_venues::build_with_signer(venue, options, entropy, Some(signer), spawn)
+        }
+        None => safe_cex_venues::build(venue, options, entropy, spawn),
+    };
+    result.map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
+}
+
+/// Why `AccountHandle::input` refused a client message; `notice` is the
+/// frame-server error notice to send back.
+#[derive(Debug)]
+pub struct InputRefused {
+    pub notice: Arc<str>,
+}
+
+impl AccountHandle {
+    /// `client` must be unique among this account's live clients.
+    pub async fn join(&self, client: u64, account_auth: bool) -> Result<ClientLink, &'static str> {
+        let (outgoing, frames) = mpsc::channel(self.config.client_queue_capacity);
+        let (cancel, canceled) = watch::channel(false);
+        let (ready, joined) = oneshot::channel();
+        let join = Control::Join {
+            client,
+            outgoing,
+            cancel,
+            account_auth,
+            ready,
+        };
+        self.commands
+            .send(join)
+            .await
+            .map_err(|_| "account stopped")?;
+        joined.await.map_err(|_| "account stopped")??;
+        Ok(ClientLink {
+            outgoing: frames,
+            canceled,
+        })
+    }
+
+    /// Decodes one JSON command exactly as the frame-server wire does.
+    /// `Err` carries the notice to return; `Ok(false)` means the account's
+    /// queue is full or it stopped, which the frame server treats as a disconnect.
+    pub fn input(&self, client: u64, text: &str) -> Result<bool, InputRefused> {
+        let control = match safe_cex_engine::command::decode_host_input(text) {
+            Ok(HostInput::PublicFeedUpdate(_)) => {
+                return Err(InputRefused {
+                    notice: encode_notice(ServerNotice::Error {
+                        command: None,
+                        error: "public feed updates require a trusted host provider",
+                    }),
+                });
+            }
+            Ok(HostInput::Command { command, .. }) => Control::Command { client, command },
+            Ok(HostInput::PollScaleChanged { scale, ceiling_ms }) => Control::PollScaleChanged {
+                client,
+                scale,
+                ceiling_ms,
+            },
+            Err(_) => {
+                return Err(InputRefused {
+                    notice: encode_notice(ServerNotice::Error {
+                        command: None,
+                        error: "invalid command",
+                    }),
+                });
+            }
+        };
+        Ok(self.commands.try_send(control).is_ok())
+    }
+
+    pub fn leave(&self, client: u64) {
+        let _ = self.commands.try_send(Control::Leave(client));
+    }
+
+    /// Stops the actor: clients are canceled, venue sockets close, timers end.
+    pub fn dispose(&self) {
+        self.stop.send_replace(true);
+    }
+}
+
+/// What an account sends a client: SCXF frames, or JSON notices (`type: done | error | event | ...`).
+#[derive(Clone, Debug)]
+pub enum Outgoing {
     Frame(Arc<[u8]>),
     Text(Arc<str>),
 }
@@ -466,6 +621,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
         cancel: watch::Sender<bool>,
         account_auth: bool,
     ) -> Result<(), &'static str> {
+        if self.peers.contains_key(&client) {
+            return Err("duplicate client ID");
+        }
         if self.peers.len() >= self.config.max_clients_per_account {
             return Err("account client limit reached");
         }
