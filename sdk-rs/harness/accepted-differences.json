@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "description": "Named TS/Rust output differences accepted because Rust is intentionally better or TS cannot express the value. Each entry names the exact venue, tape SHA and diagnostic paths, its category, rationale and evidence. An accepted key that is no longer reproduced fails verification. Accepted differences are not known failures: they never cover performance, coverage or harness integrity diagnostics.",
+  "differences": []
+}

@@ -248,6 +248,17 @@ pub fn assert_exchange_metadata_native(native: &ExchangeMetadata, source: &serde
         "native ExchangeMetadata.supportsOptionsToggle"
     );
     assert_eq!(
+        native.options_only,
+        serde_json::from_value::<Option<bool>>(
+            source
+                .get("optionsOnly")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field optionsOnly"),
+        "native ExchangeMetadata.optionsOnly"
+    );
+    assert_eq!(
         native.supports_inverse_toggle,
         serde_json::from_value::<Option<bool>>(
             source

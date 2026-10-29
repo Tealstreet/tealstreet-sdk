@@ -25,7 +25,8 @@ export type RemoteSigningPolicy = Readonly<{
   payloadSupported?: boolean;
   payloadRestOnly?: boolean;
   protectedHeaders?: readonly string[];
-  signatureEncoding?: 'hex' | 'base64';
+  /** `hex-base64` is base64 of the MAC's lowercase hex text (BloFin). */
+  signatureEncoding?: 'hex' | 'base64' | 'hex-base64';
   passphraseHeader?: string;
   wire?: Readonly<{
     exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot' | 'secondsTimestamp'; requestId?: string;

@@ -2,6 +2,7 @@ import type { ExchangeName } from '../../../types';
 import type { RoutingTable } from './types';
 
 import { isTokyoEgress } from '@tealstreet/http-over-websocket/src/egressRegion';
+import { buildRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { exchangeMetadata } from '../../../exchangeMetadata';
 
 // THE declarative routing table. Every value here was previously hardcoded and
@@ -14,10 +15,8 @@ import { exchangeMetadata } from '../../../exchangeMetadata';
 //   howEgress - HOW (REST-over-WS) tradetunnel egress region (isTokyoEgress -> jp).
 //   ws        - per-channel WS host strategy; omitted channels are 'direct'.
 
-// --- WS host literals (exact, matching the current per-exchange ws classes) ---
-const T = 'wss://fsjnpy143pbz'; // tunnel host prefix
-const JP = `${T}.jp.tealstreet.io`;
-const ASIA = `${T}.asia.tealstreet.io`;
+// --- WS host literals ---------------------------------------------------------
+const TYO = 'wss://fsjnpy143pbz-tyo.tealstreet.io'; // the Vultr tunnel host (AWS_EXIT.md 3e)
 // Tokyo passthrough tunnels (Caddy behind Cloudflare) — the DIRECT-path
 // fallback hosts for bybit/okx.
 const BYBIT_JA = 'wss://bybit-proxy-ja.tealstreet.io';
@@ -28,29 +27,39 @@ const RELAY_UPSTREAM = {
   bybitPrivate: 'wss://stream.bybit.com/v5/private',
   okxPrivate: 'wss://ws.okx.com/ws/v5/private',
   okxBusiness: 'wss://ws.okx.com/ws/v5/business',
+  okxeuPrivate: 'wss://wseea.okx.com/ws/v5/private',
+  okxeuBusiness: 'wss://wseea.okx.com/ws/v5/business',
   bitgetPrivate: 'wss://ws.bitget.com/v2/ws/private',
   bitgetPrivateUta: 'wss://ws.bitget.com/v3/ws/private',
+  blofinPrivate: 'wss://openapi.blofin.com/ws/private',
+  // The host root: the tunnel matches it since #8265 (an entry ending in `/`).
+  coinbasePrivate: 'wss://advanced-trade-ws-user.coinbase.com/',
 } as const;
+const relay = (upstream: string): string => buildRelayUrl('jp', upstream);
 
-const WS = {
-  grvt: `${JP}/grvt`,
-  okxPrivate: `${ASIA}/okx/private`,
-  okxBusiness: `${ASIA}/okx/business`,
-  okxeuPrivate: `${ASIA}/okxeu/private`,
-  okxeuBusiness: `${ASIA}/okxeu/business`,
-  blofin: `${ASIA}/blofin/private`,
-  coinbase: `${ASIA}/coinbase/private`,
-  apex: `${ASIA}/apex/private`,
-  bitgetPrivate: `${ASIA}/bitget/v2/private`,
-  bitgetPrivateUta: `${ASIA}/bitget/v3/private`,
+// The browser build's WS hosts. IP-bound private sockets (okx, okxeu, bitget, blofin, coinbase)
+// go through the tunnel relay, which dials the venue from the 9-IP fleet; they used
+// to be the AWS Python ws-proxy paths (`fsjnpy143pbz.asia…/<venue>/private`), moved
+// in AWS_EXIT.md step 3e. bybitbra, grvt and lighter are containers on the tunnel
+// hosts (step 5b). The hosted exchange server pins its own copy of this map.
+export const BROWSER_WS_HOSTS = {
+  grvt: `${TYO}/grvt`,
+  okxPrivate: relay(RELAY_UPSTREAM.okxPrivate),
+  okxBusiness: relay(RELAY_UPSTREAM.okxBusiness),
+  okxeuPrivate: relay(RELAY_UPSTREAM.okxeuPrivate),
+  okxeuBusiness: relay(RELAY_UPSTREAM.okxeuBusiness),
+  blofin: relay(RELAY_UPSTREAM.blofinPrivate),
+  coinbase: relay(RELAY_UPSTREAM.coinbasePrivate),
+  bitgetPrivate: relay(RELAY_UPSTREAM.bitgetPrivate),
+  bitgetPrivateUta: relay(RELAY_UPSTREAM.bitgetPrivateUta),
   bitgetPublic: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',
-  lighterPublic: `${JP}/lighter/stream?readonly=true`,
-  lighterPrivate: `${JP}/lighter/stream`,
-  lighterRh: `${JP}/lighter-rh/stream`,
-  bybitBraPrivate: `${ASIA}/bybitbra/v5/private`,
-  bybitBraPublicLinear: `${ASIA}/bybitbra/v5/public/linear`,
-  bybitBraPublicInverse: `${ASIA}/bybitbra/v5/public/inverse`,
-  bybitBraPublicSpot: `${ASIA}/bybitbra/v5/public/spot`,
+  lighterPublic: `${TYO}/lighter/stream?readonly=true`,
+  lighterPrivate: `${TYO}/lighter/stream`,
+  lighterRh: `${TYO}/lighter-rh/stream`,
+  bybitBraPrivate: `${TYO}/bybitbra/v5/private`,
+  bybitBraPublicLinear: `${TYO}/bybitbra/v5/public/linear`,
+  bybitBraPublicInverse: `${TYO}/bybitbra/v5/public/inverse`,
+  bybitBraPublicSpot: `${TYO}/bybitbra/v5/public/spot`,
   bybitJaPublicLinear: `${BYBIT_JA}/v5/public/linear`,
   bybitJaPublicInverse: `${BYBIT_JA}/v5/public/inverse`,
   bybitJaPublicSpot: `${BYBIT_JA}/v5/public/spot`,
@@ -62,6 +71,11 @@ const WS = {
   bitunixPrivate: 'wss://bitunix-fapi-proxy-ja.tealstreet.io/private/',
   bitunixFutures: 'wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2',
 } as const;
+
+// Every WS host the table names. `apex` is optional and absent here: apexomni's
+// private socket connects directly (AWS_EXIT.md 5c) — it answers a browser-origin
+// upgrade and binds no IP. Its AWS proxy path survives only in the exchange server's pin.
+export type WsHosts = Record<keyof typeof BROWSER_WS_HOSTS, string> & { apex?: string };
 
 // Exchanges whose REST CORS pool is the Tokyo (jp) box — getPrivateProxy's
 // /binance|okx|okex|bitget/ regex. grvt -> 'tiny'; everything else -> 'asia'.
@@ -85,104 +99,6 @@ const REST_JP: ExchangeName[] = [
 // therefore reuse the same ws-* classes (and thus the same hosts). Declared once
 // and assigned to both parent and variants so they can't drift.
 type WsGroup = RoutingTable[ExchangeName]['ws'];
-// okx (global entity only — okxeu/okxdemo terminate elsewhere) also carries the
-// athena passthrough as a direct-path fallback on every channel.
-const okxWs: WsGroup = {
-  public: { kind: 'direct', fallback: WS.okxJaPublic },
-  private: {
-    kind: 'proxyConditional',
-    host: WS.okxPrivate,
-    fallback: WS.okxJaPrivate,
-    relayUpstream: RELAY_UPSTREAM.okxPrivate,
-  },
-  business: {
-    kind: 'proxyConditional',
-    host: WS.okxBusiness,
-    fallback: WS.okxJaBusiness,
-    relayUpstream: RELAY_UPSTREAM.okxBusiness,
-  },
-};
-// okxeu shares the OKX ws classes but must terminate on the EEA entity's hosts
-// (wseea.okx.com) — EEA credentials do not authenticate on the global ws host.
-const okxeuWs: WsGroup = {
-  private: { kind: 'proxyConditional', host: WS.okxeuPrivate },
-  business: { kind: 'proxyConditional', host: WS.okxeuBusiness },
-};
-// Bitget checks the key's bound IP on private login (40018), so a proxied
-// account dials ws-proxy (the IP the add-account form asks Bitget users to bind)
-// and then the relay, which egresses from the same fleet as its REST.
-const bitgetWs: WsGroup = {
-  // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
-  public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic, initialSilentConnects: 1 },
-  // Master's TS proxy/relay routing. The Rust engine host routes its UTA socket
-  // (v3) through privateUta by URL, so no UTA direct bypass remains.
-  private: {
-    kind: 'proxyConditional',
-    host: WS.bitgetPrivate,
-    fallback: WS.bitgetPrivate,
-    relayUpstream: RELAY_UPSTREAM.bitgetPrivate,
-    relayWhenTunnelled: true,
-    initialSilentConnects: 1,
-    ignoredMessages: ['pong'],
-  },
-  privateUta: {
-    kind: 'proxyConditional',
-    host: WS.bitgetPrivateUta,
-    fallback: WS.bitgetPrivateUta,
-    relayUpstream: RELAY_UPSTREAM.bitgetPrivateUta,
-    relayWhenTunnelled: true,
-  },
-};
-const coinbaseWs: WsGroup = { private: { kind: 'proxyConditional', host: WS.coinbase } };
-const bybitBrazilPrivateWs = {
-  kind: 'bybitBrazilConditional',
-  host: WS.bybitBraPrivate,
-  fallback: WS.bybitJaPrivate,
-  relayUpstream: RELAY_UPSTREAM.bybitPrivate,
-} as const;
-
-// Per-exchange WS overrides (everything not listed defaults to all-direct).
-const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
-  grvt: { private: { kind: 'alwaysProxy', host: WS.grvt } },
-  // The bitunix ws classes pick the fallback themselves: `tealstreetWsRoute`, or
-  // two connects that delivered nothing. `business` is the frontend futures socket.
-  bitunix: {
-    public: { kind: 'fallbackOnly', fallback: WS.bitunixPublic },
-    private: { kind: 'fallbackOnly', fallback: WS.bitunixPrivate },
-    business: { kind: 'fallbackOnly', fallback: WS.bitunixFutures },
-  },
-  okx: okxWs,
-  okxeu: okxeuWs, // OKXEUExchange extends OKXExchange {} but tunnels to wseea.okx.com
-  // OKX EU Demo intentionally stays direct: testnet endpoints are wseeapap.okx.com
-  // and authenticate with a normal OKX login frame after connect.
-  blofin: { private: { kind: 'proxyConditional', host: WS.blofin } },
-  coinbase: coinbaseWs,
-  coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange
-  apexomni: { private: { kind: 'proxyConditional', host: WS.apex } },
-  bitget: bitgetWs,
-  bitgetinverse: bitgetWs, // BitgetInverseExchange extends BitgetExchange
-  bitgetusdc: bitgetWs, // BitgetUSDCExchange extends BitgetExchange
-  lighter: {
-    public: { kind: 'wsRouteCandidates', proxy: WS.lighterPublic },
-    private: { kind: 'wsRouteCandidates', proxy: WS.lighterPrivate },
-  },
-  'lighter-robinhood': {
-    public: { kind: 'wsRouteCandidates', proxy: WS.lighterRh },
-    private: { kind: 'wsRouteCandidates', proxy: WS.lighterRh },
-  },
-  bybit: {
-    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicLinear, fallback: WS.bybitJaPublicLinear },
-    private: bybitBrazilPrivateWs,
-  },
-  bybitinverse: {
-    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicInverse, fallback: WS.bybitJaPublicInverse },
-    private: bybitBrazilPrivateWs,
-  },
-  bybitspot: {
-    public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicSpot, fallback: WS.bybitJaPublicSpot },
-    private: bybitBrazilPrivateWs,
-  },
-};
 
 // Exchanges that install a region-pinned HOW adapter from the account's proxyRegion
 // (bybit when tunnelling) -> howEgress is 'regionConditional'. Their
@@ -193,18 +109,131 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
 // stays out of this list.
 const HOW_REGION_CONDITIONAL: ExchangeName[] = ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot'];
 
-// The set of exchanges is enumerated exactly once, at the type level (ExchangeName)
-// and at runtime by exchangeMetadata's keys — which TypeScript pins to ExchangeName
-// via its `{ [key in ExchangeName]: ... }` mapped type. We derive the table from
-// those keys so a new exchange automatically gets a row (and can't be forgotten):
-// adding it to ExchangeName forces a metadata entry, which forces a routing entry.
-export const routingTable: RoutingTable = Object.fromEntries(
-  (Object.keys(exchangeMetadata) as ExchangeName[]).map((name) => [
-    name,
-    {
-      restPool: name === 'grvt' ? 'tiny' : REST_JP.includes(name) ? 'jp' : 'asia',
-      howEgress: HOW_REGION_CONDITIONAL.includes(name) ? 'regionConditional' : isTokyoEgress(name) ? 'jp' : 'sg',
-      ...(WS_OVERRIDES[name] ? { ws: WS_OVERRIDES[name] } : {}),
+// Builds the table over a set of WS hosts: the browser build's, or a host app's
+// pinned copy (`setRoutingWsHosts`, the hosted exchange server).
+const buildRoutingTable = (WS: WsHosts): RoutingTable => {
+  // okx (global entity only — okxeu/okxdemo terminate elsewhere) also carries the
+  // athena passthrough as a direct-path fallback on every channel.
+  const okxWs: WsGroup = {
+    public: { kind: 'direct', fallback: WS.okxJaPublic },
+    private: {
+      kind: 'proxyConditional',
+      host: WS.okxPrivate,
+      fallback: WS.okxJaPrivate,
+      relayUpstream: RELAY_UPSTREAM.okxPrivate,
     },
-  ]),
-) as RoutingTable;
+    business: {
+      kind: 'proxyConditional',
+      host: WS.okxBusiness,
+      fallback: WS.okxJaBusiness,
+      relayUpstream: RELAY_UPSTREAM.okxBusiness,
+    },
+  };
+  // okxeu shares the OKX ws classes but must terminate on the EEA entity's hosts
+  // (wseea.okx.com) — EEA credentials do not authenticate on the global ws host.
+  const okxeuWs: WsGroup = {
+    private: { kind: 'proxyConditional', host: WS.okxeuPrivate },
+    business: { kind: 'proxyConditional', host: WS.okxeuBusiness },
+  };
+  // Bitget checks the key's bound IP on private login (40018), so a proxied
+  // account dials its host and then the relay, which egresses from the same fleet
+  // as its REST. In the browser build the host IS the relay (AWS_EXIT.md 3e), so
+  // the second candidate repeats it; the exchange server's pin keeps ws-proxy first.
+  const bitgetWs: WsGroup = {
+    // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
+    public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic, initialSilentConnects: 1 },
+    // Master's TS proxy/relay routing. The Rust engine host routes its UTA socket
+    // (v3) through privateUta by URL, so no UTA direct bypass remains.
+    private: {
+      kind: 'proxyConditional',
+      host: WS.bitgetPrivate,
+      fallback: WS.bitgetPrivate,
+      relayUpstream: RELAY_UPSTREAM.bitgetPrivate,
+      relayWhenTunnelled: true,
+      initialSilentConnects: 1,
+      ignoredMessages: ['pong'],
+    },
+    privateUta: {
+      kind: 'proxyConditional',
+      host: WS.bitgetPrivateUta,
+      fallback: WS.bitgetPrivateUta,
+      relayUpstream: RELAY_UPSTREAM.bitgetPrivateUta,
+      relayWhenTunnelled: true,
+    },
+  };
+  const coinbaseWs: WsGroup = { private: { kind: 'proxyConditional', host: WS.coinbase } };
+  const bybitBrazilPrivateWs = {
+    kind: 'bybitBrazilConditional',
+    host: WS.bybitBraPrivate,
+    fallback: WS.bybitJaPrivate,
+    relayUpstream: RELAY_UPSTREAM.bybitPrivate,
+  } as const;
+
+  // Per-exchange WS overrides (everything not listed defaults to all-direct).
+  const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
+    grvt: { private: { kind: 'alwaysProxy', host: WS.grvt } },
+    // The bitunix ws classes pick the fallback themselves: `tealstreetWsRoute`, or
+    // two connects that delivered nothing. `business` is the frontend futures socket.
+    bitunix: {
+      public: { kind: 'fallbackOnly', fallback: WS.bitunixPublic },
+      private: { kind: 'fallbackOnly', fallback: WS.bitunixPrivate },
+      business: { kind: 'fallbackOnly', fallback: WS.bitunixFutures },
+    },
+    okx: okxWs,
+    okxeu: okxeuWs, // OKXEUExchange extends OKXExchange {} but tunnels to wseea.okx.com
+    // OKX EU Demo intentionally stays direct: testnet endpoints are wseeapap.okx.com
+    // and authenticate with a normal OKX login frame after connect.
+    blofin: { private: { kind: 'proxyConditional', host: WS.blofin } },
+    coinbase: coinbaseWs,
+    coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange
+    ...(WS.apex ? { apexomni: { private: { kind: 'proxyConditional', host: WS.apex } } } : {}),
+    bitget: bitgetWs,
+    bitgetinverse: bitgetWs, // BitgetInverseExchange extends BitgetExchange
+    bitgetusdc: bitgetWs, // BitgetUSDCExchange extends BitgetExchange
+    lighter: {
+      public: { kind: 'wsRouteCandidates', proxy: WS.lighterPublic },
+      private: { kind: 'wsRouteCandidates', proxy: WS.lighterPrivate },
+    },
+    'lighter-robinhood': {
+      public: { kind: 'wsRouteCandidates', proxy: WS.lighterRh },
+      private: { kind: 'wsRouteCandidates', proxy: WS.lighterRh },
+    },
+    bybit: {
+      public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicLinear, fallback: WS.bybitJaPublicLinear },
+      private: bybitBrazilPrivateWs,
+    },
+    bybitinverse: {
+      public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicInverse, fallback: WS.bybitJaPublicInverse },
+      private: bybitBrazilPrivateWs,
+    },
+    bybitspot: {
+      public: { kind: 'bybitBrazilConditional', host: WS.bybitBraPublicSpot, fallback: WS.bybitJaPublicSpot },
+      private: bybitBrazilPrivateWs,
+    },
+  };
+
+  // The set of exchanges is enumerated exactly once, at the type level (ExchangeName)
+  // and at runtime by exchangeMetadata's keys — which TypeScript pins to ExchangeName
+  // via its `{ [key in ExchangeName]: ... }` mapped type. We derive the table from
+  // those keys so a new exchange automatically gets a row (and can't be forgotten):
+  // adding it to ExchangeName forces a metadata entry, which forces a routing entry.
+  return Object.fromEntries(
+    (Object.keys(exchangeMetadata) as ExchangeName[]).map((name) => [
+      name,
+      {
+        restPool: name === 'grvt' ? 'tiny' : REST_JP.includes(name) ? 'jp' : 'asia',
+        howEgress: HOW_REGION_CONDITIONAL.includes(name) ? 'regionConditional' : isTokyoEgress(name) ? 'jp' : 'sg',
+        ...(WS_OVERRIDES[name] ? { ws: WS_OVERRIDES[name] } : {}),
+      },
+    ]),
+  ) as RoutingTable;
+};
+
+let routingTable = buildRoutingTable(BROWSER_WS_HOSTS);
+
+/** Pins this runtime's WS hosts; see `pinTealstreetEgressHosts`. */
+export const setRoutingWsHosts = (ws: WsHosts): void => {
+  routingTable = buildRoutingTable(ws);
+};
+
+export const getRoutingTable = (): RoutingTable => routingTable;

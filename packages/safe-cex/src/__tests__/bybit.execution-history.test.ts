@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from './reference/bybit/bybit.exchange';
+import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
 import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
 import { OrderSide } from '../types';
 
-type TestExchange = BybitExchange | BybitInverseExchange;
+type TestExchange = BybitExchange | BybitDemoExchange | BybitInverseExchange;
 const BYBIT_MAX_QUERY_RANGE_MS = 7 * 24 * 60 * 60 * 1000 - 1;
 
 const createStore = () =>
@@ -35,6 +36,21 @@ const createLinearExchange = () => {
 const createInverseExchange = () => {
   const exchange = new BybitInverseExchange(
     'bybitinverse' as any,
+    {
+      key: 'key',
+      secret: 'secret',
+      testnet: false,
+    } as any,
+    createStore(),
+  );
+  const get = vi.fn();
+  exchange.xhr = { get } as any;
+  return { exchange, get };
+};
+
+const createDemoExchange = () => {
+  const exchange = new BybitDemoExchange(
+    'bybitdemo' as any,
     {
       key: 'key',
       secret: 'secret',
@@ -215,6 +231,108 @@ const assertAlternatePrimaryExecutionShape = async (
   ]);
 };
 
+const assertMicrosecondPrimaryExecutionTimestamp = async (
+  exchange: TestExchange,
+  get: ReturnType<typeof vi.fn>,
+  symbol: string,
+) => {
+  get.mockResolvedValueOnce({
+    data: {
+      retMsg: 'OK',
+      result: {
+        list: [
+          {
+            execId: 'exec-micro',
+            execTime: '1793096306496430',
+            symbol,
+            orderId: 'oid-micro',
+            execPrice: '50000',
+            execQty: '0.1',
+            side: 'Buy',
+            execFee: '0.01',
+            feeCurrency: 'USDT',
+          },
+        ],
+      },
+    },
+  });
+
+  const executions = await exchange.fetchHistoricalFills({ symbol, limit: 50 });
+
+  expect(executions).toEqual([
+    {
+      id: 'exec-micro',
+      timestamp: 1793096306,
+      symbol,
+      orderId: 'oid-micro',
+      price: 50000,
+      qty: 0.1,
+      side: OrderSide.Buy,
+      commission: 0.01,
+      commissionAsset: 'USDT',
+    },
+  ]);
+};
+
+const assertMicrosecondOrderHistoryTimestamp = async (
+  exchange: TestExchange,
+  get: ReturnType<typeof vi.fn>,
+  symbol: string,
+) => {
+  get.mockImplementation((url: string) => {
+    if (url === '/v5/execution/list') {
+      return Promise.resolve({
+        data: {
+          retMsg: 'OK',
+          result: {
+            list: [],
+          },
+        },
+      });
+    }
+
+    if (url === '/v5/order/history') {
+      return Promise.resolve({
+        data: {
+          retMsg: 'OK',
+          result: {
+            list: [
+              {
+                symbol,
+                orderId: 'oid-history-micro',
+                orderStatus: 'Filled',
+                side: 'Sell',
+                avgPrice: '50100',
+                cumExecQty: '0.2',
+                updatedTime: '1793096306496430',
+                cumExecFee: '0.02',
+                feeCurrency: 'USDT',
+              },
+            ],
+          },
+        },
+      });
+    }
+
+    return Promise.reject(new Error(`Unexpected URL ${url}`));
+  });
+
+  const executions = await exchange.fetchHistoricalFills({ symbol, limit: 50 });
+
+  expect(executions).toEqual([
+    {
+      timestamp: 1793096306,
+      symbol,
+      orderId: 'oid-history-micro',
+      price: 50100,
+      qty: 0.2,
+      side: OrderSide.Sell,
+      commission: 0.02,
+      commissionAsset: 'USDT',
+    },
+  ]);
+};
+
 const assertOrderHistoryFallbackAfterPrimaryError = async (
   exchange: TestExchange,
   get: ReturnType<typeof vi.fn>,
@@ -360,6 +478,31 @@ describe('Bybit execution history mapping', () => {
   it('maps alternate primary execution fields for inverse bybit', async () => {
     const { exchange, get } = createInverseExchange();
     await assertAlternatePrimaryExecutionShape(exchange, get, 'BTCUSD');
+  });
+
+  it('maps microsecond primary execution timestamps for linear bybit', async () => {
+    const { exchange, get } = createLinearExchange();
+    await assertMicrosecondPrimaryExecutionTimestamp(exchange, get, 'BTCUSDT');
+  });
+
+  it('maps microsecond primary execution timestamps for bybit demo', async () => {
+    const { exchange, get } = createDemoExchange();
+    await assertMicrosecondPrimaryExecutionTimestamp(exchange, get, 'BTCUSDT');
+  });
+
+  it('maps microsecond primary execution timestamps for inverse bybit', async () => {
+    const { exchange, get } = createInverseExchange();
+    await assertMicrosecondPrimaryExecutionTimestamp(exchange, get, 'BTCUSD');
+  });
+
+  it('maps microsecond order-history fallback timestamps for linear bybit', async () => {
+    const { exchange, get } = createLinearExchange();
+    await assertMicrosecondOrderHistoryTimestamp(exchange, get, 'BTCUSDT');
+  });
+
+  it('maps microsecond order-history fallback timestamps for inverse bybit', async () => {
+    const { exchange, get } = createInverseExchange();
+    await assertMicrosecondOrderHistoryTimestamp(exchange, get, 'BTCUSD');
   });
 
   it('falls back to order history for inverse bybit when execution list errors', async () => {
