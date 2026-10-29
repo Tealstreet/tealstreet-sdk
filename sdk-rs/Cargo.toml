@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "algos/*",
     "crypto",
     "engine",
     "hosts/native",
@@ -16,6 +17,7 @@ members = [
 # A bare `cargo build|test` never unifies the candle-cache serde_json features
 # into the port; those crates build only with `-p`.
 default-members = [
+    "algos/*",
     "crypto",
     "engine",
     "hosts/native",
