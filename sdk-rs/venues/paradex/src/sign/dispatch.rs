@@ -370,3 +370,100 @@ impl<T: SignedBody> SignStep for Orders<T> {
         FRESHNESS_MS
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hosted::OrderStatement;
+    use crate::sign::SystemConfig;
+    use safe_cex_engine::signing::KeyRef;
+
+    fn signer() -> Signer {
+        let config = SystemConfig {
+            starknet_chain_id: "PRIVATE_SN_PARACLEAR_MAINNET".into(),
+            l1_chain_id: None,
+            paraclear_account_hash: None,
+            paraclear_account_proxy_hash: None,
+        };
+        let credentials = Credentials::new(
+            KeyRef("ref:stark".into()),
+            [7; 32],
+            "0x0123",
+            "0x456",
+            None,
+            &config,
+        )
+        .unwrap();
+        Signer::new(&credentials, false)
+    }
+
+    fn order(market: &str) -> OrderStatement<'_> {
+        OrderStatement {
+            timestamp_ms: 1_700_000_000_000,
+            market,
+            side: "BUY",
+            order_type: "LIMIT",
+            size: "1.5",
+            price: Some("100.1"),
+            trigger_price: None,
+            instruction: "GTC",
+            flags: None,
+            stp: Some("EXPIRE_TAKER"),
+            client_id: Some("one"),
+        }
+    }
+
+    #[test]
+    fn work_commits_only_a_statement_that_rebuilds_the_signed_hashes() {
+        let signer = signer();
+        let preimage = Preimage {
+            market: "BTC-USD-PERP",
+            side: "BUY",
+            kind: "LIMIT",
+            size: "1.5",
+            price: Some("100.1"),
+            id: None,
+        };
+        let hash = signer
+            .credentials
+            .order_hash(1_700_000_000_000, &preimage)
+            .unwrap();
+        let statement = Statement::Create {
+            batch_single: false,
+            order: order("BTC-USD-PERP"),
+        };
+        let (work, commitment) = signer
+            .work(1.7e12, Method::Post, "/v1/orders", &statement, &[hash])
+            .unwrap();
+        let text = statement.to_json();
+        assert_eq!(commitment, safe_cex_crypto::sha256(text.as_bytes()));
+        assert!(matches!(
+            &work.operations[0],
+            Operation::Sha256 { payload } if payload == &[PayloadPart::Bytes { bytes: text.into_bytes() }]
+        ));
+        assert_eq!(work.operations.len(), 2);
+        // A projection that differs from the hashed body, an invalid one, and a
+        // count mismatch each refuse before any provider work exists.
+        let other = Statement::Create {
+            batch_single: false,
+            order: order("ETH-USD-PERP"),
+        };
+        let invalid = Statement::Create {
+            batch_single: false,
+            order: OrderStatement {
+                stp: None,
+                ..order("BTC-USD-PERP")
+            },
+        };
+        for (statement, hashes) in [
+            (&other, vec![hash]),
+            (&invalid, vec![hash]),
+            (&statement, vec![hash, hash]),
+        ] {
+            assert!(matches!(
+                signer.work(1.7e12, Method::Post, "/v1/orders", statement, &hashes),
+                Err(SignError::InvalidRequest)
+            ));
+        }
+    }
+}
