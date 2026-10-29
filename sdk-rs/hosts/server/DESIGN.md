@@ -36,6 +36,22 @@ Owners. Comment in your own section, and don't edit anyone else's.
 - **Signals:** SIGTERM starts a graceful drain. Clients get a `1001` close, and accounts are disposed. The process exits within 10s.
 - **Logs:** JSON lines on stdout. Warn and above go to stderr as well.
 
+### Image contract (codex-mxb4mq)
+
+The SDK Dockerfiles build from the repository root and install native binaries
+only into a Debian slim runtime running as UID/GID 65532. Exchange publishes as
+`ghcr.io/tealstreet/exchange-server-native`, port 23456; candle publishes as
+`ghcr.io/tealstreet/candle-server-native`, port 23457. Both use `GET /health`.
+Candle's `candle-cache-owner` is installed beside `candle-server` after a separate
+Cargo invocation, preserving engine/cache JSON feature isolation.
+
+NX owns `docker-exchange-server-rust.yml` and `docker-candle-server-rust.yml`.
+Each publishes `latest` and the full source SHA to GHCR, then keylessly signs
+the exact pushed digest. Vultr requires GitHub OIDC issuer
+`https://token.actions.githubusercontent.com` and a certificate identity matching
+`^https://github.com/Tealstreet/tealstreet-next/.github/workflows/`.
+Images do not contain credentials and the workflows do not deploy hosts.
+
 ## Environment
 
 | Variable | Default | Meaning |
