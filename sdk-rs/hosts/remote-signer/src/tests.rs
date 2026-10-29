@@ -718,6 +718,7 @@ async fn options_carrying_signing_material_under_any_name_refuse() {
         for options in [
             json!({ "key": "k", field: "x" }),
             json!({ "key": "k", "nested": { field: "x" } }),
+            json!({ "key": "k", "list": [[{ field: "x" }]] }),
         ] {
             let result = remote_account(link.clone(), "bybit", None, &options.to_string());
             assert!(result.is_err(), "{options}");

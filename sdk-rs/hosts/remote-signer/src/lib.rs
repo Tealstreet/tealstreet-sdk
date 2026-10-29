@@ -203,8 +203,16 @@ fn secret_shaped(options: &Map<String, Value>) -> bool {
         ]
         .iter()
         .any(|shape| name.contains(shape))
-            || matches!(value, Value::Object(inner) if secret_shaped(inner))
+            || nested_secret(value)
     })
+}
+
+fn nested_secret(value: &Value) -> bool {
+    match value {
+        Value::Object(inner) => secret_shaped(inner),
+        Value::Array(items) => items.iter().any(nested_secret),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
