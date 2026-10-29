@@ -894,3 +894,78 @@ async fn a_hyperliquid_fill_event_lowers_the_remainder_before_replacement() {
     })
     .await;
 }
+
+/// Placements land; fill lookups by order id answer with `fills`.
+fn accept_with_fills(port: &Rc<FakePort>, fills: Result<&'static str, &'static str>) {
+    port.accept_placements();
+    let accept = std::mem::replace(
+        &mut *port.responder.borrow_mut(),
+        Box::new(|_| Ok("null".into())),
+    );
+    let accept = RefCell::new(accept);
+    *port.responder.borrow_mut() = Box::new(move |command| match command {
+        Command::Query {
+            query: safe_cex_engine::engine::Query::Fills { .. },
+            ..
+        } => fills.map(Into::into).map_err(VenueError::new),
+        other => (accept.borrow_mut())(other),
+    });
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rejoin_reconciles_lost_fills_before_replacing() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":0.4}]"#));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.publish(Change {
+            resync: true,
+            orders: true,
+            positions: true,
+            ..Change::default()
+        });
+        settle(10).await;
+        port.set_ticker(101.0, 101.5);
+        settle(100).await;
+        let placements = port.placements();
+        assert_eq!(placements.len(), 2);
+        assert!((placements[1].1 - 0.6).abs() < 1e-9, "{placements:?}");
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn without_a_rejoin_a_row_venue_does_not_ask_rest() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":0.4}]"#));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.set_ticker(101.0, 101.5);
+        settle(100).await;
+        assert_eq!(port.placements()[1].1, 1.0);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rejoin_on_a_venue_without_fill_lookup_falls_back_to_rows() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Err("fills by order id are unsupported"));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.publish(Change {
+            resync: true,
+            orders: true,
+            ..Change::default()
+        });
+        settle(10).await;
+        port.set_ticker(101.0, 101.5);
+        settle(100).await;
+        assert_eq!(port.placements().len(), 2, "the chase keeps running");
+        assert!(port.completes().is_empty());
+    })
+    .await;
+}

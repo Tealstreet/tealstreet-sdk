@@ -18,6 +18,9 @@ pub struct Change {
     pub positions: bool,
     pub tickers: bool,
     pub fills: Vec<Fill>,
+    /// The feed rejoined: fills sent while it was down are lost, so algos
+    /// reconcile fills over REST before acting on the remainder again.
+    pub resync: bool,
 }
 
 /// One account as an algo sees it, implemented by the server over its account
