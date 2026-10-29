@@ -44,3 +44,8 @@ Inject `ExecFactory::with_algos(account_name, chasers, twap)` with the same
 ChaserBook and cloned TwapFactory registered for direct ops. The account name
 is trusted server configuration. CLI TWAP starts a real shared schedule, fixing
 the TS hosted router's discarded taskAction; CLI list/stop inspect that schedule.
+
+Sleep and wait run on the shared account scope. Conditions poll only current
+engine frames (100 ms), support sustain/timeout, and dispose with their scope.
+There is no venue-read loop. UTC clock waits use the next HHMM occurrence;
+variables still require the client-side PreprocessStore.

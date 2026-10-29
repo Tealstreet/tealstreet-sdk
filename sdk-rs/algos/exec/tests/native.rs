@@ -398,3 +398,43 @@ async fn cli_twap_starts_exactly_one_real_shared_schedule_and_list_stop_use_it()
         book.shutdown("test cleanup").await;cx.scope.dispose();
     }).await;
 }
+
+async fn settle_exec() {
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+}
+#[tokio::test(start_paused = true)]
+async fn shared_sleep_blocks_sequential_successor_and_scope_dispose_prevents_any_later_write() {
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"sleep 250ms; lev 3","reqId":"r"}"#,&cx).unwrap();settle_exec().await;
+        assert!(port.commands.borrow().is_empty());tokio::time::advance(std::time::Duration::from_millis(249)).await;settle_exec().await;assert!(port.commands.borrow().is_empty());
+        tokio::time::advance(std::time::Duration::from_millis(1)).await;settle_exec().await;assert_eq!(port.commands.borrow().len(),1);
+        assert!(matches!(&port.commands.borrow()[0],Command::SetLeverage{leverage,..} if *leverage==3.));
+        port.replies.borrow_mut().remove(0).send(Ok("[]".into())).unwrap();settle_exec().await;
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"sleep 1s; lev 7","reqId":"gone"}"#,&cx).unwrap();settle_exec().await;cx.scope.dispose();
+        tokio::time::advance(std::time::Duration::from_secs(2)).await;settle_exec().await;
+        assert_eq!(port.commands.borrow().len(),1);assert!(!port.events.borrow().iter().any(|(op,e)|op=="exec-result"&&e["reqId"]=="gone"));
+    }).await;
+}
+#[tokio::test(start_paused = true)]
+async fn actual_wait_reads_current_store_resets_sustain_and_times_out_without_venue_io() {
+    use safe_cex_engine::model::Position;
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"wait long for=200ms timeout=1s; lev 4","reqId":"sustain"}"#,&cx).unwrap();settle_exec().await;
+        let position=Position{id:"position".into(),symbol:"BTCUSDT".into(),side:safe_cex_engine::model::PositionSide::Long,contracts:1.,entry_price:50000.,notional:50000.,leverage:2.,margin_type:None,position_mode:None,unrealized_pnl:0.,realized_pnl:None,liquidation_price:0.,margin_size:None,last_update:None};
+        port.store.borrow_mut().positions=vec![position.clone()];tokio::time::advance(std::time::Duration::from_millis(100)).await;settle_exec().await;
+        port.store.borrow_mut().positions.clear();tokio::time::advance(std::time::Duration::from_millis(100)).await;settle_exec().await;
+        port.store.borrow_mut().positions=vec![position];
+        for _ in 0..2 {tokio::time::advance(std::time::Duration::from_millis(100)).await;settle_exec().await;}
+        assert!(port.commands.borrow().is_empty(),"false poll resets sustained interval");
+        tokio::time::advance(std::time::Duration::from_millis(100)).await;settle_exec().await;assert_eq!(port.commands.borrow().len(),1);
+        port.replies.borrow_mut().remove(0).send(Ok("[]".into())).unwrap();settle_exec().await;
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"wait short timeout=200ms","reqId":"timeout"}"#,&cx).unwrap();settle_exec().await;
+        for _ in 0..2 {tokio::time::advance(std::time::Duration::from_millis(100)).await;settle_exec().await;}
+        assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-result"&&e["reqId"]=="timeout"&&e["success"]==false&&e["error"]=="wait timed out (200ms): short"));
+        assert_eq!(port.commands.borrow().len(),1,"waiting never requests a venue read");cx.scope.dispose();
+    }).await;
+}

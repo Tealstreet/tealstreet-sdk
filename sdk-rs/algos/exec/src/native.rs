@@ -128,8 +128,27 @@ impl Host for Adapter {
         if self.cx.scope.is_disposed() {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         }
-        let command = translate(method, &args, self.cx.port.next_command_id())
-            .map_err(|error| json!({"message":error,"outcome":"notSent"}))?;
+        let wait = if method == "execWait" {
+            let symbol = args[0]
+                .as_str()
+                .ok_or_else(|| json!({"message":"Invalid wait","outcome":"notSent"}))?;
+            let tokens: Vec<String> = serde_json::from_value(args[1].clone())
+                .map_err(|_| json!({"message":"Invalid wait","outcome":"notSent"}))?;
+            Some(
+                crate::waits::Wait::parse(symbol, &tokens)
+                    .map_err(|message| json!({"message":message,"outcome":"notSent"}))?,
+            )
+        } else {
+            None
+        };
+        let command = if wait.is_none() {
+            Some(
+                translate(method, &args, self.cx.port.next_command_id())
+                    .map_err(|error| json!({"message":error,"outcome":"notSent"}))?,
+            )
+        } else {
+            None
+        };
         let Some(exec) = self.exec.upgrade() else {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         };
@@ -148,13 +167,17 @@ impl Host for Adapter {
             if adapter.cx.scope.is_disposed() {
                 return;
             }
-            let result = adapter
-                .cx
-                .port
-                .command(command)
-                .await
-                .map(|s| serde_json::from_str(&s).unwrap_or(Value::String(s)))
-                .map_err(serialize_error);
+            let result = if let Some(wait) = wait {
+                crate::waits::run(wait, &adapter.cx, || adapter.snapshot()).await
+            } else {
+                adapter
+                    .cx
+                    .port
+                    .command(command.expect("engine call"))
+                    .await
+                    .map(|s| serde_json::from_str(&s).unwrap_or(Value::String(s)))
+                    .map_err(serialize_error)
+            };
             drop(reservation);
             if !adapter.cx.scope.is_disposed() {
                 exec.borrow_mut().complete(token, result, &mut adapter);
