@@ -7502,7 +7502,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7516,7 +7516,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7530,7 +7530,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7544,7 +7544,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7558,7 +7558,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7572,7 +7572,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7586,7 +7586,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7600,7 +7600,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7614,7 +7614,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7628,7 +7628,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7642,7 +7642,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7656,7 +7656,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7828,7 +7828,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7842,7 +7842,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7856,7 +7856,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7870,7 +7870,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7884,7 +7884,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7898,7 +7898,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7912,7 +7912,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7926,7 +7926,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7940,7 +7940,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7954,7 +7954,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7968,7 +7968,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {
@@ -7982,7 +7982,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F",
         "tunnelled": true,
       },
       "wsPublic": {

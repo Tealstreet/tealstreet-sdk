@@ -9,8 +9,8 @@ Private proxy IP addresses database organized by region.
   them equal, since this package's mirror has no `infra/`). Every whitelist in
   `exchangeMetadata` is that list since `docs/plans/AWS_EXIT.md` step 3e, and
   `exchangeMetadata.test.ts` fails if an AWS pool comes back. The AWS lists stay
-  for legacy-master and go with step 3f. `exchangesRequireWsIp` is coinbase only:
-  okx, okxeu, bitget and blofin moved to the relay.
+  for legacy-master and go with step 3f. `exchangesRequireWsIp` is empty: okx,
+  okxeu, bitget and blofin moved to the relay in 3e, coinbase in 5a.
 - **Build**: `yarn build-force` (tsup)
 - **Note**: Data-only package. Lists exchanges that require WebSocket proxy.
   `tokyoK8sNatGatewayIp` is not part of `privateProxyIpsTokyo`; it is the
