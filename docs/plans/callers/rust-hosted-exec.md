@@ -167,3 +167,13 @@ optimistic success. Acceptance of a close/cancel command is not a filled/flat
 readback claim. A concurrent nuke on the same account refuses before any send.
 The wait barrier now resolves through the evaluator's same generated canonical
 lookup, so adding a future wait/sleep alias cannot bypass the failure barrier.
+
+Chart uses the account port's typed FetchCandles command, with the TS interval
+list/default 1h and default 30/max 100 requested candles. Rendering includes
+current native position/PnL and limit/SL/TP/trailing overlays, tick precision,
+price pointer and candle countdown. It emits one existing exec-log message with
+the originating reqId. Malformed/empty/oversized replies refuse; no fabricated
+candles or retry. Native time-axis labels explicitly use UTC rather than a
+browser/server locale, making hosted output deterministic. This is a read query,
+not a new transport or chart subscription; disposal prevents any queued chain
+successor from release. Browser watch/repl behavior remains outside hosted EXEC.
