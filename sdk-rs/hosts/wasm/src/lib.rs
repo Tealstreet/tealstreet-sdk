@@ -1015,6 +1015,8 @@ impl WasmEngine {
                         key: options.key.clone(),
                         vault: options.vault.clone(),
                         testnet: options.testnet,
+                        application_id: options.application_id.clone(),
+                        api_key_index: options.api_key_index.clone(),
                     };
                     (venue.to_owned(), identities, account)
                 })

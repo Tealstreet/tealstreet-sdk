@@ -74,13 +74,10 @@ it.each([
   'coinbase',
   'coinbasespot',
   'polymarket',
-  'lighter',
-  'lighter-robinhood',
   'binance',
   'bybit',
 ] as const)('keeps native payloadSigner refusal classification on private %s before I/O', async (name) => {
-  // Lighter signs locally, and a payload-only Lighter account starts public by contract.
-  for (const secret of name.startsWith('lighter') ? ['local-secret'] : ['', 'local-secret']) {
+  for (const secret of ['', 'local-secret']) {
     const { construct, transport, io } = recordEngine(name, true);
     const failure = await start(name, { secret, payloadSigner }).catch((error: unknown) => error);
     expect(failure).toMatchObject({
@@ -117,6 +114,21 @@ it('refuses a private hyperliquid payloadSigner at construction before any engin
   for (const name of ['hyperliquid', 'hyperliquidspot'] as const) {
     expect(() => new RustEngineExchange(name, { key: 'k', secret: '', payloadSigner } as ExchangeOptions, new DefaultStore()))
       .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+  }
+  expect(construct).not.toHaveBeenCalled();
+  expect(transport).not.toHaveBeenCalled();
+  expect(io).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+// Lighter declares remote signing too; its PayloadSigner has no REST-only lifecycle.
+it('refuses a private lighter payloadSigner at construction before any engine', () => {
+  const { construct, transport, io } = recordEngine('lighter');
+  for (const name of ['lighter', 'lighter-robinhood'] as const) {
+    for (const secret of ['', 'local-secret']) {
+      expect(() => new RustEngineExchange(name, { key: 'k', secret, apiKeyIndex: '2', payloadSigner } as ExchangeOptions, new DefaultStore()))
+        .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+    }
   }
   expect(construct).not.toHaveBeenCalled();
   expect(transport).not.toHaveBeenCalled();

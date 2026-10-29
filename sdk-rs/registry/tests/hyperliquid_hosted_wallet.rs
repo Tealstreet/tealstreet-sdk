@@ -37,6 +37,7 @@ fn account(vault: Option<&str>, testnet: bool) -> Account {
         key: Some(ACCOUNT.into()),
         vault: vault.map(Into::into),
         testnet,
+        ..Account::default()
     }
 }
 

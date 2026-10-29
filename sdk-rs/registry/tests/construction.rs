@@ -496,12 +496,13 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
         ),
         (false, true)
     );
+    // Lighter's remote signer signs its statements, so it is a signing credential.
     assert_eq!(
         resolve(
             "lighter",
             r#"{"publicMode":{"remoteSigner":true,"apiKeyIndexPresent":true}}"#
         ),
-        (false, false)
+        (true, false)
     );
     assert_eq!(
         resolve(
