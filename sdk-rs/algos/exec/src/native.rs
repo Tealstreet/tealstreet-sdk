@@ -68,8 +68,15 @@ impl Host for Adapter {
     }
     fn snapshot(&self) -> Value {
         let store = self.cx.port.store();
-        json!({"venue":store.venue,"markets":store.markets.values().collect::<Vec<_>>(),
-            "tickers":store.tickers.values().collect::<Vec<_>>(),"orders":store.orders,"positions":store.positions})
+        let markets: Vec<Value> = store.markets.values().map(|market| {
+            let mut value = serde_json::to_value(market).expect("finite market");
+            if let Some(labels) = store.instrument_classifications.as_ref().and_then(|map|map.get(&market.symbol)) {
+                value["instrumentClassification"] = json!({"symbolType":labels.symbol_type,"underlyingTicker":labels.underlying_ticker});
+            }
+            value
+        }).collect();
+        json!({"venue":store.venue,"markets":markets,"instrumentClassificationsReady":store.instrument_classifications.is_some(),
+            "tickers":store.tickers.values().collect::<Vec<_>>(),"orders":store.orders,"positions":store.positions,"balance":store.balance,"socketHealth":{"privateInitialized":store.private_socket.initialized,"privateHealthy":store.private_socket.healthy}})
     }
     fn call(&mut self, token: u64, method: &str, args: Value) -> Result<(), Value> {
         self.call_scoped(token, method, args, false)
@@ -79,7 +86,7 @@ impl Host for Adapter {
         token: u64,
         method: &str,
         args: Value,
-        parallel: bool,
+        _parallel: bool,
     ) -> Result<(), Value> {
         if self.cx.scope.is_disposed() {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
@@ -90,16 +97,14 @@ impl Host for Adapter {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         };
         let mut adapter = self.clone();
-        let reservation = if parallel {
+        let reservation = {
             if self.parallel.get() >= crate::MAX_PARALLEL {
                 return Err(
                     json!({"message":"EXEC command exceeds native resource limits","outcome":"notSent"}),
                 );
             }
             self.parallel.set(self.parallel.get() + 1);
-            Some(ParallelReservation(self.parallel.clone()))
-        } else {
-            None
+            ParallelReservation(self.parallel.clone())
         };
         self.cx.spawn(async move {
             let reservation = reservation;
@@ -161,6 +166,9 @@ pub fn translate(method: &str, args: &Value, id: CommandId) -> Result<Command, S
                 command: id,
                 orders: serde_json::from_value(Value::Array(orders?)).map_err(|e| e.to_string())?,
             });
+        }
+        "placeOrder" => {
+            json!({"op":"placeOrders","command":id,"orders":[args.first().ok_or("Missing order")?]})
         }
         "setLeverage" => {
             json!({"op":"setLeverage","command":id,"symbol":symbol()?,"leverage":args.get(1).ok_or("Missing leverage")?})
