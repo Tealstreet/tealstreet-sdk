@@ -86,3 +86,14 @@ numeric token; native deliberately refuses TS parseFloat-prefix inputs such as
 break-even replacement errors name the actual symbol and say no stop is in
 place in both the failed exec-result and the existing error notice channel,
 not only the diagnostic exec-log. Duplicate completion cannot repeat the notice.
+
+Order tools add cancel top/bottom/first/last, limit price ranges and side stops;
+selector keywords cannot be captured by a listed market with the same base.
+Bump issues price-only amendments, catches each independent order failure and
+continues without replay, matching TS; its summary counts successful/failed
+orders. Counts and price amounts are strict whole tokens, unlike TS parseInt /
+parseFloat prefixes. Scale prepares every rung before one batch release,
+preserves structured partial IDs/count/index, and never resends a failed batch
+or tail. Native bound: 2–128 scale rungs (8x approved); 0/1/noninteger/oversized
+ladders refuse whole before dispatch. Zero-size rungs and unknown explicit
+symbols/modifiers also refuse before any batch is sent.

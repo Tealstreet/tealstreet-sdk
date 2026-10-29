@@ -5,6 +5,7 @@ use std::collections::{HashMap, VecDeque};
 mod capabilities;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
+mod order_tools;
 mod placement;
 mod protection;
 
@@ -54,16 +55,27 @@ struct Pending {
     order_ids: Option<Vec<String>>,
     parallel: bool,
     succeeded: usize,
+    failed: usize,
+    failure_summary: Option<String>,
     current_place: bool,
     failure_context: Option<String>,
 }
 enum Evaluation {
     Done(Value),
+    Text {
+        message: String,
+        result: Value,
+    },
     Place(VecDeque<placement::Placement>),
+    Batch {
+        orders: Vec<Value>,
+        success: String,
+    },
     Sequence {
         actions: VecDeque<Action>,
         success: String,
         attempt_all: bool,
+        failure_summary: Option<String>,
     },
     Call {
         method: &'static str,
@@ -76,6 +88,10 @@ enum Action {
     Buy(placement::Placement),
     Order(Value),
     Replacement(Value),
+    Amend {
+        order: Value,
+        price: f64,
+    },
     Close {
         position: Value,
         size: Option<String>,
@@ -101,6 +117,10 @@ impl Action {
                 json!([placement::prepare_order(order, store)?]),
             )),
             Self::Call(method, args) => Ok((method, args)),
+            Self::Amend { order, price } => Ok((
+                "updateOrder",
+                json!([{"update":{"price":protection::amend_price(&order,price,store)?},"order":order}]),
+            )),
             Self::Close { position, size } => Ok((
                 "placeOrder",
                 json!([protection::prepare_close(
@@ -200,6 +220,8 @@ impl Exec {
         }
         if result.is_ok() {
             pending.succeeded += 1;
+        } else {
+            pending.failed += 1;
         }
         if result.is_ok() || pending.attempt_all {
             if let Err(error) = &result {
@@ -220,6 +242,7 @@ impl Exec {
                         return;
                     }
                     Err(message) if pending.attempt_all => {
+                        pending.failed += 1;
                         log(host, &pending.req_id, &format!("Error: {message}"))
                     }
                     Err(message) => {
@@ -234,9 +257,22 @@ impl Exec {
         }
         let result = match result {
             Ok(_) => {
-                for line in pending
-                    .success
+                let summary = if pending.failed > 0 {
+                    pending.failure_summary.as_ref().unwrap_or(&pending.success)
+                } else {
+                    &pending.success
+                };
+                for line in summary
+                    .replace(
+                        "{ids}",
+                        &pending
+                            .order_ids
+                            .as_ref()
+                            .map(|ids| ids.join(","))
+                            .unwrap_or_default(),
+                    )
                     .replace("{ok}", &pending.succeeded.to_string())
+                    .replace("{failed}", &pending.failed.to_string())
                     .split('\n')
                 {
                     log(host, &pending.req_id, line);
@@ -279,7 +315,7 @@ impl Exec {
     fn issue(&mut self, mut pending: Pending, method: &str, args: Value, host: &mut impl Host) {
         let token = self.id();
         let parallel = pending.parallel;
-        pending.current_place = method == "placeOrder";
+        pending.current_place = matches!(method, "placeOrder" | "placeOrders");
         self.pending.insert(token, pending);
         if let Err(error) = host.call_scoped(token, method, args, parallel) {
             self.complete(token, Err(error), host);
@@ -317,6 +353,13 @@ impl Exec {
             };
             let action = evaluate(&chain.symbol, text, &host.snapshot(), &chain.req_id, host);
             match action {
+                Evaluation::Text { message, result } => {
+                    log(host, &chain.req_id, &message);
+                    if !parallel {
+                        chain.last = Some(result);
+                    }
+                    self.chains.insert(id, chain);
+                }
                 Evaluation::Done(result) => {
                     if !parallel {
                         chain.last = Some(result);
@@ -341,6 +384,8 @@ impl Exec {
                         order_ids: Some(Vec::new()),
                         parallel,
                         succeeded: 0,
+                        failed: 0,
+                        failure_summary: None,
                         current_place: false,
                         failure_context: None,
                     };
@@ -361,10 +406,32 @@ impl Exec {
                         return;
                     }
                 }
+                Evaluation::Batch { orders, success } => {
+                    let pending = Pending {
+                        chain: (!parallel).then_some(id),
+                        req_id: chain.req_id.clone(),
+                        success,
+                        actions: VecDeque::new(),
+                        attempt_all: false,
+                        order_ids: Some(Vec::new()),
+                        parallel,
+                        succeeded: 0,
+                        failed: 0,
+                        failure_summary: None,
+                        current_place: false,
+                        failure_context: None,
+                    };
+                    self.chains.insert(id, chain);
+                    self.issue(pending, "placeOrders", json!([orders]), host);
+                    if !parallel {
+                        return;
+                    }
+                }
                 Evaluation::Sequence {
                     mut actions,
                     success,
                     attempt_all,
+                    failure_summary,
                 } => {
                     let Some(first) = actions.pop_front() else {
                         log(host, &chain.req_id, &success.replace("{ok}", "0"));
@@ -383,6 +450,8 @@ impl Exec {
                         order_ids: None,
                         parallel,
                         succeeded: 0,
+                        failed: 0,
+                        failure_summary,
                         current_place: false,
                         failure_context: None,
                     };
@@ -422,6 +491,8 @@ impl Exec {
                             order_ids: None,
                             parallel,
                             succeeded: 0,
+                            failed: 0,
+                            failure_summary: None,
                             current_place: false,
                             failure_context: None,
                         },
@@ -572,7 +643,8 @@ fn evaluate(
             Ok(orders) => Evaluation::Place(orders),
             Err(error) => failed(error),
         },
-        "close" | "c" | "stop" | "be" | "breakeven" | "trail" | "move" | "mv" | "bump" => {
+        "scale" | "bump" => order_tools::evaluate(symbol, &args, store, text),
+        "close" | "c" | "stop" | "be" | "breakeven" | "trail" | "move" | "mv" => {
             protection::evaluate(symbol, &args, store, text)
         }
         "cancel" | "x" => cancel(symbol, &args, store),
@@ -620,9 +692,20 @@ fn evaluate(
 }
 
 fn cancel(symbol: &str, args: &[String], store: &Value) -> Evaluation {
+    if let Some(result) = order_tools::advanced_cancel(symbol, args, store) {
+        return result;
+    }
     let target = args
-        .last()
-        .and_then(|s| resolve(store, s))
+        .iter()
+        .skip(1)
+        .rev()
+        .filter(|s| {
+            ![
+                "buys", "sells", "buy", "sell", "limits", "stops", "ro", "xro",
+            ]
+            .contains(&s.as_str())
+        })
+        .find_map(|s| resolve(store, s))
         .unwrap_or_else(|| symbol.into());
     let head = args.get(1).map(String::as_str).unwrap_or("");
     let sub = args.get(2).map(String::as_str).unwrap_or("");

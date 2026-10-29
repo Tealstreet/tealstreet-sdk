@@ -15,7 +15,7 @@ in its existing worker event array/envelope.
 
 This crate supports echo, last/mark/index prices, symbol/filtered/ID
 cancellation, leverage, buy/sell, close, stop, break-even, trailing stop and
-move placement/amendment. It preserves semicolon ordering, concurrent `@`
+move, bump and scale placement/amendment. It preserves semicolon ordering, concurrent `@`
 slices, optional reqId, last-sequential-result replies and structured native
 errors. It creates no scheduler, process, venue transport or signer.
 

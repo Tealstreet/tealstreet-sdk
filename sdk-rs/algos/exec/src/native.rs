@@ -167,6 +167,9 @@ pub fn translate(method: &str, args: &Value, id: CommandId) -> Result<Command, S
                 orders: serde_json::from_value(Value::Array(orders?)).map_err(|e| e.to_string())?,
             });
         }
+        "placeOrders" => {
+            json!({"op":"placeOrders","command":id,"orders":args.first().filter(|v|v.is_array()).ok_or("Missing orders")?})
+        }
         "placeOrder" => {
             json!({"op":"placeOrders","command":id,"orders":[args.first().ok_or("Missing order")?]})
         }
