@@ -1247,9 +1247,9 @@ impl Account {
         {
             return;
         }
-        cx.notice(
-            Level::Warn,
-            code::REQUEST_FAILED,
+        // A failing private read surfaces as an Error at the retried-failure cadence.
+        cx.retried_failure(
+            "bingx.account:private",
             format!("BingX private request failed: {error}"),
         );
         match request {

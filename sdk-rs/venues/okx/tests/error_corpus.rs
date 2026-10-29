@@ -157,8 +157,8 @@ fn the_corpus_covers_every_recorded_case_with_its_production_path() {
 }
 
 /// OKX checks the key before the timestamp and the environment, so every keyed
-/// read answered 401 50111. An account-cycle read reports it as `request.failed`
-/// with the table's `authInvalid` and the native code, never `auth.rejected`.
+/// read answered 401 50111. An account-cycle read reports it as a visible
+/// `auth.rejected` Error with the table's `authInvalid` and the native code.
 #[test]
 fn a_rejected_key_on_the_account_cycle_reads_is_classified_auth_invalid() {
     for (name, path) in [
@@ -177,10 +177,11 @@ fn a_rejected_key_on_the_account_cycle_reads_is_classified_auth_invalid() {
             .notices
             .iter()
             .find_map(|notice| match notice {
-                Notice::Event(event) if event.code == code::REQUEST_FAILED => Some(event),
+                Notice::Event(event) if event.code == code::AUTH_REJECTED => Some(event),
                 _ => None,
             })
             .unwrap_or_else(|| panic!("{name}: {:?}", cycle.notices));
+        assert_eq!(event.level, safe_cex_engine::Level::Error, "{name}");
         assert!(
             event.fields.contains(&("kind", "authInvalid".into())),
             "{name}: {:?}",

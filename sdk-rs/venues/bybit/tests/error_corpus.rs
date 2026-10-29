@@ -70,11 +70,21 @@ fn read_notice(h: &Harness, prefix: &str, kind: ErrorKind) {
             _ => None,
         })
         .unwrap_or_else(|| panic!("no {prefix} notice: {:?}", h.notices));
+    // A read refused for the key is a visible auth.rejected Error.
+    let auth = matches!(
+        kind,
+        ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission
+    );
     assert_eq!(
         event.code,
-        code::REQUEST_FAILED,
-        "a read is no auth.rejected"
+        if auth {
+            code::AUTH_REJECTED
+        } else {
+            code::REQUEST_FAILED
+        },
+        "{prefix}"
     );
+    assert_eq!(event.level, safe_cex_engine::Level::Error, "{prefix}");
     assert!(
         event.fields.contains(&("kind", kind.as_str().into())),
         "{:?}",

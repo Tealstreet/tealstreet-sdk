@@ -199,6 +199,25 @@ export const classifiedError = (value: unknown): ClassifiedError | undefined => 
   return Object.keys(result).length ? result : undefined;
 };
 
+const AUTH_KINDS: readonly string[] = ['authInvalid', 'authExpired', 'authPermission'];
+
+/**
+ * The classification an engine diagnostic carries in `fields` (engine
+ * `notice_error`). An auth kind counts only on `auth.rejected`, the
+ * account-level evidence; a read or order refusal never asserts one
+ * (ExchangeHealthMonitor.processEvent). No kind is invented: an IP mismatch is
+ * not a bad key.
+ */
+export const engineEventClassified = (event: {
+  code: string;
+  fields?: Record<string, unknown>;
+}): ClassifiedError | undefined => {
+  const classified = classifiedError(event.fields) ?? {};
+  const accountAuth = event.code === 'auth.rejected';
+  if (!accountAuth && classified.kind && AUTH_KINDS.includes(classified.kind)) delete classified.kind;
+  return Object.keys(classified).length ? classified : undefined;
+};
+
 /**
  * Closed-set Sentry tags for a classified failure: kind, its health category,
  * outcome and the venue's code. Never free text, so tags stay low-cardinality.

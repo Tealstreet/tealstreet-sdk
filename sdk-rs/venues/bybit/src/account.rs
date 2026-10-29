@@ -2505,10 +2505,24 @@ impl BybitLinear {
                             self.account.classic = info.unified_margin_status == Some(1);
                         }
                     }
-                    // Public data still loads; trading reports its own errors.
-                    Err(message) => cx.notice_error(Level::Warn, code::REQUEST_FAILED,
-                        &failed(format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable")),
-                    ),
+                    Err(message) => {
+                        let refused = response
+                            .as_ref()
+                            .ok()
+                            .and_then(venue_error)
+                            .filter(|(code, _)| crate::CREDENTIAL_REJECTIONS.contains(code));
+                        match refused {
+                            // The key itself was refused (an IP allowlist, bad key or
+                            // expiry): fail visibly instead of loading empty account data.
+                            Some((code, venue_message)) => {
+                                self.reject_credentials(cx, code, &venue_message);
+                            }
+                            // Public data still loads; the private failure is an Error.
+                            None => cx.notice_error(Level::Error, code::REQUEST_FAILED,
+                                &failed(format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable")),
+                            ),
+                        }
+                    }
                 }
                 self.startup.account_info = true;
                 let classic = self.account.classic;
