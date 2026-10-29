@@ -16,7 +16,7 @@ use safe_cex_engine::request_context::{
     Context, Operation, Owner, Policy, RetryPolicy, Scope, Session, SessionBearer, SessionHeaders,
     SessionPolicy,
 };
-use safe_cex_engine::signing::Algorithm;
+use safe_cex_engine::signing::{Algorithm, SignError};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     CredentialSlot, Cx, Fill, Method, Response, SignStep, SocketChannel, SocketId, TimerId,
@@ -1441,12 +1441,18 @@ impl Account {
                             .and_then(|identity| identity.signing_ref().ok())
                             .ok_or("Paradex signing key is not installed")?
                             .clone();
+                        // A local provider's seal, else the key a host-answered
+                        // provider bound at setup; every signature verifies under it.
                         let public = cx
                             .verified_public_key(CredentialSlot::Primary, Algorithm::StarkDigest)
-                            .map_err(|_| {
-                                "Paradex signing key is not installed by trusted local setup"
-                                    .to_owned()
-                            })?;
+                            .or_else(|_| {
+                                cx.setup_public_key(CredentialSlot::Primary, Algorithm::StarkDigest)
+                                    .and_then(|key| {
+                                        <[u8; 32]>::try_from(key)
+                                            .map_err(|_| SignError::InvalidResult)
+                                    })
+                            })
+                            .map_err(|_| "Paradex signing key is not installed".to_owned())?;
                         Credentials::new(
                             signing,
                             public,

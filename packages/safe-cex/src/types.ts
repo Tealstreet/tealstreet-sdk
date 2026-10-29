@@ -1320,6 +1320,10 @@ export interface RemoteSignerRequest {
       // the digest from; `hyperliquid-address` binds the agent address.
       | 'hyperliquid-l1'
       | 'hyperliquid-address'
+      // Paradex: `toSign` is a closed `paradex/1` descriptor the device rebuilds
+      // the Stark digests from; `paradex-public` binds the Stark public key.
+      | 'paradex-stark'
+      | 'paradex-public'
       | 'coinbase-jwt';
     extraData?: unknown;
   };

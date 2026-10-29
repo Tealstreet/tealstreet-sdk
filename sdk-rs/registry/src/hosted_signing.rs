@@ -24,6 +24,13 @@ pub enum OutputFormat {
     /// Hyperliquid: `toSign` is the signed-in account; returns the agent address.
     #[serde(rename = "hyperliquid-address")]
     HyperliquidAddress,
+    /// Paradex: `toSign` is a closed `paradex/1` descriptor the device rebuilds
+    /// and hashes; returns `0x` hex of each `r || s` in item order.
+    #[serde(rename = "paradex-stark")]
+    ParadexStark,
+    /// Paradex: `toSign` is the signed-in account; returns its Stark public key.
+    #[serde(rename = "paradex-public")]
+    ParadexPublic,
 }
 
 /// The signed-in account a device signs for, captured at construction.
@@ -32,6 +39,10 @@ pub struct Account {
     pub key: Option<String>,
     pub vault: Option<String>,
     pub testnet: bool,
+    /// Paradex: the account address this device's Stark key signs for.
+    pub paradex_address: Option<String>,
+    /// The device's protocol clock when the capture is prepared.
+    pub now_ms: Option<f64>,
 }
 
 pub enum Input {
@@ -179,7 +190,9 @@ impl OutputKind {
             Self::DoubleSha256Http(_) | Self::WsAuth(OutputFormat::BitunixDoubleSha256) => {
                 (3, Some(2))
             }
-            Self::WsAuth(OutputFormat::HyperliquidAddress) => (1, None),
+            Self::WsAuth(OutputFormat::HyperliquidAddress | OutputFormat::ParadexPublic) => {
+                (1, None)
+            }
             Self::WsAuth(OutputFormat::HyperliquidL1) => (2, None),
             _ => (2, Some(1)),
         }
@@ -276,7 +289,7 @@ pub fn admitted(venue: &str, options: &crate::EngineOptions) -> bool {
         "asterdex" => {
             options.asterdex.api_version == Some(safe_cex_venue_asterdex::sign::Version::V1)
         }
-        _ => family(venue) || hyperliquid(venue),
+        _ => family(venue) || hyperliquid(venue) || paradex(venue),
     }
 }
 
@@ -315,6 +328,81 @@ pub fn prepare(
 
 fn hyperliquid(venue: &str) -> bool {
     cfg!(feature = "hyperliquid") && matches!(venue, "hyperliquid" | "hyperliquidspot")
+}
+
+fn paradex(venue: &str) -> bool {
+    cfg!(feature = "paradex") && venue == "paradex"
+}
+
+/// The capture's lifetime bound, from the device's own clock.
+#[cfg(feature = "paradex")]
+const PARADEX_CAPTURE_MS: f64 = safe_cex_engine::signing_capture::MAX_TIMEOUT_MS as f64;
+
+/// Stark signing never answers a bare digest: the device rebuilds the closed
+/// descriptor for its own account and network and hashes it, under the
+/// descriptor's skew and deadline policy at its own clock.
+#[cfg(feature = "paradex")]
+fn paradex_work(
+    identity: &Identity,
+    account: &Account,
+    context: Context,
+    input: Input,
+) -> Result<(SignRequest, OutputKind), SignError> {
+    use safe_cex_engine::signing::{Algorithm, PayloadPart};
+    use safe_cex_venue_paradex::hosted;
+    let Input::WsAuth {
+        to_sign,
+        output_format,
+    } = input
+    else {
+        return Err(SignError::Unsupported);
+    };
+    let signing = identity.signing_ref()?.clone();
+    let own = account
+        .paradex_address
+        .as_deref()
+        .ok_or(SignError::Unavailable)?;
+    let operations = match output_format {
+        OutputFormat::ParadexPublic => {
+            if !to_sign.eq_ignore_ascii_case(own) {
+                return Err(SignError::InvalidRequest);
+            }
+            vec![Operation::PublicKey {
+                algorithm: Algorithm::StarkDigest,
+                key: signing,
+            }]
+        }
+        OutputFormat::ParadexStark => {
+            let now = account.now_ms.ok_or(SignError::InvalidRequest)?;
+            let binding = hosted::ParadexBinding::new(own, hosted::network_chain(account.testnet))
+                .map_err(|_| SignError::InvalidRequest)?;
+            let descriptor = hosted::ParadexDescriptor::from_json(&to_sign)
+                .map_err(|_| SignError::InvalidRequest)?;
+            let digests =
+                hosted::validated_digests(&descriptor, &binding, now, now + PARADEX_CAPTURE_MS)
+                    .map_err(|_| SignError::InvalidRequest)?;
+            digests
+                .as_slice()
+                .iter()
+                .map(|digest| Operation::Sign {
+                    algorithm: Algorithm::StarkDigest,
+                    key: signing.clone(),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: digest.to_vec(),
+                    }],
+                })
+                .collect()
+        }
+        _ => return Err(SignError::InvalidRequest),
+    };
+    Ok((
+        SignRequest {
+            receipt: SignReceipt::default(),
+            context,
+            operations,
+        },
+        OutputKind::WsAuth(output_format),
+    ))
 }
 
 /// Wallet signing never answers a bare digest: the device derives it from an
@@ -394,8 +482,16 @@ pub fn prepare_for(
             ..
         }
     );
-    if wallet_format != hyperliquid(venue) {
-        return Err(if wallet_format {
+    let stark_format = matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::ParadexStark | OutputFormat::ParadexPublic,
+            ..
+        }
+    );
+    // Each structured format belongs to exactly its family, which uses no other.
+    if wallet_format != hyperliquid(venue) || stark_format != paradex(venue) {
+        return Err(if wallet_format || stark_format {
             SignError::InvalidRequest
         } else {
             SignError::Unsupported
@@ -404,6 +500,10 @@ pub fn prepare_for(
     #[cfg(feature = "hyperliquid")]
     if wallet_format {
         return hyperliquid_work(identity, account, context, input);
+    }
+    #[cfg(feature = "paradex")]
+    if stark_format {
+        return paradex_work(identity, account, context, input);
     }
     let _ = account;
     if !family(venue) {
@@ -481,6 +581,29 @@ pub fn prepare_for(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    // Paradex: one 32-byte key, or 1..=10 canonical 64-byte `r || s` values.
+    if let OutputKind::WsAuth(format @ (OutputFormat::ParadexPublic | OutputFormat::ParadexStark)) =
+        kind
+    {
+        let public = matches!(format, OutputFormat::ParadexPublic);
+        let width = if public { 32 } else { 64 };
+        let count = result.values.len();
+        if !result.headers.is_empty()
+            || count == 0
+            || (public && count != 1)
+            || result.values.iter().any(|value| value.len() != width)
+        {
+            return Err(SignError::InvalidResult);
+        }
+        return Ok(Output {
+            credential: None,
+            signature: Some(format!(
+                "0x{}",
+                safe_cex_crypto::hex(&result.values.concat())
+            )),
+            headers: None,
+        });
+    }
     let (expected, mac_index) = kind.layout();
     if result.values.len() != expected {
         return Err(SignError::InvalidResult);
@@ -571,7 +694,12 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
             safe_cex_crypto::Encoding::Base64,
         ),
         OutputKind::WsAuth(OutputFormat::BitunixDoubleSha256) => safe_cex_crypto::hex(mac),
-        OutputKind::WsAuth(OutputFormat::HyperliquidL1 | OutputFormat::HyperliquidAddress) => {
+        OutputKind::WsAuth(
+            OutputFormat::HyperliquidL1
+            | OutputFormat::HyperliquidAddress
+            | OutputFormat::ParadexStark
+            | OutputFormat::ParadexPublic,
+        ) => {
             return Err(SignError::InvalidResult);
         }
     };
@@ -944,6 +1072,11 @@ mod input_parse_tests {
                 r#"["wsAuth","x","bitunix-double-sha256"]"#,
             ),
             ("hyperliquid-l1", r#"["wsAuth","x","hyperliquid-l1"]"#),
+            ("paradex-stark", r#"["wsAuth","x","paradex-stark"]"#),
+            (
+                "paradex-public",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"paradex-public"}"#,
+            ),
             (
                 "hyperliquid-address",
                 r#"{"kind":"wsAuth","toSign":"x","outputFormat":"hyperliquid-address"}"#,
@@ -966,6 +1099,8 @@ mod input_parse_tests {
                     OutputFormat::BitunixDoubleSha256 => "bitunix-double-sha256",
                     OutputFormat::HyperliquidL1 => "hyperliquid-l1",
                     OutputFormat::HyperliquidAddress => "hyperliquid-address",
+                    OutputFormat::ParadexStark => "paradex-stark",
+                    OutputFormat::ParadexPublic => "paradex-public",
                 }
             );
         }

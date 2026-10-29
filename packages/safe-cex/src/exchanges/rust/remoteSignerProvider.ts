@@ -10,15 +10,19 @@ import { deriveRemoteSigningPolicy } from './construction';
 const HMAC_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
 const DOUBLE_SHA256_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['sha256SecretSuffix']);
 const WALLET_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['secp256k1Digest']);
+const STARK_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['starkDigest']);
 /** Families whose remote wire signs `hex(sha256(hex(sha256(toSign)) ‖ material))`. */
 const doubleSha256 = (name: ExchangeName) => name === 'bitunix';
 /** Families whose device re-derives a wallet digest from a structured statement. */
 const hyperliquid = (name: ExchangeName) => name === 'hyperliquid' || name === 'hyperliquidspot';
+/** The Stark family: the device rebuilds every digest from a closed `paradex/1` descriptor. */
+const paradex = (name: ExchangeName) => name === 'paradex';
 
 /** Everything this provider signs for a venue; the engine's capability admission
  * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
 export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
-  doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : hyperliquid(name) ? WALLET_ALGORITHMS : HMAC_ALGORITHMS;
+  doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : hyperliquid(name) ? WALLET_ALGORITHMS
+    : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
   credential: string;
@@ -339,7 +343,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     if (typeof value !== 'string' || !new RegExp(`^0x[0-9a-fA-F]{${length * 2}}$`).test(value)) throw refused();
     return Array.from({ length }, (_, i) => Number.parseInt(value.slice(2 + i * 2, 4 + i * 2), 16));
   };
-  const askDevice = async (toSign: string, outputFormat: 'hyperliquid-l1' | 'hyperliquid-address', signal: AbortSignal) => {
+  const askDevice = async (toSign: string,
+    outputFormat: 'hyperliquid-l1' | 'hyperliquid-address' | 'paradex-stark' | 'paradex-public', signal: AbortSignal) => {
     const id = nanoid();
     const response = await guarded(signal, remoteSigner, () => remoteSigner!.sign({
       id,
@@ -382,6 +387,38 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     return { values: [Array.from(sha256(preimage)), boundAddress.slice(), signature], receipt };
   };
 
+  /** Paradex never sends a bare digest either. Startup binds the Stark public key
+   * via `[publicKey starkDigest]`; each write is `[sha256(descriptor), sign
+   * starkDigest x n]`, and the device rebuilds the n digests from the descriptor.
+   * The engine verifies every signature against the bound key and its own hash.
+   */
+  let boundStark: number[] | undefined;
+  const signStark = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const keyOf = (operation: unknown) => (record(operation) ? operation.key : undefined);
+    const entry = owned.get(keyOf(operations.at(-1)) as string);
+    if (!entry || !entry.primary || operations.some((operation) => record(operation)
+      && 'key' in operation && operation.key !== entry.identity.signing)) throw refused();
+    const [first, ...signs] = operations;
+    if (operations.length === 1 && first?.kind === 'publicKey') {
+      if (first.algorithm !== 'starkDigest') throw refused();
+      const key = hexBytes(await askDevice(entry.identity.publicCredential, 'paradex-public', signal), 32);
+      // One provider binds one device key; a different key is never adopted.
+      if (boundStark && boundStark.some((byte, index) => byte !== key[index])) throw refused();
+      boundStark = key;
+      return { values: [key.slice()], receipt };
+    }
+    if (!boundStark || first?.kind !== 'sha256' || signs.length < 1 || signs.length > 10
+      || signs.some((sign) => sign?.kind !== 'sign' || sign.algorithm !== 'starkDigest')) throw refused();
+    const part = Array.isArray(first.payload) && first.payload.length === 1 ? first.payload[0] : undefined;
+    if (!record(part) || part.kind !== 'bytes' || !Array.isArray(part.bytes) || part.bytes.length > MAX_PAYLOAD
+      || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+    const preimage = Uint8Array.from(part.bytes as number[]);
+    const joined = hexBytes(await askDevice(decodeUtf8(preimage), 'paradex-stark', signal), 64 * signs.length);
+    const signatures = signs.map((_, index) => joined.slice(index * 64, index * 64 + 64));
+    return { values: [Array.from(sha256(preimage)), ...signatures], receipt };
+  };
+
   return async (request, { signal }): Promise<RemoteSignerResult> => {
     try {
       if (signal.aborted) throw canceled();
@@ -392,6 +429,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
       const operations = Array.from(request.operations);
       if (hyperliquid(exchangeName)) return await signWallet(operations, receipt, signal);
+      if (paradex(exchangeName)) return await signStark(operations, receipt, signal);
       if (operations.some((operation) => operation?.kind === 'sha256'
         || (operation?.kind === 'sign' && operation.algorithm === 'sha256SecretSuffix'))) {
         return await signDoubleSha256(operations, receipt, signal);

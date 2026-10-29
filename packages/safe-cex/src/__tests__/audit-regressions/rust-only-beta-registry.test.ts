@@ -133,10 +133,11 @@ describe('Rust-only beta construction', () => {
     expect(JSON.stringify(messages)).toContain('coinbase is unsupported in this build');
     worker.dispose();
   });
-  it('refuses unsupported delegated modes and Paradex callbacks without fallback', async () => {
+  it('refuses unsupported delegated modes without fallback', async () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
-    // Hyperliquid's structured remote signing is pinned in rust.hyperliquid-remote-signing.wasm.test.ts.
-    const localOnly = ['kraken', 'krakenspot', 'lighter', 'paradex', 'apexomni', 'cryptocom', 'asterdex'] as const;
+    // Hyperliquid's and Paradex's structured remote signing are pinned in their
+    // rust.*-remote-signing.wasm.test.ts files.
+    const localOnly = ['kraken', 'krakenspot', 'lighter', 'apexomni', 'cryptocom', 'asterdex'] as const;
     // #2262 enables Bitunix through the shared policy, without a beta override.
     const refused: readonly ExchangeName[] = deriveRemoteSigningPolicy('bitunix')?.enabled
       ? localOnly

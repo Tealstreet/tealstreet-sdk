@@ -825,8 +825,13 @@ impl WasmEngine {
             }
             timeout = (5000. - age).ceil().clamp(1., 5000.) as u32;
         }
+        // A structured descriptor's time policy runs at this capture's clock.
+        let account = safe_cex_venues::hosted_signing::Account {
+            now_ms: Some(protocol_now),
+            ..account.clone()
+        };
         let (work, kind) =
-            safe_cex_venues::hosted_signing::prepare_for(venue, identities, account, input)
+            safe_cex_venues::hosted_signing::prepare_for(venue, identities, &account, input)
                 .map_err(hosted_error)?;
         let prepared = self
             .hosted_captures
@@ -1005,6 +1010,8 @@ impl WasmEngine {
                     key: options.key.clone(),
                     vault: options.vault.clone(),
                     testnet: options.testnet,
+                    paradex_address: options.paradex_address.clone(),
+                    now_ms: None,
                 };
                 (venue.to_owned(), identities, account)
             })

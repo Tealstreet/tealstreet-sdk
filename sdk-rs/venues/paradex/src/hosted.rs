@@ -178,6 +178,15 @@ impl ParadexBinding {
     }
 }
 
+/// The Starknet chain each network signs on; a device refuses any other.
+pub fn network_chain(testnet: bool) -> &'static str {
+    if testnet {
+        "PRIVATE_SN_POTC_SEPOLIA"
+    } else {
+        "PRIVATE_SN_PARACLEAR_MAINNET"
+    }
+}
+
 /// One digest per signature: exactly one, or one per batch item in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Digests(Vec<[u8; 32]>);

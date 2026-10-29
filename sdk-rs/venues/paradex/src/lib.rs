@@ -89,6 +89,21 @@ impl Paradex {
 
 impl Venue for Paradex {
     type Pending = Pending;
+    /// A host-answered provider binds its Stark public key before start; a
+    /// trusted local provider keeps the key it sealed at setup.
+    fn public_key_setup(
+        &self,
+    ) -> Option<(
+        safe_cex_engine::AddressSetupSlots,
+        safe_cex_engine::signing::Algorithm,
+    )> {
+        self.options.credentials.as_ref().map(|_| {
+            (
+                safe_cex_engine::AddressSetupSlots::Primary,
+                safe_cex_engine::signing::Algorithm::StarkDigest,
+            )
+        })
+    }
     /// Only `/auth` is credential evidence: a 401/403 is a definitive refusal,
     /// and a 2xx carrying a JWT is acceptance.
     fn account_auth_outcome(
