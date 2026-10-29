@@ -83,11 +83,11 @@ trait AnyEngine {
     fn failed(&self) -> bool {
         false
     }
-    #[cfg(feature = "hosted-signing")]
+    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         None
     }
-    #[cfg(feature = "hosted-signing")]
+    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         (now, 0)
     }
@@ -216,11 +216,11 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.address_setup_retired_wire(token, now)
     }
 
-    #[cfg(feature = "hosted-signing")]
+    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
     }
-    #[cfg(feature = "hosted-signing")]
+    #[cfg(any(feature = "hosted-signing", feature = "hosted-wallet"))]
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         Engine::signing_clock(self, now)
     }
@@ -750,6 +750,12 @@ pub struct WasmEngine {
     #[cfg(feature = "hosted-signing")]
     hosted_captures:
         safe_cex_engine::signing_capture::Capture<safe_cex_venues::hosted_signing::OutputKind>,
+    #[cfg(feature = "hosted-wallet")]
+    hosted_wallet: Option<(
+        String,
+        safe_cex_engine::signing::Identities,
+        safe_cex_venues::hosted_wallet::Account,
+    )>,
 }
 
 #[cfg(feature = "hosted-signing")]
@@ -1001,6 +1007,19 @@ impl WasmEngine {
                 .map(|identities| (venue.to_owned(), identities))
         })
         .flatten();
+        #[cfg(feature = "hosted-wallet")]
+        let hosted_wallet = (dispatch_signing && safe_cex_venues::hosted_wallet::admitted(venue))
+            .then(|| {
+                options.signing.clone().map(|identities| {
+                    let account = safe_cex_venues::hosted_wallet::Account {
+                        key: options.key.clone(),
+                        vault: options.vault.clone(),
+                        testnet: options.testnet,
+                    };
+                    (venue.to_owned(), identities, account)
+                })
+            })
+            .flatten();
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
         let inner = safe_cex_venues::build_with_signer(
@@ -1020,7 +1039,42 @@ impl WasmEngine {
             hosted_identity,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet,
         })
+    }
+
+    /// Device-side wallet answer for a keyless server's ws-auth request; the
+    /// local provider signs synchronously. Returns the `0x` hex result.
+    #[cfg(feature = "hosted-wallet")]
+    #[wasm_bindgen(js_name = hostedWalletSigning)]
+    pub fn hosted_wallet_signing(
+        &self,
+        to_sign: &str,
+        output_format: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        use safe_cex_engine::signing::SignError;
+        let error = |error: SignError| construction_error(error.venue_error());
+        let (venue, identities, account) = self
+            .hosted_wallet
+            .as_ref()
+            .ok_or_else(|| error(SignError::Unsupported))?;
+        let provider = self
+            .inner
+            .signer()
+            .ok_or_else(|| error(SignError::Unavailable))?;
+        let (protocol_now, _) = self.inner.signing_clock(now);
+        safe_cex_venues::hosted_wallet::sign(
+            venue,
+            identities,
+            account,
+            &provider,
+            to_sign,
+            output_format,
+            protocol_now,
+        )
+        .map_err(error)
     }
 
     #[cfg(feature = "address-nonce")]
@@ -2478,6 +2532,8 @@ mod tests {
             hosted_identity: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
             external_signer: false,
             construction: "{}".into(),
             inner: Box::new(Commands {
@@ -2749,6 +2805,8 @@ mod tests {
                 hosted_identity: None,
                 #[cfg(feature = "hosted-signing")]
                 hosted_captures: Default::default(),
+                #[cfg(feature = "hosted-wallet")]
+                hosted_wallet: None,
                 external_signer: false,
                 construction: "{}".into(),
                 inner: Box::new(Counted),
@@ -2777,6 +2835,8 @@ mod tests {
                 hosted_identity: None,
                 #[cfg(feature = "hosted-signing")]
                 hosted_captures: Default::default(),
+                #[cfg(feature = "hosted-wallet")]
+                hosted_wallet: None,
                 external_signer: false,
                 construction: "{}".into(),
                 inner: Box::<Messages>::default(),
@@ -2802,6 +2862,8 @@ mod tests {
             hosted_identity: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
@@ -2832,6 +2894,8 @@ mod tests {
             hosted_identity: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
@@ -2842,6 +2906,8 @@ mod tests {
             hosted_identity: None,
             #[cfg(feature = "hosted-signing")]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),

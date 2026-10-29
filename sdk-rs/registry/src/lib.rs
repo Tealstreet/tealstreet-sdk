@@ -46,6 +46,8 @@ mod asterdex_setup;
 mod construction;
 #[cfg(feature = "hosted-signing")]
 pub mod hosted_signing;
+#[cfg(feature = "hosted-wallet")]
+pub mod hosted_wallet;
 #[cfg(feature = "hyperliquid")]
 mod hyperliquid_setup;
 #[cfg(feature = "lighter")]

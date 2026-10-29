@@ -8,7 +8,7 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex and BloFin. Provider-mode eligibility still follows each declared remote
+Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin and Hyperliquid/Spot (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
@@ -81,8 +81,19 @@ The public key/applicationId/vault account fields stay separate. SDK and native
 setup share the Rust decoder: 0x and 0X prefixes are accepted, while surrounding
 space, NEL and BOM refuse. The legacy SDK's 0X refusal is deliberately widened;
 invalid input stays redacted. Native local trading uses the installed, engine-sealed identity and managed
-Prepare/Bind/Claim for each serial physical call; hosted Hyperliquid remains
-unsupported. The private provider capsule omits the trusted trimSigning false
+Prepare/Bind/Claim for each serial physical call.
+
+Hosted Hyperliquid never sends a bare digest. Each L1 action's sign work is
+`[sha256(statement), publicAddress, sign secp256k1Digest]`; the statement is
+`{kind: l1, action, nonce, vaultAddress?, isMainnet}` (`sign/statement.rs`).
+The keyless provider sends it as ws-auth `hyperliquid-l1`, and the device's
+WASM `hostedWalletSigning` export (`registry/src/hosted_wallet.rs`, feature
+`hosted-wallet`, kept apart from the HMAC capture codec for the family wasm
+budget) re-derives the digest with the venue's own code, refusing non-trading
+actions and another network or vault. It signs only with the local provider. Startup binds the agent
+address once through `hyperliquid-address` (answered only for the signed-in
+account); the engine refuses any signature not recovering to it. PayloadSigner
+stays refused. The private provider capsule omits the trusted trimSigning false
 default for feature-off decoders, while policy-derived true remains explicit
 and caller trimming metadata remains refused. Legacy top-level HL passphrases
 are consumed and ignored before provider construction; explicit provider

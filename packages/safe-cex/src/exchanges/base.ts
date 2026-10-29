@@ -2368,6 +2368,9 @@ export class BaseExchange implements Exchange {
       }
       case 'kraken-challenge':
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
+      case 'hyperliquid-l1':
+      case 'hyperliquid-address':
+        return { id: request.id, error: `${outputFormat} requires the Rust engine signer` };
       case 'coinbase-jwt':
         return { id: request.id, error: 'coinbase-jwt requires the CoinbaseExchange signWsAuth override' };
       default: {
