@@ -52,6 +52,9 @@ struct Joined {
     client: Client,
     old: Vec<Client>,
     next_command: u32,
+    /// Book and candle subscribe commands this socket holds, by command text and count.
+    /// Demand belongs to a frame client, so a re-snapshot replays it onto the new one.
+    subscriptions: HashMap<String, u32>,
 }
 
 pub struct Session {
@@ -268,6 +271,7 @@ impl Session {
                         client,
                         old: Vec::new(),
                         next_command: 0,
+                        subscriptions: HashMap::new(),
                     },
                 );
             }
@@ -307,6 +311,16 @@ impl Session {
         match self.client(&account).await {
             Ok(client) => {
                 let joined = self.joined.get_mut(name).unwrap();
+                // Before the old client leaves, so the venue never unsubscribes in between.
+                for (command, count) in &joined.subscriptions {
+                    for _ in 0..*count {
+                        if !matches!(account.handle.input(client.id, command), Ok(true)) {
+                            Log::warn(&format!(
+                                "{name}: subscription not carried to the re-snapshot"
+                            ));
+                        }
+                    }
+                }
                 let old = std::mem::replace(&mut joined.client, client);
                 old.draining.store(true, Ordering::Relaxed);
                 joined.old.retain(|client| !client.pump.is_finished());
@@ -349,20 +363,29 @@ impl Session {
             .map(str::to_owned);
         match (msg.op.as_str(), symbol, interval) {
             ("sendSnapshot", _, _) => self.resnapshot(&name).await,
-            ("subscribeOrderBook", Some(symbol), _) => {
-                self.input(&name, json!({"op": "subscribeOrderBook", "symbol": symbol}))
-            }
-            ("unsubscribeOrderBook", Some(symbol), _) => self.input(
+            ("subscribeOrderBook", Some(symbol), _) => self.subscribe(
                 &name,
+                json!({"op": "subscribeOrderBook", "symbol": symbol}),
                 json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
+                true,
             ),
-            ("subscribeOHLCV", Some(symbol), Some(interval)) => self.input(
+            ("unsubscribeOrderBook", Some(symbol), _) => self.subscribe(
+                &name,
+                json!({"op": "subscribeOrderBook", "symbol": symbol}),
+                json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
+                false,
+            ),
+            ("subscribeOHLCV", Some(symbol), Some(interval)) => self.subscribe(
                 &name,
                 json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
-            ),
-            ("unsubscribeOHLCV", Some(symbol), Some(interval)) => self.input(
-                &name,
                 json!({"op": "unsubscribeCandles", "symbol": symbol, "interval": interval}),
+                true,
+            ),
+            ("unsubscribeOHLCV", Some(symbol), Some(interval)) => self.subscribe(
+                &name,
+                json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
+                json!({"op": "unsubscribeCandles", "symbol": symbol, "interval": interval}),
+                false,
             ),
             ("callMethod", _, _) => self.call(&name, msg.data).await,
             ("updatePositions", _, _) => self.send(envelope::msg(
@@ -392,19 +415,50 @@ impl Session {
         }
     }
 
-    fn input(&self, name: &str, command: Value) {
+    /// Sends a book/candle (un)subscribe and keeps the count a re-snapshot replays.
+    fn subscribe(&mut self, name: &str, subscribe: Value, unsubscribe: Value, add: bool) {
+        let key = subscribe.to_string();
+        let held = self.joined[name]
+            .subscriptions
+            .get(&key)
+            .copied()
+            .unwrap_or(0);
+        // An unsubscribe this socket never subscribed must not release another socket's demand.
+        if !add && held == 0 {
+            return;
+        }
+        if !self.input(name, if add { subscribe } else { unsubscribe }) {
+            return;
+        }
+        let subscriptions = &mut self.joined.get_mut(name).unwrap().subscriptions;
+        if add {
+            *subscriptions.entry(key).or_default() += 1;
+        } else if held == 1 {
+            subscriptions.remove(&key);
+        } else {
+            subscriptions.insert(key, held - 1);
+        }
+    }
+
+    fn input(&self, name: &str, command: Value) -> bool {
         let joined = &self.joined[name];
         match joined
             .account
             .handle
             .input(joined.client.id, &command.to_string())
         {
-            Ok(true) => {}
-            Ok(false) => self.send(envelope::error(
-                Some(name),
-                "account is busy; subscription not sent",
-            )),
-            Err(refused) => self.send(envelope::error(Some(name), &refused.notice)),
+            Ok(true) => true,
+            Ok(false) => {
+                self.send(envelope::error(
+                    Some(name),
+                    "account is busy; subscription not sent",
+                ));
+                false
+            }
+            Err(refused) => {
+                self.send(envelope::error(Some(name), &refused.notice));
+                false
+            }
         }
     }
 
