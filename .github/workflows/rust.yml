@@ -992,6 +992,9 @@ jobs:
       - name: Scripted lifecycle financial parity (fixed sanitized capture)
         if: matrix.venue == 'binance'
         run: corepack yarn -s rust:gate:record --venue binance --tape sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl --books BTCUSDT --runs "$PRIVATE_REPLAY_RUNS"
+      - name: Generate Binance Options public CPU input before sealing
+        if: matrix.venue == 'binance'
+        run: corepack yarn rust:private-tape-binanceoptions --public
       - name: Seal approved CPU measurement inputs
         id: cpu_prepare
         env:
@@ -1031,7 +1034,6 @@ jobs:
       - name: Binance European Options retained-reference REST parity
         if: matrix.venue == 'binance'
         run: |
-          corepack yarn rust:private-tape-binanceoptions --public
           corepack yarn rust:private-tape-binanceoptions
           corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions.jsonl --books '' --runs 9
           corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions-private.jsonl --books '' --runs "$PRIVATE_REPLAY_RUNS"

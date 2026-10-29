@@ -25,7 +25,7 @@ test('OKX smoke profiles use default TLS on the exact live/demo entity host', ()
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
     // KuCoin Spot needs a separate host and sizing review.
-    if (['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'kucoinspot', 'txflow', 'lighter-robinhood'].includes(venue)) {
+    if (['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binanceoptions', 'kucoinspot', 'txflow', 'lighter-robinhood'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
@@ -43,7 +43,7 @@ test('every registry name has an explicitly reviewed environment or fails closed
 
 test('unreviewed profiles refuse all modes before credential access', () => {
   const env = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
-  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'kucoinspot', 'txflow', 'lighter-robinhood'])
+  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binanceoptions', 'kucoinspot', 'txflow', 'lighter-robinhood'])
     for (const mode of [undefined, 'testnet', 'demo', 'mainnet'])
       assert.throws(() => liveSmokeProfile(venue, mode, env), /no reviewed/);
 });

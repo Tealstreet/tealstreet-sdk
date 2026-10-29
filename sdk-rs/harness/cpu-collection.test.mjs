@@ -38,8 +38,8 @@ function fixture(t, suite = 'binance') {
   fs.symlinkSync('../apps/cli', path.join(root, 'node_modules/unused-app'));
   write(root, 'packages/fixture/node_modules/local/index.js', 'module.exports = 2;');
   for (const item of expectedGateCases(suite)) {
-    if (!item.tape.includes('/fixtures/')) continue;
     const privateTape = item.tape.includes('-private.');
+    if (!item.tape.includes('/fixtures/') && privateTape) continue;
     const data = Buffer.from(`${JSON.stringify({ type: 'meta', private: privateTape })}\n${JSON.stringify({ type: 'config', private: privateTape })}\n`);
     write(root, item.tape, item.tape.endsWith('.gz') ? gzipSync(data) : data);
   }
@@ -66,7 +66,8 @@ async function pause() { await new Promise(resolve => setTimeout(resolve, 2)); }
 
 test('premeasurement claim bundle seals exact public roster, actual module, dependencies and shallow package roots', t => {
   const options = fixture(t), state = prepareCollection(options);
-  assert.equal(state.claims.length, 4);
+  assert.equal(state.claims.length, 5);
+  assert.equal(state.claims.filter(claim => claim.case.venue === 'binanceoptions').length, 1);
   const bundle = JSON.parse(fs.readFileSync(path.join(options.root, 'sdk-rs/harness/out/cpu-collection/cohort/cohort.json')));
   assert.deepEqual(bundle.claims, state.claims);
   assert.equal(bundle.claims[0].measuredCheckoutSha, options.run.head_sha);
@@ -310,4 +311,14 @@ test('actual post-merge workflow invocation enters and completes the real collec
   assert.equal(evidence.report.runs, 9); assert.equal(evidence.raw.length, 20);
   const ledger = fs.readFileSync(path.join(options.root, 'sdk-rs/harness/out/ci/ledger.jsonl'), 'utf8').trim().split('\n');
   assert.equal(ledger.length, 1); assert.equal(JSON.parse(ledger[0]).exitCode, 0);
+});
+
+test('Binance Options public input is generated before CPU measurement inputs are sealed', () => {
+  const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  const measurement = workflow.slice(workflow.indexOf('\n  gate:\n'), workflow.indexOf('\n  bitget-paired:\n'));
+  const generation = measurement.indexOf('corepack yarn rust:private-tape-binanceoptions --public');
+  const sealing = measurement.indexOf('node sdk-rs/harness/cpu-ci.mjs --command prepare');
+  assert.ok(generation >= 0 && generation < sealing, 'Options public tape must exist before the exact CPU roster is sealed');
+  assert.equal(measurement.match(/corepack yarn rust:private-tape-binanceoptions --public/g).length, 1);
+  assert.ok(measurement.indexOf('corepack yarn rust:private-tape-binanceoptions\n') > sealing);
 });
