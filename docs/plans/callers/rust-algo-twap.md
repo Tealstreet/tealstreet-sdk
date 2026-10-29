@@ -16,9 +16,21 @@ native exchange server. Nothing calls it yet.
   `TwapFactory` emits `twap:stateUpdate` and `log` (`[message, "error"]`) and
   exposes `active_twaps` and `order_owner` for the store's `activeTWAPs` and
   `extra.isFromTwap`.
-- Account disposal: call `TwapFactory::terminate_all()` and then
-  `ChaserBook::terminate_all(..)` before disposing the account scope.
-  Disposing first would abort in-flight slices and leave chase orders resting.
+- Account disposal: run, in order,
+
+  ```rust
+  tw.terminate_all();
+  chaser_book.shutdown(reason).await;
+  account_scope.dispose();
+  ```
+
+  `terminate_all` is synchronous: it stops every schedule and slice deadline
+  and emits the final `twap:stateUpdate`, and it spawns nothing. Chase slices
+  live in the chaser book, and `shutdown` awaits their order cancels;
+  `ChaserBook::terminate_all` only spawns them, and disposing right after
+  aborts them. A direct slice placement already sent to the engine is not
+  awaited, and TS `terminate` never cancelled direct-slice limit orders
+  either, so those stay resting.
 - Web client: unchanged. It keeps persisting `twap:stateUpdate` and replays it
   as `twap:state` on connect.
 
