@@ -284,7 +284,7 @@ fn family(venue: &str) -> bool {
     let binance = cfg!(feature = "binance")
         && matches!(
             venue,
-            "binance" | "binancepm" | "binanceinverse" | "binancespot"
+            "binance" | "binancepm" | "binanceinverse" | "binancespot" | "binanceoptions"
         );
     let bybit = cfg!(feature = "bybit")
         && matches!(

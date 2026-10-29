@@ -503,7 +503,7 @@ pub fn supported(venue: &str) -> bool {
         #[cfg(feature = "phemex")]
         "phemex" => true,
         #[cfg(feature = "binance")]
-        "binance" | "binancepm" | "binancespot" | "binanceinverse" => true,
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" | "binanceoptions" => true,
         #[cfg(feature = "kucoinspot")]
         "kucoinspot" => true,
         #[cfg(feature = "kucoin")]
@@ -1915,7 +1915,7 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "binance")]
-        "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" | "binanceoptions" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
                 || options.secret.as_ref().is_some_and(|s| !s.is_empty())
                 || options.read_credentials.is_some()
@@ -1946,6 +1946,7 @@ pub fn build_with_signer<T: Visit>(
                         "binancepm" => BinanceVariant::PortfolioMargin,
                         "binancespot" => BinanceVariant::Spot,
                         "binanceinverse" => BinanceVariant::CoinM,
+                        "binanceoptions" => BinanceVariant::Options,
                         _ => BinanceVariant::UsdM,
                     },
                 }),
