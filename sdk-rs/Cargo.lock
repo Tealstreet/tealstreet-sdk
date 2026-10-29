@@ -3773,7 +3773,10 @@ dependencies = [
 name = "safe-cex-exec"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-algos",
+ "safe-cex-engine",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
