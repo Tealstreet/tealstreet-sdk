@@ -10,11 +10,16 @@ import { deriveRemoteSigningPolicy } from './construction';
 const HMAC_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
 const DOUBLE_SHA256_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['sha256SecretSuffix']);
 const WALLET_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['secp256k1Digest']);
+const SCHNORR_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['schnorrDigest']);
 const STARK_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['starkDigest']);
 /** Families whose remote wire signs `hex(sha256(hex(sha256(toSign)) ‖ material))`. */
 const doubleSha256 = (name: ExchangeName) => name === 'bitunix';
 /** Families whose device re-derives a wallet digest from a structured statement. */
 const hyperliquid = (name: ExchangeName) => name === 'hyperliquid' || name === 'hyperliquidspot';
+/** Families whose device re-derives Schnorr signing words from a statement. */
+const lighter = (name: ExchangeName) => name === 'lighter' || name === 'lighter-robinhood';
+/** One Lighter request: the statement commitment and at most 31 signatures. */
+const LIGHTER_SIGNATURE = 80;
 /** The Stark family: the device rebuilds every digest from a closed `paradex/1` descriptor. */
 const paradex = (name: ExchangeName) => name === 'paradex';
 
@@ -22,7 +27,7 @@ const paradex = (name: ExchangeName) => name === 'paradex';
  * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
 export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
   doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : hyperliquid(name) ? WALLET_ALGORITHMS
-    : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
+    : lighter(name) ? SCHNORR_ALGORITHMS : paradex(name) ? STARK_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
   credential: string;
@@ -387,6 +392,41 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     return { values: [Array.from(sha256(preimage)), boundAddress.slice(), signature], receipt };
   };
 
+  /** Lighter never sends bare words: `[sha256(statement), sign schnorrDigest x n]`,
+   * one device round trip per request. The device re-derives every signed word
+   * from the statement and answers the n signatures concatenated in order.
+   */
+  const signLighter = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!remoteSigner) throw refused();
+    const [statement, ...signs] = operations;
+    if (statement?.kind !== 'sha256' || signs.length < 1) throw refused();
+    const parts = Array.isArray(statement.payload) && statement.payload.length === 1 ? statement.payload[0] : undefined;
+    if (!record(parts) || parts.kind !== 'bytes' || !Array.isArray(parts.bytes) || parts.bytes.length > MAX_PAYLOAD
+      || parts.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
+    const preimage = Uint8Array.from(parts.bytes as number[]);
+    const entry = owned.get((signs[0] as { key?: string }).key as string);
+    if (!entry || !entry.primary || signs.some((sign) => sign?.kind !== 'sign' || sign.algorithm !== 'schnorrDigest'
+      || sign.key !== entry.identity.signing)) throw refused();
+    const id = nanoid();
+    const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({
+      id,
+      type: 'ws-auth',
+      exchangeName,
+      ...(accountName === undefined ? {} : { accountName }),
+      wsAuth: { toSign: decodeUtf8(preimage), outputFormat: 'lighter-tx' },
+    }));
+    if (!record(response) || response.id !== id
+      || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
+    if (signal.aborted) throw canceled();
+    const length = signs.length * LIGHTER_SIGNATURE;
+    const answer = response.wsAuthSignature;
+    if (typeof answer !== 'string' || !new RegExp(`^0x[0-9a-fA-F]{${length * 2}}$`).test(answer)) throw refused();
+    const bytes = Array.from({ length }, (_, i) => Number.parseInt(answer.slice(2 + i * 2, 4 + i * 2), 16));
+    const values = [Array.from(sha256(preimage))];
+    for (let i = 0; i < signs.length; i++) values.push(bytes.slice(i * LIGHTER_SIGNATURE, (i + 1) * LIGHTER_SIGNATURE));
+    return { values, receipt };
+  };
+
   /** Paradex never sends a bare digest either. Startup binds the Stark public key
    * via `[publicKey starkDigest]`; each write is `[sha256(descriptor), sign
    * starkDigest x n]`, and the device rebuilds the n digests from the descriptor.
@@ -429,6 +469,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
       if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
       const operations = Array.from(request.operations);
       if (hyperliquid(exchangeName)) return await signWallet(operations, receipt, signal);
+      if (lighter(exchangeName)) return await signLighter(operations, receipt, signal);
       if (paradex(exchangeName)) return await signStark(operations, receipt, signal);
       if (operations.some((operation) => operation?.kind === 'sha256'
         || (operation?.kind === 'sign' && operation.algorithm === 'sha256SecretSuffix'))) {

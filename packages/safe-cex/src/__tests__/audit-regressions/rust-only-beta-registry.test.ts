@@ -136,9 +136,9 @@ describe('Rust-only beta construction', () => {
   });
   it('refuses unsupported delegated modes without fallback', async () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
-    // Hyperliquid's and Paradex's structured remote signing are pinned in their
-    // rust.*-remote-signing.wasm.test.ts files.
-    const localOnly = ['kraken', 'krakenspot', 'lighter', 'apexomni', 'cryptocom', 'asterdex'] as const;
+    // Hyperliquid's, Lighter's and Paradex's structured remote signing is pinned in
+    // their rust.*-remote-signing.wasm.test.ts.
+    const localOnly = ['kraken', 'krakenspot', 'apexomni', 'cryptocom', 'asterdex'] as const;
     // #2262 enables Bitunix through the shared policy, without a beta override.
     const refused: readonly ExchangeName[] = deriveRemoteSigningPolicy('bitunix')?.enabled
       ? localOnly

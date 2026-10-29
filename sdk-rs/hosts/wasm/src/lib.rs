@@ -1015,6 +1015,12 @@ impl WasmEngine {
                         key: options.key.clone(),
                         vault: options.vault.clone(),
                         testnet: options.testnet,
+                        application_id: options.application_id.clone(),
+                        // The index option exists only in Lighter builds.
+                        #[cfg(feature = "lighter")]
+                        api_key_index: options.api_key_index.clone(),
+                        #[cfg(not(feature = "lighter"))]
+                        api_key_index: None,
                         paradex_address: options.paradex_address.clone(),
                     };
                     (venue.to_owned(), identities, account)

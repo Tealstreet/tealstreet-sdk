@@ -21,7 +21,7 @@ const setupFeatures = {
 };
 
 // Wallet families answer remote requests through the slim hosted-wallet export.
-const walletDevices = new Set(['hyperliquid', 'paradex']);
+const walletDevices = new Set(['hyperliquid', 'lighter', 'paradex']);
 const remoteFeature = (rule) => walletDevices.has(rule.setupMapping) ? 'hosted-wallet' : 'hosted-signing';
 
 function requiredFeatures(rule) {

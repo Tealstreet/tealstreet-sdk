@@ -2370,6 +2370,7 @@ export class BaseExchange implements Exchange {
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
       case 'hyperliquid-l1':
       case 'hyperliquid-address':
+      case 'lighter-tx':
       case 'paradex-stark':
       case 'paradex-public':
         return { id: request.id, error: `${outputFormat} requires the Rust engine signer` };
