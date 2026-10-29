@@ -58,7 +58,7 @@ impl EngineThreads {
         })
     }
 
-    pub fn len(&self) -> usize {
+    pub fn thread_count(&self) -> usize {
         self.lanes.len()
     }
 

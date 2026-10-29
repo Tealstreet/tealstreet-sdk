@@ -40,7 +40,10 @@ pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/health", get(health).options(preflight))
         .route("/capabilities", get(capabilities).options(preflight))
-        .route("/account/capabilities", get(capabilities).options(preflight))
+        .route(
+            "/account/capabilities",
+            get(capabilities).options(preflight),
+        )
         .route("/", get(upgrade))
         .route("/account", get(upgrade))
         .with_state(app)
@@ -49,8 +52,14 @@ pub fn router(app: Arc<App>) -> Router {
 fn cors(mut response: Response) -> Response {
     let headers = response.headers_mut();
     headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
-    headers.insert("access-control-allow-methods", HeaderValue::from_static("GET, OPTIONS"));
-    headers.insert("access-control-allow-headers", HeaderValue::from_static("content-type"));
+    headers.insert(
+        "access-control-allow-methods",
+        HeaderValue::from_static("GET, OPTIONS"),
+    );
+    headers.insert(
+        "access-control-allow-headers",
+        HeaderValue::from_static("content-type"),
+    );
     response
 }
 
@@ -67,8 +76,8 @@ async fn health(State(app): State<Arc<App>>) -> Response {
         "release": app.config.release,
         "region": app.config.region,
         "connections": connections,
-        "accounts": app.registry.len(),
-        "engineThreads": app.registry.threads().len(),
+        "accounts": app.registry.account_count(),
+        "engineThreads": app.registry.threads().thread_count(),
         "inits": inits,
         "disposes": disposes,
     });
@@ -138,7 +147,11 @@ async fn upgrade(
         Some(token) => {
             // A resume re-verifies here too: an expired token never takes a session back.
             let Some(verified) = app.verifier.verify(&token, now_ms()) else {
-                return (StatusCode::UNAUTHORIZED, "Valid Tealstreet proxy token required").into_response();
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    "Valid Tealstreet proxy token required",
+                )
+                    .into_response();
             };
             Identity {
                 user: Some(verified.user_id),
@@ -163,20 +176,21 @@ async fn upgrade(
         }
         *count += 1;
     }
-    let mut response = upgrade
-        .max_message_size(MAX_MESSAGE_BYTES)
-        .on_upgrade(move |socket| async move {
-            serve(app.clone(), identity, socket).await;
-            if let Some(ip) = public_ip {
-                let mut counts = app.public_per_ip.lock().unwrap();
-                if let Some(count) = counts.get_mut(&ip) {
-                    *count = count.saturating_sub(1);
-                    if *count == 0 {
-                        counts.remove(&ip);
+    let mut response =
+        upgrade
+            .max_message_size(MAX_MESSAGE_BYTES)
+            .on_upgrade(move |socket| async move {
+                serve(app.clone(), identity, socket).await;
+                if let Some(ip) = public_ip {
+                    let mut counts = app.public_per_ip.lock().unwrap();
+                    if let Some(count) = counts.get_mut(&ip) {
+                        *count = count.saturating_sub(1);
+                        if *count == 0 {
+                            counts.remove(&ip);
+                        }
                     }
                 }
-            }
-        });
+            });
     response.headers_mut().remove(header::SERVER);
     response
 }

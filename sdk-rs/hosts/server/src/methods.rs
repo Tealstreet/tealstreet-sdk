@@ -54,11 +54,28 @@ fn order(value: &Value) -> Result<Value, Refused> {
     let Value::Object(fields) = value else {
         return Err(refused("TypeError", "order must be an object"));
     };
-    const DENIED: [&str; 6] = ["accountName", "account", "key", "secret", "passphrase", "credentials"];
+    const DENIED: [&str; 6] = [
+        "accountName",
+        "account",
+        "key",
+        "secret",
+        "passphrase",
+        "credentials",
+    ];
     if let Some(field) = DENIED.iter().find(|field| fields.contains_key(**field)) {
-        return Err(refused("TypeError", format!("order field {field} is not allowed")));
+        return Err(refused(
+            "TypeError",
+            format!("order field {field} is not allowed"),
+        ));
     }
-    for field in ["amount", "price", "triggerPrice", "stopLoss", "takeProfit", "maxSlippagePct"] {
+    for field in [
+        "amount",
+        "price",
+        "triggerPrice",
+        "stopLoss",
+        "takeProfit",
+        "maxSlippagePct",
+    ] {
         if let Some(number) = fields.get(field).filter(|number| !number.is_null()) {
             finite(number, field)?;
         }
@@ -77,7 +94,10 @@ fn command(op: &str, fields: Map<String, Value>, returns_unit: bool) -> Plan {
 }
 
 fn fields(pairs: impl IntoIterator<Item = (&'static str, Value)>) -> Map<String, Value> {
-    pairs.into_iter().map(|(key, value)| (key.into(), value)).collect()
+    pairs
+        .into_iter()
+        .map(|(key, value)| (key.into(), value))
+        .collect()
 }
 
 /// Translates one hosted `callMethod`. `open_order_symbols` (engine store) answers
@@ -99,7 +119,11 @@ pub fn translate(
                 return Err(refused("TypeError", "placeOrders takes an array of orders"));
             };
             let orders = orders.iter().map(order).collect::<Result<Vec<_>, _>>()?;
-            one(command("placeOrders", fields([("orders", Value::Array(orders))]), false))
+            one(command(
+                "placeOrders",
+                fields([("orders", Value::Array(orders))]),
+                false,
+            ))
         }
         "placeOrder" | "placeOrderWithClientOrderId" => {
             let mut order = order(arg(args, 0))?;
@@ -107,7 +131,11 @@ pub fn translate(
                 let id = text(arg(args, 1), "clientOrderId")?;
                 order["clientOrderId"] = id.into();
             }
-            one(command("placeOrders", fields([("orders", json!([order]))]), false))
+            one(command(
+                "placeOrders",
+                fields([("orders", json!([order]))]),
+                false,
+            ))
         }
         "updateOrder" => {
             let request = arg(args, 0);
@@ -121,10 +149,16 @@ pub fn translate(
                 }
             }
             if !out.contains_key("price") && !out.contains_key("amount") {
-                return Err(refused("Error", "Order amendment requires a price or amount"));
+                return Err(refused(
+                    "Error",
+                    "Order amendment requires a price or amount",
+                ));
             }
             let op = if capabilities.amend_with_symbol {
-                out.insert("symbol".into(), text(&existing["symbol"], "order.symbol")?.into());
+                out.insert(
+                    "symbol".into(),
+                    text(&existing["symbol"], "order.symbol")?.into(),
+                );
                 "amendOrderWithSymbol"
             } else {
                 "amendOrder"
@@ -133,7 +167,10 @@ pub fn translate(
         }
         "cancelOrders" => {
             let Value::Array(orders) = arg(args, 0) else {
-                return Err(refused("TypeError", "cancelOrders takes an array of orders"));
+                return Err(refused(
+                    "TypeError",
+                    "cancelOrders takes an array of orders",
+                ));
             };
             let mut descriptors = Vec::with_capacity(orders.len());
             let mut ids = Vec::with_capacity(orders.len());
@@ -152,19 +189,28 @@ pub fn translate(
             } else {
                 one(command(
                     "cancelOrders",
-                    fields([("ids", Value::Array(ids)), ("orders", Value::Array(descriptors))]),
+                    fields([
+                        ("ids", Value::Array(ids)),
+                        ("orders", Value::Array(descriptors)),
+                    ]),
                     true,
                 ))
             }
         }
         "cancelSymbolOrders" => {
             let symbol = text(arg(args, 0), "symbol")?;
-            one(command("cancelSymbolOrders", fields([("symbol", symbol.into())]), true))
+            one(command(
+                "cancelSymbolOrders",
+                fields([("symbol", symbol.into())]),
+                true,
+            ))
         }
         "cancelAllOrders" => match capabilities.cancel_all {
-            CancelAll::Native => {
-                one(command("cancelSymbolOrders", fields([("symbol", "".into())]), true))
-            }
+            CancelAll::Native => one(command(
+                "cancelSymbolOrders",
+                fields([("symbol", "".into())]),
+                true,
+            )),
             CancelAll::EachOpenSymbol | CancelAll::EachPlacedSymbol => {
                 let mut symbols = open_order_symbols.to_vec();
                 symbols.sort();
@@ -175,7 +221,11 @@ pub fn translate(
                 Ok(symbols
                     .into_iter()
                     .map(|symbol| {
-                        command("cancelSymbolOrders", fields([("symbol", symbol.into())]), true)
+                        command(
+                            "cancelSymbolOrders",
+                            fields([("symbol", symbol.into())]),
+                            true,
+                        )
                     })
                     .collect())
             }
@@ -252,7 +302,10 @@ mod tests {
 
     fn single(method: &str, args: Value, capabilities: &Capabilities) -> Value {
         let Value::Array(args) = args else { panic!() };
-        match translate(method, &args, capabilities, &[]).unwrap().as_slice() {
+        match translate(method, &args, capabilities, &[])
+            .unwrap()
+            .as_slice()
+        {
             [Plan::Command { command, .. }] => command.clone(),
             other => panic!("{other:?}"),
         }
@@ -260,12 +313,17 @@ mod tests {
 
     #[test]
     fn place_order_becomes_a_one_order_batch_like_rust_exchange_ts() {
-        let order = json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":0.01,"price":50000});
+        let order =
+            json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":0.01,"price":50000});
         assert_eq!(
             single("placeOrder", json!([order.clone()]), &caps()),
             json!({"op":"placeOrders","orders":[order]})
         );
-        let with_id = single("placeOrderWithClientOrderId", json!([order, "abc"]), &caps());
+        let with_id = single(
+            "placeOrderWithClientOrderId",
+            json!([order, "abc"]),
+            &caps(),
+        );
         assert_eq!(with_id["orders"][0]["clientOrderId"], "abc");
     }
 
@@ -291,17 +349,29 @@ mod tests {
     #[test]
     fn amend_and_cancel_follow_engine_capabilities() {
         let request = json!([{"order":{"id":"1","symbol":"BTCUSDT"},"update":{"price":10}}]);
-        assert_eq!(single("updateOrder", request.clone(), &caps())["op"], "amendOrder");
+        assert_eq!(
+            single("updateOrder", request.clone(), &caps())["op"],
+            "amendOrder"
+        );
         let with_symbol = Capabilities {
             amend_with_symbol: true,
             cancel_with_symbols: true,
             ..caps()
         };
         let amend = single("updateOrder", request, &with_symbol);
-        assert_eq!(amend, json!({"op":"amendOrderWithSymbol","id":"1","symbol":"BTCUSDT","price":10.0}));
+        assert_eq!(
+            amend,
+            json!({"op":"amendOrderWithSymbol","id":"1","symbol":"BTCUSDT","price":10.0})
+        );
         let orders = json!([[{"id":"1","symbol":"BTCUSDT","type":"limit"}]]);
-        assert_eq!(single("cancelOrders", orders.clone(), &caps())["ids"], json!(["1"]));
-        assert_eq!(single("cancelOrders", orders, &with_symbol)["op"], "cancelOrdersWithSymbols");
+        assert_eq!(
+            single("cancelOrders", orders.clone(), &caps())["ids"],
+            json!(["1"])
+        );
+        assert_eq!(
+            single("cancelOrders", orders, &with_symbol)["op"],
+            "cancelOrdersWithSymbols"
+        );
     }
 
     #[test]
@@ -321,7 +391,10 @@ mod tests {
         let symbols = ["ETH".to_owned(), "BTC".to_owned(), "ETH".to_owned()];
         let plans = translate("cancelAllOrders", &[], &each, &symbols).unwrap();
         assert_eq!(plans.len(), 2);
-        assert_eq!(translate("cancelAllOrders", &[], &each, &[]).unwrap(), vec![Plan::Reply(Value::Null)]);
+        assert_eq!(
+            translate("cancelAllOrders", &[], &each, &[]).unwrap(),
+            vec![Plan::Reply(Value::Null)]
+        );
     }
 
     #[test]

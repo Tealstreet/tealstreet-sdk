@@ -38,9 +38,12 @@ async fn server() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, router(Arc::new(app)).into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .unwrap();
+        axum::serve(
+            listener,
+            router(Arc::new(app)).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
     });
     address.to_string()
 }
@@ -62,21 +65,29 @@ async fn health_and_capabilities_answer_without_venue_io() {
     let address = server().await;
     let (status, body) = get(&address, "/health").await;
     assert_eq!(status, 200);
-    assert!(body.contains(r#""ok":true"#) && body.contains(r#""region":"tyo""#), "{body}");
+    assert!(
+        body.contains(r#""ok":true"#) && body.contains(r#""region":"tyo""#),
+        "{body}"
+    );
     for path in ["/capabilities", "/account/capabilities"] {
         let (status, body) = get(&address, path).await;
         assert_eq!(status, 200);
         assert!(body.contains(r#""runtime":"rust""#), "{body}");
     }
-    assert_eq!(get(&address, "/account").await.0, 426, "plain GET is not an upgrade");
+    assert_eq!(
+        get(&address, "/account").await.0,
+        426,
+        "plain GET is not an upgrade"
+    );
 }
 
 #[tokio::test]
 async fn invalid_tokens_are_refused_before_the_upgrade() {
     let address = server().await;
-    let error = tokio_tungstenite::connect_async(format!("ws://{address}/account?proxyToken=not-a-jwt"))
-        .await
-        .unwrap_err();
+    let error =
+        tokio_tungstenite::connect_async(format!("ws://{address}/account?proxyToken=not-a-jwt"))
+            .await
+            .unwrap_err();
     let tokio_tungstenite::tungstenite::Error::Http(response) = error else {
         panic!("{error}")
     };
@@ -108,8 +119,13 @@ async fn unauthenticated_sockets_cannot_sign_and_are_capped_per_ip() {
     let (mut first, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let (_second, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let error = tokio_tungstenite::connect_async(&url).await.unwrap_err();
-    assert!(matches!(error, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == 429));
-    first.send(Message::text(r#"{"t":"sign-res","d":{"id":"x"}}"#)).await.unwrap();
+    assert!(
+        matches!(error, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == 429)
+    );
+    first
+        .send(Message::text(r#"{"t":"sign-res","d":{"id":"x"}}"#))
+        .await
+        .unwrap();
     let mut code = None;
     while let Some(Ok(message)) = first.next().await {
         if let Message::Close(Some(frame)) = message {

@@ -98,10 +98,10 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
         ("grvtTradingAccountId", &init.grvt_trading_account_id),
     ];
     for (field, value) in text {
-        if let Some(value) = value.as_ref().filter(|value| !value.is_empty()) {
-            if !public_only {
-                options.insert(field.into(), value.clone().into());
-            }
+        if let Some(value) = value.as_ref().filter(|value| !value.is_empty())
+            && !public_only
+        {
+            options.insert(field.into(), value.clone().into());
         }
     }
     if init.testnet == Some(true) {
@@ -136,7 +136,7 @@ impl Registry {
         self.ids.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn len(&self) -> usize {
+    pub fn account_count(&self) -> usize {
         self.accounts.lock().unwrap().len()
     }
 
@@ -165,13 +165,16 @@ impl Registry {
                     account.token.set(token);
                 }
                 if let Some(link) = &account.link {
-                    link.attach(outbox);
+                    link.attach(holder, outbox);
                 }
                 return Ok(account);
             }
             self.dispose(&account);
         }
-        let account = Arc::new(self.build(user, init, public_only, fingerprint, token, outbox).await?);
+        let account = Arc::new(
+            self.build(user, init, public_only, fingerprint, token, holder, outbox)
+                .await?,
+        );
         account.holders.lock().unwrap().insert(holder);
         let replaced = self.accounts.lock().unwrap().insert(key, account.clone());
         if let Some(replaced) = replaced {
@@ -181,6 +184,7 @@ impl Registry {
         Ok(account)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn build(
         &self,
         user: &str,
@@ -188,6 +192,7 @@ impl Registry {
         public_only: bool,
         fingerprint: String,
         token: Option<(String, u64)>,
+        socket: u64,
         outbox: Outbox,
     ) -> Result<Account, String> {
         let venue = init.exchange_name.clone();
@@ -198,8 +203,8 @@ impl Registry {
             proxy_region: init.proxy_region.clone(),
             testnet: init.testnet,
         };
-        let mut inputs =
-            resolve::account_transport(&venue, &transport_flags).map_err(|error| error.to_string())?;
+        let mut inputs = resolve::account_transport(&venue, &transport_flags)
+            .map_err(|error| error.to_string())?;
         if public_only {
             inputs.public_data_only = Some(true);
             inputs.has_key = false;
@@ -213,14 +218,23 @@ impl Registry {
         let (link, signer, options) = if public_only {
             (None, None, options)
         } else {
-            let link = SignerLink::new(outbox);
-            let remote = remote_account(link.clone(), &venue, Some(init.account_name.clone()), &options)
-                .map_err(|error| error.to_string())?;
+            let link = SignerLink::new(socket, outbox);
+            let remote = remote_account(
+                link.clone(),
+                &venue,
+                Some(init.account_name.clone()),
+                &options,
+            )
+            .map_err(|error| error.to_string())?;
             (Some(link), Some(remote.provider), remote.options_json)
         };
         // Signer and public-only are one decision: a private account never builds
         // from options without the remote provider (keyed construction).
-        assert_eq!(signer.is_none(), public_only, "private accounts sign remotely");
+        assert_eq!(
+            signer.is_none(),
+            public_only,
+            "private accounts sign remotely"
+        );
         proxy_token.set(if public_only { None } else { token });
         let tokens = proxy_token.provider();
         let config = self.engine_config.clone();
@@ -228,21 +242,22 @@ impl Registry {
         let placed = self.threads.place(move |placement| {
             let transport = NetworkTransport::with_routing(plan, tokens);
             let result =
-                safe_cex_native::spawn_venue_account(&venue, &options, transport, signer, config).map(
-                    |(handle, task)| {
+                safe_cex_native::spawn_venue_account(&venue, &options, transport, signer, config)
+                    .map(|(handle, task)| {
                         tokio::task::spawn_local(async move {
                             let _ = task.await;
                             drop(placement);
                         });
                         handle
-                    },
-                );
+                    });
             let _ = spawned.send(result.map_err(|error| error.to_string()));
         });
         if !placed {
             return Err("engine threads stopped".into());
         }
-        let handle = receive.await.map_err(|_| "engine thread failed".to_owned())??;
+        let handle = receive
+            .await
+            .map_err(|_| "engine thread failed".to_owned())??;
         Ok(Account {
             user: user.to_owned(),
             name: init.account_name.clone(),
@@ -290,7 +305,10 @@ impl Registry {
     pub fn dispose(&self, account: &Arc<Account>) {
         let mut accounts = self.accounts.lock().unwrap();
         let key = (account.user.clone(), account.name.clone());
-        if accounts.get(&key).is_some_and(|current| Arc::ptr_eq(current, account)) {
+        if accounts
+            .get(&key)
+            .is_some_and(|current| Arc::ptr_eq(current, account))
+        {
             accounts.remove(&key);
         }
         drop(accounts);
@@ -300,7 +318,12 @@ impl Registry {
 
     /// Moves a closing socket's private accounts under `resume_id` for the grace
     /// window. Their signers suspend: what waited on the old socket fails.
-    pub fn park(self: &Arc<Self>, resume_id: String, user: &str, accounts: Vec<(Arc<Account>, u64)>) {
+    pub fn park(
+        self: &Arc<Self>,
+        resume_id: String,
+        user: &str,
+        accounts: Vec<(Arc<Account>, u64)>,
+    ) {
         let mut parked = Vec::with_capacity(accounts.len());
         for (account, holder) in accounts {
             let park_holder = self.next_id();
@@ -338,7 +361,10 @@ impl Registry {
             // A resumed id stays an alias for one more grace window.
             tokio::time::sleep(grace).await;
             let mut parked = registry.parked.lock().unwrap();
-            if parked.get(&resume_id).is_some_and(|alias| alias.alias_until.is_some()) {
+            if parked
+                .get(&resume_id)
+                .is_some_and(|alias| alias.alias_until.is_some())
+            {
                 parked.remove(&resume_id);
             }
         });
@@ -374,7 +400,7 @@ impl Registry {
                 }
                 account.token.set(Some(token.clone()));
                 if let Some(link) = &account.link {
-                    link.attach(outbox.clone());
+                    link.attach(holder, outbox.clone());
                 }
                 account
             })

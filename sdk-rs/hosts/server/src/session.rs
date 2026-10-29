@@ -138,24 +138,28 @@ impl Session {
         };
         let authenticated = self.identity.user.is_some();
         match message {
-            Inbound::Init(init) => self.init(init).await?,
+            Inbound::Init(init) => self.init(*init).await?,
             Inbound::Msg(msg) => {
                 if !authenticated
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
                         && PUBLIC_OPS.contains(&msg.op.as_str()))
                 {
-                    return Err(PolicyViolation("Unauthenticated exchange-server message rejected"));
+                    return Err(PolicyViolation(
+                        "Unauthenticated exchange-server message rejected",
+                    ));
                 }
                 self.msg(msg).await;
             }
             Inbound::SignRes(response) => {
                 if !authenticated {
-                    return Err(PolicyViolation("Unauthenticated exchange-server sessions cannot sign"));
+                    return Err(PolicyViolation(
+                        "Unauthenticated exchange-server sessions cannot sign",
+                    ));
                 }
                 // Only links this socket owns can match: another socket's ids never resolve here.
                 for joined in self.joined.values() {
                     if let Some(link) = &joined.account.link
-                        && link.resolve(response.clone())
+                        && link.resolve(self.socket, response.clone())
                     {
                         break;
                     }
@@ -181,8 +185,10 @@ impl Session {
                 self.send(envelope::pong(&names));
                 let keep = ping.unwrap_or_default().accounts;
                 if !keep.is_empty() {
-                    let orphaned: Vec<String> =
-                        names.into_iter().filter(|name| !keep.contains(name)).collect();
+                    let orphaned: Vec<String> = names
+                        .into_iter()
+                        .filter(|name| !keep.contains(name))
+                        .collect();
                     for name in orphaned {
                         if let Some(joined) = self.joined.remove(&name) {
                             self.leave(joined);
@@ -205,20 +211,21 @@ impl Session {
     async fn init(&mut self, init: InitPayload) -> Result<(), PolicyViolation> {
         let authenticated = self.identity.user.is_some();
         let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
-        if !authenticated {
-            if let Some(reason) = unauthenticated_init_refusal(&init) {
-                self.send(envelope::error(Some(&init.account_name), reason));
-                return Err(PolicyViolation(reason));
-            }
+        if !authenticated && let Some(reason) = unauthenticated_init_refusal(&init) {
+            self.send(envelope::error(Some(&init.account_name), reason));
+            return Err(PolicyViolation(reason));
         }
-        Log::info(&format!("init {} ({})", init.account_name, init.exchange_name));
+        Log::info(&format!(
+            "init {} ({})",
+            init.account_name, init.exchange_name
+        ));
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
         {
             // Resumed (or repeated) with what it was built from: a fresh snapshot only.
             self.resnapshot(&init.account_name).await;
             if let Some(link) = &self.joined[&init.account_name].account.link {
-                link.attach(self.outbox());
+                link.attach(self.socket, self.outbox());
             }
             return Ok(());
         }
@@ -228,7 +235,14 @@ impl Session {
         let token = self.identity.token.clone();
         let account = self
             .registry
-            .obtain(self.user(), &init, public_only, self.socket, token, self.outbox())
+            .obtain(
+                self.user(),
+                &init,
+                public_only,
+                self.socket,
+                token,
+                self.outbox(),
+            )
             .await;
         match account {
             Ok(account) => {
@@ -323,16 +337,25 @@ impl Session {
             Log::warn(&format!("no joined account for op {}", msg.op));
             return;
         }
-        let symbol = msg.data.get("symbol").and_then(Value::as_str).map(str::to_owned);
-        let interval = msg.data.get("interval").and_then(Value::as_str).map(str::to_owned);
+        let symbol = msg
+            .data
+            .get("symbol")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let interval = msg
+            .data
+            .get("interval")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         match (msg.op.as_str(), symbol, interval) {
             ("sendSnapshot", _, _) => self.resnapshot(&name).await,
             ("subscribeOrderBook", Some(symbol), _) => {
                 self.input(&name, json!({"op": "subscribeOrderBook", "symbol": symbol}))
             }
-            ("unsubscribeOrderBook", Some(symbol), _) => {
-                self.input(&name, json!({"op": "unsubscribeOrderBook", "symbol": symbol}))
-            }
+            ("unsubscribeOrderBook", Some(symbol), _) => self.input(
+                &name,
+                json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
+            ),
             ("subscribeOHLCV", Some(symbol), Some(interval)) => self.input(
                 &name,
                 json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
@@ -351,7 +374,9 @@ impl Session {
                 self.send(envelope::msg(
                     &name,
                     "error",
-                    json!([format!("{op} is not supported on the Rust exchange server yet")]),
+                    json!([format!(
+                        "{op} is not supported on the Rust exchange server yet"
+                    )]),
                 ))
             }
             (op, _, _) => Log::warn(&format!("ignored account op {op}")),
@@ -360,21 +385,38 @@ impl Session {
 
     fn input(&self, name: &str, command: Value) {
         let joined = &self.joined[name];
-        match joined.account.handle.input(joined.client.id, &command.to_string()) {
+        match joined
+            .account
+            .handle
+            .input(joined.client.id, &command.to_string())
+        {
             Ok(true) => {}
-            Ok(false) => self.send(envelope::error(Some(name), "account is busy; subscription not sent")),
+            Ok(false) => self.send(envelope::error(
+                Some(name),
+                "account is busy; subscription not sent",
+            )),
             Err(refused) => self.send(envelope::error(Some(name), &refused.notice)),
         }
     }
 
     async fn call(&mut self, name: &str, data: Value) {
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
-        let method = data.get("method").and_then(Value::as_str).unwrap_or("").to_owned();
+        let method = data
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         let args = match data.get("args") {
             Some(Value::Array(args)) => args.clone(),
             None | Some(Value::Null) => Vec::new(),
             Some(_) => {
-                self.reply_failure(name, &request_id, "TypeError", "args must be an array", None);
+                self.reply_failure(
+                    name,
+                    &request_id,
+                    "TypeError",
+                    "args must be an array",
+                    None,
+                );
                 return;
             }
         };
@@ -382,19 +424,26 @@ impl Session {
         let symbols = if method == "cancelAllOrders" {
             account
                 .handle
-                .read(|store| store.orders().iter().map(|order| order.symbol.clone()).collect())
+                .read(|store| {
+                    store
+                        .orders()
+                        .iter()
+                        .map(|order| order.symbol.clone())
+                        .collect()
+                })
                 .await
                 .unwrap_or_default()
         } else {
             Vec::new()
         };
-        let plans = match methods::translate(&method, &args, account.handle.capabilities(), &symbols) {
-            Ok(plans) => plans,
-            Err(refused) => {
-                self.reply_failure(name, &request_id, refused.name, &refused.message, None);
-                return;
-            }
-        };
+        let plans =
+            match methods::translate(&method, &args, account.handle.capabilities(), &symbols) {
+                Ok(plans) => plans,
+                Err(refused) => {
+                    self.reply_failure(name, &request_id, refused.name, &refused.message, None);
+                    return;
+                }
+            };
         let group = (plans.len() > 1).then(|| {
             Arc::new(Mutex::new(Group {
                 remaining: plans.len(),
@@ -408,10 +457,19 @@ impl Session {
                     "callMethod:done",
                     json!({"requestId": request_id, "success": true, "result": result}),
                 )),
-                Plan::Command { mut command, returns_unit } => {
+                Plan::Command {
+                    mut command,
+                    returns_unit,
+                } => {
                     let joined = self.joined.get_mut(name).unwrap();
                     let Some(id) = joined.next_command.checked_add(1) else {
-                        self.reply_failure(name, &request_id, "Error", "command IDs exhausted", None);
+                        self.reply_failure(
+                            name,
+                            &request_id,
+                            "Error",
+                            "command IDs exhausted",
+                            None,
+                        );
                         return;
                     };
                     joined.next_command = id;
@@ -436,7 +494,12 @@ impl Session {
                     if let Some(message) = failure {
                         let pending = self.joined[name].client.pending.lock().unwrap().remove(&id);
                         if let Some(pending) = pending {
-                            settle(&self.out, name, pending, Err(failure_detail("Error", &message, false)));
+                            settle(
+                                &self.out,
+                                name,
+                                pending,
+                                Err(failure_detail("Error", &message, false)),
+                            );
                         }
                     }
                 }
@@ -444,7 +507,14 @@ impl Session {
         }
     }
 
-    fn reply_failure(&self, name: &str, request_id: &Value, kind: &str, message: &str, outcome: Option<&str>) {
+    fn reply_failure(
+        &self,
+        name: &str,
+        request_id: &Value,
+        kind: &str,
+        message: &str,
+        outcome: Option<&str>,
+    ) {
         let mut result = json!({"name": kind, "message": message});
         if let Some(outcome) = outcome {
             result["outcome"] = outcome.into();
@@ -465,7 +535,10 @@ impl Session {
                 client.pump.abort();
                 joined.account.handle.leave(client.id);
             }
-            if self.identity.resumable && self.identity.user.is_some() && !joined.account.is_public() {
+            if self.identity.resumable
+                && self.identity.user.is_some()
+                && !joined.account.is_public()
+            {
                 parked.push((joined.account, self.socket));
             } else {
                 self.registry.release(&joined.account, self.socket);
@@ -497,14 +570,21 @@ const WRITE_METHODS: [&str; 9] = [
     "setAllLeverage",
 ];
 
-fn settle(out: &mpsc::UnboundedSender<String>, name: &str, pending: Pending, outcome: Result<Value, Value>) {
+fn settle(
+    out: &mpsc::UnboundedSender<String>,
+    name: &str,
+    pending: Pending,
+    outcome: Result<Value, Value>,
+) {
     let outcome = match &pending.group {
         None => outcome,
         Some(group) => {
             let mut group = group.lock().unwrap();
             group.remaining -= 1;
             if let Err(error) = &outcome {
-                group.failures.push(error["message"].as_str().unwrap_or("failed").to_owned());
+                group
+                    .failures
+                    .push(error["message"].as_str().unwrap_or("failed").to_owned());
             }
             if group.remaining > 0 {
                 return;
@@ -522,7 +602,11 @@ fn settle(out: &mpsc::UnboundedSender<String>, name: &str, pending: Pending, out
     };
     let data = match outcome {
         Ok(result) => {
-            let result = if pending.returns_unit { Value::Null } else { result };
+            let result = if pending.returns_unit {
+                Value::Null
+            } else {
+                result
+            };
             json!({"requestId": pending.request_id, "success": true, "result": result})
         }
         Err(detail) => json!({"requestId": pending.request_id, "success": false, "result": detail}),
@@ -547,7 +631,10 @@ async fn pump(
                     continue;
                 }
                 seq += 1;
-                if out.send(envelope::frame(&name, seq, seq == 1, &bytes)).is_err() {
+                if out
+                    .send(envelope::frame(&name, seq, seq == 1, &bytes))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -563,10 +650,19 @@ async fn pump(
         }
     }
     // The account dropped this client: whatever still waits has an unknown outcome.
-    let waiting: Vec<Pending> = pending.lock().unwrap().drain().map(|(_, pending)| pending).collect();
+    let waiting: Vec<Pending> = pending
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, pending)| pending)
+        .collect();
     for pending in waiting {
         let unknown = WRITE_METHODS.contains(&pending.method.as_str());
-        let detail = failure_detail("EngineUnavailableError", "account connection closed", unknown);
+        let detail = failure_detail(
+            "EngineUnavailableError",
+            "account connection closed",
+            unknown,
+        );
         settle(&out, &name, pending, Err(detail));
     }
 }
@@ -578,7 +674,9 @@ fn notice_to_msg(
     pending: &Arc<Mutex<HashMap<u32, Pending>>>,
 ) {
     let kind = notice["type"].as_str().unwrap_or("");
-    let command = notice["command"].as_u64().and_then(|id| u32::try_from(id).ok());
+    let command = notice["command"]
+        .as_u64()
+        .and_then(|id| u32::try_from(id).ok());
     // Only completions settle a request; other notices leave it waiting.
     let settles = matches!(kind, "done" | "error");
     let waiting = command
@@ -586,7 +684,10 @@ fn notice_to_msg(
         .and_then(|id| pending.lock().unwrap().remove(&id));
     match (kind, waiting) {
         ("done", Some(pending)) => {
-            let outcome = match (notice.get("result").and_then(Value::as_str), notice.get("error")) {
+            let outcome = match (
+                notice.get("result").and_then(Value::as_str),
+                notice.get("error"),
+            ) {
                 (Some(result), _) => Ok(serde_json::from_str(result).unwrap_or(Value::Null)),
                 (None, Some(error)) => {
                     let mut detail = notice.get("detail").cloned().unwrap_or_else(|| json!({}));
@@ -605,7 +706,12 @@ fn notice_to_msg(
         }
         ("error", Some(pending)) => {
             let message = notice["error"].as_str().unwrap_or("command failed");
-            settle(out, name, pending, Err(failure_detail("Error", message, false)));
+            settle(
+                out,
+                name,
+                pending,
+                Err(failure_detail("Error", message, false)),
+            );
         }
         ("error", None) => {
             let _ = out.send(envelope::msg(name, "error", json!([notice["error"]])));
@@ -618,8 +724,15 @@ fn notice_to_msg(
         }
         ("startupFailed", _) => {
             let detail = notice.get("detail").cloned().unwrap_or(Value::Null);
-            let _ = out.send(envelope::msg(name, "start-status", json!({"ok": false, "detail": detail})));
-            let message = notice["error"].as_str().or(detail.as_str()).unwrap_or("account startup failed");
+            let _ = out.send(envelope::msg(
+                name,
+                "start-status",
+                json!({"ok": false, "detail": detail}),
+            ));
+            let message = notice["error"]
+                .as_str()
+                .or(detail.as_str())
+                .unwrap_or("account startup failed");
             let _ = out.send(envelope::msg(name, "error", json!([message])));
         }
         _ => {}
@@ -699,12 +812,24 @@ mod tests {
             },
         );
         notice_to_msg(&out, "acct", &json!({"type":"event","command":1}), &pending);
-        assert_eq!(pending.lock().unwrap().len(), 1, "a non-completion keeps the request");
+        assert_eq!(
+            pending.lock().unwrap().len(),
+            1,
+            "a non-completion keeps the request"
+        );
         sent.try_recv().unwrap();
-        notice_to_msg(&out, "acct", &json!({"type":"done","command":1,"result":"[\"o1\"]"}), &pending);
+        notice_to_msg(
+            &out,
+            "acct",
+            &json!({"type":"done","command":1,"result":"[\"o1\"]"}),
+            &pending,
+        );
         let reply: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
         assert_eq!(reply["d"]["op"], "callMethod:done");
-        assert_eq!(reply["d"]["data"], json!({"requestId":"r1","success":true,"result":["o1"]}));
+        assert_eq!(
+            reply["d"]["data"],
+            json!({"requestId":"r1","success":true,"result":["o1"]})
+        );
         assert!(pending.lock().unwrap().is_empty());
     }
 
@@ -721,7 +846,8 @@ mod tests {
                 group: None,
             },
         );
-        let notice = json!({"type":"done","command":2,"error":"rejected","detail":{"outcome":"unknown"}});
+        let notice =
+            json!({"type":"done","command":2,"error":"rejected","detail":{"outcome":"unknown"}});
         notice_to_msg(&out, "acct", &notice, &pending);
         let reply: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
         assert_eq!(reply["d"]["data"]["success"], false);

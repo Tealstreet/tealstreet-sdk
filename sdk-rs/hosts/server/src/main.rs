@@ -9,10 +9,16 @@ use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     runtime.block_on(async move {
         let threads = EngineThreads::start(config.engine_threads)?;
-        let registry = Arc::new(Registry::new(threads, config.account_flush, config.resume_grace));
+        let registry = Arc::new(Registry::new(
+            threads,
+            config.account_flush,
+            config.resume_grace,
+        ));
         let app = App {
             registry,
             metrics: Arc::new(Metrics::default()),

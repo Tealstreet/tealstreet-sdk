@@ -56,7 +56,7 @@ pub struct AccountMsg {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "t", content = "d", rename_all = "kebab-case")]
 pub enum Inbound {
-    Init(InitPayload),
+    Init(Box<InitPayload>),
     Msg(AccountMsg),
     SignRes(Value),
     Dispose {

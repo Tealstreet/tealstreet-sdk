@@ -7,7 +7,8 @@ pub struct Log;
 
 impl Log {
     fn line(level: &str, message: &str) {
-        let line = json!({"level": level, "service": "exchange-server", "msg": message}).to_string();
+        let line =
+            json!({"level": level, "service": "exchange-server", "msg": message}).to_string();
         if level == "info" {
             println!("{line}");
         } else {
