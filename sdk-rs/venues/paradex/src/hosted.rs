@@ -2,7 +2,7 @@
 //! checks and hashes before it signs with its own key. Nothing here holds a key
 //! or reads a clock. See docs/plans/RUST_PARADEX_HOSTED_STARK_CONSUMER.md.
 
-use serde::{Deserialize, Deserializer, de::Error as _};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use starknet_crypto::Felt;
 
 use crate::sign::{
@@ -54,7 +54,7 @@ pub enum Side {
     Sell,
 }
 
-/// Types native placement emits.
+/// Types native placement emits; an attached stop-loss child is STOP_LOSS_MARKET.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OrderType {
@@ -62,6 +62,7 @@ pub enum OrderType {
     Market,
     StopLimit,
     StopMarket,
+    StopLossMarket,
     TakeProfitMarket,
 }
 
@@ -163,6 +164,10 @@ pub struct ParadexBinding {
 }
 
 impl ParadexBinding {
+    /// The origin's own binding, from its validated account facts.
+    pub(crate) fn from_felts(account: Felt, chain_id: Felt) -> Self {
+        Self { account, chain_id }
+    }
     pub fn new(account: &str, starknet_chain_id: &str) -> Result<Self, DescriptorError> {
         let account = felt(account).map_err(|_| DescriptorError::Binding)?;
         if account == Felt::ZERO {
@@ -384,11 +389,13 @@ fn check_order(order: &Order) -> Result<(), DescriptorError> {
         && present(&order.trigger_price)
         && order.price.is_some() == matches!(order.order_type, Limit | StopLimit)
         && match order.order_type {
-            StopLimit | StopMarket | TakeProfitMarket => order.trigger_price.is_some(),
+            StopLimit | StopMarket | StopLossMarket | TakeProfitMarket => {
+                order.trigger_price.is_some()
+            }
             Limit | Market => true,
         }
         && match order.order_type {
-            StopMarket | TakeProfitMarket => order.flags.is_some(),
+            StopMarket | StopLossMarket | TakeProfitMarket => order.flags.is_some(),
             StopLimit => order.flags.is_none(),
             Limit | Market => true,
         }
@@ -473,7 +480,7 @@ pub fn validated_digests(
 }
 
 /// The native typed-data hashes, through the same builder local signing uses.
-fn digests(
+pub(crate) fn digests(
     descriptor: &ParadexDescriptor,
     binding: &ParadexBinding,
 ) -> Result<Digests, DescriptorError> {
@@ -520,6 +527,125 @@ fn digests(
     Ok(Digests(digests))
 }
 
+/// One order exactly as its native body projects it: the statement a remote
+/// signer receives, rebuilds through `from_json` and hashes.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderStatement<'a> {
+    pub timestamp_ms: u64,
+    pub market: &'a str,
+    pub side: &'a str,
+    pub order_type: &'a str,
+    pub size: &'a str,
+    pub price: Option<&'a str>,
+    pub trigger_price: Option<&'a str>,
+    pub instruction: &'a str,
+    pub flags: Option<[&'a str; 1]>,
+    pub stp: Option<&'a str>,
+    pub client_id: Option<&'a str>,
+}
+
+/// One amendment exactly as its native body projects it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModifyStatement<'a> {
+    pub id: &'a str,
+    pub timestamp_ms: u64,
+    pub market: &'a str,
+    pub side: &'a str,
+    pub order_type: &'a str,
+    pub size: &'a str,
+    pub price: &'a str,
+    pub trigger_price: Option<&'a str>,
+}
+
+/// One signed leg's projection: an order, or an amendment.
+pub enum Item<'a> {
+    Order(OrderStatement<'a>),
+    Modify(ModifyStatement<'a>),
+}
+
+/// A native signing operation in the closed `paradex/1` spelling.
+pub enum Statement<'a> {
+    Auth {
+        timestamp_s: u64,
+        expiration_s: u64,
+    },
+    Create {
+        batch_single: bool,
+        order: OrderStatement<'a>,
+    },
+    Batch(Vec<OrderStatement<'a>>),
+    Modify(ModifyStatement<'a>),
+}
+
+impl Statement<'_> {
+    /// The canonical JSON, with keys in declaration order.
+    pub fn to_json(&self) -> String {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Tagged<T> {
+            family: &'static str,
+            op: &'static str,
+            revision: &'static str,
+            #[serde(flatten)]
+            body: T,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Auth {
+            timestamp_s: u64,
+            expiration_s: u64,
+        }
+        #[derive(Serialize)]
+        struct Create<'b, 'a> {
+            target: &'static str,
+            order: &'b OrderStatement<'a>,
+        }
+        #[derive(Serialize)]
+        struct Batch<'b, 'a> {
+            items: &'b [OrderStatement<'a>],
+        }
+        fn tagged<T: Serialize>(op: &'static str, body: T) -> String {
+            serde_json::to_string(&Tagged {
+                family: "paradex",
+                op,
+                revision: "paradex/1",
+                body,
+            })
+            .expect("statement serializes")
+        }
+        match self {
+            Self::Auth {
+                timestamp_s,
+                expiration_s,
+            } => tagged(
+                "auth",
+                Auth {
+                    timestamp_s: *timestamp_s,
+                    expiration_s: *expiration_s,
+                },
+            ),
+            Self::Create {
+                batch_single,
+                order,
+            } => tagged(
+                "orderCreate",
+                Create {
+                    target: if *batch_single {
+                        "ordersBatchSingle"
+                    } else {
+                        "orders"
+                    },
+                    order,
+                },
+            ),
+            Self::Batch(items) => tagged("orderBatch", Batch { items }),
+            Self::Modify(modify) => tagged("orderModify", modify),
+        }
+    }
+}
+
 fn side(side: Side) -> &'static str {
     match side {
         Side::Buy => "BUY",
@@ -533,6 +659,7 @@ fn order_type(kind: OrderType) -> &'static str {
         OrderType::Market => "MARKET",
         OrderType::StopLimit => "STOP_LIMIT",
         OrderType::StopMarket => "STOP_MARKET",
+        OrderType::StopLossMarket => "STOP_LOSS_MARKET",
         OrderType::TakeProfitMarket => "TAKE_PROFIT_MARKET",
     }
 }
