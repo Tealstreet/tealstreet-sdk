@@ -1320,6 +1320,9 @@ export interface RemoteSignerRequest {
       // the digest from; `hyperliquid-address` binds the agent address.
       | 'hyperliquid-l1'
       | 'hyperliquid-address'
+      // Lighter: `toSign` is a transaction or auth statement the device re-derives
+      // the signed words from; the reply concatenates the 80-byte signatures.
+      | 'lighter-tx'
       | 'coinbase-jwt';
     extraData?: unknown;
   };
