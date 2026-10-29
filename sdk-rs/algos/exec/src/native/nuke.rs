@@ -10,13 +10,43 @@ impl Drop for NukeGuard {
 }
 impl Adapter {
     pub(super) async fn run_nuke(&self, mode: &str) -> Result<Value, Value> {
-        let store = self.snapshot();
         let mut failures = Vec::new();
         let mut ids = Vec::new();
         let mut completed = 0;
         let mut closed = 0;
         let mut cancelled = 0;
+        if !matches!(mode, "positions" | "pos") {
+            let store = self.snapshot();
+            let mut symbols = Vec::new();
+            for order in rows(&store, "orders") {
+                if let Some(symbol) = order["symbol"].as_str().filter(|s| !s.is_empty())
+                    && !symbols.iter().any(|s| s == symbol)
+                {
+                    symbols.push(symbol.to_string());
+                }
+            }
+            for symbol in symbols {
+                if self.cx.scope.is_disposed() {
+                    return Err(
+                        json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
+                    );
+                }
+                match self
+                    .nuke_command("cancelSymbolOrders", json!([symbol]))
+                    .await
+                {
+                    Ok(_) => {
+                        completed += 1;
+                        cancelled += 1;
+                    }
+                    Err(error) => {
+                        failures.push(named(error, "cancel", &symbol));
+                    }
+                }
+            }
+        }
         if !matches!(mode, "orders" | "ord") {
+            let store = self.snapshot();
             let positions = rows(&store, "positions")
                 .iter()
                 .filter(|p| p["contracts"].as_f64().is_some_and(|v| v != 0.))
@@ -57,37 +87,6 @@ impl Adapter {
                             "close",
                             position["symbol"].as_str().unwrap_or("unknown"),
                         ));
-                    }
-                }
-            }
-        }
-        if !matches!(mode, "positions" | "pos") {
-            let store = self.snapshot();
-            let mut symbols = Vec::new();
-            for order in rows(&store, "orders") {
-                if let Some(symbol) = order["symbol"].as_str().filter(|s| !s.is_empty())
-                    && !symbols.iter().any(|s| s == symbol)
-                {
-                    symbols.push(symbol.to_string());
-                }
-            }
-            for symbol in symbols {
-                if self.cx.scope.is_disposed() {
-                    return Err(
-                        json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
-                    );
-                }
-                match self
-                    .nuke_command("cancelSymbolOrders", json!([symbol]))
-                    .await
-                {
-                    Ok(_) => {
-                        completed += 1;
-                        cancelled += 1;
-                    }
-                    Err(error) => {
-                        failures.push(named(error, "cancel", &symbol));
-                        break;
                     }
                 }
             }
