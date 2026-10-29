@@ -53,7 +53,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // One linked secp256k1/keccak implementation; dependency features and combined cap unchanged.
 // #2334 hosted-signing feature split, run 40610920529 artifacts: Paradex 1,403,676 and HL/HLSpot
 // 1,363,789 B; each lowered to ceil KiB + 2 KiB (1373 and 1334 KiB).
-export const WASM_VENUE_OVERRIDES = Object.freeze({ hyperliquid: 1_366_016, hyperliquidspot: 1_366_016, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_405_952 });
+// Cutover 10-29: HL/HLSpot raised to 1344 KiB (release run 40859840322 measured 1,366,837 B),
+// leaving room for HL structured remote signing (#2362).
+export const WASM_VENUE_OVERRIDES = Object.freeze({ hyperliquid: 1_376_256, hyperliquidspot: 1_376_256, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_405_952 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
