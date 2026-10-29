@@ -11,7 +11,9 @@ use std::sync::Arc;
 use safe_cex_engine::signing::{KeyRef, Provider};
 use serde_json::{Map, Value, json};
 
-pub use link::{ECHO_PAD_CAP, EchoSize, Outbox, SIGN_TIMEOUT, SignerLink};
+pub use link::{
+    ECHO_PAD_CAP, EchoSize, MAX_RESPONSE_FIELD, Outbox, SIGN_TIMEOUT, SignerLink, SocketId,
+};
 pub use provider::{FATAL_MIN_STREAK, MAX_CONSECUTIVE_FAILURES, RemoteProvider};
 
 use policy::PassphraseRule;
@@ -151,6 +153,11 @@ pub fn remote_account(
     if let Some(Value::Object(auth)) = options.get_mut("auth") {
         auth.remove("privateKey");
     }
+    if secret_shaped(&options) {
+        return Err(SetupError(
+            "Engine options for a remote-signed account carry signing material",
+        ));
+    }
     options.insert("signing".into(), json!({ "primary": identity }));
     options.insert("remoteSigning".into(), true.into());
     options.insert("payloadSigner".into(), false.into());
@@ -176,6 +183,27 @@ pub fn remote_account(
         }),
         options_json: Value::Object(options).to_string(),
         inner,
+    })
+}
+
+/// Any field still named like signing material after stripping, at any depth.
+/// The stripped options are keyless by contract and may be logged.
+fn secret_shaped(options: &Map<String, Value>) -> bool {
+    options.iter().any(|(name, value)| {
+        let name = name.to_ascii_lowercase().replace(['_', '-'], "");
+        [
+            "secret",
+            "privatekey",
+            "seed",
+            "mnemonic",
+            "passphrase",
+            "agentkey",
+            "starkkey",
+            "l2key",
+        ]
+        .iter()
+        .any(|shape| name.contains(shape))
+            || matches!(value, Value::Object(inner) if secret_shaped(inner))
     })
 }
 

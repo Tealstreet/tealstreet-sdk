@@ -16,7 +16,7 @@ type Answer = Box<dyn Fn(&Value) -> Value + Send + Sync>;
 /// A device on the other end of the link: answers every sign-req with `answer`.
 fn device(answer: Answer) -> (Arc<SignerLink>, Arc<Mutex<Vec<Value>>>) {
     let (sender, mut frames) = mpsc::unbounded_channel::<String>();
-    let link = SignerLink::new(Arc::new(move |frame| sender.send(frame).is_ok()));
+    let link = SignerLink::new(1, Arc::new(move |frame| sender.send(frame).is_ok()));
     let seen = Arc::new(Mutex::new(Vec::new()));
     let (weak, record) = (Arc::downgrade(&link), seen.clone());
     tokio::spawn(async move {
@@ -27,7 +27,7 @@ fn device(answer: Answer) -> (Arc<SignerLink>, Arc<Mutex<Vec<Value>>>) {
             let mut response = answer(&request);
             response["id"] = request["id"].clone();
             if let Some(link) = weak.upgrade() {
-                link.resolve(response);
+                link.resolve(1, response);
             }
         }
     });
@@ -529,7 +529,7 @@ async fn paradex_binds_the_stark_key_then_signs_descriptors() {
 
 #[tokio::test]
 async fn setup_refuses_secrets_secondaries_missing_passphrases_and_undeclared_venues() {
-    let link = SignerLink::new(Arc::new(|_| true));
+    let link = SignerLink::new(1, Arc::new(|_| true));
     let build = |venue: &str, options: Value| {
         remote_account(link.clone(), venue, None, &options.to_string()).map(|_| ())
     };
@@ -549,7 +549,7 @@ async fn setup_refuses_secrets_secondaries_missing_passphrases_and_undeclared_ve
 
 #[tokio::test(start_paused = true)]
 async fn timeouts_count_toward_the_fatal_streak_and_suspension_does_not() {
-    let link = SignerLink::new(Arc::new(|_| true));
+    let link = SignerLink::new(1, Arc::new(|_| true));
     let (account, options) = account(link.clone(), "bybit", json!({ "key": "k" }));
     let fired = Arc::new(Mutex::new(0));
     let count = fired.clone();
@@ -584,14 +584,14 @@ async fn timeouts_count_toward_the_fatal_streak_and_suspension_does_not() {
         Err(SignError::Unavailable)
     );
     assert!(!link.is_available());
-    link.attach(Arc::new(|_| false));
+    link.attach(1, Arc::new(|_| false));
     assert!(link.is_available());
     assert_eq!(
         account.provider.sign(work()).await.map(|_| ()),
         Err(SignError::Unavailable)
     );
     link.mark_unavailable();
-    link.attach(Arc::new(|_| true));
+    link.attach(1, Arc::new(|_| true));
     assert!(!link.is_available());
 }
 
@@ -612,17 +612,20 @@ async fn an_error_answer_refuses_and_a_late_answer_is_ignored() {
         account.provider.sign(work).await.map(|_| ()),
         Err(SignError::Refused)
     );
-    assert!(!link.resolve(json!({ "id": "unknown", "wsAuthSignature": "00" })));
+    assert!(!link.resolve(1, json!({ "id": "unknown", "wsAuthSignature": "00" })));
 }
 
 #[tokio::test]
 async fn echo_probes_alternate_sizes_and_match_by_id() {
     let frames = Arc::new(Mutex::new(Vec::<String>::new()));
     let record = frames.clone();
-    let link = SignerLink::new(Arc::new(move |frame| {
-        record.lock().unwrap().push(frame);
-        true
-    }));
+    let link = SignerLink::new(
+        1,
+        Arc::new(move |frame| {
+            record.lock().unwrap().push(frame);
+            true
+        }),
+    );
     assert!(link.send_echo());
     assert!(!link.send_echo(), "one outstanding echo");
     assert_eq!(
@@ -639,4 +642,150 @@ async fn echo_probes_alternate_sizes_and_match_by_id() {
         link.echo_res(&json!({ "id": 2 })).map(|(_, size)| size),
         Some(EchoSize::Large)
     );
+}
+
+#[tokio::test]
+async fn only_the_sending_socket_answers_and_a_new_socket_aborts_what_waits() {
+    let frames = Arc::new(Mutex::new(Vec::<String>::new()));
+    let record = frames.clone();
+    let outbox: Outbox = Arc::new(move |frame| {
+        record.lock().unwrap().push(frame);
+        true
+    });
+    let link = SignerLink::new(1, outbox.clone());
+    let (account, options) = account(link.clone(), "binancespot", json!({ "key": "AK" }));
+    let (_, signing, _) = refs(&options);
+    let work = || {
+        request(
+            vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing.clone(),
+                payload: vec![bytes("x")],
+            }],
+            Default::default(),
+        )
+    };
+    let answer = |id: &Value| json!({ "id": id, "wsAuthSignature": "07".repeat(32) });
+
+    let pending = tokio::spawn(account.provider.sign(work()));
+    while frames.lock().unwrap().is_empty() {
+        tokio::task::yield_now().await;
+    }
+    let id = serde_json::from_str::<Value>(&frames.lock().unwrap()[0]).unwrap()["d"]["id"].clone();
+    assert!(
+        !link.resolve(2, answer(&id)),
+        "another socket cannot answer"
+    );
+    assert!(link.resolve(1, answer(&id)));
+    assert!(!link.resolve(1, answer(&id)), "one response per id");
+    assert_eq!(pending.await.unwrap().unwrap().values, vec![MAC.to_vec()]);
+
+    let pending = tokio::spawn(account.provider.sign(work()));
+    while frames.lock().unwrap().len() < 2 {
+        tokio::task::yield_now().await;
+    }
+    link.attach(2, outbox.clone());
+    assert_eq!(
+        pending.await.unwrap().map(|_| ()),
+        Err(SignError::Unavailable)
+    );
+
+    let pending = tokio::spawn(account.provider.sign(work()));
+    while frames.lock().unwrap().len() < 3 {
+        tokio::task::yield_now().await;
+    }
+    let id = serde_json::from_str::<Value>(&frames.lock().unwrap()[2]).unwrap()["d"]["id"].clone();
+    assert!(link.resolve(
+        2,
+        json!({ "id": id, "wsAuthSignature": "0".repeat(MAX_RESPONSE_FIELD + 1) })
+    ));
+    assert_eq!(pending.await.unwrap().map(|_| ()), Err(SignError::Refused));
+}
+
+#[tokio::test]
+async fn options_carrying_signing_material_under_any_name_refuse() {
+    let link = SignerLink::new(1, Arc::new(|_| true));
+    for field in [
+        "apiSecret",
+        "privateKey",
+        "agent_key",
+        "starkKey",
+        "omniSeed",
+        "mnemonic",
+        "l2Key",
+        "secondaryPassphrase",
+    ] {
+        for options in [
+            json!({ "key": "k", field: "x" }),
+            json!({ "key": "k", "nested": { field: "x" } }),
+        ] {
+            let result = remote_account(link.clone(), "bybit", None, &options.to_string());
+            assert!(result.is_err(), "{options}");
+        }
+    }
+    // Ordinary public fields stay.
+    let (_, options) = account(
+        link,
+        "bybit",
+        json!({ "key": "k", "privateOnly": true, "privateWsHeaders": false, "auth": { "privateKey": "x", "userAddress": "0xU" } }),
+    );
+    assert_eq!(options["auth"], json!({ "userAddress": "0xU" }));
+    assert_eq!(options["privateOnly"], true);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_undecodable_answer_counts_toward_the_fatal_streak() {
+    let (link, _) = device(Box::new(
+        |_| json!({ "error": "", "wsAuthSignature": "nope" }),
+    ));
+    let (account, options) = account(link, "bybit", json!({ "key": "k" }));
+    let fired = Arc::new(Mutex::new(0));
+    let count = fired.clone();
+    account.on_fatal(move || *count.lock().unwrap() += 1);
+    let (_, signing, _) = refs(&options);
+    for _ in 0..MAX_CONSECUTIVE_FAILURES {
+        let work = request(
+            vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing.clone(),
+                payload: vec![bytes("x")],
+            }],
+            Default::default(),
+        );
+        assert_eq!(
+            account.provider.sign(work).await.map(|_| ()),
+            Err(SignError::Refused)
+        );
+        tokio::time::advance(std::time::Duration::from_secs(4)).await;
+    }
+    assert_eq!(*fired.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn a_fixed_request_id_waits_for_the_previous_one() {
+    let (link, seen) = device(Box::new(|_| json!({ "wsAuthSignature": "07".repeat(32) })));
+    let (account, options) = account(link, "binancespot", json!({ "key": "AK" }));
+    let (credential, signing, _) = refs(&options);
+    let work = || {
+        request(
+            vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing.clone(),
+                payload: vec![
+                    bytes("apiKey="),
+                    PayloadPart::Credential {
+                        key: credential.clone(),
+                    },
+                    bytes("&recvWindow=5000&timestamp=1700000000000"),
+                ],
+            }],
+            SignReceipt {
+                stamp_ms: Some(1_700_000_000_000.),
+                ..Default::default()
+            },
+        )
+    };
+    let (a, b) = tokio::join!(account.provider.sign(work()), account.provider.sign(work()));
+    assert!(a.is_ok() && b.is_ok());
+    assert_eq!(seen.lock().unwrap().len(), 2);
 }

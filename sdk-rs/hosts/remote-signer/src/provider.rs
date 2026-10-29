@@ -311,14 +311,15 @@ impl Inner {
 
     /// One ws-auth round trip; returns `wsAuthSignature`. Failures count toward
     /// the account's fatal streak exactly where the TS signer counts them.
-    async fn ask(
+    async fn ask<T>(
         &self,
         id: String,
         exchange_name: &str,
         to_sign: String,
         output_format: &str,
         extra_data: Option<Value>,
-    ) -> Result<Value, SignError> {
+        decode: impl FnOnce(&Value) -> Result<T, SignError>,
+    ) -> Result<T, SignError> {
         let mut ws_auth = Map::new();
         ws_auth.insert("toSign".into(), to_sign.into());
         ws_auth.insert("outputFormat".into(), output_format.into());
@@ -333,10 +334,25 @@ impl Inner {
             request.insert("accountName".into(), name.clone().into());
         }
         request.insert("wsAuth".into(), ws_auth.into());
-        let response = match self.link.round_trip(&id, &Value::Object(request)).await {
+        let request = Value::Object(request);
+        // A declared fixed id (binanceSpot user data) waits for the previous
+        // request with that id to settle rather than refusing.
+        let deadline = Instant::now() + crate::link::SIGN_TIMEOUT;
+        let response = loop {
+            match self.link.round_trip(&id, &request).await {
+                Err(Failure::Duplicate) if Instant::now() < deadline => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                other => break other,
+            }
+        };
+        let response = match response {
             Ok(response) => response,
             Err(Failure::Suspended | Failure::Aborted) => return Err(SignError::Unavailable),
-            Err(Failure::Duplicate) => return refused(),
+            Err(Failure::Duplicate) => {
+                self.record_failure();
+                return Err(SignError::TimedOut);
+            }
             Err(Failure::TimedOut) => {
                 self.record_failure();
                 return Err(SignError::TimedOut);
@@ -351,18 +367,28 @@ impl Inner {
             self.record_failure();
             return refused();
         }
-        self.record_success();
-        if response.get("id").and_then(Value::as_str) != Some(id.as_str()) {
-            return refused();
+        // Only a decodable answer ends a failure streak.
+        let decoded = (response.get("id").and_then(Value::as_str) == Some(id.as_str()))
+            .then(|| decode(response.get("wsAuthSignature").unwrap_or(&Value::Null)));
+        match decoded {
+            Some(Ok(value)) => {
+                self.record_success();
+                Ok(value)
+            }
+            _ => {
+                self.record_failure();
+                refused()
+            }
         }
-        Ok(response
-            .get("wsAuthSignature")
-            .cloned()
-            .unwrap_or(Value::Null))
     }
 
-    async fn device(&self, to_sign: String, output_format: &str) -> Result<Value, SignError> {
-        self.ask(nanoid(), &self.venue, to_sign, output_format, None)
+    async fn device<T>(
+        &self,
+        to_sign: String,
+        output_format: &str,
+        decode: impl FnOnce(&Value) -> Result<T, SignError>,
+    ) -> Result<T, SignError> {
+        self.ask(nanoid(), &self.venue, to_sign, output_format, None, decode)
             .await
     }
 
@@ -425,7 +451,9 @@ impl Inner {
         match operations {
             [Operation::PublicAddress { .. }] => {
                 let public = utf8(&self.primary.public)?;
-                let address = prefixed(&self.device(public, "hyperliquid-address").await?, 20)?;
+                let address = self
+                    .device(public, "hyperliquid-address", |v| prefixed(v, 20))
+                    .await?;
                 self.bind(&address)?;
                 Ok(vec![address])
             }
@@ -443,8 +471,9 @@ impl Inner {
                 if single_bytes(payload, 32)?.len() != 32 {
                     return refused();
                 }
-                let signature =
-                    prefixed(&self.device(utf8(&preimage)?, "hyperliquid-l1").await?, 65)?;
+                let signature = self
+                    .device(utf8(&preimage)?, "hyperliquid-l1", |v| prefixed(v, 65))
+                    .await?;
                 Ok(vec![sha256(&preimage), bound, signature])
             }
             _ => refused(),
@@ -463,10 +492,10 @@ impl Inner {
             return refused();
         }
         let preimage = single_bytes(payload, MAX_PAYLOAD)?.to_vec();
-        let joined = prefixed(
-            &self.device(utf8(&preimage)?, "lighter-tx").await?,
-            signs.len() * LIGHTER_SIGNATURE,
-        )?;
+        let length = signs.len() * LIGHTER_SIGNATURE;
+        let joined = self
+            .device(utf8(&preimage)?, "lighter-tx", |v| prefixed(v, length))
+            .await?;
         let mut values = vec![sha256(&preimage)];
         values.extend(joined.chunks(LIGHTER_SIGNATURE).map(<[u8]>::to_vec));
         Ok(values)
@@ -482,7 +511,9 @@ impl Inner {
                 },
             ] => {
                 let public = utf8(&self.primary.public)?;
-                let key = prefixed(&self.device(public, "paradex-public").await?, 32)?;
+                let key = self
+                    .device(public, "paradex-public", |v| prefixed(v, 32))
+                    .await?;
                 self.bind(&key)?;
                 Ok(vec![key])
             }
@@ -503,10 +534,10 @@ impl Inner {
                     return refused();
                 }
                 let preimage = single_bytes(payload, MAX_PAYLOAD)?.to_vec();
-                let joined = prefixed(
-                    &self.device(utf8(&preimage)?, "paradex-stark").await?,
-                    64 * signs.len(),
-                )?;
+                let length = 64 * signs.len();
+                let joined = self
+                    .device(utf8(&preimage)?, "paradex-stark", |v| prefixed(v, length))
+                    .await?;
                 let mut values = vec![sha256(&preimage)];
                 values.extend(joined.chunks(64).map(<[u8]>::to_vec));
                 Ok(values)
@@ -560,12 +591,11 @@ impl Inner {
                 return refused();
             }
         }
-        let outer = mac(
-            &self
-                .device(utf8(&preimage)?, "bitunix-double-sha256")
-                .await?,
-            Encoding::Hex,
-        )?;
+        let outer = self
+            .device(utf8(&preimage)?, "bitunix-double-sha256", |v| {
+                mac(v, Encoding::Hex)
+            })
+            .await?;
         Ok(vec![sha256(&preimage), outer, credential.clone()])
     }
 
@@ -684,9 +714,11 @@ impl Inner {
                         _ => (nanoid(), self.venue.as_str()),
                     };
                     let signature = self
-                        .ask(id, exchange_name, payload, encoding.wire(), extra)
+                        .ask(id, exchange_name, payload, encoding.wire(), extra, |v| {
+                            mac(v, encoding)
+                        })
                         .await?;
-                    values.push(mac(&signature, encoding)?);
+                    values.push(signature);
                 }
             }
         }
