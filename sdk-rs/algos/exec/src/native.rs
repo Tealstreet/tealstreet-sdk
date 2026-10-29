@@ -113,7 +113,7 @@ impl Host for Adapter {
             value
         }).collect();
         json!({"venue":store.venue,"accountName":self.account_name,"markets":markets,"instrumentClassificationsReady":store.instrument_classifications.is_some(),
-            "tickers":store.tickers.values().collect::<Vec<_>>(),"orders":store.orders,"positions":store.positions,"balance":store.balance,"socketHealth":{"privateInitialized":store.private_socket.initialized,"privateHealthy":store.private_socket.healthy}})
+            "tickers":store.tickers.values().collect::<Vec<_>>(),"orders":store.orders,"positions":store.positions,"balance":store.balance,"coins":store.coins,"loaded":store.loaded,"socketHealth":{"privateInitialized":store.private_socket.initialized,"privateHealthy":store.private_socket.healthy}})
     }
     fn call(&mut self, token: u64, method: &str, args: Value) -> Result<(), Value> {
         self.call_scoped(token, method, args, false)

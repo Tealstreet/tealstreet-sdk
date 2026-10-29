@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 
 mod algo_commands;
 mod capabilities;
+mod display;
 pub use algo_commands::{AlgoReply, AlgoRequest};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
@@ -452,7 +453,7 @@ impl Exec {
             if !parallel {
                 chain.wait_barrier = matches!(
                     positional(text).first().map(String::as_str),
-                    Some("wait" | "sleep")
+                    Some(head) if head.eq_ignore_ascii_case("wait") || head.eq_ignore_ascii_case("sleep")
                 );
             }
             let action = evaluate(&chain.symbol, text, &host.snapshot(), &chain.req_id, host);
@@ -777,7 +778,27 @@ fn evaluate(
     req_id: &Option<Value>,
     host: &mut impl Host,
 ) -> Evaluation {
-    let args = positional(text);
+    let mut args = positional(text);
+    if let Some(head) = args.first_mut() {
+        *head = display::canonical(head)
+            .map(str::to_string)
+            .unwrap_or_else(|| head.to_ascii_lowercase());
+    }
+    if !args.is_empty()
+        && let Some(result) = display::evaluate(symbol, &args, store, text)
+    {
+        return result;
+    }
+    if args.len() == 1
+        && rows(store, "markets").iter().any(|m| {
+            m["symbol"]
+                .as_str()
+                .is_some_and(|s| s.eq_ignore_ascii_case(&args[0]))
+        })
+    {
+        return display::evaluate(symbol, &["symbol".into(), args[0].clone()], store, text)
+            .expect("symbol command");
+    }
     let Some(head) = args.first().map(String::as_str) else {
         return Evaluation::Done(json!({"handled":true}));
     };

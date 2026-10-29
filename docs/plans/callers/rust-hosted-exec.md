@@ -132,3 +132,19 @@ including parse/admission refusal and timeout. This tightens TS worker parity
 to prevent a later trade on a false condition; other explicit semicolon steps
 retain continue-after-error. Disposal prevents a sleeping
 chain's successor from dispatching; no write is replayed on reconnect.
+
+Read-only order/position/margin/spot/market/status/check/max displays use current
+engine frames and the existing exec-log string envelope. Order/position filters
+retain TS focused/all/side and open/creating semantics; web tables use aligned
+nonbreaking-space columns. The focused position card retains native position,
+entry/mark/PnL/liquidation/leverage data. Coin and loaded sections remain unknown
+until delivered, distinct from a delivered empty or false section. No read-only
+command fetches venue data. Classification reports unknown for missing or new
+Bybit labels, and never advertises eligibility. Native spot uses the same aligned
+web-table style as other displays rather than TS's terminal box/ANSI formatter.
+Help metadata and case-insensitive aliases are generated from the registered TS
+catalog; regenerate with algos/exec/scripts/generate-cli-catalog.py, and verify
+with --check. The worker's symbol/session updates remain client-owned: each exec
+payload supplies its focus. Hosted variable/alias/budget/simulation commands keep
+the TS Worker's absent-PreprocessStore refusal; no second script state is created.
+Manual socket reconnect remains outside hosted EXEC (explicit fixed refusal).
