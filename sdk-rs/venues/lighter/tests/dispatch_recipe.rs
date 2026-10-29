@@ -369,8 +369,12 @@ fn work(engine: &mut Engine<Issue>) -> (RequestId, safe_cex_engine::signing::Sig
     works.pop().unwrap()
 }
 
+/// The Sign payloads after the leading statement commitment.
 fn payloads(work: &safe_cex_engine::signing::SignRequest) -> Vec<&[u8]> {
-    work.operations
+    let [Operation::Sha256 { .. }, signs @ ..] = &work.operations[..] else {
+        panic!("a statement commitment first");
+    };
+    signs
         .iter()
         .map(|operation| match operation {
             Operation::Sign { payload, .. } => match &payload[..] {
@@ -487,7 +491,8 @@ fn parked_refusals_and_malformed_results_never_send() {
         let result = match kind {
             0 => Err(SignError::Unavailable),
             1 => {
-                result.values[0].truncate(64);
+                // values[0] is the statement commitment; truncate the signature.
+                result.values[1].truncate(64);
                 Ok(result)
             }
             2 => {
