@@ -79,6 +79,9 @@ pub struct ExchangeMetadata {
     #[serde(rename = "supportsOptionsToggle")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_options_toggle: Option<bool>,
+    #[serde(rename = "optionsOnly")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options_only: Option<bool>,
     #[serde(rename = "supportsInverseToggle")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_inverse_toggle: Option<bool>,
@@ -292,6 +295,9 @@ struct ExchangeMetadataWire {
     #[serde(rename = "supportsOptionsToggle")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_options_toggle: Option<bool>,
+    #[serde(rename = "optionsOnly")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options_only: Option<bool>,
     #[serde(rename = "supportsInverseToggle")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_inverse_toggle: Option<bool>,
