@@ -57,7 +57,8 @@ struct Snapshot {
 
 struct Port {
     handle: AccountHandle,
-    client: u64,
+    /// Changes when the feed rejoins after the account dropped it.
+    client: Cell<u64>,
     store: RefCell<AlgoStore>,
     subscribers: RefCell<Vec<mpsc::UnboundedSender<Change>>>,
     next: Cell<CommandId>,
@@ -86,7 +87,7 @@ impl AccountPort for Port {
         if let Some(id) = id {
             self.pending.borrow_mut().insert(id, tx);
         }
-        let sent = self.handle.command(self.client, command);
+        let sent = self.handle.command(self.client.get(), command);
         if !sent && let Some(id) = id {
             self.pending.borrow_mut().remove(&id);
         }
@@ -211,6 +212,109 @@ impl Port {
     }
 }
 
+/// Algo clients are trusted and in-process: a deep queue keeps a burst from
+/// dropping them (and the fills its frames carry) as slow peers.
+pub const ALGO_QUEUE: usize = 4096;
+
+/// IDs for rejoined algo clients, apart from the registry's sequential ones.
+static REJOIN_IDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1 << 62);
+
+/// Everything the account sent since the last batch, coalesced.
+#[derive(Default)]
+pub struct Batch {
+    pub frames: usize,
+    /// Every fill of every coalesced frame, in order.
+    pub fills: Vec<Fill>,
+    pub notices: Vec<Value>,
+    /// The account had dropped this client; it rejoined with a fresh snapshot.
+    pub rejoined: bool,
+}
+
+/// The algo host's subscription to its account.
+pub struct Feed {
+    handle: AccountHandle,
+    link: safe_cex_native::ClientLink,
+    client: u64,
+    rejoins: std::collections::VecDeque<tokio::time::Instant>,
+}
+
+/// At most this many rejoins per window; past it the account is treated as gone.
+pub const MAX_REJOINS: usize = 5;
+pub const REJOIN_WINDOW: Duration = Duration::from_secs(60);
+
+impl Feed {
+    pub async fn join(handle: AccountHandle, client: u64) -> Result<Self, &'static str> {
+        let link = handle.join_with_capacity(client, false, ALGO_QUEUE).await?;
+        Ok(Self {
+            handle,
+            link,
+            client,
+            rejoins: Default::default(),
+        })
+    }
+
+    pub fn client(&self) -> u64 {
+        self.client
+    }
+
+    fn take(&self, batch: &mut Batch, item: Outgoing) {
+        match item {
+            Outgoing::Frame(frame) => {
+                batch.frames += 1;
+                // Fills ride only in their flush frame; the store keeps none.
+                batch
+                    .fills
+                    .extend(safe_cex_engine::wire::fills(&frame).unwrap_or_default());
+            }
+            Outgoing::Text(text) => {
+                if let Ok(notice) = serde_json::from_str(&text) {
+                    batch.notices.push(notice);
+                }
+            }
+        }
+    }
+
+    /// The next batch: one awaited item plus everything already queued. A
+    /// dropped client rejoins; `None` only when the account itself is gone.
+    pub async fn next(&mut self) -> Option<Batch> {
+        let mut batch = Batch::default();
+        match self.link.outgoing.recv().await {
+            Some(item) => self.take(&mut batch, item),
+            None => {
+                let now = tokio::time::Instant::now();
+                while self
+                    .rejoins
+                    .front()
+                    .is_some_and(|at| now.duration_since(*at) > REJOIN_WINDOW)
+                {
+                    self.rejoins.pop_front();
+                }
+                if self.rejoins.len() >= MAX_REJOINS {
+                    crate::state::Log::warn(
+                        "algo feed dropped repeatedly; giving up on the account",
+                    );
+                    return None;
+                }
+                // Back off so a feed dropped right after its snapshot cannot spin.
+                tokio::time::sleep(Duration::from_millis(100) * self.rejoins.len() as u32).await;
+                self.rejoins.push_back(now);
+                let client = REJOIN_IDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.link = self
+                    .handle
+                    .join_with_capacity(client, false, ALGO_QUEUE)
+                    .await
+                    .ok()?;
+                self.client = client;
+                batch.rejoined = true;
+            }
+        }
+        while let Ok(item) = self.link.outgoing.try_recv() {
+            self.take(&mut batch, item);
+        }
+        Some(batch)
+    }
+}
+
 /// Runs one account's algos until `Dispose` (or the inbox closes), then
 /// settles chases and disposes the engine. Call inside a `LocalSet`.
 pub async fn run(
@@ -222,7 +326,7 @@ pub async fn run(
     link_signer: Option<std::sync::Arc<safe_cex_remote_signer::SignerLink>>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
-    let Ok(mut link) = handle.join(client, false).await else {
+    let Ok(mut feed) = Feed::join(handle.clone(), client).await else {
         handle.dispose();
         if let Some(signer) = &link_signer {
             signer.mark_unavailable();
@@ -231,7 +335,7 @@ pub async fn run(
     };
     let port = Rc::new(Port {
         handle: handle.clone(),
-        client,
+        client: Cell::new(client),
         store: RefCell::new(AlgoStore {
             venue,
             ..AlgoStore::default()
@@ -270,23 +374,35 @@ pub async fn run(
     };
     loop {
         tokio::select! {
-            item = link.outgoing.recv() => match item {
-                Some(Outgoing::Frame(frame)) => {
-                    // Fills ride only in their flush frame; the store keeps none.
-                    let fills = safe_cex_engine::wire::fills(&frame).unwrap_or_default();
-                    if let Some(snapshot) = handle.read(project).await {
-                        let change = port.apply(snapshot, fills);
-                        port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
-                        publish(&mut published);
+            batch = feed.next() => {
+                let Some(batch) = batch else { break };
+                for notice in &batch.notices {
+                    port.settle(notice);
+                }
+                if batch.rejoined {
+                    crate::state::Log::warn(&format!("{name}: algo feed was dropped; rejoined with a fresh snapshot"));
+                    port.client.set(feed.client());
+                    // Their completions went to the dropped client: the outcome is unknown.
+                    for (_, waiter) in port.pending.borrow_mut().drain() {
+                        let mut error = VenueError::new("algo feed rejoined; command outcome unknown");
+                        error.outcome = Some(Outcome::Unknown);
+                        let _ = waiter.send(Err(error));
                     }
                 }
-                Some(Outgoing::Text(text)) => {
-                    if let Ok(notice) = serde_json::from_str::<Value>(&text) {
-                        port.settle(&notice);
+                // One store read per batch, carrying every coalesced frame's fills.
+                if (batch.frames > 0 || batch.rejoined)
+                    && let Some(snapshot) = handle.read(project).await
+                {
+                    let mut change = port.apply(snapshot, batch.fills);
+                    if batch.rejoined {
+                        // Fills sent while dropped are gone: make algos re-read orders and positions.
+                        change.orders = true;
+                        change.positions = true;
                     }
+                    port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
+                    publish(&mut published);
                 }
-                None => break,
-            },
+            }
             input = inbox.recv() => match input {
                 Some(AlgoInput::Op { op, data }) => {
                     if let Some(Err(error)) = registry.dispatch(&op, &data, &cx) {
@@ -312,7 +428,7 @@ pub async fn run(
         ));
     }
     scope.dispose();
-    handle.leave(client);
+    handle.leave(feed.client());
     handle.dispose();
     if let Some(signer) = &link_signer {
         signer.mark_unavailable();
