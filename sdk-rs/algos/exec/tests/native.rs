@@ -358,3 +358,43 @@ async fn native_swarm_checks_shared_account_credits_before_any_second_payload_sl
         cx.scope.dispose();tokio::task::yield_now().await;
     }).await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn cli_twap_starts_exactly_one_real_shared_schedule_and_list_stop_use_it() {
+    use safe_cex_algo_twap::factory::TwapFactory;
+    use safe_cex_chaser::ChaserBook;
+    use safe_cex_engine::model::{Limits, Market, MinMax, Precision, Ticker};
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());
+        port.store.borrow_mut().markets.insert("BTCUSDT".into(), Market {
+            id:"BTCUSDT".into(),symbol:"BTCUSDT".into(),pretty_symbol:None,base:"BTC".into(),quote:"USDT".into(),active:true,
+            precision:Precision{amount:0.001,price:0.1},limits:Limits{amount:MinMax{min:0.001,max:1000.},leverage:MinMax{min:1.,max:20.},price:None},
+            contract_size:None,is_expiring:None,is_inverse:None,is_spot:None,is_perpetual:None,is_read_only:None,taker_fee:None,maker_fee:None,
+        });
+        port.store.borrow_mut().tickers.insert("BTCUSDT".into(),Ticker{symbol:"BTCUSDT".into(),last:50000.,bid:49999.,ask:50001.,..Default::default()});
+        let cx=AlgoCx::new(port.clone(),Scope::new());let book=ChaserBook::new(cx.clone());
+        let twap=TwapFactory::new(cx.clone(),Rc::new(book.clone()));
+        let exec=ExecFactory::with_algos("trusted-account".into(),book.clone(),twap.clone());
+        exec.handle("exec",r#"{"symbol":"BTCUSDT","command":"twap buy $1000 into 2 over 1","reqId":"start","accountName":"untrusted"}"#,&cx).unwrap();
+        for _ in 0..8 {tokio::task::yield_now().await;}
+        let active=twap.active_twaps("trusted-account");assert_eq!(active.len(),1,"{:?}",port.events.borrow());
+        assert!(twap.active_twaps("untrusted").is_empty());
+        assert_eq!(active[0]["duration"],1.);assert_eq!(active[0]["ordersCount"],2);
+        assert_eq!(port.commands.borrow().len(),1);
+        assert!(matches!(&port.commands.borrow()[0],Command::PlaceOrders{orders,..} if orders.len()==1 && orders[0].amount==0.01));
+        exec.handle("exec",r#"{"symbol":"BTCUSDT","command":"twap list","reqId":"list"}"#,&cx).unwrap();
+        let id=active[0]["id"].as_str().unwrap();
+        assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-log"&&e.to_string().contains(id)));
+        exec.handle("exec",r#"{"symbol":"BTCUSDT","command":"twap stop all","reqId":"stop"}"#,&cx).unwrap();
+        tokio::time::advance(std::time::Duration::from_secs(61)).await;
+        for _ in 0..8 {tokio::task::yield_now().await;}
+        assert_eq!(port.commands.borrow().len(),1,"stop cannot release the second slice");
+        exec.handle("exec",r#"{"symbol":"BTCUSDT","command":"chase buy $100","reqId":"chase"}"#,&cx).unwrap();
+        assert_eq!(book.active_chasers().len(),1);
+        assert_eq!(book.active_chasers()[0].origin.as_deref(),Some("cli"));
+        exec.handle("exec",r#"{"symbol":"BTCUSDT","command":"chase cancel keep"}"#,&cx).unwrap();
+        assert!(book.active_chasers().is_empty());
+        assert_eq!(port.commands.borrow().len(),1,"cancel keep does not cancel the resting order");
+        book.shutdown("test cleanup").await;cx.scope.dispose();
+    }).await;
+}

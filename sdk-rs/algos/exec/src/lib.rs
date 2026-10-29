@@ -2,7 +2,9 @@
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 
+mod algo_commands;
 mod capabilities;
+pub use algo_commands::{AlgoReply, AlgoRequest};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 mod order_tools;
@@ -20,6 +22,9 @@ pub trait Host {
     fn snapshot(&self) -> Value;
     fn call(&mut self, token: u64, method: &str, args: Value) -> Result<(), Value>;
     fn emit(&mut self, op: &str, data: Value);
+    fn algo(&mut self, _request: AlgoRequest) -> Result<AlgoReply, Value> {
+        Err(json!({"message":"Hosted algo runtime unavailable","outcome":"notSent"}))
+    }
     fn random(&mut self) -> Result<f64, String> {
         Err("Random distribution unavailable".into())
     }
@@ -788,6 +793,7 @@ fn evaluate(
             Ok(orders) => Evaluation::Place(orders),
             Err(error) => failed(error),
         },
+        "chase" | "chasers" | "twap" => algo_commands::evaluate(symbol, &args, store, req_id, host),
         "swarm" => match swarm::prepare(symbol, &args, store, host) {
             Ok((orders, symbol, side)) => Evaluation::Swarm {
                 orders,

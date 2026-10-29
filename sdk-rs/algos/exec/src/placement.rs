@@ -366,7 +366,7 @@ fn clamp(order: &mut Value, store: &Value, market: &Value, ticker: &Value) {
             json!(nearest(reduced, positive(n(&market["precision"], "amount"), 1e-8)) / conversion);
     }
 }
-fn tradfi_preflight(store: &Value, market: &Value) -> Result<(), String> {
+pub(crate) fn tradfi_preflight(store: &Value, market: &Value) -> Result<(), String> {
     if !matches!(
         store["venue"].as_str(),
         Some("bybit" | "bybitdemo" | "bybitinverse" | "bybitspot")
