@@ -216,3 +216,116 @@ fn focused_position_card_help_examples_and_bare_symbol_preserve_read_only_sessio
     );
     assert!(p.calls.is_empty());
 }
+
+#[test]
+fn hosted_mutations_refuse_without_processing_or_logging_payload_credentials() {
+    for command in [
+        "account other",
+        "account enable other",
+        "accounts add --api-key secret-sentinel --api-secret secret-sentinel",
+        "accounts import '{\"apiKey\":\"secret-sentinel\"}'",
+        "accounts remove other",
+        "prompt preset minimal",
+        "prompt prefix secret-sentinel",
+        "prompt set secret-sentinel",
+    ] {
+        let mut p = port();
+        let result = run(&mut p, command);
+        assert_eq!(result["handled"], true, "{command}");
+        assert_eq!(result["success"], false, "{command}");
+        assert!(
+            result["error"]
+                .as_str()
+                .unwrap()
+                .contains("not available in hosted mode")
+        );
+        assert!(
+            !p.events
+                .iter()
+                .any(|(_, v)| v.to_string().contains("secret-sentinel"))
+        );
+        assert!(p.calls.is_empty());
+    }
+}
+#[test]
+fn account_reads_stay_trusted_and_the_worker_list_remains_empty() {
+    let mut p = port();
+    run(&mut p, "acc");
+    assert!(logs(&p).contains("Current account: trusted"));
+    p.events.clear();
+    run(&mut p, "accounts");
+    assert!(logs(&p).contains("No accounts configured"));
+    assert!(!logs(&p).contains("trusted"));
+    p.events.clear();
+    run(&mut p, "prompt list");
+    let out = logs(&p);
+    for name in ["minimal", "default", "detailed", "trader", "compact"] {
+        assert!(out.contains(name));
+    }
+    p.events.clear();
+    run(&mut p, "prompt preview");
+    assert!(logs(&p).contains("[UNKNOWN] [trusted BTCUSDT"));
+    assert!(p.calls.is_empty());
+}
+#[test]
+fn exchange_help_uses_inherited_ts_schema_flags_and_excludes_disabled_picker_rows() {
+    let mut p = port();
+    run(&mut p, "ex");
+    let out = logs(&p);
+    assert!(out.contains("Bybit"));
+    assert!(out.contains("Hyperliquid"));
+    assert!(out.contains("grvtSignerAddress, grvtTradingAccountId"));
+    assert!(
+        !out.lines()
+            .any(|l| l.trim_start().starts_with("polymarket "))
+    );
+    assert!(p.calls.is_empty());
+}
+#[test]
+fn generated_metadata_is_current_including_ts_inheritance_and_prompt_presets() {
+    let status = std::process::Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/generate-cli-catalog.py"
+        ))
+        .arg("--check")
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+#[test]
+fn every_registered_ts_command_has_a_native_route_or_an_explicit_hosted_refusal() {
+    let catalog: Vec<Value> = serde_json::from_str(include_str!("../src/catalog.json")).unwrap();
+    assert_eq!(catalog.len(), 58);
+    for row in catalog {
+        let mut p = port();
+        let name = row["name"].as_str().unwrap();
+        Exec::default().handle(
+            &json!({"symbol":"BTCUSDT","command":name,"reqId":"r"}),
+            &mut p,
+        );
+        assert!(
+            !logs(&p).starts_with("Unknown command:"),
+            "missing native route: {name}"
+        );
+        if p.calls.is_empty() {
+            let r = p.events.iter().find(|(op, _)| op == "exec-result").unwrap();
+            assert_eq!(r.1["handled"], true, "{name}: {:?}", p.events);
+        }
+    }
+}
+#[test]
+fn legacy_sequential_refusal_without_reqid_is_visible_as_in_typescript_worker_router() {
+    let mut p = port();
+    Exec::default().handle(
+        &json!({"symbol":"BTCUSDT","command":"prompt set ignored"}),
+        &mut p,
+    );
+    assert!(logs(&p).contains("not available in hosted mode"));
+    assert_eq!(
+        p.events.iter().filter(|(op, _)| op == "exec-log").count(),
+        1
+    );
+    assert!(p.events.iter().all(|(op, _)| op != "exec-result"));
+    assert!(p.calls.is_empty());
+}

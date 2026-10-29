@@ -177,3 +177,16 @@ candles or retry. Native time-axis labels explicitly use UTC rather than a
 browser/server locale, making hosted output deterministic. This is a read query,
 not a new transport or chart subscription; disposal prevents any queued chain
 successor from release. Browser watch/repl behavior remains outside hosted EXEC.
+
+Hosted account-management and prompt mutations deliberately refuse with a fixed
+"not available in hosted mode" error instead of the TS worker's dropped session
+action/no-op adapter success. No credentials are processed or echoed from those
+payloads. Reads use the trusted account; plain accounts list preserves the empty
+worker adapter result. Terminal clear is explicitly unavailable. Prompt preview
+is read-only, uses the current snapshot and reports unknown private telemetry;
+it neither changes nor persists a browser prompt/session. Exchange required-field
+help and the five prompt presets come from the same generated TS metadata check
+as command help. Every one of the 58 registered command names has a route or an
+explicit hosted refusal. A sequential inline refusal without reqId emits one
+exec-log fallback, matching worker-host/router.ts; a wait barrier already logged
+its error and does not duplicate it. Parallel result/capture semantics are unchanged.
