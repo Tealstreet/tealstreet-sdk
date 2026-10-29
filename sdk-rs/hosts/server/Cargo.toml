@@ -1,0 +1,29 @@
+[package]
+name = "safe-cex-exchange-server"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Native hosted exchange server: today's /account envelope over FrameServer accounts"
+
+[[bin]]
+name = "exchange-server"
+path = "src/main.rs"
+
+[dependencies]
+safe-cex-engine.workspace = true
+safe-cex-native = { workspace = true, features = ["address-nonce"] }
+safe-cex-remote-signer = { path = "../remote-signer" }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws", "query", "json"] }
+tokio = { version = "1.53.3", features = ["rt", "rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+jsonwebtoken = { version = "9.3.1", default-features = false, features = ["use_pem"] }
+base64.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio-tungstenite = "0.30.0"
+
+[lints]
+workspace = true

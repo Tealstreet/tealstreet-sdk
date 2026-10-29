@@ -882,6 +882,8 @@ async fn in_process_account_handle_snapshots_commands_and_disposes() {
             if let safe_cex_native::Outgoing::Text(text) = next(&mut first).await { break text; }
         };
         assert!(matches!(serde_json::from_str::<Reply>(&done).unwrap(), Reply::Done { command: 7, result: Some(result), error: None } if result == "\"a\""));
+        let markets = handle.read(|store| store.markets().len()).await;
+        assert_eq!(markets, Some(1), "reads run against the engine store");
         // A second in-process client on the same account gets its own snapshot.
         let mut second = handle.join(2, false).await.unwrap();
         assert!(matches!(next(&mut second).await, safe_cex_native::Outgoing::Frame(_)));
