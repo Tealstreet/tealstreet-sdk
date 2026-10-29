@@ -70,7 +70,6 @@ const start = (name: ExchangeName, options: Partial<ExchangeOptions>) => {
 // MCP signer mode supplies a payloadSigner and no secret. These venues skip the
 // generic local-credential guard, so before this refusal they started unsigned.
 it.each([
-  'hyperliquid',
   'txflow',
   'coinbase',
   'coinbasespot',
@@ -111,15 +110,29 @@ it('leaves Paradex and explicitly public-only payload signers to native construc
   }
 });
 
+// Hyperliquid declares remote signing, so its PayloadSigner refusal is the shared
+// delegated policy: refused at construction, before any engine or transport.
+it('refuses a private hyperliquid payloadSigner at construction before any engine', () => {
+  const { construct, transport, io } = recordEngine('hyperliquid');
+  for (const name of ['hyperliquid', 'hyperliquidspot'] as const) {
+    expect(() => new RustEngineExchange(name, { key: 'k', secret: '', payloadSigner } as ExchangeOptions, new DefaultStore()))
+      .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+  }
+  expect(construct).not.toHaveBeenCalled();
+  expect(transport).not.toHaveBeenCalled();
+  expect(io).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
 it('reports the structured refusal through start and validateAccount', async () => {
-  const { construct, transport, io } = recordEngine('hyperliquid', true);
-  const hyperliquid = new RustEngineExchange(
-    'hyperliquid',
+  const { construct, transport, io } = recordEngine('txflow', true);
+  const txflow = new RustEngineExchange(
+    'txflow',
     { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
     new DefaultStore(),
   );
-  running.push(hyperliquid);
-  await expect(hyperliquid.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+  running.push(txflow);
+  await expect(txflow.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
 
   const coinbase = new RustEngineExchange(
     'coinbase',
