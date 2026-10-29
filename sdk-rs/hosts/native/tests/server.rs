@@ -943,3 +943,70 @@ async fn a_deep_in_process_queue_survives_a_burst_the_default_peer_cannot() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn an_account_handle_reads_books_and_takes_a_trusted_public_feed() {
+    LocalSet::new().run_until(async {
+        let mut book = Book::default();
+        book.apply(BookSide::Bids, 99., 1.);
+        book.apply(BookSide::Asks, 101., 2.);
+        let mut engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
+            label: "a",
+            book,
+            observed: Rc::default(),
+            pending: Vec::new(),
+            received: Rc::default(),
+            started: Rc::default(),
+            poll_scales: Rc::default(),
+            poll_intervals: Rc::default(),
+            poll_timer: None,
+        });
+        engine.set_public_feed_policy(safe_cex_engine::PublicFeedPolicy::Shared).unwrap();
+        let (handle, _task) = safe_cex_native::spawn_account(Host::new(engine, Tape::default()), config()).unwrap();
+        let books = handle.books(vec!["BTCUSDT".into(), "UNKNOWN".into()]).await.unwrap();
+        assert!(books.is_empty(), "a shared-feed account has no book until the provider sends one");
+        let safe_cex_engine::command::HostInput::PublicFeedUpdate(update) =
+            safe_cex_engine::command::decode_host_input(r#"{"op":"publicFeedUpdate","books":[{"symbol":"BTCUSDT","bids":[[88,2]],"asks":[[90,3]]}]}"#).unwrap() else { panic!("update") };
+        assert!(handle.public_feed(update));
+        let mut fed = Vec::new();
+        for _ in 0..50 {
+            fed = handle.books(vec!["BTCUSDT".into()]).await.unwrap();
+            if fed.first().is_some_and(|book| book.1 == vec![(88., 2.)]) { break; }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        assert_eq!(fed, vec![("BTCUSDT".to_owned(), vec![(88., 2.)], vec![(90., 3.)])], "the shared feed set the book");
+    }).await;
+}
+
+#[tokio::test]
+async fn a_direct_account_handle_reads_its_venue_books() {
+    LocalSet::new()
+        .run_until(async {
+            let mut book = Book::default();
+            book.apply(BookSide::Bids, 99., 1.);
+            book.apply(BookSide::Asks, 101., 2.);
+            let engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
+                label: "a",
+                book,
+                observed: Rc::default(),
+                pending: Vec::new(),
+                received: Rc::default(),
+                started: Rc::default(),
+                poll_scales: Rc::default(),
+                poll_intervals: Rc::default(),
+                poll_timer: None,
+            });
+            let (handle, _task) =
+                safe_cex_native::spawn_account(Host::new(engine, Tape::default()), config())
+                    .unwrap();
+            let books = handle
+                .books(vec!["BTCUSDT".into(), "UNKNOWN".into()])
+                .await
+                .unwrap();
+            assert_eq!(
+                books,
+                vec![("BTCUSDT".to_owned(), vec![(99., 1.)], vec![(101., 2.)])]
+            );
+        })
+        .await;
+}

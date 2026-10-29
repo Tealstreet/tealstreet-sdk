@@ -295,7 +295,11 @@ pub struct AccountHandle {
     stop: Arc<watch::Sender<bool>>,
     config: ServerConfig,
     capabilities: safe_cex_engine::Capabilities,
+    events: crate::Events,
 }
+
+/// One book's levels, best first, as `(symbol, bids, asks)`.
+pub type BookLevels = (String, Vec<(f64, f64)>, Vec<(f64, f64)>);
 
 /// A joined client's stream: a full snapshot frame first, then ordered flush
 /// frames and JSON notices exactly as the frame-server wire sends them.
@@ -318,6 +322,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
         ));
     }
     let capabilities = host.engine.capabilities();
+    let events = host.event_sender();
     let (commands, inbox) = mpsc::channel(256);
     let (stop, stopped) = watch::channel(false);
     let actor = Account::new(host, config.clone());
@@ -335,6 +340,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
         stop: Arc::new(stop),
         config,
         capabilities,
+        events,
     };
     Ok((handle, task))
 }
@@ -472,6 +478,24 @@ impl AccountHandle {
             .is_ok()
     }
 
+    /// The current levels of `symbols`' books; unknown symbols are omitted.
+    pub async fn books(&self, symbols: Vec<String>) -> Option<Vec<BookLevels>> {
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(Control::Books(symbols, reply))
+            .await
+            .ok()?;
+        result.await.ok()
+    }
+
+    /// Delivers host-owned public data to an account built with
+    /// `PublicFeedPolicy::Shared` (trusted provider ingress, never client input).
+    pub fn public_feed(&self, update: safe_cex_engine::PublicFeedUpdate) -> bool {
+        self.events
+            .send(crate::HostEvent::PublicFeedUpdate(update))
+            .is_ok()
+    }
+
     pub fn leave(&self, client: u64) {
         let _ = self.commands.try_send(Control::Leave(client));
     }
@@ -516,6 +540,7 @@ enum Control {
     },
     Leave(u64),
     Read(Box<dyn FnOnce(&safe_cex_engine::Store) + Send>),
+    Books(Vec<String>, oneshot::Sender<Vec<BookLevels>>),
 }
 
 /// Subprotocol a client offers beside `safe-cex-frame.v1` to receive
@@ -640,6 +665,16 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                     Some(Control::Leave(client)) => self.leave(client),
                     Some(Control::Read(read)) => read(self.host.engine.store()),
+                    Some(Control::Books(symbols, reply)) => {
+                        let books = symbols
+                            .into_iter()
+                            .filter_map(|symbol| {
+                                let book = self.host.engine.book(&symbol)?;
+                                Some((symbol, book.bids().to_vec(), book.asks().to_vec()))
+                            })
+                            .collect();
+                        let _ = reply.send(books);
+                    }
                     None => break,
                 },
                 Some(event) = self.host.inbox.recv() => self.host.dispatch(event),
