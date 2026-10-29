@@ -78,3 +78,11 @@ unprotected; this is an intentional native safety message addition, without
 retry. An underwater break-even that becomes a TP warns there is no stop loss.
 Move requires exactly one open limit matching the real ID prefix and sends
 only a rounded price amend, retaining size/side/reduce-only in the engine.
+
+Protective/close scope tokens fail closed: an unrecognized explicit symbol
+never becomes the focused position. Move and trigger prices require the entire
+numeric token; native deliberately refuses TS parseFloat-prefix inputs such as
+61k, 61,000 or 6100O rather than amending at a truncated price. Unprotected
+break-even replacement errors name the actual symbol and say no stop is in
+place in both the failed exec-result and the existing error notice channel,
+not only the diagnostic exec-log. Duplicate completion cannot repeat the notice.
