@@ -4,7 +4,7 @@ use safe_cex_algos::{AccountPort, AlgoCx, AlgoStore, Change, CommandFuture, Regi
 use safe_cex_engine::engine::{Command, CommandId, Fill};
 use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_engine::model::{
-    Balance, InstrumentClassification, Loaded, Market, Order, Position, Ticker,
+    Balance, CoinBalance, InstrumentClassification, Loaded, Market, Order, Position, Ticker,
 };
 use safe_cex_native::{AccountHandle, Outgoing};
 use serde_json::Value;
@@ -53,6 +53,7 @@ struct Snapshot {
     balance: Balance,
     loaded: Loaded,
     classifications: Option<Vec<InstrumentClassification>>,
+    coins: Option<Vec<CoinBalance>>,
 }
 
 struct Port {
@@ -126,6 +127,7 @@ fn project(store: &safe_cex_engine::Store) -> Snapshot {
         balance: store.balance().clone(),
         loaded: store.loaded(),
         classifications: store.instrument_classifications().map(<[_]>::to_vec),
+        coins: store.coin_balances().map(<[_]>::to_vec),
     }
 }
 
@@ -164,6 +166,8 @@ fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>, rejoined: 
         .into_iter()
         .map(|market| (market.symbol.clone(), market))
         .collect();
+    store.coins = snapshot.coins;
+    store.loaded = Some(snapshot.loaded);
     if snapshot.loaded.balance {
         store.balance = Some(snapshot.balance);
     }
@@ -500,6 +504,7 @@ mod tests {
                 tickers: true,
                 positions: true,
             },
+            coins: None,
             classifications: classified.then(|| {
                 vec![InstrumentClassification {
                     market: 1,
@@ -516,6 +521,8 @@ mod tests {
         let mut store = AlgoStore::default();
         apply(&mut store, snapshot(false, false), Vec::new(), false);
         assert!(store.instrument_classifications.is_none());
+        assert!(store.coins.is_none(), "absent coins stay absent");
+        assert!(store.loaded.is_some_and(|loaded| loaded.orders));
         assert!(
             store.balance.is_none(),
             "no balance before its section loads"
