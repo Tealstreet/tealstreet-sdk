@@ -13,7 +13,20 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// Panics when two families claim the same op, which would shadow one.
     pub fn new(factories: Vec<Box<dyn AlgoFactory>>) -> Self {
+        let mut ops: Vec<&str> = factories
+            .iter()
+            .flat_map(|factory| factory.ops().iter().copied())
+            .collect();
+        let count = ops.len();
+        ops.sort_unstable();
+        ops.dedup();
+        assert_eq!(
+            ops.len(),
+            count,
+            "algo ops must be disjoint across families"
+        );
         Self { factories }
     }
 

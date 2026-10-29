@@ -31,6 +31,7 @@ impl Scope {
             child.dispose();
         } else {
             state.tasks.retain(|task| !task.is_finished());
+            state.children.retain(|child| !child.is_disposed());
             state.children.push(child.clone());
         }
         child
@@ -44,6 +45,12 @@ impl Scope {
         let mut state = self.0.borrow_mut();
         state.tasks.retain(|task| !task.is_finished());
         state.tasks.push(handle);
+    }
+
+    /// Live children, for leak tests.
+    #[doc(hidden)]
+    pub fn child_count(&self) -> usize {
+        self.0.borrow().children.len()
     }
 
     pub fn is_disposed(&self) -> bool {
@@ -83,7 +90,8 @@ impl AlgoCx {
         Self { port, scope }
     }
 
-    /// A context for one algo instance, disposed with this one.
+    /// A context for one algo instance, disposed with this one. The algo
+    /// disposes it when it finishes, so the parent can drop it.
     pub fn child(&self) -> AlgoCx {
         Self {
             port: self.port.clone(),

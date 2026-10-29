@@ -57,3 +57,30 @@ async fn disposing_a_child_leaves_its_parent_running() {
         })
         .await;
 }
+
+#[test]
+#[should_panic(expected = "algo ops must be disjoint")]
+fn a_registry_refuses_a_duplicated_op() {
+    struct Family(&'static [&'static str]);
+    impl safe_cex_algos::AlgoFactory for Family {
+        fn ops(&self) -> &'static [&'static str] {
+            self.0
+        }
+        fn handle(&self, _: &str, _: &str, _: &safe_cex_algos::AlgoCx) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    safe_cex_algos::Registry::new(vec![
+        Box::new(Family(&["chaser:start"])),
+        Box::new(Family(&["chaser:start"])),
+    ]);
+}
+
+#[test]
+fn a_disposed_child_is_pruned_when_the_next_child_is_made() {
+    let parent = Scope::new();
+    let first = parent.child();
+    first.dispose();
+    let _second = parent.child();
+    assert_eq!(parent.child_count(), 1);
+}

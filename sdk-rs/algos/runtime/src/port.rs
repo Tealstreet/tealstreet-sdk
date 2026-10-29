@@ -4,7 +4,7 @@ use std::pin::Pin;
 
 use safe_cex_engine::engine::{Command, CommandId, Fill};
 use safe_cex_engine::error::VenueError;
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 use crate::AlgoStore;
 
@@ -25,9 +25,12 @@ pub struct Change {
 /// outcome is reported, never replayed.
 pub trait AccountPort {
     /// The latest decoded state; already updated when a [`Change`] is delivered.
+    /// Never hold the borrow across an `.await`: the port applies frames between polls.
     fn store(&self) -> Ref<'_, AlgoStore>;
     /// One [`Change`] per applied flush frame, from the moment of subscribing.
-    fn subscribe(&self) -> broadcast::Receiver<Change>;
+    /// Unbounded so no fill is ever dropped for a busy algo; dropping the
+    /// receiver unsubscribes.
+    fn subscribe(&self) -> mpsc::UnboundedReceiver<Change>;
     fn next_command_id(&self) -> CommandId;
     fn command(&self, command: Command) -> CommandFuture;
     /// A wire reply to the client that started the algo, under an existing op
