@@ -1002,6 +1002,9 @@ impl BybitLinear {
             (RetireReason::Closed, None) => "Bybit socket closed; reconnecting".into(),
             (RetireReason::Stopped, _) => "Bybit socket stopped".into(),
             (RetireReason::RouteExhausted, _) => "Bybit socket refused on every route".into(),
+            (RetireReason::RouteRefused, _) => {
+                "Bybit socket route refused; trying the next route".into()
+            }
         };
         cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
     }
