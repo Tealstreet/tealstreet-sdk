@@ -49,7 +49,7 @@ impl AccountPort for Port {
 async fn actual_shared_runtime_delivers_typed_engine_commands_and_wire_reply() {
     LocalSet::new().run_until(async {
   let port=Rc::new(Port::default());let cx=AlgoCx::new(port.clone(),Scope::new());
-  ExecFactory.handle("exec",r#"{"symbol":"BTCUSDT","command":"cancel; lev 3","reqId":"r"}"#,&cx).unwrap();
+  ExecFactory::default().handle("exec",r#"{"symbol":"BTCUSDT","command":"cancel; lev 3","reqId":"r"}"#,&cx).unwrap();
   tokio::task::yield_now().await;
   assert!(matches!(&port.commands.borrow()[0],Command::CancelSymbolOrders{symbol,..} if symbol=="BTCUSDT"));
   assert_eq!(port.commands.borrow().len(),1);
@@ -68,7 +68,7 @@ async fn closing_shared_scope_during_a_command_never_issues_the_successor() {
         .run_until(async {
             let port = Rc::new(Port::default());
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            ExecFactory
+            ExecFactory::default()
                 .handle(
                     "exec",
                     r#"{"symbol":"BTCUSDT","command":"cancel; lev 9","reqId":"r"}"#,
@@ -120,4 +120,91 @@ fn cancellation_keeps_routing_symbols_and_partial_errors_keep_real_ids() {
     assert_eq!(data["totalOrderCount"], 2);
     assert_eq!(data["outcome"], "unknown");
     assert!(translate("invented", &json!([]), 2).is_err());
+}
+
+#[tokio::test]
+async fn parallel_budget_spans_payloads_and_refuses_second_whole_payload() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            for req in ["one", "two"] {
+                let data = json!({"symbol":"BTCUSDT","command":"@cancel;".repeat(20),"reqId":req});
+                factory.handle("exec", &data.to_string(), &cx).unwrap();
+            }
+            tokio::task::yield_now().await;
+            assert_eq!(
+                port.commands.borrow().len(),
+                20,
+                "second payload dispatches nothing"
+            );
+            assert!(
+                port.events
+                    .borrow()
+                    .iter()
+                    .any(|(op, data)| op == "exec-result"
+                        && data["reqId"] == "two"
+                        && data["success"] == false)
+            );
+            for reply in port.replies.borrow_mut().drain(..) {
+                reply.send(Ok("[]".into())).unwrap();
+            }
+            tokio::task::yield_now().await;
+            factory
+                .handle(
+                    "exec",
+                    &json!({"symbol":"BTCUSDT","command":"@cancel;".repeat(20),"reqId":"three"})
+                        .to_string(),
+                    &cx,
+                )
+                .unwrap();
+            tokio::task::yield_now().await;
+            assert_eq!(
+                port.commands.borrow().len(),
+                40,
+                "settlement returns all credits"
+            );
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn scope_abort_returns_account_parallel_credits_without_a_replay() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            let data = json!({"symbol":"BTCUSDT","command":"@cancel;".repeat(20)}).to_string();
+            factory.handle("exec", &data, &cx).unwrap();
+            tokio::task::yield_now().await;
+            cx.scope.dispose();
+            tokio::task::yield_now().await;
+            let next = AlgoCx::new(port.clone(), Scope::new());
+            factory.handle("exec", &data, &next).unwrap();
+            tokio::task::yield_now().await;
+            assert_eq!(
+                port.commands.borrow().len(),
+                40,
+                "20 new calls, no replay of old calls"
+            );
+            next.scope.dispose();
+        })
+        .await;
+}
+
+#[test]
+fn a_factory_cannot_share_credits_or_state_across_accounts() {
+    let factory = ExecFactory::default();
+    let one = AlgoCx::new(Rc::new(Port::default()), Scope::new());
+    let two = AlgoCx::new(Rc::new(Port::default()), Scope::new());
+    factory
+        .handle("exec", r#"{"command":"echo hi"}"#, &one)
+        .unwrap();
+    assert_eq!(
+        factory.handle("exec", r#"{"command":"echo hi"}"#, &two),
+        Err("ExecFactory must be account-scoped".into())
+    );
 }

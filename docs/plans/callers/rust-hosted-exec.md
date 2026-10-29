@@ -30,3 +30,9 @@ Approved native resource difference: reject the whole payload before dispatch
 above 16 KiB UTF-8 command text, 128 nonempty steps, or 32 parallel slices plus
 already in-flight parallel calls in this Exec. Rejection produces exec-log and
 the optional failed exec-result. No earlier command in that payload is executed.
+
+Construct one `ExecFactory::default()` per account registry. Its shared parallel
+credits span payloads; command settlement and scope-aborted waiter disposal
+return credits without replaying any engine write. Reusing a factory for a
+different account port is refused. Separate requests keep separate chain state
+and reply ownership, even though they consume the same account budget.

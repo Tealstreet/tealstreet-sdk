@@ -15,6 +15,18 @@ pub trait Host {
     fn snapshot(&self) -> Value;
     fn call(&mut self, token: u64, method: &str, args: Value) -> Result<(), Value>;
     fn emit(&mut self, op: &str, data: Value);
+    fn parallel_in_flight(&self) -> usize {
+        0
+    }
+    fn call_scoped(
+        &mut self,
+        token: u64,
+        method: &str,
+        args: Value,
+        _parallel: bool,
+    ) -> Result<(), Value> {
+        self.call(token, method, args)
+    }
 }
 
 #[derive(Default)]
@@ -81,7 +93,12 @@ impl Exec {
             .map(String::from)
             .collect();
         let parallel = steps.iter().filter(|s| s.starts_with('@')).count();
-        let in_flight = self.pending.values().filter(|p| p.chain.is_none()).count();
+        let in_flight = self
+            .pending
+            .values()
+            .filter(|p| p.chain.is_none())
+            .count()
+            .max(host.parallel_in_flight());
         if steps.len() > MAX_STEPS || parallel + in_flight > MAX_PARALLEL {
             resource_refusal(host, &req_id);
             return;
@@ -189,7 +206,7 @@ impl Exec {
                         },
                     );
                     self.chains.insert(id, chain);
-                    match host.call(token, method, args) {
+                    match host.call_scoped(token, method, args, parallel) {
                         Ok(()) if !parallel => return,
                         Ok(()) => {}
                         Err(error) => {
