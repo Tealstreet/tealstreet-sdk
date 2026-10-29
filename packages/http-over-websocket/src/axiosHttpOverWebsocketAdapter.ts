@@ -6,7 +6,7 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
 import { bindProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from './config';
-import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from './tunnelEndpoints';
+import { tunnelEgressUrl } from './tunnelEndpoints';
 import { isTokyoEgress } from './egressRegion';
 import { HOWWebSocket } from './HOWWebSocket';
 import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, LatencyEntry } from './types';
@@ -260,8 +260,8 @@ const BYPASS_PROXY_EXCHANGES = ['grvt'];
 
 const BYPASS_PROXY_PATTERN = new RegExp(BYPASS_PROXY_EXCHANGES.join('|'), 'i');
 
-export let howWebSocketSG = new HOWWebSocket(SINGAPORE_HOW_EGRESS);
-export let howWebSocketJA = new HOWWebSocket(TOKYO_HOW_EGRESS);
+export let howWebSocketSG = new HOWWebSocket(() => tunnelEgressUrl('sg'));
+export let howWebSocketJA = new HOWWebSocket(() => tunnelEgressUrl('jp'));
 
 // A Bad auth response is connection-scoped, but many HTTP requests can observe
 // it concurrently. Elect one request to refresh/send the token and let the
@@ -398,7 +398,7 @@ const createAxiosHttpOverWebsocketAdapter = (
     if (WebSocketCtor) {
       let owned = ownedSockets.get(selectedRegion);
       if (!owned) {
-        owned = new HOWWebSocket(selectedRegion === 'JA' ? TOKYO_HOW_EGRESS : SINGAPORE_HOW_EGRESS, WebSocketCtor);
+        owned = new HOWWebSocket(tunnelEgressUrl(selectedRegion === 'JA' ? 'jp' : 'sg'), WebSocketCtor);
         ownedSockets.set(selectedRegion, owned);
       }
       howWebSocket = owned;

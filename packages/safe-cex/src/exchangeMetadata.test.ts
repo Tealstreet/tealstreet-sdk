@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
 import {
   exchangeMetadata,
   exchangePrettyNames,
@@ -271,6 +272,16 @@ describe('exchangeMetadata', () => {
             `${name}: requiresCors is true but privateProxyIps is empty`,
           ).toBeGreaterThan(0);
         }
+      });
+    });
+
+    // Since AWS_EXIT.md step 3e every private path egresses from the Vultr Tokyo fleet,
+    // so the form must never again suggest an AWS pool to whitelist on master.
+    it('every whitelist the account form can show is the Vultr Tokyo fleet', () => {
+      exchanges.forEach((name) => {
+        const m = exchangeMetadata[name];
+        const lists = [m.privateProxyIps, ...Object.values(m.privateProxyRegions)].filter((ips) => ips.length);
+        lists.forEach((ips) => expect(ips, name).toEqual(privateProxyIpsVultrTokyo));
       });
     });
 

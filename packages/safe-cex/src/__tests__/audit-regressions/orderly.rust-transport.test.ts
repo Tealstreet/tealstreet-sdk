@@ -455,8 +455,9 @@ describe('Orderly Rust transport boundary', () => {
   it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
     '%s native routing plan uses the same serializable HOW policy', (name) => {
       const plan = resolveEngineRoutingPlan(name, options(tealstreetTransport, { tealstreetTunnel: true }), origin);
+      // Was fsjnpy143pbz.asia (AWS) until AWS_EXIT.md step 3e.
       expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false,
-        tunnelUrl: 'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel' });
+        tunnelUrl: 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel' });
       expect(plan.ws).toEqual({ public: {}, private: {}, business: {} });
       expect(JSON.stringify(plan)).not.toContain('unused-test-secret');
     },
