@@ -208,3 +208,55 @@ fn a_factory_cannot_share_credits_or_state_across_accounts() {
         Err("ExecFactory must be account-scoped".into())
     );
 }
+
+#[tokio::test]
+async fn settling_and_aborting_return_each_credit_once_in_either_order() {
+    LocalSet::new()
+        .run_until(async {
+            for settle_first in [false, true] {
+                let port = Rc::new(Port::default());
+                let factory = ExecFactory::default();
+                let old = AlgoCx::new(port.clone(), Scope::new());
+                let payload =
+                    json!({"symbol":"BTCUSDT","command":"@cancel;".repeat(32)}).to_string();
+                factory.handle("exec", &payload, &old).unwrap();
+                tokio::task::yield_now().await;
+                assert_eq!(port.commands.borrow().len(), 32);
+                for reply in port.replies.borrow_mut().drain(..) {
+                    reply.send(Ok("[]".into())).unwrap();
+                }
+                if settle_first {
+                    tokio::task::yield_now().await;
+                }
+                old.scope.dispose();
+                tokio::task::yield_now().await;
+                let next = AlgoCx::new(port.clone(), Scope::new());
+                factory.handle("exec", &payload, &next).unwrap();
+                factory
+                    .handle(
+                        "exec",
+                        &json!({"symbol":"BTCUSDT","command":"@cancel","reqId":"overflow"})
+                            .to_string(),
+                        &next,
+                    )
+                    .unwrap();
+                tokio::task::yield_now().await;
+                assert_eq!(
+                    port.commands.borrow().len(),
+                    64,
+                    "all 32 credits returned exactly once, settle_first={settle_first}"
+                );
+                assert!(
+                    port.events
+                        .borrow()
+                        .iter()
+                        .any(|(op, data)| op == "exec-result"
+                            && data["reqId"] == "overflow"
+                            && data["success"] == false)
+                );
+                next.scope.dispose();
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+}
