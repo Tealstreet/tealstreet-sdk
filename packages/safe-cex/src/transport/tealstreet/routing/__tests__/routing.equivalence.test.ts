@@ -101,7 +101,7 @@ const bybitBrazil = { bybitSiteId: 'BRA_BTL' as const };
 // AWS_EXIT.md step 3e moved every host below from fsjnpy143pbz.{jp,asia} (AWS) to the
 // Vultr host: the tunnel, the relay, the bybitbra/grvt/lighter paths, and the
 // okx/okxeu/bitget/blofin private sockets, which became relay urls in place of the
-// AWS Python ws-proxy paths. coinbase is still on AWS; apex went direct. The hosted
+// AWS Python ws-proxy paths, as did coinbase's once the relay took root paths (5a); apex went direct. The hosted
 // exchange server keeps the old hosts (services/exchange-server/src/egress-hosts.test.ts).
 const TYO = 'wss://fsjnpy143pbz-tyo.tealstreet.io';
 const relayOf = (upstream: string) => `${TYO}/tunnel?ts-relay=${encodeURIComponent(upstream)}`;
@@ -119,9 +119,9 @@ describe('routing table / resolver (Epic 1 net)', () => {
       fallback: 'wss://okx-proxy-ja.tealstreet.io/ws/v5/private',
     });
     expect(resolveExchangeRouting('blofin', proxy).wsPrivate.host).toBe(relayOf('wss://openapi.blofin.com/ws/private'));
-    // Still the AWS ws-proxy: the tunnel cannot allowlist coinbase's root path yet.
+    // Was the AWS ws-proxy `…asia…/coinbase/private`; the relay dials its host root (5a).
     expect(resolveExchangeRouting('coinbase', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private',
+      relayOf('wss://advanced-trade-ws-user.coinbase.com/'),
     );
     // Was the AWS ws-proxy `…asia…/apex/private`; apex connects directly since 3e (5c).
     expect(resolveExchangeRouting('apexomni', proxy).wsPrivate).toEqual({ tunnelled: false });
@@ -227,7 +227,7 @@ describe('routing table / resolver (Epic 1 net)', () => {
     }
     // coinbasespot extends CoinbaseExchange -> same private proxy host.
     expect(resolveExchangeRouting('coinbasespot', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private',
+      relayOf('wss://advanced-trade-ws-user.coinbase.com/'),
     );
   });
 
