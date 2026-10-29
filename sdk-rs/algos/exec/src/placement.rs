@@ -14,7 +14,7 @@ pub(crate) struct Placement {
     reduce: bool,
     post_only: bool,
 }
-fn number(text: &str) -> Option<f64> {
+pub(crate) fn number(text: &str) -> Option<f64> {
     let mut dots = 0;
     if text.is_empty()
         || !text.chars().all(|c| {
@@ -116,7 +116,7 @@ pub(crate) fn parse(
         })
         .collect())
 }
-fn n(value: &Value, key: &str) -> f64 {
+pub(crate) fn n(value: &Value, key: &str) -> f64 {
     value[key].as_f64().unwrap_or(0.)
 }
 fn positive(value: f64, default: f64) -> f64 {
@@ -132,7 +132,7 @@ fn js_round(value: f64) -> f64 {
 fn clean(value: f64) -> f64 {
     format!("{value:.10}").parse().unwrap_or(0.)
 }
-fn nearest(value: f64, step: f64) -> f64 {
+pub(crate) fn nearest(value: f64, step: f64) -> f64 {
     clean(js_round(value / step) * step)
 }
 fn adjust(value: f64, step: f64) -> f64 {
@@ -158,7 +158,7 @@ pub(crate) fn native_position(position: &Value, market: &Value) -> f64 {
         .abs()
         .max(source.abs() / contract)
 }
-fn price(text: &str, last: f64) -> Result<f64, String> {
+pub(crate) fn price(text: &str, last: f64) -> Result<f64, String> {
     let text = text.strip_prefix('$').unwrap_or(text);
     let unsigned = text.trim_start_matches(['+', '-']);
     let value = number(unsigned.trim_end_matches('%'))
@@ -173,6 +173,18 @@ fn price(text: &str, last: f64) -> Result<f64, String> {
     })
 }
 impl Placement {
+    pub(crate) fn sized(symbol: &str, side: &'static str, size: &str, reduce: bool) -> Self {
+        Self {
+            symbol: symbol.into(),
+            side,
+            size: size.into(),
+            price: None,
+            best: false,
+            stop: None,
+            reduce,
+            post_only: false,
+        }
+    }
     pub(crate) fn prepare(&self, store: &Value) -> Result<Value, String> {
         let symbol = &self.symbol;
         let market = rows(store, "markets")
@@ -216,7 +228,6 @@ impl Placement {
             return Err("Account connection is degraded (private data stream is stale) — refusing to open or increase exposure. Wait for reconnect (run `health`); close / cancel / reduce-only orders stay allowed.".into());
         }
         let lot = positive(n(&market["precision"], "amount"), 1e-8);
-        let tick = positive(n(&market["precision"], "price"), 0.01);
         let amount = self.size(store, market, last, lot)?;
         if amount <= 0. || !amount.is_finite() {
             return Err(format!(
@@ -224,58 +235,23 @@ impl Placement {
                 self.size
             ));
         }
-        tradfi_preflight(store, market)?;
-        let down = market["isSpot"] == true
-            && matches!(
-                store["venue"].as_str(),
-                Some("hyperliquid" | "hyperliquidspot")
-            )
-            && !(self.reduce && limit_price.is_none());
-        let quotient = amount / lot;
-        let mut rounded = if down {
-            let closest = js_round(quotient);
-            clean(
-                (if (quotient - closest).abs() <= quotient.abs().max(1.) * 1e-12 {
-                    closest
-                } else {
-                    quotient.floor()
-                }) * lot,
-            )
-        } else {
-            nearest(amount, lot)
-        };
-        if rounded <= 0. && self.reduce && limit_price.is_none() {
-            rounded = amount;
+        let mut order = json!({"symbol":symbol,"side":self.side,"type":if limit_price.is_some(){"limit"}else{"market"},"amount":amount,"reduceOnly":self.reduce,"timeInForce":if limit_price.is_some()&&self.post_only{"PostOnly"}else{"GoodTillCancel"}});
+        if let Some(price) = limit_price {
+            order["price"] = json!(price);
         }
-        if rounded <= 0. || !rounded.is_finite() {
-            return Err(format!(
-                "order size {amount} rounds to {rounded} for '{symbol}' — below the venue lot step"
-            ));
+        if let Some(stop) = stop {
+            order["stopLoss"] = json!(stop);
         }
-        let mut order = json!({"symbol":symbol,"side":self.side,"type":if limit_price.is_some(){"limit"}else{"market"},"amount":rounded,"reduceOnly":self.reduce,"timeInForce":if limit_price.is_some()&&self.post_only{"PostOnly"}else{"GoodTillCancel"}});
-        for (key, value) in [("price", limit_price), ("stopLoss", stop)] {
-            if let Some(value) = value {
-                let rounded = nearest(value, tick);
-                if !rounded.is_finite() || rounded <= 0. {
-                    return Err(format!("invalid {key} for '{symbol}': {value}"));
-                }
-                if key == "price"
-                    && market["limits"]["price"]["min"]
-                        .as_f64()
-                        .is_some_and(|min| rounded < min)
-                {
-                    return Err(format!(
-                        "price {rounded} is below the minimum {} for '{symbol}'",
-                        market["limits"]["price"]["min"]
-                    ));
-                }
-                order[key] = json!(rounded);
-            }
-        }
-        clamp(&mut order, store, market, ticker);
-        Ok(order)
+        prepare_order(order, store)
     }
-    fn size(&self, store: &Value, market: &Value, last: f64, lot: f64) -> Result<f64, String> {
+
+    pub(crate) fn size(
+        &self,
+        store: &Value,
+        market: &Value,
+        last: f64,
+        lot: f64,
+    ) -> Result<f64, String> {
         let size = self.size.trim();
         let inverse = market["isInverse"] == true;
         let contract = positive(n(market, "contractSize"), 1.);
@@ -342,7 +318,7 @@ impl Placement {
 }
 fn clamp(order: &mut Value, store: &Value, market: &Value, ticker: &Value) {
     if order["reduceOnly"] != true
-        || !matches!(store["venue"].as_str(), Some("hyperliquid" | "woo"))
+        || !crate::capabilities::clamp(store["venue"].as_str().unwrap_or(""))
     {
         return;
     }
@@ -423,4 +399,81 @@ fn tradfi_preflight(store: &Value, market: &Value) -> Result<(), String> {
         market["symbol"].as_str().unwrap_or(""),
         store["venue"].as_str().unwrap_or("")
     ))
+}
+
+pub(crate) fn prepare_order(mut order: Value, store: &Value) -> Result<Value, String> {
+    let symbol = order["symbol"].as_str().unwrap_or("").to_string();
+    let market = rows(store, "markets")
+        .iter()
+        .find(|m| m["symbol"] == symbol)
+        .ok_or_else(|| format!("Market not found for {symbol}"))?;
+    let ticker = rows(store, "tickers")
+        .iter()
+        .find(|t| t["symbol"] == symbol)
+        .unwrap_or(&Value::Null);
+    tradfi_preflight(store, market)?;
+    let lot = positive(n(&market["precision"], "amount"), 1e-8);
+    let tick = positive(n(&market["precision"], "price"), 0.01);
+    let amount = n(&order, "amount");
+    let infinity = amount == 0.
+        && matches!(
+            order["type"].as_str(),
+            Some("stop_market" | "take_profit_market" | "trailing_stop_market")
+        );
+    if infinity && !crate::capabilities::infinity(store["venue"].as_str().unwrap_or("")) {
+        return Err(format!(
+            "'{}' does not support Full (Infinity) TP/SL orders",
+            store["venue"].as_str().unwrap_or("this venue")
+        ));
+    }
+    let reduce_market = order["reduceOnly"] == true && order["type"] == "market";
+    let down = market["isSpot"] == true
+        && matches!(
+            store["venue"].as_str(),
+            Some("hyperliquid" | "hyperliquidspot")
+        )
+        && !reduce_market;
+    let quotient = amount / lot;
+    let closest = js_round(quotient);
+    let mut rounded = if down {
+        clean(
+            (if (quotient - closest).abs() <= quotient.abs().max(1.) * 1e-12 {
+                closest
+            } else {
+                quotient.floor()
+            }) * lot,
+        )
+    } else {
+        nearest(amount, lot)
+    };
+    if rounded <= 0. && reduce_market {
+        rounded = amount;
+    }
+    if !infinity && (!rounded.is_finite() || rounded <= 0.) {
+        return Err(format!(
+            "order size {amount} rounds to {rounded} for '{symbol}' — below the venue lot step"
+        ));
+    }
+    order["amount"] = json!(rounded);
+    for field in ["price", "stopLoss", "takeProfit", "triggerPrice"] {
+        if let Some(value) = order[field].as_f64() {
+            let rounded = nearest(value, tick);
+            if !rounded.is_finite() || rounded <= 0. {
+                return Err(format!("invalid {field} for '{symbol}': {value}"));
+            }
+            if field == "price"
+                && market["limits"]["price"]["min"]
+                    .as_f64()
+                    .is_some_and(|min| rounded < min)
+            {
+                return Err(format!(
+                    "price {rounded} is below the minimum {} for '{symbol}'",
+                    market["limits"]["price"]["min"]
+                ));
+            }
+            order[field] = json!(rounded);
+        }
+    }
+    clamp(&mut order, store, market, ticker);
+    Ok(order)
 }

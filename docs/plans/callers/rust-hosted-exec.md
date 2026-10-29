@@ -59,3 +59,22 @@ suffix. ETHFI never routes to ETH solely because ETH is listed. Explicit
 unresolved leverage or filtered-cancel scopes refuse instead of falling back to
 the focused symbol. Null placement completions are Unknown and stop fan-out;
 only an actual string-array result, including [], is a successful native shape.
+
+Close, stop, break-even, trailing stop and move use the same prepared order
+policy as buy/sell. Full and partial closes convert base positions to native
+contract amounts and cap partial requests to that position. Explicit hedge
+side is required for an ambiguous partial close. Stop/trail Full amounts remain
+zero only on TS-metadata-supported venues; metadata inheritance and flags are
+pinned against the TS source. Reduce-only clamp now follows the complete TS
+metadata venue list instead of only Hyperliquid and Woo.
+
+Global close all/longs/shorts deliberately attempts each independent position
+after another position's failure, including Unknown, matching TS; no physical
+write is retried. Scoped close and protective operations stop on failure.
+Break-even cancels only same-side stop losses, never take-profits, and waits for
+that cancel before replacement. After a confirmed cancel, any replacement
+refusal/Unknown/preparation failure explicitly reports that the position is
+unprotected; this is an intentional native safety message addition, without
+retry. An underwater break-even that becomes a TP warns there is no stop loss.
+Move requires exactly one open limit matching the real ID prefix and sends
+only a rounded price amend, retaining size/side/reduce-only in the engine.
