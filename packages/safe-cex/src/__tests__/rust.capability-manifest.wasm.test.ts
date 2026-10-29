@@ -5,13 +5,19 @@ import type { ExchangeName, ExchangeOptions } from '../types';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 
 import { exchangeRegistry } from '../exchanges/registry';
 import { BETA_VENUES } from '../exchanges/rust/betaVenues';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
+
+// HyroTrader has no default endpoints: hosts configure them at build time, read when bybit.types loads.
+vi.hoisted(() => {
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL ??= 'https://hyrotrader.capability-manifest.invalid';
+  process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL ??= 'https://hyrotrader-simulator.capability-manifest.invalid';
+});
 
 // Regenerate with `corepack yarn workspace @tealstreet/safe-cex capability-manifest`, which rebuilds
 // the wasm first; `test-wasm` fails on any difference, so the file is exactly what the runtime reports.

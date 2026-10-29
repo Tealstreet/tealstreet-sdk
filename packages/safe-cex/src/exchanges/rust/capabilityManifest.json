@@ -111,6 +111,20 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "bitgetinverse": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "bitgetusdc": {
     "startup": true,
     "trading": true,
@@ -247,6 +261,20 @@
     "incomeHistory": false,
     "incomeRange": false,
     "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "hyrotrader": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": false,
+    "incomeRange": false,
+    "closedPnl": true,
     "optionChain": false,
     "optionExpiries": false,
     "accountGreeks": false

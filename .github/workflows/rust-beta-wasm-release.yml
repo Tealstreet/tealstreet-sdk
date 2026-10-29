@@ -22,6 +22,10 @@ on:
         description: New release tag, e.g. rust-beta-wasm-<first 11 of sdk_sha>
         required: true
         type: string
+      skip_certification:
+        description: Publish without waiting for this commit's Rust / required coverage (manual releases only)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -84,7 +88,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           node sdk-rs/harness/beta-wasm-release-guard.mjs held
-          node sdk-rs/harness/beta-wasm-release-guard.mjs certified "$GITHUB_REPOSITORY" '${{ steps.source.outputs.sdk_sha }}'
+          if [ "${{ inputs.skip_certification }}" = true ]; then
+            echo "::warning::publishing ${{ steps.source.outputs.sdk_sha }} without Rust / required coverage (manual override)"
+          else
+            node sdk-rs/harness/beta-wasm-release-guard.mjs certified "$GITHUB_REPOSITORY" '${{ steps.source.outputs.sdk_sha }}'
+          fi
       # Unchanged sdk-rs/ inputs already have a release; publishing again only adds volume.
       - name: Publish only new sdk-rs inputs
         id: inputs
