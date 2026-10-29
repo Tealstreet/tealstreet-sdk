@@ -3797,8 +3797,11 @@ checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
 name = "safe-cex-algo-twap"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-algos",
+ "safe-cex-engine",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -3825,6 +3828,33 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "safe-cex-candle-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "form_urlencoded",
+ "redis",
+ "ryu-js",
+ "safe-cex-engine",
+ "safe-cex-native",
+ "safe-cex-venues",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "safe-cex-chaser"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-algos",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -3885,7 +3915,10 @@ dependencies = [
 name = "safe-cex-exec"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-algos",
+ "safe-cex-engine",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

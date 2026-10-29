@@ -114,3 +114,141 @@ fn an_override_proxy_url_input_refuses() {
     let smuggled = serde_json::json!({"tealstreetProxy": true, "hasKey": true, "overrideProxyUrl": "https://evil.invalid"});
     assert!(serde_json::from_value::<RoutingInputs>(smuggled).is_err());
 }
+
+/// Each core venue's (mainnet, testnet) origin; `None` is a venue with no testnet.
+const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
+    (
+        "binance",
+        "https://fapi.binance.com",
+        Some("https://demo-fapi.binance.com"),
+    ),
+    (
+        "binancepm",
+        "https://papi.binance.com",
+        Some("https://demo-fapi.binance.com"),
+    ),
+    (
+        "binanceinverse",
+        "https://dapi.binance.com",
+        Some("https://demo-dapi.binance.com"),
+    ),
+    (
+        "binancespot",
+        "https://api.binance.com",
+        Some("https://testnet.binance.vision"),
+    ),
+    (
+        "bybit",
+        "https://api.bybit.com",
+        Some("https://api-testnet.bybit.com"),
+    ),
+    (
+        "bybitinverse",
+        "https://api.bybit.com",
+        Some("https://api-testnet.bybit.com"),
+    ),
+    (
+        "bybitspot",
+        "https://api.bybit.com",
+        Some("https://api-testnet.bybit.com"),
+    ),
+    (
+        "bybitdemo",
+        "https://api-demo.bybit.com",
+        Some("https://api-testnet.bybit.com"),
+    ),
+    (
+        "okx",
+        "https://www.okx.com",
+        Some("https://openapi.okx.com"),
+    ),
+    (
+        "okxdemo",
+        "https://openapi.okx.com",
+        Some("https://openapi.okx.com"),
+    ),
+    ("okxeu", "https://eea.okx.com", Some("https://eea.okx.com")),
+    (
+        "okxeudemo",
+        "https://eea.okx.com",
+        Some("https://eea.okx.com"),
+    ),
+    // Bitget's testnet trades simulated `s*-futures` products on the mainnet host.
+    (
+        "bitget",
+        "https://api.bitget.com",
+        Some("https://api.bitget.com"),
+    ),
+    (
+        "bitgetusdc",
+        "https://api.bitget.com",
+        Some("https://api.bitget.com"),
+    ),
+    (
+        "bitgetinverse",
+        "https://api.bitget.com",
+        Some("https://api.bitget.com"),
+    ),
+    (
+        "hyperliquid",
+        "https://api.hyperliquid.xyz",
+        Some("https://api.hyperliquid-testnet.xyz"),
+    ),
+    (
+        "hyperliquidspot",
+        "https://api.hyperliquid.xyz",
+        Some("https://api.hyperliquid-testnet.xyz"),
+    ),
+    (
+        "blofin",
+        "https://openapi.blofin.com",
+        Some("https://demo-trading-openapi.blofin.com"),
+    ),
+    ("bingx", "https://open-api.bingx.com", None),
+    (
+        "lighter",
+        "https://mainnet.zklighter.elliot.ai",
+        Some("https://testnet-api.lighter.xyz"),
+    ),
+    (
+        "lighter-robinhood",
+        "https://api.rh.lighter.xyz",
+        Some("https://api.rh-testnet.lighter.xyz"),
+    ),
+    (
+        "paradex",
+        "https://api.prod.paradex.trade/v1",
+        Some("https://api.testnet.paradex.trade/v1"),
+    ),
+    (
+        "phemex",
+        "https://api.phemex.com",
+        Some("https://testnet-api.phemex.com"),
+    ),
+    // Bitunix's testnet is `x-simulated-trading` on the mainnet host.
+    (
+        "bitunix",
+        "https://fapi.bitunix.com",
+        Some("https://fapi.bitunix.com"),
+    ),
+];
+
+#[test]
+fn every_core_venue_base_url_pair_is_pinned_and_resolves() {
+    use safe_cex_native::resolve::rest_base_url;
+    for (venue, mainnet, testnet) in BASE_URLS {
+        assert_eq!(rest_base_url(venue, false).ok(), Some(*mainnet), "{venue}");
+        assert_eq!(rest_base_url(venue, true).ok(), *testnet, "{venue} testnet");
+        for (is_testnet, base) in [(false, Some(*mainnet)), (true, *testnet)] {
+            let Some(base) = base else { continue };
+            let account = AccountTransport {
+                tealstreet_proxy: Some(true),
+                testnet: Some(is_testnet),
+                ..Default::default()
+            };
+            let inputs = account_transport(venue, &account).unwrap();
+            resolve_routing_plan(venue, &inputs, base, Provider::Tealstreet).unwrap();
+        }
+    }
+    assert!(rest_base_url("hyrotrader", false).is_err());
+}

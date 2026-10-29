@@ -222,3 +222,58 @@ fn combined_side_and_reduce_only_filter_is_never_dropped() {
     e.handle(&request("cancel buys ro"), &mut p);
     assert_eq!(p.calls[0].2, json!([[]]));
 }
+
+#[test]
+fn one_suffix_intentionally_cancels_multiple_matches_across_symbols_like_ts() {
+    let mut e = Exec::default();
+    let mut p = port();
+    p.store["orders"][2]["id"] = json!("different123");
+    e.handle(&request("cancel 123"), &mut p);
+    assert_eq!(p.calls[0].2[0].as_array().unwrap().len(), 2);
+    assert_ne!(p.calls[0].2[0][0]["symbol"], p.calls[0].2[0][1]["symbol"]);
+}
+
+#[test]
+fn payload_bounds_refuse_everything_before_any_effect_or_dispatch() {
+    for text in [
+        "echo x;".repeat(safe_cex_exec::MAX_STEPS + 1),
+        "@cancel;".repeat(safe_cex_exec::MAX_PARALLEL + 1),
+        "x".repeat(safe_cex_exec::MAX_COMMAND_BYTES + 1),
+    ] {
+        let mut e = Exec::default();
+        let mut p = port();
+        e.handle(&request(&text), &mut p);
+        assert!(p.calls.is_empty());
+        assert_eq!(logs(&p), ["EXEC command exceeds native resource limits"]);
+        assert_eq!(results(&p)[0]["success"], false);
+    }
+}
+
+#[test]
+fn parallel_limit_counts_calls_still_in_flight_from_another_request() {
+    let mut e = Exec::default();
+    let mut p = port();
+    e.handle(
+        &request(&"@cancel;".repeat(safe_cex_exec::MAX_PARALLEL)),
+        &mut p,
+    );
+    assert_eq!(p.calls.len(), safe_cex_exec::MAX_PARALLEL);
+    e.handle(&request("@cancel; echo should-not-run"), &mut p);
+    assert_eq!(p.calls.len(), safe_cex_exec::MAX_PARALLEL);
+    assert_eq!(
+        logs(&p).last(),
+        Some(&"EXEC command exceeds native resource limits")
+    );
+}
+
+#[test]
+fn empty_filter_selections_still_call_cancel_orders_like_ts() {
+    for head in ["buys", "sells", "limits", "ro", "xro"] {
+        let mut e = Exec::default();
+        let mut p = port();
+        p.store["orders"] = json!([]);
+        e.handle(&request(&format!("cancel {head}")), &mut p);
+        assert_eq!(p.calls[0].1, "cancelOrders");
+        assert_eq!(p.calls[0].2, json!([[]]));
+    }
+}
