@@ -72,6 +72,7 @@ struct Pending {
     failure_summary: Option<String>,
     group: Option<(u64, usize)>,
     current_place: bool,
+    native_summary: bool,
     failure_context: Option<String>,
 }
 enum Evaluation {
@@ -235,6 +236,15 @@ impl Exec {
         };
         let mut pending = pending;
         let mut result = result;
+        if pending.native_summary
+            && let Ok(value) = &result
+        {
+            if let Some(summary) = value["summary"].as_str() {
+                pending.success = summary.into();
+            } else {
+                result = Err(json!({"message":"Invalid nuke result","outcome":"unknown"}));
+            }
+        }
         if let Ok(value) = &result
             && pending.current_place
         {
@@ -452,8 +462,10 @@ impl Exec {
             };
             if !parallel {
                 chain.wait_barrier = matches!(
-                    positional(text).first().map(String::as_str),
-                    Some(head) if head.eq_ignore_ascii_case("wait") || head.eq_ignore_ascii_case("sleep")
+                    positional(text)
+                        .first()
+                        .and_then(|head| display::canonical(head)),
+                    Some("wait" | "sleep")
                 );
             }
             let action = evaluate(&chain.symbol, text, &host.snapshot(), &chain.req_id, host);
@@ -496,6 +508,7 @@ impl Exec {
                         failure_summary: None,
                         group: None,
                         current_place: false,
+                        native_summary: false,
                         failure_context: None,
                     };
                     self.chains.insert(id, chain);
@@ -562,6 +575,7 @@ impl Exec {
                             failure_summary: None,
                             group: Some((group, index)),
                             current_place: false,
+                            native_summary: false,
                             failure_context: None,
                         };
                         self.issue(pending, "placeOrder", json!([order]), host);
@@ -584,6 +598,7 @@ impl Exec {
                         failure_summary: None,
                         group: None,
                         current_place: false,
+                        native_summary: false,
                         failure_context: None,
                     };
                     self.chains.insert(id, chain);
@@ -619,6 +634,7 @@ impl Exec {
                         failure_summary,
                         group: None,
                         current_place: false,
+                        native_summary: false,
                         failure_context: None,
                     };
                     self.chains.insert(id, chain);
@@ -661,6 +677,7 @@ impl Exec {
                             failure_summary: None,
                             group: None,
                             current_place: false,
+                            native_summary: method == "nuke",
                             failure_context: None,
                         },
                     );
@@ -841,7 +858,9 @@ fn evaluate(
             Err(error) => failed(error),
         },
         "sleep" | "wait" => waits::evaluate(symbol, &args),
-        "chase" | "chasers" | "twap" => algo_commands::evaluate(symbol, &args, store, req_id, host),
+        "chase" | "chasers" | "twap" | "tasks" | "kill" => {
+            algo_commands::evaluate(symbol, &args, store, req_id, host)
+        }
         "swarm" => match swarm::prepare(symbol, &args, store, host) {
             Ok((orders, symbol, side)) => Evaluation::Swarm {
                 orders,
@@ -853,6 +872,17 @@ fn evaluate(
         "scale" | "bump" => order_tools::evaluate(symbol, &args, store, text),
         "close" | "c" | "stop" | "be" | "breakeven" | "trail" | "move" | "mv" => {
             protection::evaluate(symbol, &args, store, text)
+        }
+        "nuke" => {
+            let mode = args.get(1).map(String::as_str).unwrap_or("all");
+            if !matches!(mode, "all" | "positions" | "pos" | "orders" | "ord") {
+                return failed("Invalid syntax: nuke <positions|pos|orders|ord|all>".into());
+            }
+            Evaluation::Call {
+                method: "nuke",
+                args: json!([mode]),
+                success: "Nuke completed".into(),
+            }
         }
         "cancel" | "x" => cancel(symbol, &args, store),
         "leverage" | "lev" => {
