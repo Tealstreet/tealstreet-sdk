@@ -407,7 +407,7 @@ export class RustEngineExchange extends BaseExchange {
 
   override loadCapabilities = async (): Promise<ExchangeCapabilities> => {
     // A main-thread mirror asks the worker's engine rather than building its own.
-    if (this.routesToWorker && !this.host) await this.loadWorkerCapabilities();
+    if (this.isWorkerMirror || (this.routesToWorker && !this.host)) await this.loadWorkerCapabilities();
     else await this.ensureHost();
     return this.capabilities;
   };
@@ -1929,7 +1929,6 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   // The engine reconciles orders and positions itself; reads serve its state.
-  /** Reads wait only for their native sections, independently of unrelated reconciliation. */
   /** A mirror's sections load from the worker's frames; it never starts its own engine. */
   private untilWorkerData = (flag: number, label: string): Promise<void> =>
     new Promise<void>((resolve, reject) => {
@@ -1939,16 +1938,21 @@ export class RustEngineExchange extends BaseExchange {
       const finish = (error?: Error) => {
         clearTimeout(timeout);
         unsubscribe();
+        this.startupWaiters.delete(wake);
         if (error) reject(error);
         else resolve();
       };
-      const unsubscribe = this.store.subscribe(() => {
+      // Disposal wakes startup waiters, so an idle mirror does not wait out the timeout.
+      const wake = () => {
         if (this.isDisposed) finish(new Error('Exchange disposed during native read'));
         else if (loaded()) finish();
-      });
+      };
+      const unsubscribe = this.store.subscribe(wake);
+      this.startupWaiters.add(wake);
       const timeout = setTimeout(() => finish(new Error(`Timed out waiting for worker ${label}`)), 30_000);
     });
 
+  /** Reads wait only for their native sections, independently of unrelated reconciliation. */
   private untilNativeData = (flag: number, label: string): Promise<void> => {
     if (this.isWorkerMirror) return this.untilWorkerData(flag, label);
     const ready = new Promise<void>((resolve, reject) => {

@@ -74,6 +74,30 @@ describe('main-thread Rust trading routing', () => {
     expect(store.orders).toEqual([]);
   });
 
+  it('asks the worker for capabilities after hosted signing built a mirror its signing host', async () => {
+    const loader = vi.fn(() => new Promise<never>(() => {}));
+    setWasmEngineLoader(loader);
+    main = new RustEngineExchange('hyperliquid', { key: '', secret: '', workerMirror: true }, new DefaultStore());
+    // A signing-only host exists once main answered a hosted sign request.
+    (main as unknown as { host: object }).host = { dispose: () => {}, flush: () => {} };
+    const calls: string[] = [];
+    main.on('callMethod', (event: { requestId: string; method: string }) => {
+      calls.push(event.method);
+      main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: undefined });
+    });
+    await expect(main.loadCapabilities()).resolves.toBeDefined();
+    expect(calls).toEqual(['fetchEngineCapabilities']);
+    expect(main.hasStarted).toBe(false);
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it('settles an idle mirror read on disposal without waiting for the store', async () => {
+    main = new RustEngineExchange('bybit', { key: '', secret: '', workerMirror: true }, new DefaultStore());
+    const markets = main.fetchMarkets();
+    main.dispose();
+    await expect(markets).rejects.toThrow('disposed');
+  });
+
   it('strips the mirror flag from the options a worker runs its engine with', () => {
     const worker = new ExchangeWorker(
       { postMessage: vi.fn() } as unknown as Worker,
