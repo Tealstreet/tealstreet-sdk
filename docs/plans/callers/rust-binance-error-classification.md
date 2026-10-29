@@ -48,6 +48,10 @@ Not changed in this PR, and why:
 - **Spot -2010 "Account has insufficient balance for requested action."** stays
   `rejected`. Its `IntMessage` row needs that exact text recorded, which also
   needs a credentialed capture.
+- **Binance Options (`binanceoptions`, #2356/#2368) is not covered.** This
+  classification was reviewed before Options landed and touches no Options
+  file, so Options venue errors keep their current unclassified handling. Its
+  table is a later beta family with its own capture list.
 
 TS that classified wrongly: `errorPatterns.ts` read -1022 as time sync (fixed
 by #2337).
