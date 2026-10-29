@@ -1,0 +1,760 @@
+[
+  {
+    "name": "help",
+    "aliases": [
+      "?",
+      "h"
+    ],
+    "description": "Show available commands and usage",
+    "examples": [
+      "help",
+      "help buy",
+      "help accounts"
+    ]
+  },
+  {
+    "name": "status",
+    "aliases": [
+      "st"
+    ],
+    "description": "Show current connection status",
+    "examples": [
+      "status"
+    ]
+  },
+  {
+    "name": "symbol",
+    "aliases": [
+      "sym",
+      "switch"
+    ],
+    "description": "Change the current trading symbol",
+    "examples": [
+      "symbol BTCUSDT",
+      "switch ETH",
+      "sym BTC"
+    ]
+  },
+  {
+    "name": "markets",
+    "aliases": [
+      "mkt",
+      "m"
+    ],
+    "description": "List available markets on the connected exchange",
+    "examples": [
+      "markets"
+    ]
+  },
+  {
+    "name": "connection",
+    "aliases": [
+      "conn",
+      "ws"
+    ],
+    "description": "Show connection status or reconnect",
+    "examples": [
+      "connection",
+      "conn",
+      "conn --all",
+      "conn reconnect",
+      "ws reconnect"
+    ]
+  },
+  {
+    "name": "prompt",
+    "aliases": [],
+    "description": "Configure the CLI prompt format",
+    "examples": [
+      "prompt",
+      "prompt list",
+      "prompt preset detailed",
+      "prompt set \"[{symbol} {price} {pnl%}]> \"",
+      "prompt prefix ts",
+      "prompt preview"
+    ]
+  },
+  {
+    "name": "check",
+    "aliases": [],
+    "description": "Say what a listed contract is a claim on (crypto / tokenized equity / ETF / commodity / FX)",
+    "examples": [
+      "check BTCUSDT",
+      "check SHOPUSDT",
+      "check XAUUSDT"
+    ]
+  },
+  {
+    "name": "account",
+    "aliases": [
+      "acc",
+      "use"
+    ],
+    "description": "Switch to a specific account",
+    "examples": [
+      "account mybybit",
+      "account 1",
+      "account -# 2",
+      "use binance-main",
+      "account enable acc1",
+      "account enable --all",
+      "account disable --all"
+    ]
+  },
+  {
+    "name": "accounts",
+    "aliases": [
+      "config"
+    ],
+    "description": "Manage accounts (list, add, remove, import)",
+    "examples": [
+      "accounts",
+      "accounts enabled",
+      "accounts add -n mybybit -e bybit -k KEY -s SECRET",
+      "accounts add -n mybybit -e bybit -k KEY -s SECRET --proxy",
+      "accounts import {\"exchange\":\"bybit\",\"name\":\"my-acc\",...}",
+      "accounts remove mybybit",
+      "accounts remove --all",
+      "accounts enable mybybit",
+      "accounts enable --all",
+      "accounts disable mybybit",
+      "accounts disable --all",
+      "accounts help"
+    ]
+  },
+  {
+    "name": "exchanges",
+    "aliases": [
+      "ex"
+    ],
+    "description": "List supported exchanges",
+    "examples": [
+      "exchanges"
+    ]
+  },
+  {
+    "name": "orders",
+    "aliases": [
+      "o"
+    ],
+    "description": "List open orders",
+    "examples": [
+      "orders",
+      "o",
+      "orders all",
+      "orders --all"
+    ]
+  },
+  {
+    "name": "positions",
+    "aliases": [
+      "ps"
+    ],
+    "description": "List open positions",
+    "examples": [
+      "positions",
+      "ps",
+      "positions --all",
+      "positions long",
+      "positions short"
+    ]
+  },
+  {
+    "name": "position",
+    "aliases": [
+      "p",
+      "pos"
+    ],
+    "description": "Show position for current symbol",
+    "examples": [
+      "position",
+      "p",
+      "pos btc",
+      "position show",
+      "position show BTCUSDT"
+    ]
+  },
+  {
+    "name": "margin",
+    "aliases": [
+      "balance",
+      "bal"
+    ],
+    "description": "Show account margin/balance",
+    "examples": [
+      "margin",
+      "balance",
+      "bal"
+    ]
+  },
+  {
+    "name": "spot",
+    "aliases": [],
+    "description": "Show spot balances",
+    "examples": [
+      "spot"
+    ]
+  },
+  {
+    "name": "bump",
+    "aliases": [],
+    "description": "Move open limit orders by a price delta",
+    "examples": [
+      "bump +10",
+      "bump -5",
+      "bump ETHUSDT +10",
+      "bump buy +10",
+      "bump sell -5 ETHUSDT",
+      "bump top 3 +5",
+      "bump buy bottom 5 -2 ETHUSDT",
+      "bump 100 --buys"
+    ]
+  },
+  {
+    "name": "move",
+    "aliases": [
+      "mv"
+    ],
+    "description": "Move an order to a new price",
+    "examples": [
+      "move abc123 50000",
+      "move abc123 +10",
+      "move abc -5"
+    ]
+  },
+  {
+    "name": "buy",
+    "aliases": [
+      "b"
+    ],
+    "description": "Buy market or limit order",
+    "examples": [
+      "buy $100",
+      "buy $100 reduce",
+      "buy WIFUSDT $100",
+      "buy $100 WIFUSDT",
+      "buy WIFUSDT,ENAUSDT $100",
+      "buy $100 at 50000",
+      "buy $100 at 50000 ETHUSDT"
+    ]
+  },
+  {
+    "name": "sell",
+    "aliases": [
+      "s"
+    ],
+    "description": "Sell market or limit order",
+    "examples": [
+      "sell $100",
+      "sell $100 reduce",
+      "sell WIFUSDT $100",
+      "sell $100 WIFUSDT",
+      "sell WIFUSDT,ENAUSDT $100",
+      "sell $100 at 50000",
+      "sell $100 at 50000 ETHUSDT"
+    ]
+  },
+  {
+    "name": "cancel",
+    "aliases": [
+      "x"
+    ],
+    "description": "Cancel orders",
+    "examples": [
+      "cancel",
+      "cancel ETHUSDT",
+      "cancel buys",
+      "cancel buys ETHUSDT",
+      "cancel sells",
+      "cancel stops",
+      "cancel limits",
+      "cancel ro",
+      "cancel xro",
+      "cancel buys ro",
+      "cancel sells xro",
+      "cancel buy stops",
+      "cancel top 3",
+      "cancel bottom 5 ETHUSDT",
+      "cancel first 2",
+      "cancel last 1",
+      "cancel from 49000 to 50000",
+      "cancel 1234abcd"
+    ]
+  },
+  {
+    "name": "close",
+    "aliases": [
+      "c"
+    ],
+    "description": "Close a position fully or partially",
+    "examples": [
+      "close",
+      "close short",
+      "close short WIFUSDT",
+      "close short WIFUSDT,ETHUSDT",
+      "close long",
+      "close long BTCUSDT",
+      "close longs",
+      "close shorts",
+      "close allpos",
+      "close all",
+      "close longs 50%",
+      "close BTCUSDT",
+      "close 50%",
+      "close $100",
+      "close 100$ ETHUSDT"
+    ]
+  },
+  {
+    "name": "nuke",
+    "aliases": [],
+    "description": "Instantly nuke positions or orders",
+    "examples": [
+      "nuke",
+      "nuke all",
+      "nuke positions",
+      "nuke pos",
+      "nuke orders",
+      "nuke ord"
+    ]
+  },
+  {
+    "name": "scale",
+    "aliases": [],
+    "description": "Create scaled orders",
+    "examples": [
+      "scale buy 10 into 10 from 31000 to 32000",
+      "scale buy $1000 into 10 from -0.25% to -1% ETHUSDT",
+      "scale sell $10000 into 25 from 50000 to 48500 reduce",
+      "scale sell $10000 into 25 from 50000 to 48500 taker",
+      "scale sell 1 into 5 from +1% to 32000 reduce"
+    ]
+  },
+  {
+    "name": "stop",
+    "aliases": [],
+    "description": "Create a stop order",
+    "examples": [
+      "stop 18500",
+      "stop -1%",
+      "stop at 0.1%",
+      "stop at 0.1% ETHUSDT",
+      "stop at -100",
+      "stop at 18500",
+      "stop buy at +100",
+      "stop sell at 1%",
+      "stop $500 at 1%",
+      "stop $500 at 1% ETHUSDT",
+      "stop buy $500 at 1%",
+      "stop sell 0.01 at -100",
+      "stop at 0.1% trigger 18500",
+      "stop buy at +100 trigger 19500",
+      "stop 500$ at 1% trigger 19000",
+      "stop buy 500$ at 1% trigger 1500"
+    ]
+  },
+  {
+    "name": "be",
+    "aliases": [
+      "breakeven"
+    ],
+    "description": "Move the stop loss to break-even",
+    "examples": [
+      "be",
+      "be +3%",
+      "be -0.5%",
+      "be +100",
+      "be ETHUSDT"
+    ]
+  },
+  {
+    "name": "trail",
+    "aliases": [],
+    "description": "Place a trailing stop on the open position",
+    "examples": [
+      "trail 20%",
+      "trail 500",
+      "trail 20% ETHUSDT",
+      "when (price >= 0.0716) (trail 20%)"
+    ]
+  },
+  {
+    "name": "leverage",
+    "aliases": [
+      "lev"
+    ],
+    "description": "Show or set leverage for the active symbol",
+    "examples": [
+      "leverage",
+      "lev",
+      "lev 5",
+      "leverage 10 ETHUSDT"
+    ]
+  },
+  {
+    "name": "max",
+    "aliases": [],
+    "description": "Show the largest possible order size for the active symbol",
+    "examples": [
+      "max",
+      "max ETHUSDT"
+    ]
+  },
+  {
+    "name": "swarm",
+    "aliases": [],
+    "description": "Fire N market orders that sum to <size>",
+    "examples": [
+      "swarm buy $1000 into 5",
+      "swarm sell $500 into 10 reduce",
+      "swarm buy $1000 into 5 irregular",
+      "swarm sell $1000 into 10 irregular reduce ETHUSDT"
+    ]
+  },
+  {
+    "name": "last-price",
+    "aliases": [
+      "lp",
+      "l"
+    ],
+    "description": "Show last price",
+    "examples": [
+      "last-price",
+      "lp",
+      "l",
+      "last-price BTCUSDT"
+    ]
+  },
+  {
+    "name": "mark-price",
+    "aliases": [
+      "mp",
+      "m"
+    ],
+    "description": "Show mark price",
+    "examples": [
+      "mark-price",
+      "mp",
+      "m",
+      "mark-price BTCUSDT"
+    ]
+  },
+  {
+    "name": "index-price",
+    "aliases": [
+      "ip",
+      "i"
+    ],
+    "description": "Show index price",
+    "examples": [
+      "index-price",
+      "ip",
+      "i",
+      "index-price BTCUSDT"
+    ]
+  },
+  {
+    "name": "chart",
+    "aliases": [],
+    "description": "Display ASCII candlestick chart",
+    "examples": [
+      "chart - Show 30 candles with 1h timeframe",
+      "chart 15m - Show 30 candles with 15m timeframe",
+      "chart 4h 50 - Show 50 candles with 4h timeframe",
+      "chart 1d ETHUSDT - Show daily chart for ETHUSDT",
+      "watch chart 5m - Live updating chart (q to stop)"
+    ]
+  },
+  {
+    "name": "chase",
+    "aliases": [],
+    "description": "Chases the price to execute order at best bid/ask",
+    "examples": [
+      "chase buy $100",
+      "chase buy $100 ETHUSDT",
+      "chase buy $100 reduce",
+      "chase buy WIFUSDT $100",
+      "chase buy WIFUSDT,ENAUSDT $100",
+      "chase sell $120",
+      "chase sell $120 ETHUSDT",
+      "chase sell %all% 20% reduce",
+      "chase buy $100 to 49500",
+      "chase buy $100 to 1%",
+      "chase sell $100 to $50",
+      "chase cancel",
+      "chase cancel keep",
+      "watch chase - Monitor all active chasers (q to stop watching)"
+    ]
+  },
+  {
+    "name": "chasers",
+    "aliases": [],
+    "description": "List all active and recent chasers",
+    "examples": [
+      "chasers - List all chasers",
+      "chasers cancel <id> - Cancel a specific chaser",
+      "chasers cancel all - Cancel all active chasers",
+      "watch chase - Monitor all chasers in real-time"
+    ]
+  },
+  {
+    "name": "twap",
+    "aliases": [],
+    "description": "Execute TWAP (Time-Weighted Average Price) order",
+    "examples": [
+      "twap buy $1000 into 10 over 60",
+      "twap buy $1000 BTCUSDT into 10 over 60",
+      "twap sell $500 into 5 over 30 reduce",
+      "twap sell $500 into 5 over 30 chaser",
+      "twap chase buy $1000 into 10 over 60",
+      "twap chase buy $1000 BTCUSDT into 10 over 60",
+      "twap chase buy $1000 into 10 over 60 timeout 30% next",
+      "twap chase sell $500 into 5 over 30 reduce fail next",
+      "twap buy $1000 duration=1h slices=10",
+      "twap list",
+      "twap stop <id>",
+      "twap stop all"
+    ]
+  },
+  {
+    "name": "echo",
+    "aliases": [
+      "say"
+    ],
+    "description": "Echo arguments (after var/constant substitution)",
+    "examples": [
+      "echo hello world",
+      "echo $symbol",
+      "say \"peak pnl is @hi\""
+    ]
+  },
+  {
+    "name": "set",
+    "aliases": [],
+    "description": "Create or update a user variable",
+    "examples": [
+      "set @size 100$",
+      "set @entry $entry",
+      "set @stop $entry -100"
+    ]
+  },
+  {
+    "name": "sets",
+    "aliases": [],
+    "description": "Create or update a reactive (live) variable",
+    "examples": [
+      "sets @spread $ask-$bid",
+      "sets @above $entry +1%",
+      "sets @doubled @x*2"
+    ]
+  },
+  {
+    "name": "track",
+    "aliases": [],
+    "description": "Track the high/low-water mark of a source expression",
+    "examples": [
+      "track max @hi $pnl",
+      "track min @lo $pnl",
+      "track max @maxSpread $ask-$bid",
+      "track list"
+    ]
+  },
+  {
+    "name": "untrack",
+    "aliases": [],
+    "description": "Remove a tracker, or `untrack all`",
+    "examples": [
+      "untrack @hi",
+      "untrack all"
+    ]
+  },
+  {
+    "name": "unset",
+    "aliases": [],
+    "description": "Remove a user variable, or `unset all`",
+    "examples": [
+      "unset @size",
+      "unset all"
+    ]
+  },
+  {
+    "name": "print",
+    "aliases": [
+      "vars"
+    ],
+    "description": "Show a user variable, or list all (`print all` / `vars`)",
+    "examples": [
+      "print @size",
+      "print all",
+      "print list",
+      "vars",
+      "vars list",
+      "vars @size"
+    ]
+  },
+  {
+    "name": "alias",
+    "aliases": [],
+    "description": "List or define a command alias",
+    "examples": [
+      "alias list",
+      "alias b1 \"buy 100$\"",
+      "alias z \"buy at $entry -50; sleep 5s; close\""
+    ]
+  },
+  {
+    "name": "unalias",
+    "aliases": [],
+    "description": "Remove an alias, or `unalias all`",
+    "examples": [
+      "unalias b1",
+      "unalias all"
+    ]
+  },
+  {
+    "name": "sleep",
+    "aliases": [],
+    "description": "Pause for ms / s / m (default s, max 10m)",
+    "examples": [
+      "sleep 5",
+      "sleep 250ms",
+      "sleep 30s",
+      "sleep 2m"
+    ]
+  },
+  {
+    "name": "clear",
+    "aliases": [
+      "cls"
+    ],
+    "description": "Clear the console",
+    "examples": [
+      "clear"
+    ]
+  },
+  {
+    "name": "tasks",
+    "aliases": [],
+    "description": "List all active CLI tasks",
+    "examples": [
+      "tasks"
+    ]
+  },
+  {
+    "name": "kill",
+    "aliases": [
+      "fuck",
+      "terminate"
+    ],
+    "description": "Kill an active task",
+    "examples": [
+      "kill",
+      "kill last",
+      "kill abc12345",
+      "kill all",
+      "fuck",
+      "fuck last",
+      "terminate all"
+    ]
+  },
+  {
+    "name": "whitelist",
+    "aliases": [],
+    "description": "Whitelist a symbol from global \"all positions\" commands",
+    "examples": [
+      "whitelist",
+      "whitelist BTCUSDT",
+      "whitelist ethusdt"
+    ]
+  },
+  {
+    "name": "unwhitelist",
+    "aliases": [],
+    "description": "Remove a symbol from the whitelist (or `unwhitelist all`)",
+    "examples": [
+      "unwhitelist BTCUSDT",
+      "unwhitelist all"
+    ]
+  },
+  {
+    "name": "fatfinger",
+    "aliases": [],
+    "description": "Set or list per-symbol max-order-size guards",
+    "examples": [
+      "fatfinger",
+      "fatfinger 10",
+      "fatfinger 0.5 BTCUSDT",
+      "fatfinger 1000 ETHUSDT"
+    ]
+  },
+  {
+    "name": "unfatfinger",
+    "aliases": [],
+    "description": "Remove a fatfinger limit (or `unfatfinger all`)",
+    "examples": [
+      "unfatfinger BTCUSDT",
+      "unfatfinger all"
+    ]
+  },
+  {
+    "name": "budget",
+    "aliases": [],
+    "description": "Set or show the aggregate notional budget (cumulative order cap)",
+    "examples": [
+      "budget",
+      "budget $5000",
+      "budget 5000",
+      "budget off",
+      "budget reset"
+    ]
+  },
+  {
+    "name": "simulation",
+    "aliases": [
+      "sim",
+      "dry-run"
+    ],
+    "description": "Toggle dry-run mode (write commands log + skip)",
+    "examples": [
+      "simulation on",
+      "simulation off",
+      "simulation",
+      "sim status"
+    ]
+  },
+  {
+    "name": "wait",
+    "aliases": [],
+    "description": "Block the chain until a condition holds (with timeout)",
+    "examples": [
+      "wait 5s",
+      "wait position",
+      "wait anyposition",
+      "wait long ETHUSDT",
+      "wait short",
+      "wait price > 50000",
+      "wait price < 49500 timeout=10s",
+      "wait fill"
+    ]
+  },
+  {
+    "name": "when",
+    "aliases": [],
+    "description": "Arm a command to run once, when a condition becomes true",
+    "examples": [
+      "when (price >= 0.051533) (be +3%)",
+      "when (price >= 0.053169) (trail 20%)",
+      "when (fill) (be)",
+      "when (both (price > 50000) and (pnl > 0)) (close 50%)"
+    ]
+  },
+  {
+    "name": "history",
+    "aliases": [],
+    "description": "Show recent commands",
+    "examples": [
+      "history",
+      "history 20"
+    ]
+  }
+]

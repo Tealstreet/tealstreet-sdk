@@ -49,3 +49,10 @@ Sleep and wait run on the shared account scope. Conditions poll only current
 engine frames (100 ms), support sustain/timeout, and dispose with their scope.
 There is no venue-read loop. UTC clock waits use the next HHMM occurrence;
 variables still require the client-side PreprocessStore.
+
+Store displays include orders, positions/focused card, margin, spot, markets,
+status/connection diagnostics, instrument check and maximum-size projection.
+Missing coin/loaded telemetry stays unknown. Help names/aliases/descriptions/
+examples come from the TS registered catalog via scripts/generate-cli-catalog.py;
+its --check mode detects drift. Browser account/session/preprocess state remains
+outside this crate. Display commands do not fetch venue data.
