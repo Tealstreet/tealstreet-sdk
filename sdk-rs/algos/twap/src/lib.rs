@@ -163,6 +163,16 @@ impl TwapBook {
         effects
     }
 
+    /// `twap:stop` for every TWAP, as on account disposal.
+    pub fn terminate_all(&mut self) -> Vec<TwapEffect> {
+        let mut effects = Vec::new();
+        for entry in self.entries.iter_mut().filter(|entry| entry.managed) {
+            entry.instance.terminate();
+        }
+        self.settle(&mut effects);
+        effects
+    }
+
     /// Fire every timer due now across the account's TWAPs.
     pub fn wake(&mut self, env: &mut dyn TwapEnv, view: &dyn TwapMarketView) -> Vec<TwapEffect> {
         let mut effects = Vec::new();

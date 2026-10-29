@@ -11,6 +11,7 @@ use safe_cex_algo_twap::factory::{TwapChasers, TwapFactory};
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoFactory, AlgoStore, Change, CommandFuture, Scope};
 use safe_cex_engine::engine::{Command, CommandId};
 use safe_cex_engine::error::VenueError;
+use safe_cex_engine::model::{Limits, Market, MinMax, Precision, Ticker};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
@@ -62,8 +63,9 @@ struct Chasers {
 }
 
 impl TwapChasers for Chasers {
-    fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) {
+    fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {
         self.started.borrow_mut().push(request.clone());
+        Ok(())
     }
     fn progress(&self, _chaser_id: &str) -> Option<ChaserProgress> {
         None
@@ -108,7 +110,7 @@ async fn runs_slices_on_the_interval_and_reports_state() {
         .run_until(async {
             let port = Rc::new(Port::default());
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new(Rc::new(Chasers::default()));
+            let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
             factory
                 .handle("twap:start", &twap_options(json!({})), &cx)
                 .unwrap();
@@ -138,7 +140,7 @@ async fn a_failed_slice_logs_an_error_and_continues() {
             let port = Rc::new(Port::default());
             port.fail.set(true);
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new(Rc::new(Chasers::default()));
+            let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
             factory
                 .handle("twap:start", &twap_options(json!({})), &cx)
                 .unwrap();
@@ -159,7 +161,7 @@ async fn chaser_slices_start_through_the_chaser_runtime() {
             let port = Rc::new(Port::default());
             let chasers = Rc::new(Chasers::default());
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new(chasers.clone());
+            let factory = TwapFactory::new(cx.clone(), chasers.clone());
             factory
                 .handle(
                     "twap:start",
@@ -179,38 +181,48 @@ async fn chaser_slices_start_through_the_chaser_runtime() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn disposing_the_scope_stops_the_schedule_and_a_new_scope_restarts_it() {
+async fn closing_the_sending_socket_leaves_the_schedule_running() {
     LocalSet::new()
         .run_until(async {
             let port = Rc::new(Port::default());
-            let scope = Scope::new();
-            let cx = AlgoCx::new(port.clone(), scope.clone());
-            let factory = TwapFactory::new(Rc::new(Chasers::default()));
-            factory
-                .handle(
-                    "twap:start",
-                    &twap_options(json!({ "ordersCount": 4 })),
-                    &cx,
-                )
-                .unwrap();
+            let account = AlgoCx::new(port.clone(), Scope::new());
+            let socket = account.child();
+            let factory = TwapFactory::new(account.clone(), Rc::new(Chasers::default()));
+            let options = twap_options(json!({ "ordersCount": 4 }));
+            factory.handle("twap:start", &options, &socket).unwrap();
             settle().await;
-            scope.dispose();
-            tokio::time::sleep(Duration::from_millis(60_000)).await;
+            socket.scope.dispose();
+            tokio::time::sleep(Duration::from_millis(15_001)).await;
             settle().await;
-            assert_eq!(placed_amounts(&port).len(), 1);
+            assert_eq!(placed_amounts(&port).len(), 2);
+        })
+        .await;
+}
 
-            let id = factory.active_twaps("a")[0]["id"]
-                .as_str()
-                .unwrap()
-                .to_owned();
+#[tokio::test(start_paused = true)]
+async fn terminate_all_stops_every_twap_and_reports_it() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            factory
-                .handle("twap:pause", &json!(id).to_string(), &cx)
-                .unwrap();
-            factory
-                .handle("twap:resume", &json!(id).to_string(), &cx)
-                .unwrap();
-            tokio::time::sleep(Duration::from_millis(16_000)).await;
+            let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
+            for _ in 0..2 {
+                factory
+                    .handle(
+                        "twap:start",
+                        &twap_options(json!({ "ordersCount": 4 })),
+                        &cx,
+                    )
+                    .unwrap();
+            }
+            settle().await;
+            factory.terminate_all();
+            assert!(factory.active_twaps("a").is_empty());
+            assert_eq!(
+                port.emits.borrow().last().unwrap(),
+                &("twap:stateUpdate".to_owned(), json!({}))
+            );
+            tokio::time::sleep(Duration::from_millis(60_000)).await;
             settle().await;
             assert_eq!(placed_amounts(&port).len(), 2);
         })
@@ -219,13 +231,13 @@ async fn disposing_the_scope_stops_the_schedule_and_a_new_scope_restarts_it() {
 
 #[test]
 fn rejects_malformed_payloads() {
-    let factory = TwapFactory::new(Rc::new(Chasers::default()));
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
         .unwrap();
     LocalSet::new().block_on(&rt, async {
         let cx = AlgoCx::new(Rc::new(Port::default()), Scope::new());
+        let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
         assert!(factory.handle("twap:pause", "{", &cx).is_err());
     });
 }
@@ -264,4 +276,90 @@ fn placement_outcomes_read_ids_strictly() {
         placement_outcome(Err(rejected)),
         Err("insufficient margin".to_owned())
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn chase_slices_run_on_the_account_chaser_book() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            {
+                let mut store = port.store.borrow_mut();
+                store.markets.insert("BTCUSDT".into(), market());
+                store.tickers.insert(
+                    "BTCUSDT".into(),
+                    Ticker {
+                        id: "BTCUSDT".into(),
+                        symbol: "BTCUSDT".into(),
+                        bid: 100.0,
+                        ask: 100.5,
+                        last: 100.25,
+                        ..Ticker::default()
+                    },
+                );
+            }
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let book = safe_cex_chaser::ChaserFactory::new().book(&cx);
+            let factory = TwapFactory::new(cx.clone(), Rc::new(book.clone()));
+            let options = twap_options(
+                json!({ "useChaserOrders": true, "timeoutPct": 50, "timeoutAction": "next" }),
+            );
+            factory.handle("twap:start", &options, &cx).unwrap();
+            settle().await;
+            let active = book.active_chasers();
+            assert_eq!(active.len(), 1);
+            let chaser_id = active[0].id.clone();
+            assert_eq!(
+                (
+                    active[0].size,
+                    active[0].max_attempts,
+                    active[0].reduce_only
+                ),
+                (0.5, 1000.0, false)
+            );
+            assert_eq!(
+                book.progress(&chaser_id).map(|p| p.remaining_size),
+                Some(0.5)
+            );
+
+            // At 50% of the 30 s slice the unfilled chase is removed (`next`).
+            tokio::time::sleep(Duration::from_millis(15_001)).await;
+            settle().await;
+            assert!(book.progress(&chaser_id).is_none_or(|p| p.stopped));
+        })
+        .await;
+}
+
+fn market() -> Market {
+    Market {
+        id: "BTCUSDT".into(),
+        symbol: "BTCUSDT".into(),
+        base: "BTC".into(),
+        quote: "USDT".into(),
+        active: true,
+        precision: Precision {
+            amount: 0.001,
+            price: 0.5,
+        },
+        limits: Limits {
+            amount: MinMax {
+                min: 0.001,
+                max: 100.0,
+            },
+            leverage: MinMax {
+                min: 1.0,
+                max: 100.0,
+            },
+            price: None,
+        },
+        pretty_symbol: None,
+        contract_size: None,
+        is_expiring: None,
+        is_inverse: None,
+        is_spot: None,
+        is_perpetual: None,
+        is_read_only: None,
+        taker_fee: None,
+        maker_fee: None,
+    }
 }
