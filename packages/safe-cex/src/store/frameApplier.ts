@@ -559,10 +559,14 @@ export class FrameApplier {
         const hedged = (update.options ?? this.store.options).isHedged;
         const leverage: Record<string, FetchedLeverage> = {};
         for (let i = 0; i < settings.count; i++) {
-          const value = settings.leverage[i];
+          const value = finite(settings.leverage[i]);
+          const buyLeverage = finite(settings.buyLeverage?.[i] ?? NaN) ?? value;
+          const sellLeverage = finite(settings.sellLeverage?.[i] ?? NaN) ?? value;
+          // An unknown side omits the symbol: UiStateHandler copies these onto positions.
+          if (buyLeverage === undefined || sellLeverage === undefined) continue;
           leverage[resolveSymbol(settings.market[i], settings.symbol?.(i))] = {
-            buyLeverage: finite(settings.buyLeverage?.[i] ?? NaN) ?? value,
-            sellLeverage: finite(settings.sellLeverage?.[i] ?? NaN) ?? value,
+            buyLeverage,
+            sellLeverage,
             marginType: settings.marginType(i) as MarginType | undefined,
             positionMode: hedged ? PositionMode.Hedged : PositionMode.OneWay,
           };
