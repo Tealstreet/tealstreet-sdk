@@ -1,11 +1,6 @@
 **
 !sdk-rs/
 !sdk-rs/**
-!packages/
-!packages/safe-cex/
-!packages/safe-cex/src/
-!packages/safe-cex/src/exchanges/
-!packages/safe-cex/src/exchanges/rust/
 !packages/safe-cex/src/exchanges/rust/construction-rules.json
 sdk-rs/target/
 sdk-rs/**/target/

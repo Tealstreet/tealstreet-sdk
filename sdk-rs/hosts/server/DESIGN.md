@@ -48,8 +48,12 @@ Cargo invocation, preserving engine/cache JSON feature isolation.
 NX owns `docker-exchange-server-rust.yml` and `docker-candle-server-rust.yml`.
 Each publishes `latest` and the full source SHA to GHCR, then keylessly signs
 the exact pushed digest. Vultr requires GitHub OIDC issuer
-`https://token.actions.githubusercontent.com` and a certificate identity matching
-`^https://github.com/Tealstreet/tealstreet-next/.github/workflows/`.
+`https://token.actions.githubusercontent.com` and an exact certificate identity
+(`cosign verify --certificate-identity`, not a workflow-directory prefix):
+
+- Exchange: `https://github.com/Tealstreet/tealstreet-next/.github/workflows/docker-exchange-server-rust.yml@refs/heads/master`
+- Candle: `https://github.com/Tealstreet/tealstreet-next/.github/workflows/docker-candle-server-rust.yml@refs/heads/master`
+
 Images do not contain credentials and the workflows do not deploy hosts.
 
 ## Environment
