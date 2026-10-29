@@ -3,6 +3,7 @@ mod account;
 mod candles;
 mod history;
 mod identity;
+mod options;
 mod paths;
 mod reads;
 mod session;
@@ -59,6 +60,7 @@ pub enum Variant {
     PortfolioMargin,
     CoinM,
     Spot,
+    Options,
 }
 
 #[derive(Clone, Default)]
@@ -112,6 +114,7 @@ impl Urls {
 pub enum Pending {
     Background(Context, Box<Pending>),
     Identity(Context),
+    Options(Box<options::Request>),
     ExchangeInfo {
         rows: Vec<Market>,
         rejected: bool,
@@ -239,6 +242,7 @@ mod source {
 }
 
 pub struct BinanceFutures {
+    option_state: options::State,
     options: Options,
     urls: Urls,
     paths: &'static paths::Paths,
@@ -280,11 +284,15 @@ impl BinanceFutures {
             options.variant = Variant::PortfolioMargin;
         }
         options.portfolio_margin = options.variant == Variant::PortfolioMargin;
+        if options.variant == Variant::Options && options.recv_window.is_none() {
+            options.recv_window = Some(5_000.);
+        }
         let paths = match options.variant {
             Variant::UsdM => &paths::USD_M,
             Variant::PortfolioMargin => &paths::PORTFOLIO_MARGIN,
             Variant::CoinM => &paths::COIN_M,
             Variant::Spot => &paths::SPOT,
+            Variant::Options => &paths::OPTIONS,
         };
         let urls = Urls::for_options(&options, paths);
         let spot = options.variant == Variant::Spot;
@@ -297,6 +305,7 @@ impl BinanceFutures {
             SlotPolicy::default(),
         );
         Self {
+            option_state: options::State::default(),
             options,
             urls,
             paths,
@@ -592,6 +601,16 @@ impl BinanceFutures {
     /// and sends only the deltas while connected.
     fn interests(&self, cx: &Cx<'_, Pending>, channel: Channel) -> Vec<Interest> {
         let mut topics = Vec::new();
+        if self.is_options() {
+            if channel == Channel::Public {
+                for market in cx.store.markets() {
+                    topics.push(format!("{}@ticker", market.symbol));
+                }
+                topics.extend(self.books.keys().map(|s| format!("{s}@depth20@100ms")));
+                topics.extend(self.candles.keys().map(|(s, i)| format!("{s}@kline_{i}")));
+            }
+            return topics.into_iter().map(Interest::from_wire_args).collect();
+        }
         match channel {
             Channel::Public => {
                 if self.is_spot() {
@@ -1311,7 +1330,11 @@ impl Venue for BinanceFutures {
         true
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
-        self.reconcile_orders(cx);
+        if self.is_options() {
+            self.options_reconcile(cx);
+        } else {
+            self.reconcile_orders(cx);
+        }
     }
     fn unproven_http_evidence(
         &self,
@@ -1361,6 +1384,13 @@ impl Venue for BinanceFutures {
                 ..safe_cex_engine::Capabilities::BASE
             },
             Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
+            Variant::Options => safe_cex_engine::Capabilities {
+                fill_history: true,
+                order_history: true,
+                income_history: false,
+                fills_by_order_id: true,
+                ..safe_cex_engine::Capabilities::NO_HISTORY
+            },
             Variant::CoinM => safe_cex_engine::Capabilities {
                 quantity_units: safe_cex_engine::QuantityUnits::InverseContractSized,
                 balance_info: true,
@@ -1391,6 +1421,10 @@ impl Venue for BinanceFutures {
     }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.start_options(cx);
+            return;
+        }
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
@@ -1443,6 +1477,10 @@ impl Venue for BinanceFutures {
                     return;
                 }
             }
+        }
+        if self.is_options() {
+            self.on_options_frame(cx, channel, text);
+            return;
         }
         match channel {
             Channel::Public => {
@@ -1596,6 +1634,10 @@ impl Venue for BinanceFutures {
             self.on_response(cx, *pending, response);
             return;
         }
+        if let Pending::Options(request) = pending {
+            self.options_response(cx, *request, response);
+            return;
+        }
         self.observe_weight(cx, &response);
         if let Pending::Identity(context) = pending {
             self.identity_response(cx, context, response);
@@ -1604,7 +1646,7 @@ impl Venue for BinanceFutures {
         let Response { status, body, .. } = response;
         match pending {
             Pending::Background(..) => unreachable!(),
-            Pending::Identity(_) => unreachable!(),
+            Pending::Identity(_) | Pending::Options(_) => unreachable!(),
             Pending::ExchangeInfo { rows, rejected } => {
                 self.on_markets(cx, rows, response, rejected)
             }
@@ -1765,6 +1807,7 @@ impl Venue for BinanceFutures {
             return;
         }
         match pending {
+            Pending::Options(request) => self.options_failed(cx, *request, error),
             Pending::Background(..) => unreachable!(),
             Pending::Klines { context, .. } => {
                 let _ = cx.fail_context(&context, error.to_owned());
@@ -1796,6 +1839,9 @@ impl Venue for BinanceFutures {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.is_options() {
+            self.options_timer(cx, timer);
+        }
         if let Some(source) = self.discovery.on_timer(timer) {
             match source {
                 0 => self.get_streamed(
@@ -1923,6 +1969,9 @@ impl Venue for BinanceFutures {
                         candles: Vec::new(),
                     },
                 );
+            }
+            Command::Query { command: _, query } if self.is_options() => {
+                self.options_query(cx, query)
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),

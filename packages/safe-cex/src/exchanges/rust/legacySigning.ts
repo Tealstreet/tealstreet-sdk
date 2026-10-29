@@ -17,7 +17,7 @@ import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../bybit/bybit.site'
 import { BROKER_ID, RECV_WINDOW } from '../bybit/bybit.types';
 import { finishOkxRequest, isOkxPublicSigningRequest, isOkxUnsignedSigningRequest, prepareOkxRequest } from '../okx/okx.signing';
 
-const BINANCE = new Set<ExchangeName>(['binance', 'binancepm', 'binanceinverse', 'binancespot']);
+const BINANCE = new Set<ExchangeName>(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'binanceoptions']);
 const BYBIT = new Set<ExchangeName>(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader']);
 const OKX = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const BITGET = new Set<ExchangeName>(['bitget', 'bitgetusdc', 'bitgetinverse']);

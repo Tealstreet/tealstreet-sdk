@@ -466,6 +466,10 @@ impl BinanceFutures {
     }
 
     pub(crate) fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.options_read(cx, crate::options::Kind::Orders);
+            return;
+        }
         if self.account.orders.is_some() {
             return;
         }
@@ -545,6 +549,10 @@ impl BinanceFutures {
     }
 
     pub(crate) fn on_private_open(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.options_refresh(cx);
+            return;
+        }
         if self.is_spot() {
             self.subscribe_spot_account(cx);
             return;

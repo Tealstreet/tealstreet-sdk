@@ -17,8 +17,8 @@ const OUT = [
   'bitrue', 'hyrotrader', 'lighter-robinhood', 'bitgetinverse',
 ];
 
-test('the beta set is exactly the 27 IN venues in 15 families', () => {
-  assert.equal(betaVenueNames.length, 27);
+test('the beta set is exactly the 28 IN venues in 15 families', () => {
+  assert.equal(betaVenueNames.length, 28);
   assert.deepEqual(betaVenueFamilies, [
     'apexomni', 'asterdex', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'cryptocom',
     'hyperliquid', 'kraken', 'lighter', 'okx', 'paradex', 'phemex',

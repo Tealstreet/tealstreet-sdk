@@ -19,7 +19,7 @@ export const validateBinanceRequest = ({ method, url, body, headers = {} }) => {
   const fields = Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers))
     .map(([key, value]) => [key.toLowerCase(), String(value)]));
   if (body !== undefined && body !== null && body !== '') throw new Error('Binance request parameters must be in the URL');
-  if (publicPaths.test(parsed.pathname)) {
+  if (publicPaths.test(parsed.pathname) || /^\/eapi\/v1\/(?:ticker|mark)$/.test(parsed.pathname)) {
     if (fields['x-mbx-apikey'] || parsed.searchParams.has('signature')) throw new Error('Binance public request leaked credentials');
     return;
   }
