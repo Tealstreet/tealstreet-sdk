@@ -14,11 +14,14 @@ use tokio::time::Instant;
 use crate::chase::{
     ActiveChaser, Chase, ChaserComplete, ChaserOptions, Dirty, adjust, placement_filled,
 };
+use crate::client_id::ClientIdMinter;
 
 pub const KEPT_ORDER_STOP_REASON: &str = "User cancelled, kept order in book";
 pub const UNCONFIRMED_ORDER_STOP_REASON: &str = "Could not confirm order placement";
 
 const PRICE_CHECK_MIN_INTERVAL_MS: u64 = 50;
+/// After a send whose outcome is unknown.
+const LOST_PLACEMENT_CHECKS_MS: [u64; 4] = [1_000, 2_000, 4_000, 8_000];
 /// Each chase runs its own supervisor, price checks and REST reconciles.
 pub const MAX_CHASES_PER_ACCOUNT: usize = 50;
 const MISSING_ORDER_CONFIRMATIONS: u32 = 2;
@@ -41,6 +44,7 @@ pub struct Progress {
 pub struct ChaserBook {
     cx: AlgoCx,
     chases: RefCell<Vec<Rc<Chase>>>,
+    client_ids: ClientIdMinter,
     next_id: Cell<u64>,
 }
 
@@ -49,6 +53,7 @@ impl ChaserBook {
         Rc::new(Self {
             cx,
             chases: RefCell::new(Vec::new()),
+            client_ids: ClientIdMinter::default(),
             next_id: Cell::new(0),
         })
     }
@@ -638,7 +643,8 @@ impl ChaserBook {
                     return Vec::new();
                 }
             };
-            let order = match place_opts(chase, price) {
+            let client_order_id = self.mint_client_order_id(chase);
+            let order = match place_opts(chase, price, client_order_id.clone()) {
                 Ok(order) => order,
                 Err(error) => {
                     chase.mark_complete("Invalid placement");
@@ -657,15 +663,49 @@ impl ChaserBook {
                 .await;
             // An accepted placement whose ids cannot be read may be live:
             // treat it as an unknown outcome, never as a refusal to retry.
-            let (ids, unconfirmed) = match &placed {
+            let (mut ids, lost) = match &placed {
                 Ok(result) => match serde_json::from_str::<Vec<String>>(result) {
                     Ok(ids) => (ids, false),
                     Err(_) => (Vec::new(), true),
                 },
                 Err(error) => (Vec::new(), error.outcome == Some(Outcome::Unknown)),
             };
+            let mut unconfirmed = lost;
+            if let Some(client_order_id) = client_order_id.as_deref()
+                && ids.is_empty()
+                && (lost || placed.is_ok())
+            {
+                // A lost answer is looked up at 1/2/4/8 s; an empty answer once,
+                // since most venues return it for an ordinary refusal.
+                let delays: &[u64] = if lost {
+                    &LOST_PLACEMENT_CHECKS_MS
+                } else {
+                    &[0]
+                };
+                match self
+                    .find_lost_placement(chase, client_order_id, delays)
+                    .await
+                {
+                    Some(order)
+                        if !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) =>
+                    {
+                        ids = vec![order.id];
+                        unconfirmed = false;
+                    }
+                    Some(order) => {
+                        // Filled, or a post-only reject after a partial fill:
+                        // count it, then retry what is left.
+                        chase.set_filled_amount(&order.id, order.placement_filled());
+                        unconfirmed = false;
+                        if chase.is_stopped() {
+                            return Vec::new();
+                        }
+                    }
+                    None => {}
+                }
+            }
             if unconfirmed {
-                // No caller client id to look the order up by: placing again
+                // Not found, or no client id to look it up by: placing again
                 // could double it, and it may still land.
                 let message = format!(
                     "Chaser for {} stopped: could not confirm whether its order was placed — check open orders",
@@ -695,6 +735,60 @@ impl ChaserBook {
             };
             self.cx.sleep_ms(delay).await;
             tries += 1;
+        }
+    }
+
+    fn mint_client_order_id(&self, chase: &Chase) -> Option<String> {
+        let store = self.store();
+        let market = store.markets.get(&chase.options.symbol)?;
+        // An order the venue would split cannot carry one caller id.
+        if chase.remaining() > market.limits.amount.max && market.limits.amount.max > 0.0 {
+            return None;
+        }
+        self.client_ids.mint(&store.venue)
+    }
+
+    /// Looks the order up after each delay; a failed lookup is a miss. A STOP
+    /// ends the wait with one last look, so a landed order is still found.
+    async fn find_lost_placement(
+        &self,
+        chase: &Chase,
+        client_order_id: &str,
+        delays_ms: &[u64],
+    ) -> Option<LookedUpOrder> {
+        for &delay in delays_ms {
+            if chase.is_stopped() {
+                return self.look_up(chase, client_order_id).await;
+            }
+            if delay > 0 {
+                self.cx.sleep_ms(delay).await;
+            }
+            if let Some(order) = self.look_up(chase, client_order_id).await {
+                return Some(order);
+            }
+        }
+        None
+    }
+
+    async fn look_up(&self, chase: &Chase, client_order_id: &str) -> Option<LookedUpOrder> {
+        let query = Query::OrderByClientId {
+            symbol: chase.options.symbol.clone(),
+            client_order_id: client_order_id.into(),
+        };
+        match self
+            .command(|command| Command::Query { command, query })
+            .await
+        {
+            Ok(result) => serde_json::from_str::<Lookup>(&result)
+                .ok()
+                .and_then(|lookup| lookup.order.filter(|_| lookup.found)),
+            Err(error) => {
+                self.log(
+                    chase,
+                    &format!("client order id lookup failed: {}", error.message),
+                );
+                None
+            }
         }
     }
 
@@ -790,7 +884,49 @@ impl ChaserBook {
     }
 }
 
-fn place_opts(chase: &Chase, price: f64) -> Result<PlaceOrderOpts, String> {
+/// The `ClientOrderLookup` answer: `{found: true, order}` or `{found: false, definitive}`.
+#[derive(Deserialize)]
+struct Lookup {
+    found: bool,
+    #[serde(default)]
+    order: Option<LookedUpOrder>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LookedUpOrder {
+    id: String,
+    status: OrderStatus,
+    filled: f64,
+    #[serde(default)]
+    extra: Option<LookedUpExtra>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LookedUpExtra {
+    #[serde(default)]
+    filled_in_placement_units: Option<f64>,
+}
+
+impl LookedUpOrder {
+    fn placement_filled(&self) -> f64 {
+        match self
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.filled_in_placement_units)
+        {
+            Some(fill) if fill.is_finite() && fill >= 0.0 => fill,
+            _ => self.filled,
+        }
+    }
+}
+
+fn place_opts(
+    chase: &Chase,
+    price: f64,
+    client_order_id: Option<String>,
+) -> Result<PlaceOrderOpts, String> {
     let amount = chase.remaining();
     if !(price.is_finite() && price > 0.0 && amount.is_finite() && amount > 0.0) {
         return Err(format!("price {price}, amount {amount}"));
@@ -804,5 +940,8 @@ fn place_opts(chase: &Chase, price: f64) -> Result<PlaceOrderOpts, String> {
         "reduceOnly": chase.options.reduce_only(),
         "timeInForce": "PostOnly",
     });
-    serde_json::from_value(value).map_err(|error| error.to_string())
+    let mut order: PlaceOrderOpts =
+        serde_json::from_value(value).map_err(|error| error.to_string())?;
+    order.client_order_id = client_order_id;
+    Ok(order)
 }

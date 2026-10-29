@@ -726,3 +726,130 @@ async fn a_non_finite_price_stops_and_cleans_up_instead_of_panicking() {
     })
     .await;
 }
+
+/// Placements are lost (unknown outcome); lookups answer with `lookup`.
+fn lose_placements(port: &Rc<FakePort>, lookup: &'static str) {
+    *port.responder.borrow_mut() = Box::new(move |command| match command {
+        Command::PlaceOrders { .. } => Err(VenueError {
+            outcome: Some(Outcome::Unknown),
+            ..VenueError::new("timed out")
+        }),
+        Command::Query {
+            query: safe_cex_engine::engine::Query::OrderByClientId { .. },
+            ..
+        } => Ok(lookup.into()),
+        _ => Ok("null".into()),
+    });
+}
+
+fn client_ids(port: &FakePort) -> Vec<Option<String>> {
+    port.commands
+        .borrow()
+        .iter()
+        .filter_map(|command| match command {
+            Command::PlaceOrders { orders, .. } => Some(orders[0].client_order_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn lookups(port: &FakePort) -> usize {
+    port.commands
+        .borrow()
+        .iter()
+        .filter(|command| {
+            matches!(
+                command,
+                Command::Query {
+                    query: safe_cex_engine::engine::Query::OrderByClientId { .. },
+                    ..
+                }
+            )
+        })
+        .count()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lost_placement_found_open_is_adopted() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        lose_placements(
+            &port,
+            r#"{"found":true,"order":{"id":"o7","status":"open","filled":0}}"#,
+        );
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1500).await;
+        assert_eq!(port.placements().len(), 1);
+        let id = client_ids(&port)[0].clone().unwrap();
+        assert!(id.starts_with("0x") && id.len() == 34, "{id}");
+        assert_eq!(
+            factory.book().active_chasers()[0].current_order_ids,
+            vec!["o7".to_string()]
+        );
+        assert!(port.completes().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lost_placement_never_found_stops_after_the_lookups() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        lose_placements(&port, r#"{"found":false,"definitive":false}"#);
+        let _chase = start(&port, BUY_ONE);
+        settle(20_000).await;
+        assert_eq!(port.placements().len(), 1);
+        assert_eq!(lookups(&port), 4);
+        assert_eq!(
+            port.completes()[0]["stopReason"],
+            UNCONFIRMED_ORDER_STOP_REASON
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lost_placement_found_filled_counts_and_places_only_the_rest() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        let placed = Rc::new(Cell::new(0));
+        let count = placed.clone();
+        *port.responder.borrow_mut() = Box::new(move |command| match command {
+            Command::PlaceOrders { .. } => {
+                count.set(count.get() + 1);
+                if count.get() == 1 {
+                    return Err(VenueError {
+                        outcome: Some(Outcome::Unknown),
+                        ..VenueError::new("timed out")
+                    });
+                }
+                Ok(r#"["o2"]"#.into())
+            }
+            Command::Query {
+                query: safe_cex_engine::engine::Query::OrderByClientId { .. },
+                ..
+            } => Ok(
+                r#"{"found":true,"order":{"id":"o1","status":"canceled","filled":0.25}}"#.into(),
+            ),
+            _ => Ok("null".into()),
+        });
+        let _chase = start(&port, BUY_ONE);
+        settle(2000).await;
+        let placements = port.placements();
+        assert_eq!(placements.len(), 2);
+        assert!((placements[1].1 - 0.75).abs() < 1e-9, "{placements:?}");
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_venue_without_client_id_lookup_places_without_one() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let _chase = start(&port, BUY_ONE);
+        settle(10).await;
+        assert_eq!(client_ids(&port), vec![None]);
+    })
+    .await;
+}
