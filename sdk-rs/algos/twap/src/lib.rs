@@ -7,6 +7,8 @@
 //! [`TwapBook::placement_settled`], and executes the returned [`TwapEffect`]s
 //! against the engine and the hosted protocol.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod factory;
 mod instance;
 mod math;
 mod types;

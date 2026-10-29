@@ -3700,8 +3700,11 @@ checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
 name = "safe-cex-algo-twap"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-algos",
+ "safe-cex-engine",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
