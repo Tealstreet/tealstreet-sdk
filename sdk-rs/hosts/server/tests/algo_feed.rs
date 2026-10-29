@@ -197,3 +197,26 @@ async fn a_dropped_feed_rejoins_with_a_snapshot_instead_of_ending() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn a_feed_dropped_over_and_over_gives_up_instead_of_spinning() {
+    LocalSet::new()
+        .run_until(async {
+            let (handle, _tape) = account();
+            let mut feed = Feed::join(handle.clone(), 1).await.unwrap();
+            let mut rejoins = 0;
+            let ended = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    handle.leave(feed.client());
+                    match feed.next().await {
+                        Some(batch) => rejoins += usize::from(batch.rejoined),
+                        None => break,
+                    }
+                }
+            })
+            .await;
+            assert!(ended.is_ok(), "the feed ends");
+            assert_eq!(rejoins, safe_cex_exchange_server::algos::MAX_REJOINS);
+        })
+        .await;
+}

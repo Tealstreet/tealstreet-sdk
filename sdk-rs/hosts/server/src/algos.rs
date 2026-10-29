@@ -235,7 +235,12 @@ pub struct Feed {
     handle: AccountHandle,
     link: safe_cex_native::ClientLink,
     client: u64,
+    rejoins: std::collections::VecDeque<tokio::time::Instant>,
 }
+
+/// At most this many rejoins per window; past it the account is treated as gone.
+pub const MAX_REJOINS: usize = 5;
+pub const REJOIN_WINDOW: Duration = Duration::from_secs(60);
 
 impl Feed {
     pub async fn join(handle: AccountHandle, client: u64) -> Result<Self, &'static str> {
@@ -244,6 +249,7 @@ impl Feed {
             handle,
             link,
             client,
+            rejoins: Default::default(),
         })
     }
 
@@ -275,6 +281,23 @@ impl Feed {
         match self.link.outgoing.recv().await {
             Some(item) => self.take(&mut batch, item),
             None => {
+                let now = tokio::time::Instant::now();
+                while self
+                    .rejoins
+                    .front()
+                    .is_some_and(|at| now.duration_since(*at) > REJOIN_WINDOW)
+                {
+                    self.rejoins.pop_front();
+                }
+                if self.rejoins.len() >= MAX_REJOINS {
+                    crate::state::Log::warn(
+                        "algo feed dropped repeatedly; giving up on the account",
+                    );
+                    return None;
+                }
+                // Back off so a feed dropped right after its snapshot cannot spin.
+                tokio::time::sleep(Duration::from_millis(100) * self.rejoins.len() as u32).await;
+                self.rejoins.push_back(now);
                 let client = REJOIN_IDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 self.link = self
                     .handle
@@ -370,7 +393,12 @@ pub async fn run(
                 if (batch.frames > 0 || batch.rejoined)
                     && let Some(snapshot) = handle.read(project).await
                 {
-                    let change = port.apply(snapshot, batch.fills);
+                    let mut change = port.apply(snapshot, batch.fills);
+                    if batch.rejoined {
+                        // Fills sent while dropped are gone: make algos re-read orders and positions.
+                        change.orders = true;
+                        change.positions = true;
+                    }
                     port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                     publish(&mut published);
                 }
