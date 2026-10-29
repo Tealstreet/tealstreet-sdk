@@ -10,3 +10,11 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+safe-cex-algos = { path = "../runtime" }
+safe-cex-engine.workspace = true
+tokio = { version = "1.53.3", features = ["rt", "sync", "time"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }

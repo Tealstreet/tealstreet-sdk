@@ -779,3 +779,103 @@ fn options_round_trip_unknown_fields() {
     let (id, _) = start(&mut book, &mut env, &view, json!({ "clientTag": "x" }));
     assert_eq!(book.serialize_state()[&id]["options"]["clientTag"], "x");
 }
+
+// --- client input bounds (server-only; TS trusted its own worker) ---
+
+fn logs(effects: &[TwapEffect]) -> Vec<&str> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            TwapEffect::Log { message } => Some(message.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn start_refuses_out_of_bounds_options_before_building_slices() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    for bad in [
+        json!({ "ordersCount": 0 }),
+        json!({ "ordersCount": 1001 }),
+        json!({ "ordersCount": u32::MAX }),
+        json!({ "size": 0 }),
+        json!({ "size": -1 }),
+        json!({ "duration": 0 }),
+        json!({ "duration": -5 }),
+        json!({ "randomnessPercentage": 100.5 }),
+        json!({ "randomnessPercentage": -1 }),
+        json!({ "timeoutPct": 101 }),
+        json!({ "timeoutPct": -1 }),
+        json!({ "chaserDelay": -1 }),
+    ] {
+        let effects = book.handle("twap:start", &options(bad.clone()), &mut env, &view);
+        assert_eq!(logs(&effects).len(), 1, "{bad}");
+        assert!(
+            logs(&effects)[0].starts_with("TWAP BTCUSDT rejected: "),
+            "{bad}"
+        );
+        assert!(placements(&effects).is_empty(), "{bad}");
+        assert_eq!(book.ids().count(), 0, "{bad}");
+    }
+}
+
+#[test]
+fn start_accepts_the_bounds_themselves() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    for good in [
+        json!({ "ordersCount": 1 }),
+        json!({ "ordersCount": safe_cex_algo_twap::MAX_ORDERS_COUNT }),
+        json!({ "randomnessPercentage": 100 }),
+        json!({ "useChaserOrders": true, "timeoutPct": 0 }),
+        json!({ "useChaserOrders": true, "timeoutPct": 100 }),
+    ] {
+        let effects = book.handle("twap:start", &options(good.clone()), &mut env, &view);
+        assert!(logs(&effects).is_empty(), "{good}");
+    }
+}
+
+#[test]
+fn restore_skips_entries_outside_the_bounds_and_keeps_going() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    let mut oversized = persisted("big", "paused", 0.0);
+    oversized["state"]["ordersSizes"] = json!(vec![0.1; 6]);
+    let mut miscounted = persisted("count", "paused", 0.0);
+    miscounted["state"]["ordersCount"] = json!(u32::MAX);
+    let mut unbounded = persisted("opts", "paused", 0.0);
+    unbounded["options"]["ordersCount"] = json!(u32::MAX);
+    let restore = json!([
+        oversized,
+        miscounted,
+        unbounded,
+        persisted("ok", "paused", 0.0)
+    ]);
+    let effects = book.handle("twap:state", &restore, &mut env, &view);
+    assert_eq!(logs(&effects).len(), 3);
+    assert_eq!(book.ids().collect::<Vec<_>>(), ["ok"]);
+}
+
+#[test]
+fn an_unknown_placement_outcome_still_advances_the_slice() {
+    // TS parity: the slice counts as executed and the next one is scheduled;
+    // the failure log says the order may be live.
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
+    let settled = settle_all(
+        &mut book,
+        &mut env,
+        &id,
+        &effects,
+        Err("outcome unknown, the order may be live: timeout".into()),
+    );
+    assert_eq!(
+        logs(&settled),
+        ["TWAP BTCUSDT slice failed: outcome unknown, the order may be live: timeout"]
+    );
+    assert_eq!(book.get(&id).unwrap().state.orders_executed, 1);
+    assert!(book.wake_at().is_some());
+}

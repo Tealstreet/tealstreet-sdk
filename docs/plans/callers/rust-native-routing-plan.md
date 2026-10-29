@@ -25,3 +25,9 @@ An authorized route would carry the account's proxy token to the host it named,
 so every authorized prefix is a table proxy host (pinned by `routing_port.rs`).
 `account_transport` sets `has_key`; an unauthenticated public account must set
 `public_data_only: Some(true)` itself, or its plan resolves as a private one.
+
+**Testnet.** `rest_base_url(_, true)` refuses BingX, which has no testnet, so a
+hosted BingX testnet account fails init with `NoBaseUrl`. Bitget's demo (simulated
+`s*-futures` products), Bitunix's (`x-simulated-trading`) and OKX EU's ride their
+mainnet host and resolve there. HyroTrader's endpoints are account-configured and
+refuse.
