@@ -140,7 +140,8 @@ describe('safeCexAxiosCreate', () => {
       };
 
       const result = getProxyForAxios(config, options, 'bybit');
-      expect(result).toBe('https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy');
+      // Every pool is the one Vultr Worker since AWS_EXIT.md step 3e (was fsjnpy143pbz.asia).
+      expect(result).toBe('https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy');
     });
 
     it('should return private proxy URL for Japan region', () => {
@@ -153,7 +154,8 @@ describe('safeCexAxiosCreate', () => {
       };
 
       const result = getProxyForAxios(config, options, 'bybit');
-      expect(result).toBe('https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy');
+      // Was fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e.
+      expect(result).toBe('https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy');
     });
 
     it('should return empty string when no proxy is needed', () => {

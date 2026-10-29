@@ -1082,6 +1082,8 @@ because Bitget rejects a private login from an IP the key is not bound to
 declares a separate `privateUta` channel, resolved as the optional
 `wsPrivateUta`. `createWebsocket` recognises a relay url (`isRelayUrl`) and hands `RelayWebSocket` to the reconnecting socket as its `WebSocket` option.
 
+**Two sets of hosts since AWS_EXIT step 3e: the browser build's and the hosted exchange server's pin.** The browser build (master, the Rust bundle) sends every tunnel, relay, private-pool and per-venue socket to the Vultr host `fsjnpy143pbz-tyo` — Tokyo for every region, so `PRIVATE_PROXY_JP/ASIA/GRVT_TINY` and `TOKYO/SINGAPORE_HOW_EGRESS` are each one value, and okx/okxeu/bitget/blofin private sockets are relay urls (`BROWSER_WS_HOSTS` in `routingTable.ts`). Coinbase stays on the AWS ws-proxy (the tunnel cannot allowlist a root path yet) and the public CORS proxy stays on AWS (anonymous callers; the Vultr edge needs a JWT). `services/exchange-server` calls `pinTealstreetEgressHosts` (`transport/tealstreet/pinEgressHosts.ts`) at boot with the old AWS hosts in `src/egress-hosts.ts`, so redeploying it from master moves nothing: its Cloudflare containers share egress IPs that would trip the Vultr edge's per-IP limits. **Every consumer must read hosts at call time** — `tunnelEgressUrl`, `getPrivateProxyHost`, `getPublicCorsProxy`, `getRoutingTable` — never cache a constant at module load, or the pin silently stops covering it. A new host goes in `BROWSER_WS_HOSTS` AND the server's map (the `WsHosts` type makes the second one a compile error to forget). **`WS_RELAY_PRIVATE` is not a kill switch for the relay any more**: for a proxied okx, okxeu, bitget or blofin account the relay url IS the channel's `host`, which the flag never gated (it gates only the `relay` candidate a direct account may fall back to). Turning the flag off leaves those sockets on the relay; the rollback is redeploying the previous build (or moving the user back to legacy).
+
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned families (bitmex always, bybit when tunnelling) whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
 Canonical saved account construction lives in
@@ -1310,7 +1312,8 @@ Is requiresCors true?
   it can apply the wrong transport and capability flags to corrupt saved data.
 - **Non-browser tradetunnel callers must use the shared header-capable
   transport with a browser-like `User-Agent`.** CloudFront/WAF in front of
-  `fsjnpy143pbz.{jp,asia}.tealstreet.io` can reject WebSocket upgrades before
+  `fsjnpy143pbz.{jp,asia}.tealstreet.io` (and Cloudflare in front of
+  `fsjnpy143pbz-tyo`) can reject WebSocket upgrades before
   the Rust tradetunnel sees them. Browser clients send their own UA. Node/Bun
   clients (CLI, `yarn keys`, exchange-server) must use either
   `@tealstreet/http-over-websocket` for HoW REST or `base.ws.ts`'s Tealstreet
