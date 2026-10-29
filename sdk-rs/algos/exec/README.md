@@ -15,14 +15,13 @@ in its existing worker event array/envelope.
 
 This crate supports echo, last/mark/index prices, symbol/filtered/ID
 cancellation, leverage, buy/sell, close, stop, break-even, trailing stop and
-move, bump, scale and swarm placement/amendment. It preserves semicolon ordering, concurrent `@`
+move, bump, scale, swarm and typed chaser/TWAP delegation. It preserves semicolon ordering, concurrent `@`
 slices, optional reqId, last-sequential-result replies and structured native
 errors. It creates no scheduler, process, venue transport or signer.
 
 Full CLI catalog parity and server registration follow in separate slices.
 This crate alone does not enable hosted users. Pending work includes the remaining trading catalog,
-amendment policy, display formatting, timer-backed waits and
-chaser/TWAP delegation. Browser-side script preprocessing stays client-owned.
+amendment policy, display formatting, timer-backed waits. Browser-side script preprocessing stays client-owned.
 The source oracles are `CommandHandler.test.ts`, `worker-host/router*.test.ts`,
 `PriceCommand.ts`, `CancelCommand.ts` and `LeverageCommand.ts` in cli-core.
 
@@ -40,3 +39,8 @@ store; failures stop that symbol fan-out without retry. An explicit semicolon
 chain still continues after failures, exactly as the TS worker router does.
 Successful capture data contains only the native returned IDs, including [].
 The account budget now counts every dispatched call, not just @ slices.
+
+Inject `ExecFactory::with_algos(account_name, chasers, twap)` with the same
+ChaserBook and cloned TwapFactory registered for direct ops. The account name
+is trusted server configuration. CLI TWAP starts a real shared schedule, fixing
+the TS hosted router's discarded taskAction; CLI list/stop inspect that schedule.

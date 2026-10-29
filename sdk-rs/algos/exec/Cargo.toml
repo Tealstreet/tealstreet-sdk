@@ -11,6 +11,8 @@ serde_json.workspace = true
 safe-cex-algos = { path = "../runtime" }
 safe-cex-engine.workspace = true
 getrandom.workspace = true
+safe-cex-chaser = { path = "../chaser" }
+safe-cex-algo-twap = { path = "../twap" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }

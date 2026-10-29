@@ -108,3 +108,14 @@ otherwise the whole swarm refuses. Irregular weights use the host random
 source; native uses OS randomness and refuses before dispatch if unavailable.
 Browser preprocessing budget/fat-finger state remains absent on this hosted
 worker path, as in TS; no synthetic account state is introduced.
+
+
+CLI chase and TWAP use the same injected account ChaserBook/TwapFactory as direct
+ops. The constructor takes the server's trusted account name; no payload account
+or client order id is forwarded. Chaser percent/USD sizing, reduce-only, captured
+termination anchor, list and stop delegate to those shared instances and their
+existing account bounds. TWAP duration is converted to minutes and uses the
+direct factory's validation, state messages and lifecycle. Intentionally fixes
+the TS hosted CLI no-op: its router dropped taskAction; native CLI twap now
+starts exactly one real schedule. Shared algo stop/dispose policy remains owned
+by the account runtime; EXEC never adds write retry or resume replay.

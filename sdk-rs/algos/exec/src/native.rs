@@ -8,13 +8,30 @@ use safe_cex_engine::engine::{Command, CommandId};
 use safe_cex_engine::error::VenueError;
 use serde_json::{Value, json};
 
-use crate::{Exec, Host};
+use crate::{AlgoReply, AlgoRequest, Exec, Host};
+use safe_cex_algo_twap::{TwapOptions, factory::TwapFactory};
+use safe_cex_chaser::{ChaserBook, ChaserOptions};
 
 /// Register once in the server's account algo registry.
 #[derive(Default)]
 pub struct ExecFactory {
     parallel: Rc<Cell<usize>>,
     account: RefCell<Option<Weak<dyn AccountPort>>>,
+    account_name: Option<String>,
+    chasers: Option<Rc<ChaserBook>>,
+    twap: Option<TwapFactory>,
+}
+
+impl ExecFactory {
+    /// Inject the same account instances used by direct chaser/TWAP ops.
+    pub fn with_algos(account_name: String, chasers: Rc<ChaserBook>, twap: TwapFactory) -> Self {
+        Self {
+            account_name: Some(account_name),
+            chasers: Some(chasers),
+            twap: Some(twap),
+            ..Default::default()
+        }
+    }
 }
 
 impl AlgoFactory for ExecFactory {
@@ -44,6 +61,9 @@ impl AlgoFactory for ExecFactory {
             cx: cx.clone(),
             exec: Rc::downgrade(&exec),
             parallel: self.parallel.clone(),
+            account_name: self.account_name.clone(),
+            chasers: self.chasers.clone(),
+            twap: self.twap.clone(),
         };
         exec.borrow_mut().handle(&payload, &mut host);
         Ok(())
@@ -55,6 +75,9 @@ struct Adapter {
     cx: AlgoCx,
     exec: Weak<RefCell<Exec>>,
     parallel: Rc<Cell<usize>>,
+    account_name: Option<String>,
+    chasers: Option<Rc<ChaserBook>>,
+    twap: Option<TwapFactory>,
 }
 struct ParallelReservation(Rc<Cell<usize>>);
 impl Drop for ParallelReservation {
@@ -63,6 +86,14 @@ impl Drop for ParallelReservation {
     }
 }
 impl Host for Adapter {
+    fn algo(&mut self, request: AlgoRequest) -> Result<AlgoReply, Value> {
+        if self.cx.scope.is_disposed() {
+            return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
+        }
+        self.run_algo(request)
+            .map_err(|message| json!({"message":message,"outcome":"notSent"}))
+    }
+
     fn random(&mut self) -> Result<f64, String> {
         let mut bytes = [0u8; 8];
         getrandom::getrandom(&mut bytes).map_err(|_| "Random distribution unavailable")?;
@@ -81,7 +112,7 @@ impl Host for Adapter {
             }
             value
         }).collect();
-        json!({"venue":store.venue,"markets":markets,"instrumentClassificationsReady":store.instrument_classifications.is_some(),
+        json!({"venue":store.venue,"accountName":self.account_name,"markets":markets,"instrumentClassificationsReady":store.instrument_classifications.is_some(),
             "tickers":store.tickers.values().collect::<Vec<_>>(),"orders":store.orders,"positions":store.positions,"balance":store.balance,"socketHealth":{"privateInitialized":store.private_socket.initialized,"privateHealthy":store.private_socket.healthy}})
     }
     fn call(&mut self, token: u64, method: &str, args: Value) -> Result<(), Value> {
@@ -210,4 +241,230 @@ pub fn serialize_error(error: VenueError) -> Value {
         }
     }
     data
+}
+
+impl Adapter {
+    fn run_algo(&self, request: AlgoRequest) -> Result<AlgoReply, String> {
+        let mut reply = AlgoReply::default();
+        match request {
+            AlgoRequest::ChaseStart { options, errors } => {
+                reply.logs = errors;
+                let book = self
+                    .chasers
+                    .as_ref()
+                    .ok_or("Hosted chaser runtime unavailable")?;
+                let mut ids = Vec::new();
+                let mut symbols = Vec::new();
+                for option in options {
+                    let mut option: ChaserOptions =
+                        serde_json::from_value(option).map_err(|_| "Invalid chase options")?;
+                    option.account_name = self.account_name.clone();
+                    option.client_id = None;
+                    let symbol = option.symbol.clone();
+                    match book.start(option) {
+                        Ok(id) => {
+                            ids.push(id);
+                            symbols.push(symbol);
+                        }
+                        Err(error) => reply.logs.push(error),
+                    }
+                }
+                if ids.is_empty() {
+                    return Err(format!(
+                        "No chasers started{}",
+                        if reply.logs.is_empty() {
+                            String::new()
+                        } else {
+                            format!(": {}", reply.logs.join("; "))
+                        }
+                    ));
+                }
+                let labels = ids
+                    .iter()
+                    .map(|id| &id[..id.len().min(8)])
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                reply.message = if ids.len() == 1 {
+                    format!("Chaser started for {} [{labels}]", symbols.join(", "))
+                } else {
+                    format!(
+                        "{} chasers started for {} [{labels}]",
+                        ids.len(),
+                        symbols.join(", ")
+                    )
+                };
+                reply
+                    .message
+                    .push_str("\nUse \"watch chase\" to monitor progress, \"chasers\" to list all");
+            }
+            AlgoRequest::ChaseCancel { keep } => {
+                let book = self
+                    .chasers
+                    .as_ref()
+                    .ok_or("Hosted chaser runtime unavailable")?;
+                if let Some(chase) = book
+                    .active_chasers()
+                    .into_iter()
+                    .rev()
+                    .find(|c| !c.is_stopped)
+                {
+                    if keep {
+                        book.remove_keep_order(&chase.id);
+                    } else {
+                        book.remove(&chase.id);
+                    }
+                    reply.message = if keep {
+                        format!(
+                            "Stopped chaser [{}] — order left in book",
+                            &chase.id[..chase.id.len().min(8)]
+                        )
+                    } else {
+                        format!("Cancelled chaser [{}]", &chase.id[..chase.id.len().min(8)])
+                    };
+                } else {
+                    reply.message = "No active chasers to cancel".into();
+                }
+            }
+            AlgoRequest::ChasersList => {
+                let book = self
+                    .chasers
+                    .as_ref()
+                    .ok_or("Hosted chaser runtime unavailable")?;
+                let all = book.active_chasers();
+                reply.message = if all.is_empty() {
+                    "No active or recent chasers".into()
+                } else {
+                    all.iter()
+                        .map(|c| {
+                            format!(
+                                "[{}] {} {:?} {} attempts: {} {}",
+                                c.id,
+                                c.symbol,
+                                c.side,
+                                c.size,
+                                c.attempts,
+                                if c.is_stopped {
+                                    &c.stop_reason
+                                } else {
+                                    "ACTIVE"
+                                }
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+            }
+            AlgoRequest::ChasersCancel(target) => {
+                let book = self
+                    .chasers
+                    .as_ref()
+                    .ok_or("Hosted chaser runtime unavailable")?;
+                if target.is_empty() {
+                    reply.message = "Usage: chasers cancel <id> or chasers cancel all".into();
+                } else if target == "all" {
+                    let active = book
+                        .active_chasers()
+                        .into_iter()
+                        .filter(|c| !c.is_stopped)
+                        .collect::<Vec<_>>();
+                    for chase in &active {
+                        book.remove(&chase.id);
+                    }
+                    reply.message = format!("Cancelled {} chaser(s)", active.len());
+                } else if let Some(chase) = book
+                    .active_chasers()
+                    .into_iter()
+                    .find(|c| c.id.starts_with(&target))
+                {
+                    if chase.is_stopped {
+                        reply.message = format!("Chaser [{target}] is already stopped");
+                    } else {
+                        book.remove(&chase.id);
+                        reply.message = format!(
+                            "Cancelled chaser [{}] for {}",
+                            &chase.id[..chase.id.len().min(8)],
+                            chase.symbol
+                        );
+                    }
+                } else {
+                    reply.message = format!("Chaser not found: {target}");
+                }
+            }
+            AlgoRequest::TwapStart(mut value) => {
+                let factory = self
+                    .twap
+                    .as_ref()
+                    .ok_or("Hosted TWAP runtime unavailable")?;
+                value["accountName"] = json!(
+                    self.account_name
+                        .as_ref()
+                        .ok_or("TWAP account unavailable")?
+                );
+                let options: TwapOptions =
+                    serde_json::from_value(value).map_err(|_| "Invalid TWAP options")?;
+                let symbol = options.symbol().to_string();
+                let id = factory.start(options)?;
+                reply.message = format!("Starting TWAP for {symbol} [{id}]");
+            }
+            AlgoRequest::TwapList => {
+                let factory = self
+                    .twap
+                    .as_ref()
+                    .ok_or("Hosted TWAP runtime unavailable")?;
+                let rows = factory.active_twaps(
+                    self.account_name
+                        .as_deref()
+                        .ok_or("TWAP account unavailable")?,
+                );
+                reply.message = if rows.is_empty() {
+                    "No TWAP orders running".into()
+                } else {
+                    format!(
+                        "Active TWAP Orders\n{}",
+                        rows.iter()
+                            .map(Value::to_string)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    )
+                };
+            }
+            AlgoRequest::TwapStop(target) => {
+                let factory = self
+                    .twap
+                    .as_ref()
+                    .ok_or("Hosted TWAP runtime unavailable")?;
+                let rows = factory.active_twaps(
+                    self.account_name
+                        .as_deref()
+                        .ok_or("TWAP account unavailable")?,
+                );
+                let rows = rows
+                    .into_iter()
+                    .filter(|row| row["status"] != "completed")
+                    .collect::<Vec<_>>();
+                if target == "all" {
+                    let mut count = 0;
+                    for row in rows {
+                        if let Some(id) = row["id"].as_str() {
+                            count += usize::from(factory.stop(id));
+                        }
+                    }
+                    reply.message = format!("Stopping {count} TWAP order(s)");
+                } else {
+                    let id = rows
+                        .iter()
+                        .filter_map(|row| row["id"].as_str())
+                        .find(|id| id.starts_with(&target))
+                        .ok_or_else(|| {
+                            format!("No TWAP found with ID starting with \"{target}\"")
+                        })?;
+                    if !factory.stop(id) {
+                        return Err(format!("TWAP [{id}] is already completed"));
+                    }
+                    reply.message = format!("Stopping TWAP [{id}]");
+                }
+            }
+        }
+        Ok(reply)
+    }
 }
