@@ -895,3 +895,51 @@ async fn in_process_account_handle_snapshots_commands_and_disposes() {
         assert!(handle.join(3, false).await.is_err(), "a disposed account refuses joins");
     }).await;
 }
+
+#[tokio::test]
+async fn a_deep_in_process_queue_survives_a_burst_the_default_peer_cannot() {
+    LocalSet::new()
+        .run_until(async {
+            let tape = Tape::default();
+            let mut book = Book::default();
+            book.apply(BookSide::Bids, 99., 1.);
+            let engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
+                label: "a",
+                book,
+                observed: Rc::default(),
+                pending: Vec::new(),
+                received: Rc::default(),
+                started: Rc::default(),
+                poll_scales: Rc::default(),
+                poll_intervals: Rc::default(),
+                poll_timer: None,
+            });
+            let config = ServerConfig {
+                flush_every: Duration::from_millis(1),
+                ..config()
+            };
+            let (handle, _task) =
+                safe_cex_native::spawn_account(Host::new(engine, tape.clone()), config).unwrap();
+            let shallow = handle.join(1, false).await.unwrap();
+            let deep = handle.join_with_capacity(2, false, 4096).await.unwrap();
+            // Neither client reads while 40 book changes each flush a frame.
+            for amount in 2..42 {
+                tape.message(&amount.to_string());
+                tokio::time::sleep(Duration::from_millis(3)).await;
+            }
+            assert!(
+                *shallow.canceled.borrow(),
+                "a 32-deep peer is dropped as slow"
+            );
+            assert!(
+                !*deep.canceled.borrow(),
+                "the deep in-process client is kept"
+            );
+            assert!(
+                deep.outgoing.len() > 32,
+                "every frame is still queued: {}",
+                deep.outgoing.len()
+            );
+        })
+        .await;
+}

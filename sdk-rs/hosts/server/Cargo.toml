@@ -27,6 +27,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.53.3", features = ["test-util"] }
 safe-cex-venues = { workspace = true, features = ["hyperliquid"] }
 tokio-tungstenite = "0.30.0"
