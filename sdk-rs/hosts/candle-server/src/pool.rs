@@ -249,8 +249,13 @@ impl Drop for Held {
     }
 }
 
+/// Cold starts each load a venue catalogue; bounding them keeps a caller
+/// cycling exchanges from turning the pool into a venue-request amplifier.
+const MAX_CONCURRENT_STARTS: usize = 3;
+
 pub struct Pool {
     residents: RefCell<HashMap<String, Rc<Resident>>>,
+    starting: Rc<Cell<usize>>,
     pub max_resident: usize,
     pub idle_ttl_ms: f64,
 }
@@ -259,6 +264,7 @@ impl Pool {
     pub fn new(max_resident: usize, idle_ttl_ms: f64) -> Self {
         Self {
             residents: RefCell::new(HashMap::new()),
+            starting: Rc::new(Cell::new(0)),
             max_resident,
             idle_ttl_ms,
         }
@@ -269,6 +275,8 @@ impl Pool {
     }
 
     /// The venue's resident, created (and its markets awaited) on first use.
+    /// Concurrent requests for one venue share its single start: the resident
+    /// is registered before its markets load, and later holds await it.
     pub async fn hold(&self, venue: &str) -> Result<Held, String> {
         let existing = self.residents.borrow().get(venue).cloned();
         let resident = match existing {
@@ -284,6 +292,11 @@ impl Pool {
     }
 
     fn create(&self, venue: &str) -> Result<Rc<Resident>, String> {
+        if self.starting.get() >= MAX_CONCURRENT_STARTS {
+            return Err(format!(
+                "{MAX_CONCURRENT_STARTS} exchange engines are already starting"
+            ));
+        }
         let options: safe_cex_venues::EngineOptions = serde_json::from_str(
             r#"{"publicDataOnly":true,"publicFeed":{"mode":"disabled"},"logLevel":"warn"}"#,
         )
@@ -301,6 +314,8 @@ impl Pool {
         )
         .map_err(|error| error.message)?;
         let (settle, settled) = watch::channel(false);
+        self.starting.set(self.starting.get() + 1);
+        let starting = self.starting.clone();
         let watcher = shared.clone();
         let mut ready = frames.clone();
         let name = venue.to_owned();
@@ -319,6 +334,7 @@ impl Pool {
                     "[candle-server] could not load markets, symbol precheck disabled for this venue exchange={name}"
                 );
             }
+            starting.set(starting.get() - 1);
             let _ = settle.send(true);
         });
         let now = now_ms();
@@ -362,5 +378,19 @@ impl Pool {
         self.residents.borrow_mut().retain(|_, resident| {
             resident.in_flight.get() > 0 || now - resident.last_used.get() < self.idle_ttl_ms
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cold_starts_beyond_the_cap_are_refused_before_any_engine_is_built() {
+        let pool = Pool::new(8, 600_000.);
+        pool.starting.set(MAX_CONCURRENT_STARTS);
+        let refused = pool.create("bybit").err().unwrap();
+        assert!(refused.contains("already starting"), "{refused}");
+        assert_eq!(pool.size(), 0);
     }
 }
