@@ -7,8 +7,8 @@ and test-only replay/reference implementations remain independent dependencies.
 Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
-Hosted-enabled beta names are Binance x4, Bybit x4, OKX x4, Bitget/USDC and
-Bitunix (#2262). Provider-mode eligibility still follows each declared remote
+Hosted-enabled beta names are Binance x4, Bybit x4, OKX x4, Bitget/USDC,
+Bitunix (#2262) and BloFin. Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.

@@ -35,6 +35,13 @@ describe('shared delegated signing declarations', () => {
     expect(deriveBridgeConstruction('bitunix', {} as ExchangeOptions).dispatchSigning).toBe(true);
   });
 
+  it('blofin admits RemoteSigner on its base64-of-hex wire while refusing unsupported private PayloadSigner', () => {
+    expect(deriveRemoteSigningPolicy('blofin')).toEqual({ enabled: true, payloadSupported: false,
+      protectedHeaders: ['ACCESS-KEY', 'ACCESS-SIGN', 'ACCESS-TIMESTAMP', 'ACCESS-NONCE', 'ACCESS-PASSPHRASE'],
+      signatureEncoding: 'hex-base64', passphraseHeader: 'ACCESS-PASSPHRASE' });
+    expect(deriveBridgeConstruction('blofin', {} as ExchangeOptions).dispatchSigning).toBe(true);
+  });
+
   it.each(['okx', 'okxeu', 'okxdemo', 'okxeudemo'] as const)('%s admits RemoteSigner while refusing unsupported private PayloadSigner', (name) => {
     expect(deriveRemoteSigningPolicy(name)).toMatchObject({ enabled: true, payloadSupported: false,
       signatureEncoding: 'base64', passphraseHeader: 'OK-ACCESS-PASSPHRASE', wire: { exchangeName: name, extraData: 'secondsTimestamp', secondsSuffix: { method: 'GET', path: '/users/self/verify' } } });

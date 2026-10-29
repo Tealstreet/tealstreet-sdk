@@ -90,6 +90,23 @@ Private WebSocket authenticates via a `login` operation after connection:
 
 The signature signs the string `/users/self/verify` + `GET` + `timestamp` + `nonce` using the same HMAC-SHA256 + base64(hex) method (see `blofin.ws-private.ts auth`).
 
+### Rust hosted and remote signing
+
+The Rust venue signs at dispatch (`sdk-rs/venues/blofin/src/sign/dispatch.rs`):
+the provider returns the raw 32-byte MAC and the venue writes base64 of its
+lowercase hex. Credentials go through the shared trusted signer setup with the
+OKX/Bitget passphrase policy: a private Primary requires its own, an absent
+Secondary inherits it, and an explicit empty one never falls back.
+
+`construction-rules.json` declares `signatureEncoding: "hex-base64"`, so:
+
+- hosted `signHttpRequest` (`blofin.signing.ts` in `legacySigning.ts`) and
+  `signWsAuth` return the same `ACCESS-SIGN` as the TS interceptor;
+- a keyless `remoteSigner` is asked `outputFormat: 'hex-base64'` (the legacy
+  login wire), and the provider accepts only the canonical base64 of 64
+  lowercase hex characters;
+- a private `payloadSigner` is refused, as there is no REST-only lifecycle.
+
 ## Startup Sequence
 
 The `start()` method follows this initialization order:
