@@ -191,8 +191,8 @@ const getGrvtTradingApiUrl = (testnet: boolean): string => {
  * ## API Call
  *
  * **Endpoint**: `POST {transport proxy}/{EDGE_BASE_URL}/auth/api_key/login`
- *   - Testnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.testnet.grvt.io/auth/api_key/login`
- *   - Mainnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io/auth/api_key/login`
+ *   - Testnet:  `POST https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.testnet.grvt.io/auth/api_key/login`
+ *   - Mainnet:  `POST https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io/auth/api_key/login`
  *
  * **Request Headers**:
  * ```
@@ -416,8 +416,8 @@ export const requestWalletConnection = async (): Promise<string | null> => {
  * ## API Call
  *
  * **Endpoint**: `POST {transport proxy}/{TDG_BASE_URL}/full/v1/get_authorized_builders`
- *   - Testnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.testnet.grvt.io/full/v1/get_authorized_builders`
- *   - Mainnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io/full/v1/get_authorized_builders`
+ *   - Testnet:  `POST https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.testnet.grvt.io/full/v1/get_authorized_builders`
+ *   - Mainnet:  `POST https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io/full/v1/get_authorized_builders`
  *
  * **Request Headers**:
  * ```
@@ -618,8 +618,8 @@ export function createGrvtBuilderInfo(
  * ## API Call (Step 5)
  *
  * **Endpoint**: `POST {transport proxy}/{EDGE_BASE_URL}/auth/builder/authorize`
- *   - Testnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.testnet.grvt.io/auth/builder/authorize`
- *   - Mainnet:  `POST https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://edge.grvt.io/auth/builder/authorize`
+ *   - Testnet:  `POST https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.testnet.grvt.io/auth/builder/authorize`
+ *   - Mainnet:  `POST https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://edge.grvt.io/auth/builder/authorize`
  *
  * **Request Headers**:
  * ```

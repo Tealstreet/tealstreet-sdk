@@ -66,9 +66,10 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   documented `tpslMode: "full"` shape.
 - Private WS uses `wss://ws.bitget.com/v3/ws/private` and subscribes with
   `{ instType: "UTA", topic: "account" | "position" | "order" }`.
-  Its proxied routes are the v3 equivalents of Classic's: ws-proxy
-  `/bitget/v3/private` and the relay upstream `ws.bitget.com/v3/ws/private`
-  (routing `privateUta`, resolved as `wsPrivateUta`). See "Private WS egress".
+  Its proxied route is the v3 equivalent of Classic's: the relay upstream
+  `ws.bitget.com/v3/ws/private` (routing `privateUta`, resolved as
+  `wsPrivateUta`; the exchange server's pin keeps ws-proxy `/bitget/v3/private`
+  first). See "Private WS egress".
 
 Account-type detection is eager during validation/startup and lazy on private
 methods that choose between Classic v2 and UTA v3. The lazy path shares one
@@ -322,8 +323,8 @@ The implementation uses **four WebSocket connections** simultaneously:
 
 ### 4. Private WebSocket (`bitget.ws-private.ts`)
 
-- **Classic URL**: `wss://ws.bitget.com/v2/ws/private` direct; a proxied account dials ws-proxy `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`, then the relay
-- **UTA URL**: `wss://ws.bitget.com/v3/ws/private` direct; proxied: ws-proxy `.../bitget/v3/private`, then the relay
+- **Classic URL**: `wss://ws.bitget.com/v2/ws/private` direct; a proxied account dials the relay `wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss://ws.bitget.com/v2/ws/private` (the exchange server: ws-proxy `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`, then the relay)
+- **UTA URL**: `wss://ws.bitget.com/v3/ws/private` direct; proxied: the relay to `ws.bitget.com/v3/ws/private` (the exchange server: ws-proxy `.../bitget/v3/private`, then the relay)
 
 #### Private WS egress (Bitget checks the key's bound IP)
 
@@ -335,10 +336,17 @@ container's IPs are never on a key's whitelist.
 
 Routing (`routingTable.ts`) is OKX's pattern: `private`/`privateUta` are
 `proxyConditional` to ws-proxy (`python/ws-proxy`, egress `54.255.57.166`, which
-the add-account form asks Bitget users to bind via `exchangesRequireWsIp`) with a
+legacy's add-account form asks Bitget users to bind via `exchangesRequireWsIp`;
+master's form no longer does, AWS_EXIT.md 3e) with a
 `relayUpstream` and `relayWhenTunnelled`, so the tradetunnel relay — egressing
 from the private proxy fleet, i.e. the account's REST IPs — is offered even to a
 proxied account. Bitget does NOT gate the relay on `WS_RELAY_PRIVATE`.
+
+**Since AWS_EXIT step 3e the browser build has no ws-proxy**: its `host` and
+`fallback` ARE the relay url (`BROWSER_WS_HOSTS`), so a proxied socket offers the
+relay twice and a direct one walks direct → relay. The ws-proxy-first chain above
+survives only in the hosted exchange server's pinned hosts
+(`services/exchange-server/src/egress-hosts.ts`).
 
 `bitget.ws-private.ts` walks the chain with `WsDirectFallback`:
 
@@ -357,8 +365,9 @@ proxied account. Bitget does NOT gate the relay on `WS_RELAY_PRIVATE`.
 Infra this depends on: ws-proxy's `bitget/v2/private` + `bitget/v3/private`
 routes; tradetunnel `RELAY_ALLOWED_UPSTREAMS` including `ws.bitget.com/v2/ws/private`
 and `/v3/ws/private` (live `kubectl` env + `terraform/{tokyo,singapore}`); the
-private fleet's `stream_bitget_backend` (already present). Bitget's HOW egress is
-Tokyo, so the relay dials `fsjnpy143pbz.jp`.
+private fleet's `stream_bitget_backend` (already present). The browser build's
+relay dials `fsjnpy143pbz-tyo`; the exchange server's dials `fsjnpy143pbz.jp`
+(Bitget's HOW egress is Tokyo).
 
 - **Authentication**: Required before subscribing (login op)
 - **Channels subscribed**:

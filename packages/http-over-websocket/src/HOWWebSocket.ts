@@ -84,10 +84,12 @@ export class HOWWebSocket {
     return this._emitter.emit(event, ...args);
   };
 
-  private url: string | undefined;
+  // A getter is resolved at each connect, so the module-level singletons follow a
+  // host app's `setTunnelEgressUrls` however early they were constructed.
+  private url: string | (() => string);
 
   constructor(
-    url: string,
+    url: string | (() => string),
     private readonly WebSocketCtor?: typeof WebSocket,
   ) {
     if (!url) {
@@ -199,7 +201,7 @@ export class HOWWebSocket {
   connectAndSubscribe = () => {
     this.isInitialized = true;
     if (!this.isDisposed) {
-      this.ws = this.createWebsocket(this.url || '');
+      this.ws = this.createWebsocket(typeof this.url === 'function' ? this.url() : this.url);
 
       clearTimeout(this.lastMessageTimeout);
 

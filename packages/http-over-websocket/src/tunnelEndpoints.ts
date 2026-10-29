@@ -10,13 +10,22 @@ export const TUNNEL_PATH =
     ? '/tunnel-staging'
     : '/tunnel';
 
-export const SINGAPORE_HOW_EGRESS = `wss://fsjnpy143pbz.asia.tealstreet.io${TUNNEL_PATH}`;
-export const TOKYO_HOW_EGRESS = `wss://fsjnpy143pbz.jp.tealstreet.io${TUNNEL_PATH}`;
+// The Vultr Tokyo tunnel (docs/plans/AWS_EXIT.md step 3e): every region egresses
+// through it, so both names are the same host. The hosted exchange server pins its
+// own hosts with `setTunnelEgressUrls`, so a redeploy of it cannot move its egress.
+export const TOKYO_HOW_EGRESS = `wss://fsjnpy143pbz-tyo.tealstreet.io${TUNNEL_PATH}`;
+export const SINGAPORE_HOW_EGRESS = TOKYO_HOW_EGRESS;
 
 export type TunnelEgress = 'jp' | 'sg';
 
-export const tunnelEgressUrl = (egress: TunnelEgress): string =>
-  egress === 'jp' ? TOKYO_HOW_EGRESS : SINGAPORE_HOW_EGRESS;
+let tunnelEgressUrls: Readonly<Record<TunnelEgress, string>> = { jp: TOKYO_HOW_EGRESS, sg: SINGAPORE_HOW_EGRESS };
+
+/** Pins this runtime's tunnel hosts. Read at dial time, so call it at boot, before the first request. */
+export const setTunnelEgressUrls = (urls: Record<TunnelEgress, string>): void => {
+  tunnelEgressUrls = { ...urls };
+};
+
+export const tunnelEgressUrl = (egress: TunnelEgress): string => tunnelEgressUrls[egress];
 
 // ---- rpc.relay urls (pure; no socket construction so safe-cex's routing table
 // can import this without dragging `ws`/configureHOW into its test mocks) ----

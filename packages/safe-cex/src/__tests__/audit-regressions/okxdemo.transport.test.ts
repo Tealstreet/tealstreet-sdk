@@ -87,8 +87,9 @@ describe('OKX Demo transport and metadata', () => {
       latencyDomain: 'openapi.okx.com',
     });
 
+    // Was fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e.
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).restProxyHost).toBe(
-      'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+      'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy',
     );
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsPrivate).toEqual({ tunnelled: false });
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsBusiness).toEqual({ tunnelled: false });
@@ -108,7 +109,7 @@ describe('OKX Demo transport and metadata', () => {
     });
 
     expect(resolveExchangeRouting('okxeudemo', { tealstreetProxy: true }).restProxyHost).toBe(
-      'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+      'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy',
     );
     expect(resolveExchangeRouting('okxeudemo', { tealstreetProxy: true }).wsPrivate).toEqual({ tunnelled: false });
     expect(resolveExchangeRouting('okxeudemo', { tealstreetProxy: true }).wsBusiness).toEqual({ tunnelled: false });
