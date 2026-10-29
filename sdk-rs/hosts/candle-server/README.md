@@ -37,7 +37,9 @@ cargo build --release --locked -p safe-cex-candle-cache --bin candle-cache-owner
 The server starts the owner from its own directory, or from
 `CANDLE_CACHE_OWNER_BIN`, and exits if the owner dies. It listens on
 `0.0.0.0:TEALSTREET_CANDLE_PORT` (23457). `CANDLE_SERVER_CORS_ORIGINS` (`*`) is
-read per request. Alerts are stderr lines.
+read per request. Alerts are stderr lines. At most three engines start at once;
+a further cold start answers 503, so a caller cycling exchanges cannot
+amplify venue market loads. Per-IP rate limiting belongs to the edge.
 
 Known differences from the TS server:
 - `/api/market-data/markets` sorts ties with an approximation of ICU
