@@ -173,6 +173,8 @@ fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>) -> Change 
         positions,
         tickers: tickers_changed,
         fills,
+        // Set by the port on a feed rejoin (fe7lgm).
+        resync: false,
     }
 }
 
