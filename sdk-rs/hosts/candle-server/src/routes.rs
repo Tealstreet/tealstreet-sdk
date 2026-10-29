@@ -130,7 +130,11 @@ async fn route(local: Local, method: Method, uri: Uri, headers: HeaderMap) -> Re
                 .await
         }
         "/api/market-data/candles" if get => {
-            let ttl = closed_range_ttl(&query, crate::pool::now_ms());
+            let ttl = closed_range_ttl(
+                &query,
+                crate::pool::now_ms(),
+                std::env::var("CANDLE_CACHE_TTL_SECONDS").ok().as_deref(),
+            );
             let mut reply = local
                 .run(Box::new(move |app| {
                     Box::pin(async move { handlers::candles(&app, &query).await })
@@ -164,7 +168,7 @@ pub fn internal_error() -> Reply {
 }
 
 /// `getClosedRangeCacheTtl`: only a range ending before the current candle is final.
-pub fn closed_range_ttl(query: &Query, now_ms: f64) -> Option<u64> {
+pub fn closed_range_ttl(query: &Query, now_ms: f64, configured_ttl: Option<&str>) -> Option<u64> {
     let interval = query.get("interval").unwrap_or("");
     let seconds = CACHEABLE_INTERVAL_SECONDS
         .iter()
@@ -176,7 +180,7 @@ pub fn closed_range_ttl(query: &Query, now_ms: f64) -> Option<u64> {
         return None;
     }
     Some(parse_positive_int(
-        std::env::var("CANDLE_CACHE_TTL_SECONDS").ok().as_deref(),
+        configured_ttl,
         DEFAULT_CANDLE_CACHE_TTL_SECONDS,
     ))
 }
@@ -231,10 +235,15 @@ pub fn js_number(text: &str) -> f64 {
 
 /// `getCorsHeaders`: `CANDLE_SERVER_CORS_ORIGINS`, read per request.
 fn cors_origin(origin: &str) -> String {
-    let configured = std::env::var("CANDLE_SERVER_CORS_ORIGINS")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "*".into());
+    allowed_origin(
+        std::env::var("CANDLE_SERVER_CORS_ORIGINS").ok().as_deref(),
+        origin,
+    )
+}
+
+/// A disallowed origin gets the first configured origin, as the TS server does.
+fn allowed_origin(configured: Option<&str>, origin: &str) -> String {
+    let configured = configured.filter(|value| !value.is_empty()).unwrap_or("*");
     let allowed: Vec<&str> = configured
         .split(',')
         .map(str::trim)
@@ -309,16 +318,19 @@ mod tests {
         let query =
             |interval: &str, to: f64| Query::parse(Some(&format!("interval={interval}&to={to}")));
         assert_eq!(
-            closed_range_ttl(&query("1m", now - 31_000.), now),
+            closed_range_ttl(&query("1m", now - 31_000.), now, None),
             Some(300)
         );
         // The forming candle (and anything after its start) is never cached.
-        assert_eq!(closed_range_ttl(&query("1m", now - 30_000.), now), None);
-        assert_eq!(closed_range_ttl(&query("1m", now), now), None);
-        // Intervals outside the Worker table stay uncached.
-        assert_eq!(closed_range_ttl(&query("3h", 0.), now), None);
         assert_eq!(
-            closed_range_ttl(&Query::parse(Some("interval=1m&to=abc")), now),
+            closed_range_ttl(&query("1m", now - 30_000.), now, None),
+            None
+        );
+        assert_eq!(closed_range_ttl(&query("1m", now), now, None), None);
+        // Intervals outside the Worker table stay uncached.
+        assert_eq!(closed_range_ttl(&query("3h", 0.), now, None), None);
+        assert_eq!(
+            closed_range_ttl(&Query::parse(Some("interval=1m&to=abc")), now, None),
             None
         );
         assert_eq!(parse_positive_int(Some("120s"), 300), 120);
@@ -339,17 +351,19 @@ mod tests {
 
     #[test]
     fn cors_echoes_only_an_allowed_origin() {
-        // SAFETY: tests in this module are the only readers of this variable.
-        unsafe {
-            std::env::set_var(
-                "CANDLE_SERVER_CORS_ORIGINS",
-                "https://a.test, https://b.test",
-            )
-        };
-        assert_eq!(cors_origin("https://b.test"), "https://b.test");
-        assert_eq!(cors_origin("https://evil.test"), "https://a.test");
-        assert_eq!(cors_origin(""), "*");
-        unsafe { std::env::remove_var("CANDLE_SERVER_CORS_ORIGINS") };
-        assert_eq!(cors_origin("https://evil.test"), "*");
+        let configured = Some("https://a.test, https://b.test");
+        assert_eq!(
+            allowed_origin(configured, "https://b.test"),
+            "https://b.test"
+        );
+        // TS getCorsHeaders parity: a disallowed origin gets the FIRST allowed
+        // origin, never its own; the browser then refuses the response.
+        assert_eq!(
+            allowed_origin(configured, "https://evil.test"),
+            "https://a.test"
+        );
+        assert_eq!(allowed_origin(configured, ""), "*");
+        assert_eq!(allowed_origin(None, "https://evil.test"), "*");
+        assert_eq!(allowed_origin(Some(""), "https://evil.test"), "*");
     }
 }
