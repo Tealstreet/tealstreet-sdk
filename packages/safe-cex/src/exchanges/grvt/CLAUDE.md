@@ -364,7 +364,7 @@ require authentication before private sends and exact responses to server pings.
 **Error Codes Handled** (`grvt.ws-private.ts:183-197`):
 
 - `1003`: Malformed syntax -- silently ignored
-- `1008`: IP not whitelisted -- shows user-facing error with the proxy IP to whitelist (18.176.98.246)
+- `1008`: IP not whitelisted -- shows a user-facing error pointing at the Tealstreet IPs in the API key form
 - Other codes: Logged as errors
 
 ## Order Types and Mappings
