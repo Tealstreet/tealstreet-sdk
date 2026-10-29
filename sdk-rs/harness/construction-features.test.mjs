@@ -73,11 +73,11 @@ test('feature guard rejects missing bootstrap, address setup and signing metadat
   assert.throws(() => requiredFeatures({ setupMapping: 'new-mapping' }), /Unspecified setup mapping/);
 });
 
-test('Hyperliquid ScalarOnly setup requires isolated dispatch signing and address setup', () => {
-  const required = ['dispatch-signing', 'address-nonce'];
+test('Hyperliquid ScalarOnly setup requires isolated dispatch signing, address setup and hosted signing', () => {
+  const required = ['dispatch-signing', 'address-nonce', 'hosted-signing'];
   for (const missing of required) {
     const graph = { hyperliquid: required.filter(feature => feature !== missing),
-      'dispatch-signing': [], 'address-nonce': [] };
+      'dispatch-signing': [], 'address-nonce': [], 'hosted-signing': [] };
     assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquid), new RegExp(missing));
     assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquidspot), new RegExp(missing));
   }
