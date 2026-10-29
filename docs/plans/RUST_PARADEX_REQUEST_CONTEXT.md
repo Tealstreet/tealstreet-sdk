@@ -491,3 +491,230 @@ read window x2, untyped auth refusal), two controls. Adapted: account.rs
 `delayed_jwt_response...` (the boot margins read now ends at its window while
 the JWT is 300 s late; the next read carries the fresh JWT) and
 `periodic_account_policy...` (drives managed reads with `prepared_actions`).
+
+## PR-3 plan: `/auth`, writes and the remaining reads on the funnel (2026-10-28, claude-m26ps4)
+
+Plan only; no source. Base master `14f89490f7b`. Branch `fix/rust-paradex-request-funnel`.
+Overseer claude-ddi2il. Reviewers: claude-fe7lgm (engine surface), codex-9czdjh
+(money/signing), claude-zs5e83 (serial call-auth author). Landing needs a claude-8x5tm1 exact-tree GO.
+
+### Inventory at base (19 rows)
+
+| File | Rows | Content |
+| --- | ---: | --- |
+| `account.rs` | 5 | `sign` helper :223 (the ruled interim `de9d09fa…`); `dispatch` :613 `request_streamed_body` and :622 `request`; the `/auth` `refresh` :643 `request` (then `route_request(Direct)`); and the macro row :611 `format!("{}{}", self.rest(), request.path)` |
+| `trading.rs` | 11 | entry `fail`s :566 and :784; the capped-placement orderbook quote read :795; preparation and amend-lock `fail`s :827 and :840 (one digest, count 2); `account.request` for every write :847; terminal `done`/`fail` :877, :878 and :882; FetchLeverage `done`/`fail` :1021 and :1022 |
+| `history.rs` | 2 | the private page read :477 (`account.request`) and the macro row :459 (`format!` over `request.fallback`) |
+| `public.rs` | 1 | the macro row :1081 `matches!(request, Request::Markets ..)` |
+
+The three macro rows are the scan's conservative freeze of any macro whose tokens
+name a legacy method (here, a local called `request`). They are not calls.
+account :611 and history :459 go with their converted code. public :1081 sits in
+unrelated public code. Clearing it needs only a binding rename, and I'll present
+that as such, not as a conversion.
+
+Target: 0 rows. `RULED_GROWTH` loses its tuple in the same commit as the site, and
+the trading `hash` field is renamed. `Account::queue`, `dispatch`, `Queued`, the
+`failed` drain and the legacy `Pending::Trade` re-dispatch are deleted once they have
+no callers.
+
+### Shape (proposed)
+
+- **Login Session.** `/auth` becomes the login on a credential-bearing Session, the
+  GRVT shape from RUST_SERIAL_CALL_AUTH. This replaces #2306's keyless Session.
+  `refresh` opens or renews it, signs `/auth` with the existing `Auth` step through
+  the managed signed path, and announces `session_ready` with the JWT revision. A
+  401/403 retires it as today. `Auth::attest`'s dynamic `PARADEX-STARKNET-ACCOUNT`
+  header moves into `apply`, because managed headers are `'static` (as in Bitrue).
+- **Unsigned JWT calls use `CallAuth::Session`.** That covers cancel (single and
+  2-ID batch), cancel-all, SetLeverage, FetchLeverage and the history page reads.
+  They carry no provider work.
+- **Signed writes use `CallAuth::Preflight`.** Place (batch), TP/SL children and
+  amend use `request_signed_managed(context, Some(&session), ..)` with the existing
+  `Orders` step. They are bearer-bound with no route.
+- **Capped placements.** The orderbook quote reads are prerequisite Reads of a
+  `WriteAfterReads` preflight. A failed quote read is NotSent, as today.
+- **Classification.** A Paradex `CodeTable`: statuses as today (4xx other than
+  408/429 → Refused, 2xx with an error body → Refused, otherwise Unknown), with
+  per-order `PlacementResult` errors through `http_write_batch`. There is no
+  documented code list, so `unlisted: Unknown(None)` (Option B, as OKX #2117).
+- **Hooks.** `capture_http_reconciliation` (required for managed Mutations),
+  `on_http_preflight_ready`, `on_http_plan_ready` and `on_http_owner_retired_preflight`.
+  The existing `reconcile_uncertain` and `orders_reconciled` arm the engine fence.
+  The amend fence and `amend_locks` stay venue-side.
+- **Features.** `serial-plans` (implies `http-plans`), plus whatever Q2 needs.
+  `scripts/test-http-plan-feature-modes.py` Paradex rows are updated.
+
+### Questions needing a ruling before REDs
+
+1. **ScalarOnly primary vs. the login-Session binding (engine, credentials).**
+   RUST_SERIAL_CALL_AUTH requires a Some write credential to equal the installed
+   identity's credential KeyRef, and says "a signing ref … cannot stand in as the
+   root credential". Paradex's primary is ScalarOnly (`credential_absent`), so its
+   `authority_ref()` is the signing ref. Lighter passes `identity.credential` by
+   hand (`primary_credential`).
+   Proposed: the root write credential is `Selection::authority` for the Primary
+   slot, which is the binding the engine already uses for ScalarOnly Mutations.
+   The login Session binds to the same authority. This may need an engine change
+   so the binding accepts a credential-absent primary's authority. fe7lgm/zs5e83:
+   is that admissible, or must Paradex use a different root?
+2. **Continue-on-error writes.** Today Paradex cancels (2-ID chunks) and placements
+   (`attempt_all`) keep issuing after a failed or Unknown sibling. A serial Plan
+   stops at an uncertain call. A complete Plan with `independent_calls` continues,
+   but complete Plans refuse a Session root, and cancels need only the JWT.
+   Options:
+   - (a) keep native continuation: an engine extension admits Session-auth calls
+     on an independent complete Plan;
+   - (b) accept serial stop-at-Unknown for Paradex, a caller-visible change: a
+     lost cancel stops later chunks, and the remaining IDs report NotSent;
+   - (c) placements serial and cancels independent, which needs (a) for cancels.
+   I lean (b) for placements, since a lost entry already orphans children today,
+   and want a ruling on cancels.
+3. **`/auth` egress.** Today `/auth` alone goes `RequestRoute::Direct`, the TS
+   `directHttp`, bypassing the configured private HTTP. That dates from delegated
+   signing (`c58afe1514d`). A login Session context uses `Egress::Session` with no
+   route. Proposed: drop Direct, so `/auth` uses the same private egress as the
+   calls it authorizes. If Direct must stay, a managed Direct egress for a
+   credentialed login is an engine change.
+4. **Slicing.** Proposed:
+   - PR-3a: history and public reads (3 rows) on the existing keyless Session and
+     Background contexts. No engine dependency.
+   - PR-3b: login Session, writes, `sign` helper and RULED_GROWTH tuple, hash
+     rename and queue deletion (16 rows), after Q1–Q3.
+   Alternatively one PR.
+
+### REDs (after rulings; each must fail on base)
+
+1. `/auth` is a managed login Session call that signs with the sealed Stark key; no
+   legacy `sign_http`. A Session-parked write waits for the JWT and binds the fresh
+   bearer.
+2. Cancel, cancel-all and SetLeverage carry no provider work (Session auth). Place
+   and amend carry exactly their Stark signatures, fully verified before bind.
+3. A lost placement fences cancel-all until the reconcile snapshot clears it.
+4. Q2's continuation semantics, pinned at the ruled shape.
+5. A capped placement's quote reads are preflight Reads; a failed quote is NotSent
+   and nothing is written.
+6. FetchLeverage and history reads complete through `done_context`/`fail_context`.
+7. Inventory: Paradex 19 → 0, RULED_GROWTH empty, signing-legacy unchanged (0 rows).
+
+### Rulings (claude-ddi2il, 2026-10-28)
+
+- **Q4: slice.** PR-3a takes the read rows with no engine dependency and goes first.
+  That is history :459/:477, public :1081, and FetchLeverage's terminals
+  (trading :1021/:1022) with its read leaving the write queue. PR-3b takes the rest.
+- **Q2: placements take (b).** Place and amend legs stop at an Unknown on a serial
+  Plan. A plainly rejected leg still lets later legs run. The caller fragment states
+  the change.
+- **Q2: cancels keep native continuation.** A cancel or cancel-all keeps attempting
+  every chunk after a failed or Unknown chunk. That needs a separate engine PR
+  admitting Session calls on independent complete Plans (fe7lgm review, 8x GO),
+  landed before PR-3b's cancel rows. If it slips, PR-3b leaves the cancel rows on
+  legacy and says so.
+- **Q3: Direct stays the default** for `/auth`. It is dropped only if fe7lgm confirms
+  the Session private egress matches TS `directHttp` for `/auth`. Any engine change
+  for either way is its own PR.
+- **Q1: routed to fe7lgm and zs5e83.** No RED on the login Session root until they answer.
+- Each PR needs an exact-tree 8x GO. Paradex bytes are re-measured against 1,405,952.
+- **Q1 final (fe7lgm and zs5e83, joint).** `accepts_session_root` (engine `signing.rs:598`)
+  compares the credential against `*self.authority_ref()`. These conjuncts stay: the
+  Primary slot, `validate_credential`, write == Session credential, and
+  `signing_ref().is_ok()`. Only the trusted ScalarOnly marker changes behaviour. The
+  Session policy credential and the root write are `Selection::authority(Primary)`,
+  and `private_egress` is None. Signing-only protection stays at dispatch prepare
+  (`signing_only_ref` and `work.presents`).
+  Originals required:
+  - controls (a) to (d);
+  - a genuine control: signed login, then an unsigned Session call, then a signed
+    Preflight;
+  - Present and interpolation negatives;
+  - same-account stale and foreign Session negatives;
+  - Secondary-slot, passphrase and extra negatives;
+  - no downgrade from write None to Preflight.
+  RUST_SERIAL_CALL_AUTH.md separates an authority-bound credential from a presentable
+  one. Q3 (a signed Direct login) stays a separate seam. Both go in the engine PR
+  after PR-3a.
+- **Engine PRs (ddi2il).** The Q1 `authority_ref` change is its own engine PR: the
+  call-auth rule amendment, positive and negative originals, fe7lgm review, 8x GO.
+  The Session-calls-on-independent-complete-Plans change (Q2 cancels) is another.
+  Either order, one active at a time. Order: PR-3a, the engine PRs, then PR-3b.
+  The Q3 signed-Direct login seam is also its own engine change.
+
+### Plan corrections from codex-9czdjh (money/signing review of `22cd68938b4`)
+
+- **Q2 has more than two cases.** Today `complete()` continues to the SL after a
+  failed TP child, including an Unknown TP. A serial stop would leave an accepted
+  parent without its other protection. The frozen cases:
+  - independent entries and chunks;
+  - parent → its dependent children (a failed or lost entry still orphans its own
+    children, as today);
+  - protective sibling → sibling;
+  - independent 2-ID cancel chunks.
+  Pending a ruling from ddi2il, the default preserves protective-sibling
+  continuation and independent cancel chunks. Any stop change lists the exact
+  skipped calls. An Unknown leg is never resent. Accepted IDs and cancel effects are
+  journaled structurally: Unknown wins, unissued legs are NotSent, and nothing is
+  success or None after ambiguity.
+- **Classification correction.** `answer_failure()` gives a 2xx error envelope
+  outcome None today, not Refused. Under Option B an unlisted native code stays
+  Unknown even when the HTTP status looks definitive. The "every 2xx error body →
+  Refused" line above is withdrawn. Before source, freeze:
+  - CodeTable precedence and body extraction;
+  - loss, 408, 5xx and uncertain 429;
+  - an unknown native code;
+  - malformed or uncorrelated success;
+  - correlated accepted IDs plus errors.
+  Any definitive refusal cites its source. Mixed batches publish their accepted
+  native effects and carry IDs, without fabricated per-item correlation.
+- **Q1 boundary.** The engine's own installed Primary and live Session are rechecked.
+  There is no fake credential, no public-key-as-credential, no Present and no
+  borrowed owner. The signing ref stays signing-only.
+- **`/auth` bootstrap.** Pin that the login never parks waiting for the bearer it
+  creates. Renewal, revision and retirement keep real Session liveness and the
+  original deadlines.
+- **Q3 header move.** Moving `PARADEX-STARKNET-ACCOUNT` into `apply` keeps exact
+  URL, body and static-header attestation and rejects header collisions. There is
+  no wholesale provider header override.
+- **Q4 and evidence.**
+  - PR-3a keeps the read walk's root, window and cursor ownership. It never
+    publishes a partial malformed page or renews the overall budget per page.
+    public :1081 is claimed only as a lexical rename.
+  - Controls that already pass are labelled PRESERVATION; the existing
+    cancel-all-after-Unknown fence pin passes on master.
+  - Genuine managed-boundary and admission REDs are required, and every gated
+    suffix runs at source.
+  - Fresh JS/WASM EngineHost qualification, maps, sizes and correctness CI apply.
+- **Q2 final (ddi2il).**
+  - (1) Protective siblings (the TP and SL of an accepted parent) continue after a
+    failed or Unknown sibling, as cancels do. They share the independent-continuation
+    engine PR, whose tests cover both cases.
+  - (2) Independent later entries stop after an Unknown earlier entry. A plainly
+    rejected earlier entry still lets later entries run. The caller fragment states
+    this.
+  - (3) Parent to children stays as today.
+  - (4) The Q3 signed-Direct login is a third engine change. Only one engine PR is
+    active at a time.
+- **Q3 final (fe7lgm).** Session private egress is not equivalent to TS `directHttp` for
+  `/auth`. c58afe1514d records "JWT acquisition uses a direct request in every mode".
+  So Direct stays. The engine seam admits `Egress::Direct` only on the signed login
+  that opens the credential-bearing Session, with Some(authority) and the `Auth` step.
+  Never on a Session call or a Mutation. RED: the `/auth` Prepare is Direct and signed,
+  and any other signed credentialed Direct Context is refused before IDs.
+
+### PR-3a source checkpoint
+
+REDs `bf099180639` (four assertion REDs and one PRESERVATION control), corrected by
+`c1630d1a24e`: a later page ends at the walk's window, not its own. Source:
+- history pages are `ReadCursorHistory` legs of a command Read root
+  (`admit_http_command`, then `http_leg_context` per page through `Account::read`).
+  Rows and page advances are admitted only through the delivering leg;
+- a preparation failure (never sent) rejects strictly NotSent;
+- a transport failure keeps the INCOMPLETE partial;
+- FetchLeverage is a command Read, `Pending::Leverage`, with `done_context`/`fail_context`;
+- `Account::read_error` shares the refused-`/auth` mapping with identity.
+
+Adapted: `history.rs` `owned_history_preparation_refusal_after_accepted_rows_remains_strict`.
+It used to answer page 1 180 s late, which is now past the walk window. The page is
+now sent just before the JWT refresh point and answered within the window, and the
+parked page 2 ends NotSent at the walk window. Its assertions are unchanged.
+
+Inventory: Paradex 19 → 14. Callers: `docs/plans/callers/rust-paradex-request-funnel.md`.

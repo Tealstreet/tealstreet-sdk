@@ -73,18 +73,20 @@ const waitFor = (pred: () => boolean, ms = 3000) =>
 
 describe('relay url helpers', () => {
   it('builds, detects and parses the ts-relay query on the regional tunnel url', () => {
+    // Both regions were fsjnpy143pbz.{asia,jp} (AWS) until AWS_EXIT.md step 3e moved
+    // every region to the one Vultr tunnel host.
     const url = buildRelayUrl('sg', 'wss://stream.bybit.com/v5/private');
     expect(url).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
+      'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
     );
     expect(buildRelayUrl('jp', 'wss://ws.okx.com:8443/ws/v5/private')).toContain(
-      'fsjnpy143pbz.jp.tealstreet.io/tunnel?',
+      'fsjnpy143pbz-tyo.tealstreet.io/tunnel?',
     );
     expect(isRelayUrl(url)).toBe(true);
     expect(isRelayUrl('wss://stream.bybit.com/v5/private?requestId=x')).toBe(false);
     expect(isRelayUrl('not a url')).toBe(false);
     expect(parseRelayUrl(url)).toEqual({
-      tunnelUrl: 'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel',
+      tunnelUrl: 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel',
       upstream: 'wss://stream.bybit.com/v5/private',
     });
   });

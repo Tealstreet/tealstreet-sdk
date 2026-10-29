@@ -70,18 +70,14 @@ const start = (name: ExchangeName, options: Partial<ExchangeOptions>) => {
 // MCP signer mode supplies a payloadSigner and no secret. These venues skip the
 // generic local-credential guard, so before this refusal they started unsigned.
 it.each([
-  'hyperliquid',
   'txflow',
   'coinbase',
   'coinbasespot',
   'polymarket',
-  'lighter',
-  'lighter-robinhood',
   'binance',
   'bybit',
 ] as const)('keeps native payloadSigner refusal classification on private %s before I/O', async (name) => {
-  // Lighter signs locally, and a payload-only Lighter account starts public by contract.
-  for (const secret of name.startsWith('lighter') ? ['local-secret'] : ['', 'local-secret']) {
+  for (const secret of ['', 'local-secret']) {
     const { construct, transport, io } = recordEngine(name, true);
     const failure = await start(name, { secret, payloadSigner }).catch((error: unknown) => error);
     expect(failure).toMatchObject({
@@ -98,9 +94,8 @@ it.each([
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it('leaves Paradex and explicitly public-only payload signers to native construction policy', async () => {
+it('leaves explicitly public-only payload signers to native construction policy', async () => {
   for (const [name, options] of [
-    ['paradex', { payloadSigner, paradexAddress: '0x1', subkeyAddress: '0x2' }],
     ['bybit', { payloadSigner, publicDataOnly: true }],
   ] as const) {
     const { transport } = recordEngine(name);
@@ -111,15 +106,46 @@ it('leaves Paradex and explicitly public-only payload signers to native construc
   }
 });
 
+// Hyperliquid and Paradex declare remote signing, so their PayloadSigner refusal is
+// the shared delegated policy: refused at construction, before any engine or transport.
+it('refuses a private hyperliquid or paradex payloadSigner at construction before any engine', () => {
+  const { construct, transport, io } = recordEngine('hyperliquid');
+  for (const [name, options] of [
+    ['hyperliquid', {}], ['hyperliquidspot', {}], ['paradex', { paradexAddress: '0x1', subkeyAddress: '0x2' }],
+  ] as const) {
+    expect(() => new RustEngineExchange(name, { key: 'k', secret: '', payloadSigner, ...options } as ExchangeOptions, new DefaultStore()))
+      .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+  }
+  expect(construct).not.toHaveBeenCalled();
+  expect(transport).not.toHaveBeenCalled();
+  expect(io).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+// Lighter declares remote signing too; its PayloadSigner has no REST-only lifecycle.
+it('refuses a private lighter payloadSigner at construction before any engine', () => {
+  const { construct, transport, io } = recordEngine('lighter');
+  for (const name of ['lighter', 'lighter-robinhood'] as const) {
+    for (const secret of ['', 'local-secret']) {
+      expect(() => new RustEngineExchange(name, { key: 'k', secret, apiKeyIndex: '2', payloadSigner } as ExchangeOptions, new DefaultStore()))
+        .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+    }
+  }
+  expect(construct).not.toHaveBeenCalled();
+  expect(transport).not.toHaveBeenCalled();
+  expect(io).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
 it('reports the structured refusal through start and validateAccount', async () => {
-  const { construct, transport, io } = recordEngine('hyperliquid', true);
-  const hyperliquid = new RustEngineExchange(
-    'hyperliquid',
+  const { construct, transport, io } = recordEngine('txflow', true);
+  const txflow = new RustEngineExchange(
+    'txflow',
     { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
     new DefaultStore(),
   );
-  running.push(hyperliquid);
-  await expect(hyperliquid.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+  running.push(txflow);
+  await expect(txflow.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
 
   const coinbase = new RustEngineExchange(
     'coinbase',

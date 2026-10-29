@@ -1678,7 +1678,7 @@ fn ip_whitelist_rejection_keeps_its_actionable_message() {
         a,
         Action::Notice(safe_cex_engine::Notice::Event(event))
             if event.level == safe_cex_engine::Level::Error
-                && event.message.starts_with("GRVT IP is not whitelisted")
+                && event.message == "GRVT IP is not whitelisted. Please re-add your API key and whitelist every Tealstreet IP listed in the API key form."
     )));
 }
 

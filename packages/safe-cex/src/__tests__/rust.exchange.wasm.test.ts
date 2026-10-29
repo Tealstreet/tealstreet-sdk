@@ -15,6 +15,7 @@ import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 import { prepareRecordedHttp } from './support/managedHttp';
+import { BROWSER_WS_HOSTS, setRoutingWsHosts } from '../transport/tealstreet/routing/routingTable';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
 import { PRIVATE_PROXY_JP } from '../transport/tealstreet/transportResolution';
 import { OrderSide, OrderStatus, OrderType } from '../types';
@@ -448,6 +449,13 @@ describe('RustEngineExchange', () => {
   });
 
   it('routes real engine HTTP and private sockets through the account provider', async () => {
+    // Since AWS_EXIT.md step 3e the browser build's proxied okx sockets are relay urls,
+    // which RelayWebSocket dials outside the account transport (they were the AWS
+    // ws-proxy `fsjnpy143pbz.asia…/okx/{private,business}`). Pin plain routed hosts so
+    // the engine's use of the provider's socket routes stays observable at `connect`.
+    const okxPrivate = 'wss://okx-route.invalid/okx/private';
+    const okxBusiness = 'wss://okx-route.invalid/okx/business';
+    setRoutingWsHosts({ ...BROWSER_WS_HOSTS, okxPrivate, okxBusiness });
     const tape = recordedOkxTransport();
     const outgoing: Array<Parameters<Transport['request']>[0]> = [];
     const sockets: string[] = [];
@@ -501,8 +509,9 @@ describe('RustEngineExchange', () => {
     const placement = outgoing.find((request) => request.url.endsWith('/trade/batch-orders'))!;
     expect(placement.headers['OK-ACCESS-SIGN']).toBeTruthy();
     expect(placement.body).toContain('39000');
-    expect(sockets).toContain('wss://fsjnpy143pbz.asia.tealstreet.io/okx/private');
-    expect(sockets).toContain('wss://fsjnpy143pbz.asia.tealstreet.io/okx/business');
+    expect(sockets).toContain(okxPrivate);
+    expect(sockets).toContain(okxBusiness);
+    setRoutingWsHosts(BROWSER_WS_HOSTS);
   });
 
   it.each([

@@ -350,6 +350,8 @@ export class EngineHost {
     }
     this.signer = options.signer;
     this.primitiveSignings = new Map();
+    // Provider calls still running after their wait ended, for retirement joins.
+    this.signingJoins = new Map();
     this.hostedSignings = new Map();
     this.entropy = identity;
     this.engine = engine;
@@ -664,6 +666,9 @@ export class EngineHost {
     attempt(() => this.managedHttp.dispose());
     for (const pending of this.primitiveSignings.values()) attempt(() => pending.cancel());
     this.primitiveSignings.clear();
+    const addressSetupWaiter = this.addressSetupWaiter;
+    this.addressSetupWaiter = undefined;
+    attempt(() => addressSetupWaiter?.());
     for (const pending of this.hostedSignings.values()) attempt(() => pending.cancel());
     this.hostedSignings.clear();
     for (const socket of this.sockets.values()) attempt(() => socket.close());
@@ -745,6 +750,10 @@ export class EngineHost {
     const expectedCount = work?.operations?.length;
     const controller = new AbortController();
     let settled = false;
+    // Settles once the provider call itself has, not when waiting was abandoned.
+    let workJoined;
+    const joined = new Promise((resolve) => { workJoined = resolve; });
+    let executing = false;
     const clearTimer = () => {
       if (pending.timer !== undefined) {
         try { this.transport.clearTimeout(pending.timer); } catch { /* Completion must still settle. */ }
@@ -758,12 +767,14 @@ export class EngineHost {
         try { controller.abort(); } catch { /* Provider listeners cannot strand completion. */ }
       }
       complete(result, code);
+      if (!executing) workJoined();
     };
     // Register correlation before arming: injected timers may fire inline or
     // throw. Both paths must retire the native capture and settle the caller.
     const pending = {
       controller,
       timer: undefined,
+      joined,
       cancel: () => finish(undefined, 'unavailable'),
       start: () => {
         const notify = () => {
@@ -776,16 +787,49 @@ export class EngineHost {
         Promise.resolve().then(() => {
           if (controller.signal.aborted || this.disposed) return;
           if (!execute) { finish(undefined, 'unavailable'); return; }
+          executing = true;
           return execute({ signal: controller.signal });
         }).then((result) => {
           if (controller.signal.aborted || this.disposed) return;
           const checked = checkedSigningResult(expectedReceipt, expectedCount, result);
           if (!checked) { finish(undefined, 'invalidResult'); return; }
           finish(checked);
-        }).catch(() => finish(undefined, 'refused'));
+        }).catch(() => finish(undefined, 'refused')).finally(() => workJoined());
       },
     };
     return pending;
+  }
+
+  /** Pre-start PublicAddress setup through an injected provider. The engine asks
+   * to retire every task, success included; acknowledge only after that task's
+   * provider call has actually settled, never on a timeout or abort alone. */
+  prepareAddressSetup() {
+    this.assertHttpHandoffIdle();
+    const { engine } = this;
+    if (this.disposed || this.started || !this.signer || typeof engine.setAddressSetupSupport !== 'function')
+      return Promise.resolve();
+    this.invoke(engine.setAddressSetupSupport, 'publicAddressOwned');
+    this.addressSetupNegotiated = true;
+    const ready = new Promise((resolve) => { this.addressSetupWaiter = resolve; });
+    this.run(this.invoke(engine.initializeAddressSetup, this.transport.now(), false));
+    this.checkAddressSetup();
+    return ready;
+  }
+
+  checkAddressSetup() {
+    const waiter = this.addressSetupWaiter;
+    if (!waiter || (!this.disposed && !this.invoke(this.engine.addressSetupReady))) return;
+    this.addressSetupWaiter = undefined;
+    waiter();
+  }
+
+  retireAddressSetup({ task, token }) {
+    this.primitiveSignings.get(task)?.cancel();
+    Promise.resolve(this.signingJoins.get(task)).then(() => {
+      if (this.disposed) return;
+      this.run(this.invoke(this.engine.addressSetupRetired, token, this.transport.now()));
+      this.checkAddressSetup();
+    });
   }
 
   sign(action) {
@@ -809,6 +853,8 @@ export class EngineHost {
         else this.run(this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
       });
     this.primitiveSignings.set(id, pending);
+    this.signingJoins.set(id, pending.joined);
+    pending.joined.then(() => { if (this.signingJoins.get(id) === pending.joined) this.signingJoins.delete(id); });
     pending.start();
   }
 
@@ -867,6 +913,15 @@ export class EngineHost {
       this.hostedSignings.set(id, pending);
       pending.start();
     });
+  }
+
+  hostedWalletSigning({ toSign, outputFormat }) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw new EngineDisposedError();
+    // Wallet keys sign only on the device that holds them, never through a callback.
+    if (this.signer || typeof this.engine.hostedWalletSigning !== 'function')
+      throw new ExchangeError('Hosted wallet signing is unsupported', { kind: 'unsupported', outcome: 'notSent' });
+    return this.invokeHosted(this.engine.hostedWalletSigning, toSign, outputFormat, this.transport.now());
   }
 
   clearSocketFailure(id) {
@@ -953,8 +1008,12 @@ export class EngineHost {
     const { engine, transport } = this;
     switch (action?.op) {
       case 'retireAddressSetup':
-        this.dispose();
-        throw new EngineDisposedError();
+        if (!this.addressSetupNegotiated) {
+          this.dispose();
+          throw new EngineDisposedError();
+        }
+        this.retireAddressSetup(action);
+        break;
       case 'sign':
         this.sign(action);
         break;

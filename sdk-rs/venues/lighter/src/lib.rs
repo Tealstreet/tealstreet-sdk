@@ -215,11 +215,7 @@ impl Lighter {
         }
     }
     fn chain_id(&self) -> u32 {
-        match (self.options.robinhood, self.options.testnet) {
-            (_, true) => 300,
-            (true, false) => 466_324,
-            (false, false) => 304,
-        }
+        sign::chain_id(self.options.robinhood, self.options.testnet)
     }
     fn ws_url(&self) -> &'static str {
         match (self.options.robinhood, self.options.testnet) {

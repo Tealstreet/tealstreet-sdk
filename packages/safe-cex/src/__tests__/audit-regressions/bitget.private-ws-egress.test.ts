@@ -4,6 +4,7 @@ import { buildRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoin
 import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { BROWSER_WS_HOSTS, setRoutingWsHosts } from '../../transport/tealstreet/routing/routingTable';
 
 import '../../transport/registerTealstreetTransport';
 
@@ -14,6 +15,10 @@ const WS_PROXY_V2 = 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private';
 const WS_PROXY_V3 = 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private';
 const RELAY_V2 = buildRelayUrl('jp', 'wss://ws.bitget.com/v2/ws/private');
 const RELAY_V3 = buildRelayUrl('jp', 'wss://ws.bitget.com/v3/ws/private');
+// Since AWS_EXIT.md step 3e the browser build's host IS the relay; the ws-proxy-first
+// chain survives in the hosted exchange server's pinned hosts. Pin a ws-proxy here
+// so the two-route walk stays covered.
+setRoutingWsHosts({ ...BROWSER_WS_HOSTS, bitgetPrivate: WS_PROXY_V2, bitgetPrivateUta: WS_PROXY_V3 });
 const DIRECT_V2 = 'wss://ws.bitget.com/v2/ws/private';
 
 const live: BitgetExchange[] = [];

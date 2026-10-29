@@ -2046,7 +2046,7 @@ impl Grvt {
         }
         if code == "1008" {
             cx.notice(Level::Error, code::AUTH_REJECTED,
-                "GRVT IP is not whitelisted. Please re-add your API key with correct IP whitelisting (18.176.98.246).",
+                "GRVT IP is not whitelisted. Please re-add your API key and whitelist every Tealstreet IP listed in the API key form.",
             );
             return true;
         }

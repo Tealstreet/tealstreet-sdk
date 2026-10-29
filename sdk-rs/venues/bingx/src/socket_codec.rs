@@ -39,6 +39,7 @@ fn policy(role: SocketChannel) -> FeedPolicy {
             Invalidation::Required
         },
         subscription_interval_ms: 0.,
+        close_floors: &[],
     }
 }
 impl Bingx {

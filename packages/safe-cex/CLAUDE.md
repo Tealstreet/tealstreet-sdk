@@ -7,12 +7,12 @@ and test-only replay/reference implementations remain independent dependencies.
 Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
-Hosted-enabled beta names are Binance x4, Bybit x4, OKX x4, Bitget/USDC and
-Bitunix (#2262). Provider-mode eligibility still follows each declared remote
+Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
+Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, and
+Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
-
 
 Core exchange integration library. See also exchange-specific `CLAUDE.md` files in `src/exchanges/*/`.
 
@@ -82,8 +82,19 @@ The public key/applicationId/vault account fields stay separate. SDK and native
 setup share the Rust decoder: 0x and 0X prefixes are accepted, while surrounding
 space, NEL and BOM refuse. The legacy SDK's 0X refusal is deliberately widened;
 invalid input stays redacted. Native local trading uses the installed, engine-sealed identity and managed
-Prepare/Bind/Claim for each serial physical call; hosted Hyperliquid remains
-unsupported. The private provider capsule omits the trusted trimSigning false
+Prepare/Bind/Claim for each serial physical call.
+
+Hosted Hyperliquid never sends a bare digest. Each L1 action's sign work is
+`[sha256(statement), publicAddress, sign secp256k1Digest]`; the statement is
+`{kind: l1, action, nonce, vaultAddress?, isMainnet}` (`sign/statement.rs`).
+The keyless provider sends it as ws-auth `hyperliquid-l1`, and the device's
+WASM `hostedWalletSigning` export (`registry/src/hosted_wallet.rs`, feature
+`hosted-wallet`, kept apart from the HMAC capture codec for the family wasm
+budget) re-derives the digest with the venue's own code, refusing non-trading
+actions and another network or vault. It signs only with the local provider. Startup binds the agent
+address once through `hyperliquid-address` (answered only for the signed-in
+account); the engine refuses any signature not recovering to it. PayloadSigner
+stays refused. The private provider capsule omits the trusted trimSigning false
 default for feature-off decoders, while policy-derived true remains explicit
 and caller trimming metadata remains refused. Legacy top-level HL passphrases
 are consumed and ignored before provider construction; explicit provider
@@ -96,7 +107,12 @@ scalar (the venue's existing parse) and derives any other from an Ethereum key o
 the network's fixed chain, then seals the provider's public key to that provider.
 `paradexAddress`/`subkeyAddress` stay public options; legacy `secret` and
 `passphrase` are ignored. `/auth` and every write are signed at dispatch and fully
-verified against the sealed key. Hosted and delegated Paradex stay refused.
+verified against the sealed key. Keyless `remoteSigner` Paradex (key = the Paradex
+account address) binds the device's Stark public key at setup (`paradex-public`)
+and sends each signing as one closed `paradex/1` descriptor (`paradex-stark`):
+the device's `hostedWalletSigning` (`hosted_wallet.rs`) rebuilds and hashes it at
+its own clock, and the engine verifies every returned `r || s` against the bound
+key and its own hash. PayloadSigner is refused.
 
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
@@ -160,7 +176,8 @@ revision; provider text and partial results are not returned on failure.
 A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
 its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
 The BingX native checkpoint keeps hosted admission disabled until those gates.
-Phemex native dispatch signing likewise keeps hosted/delegated admission disabled.
+Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
+in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
 The shared delegated-provider companion admits keyless `remoteSigner` and
@@ -1082,6 +1099,8 @@ because Bitget rejects a private login from an IP the key is not bound to
 declares a separate `privateUta` channel, resolved as the optional
 `wsPrivateUta`. `createWebsocket` recognises a relay url (`isRelayUrl`) and hands `RelayWebSocket` to the reconnecting socket as its `WebSocket` option.
 
+**Two sets of hosts since AWS_EXIT step 3e: the browser build's and the hosted exchange server's pin.** The browser build (master, the Rust bundle) sends every tunnel, relay, private-pool and per-venue socket to the Vultr host `fsjnpy143pbz-tyo` — Tokyo for every region, so `PRIVATE_PROXY_JP/ASIA/GRVT_TINY` and `TOKYO/SINGAPORE_HOW_EGRESS` are each one value, and okx/okxeu/bitget/blofin private sockets are relay urls (`BROWSER_WS_HOSTS` in `routingTable.ts`). Coinbase stays on the AWS ws-proxy (the tunnel cannot allowlist a root path yet). The public CORS proxy (`PUBLIC_CORS_PROXY`) is the same Vultr host's `/api/public_proxy`: the edge Worker serves it without a JWT, from the tunnel hosts' own IPs and never the whitelisted fleet, even when a caller attaches its proxy token (Binance public reads do), so public-data weight stays off the IPs users trade through (`infra/tofu/CLAUDE.md` → trade tunnel). **The rust lanes must not be released until `public_cors_enabled` is on and both tunnel hosts carry the public CORS container**, or every public read 403s. `services/exchange-server` calls `pinTealstreetEgressHosts` (`transport/tealstreet/pinEgressHosts.ts`) at boot with the old AWS hosts in `src/egress-hosts.ts`, so redeploying it from master moves nothing: its Cloudflare containers share egress IPs that would trip the Vultr edge's per-IP limits. **Every consumer must read hosts at call time** — `tunnelEgressUrl`, `getPrivateProxyHost`, `getPublicCorsProxy`, `getRoutingTable` — never cache a constant at module load, or the pin silently stops covering it. A new host goes in `BROWSER_WS_HOSTS` AND the server's map (the `WsHosts` type makes the second one a compile error to forget). **`WS_RELAY_PRIVATE` is not a kill switch for the relay any more**: for a proxied okx, okxeu, bitget or blofin account the relay url IS the channel's `host`, which the flag never gated (it gates only the `relay` candidate a direct account may fall back to). Turning the flag off leaves those sockets on the relay; the rollback is redeploying the previous build (or moving the user back to legacy).
+
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned families (bitmex always, bybit when tunnelling) whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
 Canonical saved account construction lives in
@@ -1149,8 +1168,8 @@ three references to the _same_ primary client (the read Proxy is never built), s
 routing is **byte-identical** to before. Precedence for the secondary read transport:
 `options.secondaryProxyUrl || otherOptions.proxyUrl || <jp default>`, applied as the
 secondary client's `overrideProxyUrl`. `createExchangeFromAccount` sets
-`secondaryProxyUrl` to `AWS_PUBLIC_CORS_PROXY` — the same
-`exchange-proxy.jp.tealstreet.io` host `getPublicCorsProxy()` returns.
+`secondaryProxyUrl` to `PUBLIC_CORS_PROXY` — the same
+edge Worker `/api/public_proxy` host `getPublicCorsProxy()` returns (the tunnel hosts' own IPs, never the whitelisted fleet).
 
 The Rust `SecondaryKeyClients` exposes the same get-only split, keeping generic
 request calls on the primary. The raw secondary adapter is private, so its
@@ -1310,7 +1329,8 @@ Is requiresCors true?
   it can apply the wrong transport and capability flags to corrupt saved data.
 - **Non-browser tradetunnel callers must use the shared header-capable
   transport with a browser-like `User-Agent`.** CloudFront/WAF in front of
-  `fsjnpy143pbz.{jp,asia}.tealstreet.io` can reject WebSocket upgrades before
+  `fsjnpy143pbz.{jp,asia}.tealstreet.io` (and Cloudflare in front of
+  `fsjnpy143pbz-tyo`) can reject WebSocket upgrades before
   the Rust tradetunnel sees them. Browser clients send their own UA. Node/Bun
   clients (CLI, `yarn keys`, exchange-server) must use either
   `@tealstreet/http-over-websocket` for HoW REST or `base.ws.ts`'s Tealstreet
@@ -1504,7 +1524,6 @@ Custom provider upgrade headers require a capable host and are checked before
 engine construction. History `orderId`/`status` filters fail explicitly rather
 than returning unrelated rows. See `sdk-rs/venues/orderly/README.md`
 for native IDs, margin modes, caller IDs and socket capacity.
-
 
 ## Native credential polling feedback
 
