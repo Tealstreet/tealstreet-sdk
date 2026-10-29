@@ -74,11 +74,11 @@ test('only the declared venue families carry overrides, and only for the venue p
     assert.match(wasmBudgetError(1_411_073, 'venue', venue), /exceeds 1411072/);
   }
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
-    // #2334 run 40610920529, job 122562227484: 1,363,789 B; ceil KiB + 2 KiB.
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1334 * 1024);
+    // Cutover 10-29: release run 40859840322 measured 1,366,837 B; 1344 KiB leaves room for #2362.
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1344 * 1024);
     assert.equal(wasmBudgetError(1_363_789, 'venue', venue), undefined);
-    assert.equal(wasmBudgetError(1_366_016, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_366_017, 'venue', venue), /exceeds 1366016/);
+    assert.equal(wasmBudgetError(1_376_256, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_376_257, 'venue', venue), /exceeds 1376256/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.bybit, 1419 * 1024);
   assert.equal(wasmBudgetError(1_446_912, 'venue', 'bybit'), undefined);
