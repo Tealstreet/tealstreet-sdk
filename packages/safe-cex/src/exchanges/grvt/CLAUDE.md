@@ -301,7 +301,7 @@ The code handles both formats throughout with fallback patterns like `feed.i || 
 
 ### Private WebSocket (`grvt.ws-private.ts`)
 
-**Connection**: Through Tealstreet proxy at `wss://fsjnpy143pbz.jp.tealstreet.io/grvt` (hardcoded, `grvt.ws-private.ts:33`).
+**Connection**: Through Tealstreet proxy at `wss://fsjnpy143pbz-tyo.tealstreet.io/grvt` (`BROWSER_WS_HOSTS.grvt` in `transport/tealstreet/routing/routingTable.ts`; the hosted exchange server pins `wss://fsjnpy143pbz.jp.tealstreet.io/grvt`).
 
 **Authentication Flow** (`grvt.ws-private.ts:69-92`):
 
@@ -364,7 +364,7 @@ require authentication before private sends and exact responses to server pings.
 **Error Codes Handled** (`grvt.ws-private.ts:183-197`):
 
 - `1003`: Malformed syntax -- silently ignored
-- `1008`: IP not whitelisted -- shows user-facing error with the proxy IP to whitelist (18.176.98.246)
+- `1008`: IP not whitelisted -- shows a user-facing error pointing at the Tealstreet IPs in the API key form; since AWS_EXIT.md step 3e those are the Vultr fleet IPs (`privateProxyIpsVultrTokyo`)
 - Other codes: Logged as errors
 
 ## Order Types and Mappings
