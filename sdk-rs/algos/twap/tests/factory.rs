@@ -299,7 +299,7 @@ async fn chase_slices_run_on_the_account_chaser_book() {
                 );
             }
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let book = safe_cex_chaser::ChaserFactory::new().book(&cx);
+            let book = safe_cex_chaser::ChaserFactory::new(cx.clone()).book();
             let factory = TwapFactory::new(cx.clone(), Rc::new(book.clone()));
             let options = twap_options(
                 json!({ "useChaserOrders": true, "timeoutPct": 50, "timeoutAction": "next" }),

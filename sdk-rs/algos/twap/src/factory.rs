@@ -335,7 +335,7 @@ impl TwapEnv for CxEnv {
 }
 
 /// The account's chaser book, shared with the `chaser:*` ops: pass
-/// `ChaserFactory::book(cx)` and register that same `ChaserFactory`.
+/// `ChaserFactory::book()` and register that same `ChaserFactory`.
 impl TwapChasers for Rc<ChaserBook> {
     fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {
         // TS slices pass no origin, account or terminate rule, and the chaser

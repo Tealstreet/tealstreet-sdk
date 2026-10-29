@@ -7,8 +7,9 @@ native exchange server. Nothing calls it yet.
 
 ## Obligations
 
-- Native server: per account, build one `safe_cex_chaser::ChaserFactory`,
-  take `let chasers = chaser_factory.book(&account_cx)`, and build
+- Native server: per account, build one
+  `safe_cex_chaser::ChaserFactory::new(account_cx.clone())`, take
+  `let chasers = chaser_factory.book()`, and build
   `TwapFactory::new(account_cx, Rc::new(chasers))`. Register both factories
   in that account's `Registry`. Pass the account's `AlgoCx`, never a
   socket's: TWAPs keep running when the socket that started them closes.
