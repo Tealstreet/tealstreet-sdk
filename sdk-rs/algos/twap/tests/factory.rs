@@ -363,3 +363,60 @@ fn market() -> Market {
         maker_fee: None,
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn typed_start_and_stop_for_the_exec_twap_command() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
+            let options: safe_cex_algo_twap::TwapOptions =
+                serde_json::from_str(&twap_options(json!({ "origin": "cli" }))).unwrap();
+
+            let id = factory.start(options.clone()).unwrap();
+            settle().await;
+            assert_eq!(placed_amounts(&port), vec![0.5]);
+            assert_eq!(factory.active_twaps("a")[0]["id"], json!(id));
+            assert_eq!(factory.active_twaps("a")[0]["origin"], "cli");
+
+            assert!(factory.stop(&id));
+            assert!(!factory.stop(&id));
+            assert!(factory.active_twaps("a").is_empty());
+
+            let mut unbounded = options;
+            unbounded.orders_count = u32::MAX;
+            let emitted = port.emits.borrow().len();
+            assert_eq!(
+                factory.start(unbounded),
+                Err("TWAP BTCUSDT rejected: ordersCount must be between 1 and 1000".to_owned())
+            );
+            assert_eq!(
+                port.emits.borrow().len(),
+                emitted,
+                "the typed caller reports the refusal"
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn clones_share_one_book() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let registered = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
+            let exec_handle = registered.clone();
+            registered
+                .handle("twap:start", &twap_options(json!({})), &cx)
+                .unwrap();
+            let id = exec_handle.active_twaps("a")[0]["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            assert!(exec_handle.stop(&id));
+            assert!(registered.active_twaps("a").is_empty());
+        })
+        .await;
+}

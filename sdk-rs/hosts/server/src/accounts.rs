@@ -155,6 +155,8 @@ pub struct Registry {
     ids: AtomicU64,
     engine_config: ServerConfig,
     pub resume_grace: Duration,
+    /// 5-10 account starts per second per egress IP, with jitter (DESIGN sizing).
+    pacer: crate::pacing::Pacer,
 }
 
 /// Engine options for a hosted account: non-secret init fields only.
@@ -218,6 +220,7 @@ impl Registry {
                 ..ServerConfig::default()
             },
             resume_grace,
+            pacer: crate::pacing::Pacer::new(7, Duration::from_millis(60)),
         }
     }
 
@@ -299,6 +302,7 @@ impl Registry {
         socket: u64,
         outbox: Outbox,
     ) -> Result<(Account, Option<safe_cex_remote_signer::RemoteAccount>), String> {
+        self.pacer.admit().await;
         let venue = init.exchange_name.clone();
         let transport_flags = AccountTransport {
             tealstreet_proxy: init.tealstreet_proxy,

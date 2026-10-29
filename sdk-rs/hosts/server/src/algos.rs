@@ -1,7 +1,7 @@
 //! Server-side algos (chaser, TWAP, exec) for one private account: an
 //! `AccountPort` over `AccountHandle`, run on an engine thread's `LocalSet`.
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoStore, Change, CommandFuture, Registry, Scope};
-use safe_cex_engine::engine::{Command, CommandId};
+use safe_cex_engine::engine::{Command, CommandId, Fill};
 use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_engine::model::{
     Balance, InstrumentClassification, Loaded, Market, Order, Position, Ticker,
@@ -87,6 +87,9 @@ impl AccountPort for Port {
             self.pending.borrow_mut().insert(id, tx);
         }
         let sent = self.handle.command(self.client, command);
+        if !sent && let Some(id) = id {
+            self.pending.borrow_mut().remove(&id);
+        }
         Box::pin(async move {
             if !sent {
                 let mut error = VenueError::new("account is busy; command not sent");
@@ -126,7 +129,7 @@ fn project(store: &safe_cex_engine::Store) -> Snapshot {
 }
 
 /// Applies one engine read to the algo store; returns what changed.
-fn apply(store: &mut AlgoStore, snapshot: Snapshot) -> Change {
+fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>) -> Change {
     let orders = store.orders != snapshot.orders;
     let positions = store.positions != snapshot.positions;
     let tickers: HashMap<String, Ticker> = snapshot
@@ -161,21 +164,20 @@ fn apply(store: &mut AlgoStore, snapshot: Snapshot) -> Change {
     if snapshot.loaded.balance {
         store.balance = Some(snapshot.balance);
     }
-    // The engine exposes private-socket readiness through its loaded sections.
-    let ready = snapshot.loaded.orders && snapshot.loaded.positions;
-    store.private_socket.initialized = ready;
-    store.private_socket.healthy = ready;
+    // The engine exposes no private-socket health: report it as unknown
+    // (uninitialized), never as healthy.
+    store.private_socket = Default::default();
     Change {
         orders,
         positions,
         tickers: tickers_changed,
-        fills: Vec::new(),
+        fills,
     }
 }
 
 impl Port {
-    fn apply(&self, snapshot: Snapshot) -> Change {
-        apply(&mut self.store.borrow_mut(), snapshot)
+    fn apply(&self, snapshot: Snapshot, fills: Vec<Fill>) -> Change {
+        apply(&mut self.store.borrow_mut(), snapshot, fills)
     }
 
     fn settle(&self, notice: &Value) {
@@ -269,9 +271,11 @@ pub async fn run(
     loop {
         tokio::select! {
             item = link.outgoing.recv() => match item {
-                Some(Outgoing::Frame(_)) => {
+                Some(Outgoing::Frame(frame)) => {
+                    // Fills ride only in their flush frame; the store keeps none.
+                    let fills = safe_cex_engine::wire::fills(&frame).unwrap_or_default();
                     if let Some(snapshot) = handle.read(project).await {
-                        let change = port.apply(snapshot);
+                        let change = port.apply(snapshot, fills);
                         port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                         publish(&mut published);
                     }
@@ -299,7 +303,14 @@ pub async fn run(
     }
     // Disposal contract: stop TWAPs, let chaser cancels settle, then the scope, then the engine.
     twap.terminate_all();
-    let _ = tokio::time::timeout(SHUTDOWN_DEADLINE, book.shutdown("account disposed")).await;
+    if tokio::time::timeout(SHUTDOWN_DEADLINE, book.shutdown("account disposed"))
+        .await
+        .is_err()
+    {
+        crate::state::Log::warn(&format!(
+            "{name}: chaser shutdown passed its deadline; cancels may be unsettled and orders may rest"
+        ));
+    }
     scope.dispose();
     handle.leave(client);
     handle.dispose();
@@ -382,26 +393,42 @@ mod tests {
     #[test]
     fn classifications_map_market_index_to_symbol_and_stay_none_until_sent() {
         let mut store = AlgoStore::default();
-        apply(&mut store, snapshot(false, false));
+        apply(&mut store, snapshot(false, false), Vec::new());
         assert!(store.instrument_classifications.is_none());
         assert!(
             store.balance.is_none(),
             "no balance before its section loads"
         );
-        apply(&mut store, snapshot(true, true));
+        apply(&mut store, snapshot(true, true), Vec::new());
         let labels = store.instrument_classifications.as_ref().unwrap();
         assert_eq!(labels.len(), 1);
         assert_eq!(labels["ETHUSDT"].symbol_type.as_deref(), Some("stock"));
         assert!(store.balance.is_some());
-        assert!(store.private_socket.healthy);
+        assert!(
+            !store.private_socket.initialized && !store.private_socket.healthy,
+            "unknown, never claimed healthy"
+        );
         assert_eq!(store.markets.len(), 2);
     }
 
     #[test]
     fn unchanged_reads_report_no_change() {
         let mut store = AlgoStore::default();
-        apply(&mut store, snapshot(true, true));
-        let change = apply(&mut store, snapshot(true, true));
+        apply(&mut store, snapshot(true, true), Vec::new());
+        let fill = Fill {
+            id: None,
+            order_id: "o1".into(),
+            symbol: "BTCUSDT".into(),
+            side: safe_cex_engine::model::OrderSide::Buy,
+            price: 1.,
+            amount: 2.,
+        };
+        let change = apply(&mut store, snapshot(true, true), vec![fill.clone()]);
+        assert_eq!(
+            change.fills,
+            vec![fill],
+            "a frame's fills reach subscribers"
+        );
         assert!(!change.orders && !change.positions && !change.tickers);
         assert_eq!(store.update_ids.orders, 0);
     }
