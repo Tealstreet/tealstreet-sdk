@@ -604,7 +604,7 @@ impl<P> Cx<'_, P> {
         // After admission, so a refused binding fails an owning Plan like any
         // other issue refusal.
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-        let forbids_recipe = self.io.core.request_contexts.session_call(context.owner())
+        let forbids_recipe = self.io.core.request_contexts.session_call(&context)
             && !matches!(&recipe, ManagedRecipe::Unsigned(_));
         #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
         let forbids_recipe = false;
@@ -648,11 +648,26 @@ impl<P> Cx<'_, P> {
         #[cfg(not(feature = "session-bearer"))]
         let refusal = bearer.is_some().then_some(SESSION_BEARER_DISABLED);
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let complete = self
+            .io
+            .core
+            .request_contexts
+            .session_plan_call(&context)
+            .is_some();
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         let refusal = refusal.or_else(|| {
             if forbids_recipe {
-                Some("Keyless Session serial calls cannot sign")
+                Some(if complete {
+                    "Session Plan Session calls cannot sign"
+                } else {
+                    "Keyless Session serial calls cannot sign"
+                })
             } else if wire.is_err() {
-                Some("Keyless serial resend changed its request")
+                Some(if complete {
+                    "Session Plan resend changed its request"
+                } else {
+                    "Keyless serial resend changed its request"
+                })
             } else if self
                 .io
                 .core
@@ -661,7 +676,11 @@ impl<P> Cx<'_, P> {
                 .is_some()
                 && resolved.is_err()
             {
-                Some("Keyless serial call requires its admitted Session")
+                Some(if complete {
+                    "Session Plan call requires its admitted Session"
+                } else {
+                    "Keyless serial call requires its admitted Session"
+                })
             } else {
                 None
             }
@@ -688,7 +707,7 @@ impl<P> Cx<'_, P> {
             self.io
                 .core
                 .request_contexts
-                .commit_keyless_wire(keyless_owner, fingerprint);
+                .commit_keyless_wire(keyless_owner, leg, fingerprint);
         }
         #[cfg(feature = "http-plans")]
         if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
@@ -738,7 +757,7 @@ impl<P> Cx<'_, P> {
             },
         };
         #[cfg(feature = "serial-plans")]
-        if let Some((seeded, _)) = registry.serial_session_seed(context)
+        if let Some((seeded, _)) = registry.plan_session_seed(context)
             && generation != Some(seeded)
         {
             return Err(Error::Revoked);
@@ -1015,7 +1034,7 @@ impl<P> Cx<'_, P> {
             .io
             .core
             .request_contexts
-            .serial_session_seed(&context)
+            .plan_session_seed(&context)
             .map(|(_, floor)| floor);
         let managed_bearer = bearer.and_then(Bearer::new);
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
@@ -2977,6 +2996,8 @@ mod tests {
     include!("request_context_keyless_serial_tests.rs");
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     include!("request_context_serial_call_auth_tests.rs");
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    include!("request_context_session_plan_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
     #[cfg(feature = "sign-meta")]

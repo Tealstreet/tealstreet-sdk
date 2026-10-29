@@ -267,6 +267,8 @@ impl<P> Cx<'_, P> {
                 has_barriers: false,
                 #[cfg(feature = "http-mutation-barriers")]
                 barriers: Ok(Vec::new()),
+                #[cfg(feature = "session-bearer")]
+                session: None,
             },
             false,
             Some(Serial {
@@ -575,38 +577,13 @@ impl<P> Cx<'_, P> {
         context: &Context,
         evidence: crate::request_context::SessionResend,
     ) -> Result<Context, Error> {
-        self.validate_plan_delivery(plan, context)?;
-        let registry = &self.io.core.request_contexts;
-        registry.validate_keyless_session(plan.owner(), &self.io.core.identities)?;
-        let body = registry.validate_plan(plan, self.now)?;
-        if body.serial.is_none() {
-            return Err(Error::State);
-        }
-        let index = body.schedule.ordinal(slot)?;
-        let call = body.entries[index]
-            .call
-            .as_ref()
-            .filter(|call| call.context == *context)
-            .ok_or(Error::Revoked)?;
-        if call.terms.attempts != 2 || call.selected >= 2 {
-            return Err(Error::RetryForbidden);
-        }
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        if !call.matches(delivery) {
-            return Err(Error::Revoked);
-        }
-        let seed = self.io.serial_session_revision(delivery)?;
-        match evidence {
-            crate::request_context::SessionResend::Write(grant)
-                if context.operation() == Operation::Mutation =>
-            {
-                self.http_resend_context(context, grant)?;
-            }
-            crate::request_context::SessionResend::Read
-                if context.operation() == Operation::Read => {}
-            _ => return Err(Error::Invalid),
-        }
-        let context = self.select_plan_retry(plan, slot, context)?;
+        let (context, seed, _) = self.select_session_resend(
+            plan,
+            slot,
+            context,
+            evidence,
+            super::session_plan::ResendRoot::Serial,
+        )?;
         self.io
             .core
             .request_contexts
@@ -617,16 +594,5 @@ impl<P> Cx<'_, P> {
             .expect("validated serial Plan")
             .session_seed = Some(seed);
         Ok(context)
-    }
-}
-
-#[cfg(feature = "session-bearer")]
-impl ContextRegistry {
-    pub(in super::super::super) fn serial_session_seed(
-        &self,
-        context: &Context,
-    ) -> Option<(u64, u64)> {
-        let plan = self.plan_from_context(context)?;
-        self.plan_body(&plan).ok()?.serial.as_ref()?.session_seed
     }
 }
