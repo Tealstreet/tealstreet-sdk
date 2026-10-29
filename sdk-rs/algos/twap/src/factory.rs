@@ -68,8 +68,9 @@ impl TwapFactory {
         }
     }
 
-    /// Stop every TWAP (`twap:stop` each) and send the final state. Chase
-    /// slices are the chaser book's; terminate those through it as well.
+    /// Stop every TWAP (`twap:stop` each) and send the final state; nothing is
+    /// spawned. Chase slices are the chaser book's: await `ChaserBook::shutdown`
+    /// before disposing the account scope.
     pub fn terminate_all(&self) {
         let effects = self.inner.book.borrow_mut().terminate_all();
         Inner::run(&self.inner, &self.inner.cx, effects);
