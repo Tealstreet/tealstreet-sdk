@@ -14,7 +14,7 @@ use safe_cex_engine::model::{
     TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Response, SocketId, Store, TimerId, num};
+use safe_cex_engine::{Cx, ErrorKind, Fill, Response, SocketId, Store, TimerId, VenueError, num};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Positions and the wallet are re-read this often; the stream carries
@@ -2446,6 +2446,17 @@ impl BybitLinear {
             },
             Err(error) => Err((*error).to_owned()),
         };
+        // The table's classification of a venue or transport failure; a reply
+        // the codec rejects later carries none. Each notice keeps its own text.
+        let classified = match &response {
+            Ok(response) => crate::read_refusal(response, ""),
+            Err(error) => Some(VenueError::new(*error).kind(ErrorKind::Network)),
+        };
+        let failed = |message: String| {
+            let mut error = classified.clone().unwrap_or_else(|| VenueError::new(""));
+            error.message = message;
+            error
+        };
         match request {
             Request::FillRepair {
                 order_id,
@@ -2464,10 +2475,12 @@ impl BybitLinear {
                         cx, order_id, symbol, placed_at, cursor, filled, pages, body,
                     ),
                     Err(message) => {
-                        cx.notice(
+                        cx.notice_error(
                             Level::Warn,
                             code::REQUEST_FAILED,
-                            format!("Bybit fill check for order {order_id} failed: {message}"),
+                            &failed(format!(
+                                "Bybit fill check for order {order_id} failed: {message}"
+                            )),
                         );
                         // After the grace a failed check still lets open orders correct the row.
                         if cx.now - placed_at >= FILL_REPAIR_GRACE_MS {
@@ -2493,8 +2506,8 @@ impl BybitLinear {
                         }
                     }
                     // Public data still loads; trading reports its own errors.
-                    Err(message) => cx.notice(Level::Warn, code::REQUEST_FAILED,
-                        format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable"),
+                    Err(message) => cx.notice_error(Level::Warn, code::REQUEST_FAILED,
+                        &failed(format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable")),
                     ),
                 }
                 self.startup.account_info = true;
@@ -2558,9 +2571,9 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.retried_failure(
+                        cx.retried_failure_error(
                             "bybit.account:2216",
-                            format!("Bybit orders: {message}"),
+                            &failed(format!("Bybit orders: {message}")),
                         );
                         join.failed = true;
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
@@ -2612,9 +2625,9 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.retried_failure(
+                        cx.retried_failure_error(
                             "bybit.account:2269",
-                            format!("Bybit positions: {message}"),
+                            &failed(format!("Bybit positions: {message}")),
                         );
                         join.failed = true;
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
@@ -2684,9 +2697,9 @@ impl BybitLinear {
                         }
                     }
                     Err(message) => {
-                        cx.retried_failure(
+                        cx.retried_failure_error(
                             "bybit.account:2342",
-                            format!("Bybit balance: {message}"),
+                            &failed(format!("Bybit balance: {message}")),
                         );
                         if self.variant.is_hyro() {
                             self.hyro_read_failed(cx, "wallet reconciliation failed");
