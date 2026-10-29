@@ -79,11 +79,13 @@ const ACCOUNTS: Array<Partial<ExchangeAccountConfig>> = [
   { testnet: true, tealstreetProxy: true },
 ];
 
-/** Direct option sets that the account path never produces but the resolver accepts. */
+/**
+ * Direct option sets that the account path never produces but the resolver accepts.
+ * No `overrideProxyUrl`: the native resolver refuses it (it would steer the proxy token).
+ */
 const OPTIONS: Array<Partial<ExchangeOptions>> = [
   { publicDataOnly: true },
   { publicDataOnly: true, tealstreetProxy: true, tealstreetTunnel: true },
-  { tealstreetProxy: true, overrideProxyUrl: 'https://override.invalid/proxy' },
   { bybitSiteId: 'BRA_BTL' },
   { tealstreetProxy: true, tealstreetWsRoute: true, proxyRegion: 'JA' },
 ];
@@ -97,7 +99,6 @@ const transportOptions = (options: Partial<ExchangeOptions>) => ({
   publicDataOnly: options.publicDataOnly,
   hasKey: Boolean(options.key),
   payloadSigner: Boolean(options.payloadSigner),
-  overrideProxyUrl: options.overrideProxyUrl,
 });
 
 const plan = (exchange: ExchangeName, options: ExchangeOptions, baseURL: string) => {

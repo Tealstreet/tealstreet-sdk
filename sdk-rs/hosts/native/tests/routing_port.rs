@@ -29,7 +29,7 @@ fn applied(plan: serde_json::Value) -> serde_json::Value {
 fn every_case_matches_the_typescript_resolver() {
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/routing-port-plans.json")).unwrap();
-    assert!(cases.len() > 500);
+    assert!(cases.len() > 400);
     for case in cases {
         let label = format!("{} {:?} {}", case.exchange, case.provider, case.options);
         let inputs: RoutingInputs = serde_json::from_value(case.options.clone()).unwrap();
@@ -64,4 +64,53 @@ fn every_case_matches_the_typescript_resolver() {
             (result, plan, error) => panic!("{label}: {result:?} vs plan {plan:?} error {error:?}"),
         }
     }
+}
+
+/// Every route that attaches the account's proxy token targets a table host.
+#[test]
+fn authorized_routes_only_ever_name_table_hosts() {
+    let table: serde_json::Value =
+        serde_json::from_str(include_str!("../src/routing/table.json")).unwrap();
+    let hosts = &table["hosts"];
+    let mut allowed: Vec<&str> = hosts["privateProxy"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    allowed.push(hosts["publicCorsProxy"].as_str().unwrap());
+    let cases: Vec<Case> =
+        serde_json::from_str(include_str!("fixtures/routing-port-plans.json")).unwrap();
+    let mut authorized = 0;
+    for case in cases.iter().filter(|c| c.provider == Provider::Tealstreet) {
+        let inputs: RoutingInputs = serde_json::from_value(case.options.clone()).unwrap();
+        let Ok(plan) = resolve_routing_plan(&case.exchange, &inputs, &case.base_url, case.provider)
+        else {
+            continue;
+        };
+        for route in [
+            Some(&plan.http),
+            plan.public_http.as_ref(),
+            plan.public_cors_http.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|route| route.authorize)
+        {
+            authorized += 1;
+            assert!(
+                allowed.contains(&route.prefix.as_str()),
+                "{} {}",
+                case.exchange,
+                route.prefix
+            );
+        }
+    }
+    assert!(authorized > 50);
+}
+
+#[test]
+fn an_override_proxy_url_input_refuses() {
+    let smuggled = serde_json::json!({"tealstreetProxy": true, "hasKey": true, "overrideProxyUrl": "https://evil.invalid"});
+    assert!(serde_json::from_value::<RoutingInputs>(smuggled).is_err());
 }
