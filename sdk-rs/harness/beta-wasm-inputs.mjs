@@ -9,7 +9,20 @@ import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Generated or local-only trees: build outputs, installed packages, harness runs.
-const EXCLUDED = new Set(['target', 'node_modules', '.git', 'sdk-rs/hosts/wasm/pkg', 'sdk-rs/harness/out']);
+// Server-side crates never link into the browser wasm (the wasm host depends only on
+// the engine and registry), so their changes must not invalidate the web pin.
+const EXCLUDED = new Set([
+  'target',
+  'node_modules',
+  '.git',
+  'sdk-rs/hosts/wasm/pkg',
+  'sdk-rs/harness/out',
+  'sdk-rs/algos',
+  'sdk-rs/hosts/server',
+  'sdk-rs/hosts/candle-server',
+  'sdk-rs/hosts/remote-signer',
+  'sdk-rs/hosts/native',
+]);
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 

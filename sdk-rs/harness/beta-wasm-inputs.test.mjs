@@ -64,3 +64,22 @@ test('symlinks and an incomplete toolchain record are refused', () => {
   assert.throws(() => betaWasmInputs(root, TOOLCHAIN), /symlink/);
   assert.throws(() => betaWasmInputs(tree(), { ...TOOLCHAIN, profile: '' }), /lacks profile/);
 });
+
+test('server-side crates are ignored, but the wasm host is not', () => {
+  const root = tree();
+  const before = betaWasmInputs(root, TOOLCHAIN).fingerprint;
+  for (const dir of [
+    'sdk-rs/algos/exec/src',
+    'sdk-rs/hosts/server/src',
+    'sdk-rs/hosts/candle-server/src',
+    'sdk-rs/hosts/remote-signer/src',
+    'sdk-rs/hosts/native/src',
+  ]) {
+    mkdirSync(join(root, dir), { recursive: true });
+    writeFileSync(join(root, dir, 'lib.rs'), 'pub fn server() {}');
+  }
+  assert.equal(betaWasmInputs(root, TOOLCHAIN).fingerprint, before);
+  mkdirSync(join(root, 'sdk-rs/hosts/wasm/src'), { recursive: true });
+  writeFileSync(join(root, 'sdk-rs/hosts/wasm/src/lib.rs'), 'pub fn host() {}');
+  assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, before);
+});
