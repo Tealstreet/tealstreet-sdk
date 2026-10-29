@@ -9,6 +9,7 @@ import { signHttpCapture } from '../../utils/signHttpCapture';
 import { uuid } from '../../utils/uuid';
 import { createAsterDEXV1RequestInterceptor, isAsterDEXPublicEndpoint } from '../asterdex/asterdex.signing';
 import { createBinanceRequestInterceptor, isBinancePublicSigningRequest } from '../binance/binance.signing';
+import { finishBingxRequest, isBingxUnsignedRequest, prepareBingxRequest, serializeBingxParams } from '../bingx/bingx.signing';
 import { finishBitgetRequest, prepareBitgetRequest } from '../bitget/bitget.signing';
 import { BROKER_ID as BITGET_BROKER_ID } from '../bitget/bitget.types';
 import { finishBitunixRequest, isBitunixUnsignedRequest, prepareBitunixRequest } from '../bitunix/bitunix.signing';
@@ -38,7 +39,8 @@ export const signHostedHttp = async (
   const okx = OKX.has(name);
   const bitget = BITGET.has(name);
   const bitunix = name === 'bitunix';
-  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !aster)
+  const bingx = name === 'bingx';
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !aster)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
   // The legacy Bitget interceptor signs every request once credentials exist.
@@ -46,6 +48,7 @@ export const signHostedHttp = async (
     : okx ? isOkxUnsignedSigningRequest(request.config.url)
     : aster ? isAsterDEXPublicEndpoint(request.config.url)
       : bitunix ? isBitunixUnsignedRequest(request.config.url)
+      : bingx ? isBingxUnsignedRequest(request.config.url, options.testnet)
       : !bitget && isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
   const needsCredential = primaryComplete && !unsigned;
   const credential = needsCredential ? (await host.hostedSigning({ kind: 'credential' })).credential : undefined;
@@ -79,7 +82,8 @@ export const signHostedHttp = async (
   const xhr = axios.create({
     timeout: 20_000,
     paramsSerializer: {
-      serialize: (params) => binance ? qs.stringify(params, { arrayFormat: 'repeat' }) : qs.stringify(params),
+      serialize: (params) => binance ? qs.stringify(params, { arrayFormat: 'repeat' })
+        : bingx ? serializeBingxParams(params) : qs.stringify(params),
     },
     headers: okx ? {
       'Content-Type': 'application/json',
@@ -89,6 +93,10 @@ export const signHostedHttp = async (
       'Content-Type': 'application/json',
     } : bitunix ? {
       ...(options.testnet ? { 'x-simulated-trading': 1 } : {}),
+    } : bingx ? {
+      'X-BX-APIKEY': credential,
+      'X-SOURCE-KEY': 'Tealstreet',
+      'Content-Type': 'application/json, charset=utf-8',
     } : binance ? {
       'X-MBX-APIKEY': credential,
       'Content-Type': 'application/json, charset=utf-8',
@@ -125,6 +133,12 @@ export const signHostedHttp = async (
     const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
     if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
     return finishBitunixRequest(prepared, credential, output.signature);
+  } : bingx ? async (config) => {
+    if (isBingxUnsignedRequest(config.url, options.testnet) || !credential) return config;
+    const prepared = prepareBingxRequest(config, now());
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+    return finishBingxRequest(prepared, credential, output.signature);
   } : binance
     ? createBinanceRequestInterceptor(signingOptions, name, now)
     : createBybitRequestInterceptor(signingOptions, name, now, siteHeaders));
