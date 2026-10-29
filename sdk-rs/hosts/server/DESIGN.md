@@ -36,6 +36,22 @@ Owners. Comment in your own section, and don't edit anyone else's.
 - **Signals:** SIGTERM starts a graceful drain. Clients get a `1001` close, and accounts are disposed. The process exits within 10s.
 - **Logs:** JSON lines on stdout. Warn and above go to stderr as well.
 
+### Image contract (codex-mxb4mq)
+
+The SDK Dockerfiles build from the repository root and install native binaries
+only into a Debian slim runtime running as UID/GID 65532. Exchange publishes as
+`ghcr.io/tealstreet/exchange-server-native`, port 23456; candle publishes as
+`ghcr.io/tealstreet/candle-server-native`, port 23457. Both use `GET /health`.
+Candle's `candle-cache-owner` is installed beside `candle-server` after a separate
+Cargo invocation, preserving engine/cache JSON feature isolation.
+
+NX owns `docker-exchange-server-rust.yml` and `docker-candle-server-rust.yml`.
+Each publishes `latest` and the full source SHA to GHCR, then keylessly signs
+the exact pushed digest. Vultr requires GitHub OIDC issuer
+`https://token.actions.githubusercontent.com` and a certificate identity matching
+`^https://github.com/Tealstreet/tealstreet-next/.github/workflows/`.
+Images do not contain credentials and the workflows do not deploy hosts.
+
 ## Environment
 
 | Variable | Default | Meaning |
@@ -56,7 +72,7 @@ connections.
 ## HTTP routes
 
 - **`GET /health`:** `{ok, uptime, release, region, connections, accounts, engineThreads, remoteSigner}`. The last field carries aggregates only: no account, symbol or key ever appears here.
-- **`GET /capabilities` and `GET /account/capabilities`:** the same JSON as `getExchangeServerRuntimeCapabilities()`, with `"runtime":"rust"` and `"frames":1` added.
+- **`GET /capabilities` and `GET /account/capabilities`:** the same JSON as `getExchangeServerRuntimeCapabilities()`, with `"runtime":"rust"` added.
 - **`OPTIONS`** on the three routes above returns 204 with the existing public CORS headers.
 - **WebSocket upgrade:** accepted on `/` and on `/account`.
   - Query parameters: `proxyToken` (alias `token`), `resume`, `resumable=1`.
@@ -108,7 +124,7 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 
 | `t` | `d` | When |
 |---|---|---|
-| `session` | `{resumeId, resumed, frames: 1}` | On open, for `resumable=1` sockets. `frames:1` is the version gate (see Frames) |
+| `session` | `{resumeId, resumed}` | On open, for `resumable=1` sockets |
 | `msg` | `{op, accountName, data, ...}` | Account output (see Frames and Replies) |
 | `sign-req` | the signer request (4yjlw0) | Remote signing |
 | `echo` | `{id, pad}` | Echo probe every `SIGNER_ECHO_PROBE_MS`, default unchanged |
@@ -161,9 +177,7 @@ snapshots, `listenOrderBook` (from `FrameApplier.books`), `listenOHLCV` (from
 Decode uses `@tealstreet/safe-cex-wasm/wire` `Frame`, which is pure JS and
 needs no wasm on the client, plus safe-cex `FrameApplier`.
 
-Version gate: the server's `session` message gains `"frames":1`. A client that
-sees no `frames` field keeps today's `store:delta` path, so old and new servers
-can coexist during the Vultr rollout.
+No version gate (hard cut): the client handles `op:'frame'` unconditionally and still accepts `store` and `store:delta`.
 
 ## Trading (callMethod to engine Command)
 
@@ -195,6 +209,18 @@ existing `serve()` behaviour and wire byte for byte:
   - `command(client, Command)`, `poll_scale(...)`, `leave(client)`.
   - `dispose()`, which stops the actor, closes its venue sockets and settles pending jobs as unknown.
 - **`connection()`:** the existing WebSocket wire becomes one consumer of `AccountHandle`. `hosts/server` is a second consumer.
+
+Sizing, for 110 to 1,200 accounts per region (from the CI replay data):
+
+- **Runtime:** a multi-threaded tokio runtime for sockets, plus `TEALSTREET_ENGINE_THREADS` account threads. FrameServer's own example is single-threaded and caps the whole server at `max_connections` 256; neither limit applies here.
+  - Each account still takes `ServerConfig` per-account limits.
+  - The server caps sockets at `TEALSTREET_MAX_CONNECTIONS` (default 4096).
+- **Reconnect pacing:** account starts are paced at 5 to 10 per second per egress IP, with jitter. A mass reconnect queues inits rather than stampeding venue REST and WebSocket logins. Queued inits still get their snapshot when they start.
+- **Shared public feeds and market loads (follow-up after the first slice):**
+  - one public engine per venue and region;
+  - account engines use `PublicFeedPolicy::Shared`, fed through `HostEvent::PublicFeedUpdate`;
+  - markets are loaded once per venue.
+  - This halves the venue socket fleet and protects public rate limits on mass reconnect.
 
 Account identity:
 
