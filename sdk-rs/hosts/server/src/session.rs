@@ -579,7 +579,11 @@ fn notice_to_msg(
 ) {
     let kind = notice["type"].as_str().unwrap_or("");
     let command = notice["command"].as_u64().and_then(|id| u32::try_from(id).ok());
-    let waiting = command.and_then(|id| pending.lock().unwrap().remove(&id));
+    // Only completions settle a request; other notices leave it waiting.
+    let settles = matches!(kind, "done" | "error");
+    let waiting = command
+        .filter(|_| settles)
+        .and_then(|id| pending.lock().unwrap().remove(&id));
     match (kind, waiting) {
         ("done", Some(pending)) => {
             let outcome = match (notice.get("result").and_then(Value::as_str), notice.get("error")) {
@@ -617,12 +621,6 @@ fn notice_to_msg(
             let _ = out.send(envelope::msg(name, "start-status", json!({"ok": false, "detail": detail})));
             let message = notice["error"].as_str().or(detail.as_str()).unwrap_or("account startup failed");
             let _ = out.send(envelope::msg(name, "error", json!([message])));
-        }
-        (_, Some(waiting)) => {
-            // Not a completion: the command still waits.
-            if let Some(id) = command {
-                pending.lock().unwrap().insert(id, waiting);
-            }
         }
         _ => {}
     }
