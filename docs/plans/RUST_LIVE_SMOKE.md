@@ -156,10 +156,13 @@ Hyperliquid and Hyperliquid Spot share the HYPERLIQUID environment fields:
 SIGNER_ADDRESS is the agent (API) wallet address, PRIVATE_KEY is that agent's
 key, and ACCOUNT_ADDRESS is the funded account. Never provide the main wallet
 key. Equal signer/account addresses refuse; distinct addresses alone do not
-prove that an API wallet was authorized. The mainnet beta run must explicitly use --mainnet and a dedicated account
-with no open orders; use --symbol UBTC/USDC for Spot. Spot leverage is fixed at 1,
-so the harness never attempts a leverage change. Existing write caps, no-retry,
-post-only and fresh cleanup readback checks stay in effect.
+prove that an API wallet was authorized. The funded beta smoke is testnet only
+and uses --symbol PURR/USDC for Spot (see Hyperliquid under Funded beta smoke).
+A mainnet run would need an explicit --mainnet, a dedicated account with no open
+orders and --symbol UBTC/USDC, and is not authorized. Spot leverage is fixed at
+1: the harness skips lowering, and its restore setLeverage(1) is a local no-op
+that sends no request. Existing write caps, no-retry, post-only and fresh cleanup
+readback checks stay in effect.
 
 Spot sizing requires a successful spotMetaAndAssetCtxs reply that uniquely
 identifies the selected pair, its base lot precision and USDC quote token.
@@ -253,7 +256,7 @@ positions and one-way position mode, because cancel-all is intentional.
 
 | Entry | Fields | Venues | Notes |
 | --- | --- | --- | --- |
-| `BINANCE_TESTNET` | `KEY`, `SECRET` | binance (binanceinverse once profiled) | USD-M demo key from demo.binance.com |
+| `BINANCE_TESTNET` | `KEY`, `SECRET` | binance, binanceinverse | demo.binance.com futures key with USD-M and COIN-M enabled. COIN-M margin is the base coin, so the demo account needs some ETH (or BTC); run binanceinverse with `--symbol ETHUSD_PERP`, one 10 USD contract (BTCUSD_PERP's one contract is 100 USD, exactly the cap) |
 | `BINANCESPOT_TESTNET` | `KEY`, `SECRET` | binancespot | testnet.binance.vision key, separate from futures |
 | `BYBIT_TESTNET` | `KEY`, `SECRET` | bybit, bybitinverse, bybitspot | testnet unified account with testnet USDT and some BTC for inverse |
 | `BYBIT_DEMO` | `KEY`, `SECRET` | bybitdemo | Demo Trading key from a mainnet account |
@@ -261,7 +264,7 @@ positions and one-way position mode, because cancel-all is intentional.
 | `OKX_EEA_DEMO` | `KEY`, `SECRET`, `PASSPHRASE` | okxeu, okxeudemo | EEA (my.okx.com) Demo Trading key |
 | `BITGET_TESTNET` | `KEY`, `SECRET`, `PASSPHRASE` | bitget, bitgetusdc | Demo Trading key; simulated SUSDT/SUSDC products |
 | `KRAKEN_DEMO` | `KEY`, `SECRET` | kraken | demo-futures.kraken.com key |
-| `HYPERLIQUID_TESTNET` | `SIGNER_ADDRESS`, `PRIVATE_KEY`, `ACCOUNT_ADDRESS` | hyperliquid, hyperliquidspot | agent wallet key only, distinct from the funded account; Spot needs USDC in spot |
+| `HYPERLIQUID_TESTNET` | `SIGNER_ADDRESS`, `PRIVATE_KEY`, `ACCOUNT_ADDRESS`; optional `VAULT_ADDRESS` | hyperliquid, hyperliquidspot | See Hyperliquid below |
 | `LIGHTER_TESTNET` | `PRIVATE_KEY`, `ACCOUNT_INDEX`, `API_KEY_INDEX` | lighter | API key slot 2 or higher |
 | `PARADEX_TESTNET` | `PRIVATE_KEY`, `ACCOUNT_ADDRESS`, `SUBKEY_ADDRESS` | paradex | subkey private key |
 | `PHEMEX_TESTNET` | `KEY`, `SECRET` | phemex | testnet.phemex.com, USDT-M contract trade |
@@ -274,5 +277,43 @@ positions and one-way position mode, because cancel-all is intentional.
 | `KRAKEN_SPOT_MAINNET` | `KEY`, `SECRET` (Base64) | krakenspot | Query Funds, Query Open Orders and Trades, Create and Modify Orders, Cancel/Close Orders; XBT/USD ordermin 0.00006, costmin 0.5 USD; fund 20 USD cash |
 
 `binancepm` has no test environment and no profile yet. Whether it runs on
-mainnet or stays unsmoked is an open decision. `binanceinverse` gets its profile
-in a follow-up.
+mainnet or stays unsmoked is an open decision.
+
+### Hyperliquid
+
+codex-zs5e83 owns the Hyperliquid and Hyperliquid Spot entry and runs both
+smokes. The binding sequence is its written per-request list, which the overseer
+approved as written for testnet only (list SHA-256
+`8546b4ce5424bff103edd53d69a7a83eed9aa8ab78ef18553bf330096f94a7aa`). Its
+current requirements:
+
+- **Entry**: `HYPERLIQUID_TESTNET` in `tealstreet-beta-livesmoke`, read with
+  `peek` only and piped to `--credentials-stdin`.
+  - `SIGNER_ADDRESS` is the approved agent (API) wallet.
+  - `PRIVATE_KEY` is that agent's key only, never the master wallet's.
+  - `ACCOUNT_ADDRESS` is the funded testnet account, distinct from the agent.
+  - The first run omits `VAULT_ADDRESS`; a vault needs its own approved list.
+- **Environment**: testnet only. Mainnet is not authorized.
+- **Operations**: one post-only BUY limit far below the bid, amend, cancel,
+  cancel-all and a fresh-host readback. There are no withdrawals, transfers,
+  agent or builder approvals, vault operations, market orders or TP/SL.
+- **Configuration**: limited to the perps leverage lower and exact restore,
+  with a fresh readback. A failed restore stops the run and is reported. Spot
+  `setLeverage(1)` is a local no-op that sends no request.
+- **Funding**: testnet faucet USDC, with the Spot share moved to Spot by the
+  account owner before handoff. The harness makes no transfers.
+- **Size**: the venue minimum, never above the fixed 100 USDC cap, and never
+  raised after a rejection.
+- **Precondition**: nothing runs until Sam supplies the entry, the landed
+  harness is confirmed against the list, and zs5e83 rechecks the pin hash at
+  run time.
+
+| Venue | Testnet symbol (authorized) | Mainnet symbol (not authorized) |
+| --- | --- | --- |
+| hyperliquid | BTC-PERP | BTC-PERP |
+| hyperliquidspot | PURR/USDC | UBTC/USDC |
+
+The testnet Spot catalog has no UBTC/USDC, and its BTC/USDC has no quoted price
+or book. PURR/USDC passed a public testnet capture and correctness replay on the
+SDK 14f89490f7b pin. It is used only if its quoted rules are still present at
+smoke time, which the harness enforces before sizing.
