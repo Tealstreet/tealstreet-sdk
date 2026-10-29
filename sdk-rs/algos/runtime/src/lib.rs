@@ -13,4 +13,4 @@ mod store;
 pub use port::{AccountPort, Change, CommandFuture};
 pub use registry::{AlgoFactory, Registry};
 pub use scope::{AlgoCx, Scope};
-pub use store::AlgoStore;
+pub use store::{AlgoStore, PrivateSocketHealth};
