@@ -1,4 +1,4 @@
-//! Host-only packet paths resolved by safe-cex's TypeScript routing resolver.
+//! Host-only packet paths: applied here, resolved by `resolve` (a port of safe-cex's TS resolver).
 use crate::{Events, HostEvent};
 use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
+
+pub mod resolve;
 
 pub type ProxyTokenFuture = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
 /// Resolve a current account-context token for each operation; never put JWTs in a plan.
