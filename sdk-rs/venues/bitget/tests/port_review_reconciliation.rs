@@ -240,9 +240,14 @@ fn unmapped_owned_rest_rows_keep_their_own_position_and_protection_while_peers_u
             (vec![normal, unknown_normal], vec![known, unknown])
         };
         h.respond(
-            "/orders-pending",
+            "status=live",
             200,
             &json!({"code":"00000","data":{"entrustedList":normal_rows}}).to_string(),
+        );
+        h.respond(
+            "status=partially_filled",
+            200,
+            r#"{"code":"00000","data":{"entrustedList":[]}}"#,
         );
         h.respond(
             "planType=profit_loss",

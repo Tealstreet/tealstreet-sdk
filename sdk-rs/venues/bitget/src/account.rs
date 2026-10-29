@@ -832,9 +832,13 @@ impl BitgetFutures {
                     return;
                 }
                 let next = match snapshot.source {
-                    OrderSource::Normal if !self.account.uta => Some(OrderSource::NormalPartiallyFilled),
+                    OrderSource::Normal if !self.account.uta => {
+                        Some(OrderSource::NormalPartiallyFilled)
+                    }
                     OrderSource::Normal if !snapshot.virtual_only => Some(OrderSource::Protection),
-                    OrderSource::NormalPartiallyFilled if !snapshot.virtual_only => Some(OrderSource::Protection),
+                    OrderSource::NormalPartiallyFilled if !snapshot.virtual_only => {
+                        Some(OrderSource::Protection)
+                    }
                     OrderSource::Protection => Some(OrderSource::Trailing),
                     _ => None,
                 };

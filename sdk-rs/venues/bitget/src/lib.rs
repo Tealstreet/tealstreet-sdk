@@ -1023,14 +1023,13 @@ impl Venue for BitgetFutures {
                 request: account::Request::Orders(_),
                 ..
             }
-        ) {
-            if let Some(body) = normalize_empty_order_page(response.body) {
-                let response = Response {
-                    body: &body,
-                    ..response
-                };
-                return self.on_response(cx, pending, response);
-            }
+        ) && let Some(body) = normalize_empty_order_page(response.body)
+        {
+            let response = Response {
+                body: &body,
+                ..response
+            };
+            return self.on_response(cx, pending, response);
         }
         if discovery_context(&pending).is_some() {
             if discovery_delivered(cx, &pending) {
