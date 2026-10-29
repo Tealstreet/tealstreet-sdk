@@ -52,3 +52,10 @@ Explicit semicolon chains still continue after a failed cancel/leverage, as TS
 does; this is pinned with real buy successors. Every dispatched account call
 holds one of 32 credits, including plain single-step messages; a full budget
 refuses before that call is sent and returns the credit on settlement or abort.
+
+Native symbol resolution deliberately tightens the TS resolver's bare-prefix
+fallback: a base must be followed by nothing or a recognized quote/perpetual
+suffix. ETHFI never routes to ETH solely because ETH is listed. Explicit
+unresolved leverage or filtered-cancel scopes refuse instead of falling back to
+the focused symbol. Null placement completions are Unknown and stop fan-out;
+only an actual string-array result, including [], is a successful native shape.

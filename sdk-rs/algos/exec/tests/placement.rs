@@ -251,3 +251,30 @@ fn hundredth_contracts_and_tiny_lots_do_not_collapse_size_to_zero() {
     e.handle(&request("buy $1000"), &mut p);
     assert_eq!(p.calls[0].2[0]["amount"], 0.00002);
 }
+
+#[test]
+fn a_base_prefix_is_not_an_explicit_market_symbol() {
+    for text in ["buy ETHFI $5000", "buy BTCDOM $5000", "buy BTCX $5000"] {
+        let (_, p) = run(text);
+        assert!(p.calls.is_empty(), "{text}");
+        assert_eq!(result(&p)["success"], false);
+    }
+    for text in ["buy ETH $5000", "buy ETHUSDT $5000", "buy ethusdt $5000"] {
+        let (_, p) = run(text);
+        assert_eq!(p.calls.len(), 1, "{text}");
+        assert_eq!(p.calls[0].2[0]["symbol"], "ETHUSDT");
+    }
+    for text in ["cancel buys ETHFI", "lev 5 ETHFI", "cancel ETHFI"] {
+        let (_, p) = run(text);
+        assert!(p.calls.is_empty(), "{text}");
+        assert_eq!(result(&p)["success"], false);
+    }
+}
+#[test]
+fn null_placement_is_unknown_and_stops_multi_symbol_fanout() {
+    let (mut e, mut p) = run("buy BTC,ETH $100");
+    e.complete(p.calls[0].0, Ok(Value::Null), &mut p);
+    assert_eq!(p.calls.len(), 1);
+    assert_eq!(result(&p)["success"], false);
+    assert_eq!(result(&p)["errorDetails"]["outcome"], "unknown");
+}

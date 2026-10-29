@@ -136,10 +136,9 @@ impl Exec {
         let mut pending = pending;
         let mut result = result;
         if let (Ok(value), Some(ids)) = (&result, pending.order_ids.as_mut()) {
-            if value.is_null()
-                || value
-                    .as_array()
-                    .is_some_and(|a| a.iter().all(Value::is_string))
+            if value
+                .as_array()
+                .is_some_and(|a| a.iter().all(Value::is_string))
             {
                 if let Some(returned) = value.as_array() {
                     ids.extend(returned.iter().map(|v| v.as_str().unwrap().to_string()));
@@ -358,7 +357,22 @@ fn resolve(store: &Value, symbol: &str) -> Option<String> {
     let base = markets
         .iter()
         .filter_map(|m| m["base"].as_str())
-        .filter(|base| !base.is_empty() && upper.starts_with(base))
+        .filter(|base| {
+            !base.is_empty()
+                && upper.strip_prefix(base).is_some_and(|rest| {
+                    matches!(
+                        rest,
+                        "" | "USDT"
+                            | "USDC"
+                            | "USD"
+                            | "PERP"
+                            | "-PERP"
+                            | "/USDT"
+                            | "/USDC"
+                            | "/USD"
+                    )
+                })
+        })
         .max_by_key(|base| base.len())?;
     markets
         .iter()
@@ -419,6 +433,11 @@ fn evaluate(
         },
         "cancel" | "x" => cancel(symbol, &args, store),
         "leverage" | "lev" => {
+            if let Some(tail) = args.get(2)
+                && resolve(store, tail).is_none()
+            {
+                return failed(format!("Unknown symbol \"{tail}\""));
+            }
             let target = args
                 .last()
                 .and_then(|s| resolve(store, s))
@@ -463,6 +482,12 @@ fn cancel(symbol: &str, args: &[String], store: &Value) -> Evaluation {
         .unwrap_or_else(|| symbol.into());
     let head = args.get(1).map(String::as_str).unwrap_or("");
     let sub = args.get(2).map(String::as_str).unwrap_or("");
+    if let Some(tail) = args.last().filter(|_| args.len() > 2)
+        && !["buys", "sells", "limits", "stops", "ro", "xro"].contains(&tail.as_str())
+        && resolve(store, tail).is_none()
+    {
+        return failed(format!("Unknown symbol \"{tail}\""));
+    }
     if head.is_empty() || resolve(store, head).is_some() {
         return Evaluation::Call {
             method: "cancelSymbolOrders",
