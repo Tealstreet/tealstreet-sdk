@@ -127,6 +127,8 @@ premium, captured order-ID suffixes and nested both/either. Sleep/timeout/for
 are capped at ten minutes; wait time HHMM UTC targets the next occurrence.
 Native bounds nested conditions at sixteen levels. @variables still require
 the absent hosted PreprocessStore and refuse; browser script preprocessing
-remains client-owned. Explicit semicolon chains retain the worker's continue-
-after-error behavior, including wait timeout. Disposal prevents a sleeping
+remains client-owned. Wait/sleep failures deliberately stop their remaining sequential chain,
+including parse/admission refusal and timeout. This tightens TS worker parity
+to prevent a later trade on a false condition; other explicit semicolon steps
+retain continue-after-error. Disposal prevents a sleeping
 chain's successor from dispatching; no write is replayed on reconnect.

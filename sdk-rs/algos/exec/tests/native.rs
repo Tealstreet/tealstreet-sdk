@@ -434,7 +434,111 @@ async fn actual_wait_reads_current_store_resets_sustain_and_times_out_without_ve
         port.replies.borrow_mut().remove(0).send(Ok("[]".into())).unwrap();settle_exec().await;
         factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"wait short timeout=200ms","reqId":"timeout"}"#,&cx).unwrap();settle_exec().await;
         for _ in 0..2 {tokio::time::advance(std::time::Duration::from_millis(100)).await;settle_exec().await;}
-        assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-result"&&e["reqId"]=="timeout"&&e["success"]==false&&e["error"]=="wait timed out (200ms): short"));
+        assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-result"&&e["reqId"]=="timeout"&&e["success"]==false&&e["error"]=="chain stopped: wait did not complete: wait timed out (200ms): short"));
         assert_eq!(port.commands.borrow().len(),1,"waiting never requests a venue read");cx.scope.dispose();
+    }).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_wait_is_a_barrier_and_never_releases_the_following_buy() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            for (id, command) in [
+                ("timeout", "wait position timeout=100ms; buy $1000"),
+                ("invalid", "sleep 100m; lev 10"),
+            ] {
+                factory
+                    .handle(
+                        "exec",
+                        &json!({"symbol":"BTCUSDT","command":command,"reqId":id}).to_string(),
+                        &cx,
+                    )
+                    .unwrap();
+                settle_exec().await;
+            }
+            tokio::time::advance(std::time::Duration::from_millis(100)).await;
+            settle_exec().await;
+            assert!(
+                port.commands.borrow().is_empty(),
+                "failed sleep/wait must not issue successors"
+            );
+            for id in ["timeout", "invalid"] {
+                assert!(
+                    port.events.borrow().iter().any(|(op, e)| {
+                        op == "exec-result"
+                            && e["reqId"] == id
+                            && e["success"] == false
+                            && e["error"].as_str().is_some_and(|s| {
+                                s.starts_with("chain stopped: wait did not complete")
+                            })
+                    }),
+                    "{id}: {:?}",
+                    port.events.borrow()
+                );
+            }
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+fn wait_market(port: &Port) {
+    use safe_cex_engine::model::{Limits, Market, MinMax, Precision, Ticker};
+    port.store.borrow_mut().markets.insert(
+        "BTCUSDT".into(),
+        Market {
+            id: "BTCUSDT".into(),
+            symbol: "BTCUSDT".into(),
+            pretty_symbol: None,
+            base: "BTC".into(),
+            quote: "USDT".into(),
+            active: true,
+            precision: Precision {
+                amount: 0.001,
+                price: 0.1,
+            },
+            limits: Limits {
+                amount: MinMax {
+                    min: 0.001,
+                    max: 1000.,
+                },
+                leverage: MinMax { min: 1., max: 20. },
+                price: None,
+            },
+            contract_size: None,
+            is_expiring: None,
+            is_inverse: None,
+            is_spot: None,
+            is_perpetual: None,
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        },
+    );
+    port.store.borrow_mut().tickers.insert(
+        "BTCUSDT".into(),
+        Ticker {
+            symbol: "BTCUSDT".into(),
+            last: 50000.,
+            bid: 49999.,
+            ask: 50001.,
+            ..Default::default()
+        },
+    );
+}
+#[tokio::test(start_paused = true)]
+async fn a_successful_wait_releases_one_buy_and_an_unsatisfied_wait_releases_none() {
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());wait_market(&port);let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"wait price > 99999 timeout=100ms; buy $1000","reqId":"false"}"#,&cx).unwrap();settle_exec().await;
+        tokio::time::advance(std::time::Duration::from_millis(100)).await;settle_exec().await;assert!(port.commands.borrow().is_empty());
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"wait price > 50000 timeout=100ms; buy $1000","reqId":"true"}"#,&cx).unwrap();settle_exec().await;
+        assert_eq!(port.commands.borrow().len(),1);
+        assert!(matches!(&port.commands.borrow()[0],Command::PlaceOrders{orders,..} if orders.len()==1 && orders[0].amount==0.02));
+        port.replies.borrow_mut().remove(0).send(Ok(r#"["gated-native"]"#.into())).unwrap();settle_exec().await;
+        assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-result"&&e["reqId"]=="true"&&e["data"]["orderIds"]==json!(["gated-native"])));
+        cx.scope.dispose();
     }).await;
 }
