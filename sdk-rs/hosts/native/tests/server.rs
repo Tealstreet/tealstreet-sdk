@@ -851,3 +851,45 @@ async fn trusted_native_host_provider_updates_private_account_frames() {
         fixture.stop().await;
     }).await;
 }
+
+#[tokio::test]
+async fn in_process_account_handle_snapshots_commands_and_disposes() {
+    LocalSet::new().run_until(async {
+        let tape = Tape::default();
+        let mut book = Book::default();
+        book.apply(BookSide::Bids, 99., 1.);
+        let engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
+            label: "a",
+            book,
+            observed: Rc::default(),
+            pending: Vec::new(),
+            received: Rc::default(),
+            started: Rc::default(),
+            poll_scales: Rc::default(),
+            poll_intervals: Rc::default(),
+            poll_timer: None,
+        });
+        let (handle, task) = safe_cex_native::spawn_account(Host::new(engine, tape.clone()), config()).unwrap();
+        async fn next(link: &mut safe_cex_native::ClientLink) -> safe_cex_native::Outgoing {
+            tokio::time::timeout(DEADLINE, link.outgoing.recv()).await.unwrap().unwrap()
+        }
+        let mut first = handle.join(1, false).await.unwrap();
+        let safe_cex_native::Outgoing::Frame(snapshot) = next(&mut first).await else { panic!("snapshot first") };
+        assert!(sections(&snapshot).any(|(kind, _)| kind == section::MARKETS));
+        assert!(handle.input(1, "not json").is_err(), "malformed input returns a notice");
+        assert!(handle.input(1, r#"{"op":"fetchAccount","command":7}"#).unwrap());
+        let done = loop {
+            if let safe_cex_native::Outgoing::Text(text) = next(&mut first).await { break text; }
+        };
+        assert!(matches!(serde_json::from_str::<Reply>(&done).unwrap(), Reply::Done { command: 7, result: Some(result), error: None } if result == "\"a\""));
+        // A second in-process client on the same account gets its own snapshot.
+        let mut second = handle.join(2, false).await.unwrap();
+        assert!(matches!(next(&mut second).await, safe_cex_native::Outgoing::Frame(_)));
+        assert!(handle.join(2, false).await.is_err(), "duplicate client IDs are refused");
+        handle.dispose();
+        tokio::time::timeout(DEADLINE, task).await.unwrap().unwrap().unwrap();
+        assert!(*first.canceled.borrow(), "dispose cancels clients");
+        assert!(tape.0.borrow().as_ref().unwrap().is_closed(), "dispose drops the account transport");
+        assert!(handle.join(3, false).await.is_err(), "a disposed account refuses joins");
+    }).await;
+}
