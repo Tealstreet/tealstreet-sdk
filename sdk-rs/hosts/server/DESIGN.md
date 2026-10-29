@@ -223,7 +223,7 @@ Account construction, from `init`:
 1. Validate `InitPayload`. Apply the same normalization as `buildHostedAccountConfig`: the key is passed through, and there is never an API secret.
 2. Build options JSON for `safe_cex_venues::build_with_signer`:
    - credential refs only;
-   - `payloadSigner` set to the remote signer;
+   - the remote signer's `options_json` (`remoteSigning: true`, `payloadSigner: false`);
    - `hyperliquidBuilder` validated as in `server.ts`.
 3. Get the routing plan from m26ps4's `resolve_routing_plan`. Build `NetworkTransport::with_routing(plan, token_provider)`. `token_provider` returns the socket's current `proxyToken`; after a resume it returns the new socket's token.
 4. Register the account on an account thread, join this socket, and send a snapshot frame.
@@ -246,14 +246,27 @@ Sessions and resume (same semantics as today):
 
 ## Remote signer (claude-4yjlw0)
 
-Module `hosts/server/src/signer.rs`. Its interface toward the server:
+This has landed as the crate `safe-cex-remote-signer` (`sdk-rs/hosts/remote-signer`, #2381). `src/signer.rs` only wires it in.
 
-- `RemoteSigner::new(outbox: SignerOutbox) -> safe_cex_engine::signing::Provider`. `SignerOutbox` is a `Send` handle that queues `{t:'sign-req', d}` on the account's current owning socket. A resume swaps the socket.
-- `RemoteSigner::resolve(&self, response: SignRes)` is called for every `sign-res`.
-- The 15s timeout is `SIGN_TIMEOUT_MS`.
-- Aggregate stats are exposed for `/health.remoteSigner`.
-- The wire must match today's browser responder exactly, which is the structured ws-auth wire in `@tealstreet/safe-cex-wasm/host` `SignRequest`. The parity tests are `rust.*-remote-signing.wasm.test.ts` and `rust.delegated-provider.wasm.test.ts`.
-- The keyed mode (exchange-server holding keys) uses the local provider through the same `build_with_signer` seam, and is off by default.
+- **`SignerLink::new(outbox)`:** create one per account. It is the twin of TS `WebSocketRemoteSigner`, which is also per account.
+  - `Outbox` is `Arc<dyn Fn(String) -> bool + Send + Sync>`. It queues one text frame on the account's owning socket and returns false when the frame was not sent.
+  - The frames are `{"t":"sign-req","d":RemoteSignerRequest}`, with `t` first, and the timeout is the 15s `SIGN_TIMEOUT`.
+- **`remote_account(link, venue, Some(accountName), engine_options_json)`:** returns a `RemoteAccount` with:
+  - `provider`, which you pass to `build_with_signer` / `FrameServer::add_venue_with_signer`;
+  - `options_json`, which you construct the engine with;
+  - `on_fatal(cb)`, which fires once after 10 consecutive failures spanning at least 30s. Dispose the account, as today.
+- **Input:** `engine_options_json` holds the options the server would otherwise build. That includes the public `key` and an optional `passphrase`, with no secret.
+- **Output:** `options_json` has those fields stripped and carries `signing` (opaque refs), `remoteSigning: true`, `payloadSigner: false` and `publicMode`.
+- **`sign-res`:** call `link.resolve(d)` on each account link of the socket. It routes by id and returns false for an id it does not know, so offering a response to every account is safe.
+- **Resume:** on park, call `link.suspend()`, which aborts in-flight signs as unavailable without counting them toward the fatal streak. On resume, call `link.attach(new_outbox)`. On dispose, call `link.mark_unavailable()`.
+- **Echo:** `link.send_echo()` alternates bare and padded-to-last-sign-req probes, one outstanding at a time. Feed `echo-res` `d` to `link.echo_res(d)`, which returns `(rtt, EchoSize)`.
+- **Wire coverage:** the wire is the existing browser responder's ws-auth wire. That covers:
+  - the HMAC families, with hex, base64 and hex-base64 encodings, a passphrase Present, and the extraData codecs `secondsTimestamp`, `bybitExpiry` and `binanceSpot`;
+  - `bitunix-double-sha256`;
+  - `hyperliquid-address` and `hyperliquid-l1`;
+  - `lighter-tx`;
+  - `paradex-public` and `paradex-stark`.
+- **Address and key binding:** Hyperliquid's address and Paradex's Stark key bind through the engine's owned address setup (`create_public_address_setup`). This needs the native host's `address-nonce` feature for those venues.
 
 ## Routing (claude-m26ps4)
 
@@ -294,7 +307,7 @@ default exactly where the TS server reads it.
     src/accounts.rs   account threads, (userId, accountName) registry, park and resume
     src/methods.rs    callMethod to engine Command
     src/frames.rs     FrameServer Outgoing to msg frame/notice mapping, base64
-    src/signer.rs     4yjlw0
+    src/signer.rs     4yjlw0 (wires safe-cex-remote-signer)
 
 Dependencies: `axum` (with `ws`), `tokio`, `jsonwebtoken`, `base64`, `serde_json`
 and `safe-cex-native`. Optional `sentry`.
