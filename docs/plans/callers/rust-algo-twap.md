@@ -7,12 +7,13 @@ native exchange server. Nothing calls it yet.
 
 ## Obligations
 
-- Native server: drive one `TwapBook` per account through the shared algo
-  runtime (`sdk-rs/algos/runtime`). Send `twap:*` ops to `handle`, wake at
-  `wake_at`, report slice placements with `placement_settled`, and send
-  `StateUpdate` as `twap:stateUpdate` and `Log` as an error log. The adapter
-  follows in this crate.
-- Chaser runtime: `StartChaser` needs start with a given id, plus progress by
-  id and a remove that also cancels the open order.
+- Native server: register one `safe_cex_algo_twap::factory::TwapFactory` per
+  account in its `safe_cex_algos::Registry`. The factory owns the account's
+  `TwapBook` and timer driver, and emits `twap:stateUpdate` and `log`
+  (`[message, "error"]`). It also exposes `active_twaps` and `order_owner` for
+  the store's `activeTWAPs` and `extra.isFromTwap`.
+- Chaser runtime: implement `factory::TwapChasers` (start with a given id,
+  progress by id, and a remove that cancels the open order) over the chaser
+  book, and pass it to `TwapFactory::new`.
 - Web client: unchanged. It keeps persisting `twap:stateUpdate` and replays it
   as `twap:state` on connect.
