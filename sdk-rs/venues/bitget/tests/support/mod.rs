@@ -225,12 +225,7 @@ impl Harness {
         h
     }
     pub fn orders(&mut self, normal: &str) {
-        self.respond("status=live", 200, normal);
-        self.respond(
-            "status=partially_filled",
-            200,
-            r#"{"code":"00000","data":{"entrustedList":[]}}"#,
-        );
+        self.respond("/orders-pending", 200, normal);
         self.respond(
             "planType=profit_loss",
             200,

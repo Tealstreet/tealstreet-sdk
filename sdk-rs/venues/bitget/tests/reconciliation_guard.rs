@@ -11,11 +11,6 @@ fn stale_join_cannot_unfence_lost_placement_but_fresh_complete_read_can() {
         200,
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
     );
-    h.respond(
-        "status=partially_filled",
-        200,
-        r#"{"code":"00000","data":{"entrustedList":[]}}"#,
-    );
     let held_protection = h.take("planType=profit_loss");
     h.command(Command::PlaceOrders {
         command: 31,
@@ -105,11 +100,6 @@ fn an_unknown_placement_fences_a_retry_until_a_fresh_read_releases_it() {
     // An order census that started before the write: it can never release it.
     h.respond(
         "/orders-pending",
-        200,
-        r#"{"code":"00000","data":{"entrustedList":[]}}"#,
-    );
-    h.respond(
-        "status=partially_filled",
         200,
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
     );
@@ -298,11 +288,7 @@ fn a_census_whose_normal_page_predates_the_write_never_releases() {
         200,
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
     );
-    for path in [
-        "status=partially_filled",
-        "planType=profit_loss",
-        "planType=track_plan",
-    ] {
+    for path in ["planType=profit_loss", "planType=track_plan"] {
         if h.requests.iter().any(|r| r.url.contains(path)) {
             let body = if path.contains("track") {
                 r#"{"code":"00000","data":[]}"#
