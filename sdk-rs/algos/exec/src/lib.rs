@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 
 mod algo_commands;
 mod capabilities;
+mod chart;
 mod display;
 pub use algo_commands::{AlgoReply, AlgoRequest};
 #[cfg(not(target_arch = "wasm32"))]
@@ -242,7 +243,8 @@ impl Exec {
             if let Some(summary) = value["summary"].as_str() {
                 pending.success = summary.into();
             } else {
-                result = Err(json!({"message":"Invalid nuke result","outcome":"unknown"}));
+                result =
+                    Err(json!({"message":"Invalid native command result","outcome":"unknown"}));
             }
         }
         if let Ok(value) = &result
@@ -304,7 +306,7 @@ impl Exec {
                 } else {
                     &pending.success
                 };
-                for line in summary
+                let message = summary
                     .replace(
                         "{ids}",
                         &pending
@@ -314,10 +316,13 @@ impl Exec {
                             .unwrap_or_default(),
                     )
                     .replace("{ok}", &pending.succeeded.to_string())
-                    .replace("{failed}", &pending.failed.to_string())
-                    .split('\n')
-                {
-                    log(host, &pending.req_id, line);
+                    .replace("{failed}", &pending.failed.to_string());
+                if pending.native_summary {
+                    log(host, &pending.req_id, &message);
+                } else {
+                    for line in message.split('\n') {
+                        log(host, &pending.req_id, line);
+                    }
                 }
                 let mut result = json!({"handled":true,"success":true});
                 if let Some(ids) = pending.order_ids {
@@ -677,7 +682,7 @@ impl Exec {
                             failure_summary: None,
                             group: None,
                             current_place: false,
-                            native_summary: method == "nuke",
+                            native_summary: matches!(method, "nuke" | "fetchOHLCV"),
                             failure_context: None,
                         },
                     );
@@ -873,6 +878,7 @@ fn evaluate(
         "close" | "c" | "stop" | "be" | "breakeven" | "trail" | "move" | "mv" => {
             protection::evaluate(symbol, &args, store, text)
         }
+        "chart" => chart::evaluate(symbol, &args, store),
         "nuke" => {
             let mode = args.get(1).map(String::as_str).unwrap_or("all");
             if !matches!(mode, "all" | "positions" | "pos" | "orders" | "ord") {

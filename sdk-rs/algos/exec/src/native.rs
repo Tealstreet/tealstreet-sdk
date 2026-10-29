@@ -172,6 +172,11 @@ impl Host for Adapter {
         let Some(exec) = self.exec.upgrade() else {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         };
+        let chart_query = if method == "fetchOHLCV" {
+            args.as_array().and_then(|a| a.first()).cloned()
+        } else {
+            None
+        };
         let mut adapter = self.clone();
         let reservation = {
             if self.parallel.get() >= crate::MAX_PARALLEL {
@@ -200,6 +205,20 @@ impl Host for Adapter {
                     .await
                     .map(|s| serde_json::from_str(&s).unwrap_or(Value::String(s)))
                     .map_err(serialize_error)
+                    .and_then(|value| {
+                        if let Some(query) = chart_query {
+                            crate::chart::render(
+                                &value,
+                                &query,
+                                &adapter.snapshot(),
+                                adapter.cx.now_ms(),
+                            )
+                            .map(|summary| json!({"summary":summary}))
+                            .map_err(|message| json!({"message":message,"outcome":"notSent"}))
+                        } else {
+                            Ok(value)
+                        }
+                    })
             };
             drop(reservation);
             drop(nuke_guard);
@@ -264,6 +283,10 @@ pub fn translate(method: &str, args: &Value, id: CommandId) -> Result<Command, S
                 .filter(|s| !s.is_empty())
                 .ok_or("Missing order ID")?;
             json!({"op":"amendOrder","command":id,"id":order_id,"price":input["update"]["price"]})
+        }
+        "fetchOHLCV" => {
+            let query = args.first().ok_or("Missing candle query")?;
+            json!({"op":"fetchCandles","command":id,"symbol":query["symbol"],"interval":query["interval"],"limit":query["limit"]})
         }
         "setLeverage" => {
             json!({"op":"setLeverage","command":id,"symbol":symbol()?,"leverage":args.get(1).ok_or("Missing leverage")?})

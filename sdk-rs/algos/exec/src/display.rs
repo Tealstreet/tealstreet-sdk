@@ -73,7 +73,7 @@ fn table(headers: &[&str], rows: Vec<Vec<String>>, footer: Option<String>) -> St
     }
     out
 }
-fn dollars(value: f64, precision: Option<f64>) -> String {
+pub(crate) fn dollars(value: f64, precision: Option<f64>) -> String {
     let decimals = precision
         .filter(|p| p.is_finite() && *p > 0.)
         .map(|p| {

@@ -766,3 +766,53 @@ async fn nuke_cancels_first_and_reads_positions_again_to_close_fills_during_canc
         port.replies.borrow_mut().remove(0).send(Ok(r#"["fresh-close"]"#.into())).unwrap();settle_exec().await;assert_eq!(port.commands.borrow().len(),2);cx.scope.dispose();
     }).await;
 }
+
+#[tokio::test]
+async fn cli_chart_uses_one_typed_engine_candle_query_and_its_correlated_result() {
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());wait_market(&port);let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"chart 5m 3","reqId":"chart"}"#,&cx).unwrap();settle_exec().await;
+        assert!(matches!(&port.commands.borrow()[0],Command::FetchCandles{symbol,limit:Some(3),..} if symbol=="BTCUSDT"));
+        port.replies.borrow_mut().remove(0).send(Ok(json!([{"timestamp":0,"open":49000,"high":51000,"low":48000,"close":50000}]).to_string())).unwrap();settle_exec().await;
+        assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-log"&&e["reqId"]=="chart"&&e["message"].as_str().is_some_and(|s|s.contains("BTCUSDT 5m (1 candles)"))));
+        assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-result"&&e["reqId"]=="chart"&&e["success"]==true));assert_eq!(port.commands.borrow().len(),1);
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"chart","reqId":"bad"}"#,&cx).unwrap();settle_exec().await;port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
+        assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-result"&&e["reqId"]=="bad"&&e["success"]==false&&e["error"]=="Invalid candle result"));assert_eq!(port.commands.borrow().len(),2);cx.scope.dispose();
+    }).await;
+}
+#[tokio::test]
+async fn chart_disposal_never_releases_the_following_trade_or_retries_the_read() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            wait_market(&port);
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            factory
+                .handle(
+                    "exec",
+                    r#"{"symbol":"BTCUSDT","command":"chart; buy $100","reqId":"gone"}"#,
+                    &cx,
+                )
+                .unwrap();
+            settle_exec().await;
+            cx.scope.dispose();
+            settle_exec().await;
+            assert!(
+                port.replies
+                    .borrow_mut()
+                    .remove(0)
+                    .send(Ok("[]".into()))
+                    .is_err()
+            );
+            assert_eq!(port.commands.borrow().len(), 1);
+            assert!(
+                !port
+                    .events
+                    .borrow()
+                    .iter()
+                    .any(|(op, e)| op == "exec-result" && e["reqId"] == "gone")
+            );
+        })
+        .await;
+}

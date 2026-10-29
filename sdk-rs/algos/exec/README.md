@@ -56,3 +56,7 @@ Missing coin/loaded telemetry stays unknown. Help names/aliases/descriptions/
 examples come from the TS registered catalog via scripts/generate-cli-catalog.py;
 its --check mode detects drift. Browser account/session/preprocess state remains
 outside this crate. Display commands do not fetch venue data.
+
+Chart requests bounded candles through the engine, renders the current position
+and order overlays, and uses explicit UTC time-axis labels. It creates no candle
+transport or independent subscription. Empty or malformed results refuse.
