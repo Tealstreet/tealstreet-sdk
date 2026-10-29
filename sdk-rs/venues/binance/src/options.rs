@@ -698,7 +698,10 @@ impl BinanceFutures {
                 // The token spans the entire response; no older read can clear a new mark.
                 if cx.store.orders_snapshot_current(&token)
                     && !self.option_state.orders_owed
-                    && cx.store.commit_orders_snapshot([token], |_| orders)
+                    && cx.store.commit_orders_snapshot([token], |_| {
+                        self.account.observe_snapshot_orders(&orders);
+                        orders
+                    })
                 {
                     cx.orders_reconciled_since(None, request.read_epoch);
                 }

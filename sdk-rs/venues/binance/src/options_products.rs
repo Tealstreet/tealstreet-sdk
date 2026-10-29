@@ -389,6 +389,14 @@ impl BinanceFutures {
                 quote,
             });
         }
+        rows.sort_by(|a, b| {
+            a.market
+                .option
+                .expiry
+                .total_cmp(&b.market.option.expiry)
+                .then_with(|| a.market.option.strike.total_cmp(&b.market.option.strike))
+                .then_with(|| a.market.option.right.cmp(b.market.option.right))
+        });
         encode(&rows)
     }
 }

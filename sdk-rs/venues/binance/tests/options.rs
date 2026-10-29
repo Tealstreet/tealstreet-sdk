@@ -519,3 +519,87 @@ fn consumed_nonfinite_poll_recovers_on_a_genuine_finite_callback_without_early_i
         assert_eq!(h.timers.iter().filter(|(_, at)| *at == 7000.).count(), 1);
     }
 }
+
+#[test]
+fn cumulative_fill_evidence_survives_an_intervening_empty_census() {
+    let mut h = started(true);
+    h.respond("/eapi/v1/openOrders", 200, ORDERS);
+    let timer = h.timers.iter().find(|(_, at)| *at == 6000.).unwrap().0;
+    h.now = 6000.;
+    h.event(Event::TimerFired { timer });
+    h.respond("/eapi/v1/openOrders", 200, "[]");
+    assert!(h.engine.store().orders().is_empty());
+    let timer = h.timers.iter().find(|(_, at)| *at == 11000.).unwrap().0;
+    h.now = 11000.;
+    h.event(Event::TimerFired { timer });
+    h.respond("/eapi/v1/openOrders", 200, &ORDERS.replace("0.02", "0.01"));
+    assert!(h.engine.store().orders().is_empty());
+}
+
+#[test]
+fn chain_sorts_expiry_then_strike_then_call_before_put() {
+    let (prefix, rows) = INFO.split_once("\"optionSymbols\":[").unwrap();
+    let row = rows.strip_suffix("]}").unwrap();
+    let put = row
+        .replace("BTC-261225-85000-C", "BTC-261225-85000-P")
+        .replace("\"CALL\"", "\"PUT\"");
+    let late = row
+        .replace("BTC-261225-85000-C", "BTC-271225-85000-C")
+        .replace("1798185600000", "1829721600000");
+    let low = row
+        .replace("BTC-261225-85000-C", "BTC-261225-80000-C")
+        .replace("85000.000", "80000.000");
+    let info = format!("{prefix}\"optionSymbols\":[{late},{put},{row},{low}]}}");
+    let mut h = Harness::started(Options {
+        variant: Variant::Options,
+        public_data_only: true,
+        ..Options::default()
+    });
+    h.respond("/eapi/v1/exchangeInfo", 200, &info);
+    h.respond("/eapi/v1/ticker", 200, DAILY);
+    h.respond("/eapi/v1/mark", 200, MARK);
+    h.event(Event::Command(Command::FetchOptionChain {
+        command: 104,
+        query: safe_cex_engine::model::OptionChainQuery {
+            underlying: "BTC".into(),
+            expiry: None,
+            right: None,
+            strike_min: None,
+            strike_max: None,
+        },
+    }));
+    h.respond("/eapi/v1/ticker", 200, DAILY);
+    let mark = |symbol: &str| {
+        format!(
+            r#"{{"symbol":"{symbol}","markPrice":"100","markIV":"0.3","bidIV":"0.2","askIV":"0.4"}}"#
+        )
+    };
+    let marks = format!(
+        "[{}]",
+        [
+            "BTC-271225-85000-C",
+            "BTC-261225-85000-P",
+            "BTC-261225-85000-C",
+            "BTC-261225-80000-C"
+        ]
+        .map(mark)
+        .join(",")
+    );
+    h.respond("/eapi/v1/mark", 200, &marks);
+    let result = h
+        .done
+        .iter()
+        .find(|(id, _)| *id == 104)
+        .unwrap()
+        .1
+        .as_ref()
+        .unwrap();
+    let indexes = [
+        "BTC-261225-80000-C",
+        "BTC-261225-85000-C",
+        "BTC-261225-85000-P",
+        "BTC-271225-85000-C",
+    ]
+    .map(|s| result.find(s).unwrap());
+    assert!(indexes.windows(2).all(|w| w[0] < w[1]));
+}

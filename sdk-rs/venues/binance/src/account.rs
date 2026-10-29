@@ -190,6 +190,19 @@ pub struct AccountState {
 }
 
 impl AccountState {
+    pub(crate) fn observe_snapshot_orders(&mut self, orders: &[Order]) {
+        for order in orders {
+            if let Ok(native) = order.id.parse::<u64>() {
+                let evidence = self
+                    .native_executed
+                    .entry((order.symbol.clone(), native))
+                    .or_default();
+                evidence.0 = evidence.0.max(order.filled);
+                evidence.1 |= matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled);
+            }
+        }
+    }
+
     pub(crate) fn order_terminal(&self, order: &Order) -> bool {
         self.terminal_algo_ids.contains(&order.id)
             || order.id.parse().is_ok_and(|native: u64| {
