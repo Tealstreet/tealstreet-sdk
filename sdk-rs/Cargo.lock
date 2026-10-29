@@ -3798,6 +3798,7 @@ name = "safe-cex-algo-twap"
 version = "0.1.0"
 dependencies = [
  "safe-cex-algos",
+ "safe-cex-chaser",
  "safe-cex-engine",
  "serde",
  "serde_json",

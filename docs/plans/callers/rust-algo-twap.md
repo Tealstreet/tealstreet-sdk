@@ -7,14 +7,17 @@ native exchange server. Nothing calls it yet.
 
 ## Obligations
 
-- Native server: register one `safe_cex_algo_twap::factory::TwapFactory` per
-  account in its `safe_cex_algos::Registry`. The factory owns the account's
-  `TwapBook` and timer driver, and emits `twap:stateUpdate` and `log`
-  (`[message, "error"]`). It also exposes `active_twaps` and `order_owner` for
-  the store's `activeTWAPs` and `extra.isFromTwap`.
-- Chaser runtime: implement `factory::TwapChasers` (start with a given id,
-  progress by id, and a remove that cancels the open order) over the chaser
-  book, and pass it to `TwapFactory::new`.
+- Native server: per account, build one `safe_cex_chaser::ChaserFactory`,
+  take `let chasers = chaser_factory.book(&account_cx)`, and build
+  `TwapFactory::new(account_cx, Rc::new(chasers))`. Register both factories
+  in that account's `Registry`. Pass the account's `AlgoCx`, never a
+  socket's: TWAPs keep running when the socket that started them closes.
+  `TwapFactory` emits `twap:stateUpdate` and `log` (`[message, "error"]`) and
+  exposes `active_twaps` and `order_owner` for the store's `activeTWAPs` and
+  `extra.isFromTwap`.
+- Account disposal: call `TwapFactory::terminate_all()` and then
+  `ChaserBook::terminate_all(..)` before disposing the account scope.
+  Disposing first would abort in-flight slices and leave chase orders resting.
 - Web client: unchanged. It keeps persisting `twap:stateUpdate` and replays it
   as `twap:state` on connect.
 

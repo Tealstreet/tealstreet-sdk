@@ -19,6 +19,8 @@ pub const KEPT_ORDER_STOP_REASON: &str = "User cancelled, kept order in book";
 pub const UNCONFIRMED_ORDER_STOP_REASON: &str = "Could not confirm order placement";
 
 const PRICE_CHECK_MIN_INTERVAL_MS: u64 = 50;
+/// Each chase runs its own supervisor, price checks and REST reconciles.
+pub const MAX_CHASES_PER_ACCOUNT: usize = 50;
 const MISSING_ORDER_CONFIRMATIONS: u32 = 2;
 /// Freeze cancel+replace while partial fills land: a cancel racing an
 /// in-flight fill makes the replacement overfill the target.
@@ -73,6 +75,12 @@ impl ChaserBook {
         if !(options.size.is_finite() && options.size > 0.0) {
             return Err(format!(
                 "Chase for {} was not started: size must be positive",
+                options.symbol
+            ));
+        }
+        if self.chases.borrow().len() >= MAX_CHASES_PER_ACCOUNT {
+            return Err(format!(
+                "Chase for {} was not started: {MAX_CHASES_PER_ACCOUNT} chases are already active on this account",
                 options.symbol
             ));
         }
@@ -132,10 +140,25 @@ impl ChaserBook {
         }
     }
 
-    /// The starting socket closed or the account is disposing.
+    /// Stop every chase; their cleanups run in the background.
     pub fn terminate_all(self: &Rc<Self>, reason: &str) {
+        for chase in self.stop_all(reason) {
+            self.spawn_cleanup(chase);
+        }
+    }
+
+    /// Stop every chase and wait until each has cancelled its resting order.
+    /// Await this before disposing the account scope: disposal aborts a chase
+    /// mid-flight and would leave its order live and untracked.
+    pub async fn shutdown(self: &Rc<Self>, reason: &str) {
+        for chase in self.stop_all(reason) {
+            self.cleanup(chase).await;
+        }
+    }
+
+    fn stop_all(&self, reason: &str) -> Vec<Rc<Chase>> {
         let chases = self.chases.borrow().clone();
-        for chase in chases {
+        for chase in &chases {
             if !chase.is_stopped() {
                 chase.mark_complete(reason);
                 self.warn(&format!(
@@ -143,8 +166,8 @@ impl ChaserBook {
                     chase.options.symbol
                 ));
             }
-            self.spawn_cleanup(chase);
         }
+        chases
     }
 
     fn find(&self, id: &str) -> Option<Rc<Chase>> {
@@ -229,7 +252,7 @@ impl ChaserBook {
         let symbol = &chase.options.symbol;
         let (Some(market), Some(ticker)) = (store.markets.get(symbol), store.tickers.get(symbol))
         else {
-            return Err(format!("No market or ticker found for {symbol}"));
+            return Err("No market or ticker found".into());
         };
         let step = market.precision.price;
         let bid = if ticker.bid != 0.0 {
@@ -254,6 +277,10 @@ impl ChaserBook {
             OrderSide::Sell if bid > 0.0 => (ask + distance).max(bid + step),
             OrderSide::Sell => ask + distance,
         };
+        // f64::max would turn a NaN quote into a one-tick order; refuse it.
+        if !(raw.is_finite() && step.is_finite() && step > 0.0) {
+            return Err("No usable quote".into());
+        }
         Ok(adjust(raw.max(step), step))
     }
 
@@ -606,25 +633,38 @@ impl ChaserBook {
             let price = match self.best_price(chase) {
                 Ok(price) => price,
                 Err(message) => {
-                    chase.mark_complete("No market or ticker found");
-                    self.error(&format!("Chaser {message}"));
+                    chase.mark_complete(&message);
+                    self.error(&format!("Chaser: {message} for {}", chase.options.symbol));
                     return Vec::new();
                 }
             };
-            let order = place_opts(chase, price);
+            let order = match place_opts(chase, price) {
+                Ok(order) => order,
+                Err(error) => {
+                    chase.mark_complete("Invalid placement");
+                    self.error(&format!(
+                        "Chaser for {} stopped: invalid placement ({error})",
+                        chase.options.symbol
+                    ));
+                    return Vec::new();
+                }
+            };
             let placed = self
                 .command(|command| Command::PlaceOrders {
                     command,
                     orders: vec![order],
                 })
                 .await;
-            let ids: Vec<String> = match &placed {
-                Ok(result) => serde_json::from_str(result).unwrap_or_default(),
-                Err(_) => Vec::new(),
+            // An accepted placement whose ids cannot be read may be live:
+            // treat it as an unknown outcome, never as a refusal to retry.
+            let (ids, unconfirmed) = match &placed {
+                Ok(result) => match serde_json::from_str::<Vec<String>>(result) {
+                    Ok(ids) => (ids, false),
+                    Err(_) => (Vec::new(), true),
+                },
+                Err(error) => (Vec::new(), error.outcome == Some(Outcome::Unknown)),
             };
-            if let Err(error) = &placed
-                && error.outcome == Some(Outcome::Unknown)
-            {
+            if unconfirmed {
                 // No caller client id to look the order up by: placing again
                 // could double it, and it may still land.
                 let message = format!(
@@ -750,16 +790,19 @@ impl ChaserBook {
     }
 }
 
-fn place_opts(chase: &Chase, price: f64) -> PlaceOrderOpts {
+fn place_opts(chase: &Chase, price: f64) -> Result<PlaceOrderOpts, String> {
+    let amount = chase.remaining();
+    if !(price.is_finite() && price > 0.0 && amount.is_finite() && amount > 0.0) {
+        return Err(format!("price {price}, amount {amount}"));
+    }
     let value = serde_json::json!({
         "symbol": chase.options.symbol,
         "type": "limit",
         "side": chase.options.side,
-        "amount": chase.remaining(),
+        "amount": amount,
         "price": price,
         "reduceOnly": chase.options.reduce_only(),
         "timeInForce": "PostOnly",
     });
-    serde_json::from_value(value)
-        .unwrap_or_else(|error| panic!("chaser placement options: {error}"))
+    serde_json::from_value(value).map_err(|error| error.to_string())
 }

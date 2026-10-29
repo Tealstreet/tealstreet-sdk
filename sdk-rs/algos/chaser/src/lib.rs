@@ -6,33 +6,39 @@
 mod book;
 mod chase;
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use safe_cex_algos::{AlgoCx, AlgoFactory};
 
-pub use book::{ChaserBook, KEPT_ORDER_STOP_REASON, Progress, UNCONFIRMED_ORDER_STOP_REASON};
+pub use book::{
+    ChaserBook, KEPT_ORDER_STOP_REASON, MAX_CHASES_PER_ACCOUNT, Progress,
+    UNCONFIRMED_ORDER_STOP_REASON,
+};
 pub use chase::{
     ActiveChaser, ChaserComplete, ChaserOptions, Terminate, TerminateKind, adjust, placement_filled,
 };
 
-/// The `chaser:*` ops for one account. The first op binds the account's book;
-/// TWAP reaches the same book through [`ChaserFactory::book`].
-#[derive(Default)]
+/// The `chaser:*` ops for one account.
+///
+/// Wiring contract: build it with the ACCOUNT's context, never a socket's. Every
+/// chase runs in a child of that scope, so disposing a socket scope would abort
+/// chases other sockets and TWAP started and leave their orders live. On socket
+/// close dispatch `chaser:terminateAll`; on account dispose await
+/// [`ChaserBook::shutdown`] and only then dispose the account scope.
 pub struct ChaserFactory {
-    book: RefCell<Option<Rc<ChaserBook>>>,
+    book: Rc<ChaserBook>,
 }
 
 impl ChaserFactory {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(account: AlgoCx) -> Self {
+        Self {
+            book: ChaserBook::new(account),
+        }
     }
 
-    pub fn book(&self, cx: &AlgoCx) -> Rc<ChaserBook> {
-        self.book
-            .borrow_mut()
-            .get_or_insert_with(|| ChaserBook::new(cx.clone()))
-            .clone()
+    /// The account's chases, shared with TWAP.
+    pub fn book(&self) -> Rc<ChaserBook> {
+        self.book.clone()
     }
 }
 
@@ -41,8 +47,8 @@ impl AlgoFactory for ChaserFactory {
         &["chaser:start", "chaser:terminate", "chaser:terminateAll"]
     }
 
-    fn handle(&self, op: &str, data: &str, cx: &AlgoCx) -> Result<(), String> {
-        let book = self.book(cx);
+    fn handle(&self, op: &str, data: &str, _cx: &AlgoCx) -> Result<(), String> {
+        let book = &self.book;
         match op {
             "chaser:start" => {
                 let options: ChaserOptions = serde_json::from_str(data)
