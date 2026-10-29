@@ -6,6 +6,7 @@ members = [
     "engine",
     "hosts/native",
     "hosts/remote-signer",
+    "hosts/server",
     "hosts/wasm",
     "registry",
     # Restored verbatim from master for the monorepo candle-server image

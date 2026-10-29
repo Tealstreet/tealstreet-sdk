@@ -294,6 +294,7 @@ pub struct AccountHandle {
     commands: mpsc::Sender<Control>,
     stop: Arc<watch::Sender<bool>>,
     config: ServerConfig,
+    capabilities: safe_cex_engine::Capabilities,
 }
 
 /// A joined client's stream: a full snapshot frame first, then ordered flush
@@ -316,6 +317,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
             "account engine must not receive commands before server registration",
         ));
     }
+    let capabilities = host.engine.capabilities();
     let (commands, inbox) = mpsc::channel(256);
     let (stop, stopped) = watch::channel(false);
     let actor = Account::new(host, config.clone());
@@ -332,6 +334,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
         commands,
         stop: Arc::new(stop),
         config,
+        capabilities,
     };
     Ok((handle, task))
 }
@@ -377,6 +380,11 @@ pub struct InputRefused {
 }
 
 impl AccountHandle {
+    /// The venue's engine capabilities, fixed at construction.
+    pub fn capabilities(&self) -> &safe_cex_engine::Capabilities {
+        &self.capabilities
+    }
+
     /// `client` must be unique among this account's live clients.
     pub async fn join(&self, client: u64, account_auth: bool) -> Result<ClientLink, &'static str> {
         let (outgoing, frames) = mpsc::channel(self.config.client_queue_capacity);
@@ -431,6 +439,19 @@ impl AccountHandle {
         Ok(self.commands.try_send(control).is_ok())
     }
 
+    /// Runs `read` against the engine store on the account's thread, between turns.
+    pub async fn read<R: Send + 'static>(
+        &self,
+        read: impl FnOnce(&safe_cex_engine::Store) -> R + Send + 'static,
+    ) -> Option<R> {
+        let (reply, result) = oneshot::channel();
+        let read = Box::new(move |store: &safe_cex_engine::Store| {
+            let _ = reply.send(read(store));
+        });
+        self.commands.send(Control::Read(read)).await.ok()?;
+        result.await.ok()
+    }
+
     pub fn leave(&self, client: u64) {
         let _ = self.commands.try_send(Control::Leave(client));
     }
@@ -474,6 +495,7 @@ enum Control {
         ceiling_ms: Option<f64>,
     },
     Leave(u64),
+    Read(Box<dyn FnOnce(&safe_cex_engine::Store) + Send>),
 }
 
 /// Subprotocol a client offers beside `safe-cex-frame.v1` to receive
@@ -597,6 +619,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         }
                     }
                     Some(Control::Leave(client)) => self.leave(client),
+                    Some(Control::Read(read)) => read(self.host.engine.store()),
                     None => break,
                 },
                 Some(event) = self.host.inbox.recv() => self.host.dispatch(event),
