@@ -17,3 +17,17 @@ native exchange server. Nothing calls it yet.
   book, and pass it to `TwapFactory::new`.
 - Web client: unchanged. It keeps persisting `twap:stateUpdate` and replays it
   as `twap:state` on connect.
+
+## Behaviour callers must know
+
+- Client input is bounded before any slice is built: `size > 0`,
+  `duration > 0`, `1 <= ordersCount <= 1000` (the web's `TWAP_MAX_ORDERS`),
+  `randomnessPercentage` and `timeoutPct` in `[0, 100]`, and
+  `chaserDelay >= 0`. Restored entries must also keep `ordersSizes` within
+  `ordersCount`, with finite values. A refusal sends a `log` error and builds
+  nothing; a bad restore entry is skipped.
+- A slice whose placement outcome is unknown, or whose order ids cannot be
+  read, still advances the TWAP, as in TS. Its log says the order may be live,
+  and no later slice assumes it failed.
+- TWAP ids come from a non-cryptographic generator and are addressable only
+  inside their account's book. Never resolve a TWAP id across accounts.

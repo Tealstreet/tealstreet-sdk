@@ -12,6 +12,9 @@ pub mod factory;
 mod instance;
 mod math;
 mod types;
+mod validate;
+
+pub use validate::MAX_ORDERS_COUNT;
 
 pub use instance::TwapInstance;
 pub use types::{
@@ -132,6 +135,11 @@ impl TwapBook {
         let mut effects = Vec::new();
         match op {
             "twap:start" => match serde_json::from_value::<TwapOptions>(data.clone()) {
+                Ok(options) if let Err(reason) = validate::options(&options) => {
+                    effects.push(TwapEffect::Log {
+                        message: format!("TWAP {} rejected: {reason}", options.symbol()),
+                    });
+                }
                 Ok(options) => {
                     let id = env.new_id();
                     let instance = TwapInstance::new(id.clone(), options, None, env);
@@ -305,6 +313,12 @@ impl TwapBook {
                 }
             };
             if self.get(&entry.id).is_some() {
+                continue;
+            }
+            if let Err(reason) = validate::restored(&entry.options, &entry.state) {
+                effects.push(TwapEffect::Log {
+                    message: format!("TWAP {} not restored: {reason}", entry.options.symbol()),
+                });
                 continue;
             }
             let running = entry.state.status == TwapStatus::Running;
