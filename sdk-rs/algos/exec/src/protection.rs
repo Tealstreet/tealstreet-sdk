@@ -15,6 +15,7 @@ fn sequence(actions: Vec<Action>, success: impl Into<String>, attempt_all: bool)
         actions: actions.into(),
         success: success.into(),
         attempt_all,
+        failure_summary: None,
     }
 }
 fn ticker<'a>(store: &'a Value, symbol: &str) -> &'a Value {
@@ -38,6 +39,24 @@ fn protective(symbol: &str, side: &str, mark: f64, trigger: f64, limit: f64, amo
     json!({"symbol":symbol,"side":side,"type":if tp{"take_profit_market"}else{"stop_market"},"price":limit,"triggerPrice":trigger,"amount":amount,"reduceOnly":true,"timeInForce":"GoodTillCancel"})
 }
 pub(crate) fn evaluate(symbol: &str, args: &[String], store: &Value, raw: &str) -> Evaluation {
+    if !matches!(args[0].as_str(), "move" | "mv" | "bump") {
+        for (i, token) in args.iter().enumerate().skip(1) {
+            if [
+                "long", "short", "buy", "sell", "at", "trigger", "all", "longs", "shorts", "allpos",
+            ]
+            .contains(&token.as_str())
+                || token.contains('$')
+                || token.contains('%')
+                || price(token, 1.).is_ok()
+                || i > 1 && matches!(args[i - 1].as_str(), "at" | "trigger")
+            {
+                continue;
+            }
+            if token.split(',').any(|part| resolve(store, part).is_none()) {
+                return failed(format!("Unknown symbol \"{token}\""));
+            }
+        }
+    }
     let result = match args[0].as_str() {
         "close" | "c" => close(symbol, args, store),
         "stop" => stop(symbol, args, store, raw),
@@ -208,9 +227,9 @@ fn stop(symbol: &str, args: &[String], store: &Value, raw: &str) -> Result<Evalu
         let text = args
             .get(i + 1)
             .ok_or("trigger: missing absolute price argument")?;
-        parse_float(text)
-            .filter(|p| *p > 0.)
-            .ok_or_else(|| format!("trigger: '{text}' must be an absolute positive price"))?
+        number(text).filter(|p| *p > 0.).ok_or_else(|| {
+            format!("Invalid price: trigger '{text}' must be an absolute positive price")
+        })?
     } else {
         limit
     };
@@ -380,14 +399,7 @@ fn trail(symbol: &str, args: &[String], store: &Value, raw: &str) -> Result<Eval
         false,
     ))
 }
-fn parse_float(text: &str) -> Option<f64> {
-    for end in (1..=text.len()).rev().filter(|n| text.is_char_boundary(*n)) {
-        if let Ok(n) = text[..end].parse::<f64>() {
-            return n.is_finite().then_some(n);
-        }
-    }
-    None
-}
+
 fn move_order(args: &[String], store: &Value) -> Result<Evaluation, String> {
     let (Some(id), Some(text)) = (args.get(1), args.get(2)) else {
         return Err("Missing arguments".into());
@@ -407,7 +419,13 @@ fn move_order(args: &[String], store: &Value) -> Result<Evaluation, String> {
         return Err("Ambiguous order ID".into());
     }
     let order = selected[0];
-    let raw = parse_float(text).ok_or("Invalid price")?;
+    let numeric = text
+        .strip_prefix('+')
+        .or_else(|| text.strip_prefix('-'))
+        .unwrap_or(text);
+    let raw = number(numeric)
+        .map(|n| if text.starts_with('-') { -n } else { n })
+        .ok_or("Invalid price")?;
     let price = if text.starts_with(['+', '-']) {
         n(order, "price") + raw
     } else {
@@ -419,6 +437,18 @@ fn move_order(args: &[String], store: &Value) -> Result<Evaluation, String> {
     if price == n(order, "price") {
         return Ok(done());
     }
+    let rounded = amend_price(order, price, store)?;
+    Ok(sequence(
+        vec![Action::Call(
+            "updateOrder",
+            json!([{"order":order,"update":{"price":rounded}}]),
+        )],
+        format!("Order moved to {price}"),
+        false,
+    ))
+}
+
+pub(crate) fn amend_price(order: &Value, price: f64, store: &Value) -> Result<f64, String> {
     let symbol = order["symbol"].as_str().unwrap_or("");
     let market = rows(store, "markets")
         .iter()
@@ -443,12 +473,5 @@ fn move_order(args: &[String], store: &Value) -> Result<Evaluation, String> {
             market["limits"]["price"]["min"]
         ));
     }
-    Ok(sequence(
-        vec![Action::Call(
-            "updateOrder",
-            json!([{"order":order,"update":{"price":rounded}}]),
-        )],
-        format!("Order moved to {price}"),
-        false,
-    ))
+    Ok(rounded)
 }
