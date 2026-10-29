@@ -244,6 +244,7 @@ fn unmapped_owned_rest_rows_keep_their_own_position_and_protection_while_peers_u
             200,
             &json!({"code":"00000","data":{"entrustedList":normal_rows}}).to_string(),
         );
+        h.no_partial_fills();
         h.respond(
             "planType=profit_loss",
             200,

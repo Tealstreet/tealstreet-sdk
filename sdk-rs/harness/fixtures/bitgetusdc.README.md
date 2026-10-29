@@ -12,9 +12,9 @@ run their existing venue implementations; no USDC reference-output fixer is used
 
 | Artifact | SHA-256 |
 | --- | --- |
-| Generator `../private-tape-bitgetusdc.mjs` | `232137fc29a4233881ccb91a21b903ad4a2a95dc87d29aabe36e24c23d40ad67` |
+| Generator `../private-tape-bitgetusdc.mjs` | `ee83f41f1d6e266235ec68aa538e32f3ea3b20143a3cc84da622e3eb0a5e93f2` |
 | Committed `bitgetusdc-public.jsonl.gz` | `107a95ed6dd933afdb739cbd2a68a853e921f6319e59075a2c46fd7a17dd3cb1` |
-| Canonical generated private JSONL | `88f8f994e249dbb96eaeb9390d4703bf9761ac4cb9b1385f5815115aa01f9928` |
+| Canonical generated private JSONL | `959afb00842609a05c7b59c45c9af664c8b0f1894d974e37ced832bc3703a295` |
 
 Each tape's metadata repeats its synthetic provenance, generator, source URLs,
 product, collateral, and scope. The epoch is the fixed `1760880000000`.

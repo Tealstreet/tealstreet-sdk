@@ -262,15 +262,17 @@ export function buildBitgetClassicTrailingTape({ usdc = false } = {}) {
     marginMode: 'crossed',
     leverage: '20',
   });
-  http('GET', '/api/v2/mix/order/orders-pending', `productType=${productType}&limit=200`, {
+  for (const status of ['live', 'partially_filled']) {
+    http('GET', '/api/v2/mix/order/orders-pending', `productType=${productType}&status=${status}&limit=100`, {
+      entrustedList: [],
+      endId: '',
+    });
+  }
+  http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=${productType}&planType=profit_loss&limit=100`, {
     entrustedList: [],
     endId: '',
   });
-  http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=${productType}&planType=profit_loss&limit=200`, {
-    entrustedList: [],
-    endId: '',
-  });
-  http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=${productType}&planType=track_plan&limit=200`, {
+  http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=${productType}&planType=track_plan&limit=100`, {
     entrustedList: [row('classic-rest', '0.01', '97', '3')],
     endId: '',
   });

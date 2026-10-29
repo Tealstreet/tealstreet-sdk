@@ -509,7 +509,7 @@ fn classic_account_reads_keep_exact_urls_and_the_read_key() {
     for url in [
         "https://api.bitget.com/api/v2/mix/position/all-position?productType=usdt-futures&marginCoin=USDT",
         "https://api.bitget.com/api/v2/mix/account/accounts?productType=usdt-futures",
-        "https://api.bitget.com/api/v2/mix/order/orders-pending?productType=usdt-futures&limit=200",
+        "https://api.bitget.com/api/v2/mix/order/orders-pending?productType=usdt-futures&status=live&limit=100",
     ] {
         let request = h
             .requests
@@ -524,10 +524,17 @@ fn classic_account_reads_keep_exact_urls_and_the_read_key() {
     h.respond("/all-position", 200, POSITION);
     h.respond("/account/accounts", 200, ACCOUNT);
     h.respond("/orders-pending", 200, OPEN_ORDER);
+    let partial = h.take("status=partially_filled");
+    assert_eq!(
+        partial.url,
+        "https://api.bitget.com/api/v2/mix/order/orders-pending?productType=usdt-futures&status=partially_filled&limit=100"
+    );
+    assert_eq!(header(&partial, "ACCESS-KEY"), Some("read-key"));
+    h.reply(partial.id, 200, EMPTY_ORDERS);
     let plan = h.take("planType=profit_loss");
     assert_eq!(
         plan.url,
-        "https://api.bitget.com/api/v2/mix/order/orders-plan-pending?productType=usdt-futures&planType=profit_loss&limit=200"
+        "https://api.bitget.com/api/v2/mix/order/orders-plan-pending?productType=usdt-futures&planType=profit_loss&limit=100"
     );
     assert_eq!(header(&plan, "ACCESS-KEY"), Some("read-key"));
     h.reply(

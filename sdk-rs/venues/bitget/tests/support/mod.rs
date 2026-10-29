@@ -198,6 +198,7 @@ impl Harness {
 
 pub const POSITION: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","holdSide":"long","total":"1","openPriceAvg":"90","markPrice":"100","leverage":"20","unrealizedPL":"10","liquidationPrice":"50","marginSize":"50","marginMode":"crossed","posMode":"one_way_mode","uTime":"100"}]}"#;
 pub const ACCOUNT: &str = r#"{"code":"00000","data":[{"marginCoin":"USDT","unionTotalMargin":"1010","unionAvailable":"900","unrealizedPL":"10"}]}"#;
+pub const EMPTY_ORDERS: &str = r#"{"code":"00000","data":{"entrustedList":null,"endId":""}}"#;
 pub const OPEN_ORDER: &str = r#"{"code":"00000","data":{"entrustedList":[{"orderId":"1","symbol":"BTCUSDT","size":"2","baseVolume":"0","price":"90","side":"buy","orderType":"limit","status":"live","clientOid":"caller"}],"endId":""}}"#;
 
 impl Harness {
@@ -225,13 +226,18 @@ impl Harness {
         h
     }
     pub fn orders(&mut self, normal: &str) {
-        self.respond("/orders-pending", 200, normal);
+        self.respond("/orders-pending?", 200, normal);
+        self.no_partial_fills();
         self.respond(
             "planType=profit_loss",
             200,
             r#"{"code":"00000","data":{"entrustedList":[]}}"#,
         );
         self.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
+    }
+    /// Classic snapshots page `status=partially_filled` after the live page.
+    pub fn no_partial_fills(&mut self) {
+        self.respond("status=partially_filled", 200, EMPTY_ORDERS);
     }
     pub fn login(&mut self) {
         let socket = self

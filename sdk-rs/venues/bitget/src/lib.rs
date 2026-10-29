@@ -139,6 +139,18 @@ fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
     )
 }
 
+/// Classic pending-order pages answer an empty page as `entrustedList: null`;
+/// a missing field or another envelope stays a failure.
+fn null_classic_order_page(body: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(body).is_ok_and(|value| {
+        value["code"] == "00000"
+            && value["data"]
+                .as_object()
+                .and_then(|data| data.get("entrustedList"))
+                .is_some_and(serde_json::Value::is_null)
+    })
+}
+
 /// A private send's body, or the array its streamed response decodes.
 impl BitgetFutures {
     fn public_failed(
@@ -996,6 +1008,15 @@ impl Venue for BitgetFutures {
         if serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
             .ok()
             .is_some_and(|e| e.code.0.is_some_and(|code| code != 0.0))
+            || (!self.account.uta
+                && matches!(
+                    &pending,
+                    Pending::Account {
+                        request: account::Request::Orders(_),
+                        ..
+                    }
+                )
+                && null_classic_order_page(response.body))
         {
             self.on_response(cx, pending, response);
         } else {

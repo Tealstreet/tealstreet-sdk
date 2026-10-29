@@ -11,6 +11,7 @@ fn stale_join_cannot_unfence_lost_placement_but_fresh_complete_read_can() {
         200,
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
     );
+    h.no_partial_fills();
     let held_protection = h.take("planType=profit_loss");
     h.command(Command::PlaceOrders {
         command: 31,
@@ -103,6 +104,7 @@ fn an_unknown_placement_fences_a_retry_until_a_fresh_read_releases_it() {
         200,
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
     );
+    h.no_partial_fills();
     let stale = h.take("planType=profit_loss");
     place(&mut h, 31);
     let write = h.take("/batch-place-order");

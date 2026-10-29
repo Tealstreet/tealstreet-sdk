@@ -112,6 +112,7 @@ fn terminal_order_tombstone_and_ws_open_grace_guard_rest() {
     h.private_message(r#"{"arg":{"channel":"orders"},"data":[{"orderId":"1","symbol":"BTCUSDT","size":"2","price":"90","side":"buy","orderType":"limit","status":"canceled"}]}"#);
     h.private_message(r#"{"arg":{"channel":"orders"},"data":[{"orderId":"2","symbol":"BTCUSDT","size":"1","price":"89","side":"buy","orderType":"limit","status":"live"}]}"#);
     h.reply(normal.id, 200, OPEN_ORDER);
+    h.no_partial_fills();
     h.respond(
         "planType=profit_loss",
         200,
@@ -697,6 +698,7 @@ fn rejected_ws_protection_retains_cancel_route_against_older_rest_plan_metadata(
     );
     let mut old = live.clone();
     old["planType"] = serde_json::json!("profit_plan");
+    h.no_partial_fills();
     h.respond(
         "planType=profit_loss",
         200,
@@ -874,4 +876,50 @@ fn clean_position_delta_cannot_change_global_mode_while_other_symbol_is_retained
             .iter()
             .all(|p| p.position_mode == Some(safe_cex_engine::model::PositionMode::Oneway))
     );
+}
+
+#[test]
+fn classic_snapshot_reads_partially_filled_orders_and_accepts_null_pages() {
+    let mut h = Harness::private_started();
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, POSITION);
+    h.respond("/account/accounts", 200, ACCOUNT);
+    h.respond("status=live", 200, EMPTY_ORDERS);
+    h.respond(
+        "status=partially_filled",
+        200,
+        r#"{"code":"00000","data":{"entrustedList":[{"orderId":"7","symbol":"BTCUSDT","size":"2","baseVolume":"1","price":"90","side":"buy","orderType":"limit","status":"partially_filled"}],"endId":""}}"#,
+    );
+    h.respond("planType=profit_loss", 200, EMPTY_ORDERS);
+    h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
+    let order = h.engine.store().order("7").expect("partially filled order");
+    assert_eq!(order.filled, 1.0);
+    assert!(h.engine.store().loaded().orders);
+}
+
+#[test]
+fn classic_order_page_without_a_list_is_still_a_failure() {
+    let mut h = Harness::private_started();
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, POSITION);
+    h.respond("/account/accounts", 200, ACCOUNT);
+    h.respond(
+        "status=live",
+        200,
+        r#"{"code":"00000","data":{"endId":""}}"#,
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("partially_filled"))
+    );
+    assert!(!h.engine.store().loaded().orders);
 }

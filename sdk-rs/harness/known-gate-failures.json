@@ -3603,7 +3603,7 @@
     },
     {
       "venue": "bitget",
-      "tapeSha256": "bfcd32b911c929b80471d265d037dde0e9e2a698ce9e6e482a2c8c5a901c0567",
+      "tapeSha256": "5567bbe25766662b8019fbe110aebac361ee170272c3550774a1a9a4993486a8",
       "tape": "sdk-rs/harness/tapes/bitget-private.jsonl",
       "diagnostics": [
         {
@@ -3636,7 +3636,7 @@
     },
     {
       "venue": "bitgetinverse",
-      "tapeSha256": "20bed551d2e369ef2b3e21c9b40f1e4add8c2a0a7c2bf5b36d2c3e04493fa28a",
+      "tapeSha256": "3a547f7dfcb9d1525c207b4730b247388cc8a544fd87b622a663f605d0b94c99",
       "tape": "sdk-rs/harness/tapes/bitgetinverse-private.jsonl",
       "diagnostics": [
         {
@@ -3755,7 +3755,7 @@
     },
     {
       "venue": "bitgetusdc",
-      "tapeSha256": "88f8f994e249dbb96eaeb9390d4703bf9761ac4cb9b1385f5815115aa01f9928",
+      "tapeSha256": "959afb00842609a05c7b59c45c9af664c8b0f1894d974e37ced832bc3703a295",
       "tape": "sdk-rs/harness/tapes/bitgetusdc-private.jsonl",
       "diagnostics": [
         {
@@ -3813,7 +3813,17 @@
             "checkpoint 5 account.orders[2].remaining",
             "checkpoint 5 account.orders[2].status",
             "checkpoint 5 account.orders[2].symbol",
-            "checkpoint 5 account.orders[3]"
+            "checkpoint 5 account.orders[3]",
+            "checkpoint 6 account.orders.length",
+            "checkpoint 6 account.orders[0].amount",
+            "checkpoint 6 account.orders[0].id",
+            "checkpoint 6 account.orders[0].price",
+            "checkpoint 6 account.orders[0].remaining",
+            "checkpoint 6 account.orders[0].status",
+            "checkpoint 6 account.orders[0].symbol",
+            "checkpoint 6 account.orders[1]",
+            "checkpoint 6 account.orders[2]",
+            "checkpoint 6 account.orders[3]"
           ]
         }
       ]

@@ -74,11 +74,14 @@ export function buildBitgetInverseTape() {
     normal('inverse-rest-btc', 'BTCUSD', '1000', '50000', 'resting-btc', '100'),
     normal('inverse-rest-eth', 'ETHUSD', '500', '2500', 'resting-eth'),
   ];
-  http('GET', '/api/v2/mix/order/orders-pending', 'productType=coin-futures&limit=200', {
+  http('GET', '/api/v2/mix/order/orders-pending', 'productType=coin-futures&status=live&limit=100', {
     entrustedList: resting, endId: '',
   });
+  http('GET', '/api/v2/mix/order/orders-pending', 'productType=coin-futures&status=partially_filled&limit=100', {
+    entrustedList: null, endId: '',
+  });
   for (const planType of ['profit_loss', 'track_plan']) {
-    http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=coin-futures&planType=${planType}&limit=200`, {
+    http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=coin-futures&planType=${planType}&limit=100`, {
       entrustedList: [], endId: '',
     });
   }

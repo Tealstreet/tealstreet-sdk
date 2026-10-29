@@ -94,15 +94,19 @@ const normal = {
   cTime: '1760880000000',
   uTime: '1760880000000',
 };
-http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&limit=200', {
+http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&status=live&limit=100', {
   entrustedList: [normal],
   endId: '',
 });
-http('GET', '/api/v2/mix/order/orders-plan-pending', 'productType=usdt-futures&planType=profit_loss&limit=200', {
+http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&status=partially_filled&limit=100', {
+  entrustedList: null,
+  endId: '',
+});
+http('GET', '/api/v2/mix/order/orders-plan-pending', 'productType=usdt-futures&planType=profit_loss&limit=100', {
   entrustedList: [],
   endId: '',
 });
-http('GET', '/api/v2/mix/order/orders-plan-pending', 'productType=usdt-futures&planType=track_plan&limit=200', {
+http('GET', '/api/v2/mix/order/orders-plan-pending', 'productType=usdt-futures&planType=track_plan&limit=100', {
   entrustedList: [],
   endId: '',
 });
@@ -199,8 +203,12 @@ orderEvent(3200, {
 // Allow the 3-RPS TS client's queued reconciliation reads to complete.
 // Terminal rows are ephemeral; finish with consistent live REST/WS state.
 const finalOrder = { ...normal, orderId: '1004', clientOid: 'external-live', size: '0.004', price: '93' };
-http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&limit=200', {
+http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&status=live&limit=100', {
   entrustedList: [finalOrder], endId: '',
+});
+records.at(-1).availableAfter = 10_000;
+http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&status=partially_filled&limit=100', {
+  entrustedList: null, endId: '',
 });
 records.at(-1).availableAfter = 10_000;
 orderEvent(10_000, finalOrder);
