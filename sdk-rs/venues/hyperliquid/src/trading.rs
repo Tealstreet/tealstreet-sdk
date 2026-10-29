@@ -1475,6 +1475,42 @@ mod signing_tests {
         assert_eq!(rmp_serde::to_vec_named(&action).unwrap(), expected);
     }
 
+    /// Dispatch encodes msgpack from the action's JSON; it must equal rmp_serde's
+    /// struct encoding for every wire shape, the official vectors included.
+    #[test]
+    fn dispatch_msgpack_from_json_equals_rmp_serde_for_every_action() {
+        let mut actions = remote_actions();
+        actions.push(Action::Order {
+            orders: vec![OrderWire {
+                a: 1,
+                b: true,
+                p: "100".into(),
+                s: "100".into(),
+                r: false,
+                t: WireType::Limit {
+                    limit: LimitWire { tif: "Gtc" },
+                },
+                c: "0x00000000000000000000000000000001".into(),
+            }],
+            grouping: "na",
+            builder: None,
+        });
+        actions.push(Action::Leverage {
+            asset: 0,
+            is_cross: true,
+            leverage: 20,
+        });
+        actions.push(Action::ScheduleCancel { time: None });
+        for action in &actions {
+            let json = serde_json::to_string(action).unwrap();
+            assert_eq!(
+                sign::statement::msgpack(&json).unwrap(),
+                rmp_serde::to_vec_named(action).unwrap(),
+                "{json}"
+            );
+        }
+    }
+
     fn remote_actions() -> Vec<Action> {
         let order = |t: WireType, c: &str| OrderWire {
             a: 10_000,
