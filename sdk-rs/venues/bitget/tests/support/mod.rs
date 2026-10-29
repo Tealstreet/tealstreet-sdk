@@ -22,6 +22,8 @@ pub struct Harness {
     pub done: Vec<(u32, Result<String, String>)>,
     pub failures: Vec<safe_cex_engine::VenueError>,
     pub logs: Vec<String>,
+    /// Every engine event, with its fields.
+    pub events: Vec<safe_cex_engine::log::LogEvent>,
     pub command_errors: Vec<(u32, String)>,
     pub command_notices: Vec<(u32, &'static str)>,
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
@@ -57,6 +59,7 @@ impl Harness {
             done: vec![],
             failures: vec![],
             logs: vec![],
+            events: vec![],
             command_errors: vec![],
             command_notices: vec![],
             progress: vec![],
@@ -143,7 +146,10 @@ impl Harness {
                     );
                     self.startup_failures.push(error);
                 }
-                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
+                Action::Notice(Notice::Event(event)) => {
+                    self.logs.push(event.message.clone());
+                    self.events.push(event);
+                }
                 Action::Notice(Notice::Deactivate) => {
                     assert!(
                         self.expect_startup_failure,

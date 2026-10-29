@@ -36,13 +36,32 @@ pub(crate) const CODES: CodeTable = CodeTable {
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
-        auth(40001, ErrorKind::AuthInvalid),
-        auth(40006, ErrorKind::AuthInvalid),
-        auth(40011, ErrorKind::AuthInvalid),
-        auth(40012, ErrorKind::AuthInvalid),
-        auth(40037, ErrorKind::AuthInvalid),
-        auth(40014, ErrorKind::AuthPermission),
-        auth(40018, ErrorKind::AuthPermission),
+        refused(40001, ErrorKind::AuthInvalid),
+        refused(40006, ErrorKind::AuthInvalid),
+        refused(40011, ErrorKind::AuthInvalid),
+        refused(40012, ErrorKind::AuthInvalid),
+        refused(40037, ErrorKind::AuthInvalid),
+        refused(40014, ErrorKind::AuthPermission),
+        refused(40018, ErrorKind::AuthPermission),
+        // Balance and margin refusals (cross-checked against ccxt's Bitget map).
+        refused(40711, ErrorKind::InsufficientBalance),
+        refused(40712, ErrorKind::InsufficientBalance),
+        refused(40762, ErrorKind::InsufficientBalance),
+        refused(43012, ErrorKind::InsufficientBalance),
+        // Order rules the order itself broke: unknown symbol or parameter value,
+        // parameter verification (including the six-digit 400171), wrong quantity
+        // or price, size precision, minimum and maximum order value, and a stop
+        // price on the wrong side of the mark.
+        refused(40034, ErrorKind::InvalidInput),
+        refused(400171, ErrorKind::InvalidInput),
+        refused(40108, ErrorKind::InvalidInput),
+        refused(40706, ErrorKind::InvalidInput),
+        refused(40808, ErrorKind::InvalidInput),
+        refused(40917, ErrorKind::InvalidInput),
+        refused(43011, ErrorKind::InvalidInput),
+        refused(45110, ErrorKind::InvalidInput),
+        refused(45113, ErrorKind::InvalidInput),
+        refused(45122, ErrorKind::InvalidInput),
         Row {
             key: Key::Int(40010),
             verdict: Verdict::Unknown(None),
@@ -68,7 +87,7 @@ pub(crate) const CODES: CodeTable = CodeTable {
     ],
 };
 
-const fn auth(code: i64, kind: ErrorKind) -> Row {
+const fn refused(code: i64, kind: ErrorKind) -> Row {
     Row {
         key: Key::Int(code),
         verdict: Verdict::Refused(kind),
@@ -182,7 +201,7 @@ enum Answer {
     Batch {
         expected: usize,
         accepted: Vec<String>,
-        failures: Vec<String>,
+        failures: Vec<(Option<i64>, String)>,
     },
     Unproven,
     Coded,
@@ -373,6 +392,8 @@ struct ReplyItem<'a> {
 struct Failure {
     #[serde(default)]
     error_msg: String,
+    #[serde(default)]
+    error_code: Number,
 }
 #[derive(Deserialize)]
 struct Reply<'a> {
@@ -2245,7 +2266,10 @@ impl BitgetFutures {
                 .map(|d| failure_messages(&d.failure_list))
                 .filter(|f| !f.is_empty())
             {
-                error = Some(format!("Bitget cancel failure: {}", failures.join("; ")));
+                error = Some(format!(
+                    "Bitget cancel failure: {}",
+                    failure_text(&failures)
+                ));
                 answer = Answer::Batch {
                     expected: orders.len(),
                     accepted: accepted.into_iter().collect(),
@@ -2286,7 +2310,7 @@ impl BitgetFutures {
                 {
                     error = Some(format!(
                         "Bitget batch failure after ids {ids:?}: {}",
-                        failures.join("; ")
+                        failure_text(&failures)
                     ));
                     answer = Answer::Batch {
                         expected,
@@ -2317,12 +2341,22 @@ impl BitgetFutures {
             let error = match &parsed {
                 _ if unproven => VenueError::new(message).outcome(Outcome::Unknown),
                 Ok(reply) if explicit_rejection => {
-                    let error = VenueError::new(message).kind(match status {
-                        401 => ErrorKind::AuthInvalid,
-                        403 => ErrorKind::AuthPermission,
-                        429 => ErrorKind::RateLimited,
-                        _ => ErrorKind::Rejected,
-                    });
+                    // The table's kind for the native code, else its documented
+                    // status row; a 401/403/429 carries no code (`native_code`).
+                    // Place reads the row any intent would: every row is unscoped
+                    // (pinned in code_table_tests).
+                    let kind = native
+                        .as_ref()
+                        .and_then(|native| CODES.verdict(native, Intent::Place).kind())
+                        .or_else(|| {
+                            CODES
+                                .status
+                                .iter()
+                                .find(|(documented, _)| *documented == status)
+                                .and_then(|(_, verdict)| verdict.kind())
+                        })
+                        .unwrap_or(ErrorKind::Rejected);
+                    let error = VenueError::new(message).kind(kind);
                     let error = match reply.code.0 {
                         Some(code) => error.venue_code(code.to_string()),
                         None => error,
@@ -2504,10 +2538,10 @@ impl BitgetFutures {
                     .iter()
                     .map(|id| BatchItem::Accepted(id.as_str()))
                     .collect();
-                items.extend(failures.iter().map(|failure| {
+                items.extend(failures.iter().map(|(code, message)| {
                     BatchItem::Native(Native {
-                        code: NativeCode::None,
-                        message: failure.as_str(),
+                        code: code.map_or(NativeCode::None, NativeCode::Int),
+                        message: message.as_str(),
                     })
                 }));
                 let _ = cx.http_write_batch(context, &CODES, expected, &items, message, None);
@@ -3192,8 +3226,24 @@ fn native_code<'a>(reply: Option<&'a Reply<'a>>, status: u16) -> Option<Native<'
     })
 }
 
-fn failure_messages(failures: &[Failure]) -> Vec<String> {
-    failures.iter().map(|e| e.error_msg.clone()).collect()
+/// The failed rows' messages, as the error text has always read.
+fn failure_text(failures: &[(Option<i64>, String)]) -> String {
+    failures
+        .iter()
+        .map(|(_, message)| message.as_str())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Each failed row's message and integer code, when Bitget sends one.
+fn failure_messages(failures: &[Failure]) -> Vec<(Option<i64>, String)> {
+    failures
+        .iter()
+        .map(|e| {
+            let code = e.error_code.0.filter(|code| code.fract() == 0.0);
+            (code.map(|code| code as i64), e.error_msg.clone())
+        })
+        .collect()
 }
 
 fn restore_canceling(cx: &mut Cx<'_, Pending>, call: &Planned) {
@@ -3283,6 +3333,25 @@ impl Planned {
             Effect::Cancel { .. } => Intent::Cancel,
             Effect::Amend { .. } => Intent::Amend,
             Effect::Leverage { .. } | Effect::Margin { .. } | Effect::Mode(_) => Intent::Setting,
+        }
+    }
+}
+
+#[cfg(test)]
+mod code_table_tests {
+    use super::*;
+
+    /// assert_table covers the status rows (never Satisfied or RefusedResend);
+    /// Bitget pins 40009 as its one documented re-sign and every row unscoped.
+    #[test]
+    fn the_bitget_table_satisfies_the_engine_invariants() {
+        safe_cex_engine::classify::assert_table(&CODES);
+        for row in CODES.rows {
+            assert_eq!(row.only, None, "{row:?}");
+            if matches!(row.verdict, Verdict::RefusedResend(_)) {
+                assert_eq!(row.key, Key::Int(40009), "{row:?}");
+            }
+            assert!(!matches!(row.verdict, Verdict::Satisfied(_)), "{row:?}");
         }
     }
 }

@@ -1211,7 +1211,10 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             400,
             r#"{"code":"40762","msg":"The order amount exceeds the balance"}"#,
-            (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+            (
+                Some(ErrorKind::InsufficientBalance),
+                Some(Outcome::Rejected),
+            ),
         ),
         (
             429,
@@ -1230,6 +1233,30 @@ fn write_failures_are_classified_without_changing_their_text() {
             200,
             r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"balance"}]}}"#,
             (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+        ),
+        // A coded failed row keeps its code, so the table names the kind.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Insufficient balance","errorCode":"43012"}]}}"#,
+            (
+                Some(ErrorKind::InsufficientBalance),
+                Some(Outcome::Rejected),
+            ),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"The order amount exceeds the balance","errorCode":"40762"}]}}"#,
+            (
+                Some(ErrorKind::InsufficientBalance),
+                Some(Outcome::Rejected),
+            ),
+        ),
+        // Per-row outcome change: a row coded with an unproven code (40010,
+        // 40725, 45001) is now Unknown, where a code-less row was Rejected.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Request timed out","errorCode":"40010"}]}}"#,
+            (None, Some(Outcome::Unknown)),
         ),
         // An acknowledgement that accounts for no order is the engine's unproven reply.
         (
@@ -1272,4 +1299,51 @@ fn write_failures_are_classified_without_changing_their_text() {
     bad["clientOrderId"] = json!("bad id");
     place(&mut h, vec![bad]);
     assert_eq!(h.failures[0].outcome, Some(Outcome::NotSent));
+}
+
+/// A 40009 (signature) row inside a batch is a refusal of that row only: the
+/// one fresh resend applies to a refused request, never to one batch row, so
+/// the batch is dispatched once.
+#[test]
+fn a_signature_refused_batch_row_is_never_re_dispatched() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    let request = h.take("/batch-place-order");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"sign signature error","errorCode":"40009"}]}}"#,
+    );
+    let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::AuthInvalid), Some(Outcome::Rejected))
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/batch-place-order")),
+        "one batch request, no per-row resend"
+    );
+}
+
+/// Per-row outcome change: an unproven code (45001) on one row beside an
+/// accepted row leaves that row unknown, so the command is a partial with an
+/// unknown outcome (reconciled), never a definitive refusal.
+#[test]
+fn an_unproven_batch_row_beside_an_accepted_one_is_partial_unknown() {
+    use safe_cex_engine::Outcome;
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit(), limit()]);
+    let request = h.take("/batch-place-order");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"successList":[{"orderId":"9"}],"failureList":[{"errorMsg":"unknown error","errorCode":"45001"}]}}"#,
+    );
+    let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{}", error.message);
+    let partial = error.partial.as_deref().expect("the accepted id is kept");
+    assert_eq!(partial.order_ids, ["9"]);
 }

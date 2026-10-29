@@ -188,6 +188,7 @@ fn suppressed_public_feed_is_not_supervised() {
         done: vec![],
         failures: vec![],
         logs: vec![],
+        events: vec![],
         command_errors: vec![],
         command_notices: vec![],
         progress: vec![],

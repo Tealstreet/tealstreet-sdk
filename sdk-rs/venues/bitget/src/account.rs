@@ -678,11 +678,12 @@ impl BitgetFutures {
             .map_err(|e| e.to_string())
             .and_then(|header| header.checked().map(|_| ()));
         if let Err(error) = valid {
-            self.account_failed(cx, request, &error);
+            self.account_refused(cx, request, read_error(&response, error));
             return;
         }
         if response.status != 200 {
-            self.account_failed(cx, request, &format!("Bitget HTTP {}", response.status));
+            let error = read_error(&response, format!("Bitget HTTP {}", response.status));
+            self.account_refused(cx, request, error);
             return;
         }
         match request {
@@ -767,7 +768,8 @@ impl BitgetFutures {
                             self.apply_balance(cx, amounts);
                         }
                     }
-                    Err(error) => cx.retried_failure("bitget.account:744", error),
+                    Err(error) => cx
+                        .retried_failure_error("bitget.account:744", &read_error(&response, error)),
                 }
             }
             Request::Orders(mut snapshot) => {
@@ -891,8 +893,13 @@ impl BitgetFutures {
         request: Request,
         error: &str,
     ) {
+        self.account_refused(cx, request, VenueError::new(error));
+    }
+
+    /// A failed account read, still `request.failed`, carrying its kind fields.
+    fn account_refused(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: VenueError) {
         self.clear_in_flight(&request);
-        cx.retried_failure("bitget.account:870", error);
+        cx.retried_failure_error("bitget.account:870", &error);
     }
 
     pub(crate) fn account_sign_failed(
@@ -917,7 +924,7 @@ impl BitgetFutures {
         if matches!(request, Request::Probe) {
             self.probe_transport_failed(cx, error);
         } else {
-            self.account_failed(cx, request, error);
+            self.account_refused(cx, request, VenueError::new(error).kind(ErrorKind::Network));
         }
     }
 
@@ -2833,6 +2840,31 @@ fn rejection(which: &str, code: f64, msg: &str, kind: ErrorKind) -> VenueError {
         error = error.venue_message(msg);
     }
     error
+}
+
+/// A failed account read, classified by the Bitget table: the envelope's integer
+/// code when it has one, else the HTTP status. The text is unchanged.
+pub(crate) fn read_error(response: &Response<'_>, message: String) -> VenueError {
+    use safe_cex_engine::classify::{self, Native, NativeCode, Released};
+    let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body).ok();
+    let code = envelope
+        .as_ref()
+        .and_then(|envelope| envelope.code.0)
+        .filter(|code| code.fract() == 0.0 && *code != 0.0);
+    let native_message = envelope
+        .as_ref()
+        .map_or("", |envelope| envelope.msg.as_str());
+    let native = code.map(|code| Native {
+        code: NativeCode::Int(code as i64),
+        message: native_message,
+    });
+    classify::read(
+        &crate::trading::CODES,
+        Released::Response(response),
+        native.as_ref(),
+        message,
+    )
+    .error
 }
 
 #[cfg(test)]

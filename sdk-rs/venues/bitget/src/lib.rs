@@ -911,6 +911,11 @@ impl Venue for BitgetFutures {
                 Err(error) => error,
                 Ok(_) => format!("Bitget HTTP {}: {}", response.status, response.body),
             };
+            // A candles read takes the table's kind and native code from the reply.
+            if let Pending::Candles { root, .. } = pending {
+                let _ = cx.fail_context(&root, account::read_error(&response, error));
+                return;
+            }
             self.on_request_failed(cx, pending, &error);
             return;
         }
