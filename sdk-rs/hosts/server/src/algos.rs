@@ -361,7 +361,13 @@ pub async fn run(
     let registry = Registry::new(vec![
         Box::new(chasers),
         Box::new(SharedTwap(twap.clone())),
-        Box::new(safe_cex_exec::native::ExecFactory::default()),
+        // Exec's chase/TWAP handoff shares this account's book and TWAP schedule,
+        // under the server's trusted account name, never one from the payload.
+        Box::new(safe_cex_exec::native::ExecFactory::with_algos(
+            name.clone(),
+            book.clone(),
+            (*twap).clone(),
+        )),
     ]);
     let mut published = String::new();
     // `store` rows the frames do not carry (`activeChasers`, `activeTWAPs`).
