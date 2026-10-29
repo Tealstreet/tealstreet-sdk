@@ -1,0 +1,202 @@
+//! Device-side wallet signing for keyless servers. The device never signs a
+//! digest it did not derive itself from an allowlisted, account-bound statement.
+//! Synchronous over the local provider, without the HMAC capture codec.
+use safe_cex_engine::signing::{
+    Algorithm, Context, Identities, Operation, PayloadPart, Provider, SignError, SignRequest,
+};
+
+/// The signed-in account a device signs for, captured at construction.
+#[derive(Clone, Debug, Default)]
+pub struct Account {
+    pub key: Option<String>,
+    pub vault: Option<String>,
+    pub testnet: bool,
+    /// Paradex: the account address this device's Stark key signs for.
+    pub paradex_address: Option<String>,
+}
+
+pub fn admitted(venue: &str) -> bool {
+    (cfg!(feature = "hyperliquid") && matches!(venue, "hyperliquid" | "hyperliquidspot"))
+        || (cfg!(feature = "paradex") && venue == "paradex")
+}
+
+/// The capture bound for a structured statement, from the device's own clock.
+#[cfg(feature = "paradex")]
+const PARADEX_CAPTURE_MS: f64 = safe_cex_engine::signing_capture::MAX_TIMEOUT_MS as f64;
+
+/// Paradex: `paradex-public` returns the Stark public key for the device's own
+/// account; `paradex-stark` rebuilds and hashes a closed `paradex/1` descriptor
+/// for its own account and network at `now_ms`, returning each `r || s` in
+/// item order. A supplied digest is never signed.
+#[cfg(feature = "paradex")]
+fn paradex(
+    identities: &Identities,
+    account: &Account,
+    provider: &Provider,
+    to_sign: &str,
+    output_format: &str,
+    now_ms: f64,
+) -> Result<String, SignError> {
+    use safe_cex_venue_paradex::hosted;
+    let identity = identities.primary.as_ref().ok_or(SignError::Unavailable)?;
+    let signing = identity.signing_ref()?.clone();
+    let own = account
+        .paradex_address
+        .as_deref()
+        .ok_or(SignError::Unavailable)?;
+    let (operations, width) = match output_format {
+        "paradex-public" => {
+            if !to_sign.eq_ignore_ascii_case(own) {
+                return Err(SignError::InvalidRequest);
+            }
+            let key = Operation::PublicKey {
+                algorithm: Algorithm::StarkDigest,
+                key: signing,
+            };
+            (vec![key], 32)
+        }
+        "paradex-stark" => {
+            let binding = hosted::ParadexBinding::new(own, hosted::network_chain(account.testnet))
+                .map_err(|_| SignError::InvalidRequest)?;
+            let descriptor = hosted::ParadexDescriptor::from_json(to_sign)
+                .map_err(|_| SignError::InvalidRequest)?;
+            let digests = hosted::validated_digests(
+                &descriptor,
+                &binding,
+                now_ms,
+                now_ms + PARADEX_CAPTURE_MS,
+            )
+            .map_err(|_| SignError::InvalidRequest)?;
+            let signs = digests
+                .as_slice()
+                .iter()
+                .map(|digest| Operation::Sign {
+                    algorithm: Algorithm::StarkDigest,
+                    key: signing.clone(),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: digest.to_vec(),
+                    }],
+                })
+                .collect();
+            (signs, 64)
+        }
+        _ => return Err(SignError::InvalidRequest),
+    };
+    let work = SignRequest {
+        receipt: Default::default(),
+        context: Context {
+            venue: "paradex".into(),
+            method: "HOSTED".into(),
+            ..Default::default()
+        },
+        operations,
+    };
+    work.validate()?;
+    let result = provider.sign_ready(&work).ok_or(SignError::Unavailable)??;
+    work.validate_result(&result)?;
+    if !result.headers.is_empty()
+        || result.values.len() != work.operations.len()
+        || result.values.iter().any(|value| value.len() != width)
+    {
+        return Err(SignError::InvalidResult);
+    }
+    Ok(format!(
+        "0x{}",
+        safe_cex_crypto::hex(&result.values.concat())
+    ))
+}
+
+/// Answer one remote ws-auth wallet request with `0x` hex: `hyperliquid-address`
+/// returns the agent address, `hyperliquid-l1` returns `r || s || v` (v 27/28).
+/// `now_ms` is the device's protocol clock, for families whose statements expire.
+pub fn sign(
+    venue: &str,
+    identities: &Identities,
+    account: &Account,
+    provider: &Provider,
+    to_sign: &str,
+    output_format: &str,
+    now_ms: f64,
+) -> Result<String, SignError> {
+    if !admitted(venue) {
+        return Err(SignError::Unsupported);
+    }
+    let paradex_format = output_format.starts_with("paradex-");
+    if paradex_format != (venue == "paradex") {
+        return Err(SignError::InvalidRequest);
+    }
+    #[cfg(feature = "paradex")]
+    if paradex_format {
+        return paradex(
+            identities,
+            account,
+            provider,
+            to_sign,
+            output_format,
+            now_ms,
+        );
+    }
+    let _ = now_ms;
+    let identity = identities.primary.as_ref().ok_or(SignError::Unavailable)?;
+    let signing = identity.signing_ref()?.clone();
+    #[cfg_attr(not(feature = "hyperliquid"), allow(unused_mut))]
+    let mut operations = vec![Operation::PublicAddress {
+        key: signing.clone(),
+    }];
+    match output_format {
+        "hyperliquid-address" => {
+            let own = account.key.as_deref().ok_or(SignError::Unavailable)?;
+            if !to_sign.eq_ignore_ascii_case(own) {
+                return Err(SignError::InvalidRequest);
+            }
+        }
+        #[cfg(feature = "hyperliquid")]
+        "hyperliquid-l1" => {
+            use safe_cex_venue_hyperliquid::sign::statement;
+            let digest = statement::derive(
+                to_sign,
+                &statement::Account {
+                    mainnet: !account.testnet,
+                    vault: account.vault.as_deref(),
+                },
+            )?;
+            operations.push(Operation::Sign {
+                algorithm: Algorithm::Secp256k1Digest,
+                key: signing,
+                payload: vec![PayloadPart::Bytes {
+                    bytes: digest.to_vec(),
+                }],
+            });
+        }
+        _ => return Err(SignError::InvalidRequest),
+    }
+    let work = SignRequest {
+        receipt: Default::default(),
+        context: Context {
+            venue: venue.into(),
+            method: "HOSTED".into(),
+            ..Default::default()
+        },
+        operations,
+    };
+    work.validate()?;
+    let result = provider.sign_ready(&work).ok_or(SignError::Unavailable)??;
+    work.validate_result(&result)?;
+    if !result.headers.is_empty() {
+        return Err(SignError::InvalidResult);
+    }
+    let value = match result.values.as_slice() {
+        [address] if address.len() == 20 && work.operations.len() == 1 => address.clone(),
+        [address, signature] if address.len() == 20 && signature.len() == 65 => {
+            let mut signature = signature.clone();
+            match &mut signature[64] {
+                v @ (0 | 1) => *v += 27,
+                27 | 28 => {}
+                _ => return Err(SignError::InvalidResult),
+            }
+            signature
+        }
+        _ => return Err(SignError::InvalidResult),
+    };
+    Ok(format!("0x{}", safe_cex_crypto::hex(&value)))
+}

@@ -915,6 +915,15 @@ export class EngineHost {
     });
   }
 
+  hostedWalletSigning({ toSign, outputFormat }) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw new EngineDisposedError();
+    // Wallet keys sign only on the device that holds them, never through a callback.
+    if (this.signer || typeof this.engine.hostedWalletSigning !== 'function')
+      throw new ExchangeError('Hosted wallet signing is unsupported', { kind: 'unsupported', outcome: 'notSent' });
+    return this.invokeHosted(this.engine.hostedWalletSigning, toSign, outputFormat, this.transport.now());
+  }
+
   clearSocketFailure(id) {
     this.assertHttpHandoffIdle();
     const pending = this.socketFailures.get(id);

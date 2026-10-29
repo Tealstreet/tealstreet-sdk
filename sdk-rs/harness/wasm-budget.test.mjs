@@ -14,7 +14,7 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 });
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
-  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex']);
+  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'binance', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex']);
   assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_391 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
@@ -74,11 +74,11 @@ test('only the declared venue families carry overrides, and only for the venue p
     assert.match(wasmBudgetError(1_411_073, 'venue', venue), /exceeds 1411072/);
   }
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
-    // #2334 run 40610920529, job 122562227484: 1,363,789 B; ceil KiB + 2 KiB.
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1334 * 1024);
+    // Cutover 10-29: release run 40859840322 measured 1,366,837 B; 1344 KiB leaves room for #2362.
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1344 * 1024);
     assert.equal(wasmBudgetError(1_363_789, 'venue', venue), undefined);
-    assert.equal(wasmBudgetError(1_366_016, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_366_017, 'venue', venue), /exceeds 1366016/);
+    assert.equal(wasmBudgetError(1_376_256, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_376_257, 'venue', venue), /exceeds 1376256/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.bybit, 1419 * 1024);
   assert.equal(wasmBudgetError(1_446_912, 'venue', 'bybit'), undefined);
@@ -140,4 +140,14 @@ test('the Bybit capability comparison budgets ordinary Bybit under its own venue
   assert.ok(step >= 0 && compare > step);
   assert.match(workflow.slice(step, compare), /wasmBudgetError\(bytes\.length, 'venue', 'bybit'\)/);
   assert.match(workflow.slice(step, compare), /budgetBytes: wasmBudgetBytes\('venue', 'bybit'\)/);
+});
+
+
+test('Binance Options cutover carries the ruled shared-family ceiling', () => {
+  assert.equal(WASM_VENUE_OVERRIDES.binance, 1429 * 1024);
+  assert.equal(wasmBudgetError(1_448_609, 'venue', 'binance'), undefined);
+  assert.equal(wasmBudgetError(1_460_760, 'venue', 'binance'), undefined);
+  assert.equal(wasmBudgetError(1_463_296, 'venue', 'binance'), undefined);
+  assert.match(wasmBudgetError(1_463_297, 'venue', 'binance'), /exceeds 1463296/);
+  assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined', 'binance'), undefined);
 });

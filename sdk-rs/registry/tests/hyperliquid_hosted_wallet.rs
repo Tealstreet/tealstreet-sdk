@@ -2,7 +2,7 @@
 
 use safe_cex_engine::signing::{Identities, Provider, SignError};
 use safe_cex_venue_hyperliquid::sign;
-use safe_cex_venues::hosted_signing::{self, Account, Input, OutputFormat};
+use safe_cex_venues::hosted_wallet::{self, Account};
 
 const ACCOUNT: &str = "0x1111111111111111111111111111111111111111";
 const VAULT: &str = "0x3333333333333333333333333333333333333333";
@@ -18,22 +18,18 @@ fn sign_ws(
     venue: &str,
     account: &Account,
     to_sign: &str,
-    output_format: OutputFormat,
+    output_format: &str,
 ) -> Result<String, SignError> {
     let (provider, identities) = device(venue);
-    let (work, kind) = hosted_signing::prepare_for(
+    hosted_wallet::sign(
         venue,
         &identities,
         account,
-        Input::WsAuth {
-            to_sign: to_sign.into(),
-            output_format,
-        },
-    )?;
-    work.validate()?;
-    let result = provider.sign_ready(&work).unwrap()?;
-    work.validate_result(&result)?;
-    Ok(hosted_signing::finish(kind, &result)?.signature.unwrap())
+        &provider,
+        to_sign,
+        output_format,
+        0.,
+    )
 }
 
 fn account(vault: Option<&str>, testnet: bool) -> Account {
@@ -77,7 +73,7 @@ fn device_signs_the_statement_exactly_as_local_signing() {
                 venue,
                 &account(vault, testnet),
                 &statement,
-                OutputFormat::HyperliquidL1,
+                "hyperliquid-l1",
             )
             .unwrap();
             let local = sign::sign(&action, vault, nonce, !testnet, KEY).unwrap();
@@ -100,7 +96,7 @@ fn device_binds_its_agent_address_only_for_the_signed_in_account() {
             "hyperliquid",
             &own,
             &ACCOUNT.to_uppercase().replace("0X", "0x"),
-            OutputFormat::HyperliquidAddress
+            "hyperliquid-address"
         )
         .unwrap(),
         address.to_ascii_lowercase()
@@ -110,7 +106,7 @@ fn device_binds_its_agent_address_only_for_the_signed_in_account() {
             "hyperliquid",
             &own,
             "0x2222222222222222222222222222222222222222",
-            OutputFormat::HyperliquidAddress
+            "hyperliquid-address"
         ),
         Err(SignError::InvalidRequest)
     );
@@ -128,7 +124,7 @@ fn device_refuses_other_networks_vaults_actions_and_formats() {
             "hyperliquid",
             &own,
             &statement(cancel, true),
-            OutputFormat::HyperliquidL1
+            "hyperliquid-l1"
         )
         .is_ok()
     );
@@ -145,29 +141,28 @@ fn device_refuses_other_networks_vaults_actions_and_formats() {
         (own.clone(), "0x".to_owned() + &"ab".repeat(32)),
     ] {
         assert!(
-            sign_ws("hyperliquid", &account, &text, OutputFormat::HyperliquidL1).is_err(),
+            sign_ws("hyperliquid", &account, &text, "hyperliquid-l1").is_err(),
             "{text}"
         );
     }
-    // HMAC formats never reach a wallet key, and wallet formats no other venue.
-    for format in [OutputFormat::Hex, OutputFormat::Base64] {
+    // Only the two wallet formats sign, and only for a wallet venue.
+    for format in ["hex", "base64", "hyperliquid-user", ""] {
         assert_eq!(
             sign_ws("hyperliquid", &own, &statement(cancel, true), format),
-            Err(SignError::Unsupported)
+            Err(SignError::InvalidRequest)
         );
     }
-    let (_, identities) = device("hyperliquid");
-    let wrong_venue = hosted_signing::prepare_for(
-        "bitget",
-        &identities,
-        &own,
-        Input::WsAuth {
-            to_sign: statement(cancel, true),
-            output_format: OutputFormat::HyperliquidL1,
-        },
+    let (provider, identities) = device("hyperliquid");
+    assert_eq!(
+        hosted_wallet::sign(
+            "bitget",
+            &identities,
+            &own,
+            &provider,
+            &statement(cancel, true),
+            "hyperliquid-l1",
+            0.
+        ),
+        Err(SignError::Unsupported)
     );
-    assert!(matches!(wrong_venue, Err(SignError::InvalidRequest)));
-    let credential =
-        hosted_signing::prepare_for("hyperliquid", &identities, &own, Input::Credential {});
-    assert!(matches!(credential, Err(SignError::Unsupported)));
 }

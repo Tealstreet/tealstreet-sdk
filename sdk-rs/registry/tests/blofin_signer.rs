@@ -141,3 +141,23 @@ fn missing_or_explicit_empty_passphrases_are_refused_before_engine_startup() {
         assert!(!error.message.contains("primary-secret"));
     }
 }
+
+/// As for Bitget, any engine-options passphrase is refused once identities
+/// come from signer setup, even an empty one that would otherwise be ignored.
+#[test]
+fn an_engine_options_passphrase_is_refused_even_when_empty() {
+    for passphrase in ["", "p"] {
+        let options: EngineOptions =
+            serde_json::from_value(json!({ "passphrase": passphrase })).unwrap();
+        let error = safe_cex_venues::build_with_signer(
+            "blofin",
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(5)),
+            None,
+            Capture,
+        )
+        .map(|_| ())
+        .unwrap_err();
+        assert!(error.message.contains("signer setup"), "{}", error.message);
+    }
+}

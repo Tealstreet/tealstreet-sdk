@@ -11,6 +11,8 @@ address-nonce = ["dispatch-signing", "safe-cex-engine/address-nonce", "safe-cex-
 dispatch-signing = ["dep:safe-cex-crypto"]
 # Browser hosted signing captures; only families with a hosted codec link it.
 hosted-signing = ["dispatch-signing"]
+# Device-side wallet signing for keyless servers, without the HMAC capture codec.
+hosted-wallet = ["dispatch-signing"]
 default = [
     "bitunix",
     "grvt",
@@ -45,7 +47,7 @@ grvt = ["dep:safe-cex-venue-grvt"]
 polymarket = ["dep:safe-cex-venue-polymarket"]
 coinbase = ["dep:safe-cex-venue-coinbase"]
 breakoutprop = ["dep:safe-cex-venue-breakoutprop"]
-paradex = ["dep:safe-cex-venue-paradex", "dispatch-signing", "address-nonce", "hosted-signing", "safe-cex-crypto/stark", "dep:serde_json"]
+paradex = ["dep:safe-cex-venue-paradex", "dispatch-signing", "address-nonce", "hosted-wallet", "safe-cex-crypto/stark", "dep:serde_json"]
 apexomni = ["dep:safe-cex-venue-apexomni", "dispatch-signing"]
 txflow = ["dep:safe-cex-venue-txflow"]
 kraken = ["dep:safe-cex-venue-kraken"]
@@ -66,7 +68,7 @@ binance = ["dep:safe-cex-venue-binance", "dispatch-signing", "hosted-signing"]
 kucoin = ["dep:safe-cex-venue-kucoin"]
 kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
 bybit = ["dep:safe-cex-venue-bybit", "dispatch-signing", "hosted-signing"]
-hyperliquid = ["dep:safe-cex-venue-hyperliquid", "address-nonce", "dep:serde_json", "hosted-signing"]
+hyperliquid = ["dep:safe-cex-venue-hyperliquid", "address-nonce", "dep:serde_json", "hosted-wallet"]
 okx = ["dep:safe-cex-venue-okx", "dispatch-signing", "hosted-signing"]
 orderly = ["dep:safe-cex-venue-orderly", "dispatch-signing", "safe-cex-crypto/ed25519"]
 

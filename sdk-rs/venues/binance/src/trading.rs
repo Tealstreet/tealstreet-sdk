@@ -315,7 +315,7 @@ impl BinanceFutures {
             );
             return;
         }
-        if self.is_spot()
+        if (self.is_spot() || self.is_options())
             && matches!(
                 command,
                 Command::SetLeverage { .. }
@@ -403,7 +403,7 @@ impl BinanceFutures {
                         },
                     },
                 ];
-                if self.is_spot() || self.is_inverse() {
+                if self.is_spot() || self.is_inverse() || self.is_options() {
                     step.truncate(1);
                     if let Call::Cancel { ids, proof } = &mut step[0].call {
                         *proof = Some(if self.is_spot() {
@@ -707,6 +707,14 @@ impl BinanceFutures {
         body: &str,
         evidence: &mut UnprovenEvidence,
     ) {
+        if self.is_options() {
+            if matches!(request.call, Call::PlaceOne { .. })
+                && let Some(id) = crate::options::placed_id(body)
+            {
+                evidence.order_id(&id.to_string());
+            }
+            return;
+        }
         let Some(row) = UnprovenOrder::parse(body) else {
             return;
         };
@@ -816,6 +824,17 @@ impl BinanceFutures {
         let mut evidence_ids = Vec::new();
         let mut known_cancel_effects = false;
         let error = match (call, outcome) {
+            (Call::PlaceOne { .. }, Ok(body)) if self.is_options() => {
+                if let Some(id) = crate::options::placed_id(body) {
+                    ids.push(id.to_string());
+                    None
+                } else {
+                    Some((
+                        0,
+                        "Binance Options placement response has no valid native order ID".into(),
+                    ))
+                }
+            }
             (
                 Call::PlaceOne {
                     client_id: Some(id),
@@ -1143,7 +1162,7 @@ impl BinanceFutures {
         // Binance allows one closePosition order per direction per symbol.
         let mut replaced: Vec<Order> = Vec::new();
         let pm = self.options.portfolio_margin;
-        let replaces_close_orders = !pm && !self.is_spot();
+        let replaces_close_orders = !pm && !self.is_spot() && !self.is_options();
         for opts in orders {
             if replaces_close_orders {
                 for existing in self.conflicting_close_orders(cx, opts) {
@@ -1152,7 +1171,9 @@ impl BinanceFutures {
                     }
                 }
             }
-            let (r, a) = if self.is_spot() {
+            let (r, a) = if self.is_options() {
+                (self.format_option(cx, opts)?, Vec::new())
+            } else if self.is_spot() {
                 (self.format_spot(cx, opts)?, Vec::new())
             } else if self.is_inverse() {
                 (self.format_inverse(cx, opts)?, Vec::new())
@@ -1266,6 +1287,23 @@ impl BinanceFutures {
 
     fn plan_cancel(&self, orders: &[Order]) -> Job {
         let mut job = Job::default();
+        if self.is_options() {
+            for order in orders {
+                job.steps.push_back(vec![Planned {
+                    receipts: Vec::new(),
+                    method: Method::Delete,
+                    path: self.paths.order,
+                    query: Query::new()
+                        .str("symbol", &order.symbol)
+                        .str("orderId", &order.id),
+                    call: Call::Cancel {
+                        ids: vec![order.id.clone()],
+                        proof: Some(CancelProof::One(self.cancel_target(order))),
+                    },
+                }]);
+            }
+            return job;
+        }
         if self.options.portfolio_margin || self.is_spot() {
             // One at a time, by the client ids the orders were placed with.
             for order in orders {
@@ -1371,6 +1409,64 @@ impl BinanceFutures {
             }]);
         }
         job
+    }
+
+    fn format_option(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Vec<Params>, String> {
+        if opts.kind != OrderType::Limit
+            || opts.implied_volatility.is_some()
+            || opts.trigger_price.is_some()
+            || opts.stop_loss.is_some()
+            || opts.take_profit.is_some()
+        {
+            return Err("Binance Options requires a limit price and supports no trigger or implied-volatility order".into());
+        }
+        if let Some(id) = &opts.client_order_id
+            && !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        {
+            return Err("Invalid Binance Options client order ID".into());
+        }
+        let market = cx
+            .store
+            .market(&opts.symbol)
+            .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        let amount = num::adjust(opts.amount, market.precision.amount);
+        if !amount.is_finite()
+            || amount < market.limits.amount.min
+            || amount <= 0.
+            || amount > market.limits.amount.max
+        {
+            return Err("Binance Options quantity is outside its native lot bounds".into());
+        }
+        let price = positive_price(opts.price, market.precision.price)?;
+        let post_only = opts.time_in_force == Some(TimeInForce::PostOnly);
+        let mut params = Params::default();
+        params.set("symbol", opts.symbol.clone());
+        params.set("side", side_text(opts.side));
+        params.set("type", "LIMIT");
+        params.set("quantity", number(amount));
+        params.set("price", number(price));
+        params.set(
+            "timeInForce",
+            if post_only {
+                "GTC"
+            } else {
+                tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel))
+            },
+        );
+        if post_only {
+            params.set("postOnly", "true");
+        }
+        if opts.reduce_only == Some(true) {
+            params.set("reduceOnly", "true");
+        }
+        params.set("clientOrderId", self.client_id(cx, &opts.client_order_id)?);
+        Ok(vec![params])
     }
 
     fn format_spot(
@@ -2159,9 +2255,11 @@ fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Ve
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CancelAck {
+    #[serde(deserialize_with = "crate::options::native_id")]
     order_id: u64,
     symbol: String,
     status: String,
+    #[serde(alias = "quantity")]
     orig_qty: String,
     executed_qty: String,
     #[serde(default)]
@@ -2642,7 +2740,7 @@ impl BinanceFutures {
                 }
                 if !matches!(
                     serde_json::from_str::<Success>(body),
-                    Ok(Success { code: 200 })
+                    Ok(Success { code }) if code == 200 || (self.is_options() && code == 0)
                 ) {
                     return invalid();
                 }
@@ -2657,16 +2755,21 @@ fn identities(params: &Params) -> Vec<OrderIdentityReceipt> {
     let Some(symbol) = params.get("symbol") else {
         return Vec::new();
     };
-    ["newClientOrderId", "clientAlgoId", "newClientStrategyId"]
-        .into_iter()
-        .filter_map(|key| {
-            params.get(key).map(|identity| OrderIdentityReceipt {
-                symbol: symbol.clone(),
-                kind: OrderIdentityKind::ClientOrderId,
-                identity,
-            })
+    [
+        "newClientOrderId",
+        "clientAlgoId",
+        "newClientStrategyId",
+        "clientOrderId",
+    ]
+    .into_iter()
+    .filter_map(|key| {
+        params.get(key).map(|identity| OrderIdentityReceipt {
+            symbol: symbol.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity,
         })
-        .collect()
+    })
+    .collect()
 }
 
 #[cfg(test)]

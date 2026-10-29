@@ -87,8 +87,10 @@ Hosted Hyperliquid never sends a bare digest. Each L1 action's sign work is
 `[sha256(statement), publicAddress, sign secp256k1Digest]`; the statement is
 `{kind: l1, action, nonce, vaultAddress?, isMainnet}` (`sign/statement.rs`).
 The keyless provider sends it as ws-auth `hyperliquid-l1`, and the device's
-WASM hosted capture re-derives the digest with the venue's own code, refusing
-non-trading actions and another network or vault. Startup binds the agent
+WASM `hostedWalletSigning` export (`registry/src/hosted_wallet.rs`, feature
+`hosted-wallet`, kept apart from the HMAC capture codec for the family wasm
+budget) re-derives the digest with the venue's own code, refusing non-trading
+actions and another network or vault. It signs only with the local provider. Startup binds the agent
 address once through `hyperliquid-address` (answered only for the signed-in
 account); the engine refuses any signature not recovering to it. PayloadSigner
 stays refused. The private provider capsule omits the trusted trimSigning false
@@ -107,8 +109,9 @@ the network's fixed chain, then seals the provider's public key to that provider
 verified against the sealed key. Keyless `remoteSigner` Paradex (key = the Paradex
 account address) binds the device's Stark public key at setup (`paradex-public`)
 and sends each signing as one closed `paradex/1` descriptor (`paradex-stark`):
-the device rebuilds and hashes it at its own clock, and the engine verifies every
-returned `r || s` against the bound key and its own hash. PayloadSigner is refused.
+the device's `hostedWalletSigning` (`hosted_wallet.rs`) rebuilds and hashes it at
+its own clock, and the engine verifies every returned `r || s` against the bound
+key and its own hash. PayloadSigner is refused.
 
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
