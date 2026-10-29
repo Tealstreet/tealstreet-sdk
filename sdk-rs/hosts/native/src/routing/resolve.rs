@@ -88,8 +88,13 @@ fn loaded() -> Result<&'static Table, RoutingError> {
     static TABLE: OnceLock<Result<Table, String>> = OnceLock::new();
     TABLE
         .get_or_init(|| {
-            let table: Table =
+            let mut table: Table =
                 serde_json::from_str(include_str!("table.json")).map_err(|e| e.to_string())?;
+            apply_proxy_overrides(
+                &mut table.hosts,
+                std::env::var("PROXY_PRIVATE_URL").ok(),
+                std::env::var("PROXY_PUBLIC_URL").ok(),
+            )?;
             for pool in ["jp", "asia", "tiny"] {
                 if !table.hosts.private_proxy.contains_key(pool) {
                     return Err(format!("no private proxy pool {pool}"));
@@ -111,6 +116,39 @@ fn loaded() -> Result<&'static Table, RoutingError> {
         })
         .as_ref()
         .map_err(|e| RoutingError::InvalidTable(e.clone()))
+}
+
+/// The deployment's proxy hosts: `PROXY_PRIVATE_URL` replaces every whitelisted
+/// private pool and `PROXY_PUBLIC_URL` the public CORS proxy. Unset or empty keeps
+/// the table's value; a trailing `/` is dropped because routes append `/<origin>`.
+fn apply_proxy_overrides(
+    hosts: &mut Hosts,
+    private: Option<String>,
+    public: Option<String>,
+) -> Result<(), String> {
+    let parse = |name: &str, value: Option<String>| -> Result<Option<String>, String> {
+        let Some(value) = value.map(|v| v.trim().trim_end_matches('/').to_owned()) else {
+            return Ok(None);
+        };
+        if value.is_empty() {
+            return Ok(None);
+        }
+        if !value.starts_with("https://") || value.contains(['?', '#']) {
+            return Err(format!(
+                "{name} must be an https URL without query or fragment"
+            ));
+        }
+        Ok(Some(value))
+    };
+    if let Some(private) = parse("PROXY_PRIVATE_URL", private)? {
+        for host in hosts.private_proxy.values_mut() {
+            host.clone_from(&private);
+        }
+    }
+    if let Some(public) = parse("PROXY_PUBLIC_URL", public)? {
+        hosts.public_cors_proxy = public;
+    }
+    Ok(())
 }
 
 fn table() -> &'static Table {
@@ -700,4 +738,45 @@ pub fn resolve_routing_plan(
         public_ws_routes,
         private_ws_routes,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hosts() -> Hosts {
+        serde_json::from_str::<Table>(include_str!("table.json"))
+            .unwrap()
+            .hosts
+    }
+
+    #[test]
+    fn proxy_env_overrides_replace_every_pool_and_the_public_proxy() {
+        let mut hosts = hosts();
+        let url = "https://proxies.tyo.tealstreet.io/api/exchange_proxy/";
+        apply_proxy_overrides(&mut hosts, Some(url.into()), Some(url.into())).unwrap();
+        let expected = "https://proxies.tyo.tealstreet.io/api/exchange_proxy";
+        assert!(hosts.private_proxy.values().all(|host| host == expected));
+        assert_eq!(hosts.private_proxy.len(), 3);
+        assert_eq!(hosts.public_cors_proxy, expected);
+    }
+
+    #[test]
+    fn unset_or_empty_overrides_keep_the_table_and_bad_ones_refuse() {
+        let table = hosts();
+        let mut kept = hosts();
+        apply_proxy_overrides(&mut kept, None, Some(" ".into())).unwrap();
+        assert_eq!(kept.private_proxy, table.private_proxy);
+        assert_eq!(kept.public_cors_proxy, table.public_cors_proxy);
+        for bad in [
+            "http://plain.invalid",
+            "https://x.invalid/?a=1",
+            "proxies.tyo",
+        ] {
+            assert!(
+                apply_proxy_overrides(&mut hosts(), Some(bad.into()), None).is_err(),
+                "{bad}"
+            );
+        }
+    }
 }
