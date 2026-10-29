@@ -816,6 +816,8 @@ impl Okx {
 
     fn request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Account(request) = pending {
+            let error =
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network);
             self.account_failed(cx, request, error);
         } else if let Pending::Trade(request) = pending {
             self.trade_lost(cx, request, error);
@@ -1337,7 +1339,14 @@ impl Venue for Okx {
                 );
                 return;
             }
-            self.request_failed(cx, pending, &error);
+            // Account reads take the table's kind from the reply itself.
+            match pending {
+                Pending::Account(request) => {
+                    let error = account::read_error(&response, error);
+                    self.account_failed(cx, request, error);
+                }
+                pending => self.request_failed(cx, pending, &error),
+            }
             return;
         }
         match pending {
