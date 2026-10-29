@@ -746,7 +746,11 @@ pub struct WasmEngine {
     construction: String,
     inner: Box<dyn AnyEngine>,
     #[cfg(feature = "hosted-signing")]
-    hosted_identity: Option<(String, safe_cex_engine::signing::Identities)>,
+    hosted_identity: Option<(
+        String,
+        safe_cex_engine::signing::Identities,
+        safe_cex_venues::hosted_signing::Account,
+    )>,
     #[cfg(feature = "hosted-signing")]
     hosted_captures:
         safe_cex_engine::signing_capture::Capture<safe_cex_venues::hosted_signing::OutputKind>,
@@ -800,7 +804,7 @@ impl WasmEngine {
         if input.len() > 1024 * 1024 {
             return Err(hosted_error(SignError::InvalidRequest));
         }
-        let (venue, identities) = self
+        let (venue, identities, account) = self
             .hosted_identity
             .as_ref()
             .ok_or_else(|| hosted_error(SignError::Unsupported))?;
@@ -821,8 +825,9 @@ impl WasmEngine {
             }
             timeout = (5000. - age).ceil().clamp(1., 5000.) as u32;
         }
-        let (work, kind) = safe_cex_venues::hosted_signing::prepare(venue, identities, input)
-            .map_err(hosted_error)?;
+        let (work, kind) =
+            safe_cex_venues::hosted_signing::prepare_for(venue, identities, account, input)
+                .map_err(hosted_error)?;
         let prepared = self
             .hosted_captures
             .prepare_with_policy(
@@ -995,10 +1000,14 @@ impl WasmEngine {
         let hosted_identity = (dispatch_signing
             && safe_cex_venues::hosted_signing::admitted(venue, &options))
         .then(|| {
-            options
-                .signing
-                .clone()
-                .map(|identities| (venue.to_owned(), identities))
+            options.signing.clone().map(|identities| {
+                let account = safe_cex_venues::hosted_signing::Account {
+                    key: options.key.clone(),
+                    vault: options.vault.clone(),
+                    testnet: options.testnet,
+                };
+                (venue.to_owned(), identities, account)
+            })
         })
         .flatten();
         let construction = serde_json::to_string(&options.construction(venue))

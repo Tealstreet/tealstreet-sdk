@@ -1474,4 +1474,143 @@ mod signing_tests {
         expected.push(20);
         assert_eq!(rmp_serde::to_vec_named(&action).unwrap(), expected);
     }
+
+    fn remote_actions() -> Vec<Action> {
+        let order = |t: WireType, c: &str| OrderWire {
+            a: 10_000,
+            b: false,
+            p: "0.000123".into(),
+            s: "1234.5".into(),
+            r: true,
+            t,
+            c: c.into(),
+        };
+        vec![
+            Action::Order {
+                orders: vec![
+                    order(
+                        WireType::Limit {
+                            limit: LimitWire { tif: "Alo" },
+                        },
+                        "0x0000000000000000000000000000abcd",
+                    ),
+                    order(
+                        WireType::Trigger {
+                            trigger: TriggerWire {
+                                is_market: true,
+                                trigger_px: "99999.5".into(),
+                                tpsl: "sl",
+                            },
+                        },
+                        "0xffffffffffffffffffffffffffffffff",
+                    ),
+                ],
+                grouping: "normalTpsl",
+                builder: Some(crate::Builder {
+                    b: "0x1719884eb866cb12b2287399b15f7db5e7d775ea".into(),
+                    f: 25,
+                }),
+            },
+            Action::Cancel {
+                cancels: vec![
+                    CancelWire { a: 0, o: 1 },
+                    CancelWire {
+                        a: 4_294_967_295,
+                        o: u64::MAX,
+                    },
+                ],
+            },
+            Action::Leverage {
+                asset: 300,
+                is_cross: false,
+                leverage: 3,
+            },
+            Action::ScheduleCancel {
+                time: Some(1_700_000_000_000),
+            },
+            Action::ScheduleCancel { time: None },
+        ]
+    }
+
+    /// A remote device re-derives exactly the digest local signing signs, so a
+    /// deterministic signature and the body built from it are byte-identical.
+    #[test]
+    fn remote_statement_derives_the_local_digest_for_every_issued_action() {
+        let vault = "0x1719884eb866cb12b2287399b15f7db5e7d775ea";
+        for action in remote_actions() {
+            let json = serde_json::value::to_raw_value(&action).unwrap();
+            for (vault, mainnet) in [
+                (None, true),
+                (None, false),
+                (Some(vault), true),
+                (Some(vault), false),
+            ] {
+                for nonce in [0, 1_700_000_000_123, u64::MAX] {
+                    let statement = sign::statement::encode(&json, nonce, vault, mainnet).unwrap();
+                    let local = sign::agent_digest(
+                        sign::action_hash(&action, vault, nonce).unwrap(),
+                        mainnet,
+                    );
+                    let account = sign::statement::Account { mainnet, vault };
+                    assert_eq!(sign::statement::derive(&statement, &account), Ok(local));
+                    // A device on the other network or vault never signs it.
+                    let other = sign::statement::Account {
+                        mainnet: !mainnet,
+                        vault,
+                    };
+                    assert!(sign::statement::derive(&statement, &other).is_err());
+                    let other = sign::statement::Account {
+                        mainnet,
+                        vault: if vault.is_some() {
+                            None
+                        } else {
+                            Some(vault_other())
+                        },
+                    };
+                    assert!(sign::statement::derive(&statement, &other).is_err());
+                }
+            }
+        }
+    }
+    fn vault_other() -> &'static str {
+        "0x0000000000000000000000000000000000000001"
+    }
+
+    #[test]
+    fn remote_statement_refuses_fund_movement_and_unknown_shapes() {
+        let account = sign::statement::Account {
+            mainnet: true,
+            vault: None,
+        };
+        let statement = |action: &str| {
+            format!(r#"{{"kind":"l1","action":{action},"nonce":1,"isMainnet":true}}"#)
+        };
+        for action in [
+            r#"{"type":"withdraw3","hyperliquidChain":"Mainnet","signatureChainId":"0xa4b1","amount":"1","time":1,"destination":"0x0000000000000000000000000000000000000001"}"#,
+            r#"{"type":"usdSend","hyperliquidChain":"Mainnet","signatureChainId":"0xa4b1","amount":"1","time":1,"destination":"0x0000000000000000000000000000000000000001"}"#,
+            r#"{"type":"approveAgent","agentAddress":"0x0000000000000000000000000000000000000001","nonce":1}"#,
+            r#"{"type":"vaultTransfer","vaultAddress":"0x0000000000000000000000000000000000000001","isDeposit":false,"usd":1}"#,
+            r#"{"type":"order","type":"cancel","cancels":[]}"#,
+            r#"{"cancels":[]}"#,
+            r#"["order"]"#,
+        ] {
+            assert!(
+                sign::statement::derive(&statement(action), &account).is_err(),
+                "{action}"
+            );
+        }
+        let allowed = statement(r#"{"type":"cancel","cancels":[{"a":0,"o":1}]}"#);
+        assert!(sign::statement::derive(&allowed, &account).is_ok());
+        for refused in [
+            allowed.replace(r#""kind":"l1""#, r#""kind":"user""#),
+            allowed.replace(r#""nonce":1"#, r#""nonce":1,"expiresAfter":2"#),
+            allowed.replace(r#""nonce":1"#, r#""nonce":1,"extra":true"#),
+            allowed.replace(r#""nonce":1"#, r#""nonce":-1"#),
+        ] {
+            assert!(
+                sign::statement::derive(&refused, &account).is_err(),
+                "{refused}"
+            );
+        }
+    }
 }

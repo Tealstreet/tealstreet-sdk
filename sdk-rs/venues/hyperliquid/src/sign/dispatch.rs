@@ -20,7 +20,7 @@ pub struct Exchange {
     encoded: Vec<u8>,
     vault: Option<String>,
     testnet: bool,
-    prepared: Option<(SignRequest, [u8; 32])>,
+    prepared: Option<(SignRequest, [u8; 32], [u8; 32])>,
 }
 impl Exchange {
     pub fn new(
@@ -102,6 +102,11 @@ impl SignStep for Exchange {
         let hash = action_hash_encoded(&self.encoded, self.vault.as_deref(), nonce)
             .map_err(|_| SignError::InvalidRequest)?;
         let digest = agent_digest(hash, !self.testnet);
+        // A remote device re-derives the digest from this statement; local
+        // providers only hash it, which binds the result to the same statement.
+        let statement =
+            super::statement::encode(&self.json, nonce, self.vault.as_deref(), !self.testnet)?;
+        let commitment = safe_cex_crypto::sha256(statement.as_bytes());
         let work = SignRequest {
             receipt: SignReceipt {
                 stamp_ms: Some(dispatch.stamp_ms()),
@@ -120,6 +125,11 @@ impl SignStep for Exchange {
                 path: "/exchange".into(),
             },
             operations: vec![
+                Operation::Sha256 {
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: statement.into_bytes(),
+                    }],
+                },
                 Operation::PublicAddress {
                     key: self.signing.clone(),
                 },
@@ -133,22 +143,23 @@ impl SignStep for Exchange {
             ],
         };
         work.validate()?;
-        self.prepared = Some((work.clone(), digest));
+        self.prepared = Some((work.clone(), digest, commitment));
         Ok(work)
     }
     fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
-        let (work, digest) = self.prepared.take().ok_or(SignError::InvalidResult)?;
+        let (work, digest, commitment) = self.prepared.take().ok_or(SignError::InvalidResult)?;
         let Action::Http(request) = action else {
             return Err(SignError::InvalidRequest);
         };
         self.attest(request)?;
         work.validate_result(result)?;
-        if result.values[0].as_slice() != self.address
-            || !ethereum::signed_by(&digest, &result.values[1], &self.signer)
+        if result.values[0].as_slice() != commitment
+            || result.values[1].as_slice() != self.address
+            || !ethereum::signed_by(&digest, &result.values[2], &self.signer)
         {
             return Err(SignError::InvalidResult);
         }
-        let signature = &result.values[1];
+        let signature = &result.values[2];
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Payload<'a> {
