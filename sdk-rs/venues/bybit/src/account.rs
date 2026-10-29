@@ -1411,7 +1411,9 @@ impl BybitLinear {
     }
 
     pub(crate) fn try_start_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.catalog_ready
+        // A key the venue refused is never used for the private feed or account reads.
+        if self.credentials_rejected
+            || !self.catalog_ready
             || !self.startup.account_info
             || std::mem::replace(&mut self.account.started, true)
         {

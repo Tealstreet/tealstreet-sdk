@@ -124,8 +124,9 @@ pub struct LogEvent {
 /// on a declared socket role, HTTP failures, and auth failures it sees
 /// (`deactivate`, and auth-kind startup or command failures); venues emit the
 /// rest through `Cx::event`. Venues tag every credential rejection
-/// `auth.rejected`: one engine event counts at most one auth failure, however
-/// many of these paths report it.
+/// `auth.rejected`, and `Cx::retried_failure_error` does the same for a private
+/// read the venue refused with an auth kind: one engine event counts at most one
+/// auth failure, however many of these paths report it.
 pub mod code {
     pub const WS_CLOSED: &str = "ws.closed";
     pub const WS_RECONNECT: &str = "ws.reconnect";
