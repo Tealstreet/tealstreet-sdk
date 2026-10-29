@@ -1015,6 +1015,11 @@ impl SignRequest {
 }
 
 /// Algorithms with a public form; consumers exist only for these two.
+/// The byte length of `algorithm`'s public key, if it has one.
+pub fn public_key_length(algorithm: Algorithm) -> Option<usize> {
+    public_key_len(algorithm)
+}
+
 fn public_key_len(algorithm: Algorithm) -> Option<usize> {
     match algorithm {
         Algorithm::Ed25519 | Algorithm::StarkDigest => Some(32),
