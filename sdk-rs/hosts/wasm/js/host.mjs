@@ -215,8 +215,8 @@ function interruptedCommand(error, command, interrupted) {
   commandReceiptSnapshot(error, command);
 }
 
-const ERROR_KINDS = new Set(['rejected', 'invalidInput', 'authInvalid', 'authExpired', 'authPermission',
-  'rateLimited', 'network', 'timeout', 'venueUnavailable', 'unsupported', 'internal']);
+const ERROR_KINDS = new Set(['rejected', 'invalidInput', 'insufficientBalance', 'authInvalid', 'authExpired',
+  'authPermission', 'rateLimited', 'network', 'timeout', 'venueUnavailable', 'unsupported', 'internal']);
 const ERROR_OUTCOMES = new Set(['notSent', 'rejected', 'unknown']);
 const text = (value) => (typeof value === 'string' && value ? value : undefined);
 const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : undefined);

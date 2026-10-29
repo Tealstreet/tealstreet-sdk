@@ -36,6 +36,7 @@ export type CommandOutcome = 'notSent' | 'rejected' | 'unknown';
 export type ExchangeErrorKind =
   | 'rejected'
   | 'invalidInput'
+  | 'insufficientBalance'
   | 'authInvalid'
   | 'authExpired'
   | 'authPermission'
@@ -49,6 +50,7 @@ const OUTCOMES: readonly string[] = ['notSent', 'rejected', 'unknown'];
 const KINDS: readonly string[] = [
   'rejected',
   'invalidInput',
+  'insufficientBalance',
   'authInvalid',
   'authExpired',
   'authPermission',
@@ -164,6 +166,7 @@ const isOrderIdentityReceipt = (value: unknown): value is OrderIdentityReceipt =
 const CATEGORIES: Record<ExchangeErrorKind, ErrorCategory> = {
   rejected: 'order_rejected',
   invalidInput: 'order_rejected',
+  insufficientBalance: 'insufficient_balance',
   authInvalid: 'auth_invalid',
   authExpired: 'auth_expired',
   authPermission: 'auth_permissions',
