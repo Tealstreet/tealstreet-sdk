@@ -7,14 +7,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import './transport/registerTealstreetTransport';
 
 import { getProxyToken } from './accessToken';
-import { getProxyForAxios } from './transport/tealstreet/tealstreetTransport';
 // Import after mocking
-import {
-  httpStats,
-  LAST_LOG_PERIODICY,
-  safeCexAxiosCreate,
-  safeCexAxiosCreateNoProxy,
-} from './safeCexAxiosCreate';
+import { httpStats, LAST_LOG_PERIODICY, safeCexAxiosCreate, safeCexAxiosCreateNoProxy } from './safeCexAxiosCreate';
+import { getProxyForAxios } from './transport/tealstreet/tealstreetTransport';
 
 // Mock dependencies
 vi.mock('axios', () => ({
@@ -107,7 +102,9 @@ describe('safeCexAxiosCreate', () => {
       vi.clearAllMocks();
     });
 
-    it('returns the legacy AWS CORS proxy for binance public data (migration off)', () => {
+    // Both pins were AWS's exchange-proxy.jp; PUBLIC_CORS_PROXY moved to the edge
+    // Worker's /api/public_proxy, which never reaches the whitelisted fleet (AWS_EXIT.md 3d).
+    it('returns the public CORS proxy for binance public data (migration off)', () => {
       const config = { baseURL: 'https://api.binance.com' };
       const options: ExchangeOptions = {
         key: '',
@@ -116,10 +113,10 @@ describe('safeCexAxiosCreate', () => {
       };
 
       const result = getProxyForAxios(config, options, 'binance');
-      expect(result).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
+      expect(result).toBe('https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy');
     });
 
-    it('returns the AWS public CORS proxy for binance without an API key', () => {
+    it('returns the public CORS proxy for binance without an API key', () => {
       const config = { baseURL: 'https://api.binance.com', headers: {} };
       const options: ExchangeOptions = {
         key: '',
@@ -128,7 +125,7 @@ describe('safeCexAxiosCreate', () => {
       };
 
       const result = getProxyForAxios(config, options, 'binance');
-      expect(result).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
+      expect(result).toBe('https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy');
     });
 
     it('should return private proxy URL when tealstreetProxy is enabled', () => {

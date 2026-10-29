@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTunnelEgressUrls } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineTransport } from './engine';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
-import { AWS_PUBLIC_CORS_PROXY } from './tealstreet/transportResolution';
+import { PUBLIC_CORS_PROXY } from './tealstreet/transportResolution';
 
 const tunnels = vi.hoisted(
   () =>
@@ -186,7 +186,7 @@ describe('engine through the real HOW package', () => {
     await route.request({ method: 'GET', url, headers: { 'X-MBX-APIKEY': 'read-wallet' } });
     expect(state.sent.at(-1)?.arg).toMatchObject({
       method: 'GET',
-      url: `${AWS_PUBLIC_CORS_PROXY}/${url}`,
+      url: `${PUBLIC_CORS_PROXY}/${url}`,
       headers: { 'X-MBX-APIKEY': 'read-wallet' },
     });
     await route.request({ method: 'POST', url, headers: { 'X-MBX-APIKEY': 'primary-wallet' } });

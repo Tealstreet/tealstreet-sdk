@@ -20,11 +20,15 @@ export const PRIVATE_PROXY_JP = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exch
 export const PRIVATE_PROXY_ASIA = PRIVATE_PROXY_JP;
 export const PRIVATE_PROXY_GRVT_TINY = PRIVATE_PROXY_JP;
 
-// AWS public CORS proxy. The ONLY host for unwhitelisted public browser reads and for
-// a secondary read-only key's reads. It stays on AWS: the Vultr edge demands a user
-// JWT and several callers send none (the venue clocks, Lighter's builder approval,
-// the ticks chart, unproxied secondary reads), so it has no Vultr target yet (3d).
-export const AWS_PUBLIC_CORS_PROXY = 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
+// Public CORS proxy. The ONLY host for unwhitelisted public browser reads and for a
+// secondary read-only key's reads: the same edge Worker's /api/public_proxy/, which
+// needs no JWT and always egresses from the tunnel hosts' own IPs, never the
+// whitelisted fleet, so public-data weight stays off the IPs users trade through
+// (AWS_EXIT.md step 3d; it replaced AWS's exchange-proxy.jp). Same `<base>/<https url>` shape.
+// ROLLOUT GUARD: do not release the rust lanes until infra/tofu proxy-fleet's
+// `public_cors_enabled` is on and BOTH tunnel hosts carry the public CORS container;
+// before that this host 403s every public read (Binance market data, clocks, ticks).
+export const PUBLIC_CORS_PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy';
 
 export interface ProxyHosts {
   privateProxy: Record<RestPool, string>;
@@ -33,7 +37,7 @@ export interface ProxyHosts {
 
 let proxyHosts: ProxyHosts = {
   privateProxy: { jp: PRIVATE_PROXY_JP, asia: PRIVATE_PROXY_ASIA, tiny: PRIVATE_PROXY_GRVT_TINY },
-  publicCorsProxy: AWS_PUBLIC_CORS_PROXY,
+  publicCorsProxy: PUBLIC_CORS_PROXY,
 };
 
 /** Pins this runtime's proxy hosts (the hosted exchange server); see `pinTealstreetEgressHosts`. */

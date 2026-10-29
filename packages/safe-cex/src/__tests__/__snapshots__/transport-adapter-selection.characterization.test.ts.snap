@@ -204,9 +204,9 @@ exports[`transport adapter selection per exchange > binance 1`] = `
     "unlimitedXHR": "how:bigInt https://fapi.binance.com",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
   },
   "public proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://fapi.binance.com",
@@ -219,14 +219,14 @@ exports[`transport adapter selection per exchange > binance 1`] = `
     "unlimitedXHR": "how:bigInt https://fapi.binance.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://fapi.binance.com",
@@ -269,9 +269,9 @@ exports[`transport adapter selection per exchange > binanceinverse 1`] = `
     "unlimitedXHR": "how:bigInt https://dapi.binance.com",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
     "publicXhr": "default https://dapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
   },
   "public proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
@@ -284,14 +284,14 @@ exports[`transport adapter selection per exchange > binanceinverse 1`] = `
     "unlimitedXHR": "how:bigInt https://dapi.binance.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
     "publicXhr": "default https://dapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
     "publicXhr": "default https://dapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://dapi.binance.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
@@ -322,7 +322,7 @@ exports[`transport adapter selection per exchange > binanceoptions 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://eapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://eapi.binance.com",
   },
   "public proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
@@ -331,10 +331,10 @@ exports[`transport adapter selection per exchange > binanceoptions 1`] = `
     "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://eapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://eapi.binance.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://eapi.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://eapi.binance.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://eapi.binance.com",
@@ -381,10 +381,10 @@ exports[`transport adapter selection per exchange > binancepm 1`] = `
     "unlimitedXHR": "how https://papi.binance.com",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = papiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
-    "fapiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
+    "fapiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
   },
   "public proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = papiXhr": "how https://papi.binance.com",
@@ -399,16 +399,16 @@ exports[`transport adapter selection per exchange > binancepm 1`] = `
     "unlimitedXHR": "how https://papi.binance.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = papiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
-    "fapiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
+    "fapiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = papiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
-    "fapiXhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com",
+    "_primaryXhr = _secondaryXhr = papiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
+    "fapiXhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://fapi.binance.com",
     "publicXhr": "default https://fapi.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://papi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://papi.binance.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = papiXhr": "how https://papi.binance.com",
@@ -446,8 +446,8 @@ exports[`transport adapter selection per exchange > binancespot 1`] = `
     "unlimitedXHR": "default https://api.binance.com",
   },
   "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
   },
   "public proxy+tunnel-JA": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.binance.com",
@@ -458,12 +458,12 @@ exports[`transport adapter selection per exchange > binancespot 1`] = `
     "unlimitedXHR": "default https://api.binance.com",
   },
   "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
   },
   "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
-    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com",
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com",
   },
   "public tunnel-only": {
     "_primaryXhr = _secondaryXhr = xhr": "default https://api.binance.com",
@@ -1651,40 +1651,40 @@ exports[`transport adapter selection per exchange > kucoinspot 1`] = `
 exports[`transport adapter selection per exchange > lighter 1`] = `
 {
   "private direct": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private proxy+tunnel-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private proxy+tunnel-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private proxy-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private proxy-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "private tunnel-only": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public direct": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public proxy+tunnel-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public proxy+tunnel-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public proxy-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public proxy-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
   "public tunnel-only": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai",
   },
 }
 `;
@@ -1692,40 +1692,40 @@ exports[`transport adapter selection per exchange > lighter 1`] = `
 exports[`transport adapter selection per exchange > lighter-robinhood 1`] = `
 {
   "private direct": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private proxy+tunnel-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private proxy+tunnel-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private proxy-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private proxy-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "private tunnel-only": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public direct": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public proxy+tunnel-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public proxy+tunnel-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public proxy-JA": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public proxy-SG": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
   "public tunnel-only": {
-    "lighterApiClient.axiosInstance": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.rh.lighter.xyz",
+    "lighterApiClient.axiosInstance": "default https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.rh.lighter.xyz",
   },
 }
 `;

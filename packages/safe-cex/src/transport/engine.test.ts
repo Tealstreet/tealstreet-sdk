@@ -27,7 +27,7 @@ import { setDefaultTransport } from './registry';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 import {
-  AWS_PUBLIC_CORS_PROXY,
+  PUBLIC_CORS_PROXY,
   PRIVATE_PROXY_ASIA,
   PRIVATE_PROXY_GRVT_TINY,
   PRIVATE_PROXY_JP,
@@ -1271,7 +1271,7 @@ describe('Aster secondary signer HTTP routing', () => {
       const raw = makeRaw();
       const routed = createEngineTransport('asterdex', opts, raw);
       await routed.request(privateRequest(method));
-      expect(raw.request.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${privateRequest(method).url}`);
+      expect(raw.request.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${privateRequest(method).url}`);
       expect(raw.request.mock.lastCall![0].headers['x-mbx-apikey']).toBe('read-wallet');
       for (const write of ['POST', 'PUT', 'DELETE']) {
         await routed.request(privateRequest(write));
@@ -1292,13 +1292,13 @@ describe('Aster secondary signer HTTP routing', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('asterdex', opts, raw);
     await routed.request(privateRequest('GET'));
-    expect(mocks.adapter.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${privateRequest('GET').url}`);
+    expect(mocks.adapter.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${privateRequest('GET').url}`);
     await routed.request(privateRequest('POST'));
     expect(mocks.adapter.mock.lastCall![0].url).toBe(privateRequest('POST').url);
     expect(raw.request).not.toHaveBeenCalled();
     const plan = resolveEngineRoutingPlan('asterdex', opts, baseURL);
     expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false });
-    expect(plan.readHttp).toMatchObject({ mode: 'how', prefix: AWS_PUBLIC_CORS_PROXY, authorize: false });
+    expect(plan.readHttp).toMatchObject({ mode: 'how', prefix: PUBLIC_CORS_PROXY, authorize: false });
     expect(plan.readHttp?.tunnelUrl).toBe(plan.http.tunnelUrl);
     expect(JSON.stringify(plan)).not.toMatch(/read-wallet|read-private-key|venue-key|venue-secret|proxy-jwt/);
     routed.dispose!();
@@ -1371,7 +1371,7 @@ describe('typed public HTTP route hints', () => {
     const url = 'https://fapi.asterdex.com/fapi/v3/time?exact=one%2Btwo';
     for (const [route, expected] of [
       ['direct', url],
-      ['publicCors', `${AWS_PUBLIC_CORS_PROXY}/${url}`],
+      ['publicCors', `${PUBLIC_CORS_PROXY}/${url}`],
     ] as const) {
       await routed.request({ method: 'GET', route, url, headers: {} });
       const sent = raw.request.mock.lastCall![0];
@@ -1386,7 +1386,7 @@ describe('typed public HTTP route hints', () => {
     const plan = resolveEngineRoutingPlan('asterdex', opts, 'https://fapi.asterdex.com');
     expect(plan.publicCorsHttp).toEqual({
       mode: 'direct',
-      prefix: AWS_PUBLIC_CORS_PROXY,
+      prefix: PUBLIC_CORS_PROXY,
       authorize: false,
       authorizationHeader: 'Authorization',
       headers: {},
@@ -1402,7 +1402,7 @@ describe('typed public HTTP route hints', () => {
       const routed = createEngineTransport(exchange, options({ tealstreetTunnel: true }), raw);
       const url = 'https://venue.test/time';
       await routed.request({ method: 'GET', route: 'publicCors', url, headers: {} });
-      expect(raw.request.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${url}`);
+      expect(raw.request.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${url}`);
       expect(mocks.adapter).not.toHaveBeenCalled();
       expect(mocks.token).not.toHaveBeenCalled();
       routed.dispose!();
