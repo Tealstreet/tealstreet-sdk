@@ -364,7 +364,7 @@ require authentication before private sends and exact responses to server pings.
 **Error Codes Handled** (`grvt.ws-private.ts:183-197`):
 
 - `1003`: Malformed syntax -- silently ignored
-- `1008`: IP not whitelisted -- shows user-facing error with the proxy IP to whitelist. **Stale on master:** the text still names the Tokyo EKS NAT `18.176.98.246` (`sdk-rs/venues/grvt/src/account.rs`, mirror-authored, and its TS reference); since AWS_EXIT.md step 3e the socket egresses from the nine Vultr fleet IPs (`privateProxyIpsVultrTokyo`), so the message must change on the tealstreet-sdk mirror
+- `1008`: IP not whitelisted -- shows a user-facing error pointing at the Tealstreet IPs in the API key form; since AWS_EXIT.md step 3e those are the Vultr fleet IPs (`privateProxyIpsVultrTokyo`)
 - Other codes: Logged as errors
 
 ## Order Types and Mappings

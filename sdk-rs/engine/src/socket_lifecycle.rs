@@ -183,6 +183,8 @@ pub enum AuthEvidence {
     Progress,
     Rejected(VenueError),
     Malformed,
+    /// The venue refused this route's egress before login; another may work.
+    RouteRefused(VenueError),
 }
 #[derive(Clone, Debug)]
 pub enum Control {
@@ -201,6 +203,8 @@ pub enum RetireReason {
     Stopped,
     /// A `reject_route` connect found no route left; nothing was dialled.
     RouteExhausted,
+    /// The venue refused this route; the next connect asks for another.
+    RouteRefused,
 }
 
 #[derive(Clone, Debug)]
@@ -711,6 +715,12 @@ impl Lifecycle {
                 AuthTransition::Ignored
             };
         }
+        // This socket already logged in on this route, so the route works: a
+        // late refusal is an ordinary rejection and never burns the route.
+        let evidence = match evidence {
+            AuthEvidence::RouteRefused(error) if f.authenticated => AuthEvidence::Rejected(error),
+            evidence => evidence,
+        };
         if matches!(evidence, AuthEvidence::Accepted) {
             if f.authenticated {
                 // Positive evidence must still cancel a coalesced native login

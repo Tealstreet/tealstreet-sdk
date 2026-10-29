@@ -277,13 +277,14 @@ fn family(venue: &str) -> bool {
     let okx = cfg!(feature = "okx") && matches!(venue, "okx" | "okxeu" | "okxdemo" | "okxeudemo");
     let bitget =
         cfg!(feature = "bitget") && matches!(venue, "bitget" | "bitgetusdc" | "bitgetinverse");
-    let blofin = cfg!(feature = "blofin") && venue == "blofin";
     binance
         || bybit
         || okx
         || bitget
-        || blofin
+        || (cfg!(feature = "bingx") && venue == "bingx")
+        || (cfg!(feature = "blofin") && venue == "blofin")
         || double_sha256(venue)
+        || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
 }
 

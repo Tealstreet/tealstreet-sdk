@@ -1,7 +1,9 @@
 import type { EngineHost, HostedSigningClock } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, RemoteSignerRequest, RemoteSignerResponse } from '../../types';
 
-import axios from 'axios';
+import type { InternalAxiosRequestConfig } from 'axios';
+
+import axios, { AxiosHeaders } from 'axios';
 import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
@@ -9,6 +11,7 @@ import { signHttpCapture } from '../../utils/signHttpCapture';
 import { uuid } from '../../utils/uuid';
 import { createAsterDEXV1RequestInterceptor, isAsterDEXPublicEndpoint } from '../asterdex/asterdex.signing';
 import { createBinanceRequestInterceptor, isBinancePublicSigningRequest } from '../binance/binance.signing';
+import { finishBingxRequest, isBingxUnsignedRequest, prepareBingxRequest, serializeBingxParams } from '../bingx/bingx.signing';
 import { finishBitgetRequest, prepareBitgetRequest } from '../bitget/bitget.signing';
 import { BROKER_ID as BITGET_BROKER_ID } from '../bitget/bitget.types';
 import { finishBlofinRequest, isBlofinUnsignedRequest, prepareBlofinRequest } from '../blofin/blofin.signing';
@@ -22,6 +25,32 @@ const BINANCE = new Set<ExchangeName>(['binance', 'binancepm', 'binanceinverse',
 const BYBIT = new Set<ExchangeName>(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader']);
 const OKX = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const BITGET = new Set<ExchangeName>(['bitget', 'bitgetusdc', 'bitgetinverse']);
+
+/** Phemex's REST preimage `path ‖ query ‖ expiry ‖ body`, as the retired TS venue
+ * built it: the decoded qs query without `?`, expiry in rounded seconds a minute on.
+ */
+export const preparePhemexRequest = (config: InternalAxiosRequestConfig, stampMs: number) => {
+  const params = config.params ? decodeURIComponent(qs.stringify(config.params)) : '';
+  // A replayed config carries the body axios already serialized: sign those bytes.
+  const data = typeof config.data === 'string' ? config.data : config.data ? JSON.stringify(config.data) : '';
+  const expiry = String(Math.round((stampMs + 60_000) / 1000));
+  return { config, expiry, payload: `${config.url ?? ''}${params}${expiry}${data}` };
+};
+
+export const finishPhemexRequest = (
+  prepared: ReturnType<typeof preparePhemexRequest>,
+  key: string,
+  signature: string,
+): InternalAxiosRequestConfig => ({
+  ...prepared.config,
+  headers: new AxiosHeaders({
+    ...prepared.config.headers,
+    'Content-Type': 'application/json',
+    'X-PHEMEX-ACCESS-TOKEN': key,
+    'X-PHEMEX-REQUEST-EXPIRY': prepared.expiry,
+    'X-PHEMEX-REQUEST-SIGNATURE': signature,
+  }),
+});
 
 /** The surviving hosted wire adapter uses standalone codecs, never a TS venue.
  * It cannot fall back to options.secret: the callback always uses owned refs.
@@ -39,15 +68,18 @@ export const signHostedHttp = async (
   const okx = OKX.has(name);
   const bitget = BITGET.has(name);
   const bitunix = name === 'bitunix';
+  const bingx = name === 'bingx';
+  const phemex = name === 'phemex';
   const blofin = name === 'blofin';
-  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !blofin && !aster)
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
-  // The legacy Bitget interceptor signs every request once credentials exist.
-  const unsigned = binance ? isBinancePublicSigningRequest(name, request.config.url)
+  // The legacy Bitget and Phemex interceptors sign every request once credentials exist.
+  const unsigned = phemex ? false : binance ? isBinancePublicSigningRequest(name, request.config.url)
     : okx ? isOkxUnsignedSigningRequest(request.config.url)
     : aster ? isAsterDEXPublicEndpoint(request.config.url)
       : bitunix ? isBitunixUnsignedRequest(request.config.url)
+      : bingx ? isBingxUnsignedRequest(request.config.url, options.testnet)
       : blofin ? isBlofinUnsignedRequest(request.config.url)
       : !bitget && isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
   const needsCredential = primaryComplete && !unsigned;
@@ -82,7 +114,8 @@ export const signHostedHttp = async (
   const xhr = axios.create({
     timeout: 20_000,
     paramsSerializer: {
-      serialize: (params) => binance ? qs.stringify(params, { arrayFormat: 'repeat' }) : qs.stringify(params),
+      serialize: (params) => binance ? qs.stringify(params, { arrayFormat: 'repeat' })
+        : bingx ? serializeBingxParams(params) : qs.stringify(params),
     },
     headers: okx ? {
       'Content-Type': 'application/json',
@@ -92,7 +125,11 @@ export const signHostedHttp = async (
       'Content-Type': 'application/json',
     } : bitunix ? {
       ...(options.testnet ? { 'x-simulated-trading': 1 } : {}),
-    } : blofin ? {
+    } : bingx ? {
+      'X-BX-APIKEY': credential,
+      'X-SOURCE-KEY': 'Tealstreet',
+      'Content-Type': 'application/json, charset=utf-8',
+    } : phemex ? {} : blofin ? {
       'Content-Type': 'application/json',
     } : binance ? {
       'X-MBX-APIKEY': credential,
@@ -130,6 +167,18 @@ export const signHostedHttp = async (
     const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
     if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
     return finishBitunixRequest(prepared, credential, output.signature);
+  } : phemex ? async (config) => {
+    if (!credential) return config;
+    const prepared = preparePhemexRequest(config, now());
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+    return finishPhemexRequest(prepared, credential, output.signature);
+  } : bingx ? async (config) => {
+    if (isBingxUnsignedRequest(config.url, options.testnet) || !credential) return config;
+    const prepared = prepareBingxRequest(config, now());
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+    return finishBingxRequest(prepared, credential, output.signature);
   } : blofin ? async (config) => {
     if (isBlofinUnsignedRequest(config.url) || !credential) return config;
     const prepared = prepareBlofinRequest(config, now(), uuid());
