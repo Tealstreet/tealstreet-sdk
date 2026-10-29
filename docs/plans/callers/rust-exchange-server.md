@@ -11,5 +11,9 @@ translates into engine commands. Private accounts sign through the client via
 - The web hosted client (NX `hostedFrameClient`) connects to it at `wss://connect-tyo.tealstreet.io/account`.
 - The image is `hosts/server/Dockerfile`.
 
-**Not yet wired.** chaser, TWAP and exec (their `msg` ops reply "not supported yet"), shared
-public feeds, and init pacing.
+**Algos.** chaser, TWAP and exec run per private account through an
+`AccountPort` over `AccountHandle`. Disposal runs in order: TWAP `terminate_all`,
+then chaser `shutdown`, then the scope, then the engine. Store fills are not yet
+projected: `Change.fills` is empty.
+
+**Not yet wired.** Shared public feeds and init pacing.

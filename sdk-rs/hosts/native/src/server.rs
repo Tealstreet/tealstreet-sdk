@@ -452,6 +452,14 @@ impl AccountHandle {
         result.await.ok()
     }
 
+    /// A typed engine command from an in-process client (algos). `false` when
+    /// the account's queue is full or it stopped: the command was not sent.
+    pub fn command(&self, client: u64, command: Command) -> bool {
+        self.commands
+            .try_send(Control::Command { client, command })
+            .is_ok()
+    }
+
     pub fn leave(&self, client: u64) {
         let _ = self.commands.try_send(Control::Leave(client));
     }

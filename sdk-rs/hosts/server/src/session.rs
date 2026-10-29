@@ -370,14 +370,23 @@ impl Session {
                 "updatePositions:done",
                 json!({"requestId": msg.data.get("requestId"), "success": true}),
             )),
-            (op, _, _) if op.starts_with("chaser:") || op.starts_with("twap:") || op == "exec" => {
-                self.send(envelope::msg(
-                    &name,
-                    "error",
-                    json!([format!(
-                        "{op} is not supported on the Rust exchange server yet"
-                    )]),
-                ))
+            (op, _, _) if crate::algos::OPS.contains(&op) => {
+                let algos = self.joined[&name].account.algos.clone();
+                let sent = algos.is_some_and(|algos| {
+                    algos
+                        .send(crate::algos::AlgoInput::Op {
+                            op: op.to_owned(),
+                            data: msg.data.to_string(),
+                        })
+                        .is_ok()
+                });
+                if !sent {
+                    self.send(envelope::msg(
+                        &name,
+                        "error",
+                        json!([format!("{op} is unavailable for this account")]),
+                    ));
+                }
             }
             (op, _, _) => Log::warn(&format!("ignored account op {op}")),
         }
@@ -534,6 +543,10 @@ impl Session {
             for client in std::iter::once(joined.client).chain(joined.old) {
                 client.pump.abort();
                 joined.account.handle.leave(client.id);
+            }
+            // Chases die with the socket that may have started them, as today.
+            if let Some(algos) = &joined.account.algos {
+                let _ = algos.send(crate::algos::AlgoInput::SocketClosed);
             }
             if self.identity.resumable
                 && self.identity.user.is_some()
