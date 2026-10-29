@@ -5,6 +5,7 @@ pub mod config;
 pub mod envelope;
 pub mod http;
 pub mod methods;
+pub mod out;
 pub mod session;
 pub mod state;
 pub mod threads;
