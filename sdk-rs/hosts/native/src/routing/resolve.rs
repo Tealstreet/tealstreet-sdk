@@ -82,9 +82,39 @@ enum Kind {
     WsRouteCandidates { proxy: String },
 }
 
+/// The table, validated once: every pool and egress an entry can select exists,
+/// so the host lookups below cannot fail after `loaded()` succeeds.
+fn loaded() -> Result<&'static Table, RoutingError> {
+    static TABLE: OnceLock<Result<Table, String>> = OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            let table: Table =
+                serde_json::from_str(include_str!("table.json")).map_err(|e| e.to_string())?;
+            for pool in ["jp", "asia", "tiny"] {
+                if !table.hosts.private_proxy.contains_key(pool) {
+                    return Err(format!("no private proxy pool {pool}"));
+                }
+            }
+            for egress in ["jp", "sg"] {
+                if !table.hosts.tunnel.contains_key(egress) {
+                    return Err(format!("no tunnel egress {egress}"));
+                }
+            }
+            if let Some((name, _)) = table
+                .exchanges
+                .iter()
+                .find(|(_, e)| !table.hosts.private_proxy.contains_key(&e.routing.rest_pool))
+            {
+                return Err(format!("{name} names an unknown proxy pool"));
+            }
+            Ok(table)
+        })
+        .as_ref()
+        .map_err(|e| RoutingError::InvalidTable(e.clone()))
+}
+
 fn table() -> &'static Table {
-    static TABLE: OnceLock<Table> = OnceLock::new();
-    TABLE.get_or_init(|| serde_json::from_str(include_str!("table.json")).expect("routing table"))
+    loaded().expect("validated by every public entry point")
 }
 
 /// Which TS transport provider the account would have used.
@@ -99,8 +129,10 @@ pub enum Provider {
 
 /// The routing-relevant subset of normalized `ExchangeOptions`. No credential
 /// values and no proxy JWT: `has_key` and `payload_signer` are presence only.
+/// There is deliberately no `overrideProxyUrl`: an authorized route would carry
+/// the account's proxy token to whatever host it named. Unknown fields refuse.
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RoutingInputs {
     pub tealstreet_proxy: Option<bool>,
     pub tealstreet_tunnel: Option<bool>,
@@ -112,7 +144,6 @@ pub struct RoutingInputs {
     pub has_key: bool,
     #[serde(default)]
     pub payload_signer: bool,
-    pub override_proxy_url: Option<String>,
 }
 
 /// A saved account's transport preferences, as the hosted init payload carries them.
@@ -134,6 +165,7 @@ pub enum RoutingError {
     /// Secondary read keys are not yet routed natively.
     SecondaryUnsupported,
     UnsupportedRewrite,
+    InvalidTable(String),
 }
 
 impl std::fmt::Display for RoutingError {
@@ -149,6 +181,7 @@ impl std::fmt::Display for RoutingError {
                 write!(f, "native routing does not yet route secondary read keys")
             }
             Self::UnsupportedRewrite => write!(f, "Unsupported native URL rewrite"),
+            Self::InvalidTable(error) => write!(f, "invalid routing table: {error}"),
         }
     }
 }
@@ -156,7 +189,7 @@ impl std::fmt::Display for RoutingError {
 impl std::error::Error for RoutingError {}
 
 fn exchange(name: &str) -> Result<&'static Exchange, RoutingError> {
-    table()
+    loaded()?
         .exchanges
         .get(name)
         .ok_or_else(|| RoutingError::UnknownExchange(name.into()))
@@ -420,16 +453,12 @@ fn rest_route(
         })
         .ok_or(RoutingError::UnsupportedRewrite)?;
     let (origin, path) = url.split_at(origin_end);
-    let overridden = |base: String| match &o.override_proxy_url {
-        Some(prefix) if !prefix.is_empty() => format!("{prefix}/{origin}"),
-        _ => base,
-    };
     let (base, proxied) = match provider {
         Provider::Direct => {
             if o.tealstreet_proxy.unwrap_or(false) || o.tealstreet_tunnel.unwrap_or(false) {
                 return Err(RoutingError::DirectRefusesTealstreet(name.into()));
             }
-            (overridden(origin.into()), false)
+            (origin.into(), false)
         }
         Provider::Tealstreet => {
             let tunnel = o.tealstreet_tunnel.unwrap_or(false);
@@ -450,7 +479,7 @@ fn rest_route(
             } else {
                 origin.into()
             };
-            (overridden(base), proxied)
+            (base, proxied)
         }
     };
     Ok((format!("{base}{path}"), proxied))

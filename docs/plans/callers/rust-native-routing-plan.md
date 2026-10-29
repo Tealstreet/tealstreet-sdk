@@ -19,3 +19,9 @@ until the TS resolver is deleted. After that, `table.json` is the source.
 
 **Gaps.** Secondary read keys are refused with `SecondaryUnsupported`; the hosted
 payload carries none.
+
+**Security.** `RoutingInputs` has no `overrideProxyUrl` and refuses unknown fields.
+An authorized route would carry the account's proxy token to the host it named,
+so every authorized prefix is a table proxy host (pinned by `routing_port.rs`).
+`account_transport` sets `has_key`; an unauthenticated public account must set
+`public_data_only: Some(true)` itself, or its plan resolves as a private one.
