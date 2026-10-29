@@ -58,7 +58,10 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #2356 European Options cutover: local optimized Binance family 1,448,609 B;
 // #2368 links the advertised Options decoders: 1,460,760 B locally; ddi ruled
 // ceil KiB + 2 KiB (1429 KiB). Split Options from the family after cutover.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ binance: 1_463_296, hyperliquid: 1_376_256, hyperliquidspot: 1_376_256, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_405_952 });
+// #2367 Paradex keyless remote signing (device descriptor parser, PublicKey setup,
+// hosted-wallet): local optimized Paradex 1,482,511 B; ddi ruled ceil KiB + 4 KiB
+// (1452 KiB) for local/CI drift, without waiting on CI. Split the device build later.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ binance: 1_463_296, hyperliquid: 1_376_256, hyperliquidspot: 1_376_256, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_486_848 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
