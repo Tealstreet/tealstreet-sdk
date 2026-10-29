@@ -137,9 +137,15 @@ fn apply_proxy_overrides(
         // These hosts receive users' proxy JWTs: only a Tealstreet host is accepted.
         let host = value
             .strip_prefix("https://")
-            .filter(|_| !value.contains(['?', '#']))
+            // WHATWG URLs also split https paths on `\`; refuse it anywhere.
+            .filter(|_| !value.contains(['?', '#', '\\']))
             .and_then(|rest| rest.split('/').next())
-            .filter(|authority| !authority.contains('@'))
+            // Host and port only: no userinfo or other authority characters.
+            .filter(|authority| {
+                authority
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':'))
+            })
             .and_then(|authority| authority.split(':').next());
         if !host.is_some_and(|host| host == "tealstreet.io" || host.ends_with(".tealstreet.io")) {
             return Err(format!(
@@ -790,6 +796,9 @@ mod tests {
             "https://eviltealstreet.io/api",
             "https://user@evil.invalid/x.tealstreet.io",
             "http://proxies.tyo.tealstreet.io/api",
+            "https://evil.invalid\\.tealstreet.io/api",
+            "https://evil.invalid%2F.tealstreet.io/api",
+            "https://evil.invalid\t.tealstreet.io/api",
         ] {
             assert!(
                 apply_proxy_overrides(&mut hosts(), Some(bad.into()), None).is_err(),
