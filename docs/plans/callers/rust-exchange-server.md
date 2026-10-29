@@ -13,7 +13,10 @@ translates into engine commands. Private accounts sign through the client via
 
 **Algos.** chaser, TWAP and exec run per private account through an
 `AccountPort` over `AccountHandle`. Disposal runs in order: TWAP `terminate_all`,
-then chaser `shutdown`, then the scope, then the engine. Store fills are not yet
-projected: `Change.fills` is empty.
+then chaser `shutdown`, then the scope, then the engine. `Change.fills` comes from
+each flush frame's FILLS section (`safe_cex_engine::wire::fills`). Private-socket
+health is reported as unknown, because the engine exposes none.
 
-**Not yet wired.** Shared public feeds and init pacing.
+**Pacing.** Account starts run at about 7 per second per process, with up to 60 ms of jitter.
+
+**Not yet wired.** Shared public feeds.
