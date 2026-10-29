@@ -1016,7 +1016,11 @@ impl WasmEngine {
                         vault: options.vault.clone(),
                         testnet: options.testnet,
                         application_id: options.application_id.clone(),
+                        // EngineOptions carries api_key_index only in Lighter builds.
+                        #[cfg(feature = "lighter")]
                         api_key_index: options.api_key_index.clone(),
+                        #[cfg(not(feature = "lighter"))]
+                        api_key_index: None,
                     };
                     (venue.to_owned(), identities, account)
                 })
