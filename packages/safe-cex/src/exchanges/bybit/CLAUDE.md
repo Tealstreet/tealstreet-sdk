@@ -174,6 +174,20 @@ to the LINEAR socket only, so hosted bybit USDT worked and hosted BTCUSD did
 not — reported as "impossible to use Tealstreet on Bybit's inverse market"
 (2026-10-01) and fixed for inverse and spot the same day.
 
+**Fast Execution timestamp precision change** (Bybit announcement: 2026-11-05
+02:30 UTC): Bybit's `execution.fast` private WS topic changes `creationTime`
+and item `execTime` from millisecond to microsecond precision without changing
+field names or types. The retained TS Bybit sockets do NOT subscribe to
+`execution.fast` today: linear/demo and inverse subscribe to `order` +
+`position`, and spot subscribes to `order` only. So the announcement does not
+change the current private WS fill path. Still, any execution-row mapper or
+future `execution.fast` consumer must normalize timestamps through
+`normalizeBybitExecutionTimestampMs` / `normalizeBybitExecutionTimestampSeconds`
+so 10-digit seconds, 13-digit milliseconds and 16-digit microseconds all land in
+the same internal seconds/ms units. Demo inherits the linear mapper; inverse has
+its own mapper; spot currently has no historical-fill mapper in the retained TS
+adapter.
+
 **On a failed auth the socket sends NOTHING and reconnects** — it does not
 subscribe. Subscribing anyway was tried and is worse: bybit answers a ping on an
 unauthenticated `/v5/private` socket (measured 2026-10-01, 7 pings 7 pongs), so
