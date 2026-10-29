@@ -11,6 +11,7 @@ mod order_tools;
 mod placement;
 mod protection;
 mod swarm;
+mod waits;
 
 pub const MAX_COMMAND_BYTES: usize = 16 * 1024;
 pub const MAX_STEPS: usize = 128;
@@ -793,6 +794,7 @@ fn evaluate(
             Ok(orders) => Evaluation::Place(orders),
             Err(error) => failed(error),
         },
+        "sleep" | "wait" => waits::evaluate(symbol, &args),
         "chase" | "chasers" | "twap" => algo_commands::evaluate(symbol, &args, store, req_id, host),
         "swarm" => match swarm::prepare(symbol, &args, store, host) {
             Ok((orders, symbol, side)) => Evaluation::Swarm {

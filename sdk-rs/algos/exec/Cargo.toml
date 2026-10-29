@@ -13,6 +13,7 @@ safe-cex-engine.workspace = true
 getrandom.workspace = true
 safe-cex-chaser = { path = "../chaser" }
 safe-cex-algo-twap = { path = "../twap" }
+tokio = { version = "1.53.3", features = ["time"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }

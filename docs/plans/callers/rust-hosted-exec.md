@@ -119,3 +119,14 @@ direct factory's validation, state messages and lifecycle. Intentionally fixes
 the TS hosted CLI no-op: its router dropped taskAction; native CLI twap now
 starts exactly one real schedule. Shared algo stop/dispose policy remains owned
 by the account runtime; EXEC never adds write retry or resume replay.
+
+Sleep/wait use the shared account scope, including disposal/abort; no polling
+request is sent to a venue. Conditions read fresh engine frames every 100 ms,
+with TS bid/ask crossover semantics, position/hedge PnL, mark/index/funding/
+premium, captured order-ID suffixes and nested both/either. Sleep/timeout/for
+are capped at ten minutes; wait time HHMM UTC targets the next occurrence.
+Native bounds nested conditions at sixteen levels. @variables still require
+the absent hosted PreprocessStore and refuse; browser script preprocessing
+remains client-owned. Explicit semicolon chains retain the worker's continue-
+after-error behavior, including wait timeout. Disposal prevents a sleeping
+chain's successor from dispatching; no write is replayed on reconnect.
