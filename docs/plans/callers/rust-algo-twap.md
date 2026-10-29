@@ -47,7 +47,9 @@ native exchange server. Nothing calls it yet.
   `randomnessPercentage` and `timeoutPct` in `[0, 100]`, and
   `chaserDelay >= 0`. Restored entries must also keep `ordersSizes` within
   `ordersCount`, with finite values. A refusal sends a `log` error and builds
-  nothing; a bad restore entry is skipped.
+  nothing; a bad restore entry is skipped. An account runs at most 20 TWAPs
+  (`MAX_TWAPS_PER_ACCOUNT`): further starts are refused and further restored
+  entries are skipped, until one completes or stops.
 - A slice whose placement outcome is unknown, or whose order ids cannot be
   read, still advances the TWAP, as in TS. Its log says the order may be live,
   and no later slice assumes it failed.
