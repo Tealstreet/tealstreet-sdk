@@ -121,6 +121,7 @@ fn loaded() -> Result<&'static Table, RoutingError> {
 /// The deployment's proxy hosts: `PROXY_PRIVATE_URL` replaces every whitelisted
 /// private pool and `PROXY_PUBLIC_URL` the public CORS proxy. Unset or empty keeps
 /// the table's value; a trailing `/` is dropped because routes append `/<origin>`.
+/// Anything but an https `tealstreet.io` host refuses at table load.
 fn apply_proxy_overrides(
     hosts: &mut Hosts,
     private: Option<String>,
@@ -133,9 +134,16 @@ fn apply_proxy_overrides(
         if value.is_empty() {
             return Ok(None);
         }
-        if !value.starts_with("https://") || value.contains(['?', '#']) {
+        // These hosts receive users' proxy JWTs: only a Tealstreet host is accepted.
+        let host = value
+            .strip_prefix("https://")
+            .filter(|_| !value.contains(['?', '#']))
+            .and_then(|rest| rest.split('/').next())
+            .filter(|authority| !authority.contains('@'))
+            .and_then(|authority| authority.split(':').next());
+        if !host.is_some_and(|host| host == "tealstreet.io" || host.ends_with(".tealstreet.io")) {
             return Err(format!(
-                "{name} must be an https URL without query or fragment"
+                "{name} must be an https URL on a tealstreet.io host, without query or fragment"
             ));
         }
         Ok(Some(value))
@@ -768,10 +776,20 @@ mod tests {
         apply_proxy_overrides(&mut kept, None, Some(" ".into())).unwrap();
         assert_eq!(kept.private_proxy, table.private_proxy);
         assert_eq!(kept.public_cors_proxy, table.public_cors_proxy);
+        apply_proxy_overrides(
+            &mut hosts(),
+            Some("https://tealstreet.io:8443/p".into()),
+            None,
+        )
+        .unwrap();
         for bad in [
             "http://plain.invalid",
             "https://x.invalid/?a=1",
             "proxies.tyo",
+            "https://proxies.tyo.tealstreet.io.evil.invalid/api",
+            "https://eviltealstreet.io/api",
+            "https://user@evil.invalid/x.tealstreet.io",
+            "http://proxies.tyo.tealstreet.io/api",
         ] {
             assert!(
                 apply_proxy_overrides(&mut hosts(), Some(bad.into()), None).is_err(),
