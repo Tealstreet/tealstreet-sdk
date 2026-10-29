@@ -5,6 +5,7 @@ use std::collections::{HashMap, VecDeque};
 mod algo_commands;
 mod capabilities;
 mod chart;
+mod configuration;
 mod display;
 pub use algo_commands::{AlgoReply, AlgoRequest};
 #[cfg(not(target_arch = "wasm32"))]
@@ -487,6 +488,17 @@ impl Exec {
                         if chain.wait_barrier && result["success"] == false {
                             stop_wait_chain(&mut chain, &mut result, host);
                         }
+                        if chain.req_id.is_none()
+                            && result["handled"] == true
+                            && result["success"] == false
+                            && result["errorReported"] != true
+                        {
+                            log(
+                                host,
+                                &chain.req_id,
+                                result["error"].as_str().unwrap_or("Command failed"),
+                            );
+                        }
                         chain.last = Some(result);
                     }
                     self.chains.insert(id, chain);
@@ -711,6 +723,7 @@ fn stop_wait_chain(chain: &mut Chain, result: &mut Value, host: &mut impl Host) 
     );
     log(host, &chain.req_id, &error);
     result["error"] = json!(error);
+    result["errorReported"] = json!(true);
 }
 
 fn reply(host: &mut impl Host, req_id: &Option<Value>, mut result: Value) {
@@ -805,6 +818,11 @@ fn evaluate(
         *head = display::canonical(head)
             .map(str::to_string)
             .unwrap_or_else(|| head.to_ascii_lowercase());
+    }
+    if !args.is_empty()
+        && let Some(result) = configuration::evaluate(symbol, &args, store)
+    {
+        return result;
     }
     if !args.is_empty()
         && let Some(result) = display::evaluate(symbol, &args, store, text)
