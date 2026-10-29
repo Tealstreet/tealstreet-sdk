@@ -4,6 +4,7 @@ members = [
     "crypto",
     "engine",
     "hosts/native",
+    "hosts/remote-signer",
     "hosts/wasm",
     "registry",
     # Restored verbatim from master for the monorepo candle-server image
