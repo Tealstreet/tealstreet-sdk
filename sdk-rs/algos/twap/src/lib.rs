@@ -14,7 +14,7 @@ mod math;
 mod types;
 mod validate;
 
-pub use validate::MAX_ORDERS_COUNT;
+pub use validate::{MAX_ORDERS_COUNT, MAX_TWAPS_PER_ACCOUNT};
 
 pub use instance::TwapInstance;
 pub use types::{
@@ -191,6 +191,7 @@ impl TwapBook {
         effects: &mut Vec<TwapEffect>,
     ) -> Result<String, String> {
         validate::options(&options)
+            .and_then(|()| self.has_capacity())
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
         let instance = TwapInstance::new(id.clone(), options, None, env);
@@ -309,6 +310,20 @@ impl TwapBook {
             .map(|instance| instance.id.as_str())
     }
 
+    fn has_capacity(&self) -> Result<(), String> {
+        let running = self
+            .managed_entries()
+            .filter(|entry| entry.instance.state.status != TwapStatus::Completed)
+            .count();
+        if running >= validate::MAX_TWAPS_PER_ACCOUNT {
+            return Err(format!(
+                "at most {} TWAPs can run per account",
+                validate::MAX_TWAPS_PER_ACCOUNT
+            ));
+        }
+        Ok(())
+    }
+
     fn managed_entries(&self) -> impl Iterator<Item = &Entry> {
         self.entries.iter().filter(|entry| entry.managed)
     }
@@ -363,7 +378,9 @@ impl TwapBook {
             if self.get(&entry.id).is_some() {
                 continue;
             }
-            if let Err(reason) = validate::restored(&entry.options, &entry.state) {
+            if let Err(reason) =
+                validate::restored(&entry.options, &entry.state).and_then(|()| self.has_capacity())
+            {
                 effects.push(TwapEffect::Log {
                     message: format!("TWAP {} not restored: {reason}", entry.options.symbol()),
                 });
