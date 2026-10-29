@@ -1,0 +1,10 @@
+**
+!sdk-rs/
+!sdk-rs/**
+sdk-rs/target/
+sdk-rs/**/target/
+sdk-rs/hosts/wasm/pkg/
+sdk-rs/harness/out/
+sdk-rs/harness/tapes/
+sdk-rs/**/.env*
+sdk-rs/**/.DS_Store
