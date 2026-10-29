@@ -2625,12 +2625,47 @@ impl<P> Cx<'_, P> {
     /// least that often while a key stays rejected.
     pub fn retried_failure(&mut self, site: &'static str, message: impl Into<String>) {
         let message = message.into();
+        let level = self.retried_failure_level(site, &message);
+        self.notice(level, log_code::REQUEST_FAILED, message);
+    }
+
+    /// [`Self::retried_failure`] for a classified read failure: still
+    /// `request.failed`, now carrying the error's fields ([`Self::notice_error`]).
+    /// An auth kind stays here: account auth evidence is `AccountAuth`, and
+    /// consumers read `auth.rejected` as account-level (bitunix `recovery.rs`).
+    pub fn retried_failure_error(&mut self, site: &'static str, error: &VenueError) {
+        let level = self.retried_failure_level(site, &error.message);
+        self.notice_error(level, log_code::REQUEST_FAILED, error);
+    }
+
+    /// A notice for a classified failure under the caller's `code`. Like
+    /// `startup.degraded`, the event carries `kind`, `venueCode`, `venueMessage`
+    /// and `retryAfterMs` when the error has them. It never becomes
+    /// `auth.rejected`, which counts an auth failure and slows account polling.
+    pub fn notice_error(&mut self, level: Level, code: &'static str, error: &VenueError) {
+        let mut fields = Vec::new();
+        if let Some(kind) = error.kind {
+            fields.push(("kind", kind.as_str().into()));
+        }
+        if let Some(venue_code) = &error.venue_code {
+            fields.push(("venueCode", venue_code.as_str().into()));
+        }
+        if let Some(venue_message) = &error.venue_message {
+            fields.push(("venueMessage", venue_message.as_str().into()));
+        }
+        if let Some(retry_after_ms) = error.retry_after_ms {
+            fields.push(("retryAfterMs", retry_after_ms.into()));
+        }
+        self.event(level, code, error.message.clone(), fields);
+    }
+
+    fn retried_failure_level(&mut self, site: &'static str, message: &str) -> Level {
         let shape: String = message
             .chars()
             .map(|c| if c.is_ascii_digit() { '#' } else { c })
             .collect();
         let now = self.now;
-        let level = match self.io.core.retried_failures.get(site) {
+        match self.io.core.retried_failures.get(site) {
             Some((at, last)) if *last == shape && now - at < RETRIED_FAILURE_ERROR_EVERY_MS => {
                 Level::Warn
             }
@@ -2638,8 +2673,7 @@ impl<P> Cx<'_, P> {
                 self.io.core.retried_failures.insert(site, (now, shape));
                 Level::Error
             }
-        };
-        self.notice(level, log_code::REQUEST_FAILED, message);
+        }
     }
 
     #[inline]
@@ -8944,6 +8978,83 @@ mod public_retry_tests {
             cx.now = at;
             assert_eq!(retry.on_timer(timer), Some(DiscoveryRead::Markets));
         }
+    }
+
+    #[test]
+    fn classified_notices_carry_the_startup_degraded_fields_under_the_callers_code() {
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let event = |out: Vec<Action>| {
+            out.into_iter()
+                .find_map(|action| match action {
+                    Action::Notice(Notice::Event(event)) => Some(event),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let balance = VenueError {
+            venue_code: Some("-2019".into()),
+            venue_message: Some("Margin is insufficient.".into()),
+            ..VenueError::new("Margin is insufficient.").kind(ErrorKind::InsufficientBalance)
+        };
+        cx.notice_error(Level::Warn, log_code::ORDER_REJECTED, &balance);
+        let notice = event(std::mem::take(&mut cx.io.core.actions));
+        assert_eq!(notice.code, log_code::ORDER_REJECTED);
+        assert_eq!(notice.message, "Margin is insufficient.");
+        assert_eq!(
+            notice.fields,
+            vec![
+                ("kind", "insufficientBalance".into()),
+                ("venueCode", "-2019".into()),
+                ("venueMessage", "Margin is insufficient.".into()),
+            ]
+        );
+        let limited = VenueError {
+            retry_after_ms: Some(1_000.0),
+            ..VenueError::new("Too many requests").kind(ErrorKind::RateLimited)
+        };
+        cx.notice_error(Level::Warn, log_code::ORDER_REJECTED, &limited);
+        let notice = event(std::mem::take(&mut cx.io.core.actions));
+        assert!(notice.fields.contains(&("retryAfterMs", 1_000.0.into())));
+        // An auth kind keeps the caller's code and counts no auth failure.
+        let scoped =
+            VenueError::new("No permission to trade this symbol").kind(ErrorKind::AuthPermission);
+        cx.notice_error(Level::Warn, log_code::ORDER_REJECTED, &scoped);
+        let notice = event(std::mem::take(&mut cx.io.core.actions));
+        assert_eq!(notice.code, log_code::ORDER_REJECTED);
+        assert_eq!(notice.fields, vec![("kind", "authPermission".into())]);
+        assert!(
+            !cx.io.core.auth_failure_counted,
+            "an order refusal is no auth evidence"
+        );
+        // A read failure stays request.failed, with retried_failure's cadence.
+        let rejected = VenueError::new("API-key format invalid.").kind(ErrorKind::AuthInvalid);
+        cx.retried_failure_error("site", &rejected);
+        let first = event(std::mem::take(&mut cx.io.core.actions));
+        assert_eq!(
+            (first.code, first.level),
+            (log_code::REQUEST_FAILED, Level::Error)
+        );
+        assert_eq!(first.fields, vec![("kind", "authInvalid".into())]);
+        assert!(!cx.io.core.auth_failure_counted);
+        cx.retried_failure_error("site", &rejected);
+        assert_eq!(
+            event(std::mem::take(&mut cx.io.core.actions)).level,
+            Level::Warn
+        );
+        let plain = VenueError::new("Binance account: network error");
+        cx.retried_failure_error("other", &plain);
+        let other = event(std::mem::take(&mut cx.io.core.actions));
+        assert_eq!(other.code, log_code::REQUEST_FAILED);
+        assert!(
+            other.fields.is_empty(),
+            "an unclassified error adds no fields"
+        );
     }
 
     #[test]

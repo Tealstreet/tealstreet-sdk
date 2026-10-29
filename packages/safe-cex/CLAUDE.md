@@ -679,7 +679,9 @@ control-flow and response knowledge.
 
 Rust diagnostics emit `engine-event` with the full `EngineEvent` (code, level,
 message, fields), forwarded by the worker as `{ op: 'engine-event', data: [event] }`.
-`ExchangeHealthMonitor.processEvent(event, classified?)` uses codes only;
+`ExchangeHealthMonitor.processEvent(event, classified?)` uses codes only, plus
+the `kind` a classified notice carries in `event.fields` when no `classified`
+is passed;
 `processHealth(exchange.getHealth())` copies authoritative lifetime counters,
 including diagnostics hidden by minimum-level filtering. Category counts and
 recent errors count observed reports, separately from engine counters. Subscribe
