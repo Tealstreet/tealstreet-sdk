@@ -2649,8 +2649,9 @@ impl<P> Cx<'_, P> {
 
     /// A notice for a classified failure under the caller's `code`. Like
     /// `startup.degraded`, the event carries `kind`, `venueCode`, `venueMessage`
-    /// and `retryAfterMs` when the error has them. It never becomes
-    /// `auth.rejected`, which counts an auth failure and slows account polling.
+    /// and `retryAfterMs` when the error has them. It keeps the caller's code:
+    /// only a caller passing `auth.rejected` (as [`Self::retried_failure_error`]
+    /// does for an auth-kind read refusal) counts an auth failure.
     pub fn notice_error(&mut self, level: Level, code: &'static str, error: &VenueError) {
         let mut fields = Vec::new();
         if let Some(kind) = error.kind {

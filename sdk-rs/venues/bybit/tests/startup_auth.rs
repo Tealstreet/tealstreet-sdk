@@ -606,3 +606,26 @@ fn an_account_read_refused_for_the_key_is_an_auth_rejected_error() {
         errors(&h)
     );
 }
+
+#[test]
+fn a_refused_key_is_never_used_for_private_reads_or_the_private_feed() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 200, &rejection(10010, UNMATCHED_IP));
+    h.load_public();
+    h.advance(60_000.0);
+    for path in [
+        "/v5/order/realtime",
+        "/v5/position/list",
+        "/v5/account/wallet-balance",
+    ] {
+        assert!(!h.has_request(path), "{path}: {:?}", h.paths());
+    }
+    assert!(
+        h.sockets
+            .iter()
+            .all(|(_, url)| !url.contains("/v5/private")),
+        "{:?}",
+        h.sockets
+    );
+}
