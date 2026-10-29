@@ -10,6 +10,9 @@ relay gate off. Its data is `src/routing/table.json`, generated from the TS tabl
 by `packages/safe-cex/src/transport/engine.native-routing-port.test.ts`
 (`UPDATE_NATIVE_ROUTING_PORT=1`), which also writes the TS plans that
 `tests/routing_port.rs` holds it to. Secondary read keys are not routed natively yet.
+The deployment can replace the proxy hosts: `PROXY_PRIVATE_URL` sets every
+whitelisted private pool and `PROXY_PUBLIC_URL` the public CORS proxy (https, no
+query; a trailing `/` is dropped). Unset keeps the table's hosts.
 
 A JavaScript launcher instead resolves once at the account boundary, after normalizing its `ExchangeOptions`:
 
