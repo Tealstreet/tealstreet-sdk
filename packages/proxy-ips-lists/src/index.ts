@@ -35,6 +35,7 @@ export const tokyoK8sNatGatewayIp = '18.176.98.246';
 export const wsProxyIps = ['54.255.57.166'];
 
 // Exchanges whose private socket still leaves through the AWS ws-proxy (`wsProxyIps`).
-// okx, okxeu, bitget and blofin moved to the tunnel relay, which egresses from the
-// Vultr fleet (AWS_EXIT.md 3e); coinbase waits for a root-path relay entry (5a).
-export const exchangesRequireWsIp = ['coinbase'];
+// None: okx, okxeu, bitget and blofin moved to the tunnel relay in AWS_EXIT.md 3e,
+// coinbase once the relay took root-path entries (5a). The hosted exchange server
+// still pins the ws-proxy until its own repoint.
+export const exchangesRequireWsIp: string[] = [];

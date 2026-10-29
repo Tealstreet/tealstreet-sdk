@@ -14,11 +14,11 @@ import { venueFamilies, venueFamily } from './venues.mjs';
 const OUT = [
   'woo', 'mexc', 'grvt', 'backpack', 'coinbase', 'coinbasespot', 'orderly', 'kodiakfi', 'mode', 'salsadex',
   'tealstreet-dex', 'what', 'woofi', 'kucoin', 'kucoinspot', 'polymarket', 'breakoutprop', 'txflow', 'weex',
-  'bitrue', 'hyrotrader', 'lighter-robinhood', 'bitgetinverse',
+  'bitrue', 'lighter-robinhood',
 ];
 
-test('the beta set is exactly the 28 IN venues in 15 families', () => {
-  assert.equal(betaVenueNames.length, 28);
+test('the beta set is exactly the 30 IN venues in 15 families', () => {
+  assert.equal(betaVenueNames.length, 30);
   assert.deepEqual(betaVenueFamilies, [
     'apexomni', 'asterdex', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'cryptocom',
     'hyperliquid', 'kraken', 'lighter', 'okx', 'paradex', 'phemex',

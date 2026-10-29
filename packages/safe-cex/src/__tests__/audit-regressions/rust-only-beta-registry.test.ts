@@ -35,12 +35,14 @@ const expected = [
   'bybitspot',
   'bybitinverse',
   'bybitdemo',
+  'hyrotrader',
   'okx',
   'okxdemo',
   'okxeu',
   'okxeudemo',
   'bitget',
   'bitgetusdc',
+  'bitgetinverse',
   'kraken',
   'krakenspot',
   'hyperliquid',
@@ -65,15 +67,15 @@ describe('Rust-only beta construction', () => {
   it('has exactly the declared IN names', () => {
     expect([...BETA_VENUES]).toEqual(expected);
     expect(getRegisteredExchangeNames()).toEqual(expected);
-    expect(new Set(BETA_VENUES).size).toBe(28);
-    expect(out).toEqual(expect.arrayContaining(['coinbase', 'hyrotrader', 'lighter-robinhood']));
+    expect(new Set(BETA_VENUES).size).toBe(30);
+    expect(out).toEqual(expect.arrayContaining(['coinbase', 'grvt', 'lighter-robinhood']));
   });
   it('constructs Rust for every IN name without an engine opt-in', async () => {
     for (const name of BETA_VENUES) {
       expect(await exchangeRegistry[name]()).toBe(state.Rust);
       expect(await createExchange(name, { key: '', secret: '', publicDataOnly: true })).toBeInstanceOf(state.Rust);
     }
-    expect(state.calls).toHaveLength(28);
+    expect(state.calls).toHaveLength(30);
     expect(state.calls.every(({ options }) => (options as { engine: string }).engine === 'rust')).toBe(true);
   });
   it('refuses OUT web/native loaders before loading a runtime', async () => {
@@ -134,7 +136,7 @@ describe('Rust-only beta construction', () => {
   });
   it('refuses unsupported delegated modes and Paradex callbacks without fallback', async () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
-    const localOnly = ['kraken', 'krakenspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'paradex', 'phemex', 'bingx', 'apexomni', 'blofin', 'cryptocom', 'asterdex'] as const;
+    const localOnly = ['kraken', 'krakenspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'paradex', 'apexomni', 'cryptocom', 'asterdex'] as const;
     // #2262 enables Bitunix through the shared policy, without a beta override.
     const refused: readonly ExchangeName[] = deriveRemoteSigningPolicy('bitunix')?.enabled
       ? localOnly

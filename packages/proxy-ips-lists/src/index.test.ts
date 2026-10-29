@@ -117,9 +117,10 @@ describe('wsProxyIps', () => {
 });
 
 describe('exchangesRequireWsIp', () => {
-  it('should export a non-empty array', () => {
-    expect(Array.isArray(exchangesRequireWsIp)).toBe(true);
-    expect(exchangesRequireWsIp.length).toBeGreaterThan(0);
+  // Was 'should export a non-empty array': the last entry, coinbase, moved to the
+  // tunnel relay (AWS_EXIT.md 5a), so no browser socket needs the ws-proxy IP.
+  it('is empty now that every private socket uses the relay', () => {
+    expect(exchangesRequireWsIp).toEqual([]);
   });
 
   it('should contain only strings', () => {
