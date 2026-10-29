@@ -16,7 +16,7 @@ use tokio::sync::Notify;
 
 use crate::{
     ChaserProgress, ChaserRequest, OrderKind, OrderSide, TickerQuote, TwapBook, TwapEffect,
-    TwapEnv, TwapMarketView, TwapOrderRequest,
+    TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest,
 };
 
 /// The account's chaser runtime, as TWAP slices use it.
@@ -40,6 +40,10 @@ pub const TWAP_OPS: &[&str] = &[
 /// One account's TWAPs, bound to the account's context: the timer driver and
 /// placements outlive the socket that sent an op. Before disposing the account
 /// scope, the server calls [`TwapFactory::terminate_all`].
+///
+/// Clones share one book: box one into the `Registry` and hand another to a
+/// typed caller such as the exec `twap` command.
+#[derive(Clone)]
 pub struct TwapFactory {
     inner: Rc<Inner>,
 }
@@ -75,6 +79,36 @@ impl TwapFactory {
         let effects = self.inner.book.borrow_mut().terminate_all();
         Inner::run(&self.inner, &self.inner.cx, effects);
         self.inner.rescheduled.notify_one();
+    }
+
+    /// Start a TWAP for a typed caller such as the exec `twap` command, with
+    /// the same validation and effects as `twap:start`. Returns the new id.
+    pub fn start(&self, options: TwapOptions) -> Result<String, String> {
+        let cx = &self.inner.cx;
+        let (started, effects) = {
+            let mut env = self.inner.env.borrow_mut();
+            env.now = cx.now_ms();
+            let view = CxView {
+                cx,
+                chasers: &*self.inner.chasers,
+            };
+            self.inner
+                .book
+                .borrow_mut()
+                .start(options, &mut *env, &view)
+        };
+        Inner::run(&self.inner, cx, effects);
+        Inner::ensure_driver(&self.inner, cx);
+        started
+    }
+
+    /// `twap:stop` for a typed caller; false when no running TWAP has `id`.
+    /// Its chase slices keep their own lifecycle in the chaser book, as in TS.
+    pub fn stop(&self, id: &str) -> bool {
+        let (found, effects) = self.inner.book.borrow_mut().stop(id);
+        Inner::run(&self.inner, &self.inner.cx, effects);
+        self.inner.rescheduled.notify_one();
+        found
     }
 
     /// The store's `activeTWAPs` for `account_name`.

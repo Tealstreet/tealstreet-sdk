@@ -135,17 +135,9 @@ impl TwapBook {
         let mut effects = Vec::new();
         match op {
             "twap:start" => match serde_json::from_value::<TwapOptions>(data.clone()) {
-                Ok(options) if let Err(reason) = validate::options(&options) => {
-                    effects.push(TwapEffect::Log {
-                        message: format!("TWAP {} rejected: {reason}", options.symbol()),
-                    });
-                }
                 Ok(options) => {
-                    let id = env.new_id();
-                    let instance = TwapInstance::new(id.clone(), options, None, env);
-                    self.add(instance);
-                    if let Some(instance) = self.managed_mut(&id) {
-                        instance.start(env, view, &mut effects);
+                    if let Err(message) = self.start_with(options, env, view, &mut effects) {
+                        effects.push(TwapEffect::Log { message });
                     }
                 }
                 Err(error) => effects.push(TwapEffect::Diagnostic {
@@ -161,6 +153,52 @@ impl TwapBook {
         }
         self.settle(&mut effects);
         effects
+    }
+
+    /// `twap:start` for a typed caller (the exec `twap` command): the new id,
+    /// or the refusal that `twap:start` would log.
+    pub fn start(
+        &mut self,
+        options: TwapOptions,
+        env: &mut dyn TwapEnv,
+        view: &dyn TwapMarketView,
+    ) -> (Result<String, String>, Vec<TwapEffect>) {
+        let mut effects = Vec::new();
+        let started = self.start_with(options, env, view, &mut effects);
+        self.settle(&mut effects);
+        (started, effects)
+    }
+
+    /// `twap:stop` for a typed caller; false when no running TWAP has `id`.
+    pub fn stop(&mut self, id: &str) -> (bool, Vec<TwapEffect>) {
+        let mut effects = Vec::new();
+        let found = match self.managed_mut(id) {
+            Some(instance) => {
+                instance.terminate();
+                true
+            }
+            None => false,
+        };
+        self.settle(&mut effects);
+        (found, effects)
+    }
+
+    fn start_with(
+        &mut self,
+        options: TwapOptions,
+        env: &mut dyn TwapEnv,
+        view: &dyn TwapMarketView,
+        effects: &mut Vec<TwapEffect>,
+    ) -> Result<String, String> {
+        validate::options(&options)
+            .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
+        let id = env.new_id();
+        let instance = TwapInstance::new(id.clone(), options, None, env);
+        self.add(instance);
+        if let Some(instance) = self.managed_mut(&id) {
+            instance.start(env, view, effects);
+        }
+        Ok(id)
     }
 
     /// `twap:stop` for every TWAP, as on account disposal.
