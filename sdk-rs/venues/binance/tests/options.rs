@@ -660,3 +660,37 @@ fn native_positions_publish_their_fixed_leverage_setting_after_complete_decode()
     assert_eq!(setting.leverage, 1.);
     assert_eq!(setting.margin_type, None);
 }
+
+#[test]
+fn advertised_option_commands_cross_the_compiled_json_ingress() {
+    for (wire, path) in [
+        (
+            r#"{"op":"fetchOptionChain","command":901,"query":{"underlying":"BTC"}}"#,
+            Some("/eapi/v1/ticker"),
+        ),
+        (
+            r#"{"op":"fetchOptionExpiries","command":901,"underlying":"BTC"}"#,
+            None,
+        ),
+        (
+            r#"{"op":"fetchAccountGreeks","command":901}"#,
+            Some("/eapi/v1/marginAccount"),
+        ),
+    ] {
+        let mut h = started(true);
+        h.requests.clear();
+        let command = safe_cex_engine::command::decode_command(wire)
+            .expect("advertised Options command must be present in isolated Binance ingress");
+        h.event(Event::Command(command));
+        if let Some(path) = path {
+            assert_eq!(h.requests.len(), 1);
+            assert!(h.requests[0].url.contains(path));
+            assert_eq!(h.requests[0].method, safe_cex_engine::Method::Get);
+        } else {
+            assert!(h.requests.is_empty());
+            assert_eq!(h.done.len(), 1);
+            assert_eq!(h.done[0].0, 901);
+            assert!(h.done[0].1.is_ok());
+        }
+    }
+}
