@@ -11,11 +11,14 @@ use serde_json::{Value, json};
 use crate::{AlgoReply, AlgoRequest, Exec, Host};
 use safe_cex_algo_twap::{TwapOptions, factory::TwapFactory};
 use safe_cex_chaser::{ChaserBook, ChaserOptions};
+mod nuke;
+mod tasks;
 
 /// Register once in the server's account algo registry.
 #[derive(Default)]
 pub struct ExecFactory {
     parallel: Rc<Cell<usize>>,
+    nuking: Rc<Cell<bool>>,
     account: RefCell<Option<Weak<dyn AccountPort>>>,
     account_name: Option<String>,
     chasers: Option<Rc<ChaserBook>>,
@@ -61,6 +64,7 @@ impl AlgoFactory for ExecFactory {
             cx: cx.clone(),
             exec: Rc::downgrade(&exec),
             parallel: self.parallel.clone(),
+            nuking: self.nuking.clone(),
             account_name: self.account_name.clone(),
             chasers: self.chasers.clone(),
             twap: self.twap.clone(),
@@ -75,6 +79,7 @@ struct Adapter {
     cx: AlgoCx,
     exec: Weak<RefCell<Exec>>,
     parallel: Rc<Cell<usize>>,
+    nuking: Rc<Cell<bool>>,
     account_name: Option<String>,
     chasers: Option<Rc<ChaserBook>>,
     twap: Option<TwapFactory>,
@@ -128,6 +133,21 @@ impl Host for Adapter {
         if self.cx.scope.is_disposed() {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         }
+        let nuke_mode = if method == "nuke" {
+            Some(args[0].as_str().unwrap_or("all").to_string())
+        } else {
+            None
+        };
+        let nuke_guard = if nuke_mode.is_some() {
+            if self.nuking.replace(true) {
+                return Err(
+                    json!({"message":"Nuke already in progress on this account","outcome":"notSent"}),
+                );
+            }
+            Some(nuke::NukeGuard(self.nuking.clone()))
+        } else {
+            None
+        };
         let wait = if method == "execWait" {
             let symbol = args[0]
                 .as_str()
@@ -141,7 +161,7 @@ impl Host for Adapter {
         } else {
             None
         };
-        let command = if wait.is_none() {
+        let command = if wait.is_none() && nuke_mode.is_none() {
             Some(
                 translate(method, &args, self.cx.port.next_command_id())
                     .map_err(|error| json!({"message":error,"outcome":"notSent"}))?,
@@ -164,10 +184,13 @@ impl Host for Adapter {
         };
         self.cx.spawn(async move {
             let reservation = reservation;
+            let nuke_guard = nuke_guard;
             if adapter.cx.scope.is_disposed() {
                 return;
             }
-            let result = if let Some(wait) = wait {
+            let result = if let Some(mode) = nuke_mode {
+                adapter.run_nuke(&mode).await
+            } else if let Some(wait) = wait {
                 crate::waits::run(wait, &adapter.cx, || adapter.snapshot()).await
             } else {
                 adapter
@@ -179,6 +202,7 @@ impl Host for Adapter {
                     .map_err(serialize_error)
             };
             drop(reservation);
+            drop(nuke_guard);
             if !adapter.cx.scope.is_disposed() {
                 exec.borrow_mut().complete(token, result, &mut adapter);
             }
@@ -270,6 +294,8 @@ impl Adapter {
     fn run_algo(&self, request: AlgoRequest) -> Result<AlgoReply, String> {
         let mut reply = AlgoReply::default();
         match request {
+            AlgoRequest::Tasks => return self.task_control(None),
+            AlgoRequest::Kill(target) => return self.task_control(Some(&target)),
             AlgoRequest::ChaseStart { options, errors } => {
                 reply.logs = errors;
                 let book = self

@@ -148,3 +148,19 @@ with --check. The worker's symbol/session updates remain client-owned: each exec
 payload supplies its focus. Hosted variable/alias/budget/simulation commands keep
 the TS Worker's absent-PreprocessStore refusal; no second script state is created.
 Manual socket reconnect remains outside hosted EXEC (explicit fixed refusal).
+
+Tasks/kill inspect the same injected account chaser and TWAP books as direct
+ops. TS ordering is retained (chasers, then TWAPs; bare kill takes the last active
+row), with ID-prefix/all and existing aliases. No independent task book is added.
+Nuke is one account-guarded pass: reduce-only market closes attempt every position
+independently, even after another symbol is Unknown; cancellation uses a fresh
+store's unique symbols, stopping on its first failure as TS cancelAllOrders does.
+No write is retried. The guard and account credit return on completion or abort;
+disposal cannot release a later operation. CLI TS passes tries=3, which disables
+its base retry loop; native preserves that single-pass behavior. Intentional,
+ddi-approved difference: native waits for and reports final counts, per-symbol
+failures and structured Unknown/partial IDs in exec-result, instead of TS immediate
+optimistic success. Acceptance of a close/cancel command is not a filled/flat
+readback claim. A concurrent nuke on the same account refuses before any send.
+The wait barrier now resolves through the evaluator's same generated canonical
+lookup, so adding a future wait/sleep alias cannot bypass the failure barrier.

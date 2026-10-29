@@ -16,6 +16,8 @@ pub enum AlgoRequest {
     TwapStart(Value),
     TwapList,
     TwapStop(String),
+    Tasks,
+    Kill(String),
 }
 #[derive(Clone, Debug, Default)]
 pub struct AlgoReply {
@@ -37,6 +39,8 @@ pub(crate) fn evaluate(
             AlgoRequest::ChasersList
         }),
         "twap" => twap(symbol, args, store),
+        "tasks" => Ok(AlgoRequest::Tasks),
+        "kill" => Ok(AlgoRequest::Kill(args.get(1).cloned().unwrap_or_default())),
         _ => unreachable!(),
     };
     match request {

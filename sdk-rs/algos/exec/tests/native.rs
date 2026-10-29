@@ -542,3 +542,198 @@ async fn a_successful_wait_releases_one_buy_and_an_unsatisfied_wait_releases_non
         cx.scope.dispose();
     }).await;
 }
+
+fn native_position(symbol: &str) -> safe_cex_engine::model::Position {
+    use safe_cex_engine::model::{Position, PositionSide};
+    Position {
+        id: symbol.into(),
+        symbol: symbol.into(),
+        side: PositionSide::Long,
+        contracts: 0.02,
+        entry_price: 50000.,
+        notional: 1000.,
+        leverage: 2.,
+        margin_type: None,
+        position_mode: None,
+        unrealized_pnl: 0.,
+        realized_pnl: None,
+        liquidation_price: 0.,
+        margin_size: None,
+        last_update: None,
+    }
+}
+fn native_order(symbol: &str) -> safe_cex_engine::model::Order {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    Order {
+        id: format!("{symbol}-order"),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: symbol.into(),
+        kind: OrderType::Limit,
+        side: OrderSide::Buy,
+        price: 49000.,
+        amount: 0.01,
+        filled: 0.,
+        remaining: 0.01,
+        reduce_only: false,
+        close: None,
+        client_order_id: None,
+        time_in_force: None,
+        last_update: 0.,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    }
+}
+#[tokio::test]
+async fn nuke_attempts_every_position_after_unknown_then_cancels_account_symbols_without_retry() {
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());wait_market(&port);
+        let mut eth=port.store.borrow().markets["BTCUSDT"].clone();eth.symbol="ETHUSDT".into();eth.id="ETHUSDT".into();eth.base="ETH".into();port.store.borrow_mut().markets.insert("ETHUSDT".into(),eth);
+        port.store.borrow_mut().positions=vec![native_position("BTCUSDT"),native_position("ETHUSDT")];
+        port.store.borrow_mut().orders=vec![native_order("BTCUSDT"),native_order("ETHUSDT")];
+        let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"nuke","reqId":"nuke"}"#,&cx).unwrap();settle_exec().await;
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"nuke","reqId":"duplicate"}"#,&cx).unwrap();settle_exec().await;assert_eq!(port.commands.borrow().len(),1);
+        assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-result"&&e["reqId"]=="duplicate"&&e["errorDetails"]["outcome"]=="notSent"));
+        port.replies.borrow_mut().remove(0).send(Err(VenueError::new("lost close").outcome(Outcome::Unknown))).unwrap();settle_exec().await;assert_eq!(port.commands.borrow().len(),2);
+        for command in port.commands.borrow().iter() {assert!(matches!(command,Command::PlaceOrders{orders,..} if orders.len()==1 && orders[0].reduce_only==Some(true) && orders[0].amount==0.02));}
+        port.replies.borrow_mut().remove(0).send(Ok(r#"["real-eth-close"]"#.into())).unwrap();settle_exec().await;
+        assert!(matches!(&port.commands.borrow()[2],Command::CancelSymbolOrders{symbol,..} if symbol=="BTCUSDT"));
+        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
+        assert!(matches!(&port.commands.borrow()[3],Command::CancelSymbolOrders{symbol,..} if symbol=="ETHUSDT"));
+        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
+        let events=port.events.borrow();let result=&events.iter().find(|(op,e)|op=="exec-result"&&e["reqId"]=="nuke").unwrap().1;
+        assert_eq!(result["success"],false);assert_eq!(result["errorDetails"]["outcome"],"unknown");assert_eq!(result["errorDetails"]["failedOperationCount"],1);assert_eq!(result["errorDetails"]["partialOrderIds"],json!(["real-eth-close"]));
+        assert_eq!(result["errorDetails"]["failedLegs"][0]["symbol"],"BTCUSDT");
+        assert!(result["error"].as_str().unwrap().contains("BTCUSDT close: lost close"));
+        assert!(result["error"].as_str().unwrap().contains("3 operation(s), 1 failed"));assert_eq!(port.commands.borrow().len(),4);cx.scope.dispose();
+    }).await;
+}
+#[tokio::test]
+async fn nuke_abort_returns_its_account_guard_without_resend_and_modes_do_not_widen() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            wait_market(&port);
+            port.store.borrow_mut().positions = vec![native_position("BTCUSDT")];
+            port.store.borrow_mut().orders = vec![native_order("BTCUSDT")];
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            factory
+                .handle(
+                    "exec",
+                    r#"{"symbol":"BTCUSDT","command":"nuke pos","reqId":"gone"}"#,
+                    &cx,
+                )
+                .unwrap();
+            settle_exec().await;
+            cx.scope.dispose();
+            settle_exec().await;
+            assert!(
+                port.replies
+                    .borrow_mut()
+                    .remove(0)
+                    .send(Ok("[]".into()))
+                    .is_err()
+            );
+            let next = AlgoCx::new(port.clone(), Scope::new());
+            factory
+                .handle(
+                    "exec",
+                    r#"{"symbol":"BTCUSDT","command":"nuke ord","reqId":"orders"}"#,
+                    &next,
+                )
+                .unwrap();
+            settle_exec().await;
+            assert_eq!(port.commands.borrow().len(), 2);
+            assert!(matches!(
+                &port.commands.borrow()[1],
+                Command::CancelSymbolOrders { .. }
+            ));
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Ok("null".into()))
+                .unwrap();
+            settle_exec().await;
+            assert!(
+                port.events
+                    .borrow()
+                    .iter()
+                    .any(|(op, e)| op == "exec-result"
+                        && e["reqId"] == "orders"
+                        && e["success"] == true)
+            );
+            assert!(
+                !port
+                    .events
+                    .borrow()
+                    .iter()
+                    .any(|(op, e)| op == "exec-result" && e["reqId"] == "gone")
+            );
+            next.scope.dispose();
+        })
+        .await;
+}
+#[tokio::test(start_paused = true)]
+async fn task_list_and_kill_use_injected_chase_and_twap_books_with_ts_ordering() {
+    use safe_cex_algo_twap::factory::TwapFactory;
+    use safe_cex_chaser::ChaserBook;
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            wait_market(&port);
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let book = ChaserBook::new(cx.clone());
+            let twap = TwapFactory::new(cx.clone(), Rc::new(book.clone()));
+            let factory = ExecFactory::with_algos("a".into(), book.clone(), twap.clone());
+            for command in ["chase buy $100", "twap buy $1000 into 2 over 1", "tasks"] {
+                factory
+                    .handle(
+                        "exec",
+                        &json!({"symbol":"BTCUSDT","command":command,"reqId":command}).to_string(),
+                        &cx,
+                    )
+                    .unwrap();
+            }
+            let log = port
+                .events
+                .borrow()
+                .iter()
+                .rev()
+                .find(|(op, e)| op == "exec-log" && e["reqId"] == "tasks")
+                .unwrap()
+                .1["message"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert!(log.find("chase").unwrap() < log.find("twap").unwrap());
+            assert!(log.contains("active: 2"));
+            factory
+                .handle(
+                    "exec",
+                    r#"{"symbol":"BTCUSDT","command":"kill","reqId":"kill"}"#,
+                    &cx,
+                )
+                .unwrap();
+            assert!(twap.active_twaps("a").is_empty());
+            assert_eq!(
+                book.active_chasers().len(),
+                1,
+                "bare kill selects last TWAP row"
+            );
+            factory
+                .handle(
+                    "exec",
+                    r#"{"symbol":"BTCUSDT","command":"terminate all","reqId":"all"}"#,
+                    &cx,
+                )
+                .unwrap();
+            assert!(book.active_chasers().iter().all(|c| c.is_stopped));
+            book.shutdown("test cleanup").await;
+            cx.scope.dispose();
+        })
+        .await;
+}
