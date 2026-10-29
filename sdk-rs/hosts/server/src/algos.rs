@@ -130,7 +130,9 @@ fn project(store: &safe_cex_engine::Store) -> Snapshot {
 }
 
 /// Applies one engine read to the algo store; returns what changed.
-fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>) -> Change {
+/// `rejoined`: fills sent while the feed was dropped are gone, so algos
+/// re-read orders and positions and reconcile before acting.
+fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
     let orders = store.orders != snapshot.orders;
     let positions = store.positions != snapshot.positions;
     let tickers: HashMap<String, Ticker> = snapshot
@@ -169,16 +171,18 @@ fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>) -> Change 
     // (uninitialized), never as healthy.
     store.private_socket = Default::default();
     Change {
-        orders,
-        positions,
+        orders: orders || rejoined,
+        positions: positions || rejoined,
         tickers: tickers_changed,
         fills,
+        // Set by the port on a feed rejoin (fe7lgm).
+        resync: rejoined,
     }
 }
 
 impl Port {
-    fn apply(&self, snapshot: Snapshot, fills: Vec<Fill>) -> Change {
-        apply(&mut self.store.borrow_mut(), snapshot, fills)
+    fn apply(&self, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
+        apply(&mut self.store.borrow_mut(), snapshot, fills, rejoined)
     }
 
     fn settle(&self, notice: &Value) {
@@ -393,12 +397,7 @@ pub async fn run(
                 if (batch.frames > 0 || batch.rejoined)
                     && let Some(snapshot) = handle.read(project).await
                 {
-                    let mut change = port.apply(snapshot, batch.fills);
-                    if batch.rejoined {
-                        // Fills sent while dropped are gone: make algos re-read orders and positions.
-                        change.orders = true;
-                        change.positions = true;
-                    }
+                    let change = port.apply(snapshot, batch.fills, batch.rejoined);
                     port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                     publish(&mut published);
                 }
@@ -509,13 +508,13 @@ mod tests {
     #[test]
     fn classifications_map_market_index_to_symbol_and_stay_none_until_sent() {
         let mut store = AlgoStore::default();
-        apply(&mut store, snapshot(false, false), Vec::new());
+        apply(&mut store, snapshot(false, false), Vec::new(), false);
         assert!(store.instrument_classifications.is_none());
         assert!(
             store.balance.is_none(),
             "no balance before its section loads"
         );
-        apply(&mut store, snapshot(true, true), Vec::new());
+        apply(&mut store, snapshot(true, true), Vec::new(), false);
         let labels = store.instrument_classifications.as_ref().unwrap();
         assert_eq!(labels.len(), 1);
         assert_eq!(labels["ETHUSDT"].symbol_type.as_deref(), Some("stock"));
@@ -530,7 +529,7 @@ mod tests {
     #[test]
     fn unchanged_reads_report_no_change() {
         let mut store = AlgoStore::default();
-        apply(&mut store, snapshot(true, true), Vec::new());
+        apply(&mut store, snapshot(true, true), Vec::new(), false);
         let fill = Fill {
             id: None,
             order_id: "o1".into(),
@@ -539,7 +538,7 @@ mod tests {
             price: 1.,
             amount: 2.,
         };
-        let change = apply(&mut store, snapshot(true, true), vec![fill.clone()]);
+        let change = apply(&mut store, snapshot(true, true), vec![fill.clone()], false);
         assert_eq!(
             change.fills,
             vec![fill],

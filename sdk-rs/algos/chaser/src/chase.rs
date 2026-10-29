@@ -144,6 +144,8 @@ pub struct Chase {
     /// Wakes the supervisor: a change arrived or the chase stopped.
     pub wake: Notify,
     pub dirty: Cell<Dirty>,
+    /// A feed rejoin lost fill events; reconcile before the next replacement.
+    pub needs_reconcile: Cell<bool>,
     state: RefCell<State>,
 }
 
@@ -173,6 +175,7 @@ impl Chase {
             watch_scope,
             wake: Notify::new(),
             dirty: Cell::new(Dirty::default()),
+            needs_reconcile: Cell::new(false),
             state: RefCell::new(State {
                 remaining: options.size,
                 ..State::default()

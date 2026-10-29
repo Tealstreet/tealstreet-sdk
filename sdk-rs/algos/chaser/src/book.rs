@@ -392,6 +392,9 @@ impl ChaserBook {
                     chase.wake.notify_one();
                     return;
                 }
+                if change.resync {
+                    chase.needs_reconcile.set(true);
+                }
                 if fill_tracked {
                     let current = chase.current();
                     for fill in change.fills.iter().filter(|fill| {
@@ -547,10 +550,36 @@ impl ChaserBook {
                 }
             }
         }
+        let resync = chase.needs_reconcile.replace(false);
+        if resync && !fill_tracked {
+            // Order rows carry cumulative fills and the rejoin snapshot
+            // refreshes them, so REST only tops up; a venue without fill
+            // lookup by order id falls back to the rows.
+            match self.filled_quantities(&chase.ever()).await {
+                Ok(filled) => {
+                    for (id, amount) in filled {
+                        chase.set_filled_amount(&id, amount);
+                    }
+                }
+                Err(error) => self.log(
+                    chase,
+                    &format!("resync fill reconcile unavailable: {error}"),
+                ),
+            }
+            if chase.is_stopped() {
+                return Ok(());
+            }
+        }
         if fill_tracked {
             // A cancel can have won behind an ambiguous answer: an unknown fill
-            // would overfill, so a failed reconciliation stops the chase.
-            match self.filled_quantities(&chase.current()).await {
+            // would overfill, so a failed reconciliation stops the chase. After
+            // a rejoin every order this chase placed is reconciled.
+            let ids = if resync {
+                chase.ever()
+            } else {
+                chase.current()
+            };
+            match self.filled_quantities(&ids).await {
                 Ok(filled) => {
                     for (id, amount) in filled {
                         chase.set_filled_amount(&id, amount);
