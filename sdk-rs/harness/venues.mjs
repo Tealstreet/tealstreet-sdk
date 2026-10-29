@@ -2011,6 +2011,14 @@ export const VENUES = {
       prepareTs: prepareBinanceSpot,
     } : {}),
   }])),
+  binanceoptions: {
+    rust: 'binanceoptions', virtualPrivateClock: true, polling: true,
+    tsBooksSubscribed: (_exchange, count) => count === 0,
+    requestKey: typedRequest, validateRequest: validateBinanceRequest,
+    ts: { module: `${root}/binance/binanceoptions.exchange.ts`, className: 'BinanceOptionsExchange', name: 'binanceoptions' },
+    volatileBodyFields: true,
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+  },
   polymarket,
   kucoin: {
     ...kucoin,

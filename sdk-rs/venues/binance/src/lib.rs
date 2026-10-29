@@ -3,6 +3,8 @@ mod account;
 mod candles;
 mod history;
 mod identity;
+mod options;
+mod options_products;
 mod paths;
 mod reads;
 mod session;
@@ -59,6 +61,7 @@ pub enum Variant {
     PortfolioMargin,
     CoinM,
     Spot,
+    Options,
 }
 
 #[derive(Clone, Default)]
@@ -112,6 +115,8 @@ impl Urls {
 pub enum Pending {
     Background(Context, Box<Pending>),
     Identity(Context),
+    Options(Box<options::Request>),
+    OptionsProduct(Box<options_products::Request>),
     ExchangeInfo {
         rows: Vec<Market>,
         rejected: bool,
@@ -239,6 +244,7 @@ mod source {
 }
 
 pub struct BinanceFutures {
+    option_state: options::State,
     options: Options,
     urls: Urls,
     paths: &'static paths::Paths,
@@ -280,11 +286,15 @@ impl BinanceFutures {
             options.variant = Variant::PortfolioMargin;
         }
         options.portfolio_margin = options.variant == Variant::PortfolioMargin;
+        if options.variant == Variant::Options && options.recv_window.is_none() {
+            options.recv_window = Some(5_000.);
+        }
         let paths = match options.variant {
             Variant::UsdM => &paths::USD_M,
             Variant::PortfolioMargin => &paths::PORTFOLIO_MARGIN,
             Variant::CoinM => &paths::COIN_M,
             Variant::Spot => &paths::SPOT,
+            Variant::Options => &paths::OPTIONS,
         };
         let urls = Urls::for_options(&options, paths);
         let spot = options.variant == Variant::Spot;
@@ -297,6 +307,7 @@ impl BinanceFutures {
             SlotPolicy::default(),
         );
         Self {
+            option_state: options::State::default(),
             options,
             urls,
             paths,
@@ -1314,7 +1325,11 @@ impl Venue for BinanceFutures {
         true
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
-        self.reconcile_orders(cx);
+        if self.is_options() {
+            self.options_reconcile(cx);
+        } else {
+            self.reconcile_orders(cx);
+        }
     }
     fn unproven_http_evidence(
         &self,
@@ -1364,6 +1379,14 @@ impl Venue for BinanceFutures {
                 ..safe_cex_engine::Capabilities::BASE
             },
             Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
+            Variant::Options => safe_cex_engine::Capabilities {
+                options: true,
+                fill_history: true,
+                order_history: true,
+                income_history: false,
+                fills_by_order_id: true,
+                ..safe_cex_engine::Capabilities::NO_HISTORY
+            },
             Variant::CoinM => safe_cex_engine::Capabilities {
                 quantity_units: safe_cex_engine::QuantityUnits::InverseContractSized,
                 balance_info: true,
@@ -1394,6 +1417,10 @@ impl Venue for BinanceFutures {
     }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.start_options(cx);
+            return;
+        }
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
@@ -1412,6 +1439,9 @@ impl Venue for BinanceFutures {
     }
 
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.options_observed(cx);
+        }
         self.revalue_pending_wallet(cx);
     }
 
@@ -1599,6 +1629,14 @@ impl Venue for BinanceFutures {
             self.on_response(cx, *pending, response);
             return;
         }
+        if let Pending::Options(request) = pending {
+            self.options_response(cx, *request, response);
+            return;
+        }
+        if let Pending::OptionsProduct(request) = pending {
+            self.options_product_response(cx, *request, response);
+            return;
+        }
         self.observe_weight(cx, &response);
         if let Pending::Identity(context) = pending {
             self.identity_response(cx, context, response);
@@ -1607,7 +1645,9 @@ impl Venue for BinanceFutures {
         let Response { status, body, .. } = response;
         match pending {
             Pending::Background(..) => unreachable!(),
-            Pending::Identity(_) => unreachable!(),
+            Pending::Identity(_) | Pending::Options(_) | Pending::OptionsProduct(_) => {
+                unreachable!()
+            }
             Pending::ExchangeInfo { rows, rejected } => {
                 self.on_markets(cx, rows, response, rejected)
             }
@@ -1768,6 +1808,10 @@ impl Venue for BinanceFutures {
             return;
         }
         match pending {
+            Pending::Options(request) => self.options_failed(cx, *request, error),
+            Pending::OptionsProduct(request) => {
+                self.options_product_failed(cx, *request, error.into())
+            }
             Pending::Background(..) => unreachable!(),
             Pending::Klines { context, .. } => {
                 let _ = cx.fail_context(&context, error.to_owned());
@@ -1799,6 +1843,9 @@ impl Venue for BinanceFutures {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.is_options() {
+            self.options_timer(cx, timer);
+        }
         if let Some(source) = self.discovery.on_timer(timer) {
             match source {
                 0 => self.get_streamed(
@@ -1840,7 +1887,44 @@ impl Venue for BinanceFutures {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if self.is_options() {
+            self.options_observed(cx);
+        }
+        let command = if self.is_options() {
+            match self.options_product_command(cx, command) {
+                Ok(()) => return,
+                Err(command) => command,
+            }
+        } else {
+            command
+        };
+        if self.is_options()
+            && matches!(
+                command,
+                Command::SubscribeOrderBook { .. }
+                    | Command::SubscribeCandles { .. }
+                    | Command::UnsubscribeOrderBook { .. }
+                    | Command::UnsubscribeCandles { .. }
+            )
+        {
+            cx.notice(
+                Level::Error,
+                code::COMMAND_UNSUPPORTED,
+                "Binance Options streaming is not supported; use REST queries",
+            );
+            return;
+        }
         if let Command::FetchAccount { .. } = command {
+            if self.is_options() {
+                cx.refuse_command(
+                    Operation::Read,
+                    safe_cex_engine::VenueError::new(
+                        "Binance Options account identity lookup is unsupported",
+                    )
+                    .kind(safe_cex_engine::ErrorKind::Unsupported),
+                );
+                return;
+            }
             self.fetch_identity(cx);
             return;
         }
@@ -1926,6 +2010,9 @@ impl Venue for BinanceFutures {
                         candles: Vec::new(),
                     },
                 );
+            }
+            Command::Query { command: _, query } if self.is_options() => {
+                self.options_query(cx, query)
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),

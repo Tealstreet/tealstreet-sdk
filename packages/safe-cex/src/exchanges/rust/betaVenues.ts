@@ -7,6 +7,7 @@ import { deriveRemoteSigningPolicy } from './construction';
 export const BETA_VENUES = Object.freeze([
   'binance',
   'binancepm',
+  'binanceoptions',
   'binancespot',
   'binanceinverse',
   'bybit',

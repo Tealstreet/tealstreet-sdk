@@ -34,6 +34,7 @@
     "bybitinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
     "bybitspot": {"bridge": {"spot": true, "dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
     "binance": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": []}},
+    "binanceoptions": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": []}},
     "binancepm": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": []}},
     "binanceinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": []}},
     "binancespot": {"bridge": {"spot": true, "dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "binancespot", "extraData": "binanceSpot", "requestId": "tealstreet-user-data"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": []}},
