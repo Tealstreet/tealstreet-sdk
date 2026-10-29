@@ -853,3 +853,44 @@ async fn a_venue_without_client_id_lookup_places_without_one() {
     })
     .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_hyperliquid_fill_event_lowers_the_remainder_before_replacement() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        port.accept_placements();
+        let accept = std::mem::replace(
+            &mut *port.responder.borrow_mut(),
+            Box::new(|_| Ok("null".into())),
+        );
+        let accept = RefCell::new(accept);
+        // REST knows nothing yet: it never lowers what the fill event counted.
+        *port.responder.borrow_mut() = Box::new(move |command| match command {
+            Command::Query { .. } => Ok("[]".into()),
+            other => (accept.borrow_mut())(other),
+        });
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        let fill = Fill {
+            id: None,
+            order_id: "o1".into(),
+            symbol: "BTCUSDT".into(),
+            side: OrderSide::Buy,
+            price: 100.0,
+            amount: 0.4,
+        };
+        port.publish(Change {
+            fills: vec![fill],
+            ..Change::default()
+        });
+        settle(1100).await;
+        port.set_ticker(101.0, 101.5);
+        settle(100).await;
+        assert_eq!(port.cancels(), vec!["o1".to_string()]);
+        let placements = port.placements();
+        assert_eq!(placements.len(), 2);
+        assert_eq!(placements[1].0, 101.0);
+        assert!((placements[1].1 - 0.6).abs() < 1e-9, "{placements:?}");
+    })
+    .await;
+}

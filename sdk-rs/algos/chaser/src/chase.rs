@@ -231,14 +231,16 @@ impl Chase {
         }
     }
 
-    /// The order-row fill (WS status path); assigns, as the TS does.
+    /// The order-row fill (WS status path). Unlike the TS assignment it only
+    /// raises: a row lagging behind a fill event must not restore the
+    /// remainder, or the replacement overfills.
     pub fn subtract_filled_size(&self, order: &Order) {
         let filled = placement_filled(order);
         let mut state = self.state.borrow_mut();
         if filled > state.filled_by.get(&order.id).copied().unwrap_or(0.0) {
             state.last_partial_fill_at = Some(Instant::now());
+            state.filled_by.insert(order.id.clone(), filled);
         }
-        state.filled_by.insert(order.id.clone(), filled);
         self.finish_if_filled(&mut state, "Fully filled already");
     }
 
