@@ -14,6 +14,11 @@ pub const ECHO_PAD_CAP: usize = 64 * 1024;
 
 /// Writes one text frame to the client socket; false when it was not sent.
 pub type Outbox = Arc<dyn Fn(String) -> bool + Send + Sync>;
+/// The server's identity for one client socket. A `sign-res` resolves only a
+/// request sent on the same socket, whatever its id.
+pub type SocketId = u64;
+/// Largest accepted `sign-res` text field: Lighter's 31 signatures are ~5 KB.
+pub const MAX_RESPONSE_FIELD: usize = 16 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -35,12 +40,15 @@ pub enum EchoSize {
     Large,
 }
 
+type Waiter = oneshot::Sender<Result<Value, Failure>>;
+
 struct State {
+    socket: SocketId,
     out: Outbox,
     available: bool,
     suspended: bool,
     unavailable_since: Option<Instant>,
-    pending: HashMap<String, (u64, oneshot::Sender<Result<Value, Failure>>)>,
+    pending: HashMap<String, (u64, SocketId, Waiter)>,
     next_token: u64,
     last_sign_req_bytes: usize,
     echo: Option<(u64, Instant, EchoSize)>,
@@ -52,9 +60,10 @@ pub struct SignerLink {
 }
 
 impl SignerLink {
-    pub fn new(out: Outbox) -> Arc<Self> {
+    pub fn new(socket: SocketId, out: Outbox) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(State {
+                socket,
                 out,
                 available: true,
                 suspended: false,
@@ -100,7 +109,8 @@ impl SignerLink {
             }
             state.next_token += 1;
             let token = state.next_token;
-            state.pending.insert(id.to_owned(), (token, sender));
+            let socket = state.socket;
+            state.pending.insert(id.to_owned(), (token, socket, sender));
             // `t` first: the browser recognises frames by prefix.
             let frame = format!(r#"{{"t":"sign-req","d":{request}}}"#);
             state.last_sign_req_bytes = frame.len();
@@ -123,9 +133,10 @@ impl SignerLink {
         result
     }
 
-    /// Route one `sign-res` payload to its waiting request. False when no
-    /// request with that id waits (late, unknown or malformed).
-    pub fn resolve(&self, response: Value) -> bool {
+    /// Route one `sign-res` payload from `socket` to its waiting request, once.
+    /// False when no request with that id was sent on that socket (late,
+    /// unknown, foreign or malformed). An oversized answer settles as an error.
+    pub fn resolve(&self, socket: SocketId, mut response: Value) -> bool {
         let Some(id) = response
             .get("id")
             .and_then(Value::as_str)
@@ -133,10 +144,28 @@ impl SignerLink {
         else {
             return false;
         };
-        let Some((_, sender)) = self.state().pending.remove(&id) else {
-            return false;
+        let sender = {
+            let mut state = self.state();
+            if !state
+                .pending
+                .get(&id)
+                .is_some_and(|(_, sent, _)| *sent == socket)
+            {
+                return false;
+            }
+            state.pending.remove(&id).map(|(_, _, sender)| sender)
         };
-        sender.send(Ok(response)).is_ok()
+        let oversized = ["wsAuthSignature", "error"].iter().any(|field| {
+            response.get(*field).is_some_and(|value| {
+                !value
+                    .as_str()
+                    .is_some_and(|text| text.len() <= MAX_RESPONSE_FIELD)
+            })
+        });
+        if oversized {
+            response = serde_json::json!({ "id": id, "error": "invalid response" });
+        }
+        sender.is_some_and(|sender| sender.send(Ok(response)).is_ok())
     }
 
     /// The socket dropped but the session is parked for a resume: abort what
@@ -152,11 +181,16 @@ impl SignerLink {
     }
 
     /// The client came back within the grace window: sign over its new socket.
-    pub fn attach(&self, out: Outbox) {
+    /// Requests still waiting on another socket abort; none moves silently.
+    pub fn attach(&self, socket: SocketId, out: Outbox) {
         let mut state = self.state();
         if !state.available {
             return;
         }
+        if state.socket != socket {
+            abort_all(&mut state);
+        }
+        state.socket = socket;
         state.out = out;
         state.suspended = false;
         state.unavailable_since = None;
@@ -214,7 +248,7 @@ impl SignerLink {
 }
 
 fn abort_all(state: &mut State) {
-    for (_, (_, sender)) in state.pending.drain() {
+    for (_, (_, _, sender)) in state.pending.drain() {
         let _ = sender.send(Err(Failure::Aborted));
     }
 }
@@ -231,7 +265,7 @@ impl Drop for Pending<'_> {
         if state
             .pending
             .get(self.id)
-            .is_some_and(|(token, _)| *token == self.token)
+            .is_some_and(|(token, _, _)| *token == self.token)
         {
             state.pending.remove(self.id);
         }
