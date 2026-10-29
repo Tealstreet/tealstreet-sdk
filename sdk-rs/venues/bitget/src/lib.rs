@@ -139,6 +139,38 @@ fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
     )
 }
 
+fn normalize_empty_order_page(body: &str) -> Option<String> {
+    let mut value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if !value.get("code").is_some_and(bitget_code_is_zero) {
+        return None;
+    }
+
+    match value.get_mut("data")? {
+        serde_json::Value::Object(data) => {
+            for key in ["entrustedList", "list"] {
+                if data.get(key).is_some_and(serde_json::Value::is_null) {
+                    data.insert(key.to_owned(), serde_json::Value::Array(Vec::new()));
+                    return serde_json::to_string(&value).ok();
+                }
+            }
+            None
+        }
+        data @ serde_json::Value::Null => {
+            *data = serde_json::Value::Array(Vec::new());
+            serde_json::to_string(&value).ok()
+        }
+        _ => None,
+    }
+}
+
+fn bitget_code_is_zero(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(code) => code == "00000" || code == "0",
+        serde_json::Value::Number(code) => code.as_f64() == Some(0.0),
+        _ => false,
+    }
+}
+
 /// A private send's body, or the array its streamed response decodes.
 impl BitgetFutures {
     fn public_failed(
@@ -985,6 +1017,21 @@ impl Venue for BitgetFutures {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if matches!(
+            &pending,
+            Pending::Account {
+                request: account::Request::Orders(_),
+                ..
+            }
+        ) {
+            if let Some(body) = normalize_empty_order_page(response.body) {
+                let response = Response {
+                    body: &body,
+                    ..response
+                };
+                return self.on_response(cx, pending, response);
+            }
+        }
         if discovery_context(&pending).is_some() {
             if discovery_delivered(cx, &pending) {
                 self.discovery_failed(cx, &pending, discovery_error(&response));

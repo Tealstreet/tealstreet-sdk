@@ -22,6 +22,7 @@ const REST_PAUSE_MS: f64 = 30_000.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum OrderSource {
     Normal,
+    NormalPartiallyFilled,
     Protection,
     Trailing,
 }
@@ -528,11 +529,23 @@ impl BitgetFutures {
                     }
                 )
             }
-        } else if source == OrderSource::Normal {
-            format!("{}?productType={}&limit=200", paths::ORDERS, self.product())
+        } else if matches!(
+            source,
+            OrderSource::Normal | OrderSource::NormalPartiallyFilled
+        ) {
+            format!(
+                "{}?productType={}&status={}&limit=100",
+                paths::ORDERS,
+                self.product(),
+                if source == OrderSource::Normal {
+                    "live"
+                } else {
+                    "partially_filled"
+                }
+            )
         } else {
             format!(
-                "{}?productType={}&planType={}&limit=200",
+                "{}?productType={}&planType={}&limit=100",
                 paths::PLANS,
                 self.product(),
                 if source == OrderSource::Protection {
@@ -819,7 +832,9 @@ impl BitgetFutures {
                     return;
                 }
                 let next = match snapshot.source {
+                    OrderSource::Normal if !self.account.uta => Some(OrderSource::NormalPartiallyFilled),
                     OrderSource::Normal if !snapshot.virtual_only => Some(OrderSource::Protection),
+                    OrderSource::NormalPartiallyFilled if !snapshot.virtual_only => Some(OrderSource::Protection),
                     OrderSource::Protection => Some(OrderSource::Trailing),
                     _ => None,
                 };

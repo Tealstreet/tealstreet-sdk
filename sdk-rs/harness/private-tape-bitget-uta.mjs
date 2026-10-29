@@ -128,10 +128,7 @@ export function buildBitgetUtaTape({ usdc = false } = {}) {
   trailingSnapshot(0, [trailingRow('trail-rest'), trailingRow('trail-disappears', '0.01', '94', '2')]);
   trailingSnapshot(2, [trailingRow('trail-rest'), trailingRow('trail-created', '0.01', '95', '5')]);
   trailingSnapshot(3, [trailingRow('trail-rest'), trailingRow('trail-restored', '0.01', '95', '5')]);
-  trailingSnapshot(4, [
-    trailingRow('trail-restored', '0.01', '95', '5'),
-    trailingRow('trail-amended', '0.02', '95', '7'),
-  ]);
+  trailingSnapshot(4, [trailingRow('trail-restored', '0.01', '95', '5'), trailingRow('trail-amended', '0.02', '95', '7')]);
   trailingSnapshot(5, [trailingRow('trail-amended', '0.02', '95', '7'), trailingRow('trail-final', '0.03', '96', '3')]);
   ws(0, priv, { event: 'login', code: '0' });
   const bill = (id, type, amount, fee) => ({
@@ -161,7 +158,14 @@ export function buildBitgetUtaTape({ usdc = false } = {}) {
   command(100, 'fetchIncome', { from: UTA_EPOCH - 10000, to: UTA_EPOCH, limit: 2 });
   command(500, 'placeOrders', {
     orders: [
-      { symbol, type: 'trailing_stop_market', side: 'sell', amount: 0.01, price: 95, slTriggerType: 'last_price' },
+      {
+        symbol,
+        type: 'trailing_stop_market',
+        side: 'sell',
+        amount: 0.01,
+        price: 95,
+        slTriggerType: 'last_price',
+      },
     ],
   });
   http('POST', '/api/v3/trade/place-strategy-order', '', { orderId: 'trail-created' }, placeBody('0.01', '95', '5'));
@@ -215,9 +219,7 @@ export function buildBitgetClassicTrailingTape({ usdc = false } = {}) {
   const productType = category.toLowerCase();
   const rest = 'https://api.bitget.com';
   const priv = 'wss://ws.bitget.com/v2/ws/private';
-  const records = buildBitgetUtaTape({ usdc }).filter(
-    (r) => r.type === 'meta' || (r.type === 'http' && new URL(r.url).pathname.startsWith('/api/v2/mix/market/')),
-  );
+  const records = buildBitgetUtaTape({ usdc }).filter((r) => r.type === 'meta' || (r.type === 'http' && new URL(r.url).pathname.startsWith('/api/v2/mix/market/')));
   const http = (method, path, query, data, requestBody, code = '00000') =>
     records.push({
       t: 0,
@@ -254,30 +256,39 @@ export function buildBitgetClassicTrailingTape({ usdc = false } = {}) {
     });
   http('GET', '/api/v3/account/settings', '', null, undefined, '40084');
   http('GET', '/api/v2/mix/position/all-position', `productType=${productType}&marginCoin=${coin}`, []);
-  http('GET', '/api/v2/mix/account/accounts', `productType=${productType}`, [
-    { marginCoin: coin, unionTotalMargin: '1000', unionAvailable: '900', unrealizedPL: '0' },
-  ]);
+  http('GET', '/api/v2/mix/account/accounts', `productType=${productType}`, [{ marginCoin: coin, unionTotalMargin: '1000', unionAvailable: '900', unrealizedPL: '0' }]);
   http('GET', '/api/v2/mix/account/account', `symbol=${symbol}&productType=${productType}&marginCoin=${coin}`, {
     posMode: 'one_way_mode',
     marginMode: 'crossed',
     leverage: '20',
   });
-  http('GET', '/api/v2/mix/order/orders-pending', `productType=${productType}&limit=200`, {
+  http('GET', '/api/v2/mix/order/orders-pending', `productType=${productType}&status=live&limit=100`, {
     entrustedList: [],
     endId: '',
   });
-  http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=${productType}&planType=profit_loss&limit=200`, {
+  http('GET', '/api/v2/mix/order/orders-pending', `productType=${productType}&status=partially_filled&limit=100`, {
     entrustedList: [],
     endId: '',
   });
-  http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=${productType}&planType=track_plan&limit=200`, {
+  http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=${productType}&planType=profit_loss&limit=100`, {
+    entrustedList: [],
+    endId: '',
+  });
+  http('GET', '/api/v2/mix/order/orders-plan-pending', `productType=${productType}&planType=track_plan&limit=100`, {
     entrustedList: [row('classic-rest', '0.01', '97', '3')],
     endId: '',
   });
   ws(0, priv, { event: 'login', code: '0' });
   command(500, 'placeOrders', {
     orders: [
-      { symbol, type: 'trailing_stop_market', side: 'sell', amount: 0.01, price: 95, slTriggerType: 'last_price' },
+      {
+        symbol,
+        type: 'trailing_stop_market',
+        side: 'sell',
+        amount: 0.01,
+        price: 95,
+        slTriggerType: 'last_price',
+      },
     ],
   });
   http(
@@ -308,20 +319,20 @@ export function buildBitgetClassicTrailingTape({ usdc = false } = {}) {
     data: [{ instId: symbol, lastPr: '110', bidPr: '109.9', askPr: '110.1' }],
   });
   command(1100, 'amendOrder', { id: 'classic-created', amount: 0.02 });
-  http(
-    'POST',
-    '/api/v2/mix/order/modify-plan-order',
-    '',
-    { orderId: 'classic-created' },
-    { productType, orderId: 'classic-created', newSize: '0.02', newCallbackRatio: '5' },
-  );
+  http('POST', '/api/v2/mix/order/modify-plan-order', '', { orderId: 'classic-created' }, { productType, orderId: 'classic-created', newSize: '0.02', newCallbackRatio: '5' });
   command(1500, 'cancelOrders', { ids: ['classic-created'] });
   http(
     'POST',
     '/api/v2/mix/order/cancel-plan-order',
     '',
     { successList: [{ orderId: 'classic-created' }], failureList: [] },
-    { symbol, productType, marginCoin: coin, orderIdList: [{ orderId: 'classic-created' }], planType: 'track_plan' },
+    {
+      symbol,
+      productType,
+      marginCoin: coin,
+      orderIdList: [{ orderId: 'classic-created' }],
+      planType: 'track_plan',
+    },
   );
   strategy(2000, row('classic-final', '0.03', '97', '3'));
   return records;
@@ -335,9 +346,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       classic: { type: 'boolean', default: false },
     },
   });
-  const records = values.classic
-    ? buildBitgetClassicTrailingTape({ usdc: values.usdc })
-    : buildBitgetUtaTape({ usdc: values.usdc });
+  const records = values.classic ? buildBitgetClassicTrailingTape({ usdc: values.usdc }) : buildBitgetUtaTape({ usdc: values.usdc });
   mkdirSync(dirname(values.out), { recursive: true });
   writeFileSync(values.out, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
   console.log(

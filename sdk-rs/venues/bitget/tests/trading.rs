@@ -639,6 +639,11 @@ fn amend_old_cancellation_and_old_rest_cannot_hide_new_identity() {
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
     );
     h.respond(
+        "status=partially_filled",
+        200,
+        r#"{"code":"00000","data":{"entrustedList":[]}}"#,
+    );
+    h.respond(
         "planType=profit_loss",
         200,
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,

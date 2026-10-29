@@ -113,6 +113,11 @@ fn terminal_order_tombstone_and_ws_open_grace_guard_rest() {
     h.private_message(r#"{"arg":{"channel":"orders"},"data":[{"orderId":"2","symbol":"BTCUSDT","size":"1","price":"89","side":"buy","orderType":"limit","status":"live"}]}"#);
     h.reply(normal.id, 200, OPEN_ORDER);
     h.respond(
+        "status=partially_filled",
+        200,
+        r#"{"code":"00000","data":{"entrustedList":[]}}"#,
+    );
+    h.respond(
         "planType=profit_loss",
         200,
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
@@ -120,6 +125,70 @@ fn terminal_order_tombstone_and_ws_open_grace_guard_rest() {
     h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
     assert!(h.engine.store().order("1").is_none());
     assert!(h.engine.store().order("2").is_some());
+}
+
+#[test]
+fn classic_null_entrusted_lists_are_empty_order_pages() {
+    let mut h = Harness::private_started();
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, r#"{"code":"00000","data":[]}"#);
+    h.respond("/account/accounts", 200, ACCOUNT);
+    for path in [
+        "status=live",
+        "status=partially_filled",
+        "planType=profit_loss",
+        "planType=track_plan",
+    ] {
+        h.respond(
+            path,
+            200,
+            r#"{"code":"00000","data":{"entrustedList":null,"endId":""}}"#,
+        );
+    }
+    assert!(h.engine.store().orders().is_empty());
+    assert!(h.engine.store().loaded().orders);
+    assert!(
+        h.logs
+            .iter()
+            .all(|message| !message.contains("expected list"))
+    );
+}
+
+#[test]
+fn classic_regular_order_snapshot_includes_partially_filled_status() {
+    let mut h = Harness::private_started();
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, POSITION);
+    h.respond("/account/accounts", 200, ACCOUNT);
+    h.respond(
+        "status=live",
+        200,
+        r#"{"code":"00000","data":{"entrustedList":[],"endId":""}}"#,
+    );
+    let partial = h.take("status=partially_filled");
+    assert!(partial.url.contains("limit=100"));
+    h.reply(
+        partial.id,
+        200,
+        &OPEN_ORDER
+            .replace("\"orderId\":\"1\"", "\"orderId\":\"partial\"")
+            .replace("\"status\":\"live\"", "\"status\":\"partially_filled\""),
+    );
+    h.respond(
+        "planType=profit_loss",
+        200,
+        r#"{"code":"00000","data":{"entrustedList":[]}}"#,
+    );
+    h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
+    assert!(h.engine.store().order("partial").is_some());
 }
 
 #[test]
@@ -692,6 +761,11 @@ fn rejected_ws_protection_retains_cancel_route_against_older_rest_plan_metadata(
     );
     h.respond(
         "/orders-pending",
+        200,
+        r#"{"code":"00000","data":{"entrustedList":[]}}"#,
+    );
+    h.respond(
+        "status=partially_filled",
         200,
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
     );
