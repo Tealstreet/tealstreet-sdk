@@ -11,8 +11,8 @@ export const TUNNEL_PATH =
     : '/tunnel';
 
 // The Vultr Tokyo tunnel (docs/plans/AWS_EXIT.md step 3e): every region egresses
-// through it, so both names are the same host. The hosted exchange server pins its
-// own hosts with `setTunnelEgressUrls`, so a redeploy of it cannot move its egress.
+// through it, so both names are the same host. The hosted exchange server dials it
+// too (step 4); `setTunnelEgressUrls` exists for tests that tell the regions apart.
 export const TOKYO_HOW_EGRESS = `wss://fsjnpy143pbz-tyo.tealstreet.io${TUNNEL_PATH}`;
 export const SINGAPORE_HOW_EGRESS = TOKYO_HOW_EGRESS;
 
@@ -20,7 +20,7 @@ export type TunnelEgress = 'jp' | 'sg';
 
 let tunnelEgressUrls: Readonly<Record<TunnelEgress, string>> = { jp: TOKYO_HOW_EGRESS, sg: SINGAPORE_HOW_EGRESS };
 
-/** Pins this runtime's tunnel hosts. Read at dial time, so call it at boot, before the first request. */
+/** Substitutes the tunnel hosts (tests only). Read at dial time, so set it before the first request. */
 export const setTunnelEgressUrls = (urls: Record<TunnelEgress, string>): void => {
   tunnelEgressUrls = { ...urls };
 };

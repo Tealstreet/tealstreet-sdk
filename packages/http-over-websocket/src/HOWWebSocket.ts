@@ -84,8 +84,8 @@ export class HOWWebSocket {
     return this._emitter.emit(event, ...args);
   };
 
-  // A getter is resolved at each connect, so the module-level singletons follow a
-  // host app's `setTunnelEgressUrls` however early they were constructed.
+  // A getter is resolved at each connect, so the module-level singletons follow
+  // `setTunnelEgressUrls` however early they were constructed.
   private url: string | (() => string);
 
   constructor(

@@ -68,8 +68,7 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   `{ instType: "UTA", topic: "account" | "position" | "order" }`.
   Its proxied route is the v3 equivalent of Classic's: the relay upstream
   `ws.bitget.com/v3/ws/private` (routing `privateUta`, resolved as
-  `wsPrivateUta`; the exchange server's pin keeps ws-proxy `/bitget/v3/private`
-  first). See "Private WS egress".
+  `wsPrivateUta`). See "Private WS egress".
 
 Account-type detection is eager during validation/startup and lazy on private
 methods that choose between Classic v2 and UTA v3. The lazy path shares one
@@ -345,8 +344,8 @@ proxied account. Bitget does NOT gate the relay on `WS_RELAY_PRIVATE`.
 **Since AWS_EXIT step 3e the browser build has no ws-proxy**: its `host` and
 `fallback` ARE the relay url (`BROWSER_WS_HOSTS`), so a proxied socket offers the
 relay twice and a direct one walks direct → relay. The ws-proxy-first chain above
-survives only in the hosted exchange server's pinned hosts
-(`services/exchange-server/src/egress-hosts.ts`).
+runs in no runtime since the hosted exchange server's AWS pin was removed
+(AWS_EXIT step 4); only `bitget.private-ws-egress.test.ts` still exercises it.
 
 `bitget.ws-private.ts` walks the chain with `WsDirectFallback`:
 

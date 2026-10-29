@@ -14,8 +14,8 @@ import type { RestPool } from './routing/types';
 // Whitelisted private proxy pools: the exchange-proxy-edge Worker on the Vultr
 // tunnel host, which checks the user's proxy JWT and forwards to the 9-IP Tokyo
 // fleet (docs/plans/AWS_EXIT.md step 3e). The whitelist is Tokyo-only, so the jp,
-// asia and GRVT pools are one host; the names stay because the routing table and
-// the exchange server's pinned hosts still tell them apart.
+// asia and GRVT pools are one host; the names stay because the routing table still
+// tells them apart. The hosted exchange server dials these too (step 4).
 export const PRIVATE_PROXY_JP = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy';
 export const PRIVATE_PROXY_ASIA = PRIVATE_PROXY_JP;
 export const PRIVATE_PROXY_GRVT_TINY = PRIVATE_PROXY_JP;
@@ -30,27 +30,18 @@ export const PRIVATE_PROXY_GRVT_TINY = PRIVATE_PROXY_JP;
 // before that this host 403s every public read (Binance market data, clocks, ticks).
 export const PUBLIC_CORS_PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy';
 
-export interface ProxyHosts {
-  privateProxy: Record<RestPool, string>;
-  publicCorsProxy: string;
-}
-
-let proxyHosts: ProxyHosts = {
-  privateProxy: { jp: PRIVATE_PROXY_JP, asia: PRIVATE_PROXY_ASIA, tiny: PRIVATE_PROXY_GRVT_TINY },
-  publicCorsProxy: PUBLIC_CORS_PROXY,
+const PRIVATE_PROXY_POOLS: Record<RestPool, string> = {
+  jp: PRIVATE_PROXY_JP,
+  asia: PRIVATE_PROXY_ASIA,
+  tiny: PRIVATE_PROXY_GRVT_TINY,
 };
 
-/** Pins this runtime's proxy hosts (the hosted exchange server); see `pinTealstreetEgressHosts`. */
-export const setProxyHosts = (hosts: ProxyHosts): void => {
-  proxyHosts = { privateProxy: { ...hosts.privateProxy }, publicCorsProxy: hosts.publicCorsProxy };
-};
-
-export const getPrivateProxyHost = (pool: RestPool): string => proxyHosts.privateProxy[pool];
+export const getPrivateProxyHost = (pool: RestPool): string => PRIVATE_PROXY_POOLS[pool];
 
 // Public CORS proxy (CORS-unblocks public/unwhitelisted browser requests). A getter,
 // not an inlined const, because every call site resolves at CALL time — that is the
 // seam any future host rollout would need, and callers must not cache the string.
-export const getPublicCorsProxy = (): string => proxyHosts.publicCorsProxy;
+export const getPublicCorsProxy = (): string => PUBLIC_CORS_PROXY;
 
 // --- Preference resolution -------------------------------------------------
 

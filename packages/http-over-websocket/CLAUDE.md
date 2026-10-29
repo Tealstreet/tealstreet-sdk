@@ -50,9 +50,9 @@ behavior changes, update or delete that snapshot in the same PR.
   `require`s `ws` at load in Node — never import it from a pure consumer.
 - **One tunnel host for every region since AWS_EXIT step 3e**:
   `TOKYO_HOW_EGRESS` and `SINGAPORE_HOW_EGRESS` are both
-  `wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel`. A host app that must keep its
-  own tunnel (the hosted exchange server) calls `setTunnelEgressUrls` at boot,
-  so every consumer reads `tunnelEgressUrl(egress)` at dial time, and the
+  `wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel`. `setTunnelEgressUrls` remains
+  for tests (the hosted exchange server stopped pinning its own in 2026-10), so
+  every consumer reads `tunnelEgressUrl(egress)` at dial time, and the
   module-level `howWebSocketSG`/`howWebSocketJA` singletons take a URL getter
   for that reason. Do not reintroduce a constant read at construction.
 - `ReconnectingWebSocket` handles connection resilience

@@ -102,7 +102,7 @@ const bybitBrazil = { bybitSiteId: 'BRA_BTL' as const };
 // Vultr host: the tunnel, the relay, the bybitbra/grvt/lighter paths, and the
 // okx/okxeu/bitget/blofin private sockets, which became relay urls in place of the
 // AWS Python ws-proxy paths, as did coinbase's once the relay took root paths (5a); apex went direct. The hosted
-// exchange server keeps the old hosts (services/exchange-server/src/egress-hosts.test.ts).
+// exchange server dials these same hosts since its pin was removed (AWS_EXIT.md step 4).
 const TYO = 'wss://fsjnpy143pbz-tyo.tealstreet.io';
 const relayOf = (upstream: string) => `${TYO}/tunnel?ts-relay=${encodeURIComponent(upstream)}`;
 

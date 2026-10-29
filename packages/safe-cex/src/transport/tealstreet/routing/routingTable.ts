@@ -41,7 +41,7 @@ const relay = (upstream: string): string => buildRelayUrl('jp', upstream);
 // go through the tunnel relay, which dials the venue from the 9-IP fleet; they used
 // to be the AWS Python ws-proxy paths (`fsjnpy143pbz.asia…/<venue>/private`), moved
 // in AWS_EXIT.md step 3e. bybitbra, grvt and lighter are containers on the tunnel
-// hosts (step 5b). The hosted exchange server pins its own copy of this map.
+// hosts (step 5b). The hosted exchange server dials this same map (step 4).
 export const BROWSER_WS_HOSTS = {
   grvt: `${TYO}/grvt`,
   okxPrivate: relay(RELAY_UPSTREAM.okxPrivate),
@@ -72,10 +72,9 @@ export const BROWSER_WS_HOSTS = {
   bitunixFutures: 'wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2',
 } as const;
 
-// Every WS host the table names. `apex` is optional and absent here: apexomni's
-// private socket connects directly (AWS_EXIT.md 5c) — it answers a browser-origin
-// upgrade and binds no IP. Its AWS proxy path survives only in the exchange server's pin.
-export type WsHosts = Record<keyof typeof BROWSER_WS_HOSTS, string> & { apex?: string };
+// Every WS host the table names. apexomni has none: its private socket connects
+// directly (AWS_EXIT.md 5c) — it answers a browser-origin upgrade and binds no IP.
+export type WsHosts = Record<keyof typeof BROWSER_WS_HOSTS, string>;
 
 // Exchanges whose REST CORS pool is the Tokyo (jp) box — getPrivateProxy's
 // /binance|okx|okex|bitget/ regex. grvt -> 'tiny'; everything else -> 'asia'.
@@ -109,8 +108,8 @@ type WsGroup = RoutingTable[ExchangeName]['ws'];
 // stays out of this list.
 const HOW_REGION_CONDITIONAL: ExchangeName[] = ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot'];
 
-// Builds the table over a set of WS hosts: the browser build's, or a host app's
-// pinned copy (`setRoutingWsHosts`, the hosted exchange server).
+// Builds the table over a set of WS hosts: the browser build's, or a test's
+// substitute (`setRoutingWsHosts`).
 const buildRoutingTable = (WS: WsHosts): RoutingTable => {
   // okx (global entity only — okxeu/okxdemo terminate elsewhere) also carries the
   // athena passthrough as a direct-path fallback on every channel.
@@ -138,7 +137,7 @@ const buildRoutingTable = (WS: WsHosts): RoutingTable => {
   // Bitget checks the key's bound IP on private login (40018), so a proxied
   // account dials its host and then the relay, which egresses from the same fleet
   // as its REST. In the browser build the host IS the relay (AWS_EXIT.md 3e), so
-  // the second candidate repeats it; the exchange server's pin keeps ws-proxy first.
+  // the second candidate repeats it.
   const bitgetWs: WsGroup = {
     // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
     public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic, initialSilentConnects: 1 },
@@ -186,7 +185,6 @@ const buildRoutingTable = (WS: WsHosts): RoutingTable => {
     blofin: { private: { kind: 'proxyConditional', host: WS.blofin } },
     coinbase: coinbaseWs,
     coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange
-    ...(WS.apex ? { apexomni: { private: { kind: 'proxyConditional', host: WS.apex } } } : {}),
     bitget: bitgetWs,
     bitgetinverse: bitgetWs, // BitgetInverseExchange extends BitgetExchange
     bitgetusdc: bitgetWs, // BitgetUSDCExchange extends BitgetExchange
@@ -231,7 +229,7 @@ const buildRoutingTable = (WS: WsHosts): RoutingTable => {
 
 let routingTable = buildRoutingTable(BROWSER_WS_HOSTS);
 
-/** Pins this runtime's WS hosts; see `pinTealstreetEgressHosts`. */
+/** Substitutes the WS hosts (tests only; every runtime uses `BROWSER_WS_HOSTS`). */
 export const setRoutingWsHosts = (ws: WsHosts): void => {
   routingTable = buildRoutingTable(ws);
 };

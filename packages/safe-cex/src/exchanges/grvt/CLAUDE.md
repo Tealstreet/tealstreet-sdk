@@ -301,7 +301,7 @@ The code handles both formats throughout with fallback patterns like `feed.i || 
 
 ### Private WebSocket (`grvt.ws-private.ts`)
 
-**Connection**: Through Tealstreet proxy at `wss://fsjnpy143pbz-tyo.tealstreet.io/grvt` (`BROWSER_WS_HOSTS.grvt` in `transport/tealstreet/routing/routingTable.ts`; the hosted exchange server pins `wss://fsjnpy143pbz.jp.tealstreet.io/grvt`).
+**Connection**: Through Tealstreet proxy at `wss://fsjnpy143pbz-tyo.tealstreet.io/grvt` (`BROWSER_WS_HOSTS.grvt` in `transport/tealstreet/routing/routingTable.ts`; the hosted exchange server dials the same host).
 
 **Authentication Flow** (`grvt.ws-private.ts:69-92`):
 

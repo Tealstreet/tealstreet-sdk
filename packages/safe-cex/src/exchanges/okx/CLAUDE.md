@@ -11,7 +11,7 @@ This directory contains the OKX exchange integration for Tealstreet. Regular OKX
 - **Base URL in code**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`; `okxdemo` uses the official Demo REST host `https://openapi.okx.com`; `okxeudemo` uses `https://eea.okx.com`; demo variants add `x-simulated-trading: 1` and route REST through Tealstreet's OKX REST proxy path). OKX Global now documents `https://openapi.okx.com` as its primary REST domain; `www.okx.com` remains supported for live global REST.
 - **Latency domain**: `www.okx.com` (`okxdemo`: `openapi.okx.com`; `okxeu` / `okxeudemo`: `eea.okx.com`)
 - **Browser transport**: `okxeu` requires the Tealstreet REST/WS proxy route. Direct Node requests to `eea.okx.com` can authenticate, but browser private REST fails CORS preflight (`OPTIONS`) before OKX can process the signed request. `okxdemo` and `okxeudemo` require the Tealstreet REST proxy route, while demo WebSockets stay direct to `wspap.okx.com` / `wseeapap.okx.com`. Keep `okxeu.requiresCors = true` and demo metadata `requiresCors = true`; regular `okx` remains direct-capable by metadata.
-- **okxeu WS tunnel paths**: private/business sockets go through the tradetunnel relay to `wss://wseea.okx.com/ws/v5/{private,business}` (`RELAY_UPSTREAM` in `transport/tealstreet/routing/routingTable.ts`, AWS_EXIT step 3e); the hosted exchange server's pinned hosts keep the dedicated Python ws-proxy `okxeu/private` / `okxeu/business` paths. Do NOT reuse the global `okx` upstreams or `okx/*` paths — they terminate on `ws.okx.com`, where EEA credentials fail auth. `eea.okx.com` + `wseea.okx.com` are allowlisted in tradetunnel `ALLOWED_URLS` and in every live HAProxy proxy config (July 2026 rollout).
+- **okxeu WS tunnel paths**: private/business sockets go through the tradetunnel relay to `wss://wseea.okx.com/ws/v5/{private,business}` (`RELAY_UPSTREAM` in `transport/tealstreet/routing/routingTable.ts`, AWS_EXIT step 3e), in the hosted exchange server too. Do NOT reuse the global `okx` upstreams or `okx/*` paths — they terminate on `ws.okx.com`, where EEA credentials fail auth. `eea.okx.com` + `wseea.okx.com` are allowlisted in tradetunnel `ALLOWED_URLS` and in every live HAProxy proxy config (July 2026 rollout).
 
 ## API Documentation
 
@@ -271,8 +271,8 @@ connects that produced zero messages it dials `route.fallback` — the athena Ca
 passthrough `okx-proxy-ja.tealstreet.io` (legacy upstream 8443, pending an infrastructure change to 443) —
 for the rest of the socket's lifetime and emits `grafana-info`. The resolver attaches
 `fallback` only to a DIRECT resolution, so with `tealstreetProxy` on the private and
-business sockets keep the chosen tunnel route (the relay in the browser build, the
-EKS ws-proxy in the exchange server's pin) and never degrade to the passthrough.
+business sockets keep the chosen tunnel route (the relay) and never degrade to the
+passthrough.
 Only global `okx` declares it: `okxeu` credentials do not authenticate on
 `ws.okx.com`, and the demo variants terminate on `wspap`/`wseeapap`.
 
