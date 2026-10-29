@@ -47,13 +47,16 @@ struct Client {
     draining: Arc<AtomicBool>,
 }
 
+/// Subscribers one socket can stack on a book or candle key before extras stop counting.
+const MAX_SUBSCRIBERS_PER_KEY: u32 = 64;
+
 struct Joined {
     account: Arc<Account>,
     client: Client,
     old: Vec<Client>,
     next_command: u32,
     /// Book and candle subscribe commands this socket holds, by command text and count.
-    /// Demand belongs to a frame client, so a re-snapshot replays it onto the new one.
+    /// The engine keeps one demand per client, so a re-snapshot replays each key once.
     subscriptions: HashMap<String, u32>,
 }
 
@@ -312,13 +315,11 @@ impl Session {
             Ok(client) => {
                 let joined = self.joined.get_mut(name).unwrap();
                 // Before the old client leaves, so the venue never unsubscribes in between.
-                for (command, count) in &joined.subscriptions {
-                    for _ in 0..*count {
-                        if !matches!(account.handle.input(client.id, command), Ok(true)) {
-                            Log::warn(&format!(
-                                "{name}: subscription not carried to the re-snapshot"
-                            ));
-                        }
+                for command in joined.subscriptions.keys() {
+                    if !matches!(account.handle.input(client.id, command), Ok(true)) {
+                        Log::warn(&format!(
+                            "{name}: subscription not carried to the re-snapshot"
+                        ));
                     }
                 }
                 let old = std::mem::replace(&mut joined.client, client);
@@ -415,7 +416,8 @@ impl Session {
         }
     }
 
-    /// Sends a book/candle (un)subscribe and keeps the count a re-snapshot replays.
+    /// Counts a book/candle (un)subscribe; only the first subscribe and the last
+    /// unsubscribe reach the engine, whose per-client demand is a set.
     fn subscribe(&mut self, name: &str, subscribe: Value, unsubscribe: Value, add: bool) {
         let key = subscribe.to_string();
         let held = self.joined[name]
@@ -423,20 +425,23 @@ impl Session {
             .get(&key)
             .copied()
             .unwrap_or(0);
-        // An unsubscribe this socket never subscribed must not release another socket's demand.
-        if !add && held == 0 {
-            return;
-        }
-        if !self.input(name, if add { subscribe } else { unsubscribe }) {
-            return;
-        }
+        let next = match (add, held) {
+            // An unsubscribe this socket never subscribed must not release another socket's demand.
+            (false, 0) => return,
+            (true, 0) | (false, 1) => {
+                if !self.input(name, if add { subscribe } else { unsubscribe }) {
+                    return;
+                }
+                u32::from(add)
+            }
+            (true, held) => (held + 1).min(MAX_SUBSCRIBERS_PER_KEY),
+            (false, held) => held - 1,
+        };
         let subscriptions = &mut self.joined.get_mut(name).unwrap().subscriptions;
-        if add {
-            *subscriptions.entry(key).or_default() += 1;
-        } else if held == 1 {
+        if next == 0 {
             subscriptions.remove(&key);
         } else {
-            subscriptions.insert(key, held - 1);
+            subscriptions.insert(key, next);
         }
     }
 
