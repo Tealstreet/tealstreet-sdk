@@ -8,7 +8,8 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
-Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex and Hyperliquid/Spot (remoteSigner only). Provider-mode eligibility still follows each declared remote
+Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, and
+Hyperliquid/Spot and Lighter/Robinhood (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.

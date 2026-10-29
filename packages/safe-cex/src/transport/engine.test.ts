@@ -640,17 +640,10 @@ describe('engine socket routing at the raw transport boundary', () => {
     );
   });
 
-  it('browser sockets select the same host without attempting unsupported WAF upgrade headers', () => {
-    const raw = { ...makeRaw(), webSocketHeaders: false };
-    // A proxied coinbase socket: okx's moved to the relay in AWS_EXIT.md step 3e,
-    // and coinbase is the remaining ws-proxy route dialled through raw.connect.
-    createEngineTransport('coinbase', options({ tealstreetProxy: true }), raw).connect(
-      'wss://advanced-trade-ws-user.coinbase.com',
-      handlers('private'),
-    );
-    expect(raw.connect.mock.lastCall?.[0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private');
-    expect(raw.connect.mock.lastCall?.[1].headers).toEqual({});
-  });
+  // 'browser sockets select the same host without attempting unsupported WAF upgrade
+  // headers' was removed with the last browser ws-proxy route: coinbase moved to the
+  // relay (AWS_EXIT.md 5a) after okx/okxeu/bitget/blofin (3e), so no proxied private
+  // socket is dialled through raw.connect any more.
 
   it('two silent connections select the sticky fallback while any message resets the streak', () => {
     const raw = makeRaw();
