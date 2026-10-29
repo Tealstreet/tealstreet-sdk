@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoFactory, AlgoStore, Change, CommandFuture, Scope};
-use safe_cex_chaser::{ChaserFactory, UNCONFIRMED_ORDER_STOP_REASON};
+use safe_cex_chaser::{ChaserFactory, MAX_CHASES_PER_ACCOUNT, UNCONFIRMED_ORDER_STOP_REASON};
 use safe_cex_engine::engine::{Command, CommandId, Fill};
 use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_engine::model::{
@@ -251,7 +251,7 @@ fn order(id: &str, price: f64, amount: f64, filled: f64, status: OrderStatus) ->
 
 fn start(port: &Rc<FakePort>, payload: &str) -> (ChaserFactory, AlgoCx) {
     let cx = AlgoCx::new(port.clone(), Scope::new());
-    let factory = ChaserFactory::new();
+    let factory = ChaserFactory::new(cx.clone());
     factory.handle("chaser:start", payload, &cx).unwrap();
     (factory, cx)
 }
@@ -312,13 +312,13 @@ async fn an_adverse_move_cancels_and_replaces_at_the_new_bid() {
     local(async {
         let port = FakePort::new("bybit");
         port.accept_placements();
-        let (factory, cx) = start(&port, BUY_ONE);
+        let (factory, _cx) = start(&port, BUY_ONE);
         settle(1100).await;
         port.set_ticker(101.0, 101.5);
         settle(100).await;
         assert_eq!(port.cancels(), vec!["o1".to_string()]);
         assert_eq!(port.placements(), vec![(100.0, 1.0), (101.0, 1.0)]);
-        assert_eq!(factory.book(&cx).active_chasers()[0].attempts, 1);
+        assert_eq!(factory.book().active_chasers()[0].attempts, 1);
     })
     .await;
 }
@@ -343,7 +343,7 @@ async fn a_full_fill_completes_once_and_never_replaces() {
     local(async {
         let port = FakePort::new("bybit");
         port.accept_placements();
-        let (factory, cx) = start(&port, BUY_ONE);
+        let (factory, _cx) = start(&port, BUY_ONE);
         settle(1100).await;
         port.update_order("o1", |order| {
             order.filled = 1.0;
@@ -357,7 +357,7 @@ async fn a_full_fill_completes_once_and_never_replaces() {
         assert_eq!(completes.len(), 1);
         assert_eq!(completes[0]["filled"], 1.0);
         assert_eq!(completes[0]["clientId"], "c1");
-        assert!(factory.book(&cx).active_chasers().is_empty());
+        assert!(factory.book().active_chasers().is_empty());
     })
     .await;
 }
@@ -395,7 +395,7 @@ async fn user_stop_cancels_the_resting_order_and_reports_it() {
         port.accept_placements();
         let (factory, cx) = start(&port, BUY_ONE);
         settle(1100).await;
-        let id = factory.book(&cx).active_chasers()[0].id.clone();
+        let id = factory.book().active_chasers()[0].id.clone();
         factory
             .handle(
                 "chaser:terminate",
@@ -418,9 +418,9 @@ async fn keep_order_stops_without_cancelling() {
     local(async {
         let port = FakePort::new("bybit");
         port.accept_placements();
-        let (factory, cx) = start(&port, BUY_ONE);
+        let (factory, _cx) = start(&port, BUY_ONE);
         settle(1100).await;
-        let book = factory.book(&cx);
+        let book = factory.book();
         let id = book.active_chasers()[0].id.clone();
         book.remove_keep_order(&id);
         settle(10).await;
@@ -637,7 +637,92 @@ async fn terminate_all_stops_every_chase_with_a_warning() {
         assert_eq!(port.cancels().len(), 2);
         assert_eq!(port.completes().len(), 2);
         assert_eq!(port.messages("warning").len(), 2);
-        assert!(factory.book(&cx).active_chasers().is_empty());
+        assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+fn reply_to_placements(port: &Rc<FakePort>, result: &'static str) {
+    *port.responder.borrow_mut() = Box::new(move |command| {
+        if matches!(command, Command::PlaceOrders { .. }) {
+            return Ok(result.into());
+        }
+        Ok("null".into())
+    });
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unreadable_accepted_placement_stops_without_placing_again() {
+    for result in [r#"{"orderIds":["x"]}"#, "null"] {
+        local(async {
+            let port = FakePort::new("bybit");
+            reply_to_placements(&port, result);
+            let _chase = start(&port, BUY_ONE);
+            settle(2000).await;
+            assert_eq!(port.placements().len(), 1, "{result}");
+            assert_eq!(
+                port.completes()[0]["stopReason"],
+                UNCONFIRMED_ORDER_STOP_REASON,
+                "{result}"
+            );
+            assert!(port.messages("error")[0].contains("check open orders"));
+        })
+        .await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_then_dispose_leaves_no_live_order() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        factory.handle("chaser:start", BUY_ONE, &cx).unwrap();
+        settle(1100).await;
+        factory.book().shutdown("Account disposed").await;
+        cx.scope.dispose();
+        let mut cancelled = port.cancels();
+        cancelled.sort();
+        assert_eq!(cancelled, vec!["o1".to_string(), "o2".to_string()]);
+        assert_eq!(port.completes().len(), 2);
+        assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn starts_beyond_the_account_cap_are_refused() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        for _ in 1..MAX_CHASES_PER_ACCOUNT {
+            factory.handle("chaser:start", BUY_ONE, &cx).unwrap();
+        }
+        let refused = factory.handle("chaser:start", BUY_ONE, &cx).unwrap_err();
+        assert!(refused.contains("already active"), "{refused}");
+        assert_eq!(
+            factory.book().active_chasers().len(),
+            MAX_CHASES_PER_ACCOUNT
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_non_finite_price_stops_and_cleans_up_instead_of_panicking() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        port.store
+            .borrow_mut()
+            .tickers
+            .insert("BTCUSDT".into(), ticker(f64::NAN, f64::NAN));
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(100).await;
+        assert!(port.placements().is_empty());
+        assert_eq!(port.completes()[0]["stopReason"], "No usable quote");
+        assert!(factory.book().active_chasers().is_empty());
     })
     .await;
 }
