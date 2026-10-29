@@ -15,6 +15,7 @@ fn sequence(actions: Vec<Action>, success: impl Into<String>, attempt_all: bool)
         actions: actions.into(),
         success: success.into(),
         attempt_all,
+        failure_summary: None,
     }
 }
 fn ticker<'a>(store: &'a Value, symbol: &str) -> &'a Value {
@@ -436,6 +437,18 @@ fn move_order(args: &[String], store: &Value) -> Result<Evaluation, String> {
     if price == n(order, "price") {
         return Ok(done());
     }
+    let rounded = amend_price(order, price, store)?;
+    Ok(sequence(
+        vec![Action::Call(
+            "updateOrder",
+            json!([{"order":order,"update":{"price":rounded}}]),
+        )],
+        format!("Order moved to {price}"),
+        false,
+    ))
+}
+
+pub(crate) fn amend_price(order: &Value, price: f64, store: &Value) -> Result<f64, String> {
     let symbol = order["symbol"].as_str().unwrap_or("");
     let market = rows(store, "markets")
         .iter()
@@ -460,12 +473,5 @@ fn move_order(args: &[String], store: &Value) -> Result<Evaluation, String> {
             market["limits"]["price"]["min"]
         ));
     }
-    Ok(sequence(
-        vec![Action::Call(
-            "updateOrder",
-            json!([{"order":order,"update":{"price":rounded}}]),
-        )],
-        format!("Order moved to {price}"),
-        false,
-    ))
+    Ok(rounded)
 }
