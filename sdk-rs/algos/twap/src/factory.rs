@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use safe_cex_algos::{AlgoCx, AlgoFactory, Scope};
 use safe_cex_engine::engine::Command;
+use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_engine::model::PlaceOrderOpts;
 use serde_json::{Value, json};
 use tokio::sync::Notify;
@@ -194,10 +195,7 @@ impl Inner {
         let future = cx.port.command(command);
         let (inner, task_cx) = (inner.clone(), cx.clone());
         cx.spawn(async move {
-            let outcome = future
-                .await
-                .map(|result| serde_json::from_str::<Vec<String>>(&result).unwrap_or_default())
-                .map_err(|error| error.message);
+            let outcome = placement_outcome(future.await);
             if let Some(token) = settle_token {
                 Self::settled(&inner, &task_cx, &twap_id, token, outcome);
             }
@@ -221,6 +219,21 @@ impl Inner {
         };
         Self::run(inner, cx, effects);
         inner.rescheduled.notify_one();
+    }
+}
+
+/// A slice placement's ids, or the message its failure log carries. Ids that
+/// cannot be read and unknown outcomes say the order may be live: the TWAP
+/// advances as TS does, but never as if nothing was placed.
+pub fn placement_outcome(result: Result<String, VenueError>) -> Result<Vec<String>, String> {
+    match result {
+        Ok(result) => serde_json::from_str::<Vec<String>>(&result)
+            .map_err(|_| format!("order ids unknown, the order may be live (result {result})")),
+        Err(error) if error.outcome == Some(Outcome::Unknown) => Err(format!(
+            "outcome unknown, the order may be live: {}",
+            error.message
+        )),
+        Err(error) => Err(error.message),
     }
 }
 

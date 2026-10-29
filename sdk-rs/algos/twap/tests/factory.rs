@@ -229,3 +229,39 @@ fn rejects_malformed_payloads() {
         assert!(factory.handle("twap:pause", "{", &cx).is_err());
     });
 }
+
+#[test]
+fn placement_outcomes_read_ids_strictly() {
+    use safe_cex_algo_twap::factory::placement_outcome;
+    use safe_cex_engine::error::Outcome;
+    assert_eq!(
+        placement_outcome(Ok(r#"["a","b"]"#.into())),
+        Ok(vec!["a".to_owned(), "b".to_owned()])
+    );
+    assert_eq!(placement_outcome(Ok("[]".into())), Ok(vec![]));
+    for unreadable in [r#"{"orderIds":["a"]}"#, "null", ""] {
+        let error = placement_outcome(Ok(unreadable.into())).unwrap_err();
+        assert!(
+            error.starts_with("order ids unknown, the order may be live"),
+            "{unreadable}"
+        );
+    }
+    let unknown = VenueError {
+        message: "timeout".into(),
+        outcome: Some(Outcome::Unknown),
+        ..Default::default()
+    };
+    assert_eq!(
+        placement_outcome(Err(unknown)),
+        Err("outcome unknown, the order may be live: timeout".to_owned())
+    );
+    let rejected = VenueError {
+        message: "insufficient margin".into(),
+        outcome: Some(Outcome::Rejected),
+        ..Default::default()
+    };
+    assert_eq!(
+        placement_outcome(Err(rejected)),
+        Err("insufficient margin".to_owned())
+    );
+}
