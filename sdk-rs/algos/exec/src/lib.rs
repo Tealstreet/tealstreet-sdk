@@ -2,9 +2,11 @@
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 
+mod capabilities;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 mod placement;
+mod protection;
 
 pub const MAX_COMMAND_BYTES: usize = 16 * 1024;
 pub const MAX_STEPS: usize = 128;
@@ -47,18 +49,62 @@ struct Pending {
     chain: Option<u64>,
     req_id: Option<Value>,
     success: String,
-    placements: VecDeque<placement::Placement>,
+    actions: VecDeque<Action>,
+    attempt_all: bool,
     order_ids: Option<Vec<String>>,
     parallel: bool,
+    succeeded: usize,
+    current_place: bool,
+    failure_context: Option<&'static str>,
 }
 enum Evaluation {
     Done(Value),
     Place(VecDeque<placement::Placement>),
+    Sequence {
+        actions: VecDeque<Action>,
+        success: String,
+        attempt_all: bool,
+    },
     Call {
         method: &'static str,
         args: Value,
         success: String,
     },
+}
+
+enum Action {
+    Buy(placement::Placement),
+    Order(Value),
+    Replacement(Value),
+    Close {
+        position: Value,
+        size: Option<String>,
+    },
+    Call(&'static str, Value),
+}
+impl Action {
+    fn failure_context(&self) -> Option<&'static str> {
+        matches!(self, Self::Replacement(_))
+            .then_some("stop-loss removed, replacement not confirmed — position unprotected")
+    }
+    fn prepare(self, store: &Value) -> Result<(&'static str, Value), String> {
+        match self {
+            Self::Buy(spec) => Ok(("placeOrder", json!([spec.prepare(store)?]))),
+            Self::Order(order) | Self::Replacement(order) => Ok((
+                "placeOrder",
+                json!([placement::prepare_order(order, store)?]),
+            )),
+            Self::Call(method, args) => Ok((method, args)),
+            Self::Close { position, size } => Ok((
+                "placeOrder",
+                json!([protection::prepare_close(
+                    &position,
+                    size.as_deref(),
+                    store
+                )?]),
+            )),
+        }
+    }
 }
 
 impl Exec {
@@ -135,32 +181,60 @@ impl Exec {
         };
         let mut pending = pending;
         let mut result = result;
-        if let (Ok(value), Some(ids)) = (&result, pending.order_ids.as_mut()) {
-            if value
-                .as_array()
-                .is_some_and(|a| a.iter().all(Value::is_string))
-            {
-                if let Some(returned) = value.as_array() {
+        if let Ok(value) = &result
+            && pending.current_place
+        {
+            if let Some(returned) = value.as_array().filter(|a| a.iter().all(Value::is_string)) {
+                if let Some(ids) = pending.order_ids.as_mut() {
                     ids.extend(returned.iter().map(|v| v.as_str().unwrap().to_string()));
-                }
-                if let Some(next) = pending.placements.pop_front() {
-                    match next.prepare(&host.snapshot()) {
-                        Ok(order) => {
-                            self.issue(pending, "placeOrder", json!([order]), host);
-                            return;
-                        }
-                        Err(message) => {
-                            result = Err(json!({"message":message,"outcome":"notSent"}))
-                        }
-                    }
                 }
             } else {
                 result = Err(json!({"message":"Invalid placement result","outcome":"unknown"}));
             }
         }
+        if result.is_ok() {
+            pending.succeeded += 1;
+        }
+        if result.is_ok() || pending.attempt_all {
+            if let Err(error) = &result {
+                log(
+                    host,
+                    &pending.req_id,
+                    &format!(
+                        "Error: Command failed: {}",
+                        error["message"].as_str().unwrap_or("Command failed")
+                    ),
+                );
+            }
+            while let Some(action) = pending.actions.pop_front() {
+                pending.failure_context = action.failure_context();
+                match action.prepare(&host.snapshot()) {
+                    Ok((method, args)) => {
+                        self.issue(pending, method, args, host);
+                        return;
+                    }
+                    Err(message) if pending.attempt_all => {
+                        log(host, &pending.req_id, &format!("Error: {message}"))
+                    }
+                    Err(message) => {
+                        result = Err(json!({"message":message,"outcome":"notSent"}));
+                        break;
+                    }
+                }
+            }
+            if pending.attempt_all {
+                result = Ok(Value::Null);
+            }
+        }
         let result = match result {
             Ok(_) => {
-                log(host, &pending.req_id, &pending.success);
+                for line in pending
+                    .success
+                    .replace("{ok}", &pending.succeeded.to_string())
+                    .split('\n')
+                {
+                    log(host, &pending.req_id, line);
+                }
                 let mut result = json!({"handled":true,"success":true});
                 if let Some(ids) = pending.order_ids {
                     result["data"] = json!({"orderIds":ids});
@@ -168,10 +242,14 @@ impl Exec {
                 result
             }
             Err(error) => {
-                let message = error
+                let original = error
                     .get("message")
                     .and_then(Value::as_str)
                     .unwrap_or("Command failed");
+                let message = pending
+                    .failure_context
+                    .map(|context| format!("{context}: {original}"))
+                    .unwrap_or_else(|| original.into());
                 log(
                     host,
                     &pending.req_id,
@@ -188,9 +266,10 @@ impl Exec {
         }
     }
 
-    fn issue(&mut self, pending: Pending, method: &str, args: Value, host: &mut impl Host) {
+    fn issue(&mut self, mut pending: Pending, method: &str, args: Value, host: &mut impl Host) {
         let token = self.id();
         let parallel = pending.parallel;
+        pending.current_place = method == "placeOrder";
         self.pending.insert(token, pending);
         if let Err(error) = host.call_scoped(token, method, args, parallel) {
             self.complete(token, Err(error), host);
@@ -247,13 +326,61 @@ impl Exec {
                         } else {
                             "Orders placed".into()
                         },
-                        placements,
+                        actions: placements.into_iter().map(Action::Buy).collect(),
+                        attempt_all: false,
                         order_ids: Some(Vec::new()),
                         parallel,
+                        succeeded: 0,
+                        current_place: false,
+                        failure_context: None,
                     };
                     self.chains.insert(id, chain);
                     match order {
                         Ok(order) => self.issue(pending, "placeOrder", json!([order]), host),
+                        Err(message) => {
+                            let token = self.id();
+                            self.pending.insert(token, pending);
+                            self.complete(
+                                token,
+                                Err(json!({"message":message,"outcome":"notSent"})),
+                                host,
+                            );
+                        }
+                    }
+                    if !parallel {
+                        return;
+                    }
+                }
+                Evaluation::Sequence {
+                    mut actions,
+                    success,
+                    attempt_all,
+                } => {
+                    let Some(first) = actions.pop_front() else {
+                        log(host, &chain.req_id, &success.replace("{ok}", "0"));
+                        if !parallel {
+                            chain.last = Some(json!({"handled":true,"success":true}));
+                        }
+                        self.chains.insert(id, chain);
+                        continue;
+                    };
+                    let pending = Pending {
+                        chain: (!parallel).then_some(id),
+                        req_id: chain.req_id.clone(),
+                        success,
+                        actions,
+                        attempt_all,
+                        order_ids: None,
+                        parallel,
+                        succeeded: 0,
+                        current_place: false,
+                        failure_context: None,
+                    };
+                    self.chains.insert(id, chain);
+                    let mut pending = pending;
+                    pending.failure_context = first.failure_context();
+                    match first.prepare(&host.snapshot()) {
+                        Ok((method, args)) => self.issue(pending, method, args, host),
                         Err(message) => {
                             let token = self.id();
                             self.pending.insert(token, pending);
@@ -280,9 +407,13 @@ impl Exec {
                             chain: (!parallel).then_some(id),
                             req_id: chain.req_id.clone(),
                             success,
-                            placements: VecDeque::new(),
+                            actions: VecDeque::new(),
+                            attempt_all: false,
                             order_ids: None,
                             parallel,
+                            succeeded: 0,
+                            current_place: false,
+                            failure_context: None,
                         },
                     );
                     self.chains.insert(id, chain);
@@ -431,6 +562,9 @@ fn evaluate(
             Ok(orders) => Evaluation::Place(orders),
             Err(error) => failed(error),
         },
+        "close" | "c" | "stop" | "be" | "breakeven" | "trail" | "move" | "mv" | "bump" => {
+            protection::evaluate(symbol, &args, store, text)
+        }
         "cancel" | "x" => cancel(symbol, &args, store),
         "leverage" | "lev" => {
             if let Some(tail) = args.get(2)

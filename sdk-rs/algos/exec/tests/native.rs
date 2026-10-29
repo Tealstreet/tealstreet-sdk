@@ -329,3 +329,11 @@ async fn native_buy_uses_engine_store_and_returns_real_ids_without_replaying_unk
         cx.scope.dispose();
     }).await;
 }
+
+#[test]
+fn native_amend_translation_changes_price_only_and_retains_the_real_order_id() {
+    let command=translate("updateOrder",&json!([{"order":{"id":"native-id","symbol":"BTCUSDT","side":"sell","amount":7,"reduceOnly":true},"update":{"price":123.5}}]),99).unwrap();
+    assert!(
+        matches!(command,Command::AmendOrder{command:99,id,price:Some(123.5),amount:None} if id=="native-id")
+    );
+}
