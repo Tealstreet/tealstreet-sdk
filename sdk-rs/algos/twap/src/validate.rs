@@ -6,6 +6,9 @@ use crate::types::{TwapOptions, TwapState};
 /// The web form's and frame API's slice cap (`TWAP_MAX_ORDERS`).
 pub const MAX_ORDERS_COUNT: u32 = 1_000;
 
+/// Running TWAPs one account may hold; the chaser book caps chases at 50.
+pub const MAX_TWAPS_PER_ACCOUNT: usize = 20;
+
 pub fn options(options: &TwapOptions) -> Result<(), String> {
     if !(options.size.is_finite() && options.size > 0.0) {
         return Err("size must be a positive number".to_owned());

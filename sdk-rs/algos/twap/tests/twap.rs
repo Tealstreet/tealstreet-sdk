@@ -879,3 +879,36 @@ fn an_unknown_placement_outcome_still_advances_the_slice() {
     assert_eq!(book.get(&id).unwrap().state.orders_executed, 1);
     assert!(book.wake_at().is_some());
 }
+
+#[test]
+fn an_account_runs_at_most_twenty_twaps() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    for _ in 0..safe_cex_algo_twap::MAX_TWAPS_PER_ACCOUNT {
+        let effects = book.handle("twap:start", &options(json!({})), &mut env, &view);
+        assert!(logs(&effects).is_empty());
+    }
+    let effects = book.handle("twap:start", &options(json!({})), &mut env, &view);
+    assert_eq!(
+        logs(&effects),
+        ["TWAP BTCUSDT rejected: at most 20 TWAPs can run per account"]
+    );
+    assert!(placements(&effects).is_empty());
+    let restored = book.handle(
+        "twap:state",
+        &json!([persisted("extra", "paused", 0.0)]),
+        &mut env,
+        &view,
+    );
+    assert_eq!(
+        logs(&restored),
+        ["TWAP BTCUSDT not restored: at most 20 TWAPs can run per account"]
+    );
+
+    // A stopped TWAP frees its place.
+    let first = book.ids().next().unwrap().to_owned();
+    book.handle("twap:stop", &json!(first), &mut env, &view);
+    let effects = book.handle("twap:start", &options(json!({})), &mut env, &view);
+    assert!(logs(&effects).is_empty());
+    assert_eq!(book.ids().count(), 20);
+}
