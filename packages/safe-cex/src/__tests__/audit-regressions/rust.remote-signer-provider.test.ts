@@ -510,8 +510,10 @@ describe('BloFin base64-of-hex remote admission', () => {
     }
   });
 
-  it('refuses a BloFin PayloadSigner at setup', () => {
-    expect(() => createRemoteSignerProvider({ exchangeName: 'blofin', identities: { primary: own }, payloadSigner: vi.fn() }))
-      .toThrow(/^Remote signing request refused$/);
+  it('never asks a PayloadSigner for a BloFin signature', async () => {
+    const callback = vi.fn();
+    const signer = createRemoteSignerProvider({ exchangeName: 'blofin', identities: { primary: own }, payloadSigner: callback });
+    await expect(signer(work(), context())).rejects.toThrow(/^Remote signing request refused$/);
+    expect(callback).not.toHaveBeenCalled();
   });
 });

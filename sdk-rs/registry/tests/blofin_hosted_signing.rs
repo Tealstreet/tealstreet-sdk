@@ -59,7 +59,9 @@ fn blofin_captures_primary_http_and_ws_as_base64_of_the_hex_mac() {
     // Independent Python stdlib vectors: base64(hmac_sha256(secret, preimage).hexdigest()).
     assert_eq!(
         output.signature.as_deref(),
-        Some("MWJmOWE2ZTk4OWYxNzliOWVmOGIyOTc4NWFlMzgxMWY1YjAxZmYxMjM2NDc3MDQ3NmRlMjIwNWEzZWZhZTZmYw==")
+        Some(
+            "MWJmOWE2ZTk4OWYxNzliOWVmOGIyOTc4NWFlMzgxMWY1YjAxZmYxMjM2NDc3MDQ3NmRlMjIwNWEzZWZhZTZmYw=="
+        )
     );
     assert_eq!(output.credential.as_deref(), Some("test-key"));
     assert_eq!(

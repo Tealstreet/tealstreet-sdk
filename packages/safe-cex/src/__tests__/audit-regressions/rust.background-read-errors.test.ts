@@ -17,8 +17,8 @@ import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 const accounts: RustEngineExchange[] = [];
 afterEach(() => accounts.splice(0).forEach((exchange) => exchange.dispose()));
 
-const rejecting = (name: ExchangeName) => {
-  const exchange = new RustEngineExchange(name, { key: 'key', secret: 'secret' }, new DefaultStore());
+const rejecting = (name: ExchangeName, passphrase?: string) => {
+  const exchange = new RustEngineExchange(name, { key: 'key', secret: 'secret', passphrase }, new DefaultStore());
   accounts.push(exchange);
   const command = vi.fn().mockRejectedValue(new Error('leverage unavailable'));
   (exchange as unknown as { host: unknown }).host = { command, flush: vi.fn(), dispose: vi.fn() };
@@ -29,7 +29,7 @@ const rejecting = (name: ExchangeName) => {
 };
 
 it('keeps a failed symbol-switch leverage read at warning level', async () => {
-  const { exchange, command, errors } = rejecting('blofin');
+  const { exchange, command, errors } = rejecting('blofin', 'pass');
   const warnings = vi.fn();
   exchange.on('warning', warnings);
   await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toBeNull();
@@ -47,7 +47,7 @@ it('lets symbol metadata and chaser fill reads reject without an error event', a
 });
 
 it('still reports a failed write once', async () => {
-  const { exchange, errors } = rejecting('blofin');
+  const { exchange, errors } = rejecting('blofin', 'pass');
   await expect(exchange.setLeverage('BTCUSDT', 3)).rejects.toThrow('leverage unavailable');
   expect(errors).toHaveBeenCalledTimes(1);
 });

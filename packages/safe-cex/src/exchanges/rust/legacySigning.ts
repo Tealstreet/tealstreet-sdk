@@ -14,8 +14,8 @@ import { createBinanceRequestInterceptor, isBinancePublicSigningRequest } from '
 import { finishBingxRequest, isBingxUnsignedRequest, prepareBingxRequest, serializeBingxParams } from '../bingx/bingx.signing';
 import { finishBitgetRequest, prepareBitgetRequest } from '../bitget/bitget.signing';
 import { BROKER_ID as BITGET_BROKER_ID } from '../bitget/bitget.types';
-import { finishBlofinRequest, isBlofinUnsignedRequest, prepareBlofinRequest } from '../blofin/blofin.signing';
 import { finishBitunixRequest, isBitunixUnsignedRequest, prepareBitunixRequest } from '../bitunix/bitunix.signing';
+import { finishBlofinRequest, isBlofinUnsignedRequest, prepareBlofinRequest } from '../blofin/blofin.signing';
 import { createBybitRequestInterceptor, isBybitUnsignedSigningRequest } from '../bybit/bybit.signing';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../bybit/bybit.site';
 import { BROKER_ID, RECV_WINDOW } from '../bybit/bybit.types';

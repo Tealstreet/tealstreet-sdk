@@ -238,9 +238,6 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
   const passphrases = new Map<string, number[]>();
   try {
     if (encoding !== 'hex' && encoding !== 'base64' && encoding !== 'hex-base64') throw refused();
-    // The PayloadSigner wire names only raw hex or base64 MAC encodings;
-    // a RemoteSigner wins and never falls back to it.
-    if (!remoteSigner && payloadSigner && encoding === 'hex-base64') throw refused();
     if ((wire?.extraData === 'secondsTimestamp') !== (wire?.secondsSuffix !== undefined)) throw refused();
     accountName = remoteSigner?.accountName;
     if (accountName !== undefined && (typeof accountName !== 'string' || accountName.length > 4096)) throw refused();
@@ -412,10 +409,11 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
             || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
           values.push(mac(response.wsAuthSignature, encoding));
         } else {
+          // The PayloadSigner wire names only raw hex or base64 MAC encodings.
+          if (encoding === 'hex-base64') throw refused();
           const response = await guarded(signal, undefined, () => payloadSigner!.call(item.entry.receiver, {
             exchangeName, key: item.entry.identity.publicCredential, payload: item.payload,
-            // Setup refused hex-base64 for a PayloadSigner.
-            scheme: 'hmac-sha256', encoding: encoding as 'hex' | 'base64',
+            scheme: 'hmac-sha256', encoding,
           }));
           if (!record(response)) throw refused();
           const extra = headers(response.headers);
