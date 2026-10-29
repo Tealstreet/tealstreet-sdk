@@ -36,6 +36,7 @@ impl Default for Probe {
                 controls: ControlPolicy::Native,
                 invalidation: Invalidation::None,
                 subscription_interval_ms: 0.,
+                close_floors: &[],
             },
             timing: Some(NativeTiming::default()),
             snapshot: false,
@@ -220,7 +221,7 @@ impl Harness {
     fn timeout(&self, timeout: Timeout) -> bool {
         self.engine.venue.events.iter().any(|event| {
             matches!(event,
-            LifecycleEvent::Retired { epoch, reason: RetireReason::Timeout(kind) }
+            LifecycleEvent::Retired { epoch, reason: RetireReason::Timeout(kind), .. }
             if *epoch == self.epoch && *kind == timeout)
         })
     }

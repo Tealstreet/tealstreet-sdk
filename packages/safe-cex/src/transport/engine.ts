@@ -7,7 +7,7 @@ import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } fr
 import { AxiosHeaders } from 'axios';
 
 import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
-import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import { tunnelEgressUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/host';
 import { captureProxyTokenProvider, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
@@ -268,7 +268,7 @@ export const resolveEngineRoutingPlan = (
         ...(route.proxied && provider === tealstreetTransport ? TEALSTREET_REST_HEADERS : {}),
       },
       ...(Object.keys(headerAliases).length ? { headerAliases } : {}),
-      ...(how ? { tunnelUrl: routing.howEgress === 'jp' ? TOKYO_HOW_EGRESS : SINGAPORE_HOW_EGRESS } : {}),
+      ...(how ? { tunnelUrl: tunnelEgressUrl(routing.howEgress) } : {}),
     };
   };
   const readPlan = options.secondary_key

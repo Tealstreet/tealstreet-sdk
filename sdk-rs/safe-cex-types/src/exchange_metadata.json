@@ -49,11 +49,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "mark_price",
@@ -162,11 +166,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -275,13 +283,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -305,20 +315,26 @@
       "marketOrderDelayInSeconds": 2,
       "privateProxyRegions": {
         "SG": [
-          "13.215.143.179",
-          "54.169.98.78",
-          "18.139.171.87",
-          "52.76.105.51",
-          "13.251.151.220",
-          "54.179.219.84",
-          "18.139.81.245"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ],
         "JA": [
-          "18.178.14.27",
-          "35.75.147.201",
-          "35.78.132.227",
-          "54.238.24.246",
-          "54.65.38.58"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ]
       },
       "autoDownSizeReduceOrders": false,
@@ -409,13 +425,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -439,20 +457,26 @@
       "marketOrderDelayInSeconds": 2,
       "privateProxyRegions": {
         "SG": [
-          "13.215.143.179",
-          "54.169.98.78",
-          "18.139.171.87",
-          "52.76.105.51",
-          "13.251.151.220",
-          "54.179.219.84",
-          "18.139.81.245"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ],
         "JA": [
-          "18.178.14.27",
-          "35.75.147.201",
-          "35.78.132.227",
-          "54.238.24.246",
-          "54.65.38.58"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ]
       },
       "autoDownSizeReduceOrders": false,
@@ -534,8 +558,7 @@
         "oneway"
       ],
       "marginTypes": [
-        "cross",
-        "isolated"
+        "cross"
       ],
       "hasIndependentHedgedLeverageInIsolatedMargin": false,
       "hasIndependentHedgedLeverageInCrossMargin": false,
@@ -580,7 +603,7 @@
       "supportsReadOnlyKey": false,
       "alwaysCalculateUnrealizedPnlFromLastPrice": true,
       "forceAccountPositionModeChangeOnExchangeItself": false,
-      "hideMarginTypeSelector": false,
+      "hideMarginTypeSelector": true,
       "hidePositionModeSelector": true,
       "hideLightweightChartsPopovers": false,
       "supportsTPSLCloseAttribute": false,
@@ -648,13 +671,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -678,20 +703,26 @@
       "marketOrderDelayInSeconds": 2,
       "privateProxyRegions": {
         "SG": [
-          "13.215.143.179",
-          "54.169.98.78",
-          "18.139.171.87",
-          "52.76.105.51",
-          "13.251.151.220",
-          "54.179.219.84",
-          "18.139.81.245"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ],
         "JA": [
-          "18.178.14.27",
-          "35.75.147.201",
-          "35.78.132.227",
-          "54.238.24.246",
-          "54.65.38.58"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ]
       },
       "autoDownSizeReduceOrders": false,
@@ -782,13 +813,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -812,20 +845,26 @@
       "marketOrderDelayInSeconds": 2,
       "privateProxyRegions": {
         "SG": [
-          "13.215.143.179",
-          "54.169.98.78",
-          "18.139.171.87",
-          "52.76.105.51",
-          "13.251.151.220",
-          "54.179.219.84",
-          "18.139.81.245"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ],
         "JA": [
-          "18.178.14.27",
-          "35.75.147.201",
-          "35.78.132.227",
-          "54.238.24.246",
-          "54.65.38.58"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ]
       },
       "autoDownSizeReduceOrders": false,
@@ -917,11 +956,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -990,10 +1033,10 @@
       "requiresPassphrase": false,
       "requiresApplicationId": false,
       "requiresApiKeyIndex": false,
-      "enabled": false,
+      "enabled": true,
       "enabledInDev": true,
-      "enableInPreview": false,
-      "supportedOnMobile": false,
+      "enableInPreview": true,
+      "supportedOnMobile": true,
       "supportsTestnet": false,
       "orderbookTickDelay": 60,
       "prettyName": "Binance Inverse",
@@ -1030,11 +1073,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -1044,7 +1091,7 @@
       "defaultSLTriggerType": "mark_price",
       "orderPendingUpdateDelay": 250,
       "stopOrderPendingUpdateDelay": 250,
-      "requiresCors": false,
+      "requiresCors": true,
       "hasEmptyPositions": true,
       "klineCallbackResetThreshold": 20,
       "positionModeIsGlobal": false,
@@ -1056,7 +1103,19 @@
       "disconnectWarningThreshold": 20000,
       "supportsFeeRates": false,
       "marketOrderDelayInSeconds": 2,
-      "privateProxyRegions": {},
+      "privateProxyRegions": {
+        "JA": [
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
+        ]
+      },
       "autoDownSizeReduceOrders": false,
       "tickInterval": 500,
       "supportsChaser": true,
@@ -1095,6 +1154,112 @@
         "balance": true
       },
       "requiresTickersForMarketsLoaded": true
+    },
+    "binanceoptions": {
+      "logo": "/static/exchanges/logos/BINANCE/logo.svg",
+      "lightLogo": "/static/exchanges/logos/BINANCE/light.png",
+      "darkLogo": "/static/exchanges/logos/BINANCE/dark.png",
+      "refImage": "/static/exchanges/reflinks/binance/ref.png",
+      "requiresPassphrase": false,
+      "requiresApplicationId": false,
+      "requiresApiKeyIndex": false,
+      "enabled": false,
+      "enabledInDev": false,
+      "enableInPreview": false,
+      "supportedOnMobile": false,
+      "supportsTestnet": true,
+      "orderbookTickDelay": 60,
+      "prettyName": "Binance Options",
+      "leverageMagnets": [
+        1
+      ],
+      "tvIntraDayMultipliers": [
+        "1",
+        "5",
+        "15",
+        "30",
+        "60",
+        "240"
+      ],
+      "tvMaxGetBarFetches": 2,
+      "candleApiCountLimit": 500,
+      "defaultQuote": "USDT",
+      "positionModes": [
+        "oneway"
+      ],
+      "marginTypes": [
+        "cross"
+      ],
+      "hasIndependentHedgedLeverageInIsolatedMargin": false,
+      "hasIndependentHedgedLeverageInCrossMargin": false,
+      "supportsTrailingStopLoss": false,
+      "supportsOpeningTriggerOrders": false,
+      "privateProxyIps": [
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
+      ],
+      "supportedTPSLTriggerTypes": [],
+      "orderPendingUpdateDelay": 250,
+      "stopOrderPendingUpdateDelay": 250,
+      "requiresCors": false,
+      "hasEmptyPositions": true,
+      "klineCallbackResetThreshold": 20,
+      "positionModeIsGlobal": false,
+      "marginTypeIsGlobal": false,
+      "requiresNoSecret": false,
+      "supportsVault": false,
+      "leverageIsGlobal": false,
+      "forbidCors": false,
+      "disconnectWarningThreshold": 20000,
+      "supportsFeeRates": false,
+      "marketOrderDelayInSeconds": 2,
+      "privateProxyRegions": {},
+      "autoDownSizeReduceOrders": false,
+      "tickInterval": 10000,
+      "supportsChaser": false,
+      "supportsPositionMargin": false,
+      "supportsClosedPnLEndpoint": false,
+      "supportsPartialStops": false,
+      "supportsInfinityStops": false,
+      "supportsMaxCrossLeverage": true,
+      "supportsTunnel": false,
+      "supportsWsRoute": false,
+      "requiresOmniKeySeed": false,
+      "leverageSliderDisabled": true,
+      "supportsFetchSymbolMaxLeverage": false,
+      "unifiedMargin": true,
+      "supportsReadOnlyKey": false,
+      "alwaysCalculateUnrealizedPnlFromLastPrice": false,
+      "forceAccountPositionModeChangeOnExchangeItself": false,
+      "hideMarginTypeSelector": true,
+      "hidePositionModeSelector": true,
+      "hideLightweightChartsPopovers": false,
+      "supportsTPSLCloseAttribute": false,
+      "fetchLeverageOnMarginSymbolChange": false,
+      "enforceWsTunnel": false,
+      "doesNotSupportOpenInterest": true,
+      "supportsKlineSeconds": true,
+      "fetchOHLCVInWorker": false,
+      "supportsPublicOnly": false,
+      "exchangeName": "binanceoptions",
+      "refLink": "https://teal.link/Binance1",
+      "latencyDomain": "eapi.binance.com",
+      "features": {
+        "kline": true,
+        "orderbook": false,
+        "orders": true,
+        "positions": true,
+        "balance": true
+      },
+      "optionsOnly": true,
+      "supportsOptionsToggle": false
     },
     "binancepm": {
       "logo": "/static/exchanges/logos/BINANCE/logo.svg",
@@ -1143,11 +1308,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -1256,11 +1425,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 250,
@@ -1364,11 +1537,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "mark_price"
@@ -1474,11 +1651,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "mark_price"
@@ -1585,11 +1766,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "mark_price"
@@ -1695,11 +1880,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -1809,11 +1998,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -1923,11 +2116,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -1951,11 +2148,15 @@
       "marketOrderDelayInSeconds": 2,
       "privateProxyRegions": {
         "JA": [
-          "18.178.14.27",
-          "35.75.147.201",
-          "35.78.132.227",
-          "54.238.24.246",
-          "54.65.38.58"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ]
       },
       "autoDownSizeReduceOrders": true,
@@ -1979,7 +2180,7 @@
       "hidePositionModeSelector": false,
       "hideLightweightChartsPopovers": false,
       "supportsTPSLCloseAttribute": false,
-      "fetchLeverageOnMarginSymbolChange": false,
+      "fetchLeverageOnMarginSymbolChange": true,
       "enforceWsTunnel": false,
       "doesNotSupportOpenInterest": false,
       "supportsKlineSeconds": true,
@@ -2043,13 +2244,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 1000,
@@ -2155,11 +2358,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -2183,20 +2390,26 @@
       "marketOrderDelayInSeconds": 2,
       "privateProxyRegions": {
         "JA": [
-          "18.178.14.27",
-          "35.75.147.201",
-          "35.78.132.227",
-          "54.238.24.246",
-          "54.65.38.58"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ],
         "SG": [
-          "13.215.143.179",
-          "54.169.98.78",
-          "18.139.171.87",
-          "52.76.105.51",
-          "13.251.151.220",
-          "54.179.219.84",
-          "18.139.81.245"
+          "167.179.112.217",
+          "45.63.121.235",
+          "45.77.135.138",
+          "108.61.162.122",
+          "149.28.30.214",
+          "108.160.129.108",
+          "45.77.27.69",
+          "45.76.52.241",
+          "108.61.247.61"
         ]
       },
       "autoDownSizeReduceOrders": false,
@@ -2281,10 +2494,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "54.238.24.246",
-        "18.176.98.246"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -2395,13 +2613,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -2511,13 +2731,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -2624,11 +2846,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -2734,13 +2960,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price"
@@ -2849,13 +3077,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 250,
@@ -2961,19 +3191,20 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
-        "last_price",
         "mark_price"
       ],
-      "defaultTPTriggerType": "last_price",
+      "defaultTPTriggerType": "mark_price",
       "defaultSLTriggerType": "mark_price",
       "orderPendingUpdateDelay": 1000,
       "stopOrderPendingUpdateDelay": 1000,
@@ -3077,19 +3308,20 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
-        "last_price",
         "mark_price"
       ],
-      "defaultTPTriggerType": "last_price",
+      "defaultTPTriggerType": "mark_price",
       "defaultSLTriggerType": "mark_price",
       "orderPendingUpdateDelay": 1000,
       "stopOrderPendingUpdateDelay": 1000,
@@ -3191,11 +3423,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -3304,11 +3540,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -3417,11 +3657,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -3530,11 +3774,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -3645,13 +3893,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -3763,13 +4013,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 3000,
@@ -3872,13 +4124,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 1000,
@@ -3986,13 +4240,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 3000,
@@ -4099,13 +4355,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 3000,
@@ -4212,13 +4470,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 3000,
@@ -4325,13 +4585,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 3000,
@@ -4439,13 +4701,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 3000,
@@ -4550,13 +4814,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 3000,
@@ -4665,13 +4931,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 3000,
@@ -4777,13 +5045,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [],
       "orderPendingUpdateDelay": 250,
@@ -4885,13 +5155,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -5000,11 +5272,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -5111,11 +5387,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price"
@@ -5222,11 +5502,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price",
@@ -5333,11 +5617,15 @@
       "supportsTrailingStopLoss": true,
       "supportsOpeningTriggerOrders": false,
       "privateProxyIps": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "last_price"
@@ -5443,13 +5731,15 @@
       "supportsTrailingStopLoss": false,
       "supportsOpeningTriggerOrders": true,
       "privateProxyIps": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "supportedTPSLTriggerTypes": [
         "mark_price",
@@ -5656,13 +5946,15 @@
     "supportsTrailingStopLoss": true,
     "supportsOpeningTriggerOrders": true,
     "privateProxyIps": [
-      "13.215.143.179",
-      "54.169.98.78",
-      "18.139.171.87",
-      "52.76.105.51",
-      "13.251.151.220",
-      "54.179.219.84",
-      "18.139.81.245"
+      "167.179.112.217",
+      "45.63.121.235",
+      "45.77.135.138",
+      "108.61.162.122",
+      "149.28.30.214",
+      "108.160.129.108",
+      "45.77.27.69",
+      "45.76.52.241",
+      "108.61.247.61"
     ],
     "supportedTPSLTriggerTypes": [
       "last_price",
@@ -5686,20 +5978,26 @@
     "marketOrderDelayInSeconds": 2,
     "privateProxyRegions": {
       "SG": [
-        "13.215.143.179",
-        "54.169.98.78",
-        "18.139.171.87",
-        "52.76.105.51",
-        "13.251.151.220",
-        "54.179.219.84",
-        "18.139.81.245"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ],
       "JA": [
-        "18.178.14.27",
-        "35.75.147.201",
-        "35.78.132.227",
-        "54.238.24.246",
-        "54.65.38.58"
+        "167.179.112.217",
+        "45.63.121.235",
+        "45.77.135.138",
+        "108.61.162.122",
+        "149.28.30.214",
+        "108.160.129.108",
+        "45.77.27.69",
+        "45.76.52.241",
+        "108.61.247.61"
       ]
     },
     "autoDownSizeReduceOrders": false,

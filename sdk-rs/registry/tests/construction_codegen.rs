@@ -15,8 +15,14 @@ fn two_families_declare_owned_presentation_without_enabling_runtime_admission() 
         assert!(output.contains("signature_encoding: SignatureEncoding::Base64"));
         assert!(output.contains(&format!("passphrase_header: Some(\"{header}\")")));
     }
+    let blofin = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"blofin":{"remoteSigning":{"signatureEncoding":"hex-base64","passphraseHeader":"ACCESS-PASSPHRASE"}}}}"#;
+    assert!(
+        build_support::generate(blofin)
+            .unwrap()
+            .contains("signature_encoding: SignatureEncoding::Base64Hex")
+    );
     for declaration in [
-        r#"{"signatureEncoding":"hex-base64"}"#,
+        r#"{"signatureEncoding":"base64-hex"}"#,
         r#"{"signatureEncoding":true}"#,
         r#"{"passphraseHeader":""}"#,
         r#"{"passphraseHeader":"Bad Name"}"#,

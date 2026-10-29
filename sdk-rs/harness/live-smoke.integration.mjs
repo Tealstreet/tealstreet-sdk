@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadEngine } from './engine.mjs';
 import { prepareFetch } from '../hosts/wasm/js/managed-http.mjs';
-import { runLiveSmoke, fencedTransport } from './live-smoke.mjs';
+import { runLiveSmoke, fencedTransport, dryRunLiveSmoke, dryRunTransport } from './live-smoke.mjs';
 import { liveSmokeProfile } from './live-smoke-venues.mjs';
 import { venueOf } from './venues.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
@@ -272,4 +272,56 @@ test('an oversized venue minimum fails before every account mutation', async () 
   assert.equal(fake.orders.size, 0);
   assert.equal(fake.calls.filter((r) => r.method !== 'GET' &&
     !new URL(r.url).pathname.endsWith('/listenKey')).length, 0);
+});
+
+test('dry run sizes the order from public data and sends no request carrying credentials', async () => {
+  const fake = fakeBinance(), records = [];
+  const credentials = { KEY: 'stdin-live-key-do-not-send', SECRET: 'stdin-live-secret-do-not-send' };
+  const supplied = liveSmokeProfile('binance', 'testnet', {}, { credentials });
+  // No egress guard here: the public-only engine alone must keep every request unsigned.
+  const result = await dryRunLiveSmoke({ venue: venueOf('binance'), profile: supplied,
+    transport: fencedTransport(fake.transport, supplied),
+    write: (row) => records.push(row), symbol: 'BTCUSDT', timeoutMs: 2000, WasmEngine });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.credentials, 'parsed');
+  assert.equal(result.plan.symbol, 'BTCUSDT');
+  assert.equal(result.plan.timeInForce, 'PostOnly');
+  assert.ok(result.plan.price < 99999.9 * 0.98 && result.plan.amendPrice < result.plan.price);
+  assert.ok(result.plan.amount * result.plan.price <= 100);
+  assert.ok(fake.calls.length > 0, 'public discovery ran');
+  for (const request of fake.calls) {
+    const path = new URL(request.url).pathname;
+    assert.equal(request.method, 'GET', path);
+    assert.ok(!/order|leverage|listenKey|account|position|symbolConfig/i.test(path), path);
+    const text = JSON.stringify(request);
+    for (const value of [...Object.values(credentials), 'signature']) assert.equal(text.includes(value), false, path);
+  }
+  const serialized = records.map((r) => JSON.stringify(r)).join('\n');
+  for (const value of Object.values(credentials)) assert.equal(serialized.includes(value), false);
+});
+
+test('dry run refuses any outgoing text that carries supplied credential material', async () => {
+  const sent = [];
+  const live = { now: () => 0, connect: () => ({ send: (text) => sent.push(text), close() {} }), request: async (request) => sent.push(request) };
+  const guarded = dryRunTransport(live, ['dry-run-key-material']);
+  await guarded.request({ url: 'https://demo-fapi.binance.com/fapi/v1/time', headers: {} });
+  assert.throws(() => guarded.request({ url: 'https://demo-fapi.binance.com/x', headers: { 'X-MBX-APIKEY': 'dry-run-key-material' } }), /dry-run-credential-egress/);
+  assert.throws(() => guarded.connect('wss://demo-fstream.binance.com/ws/dry-run-key-material', {}), /dry-run-credential-egress/);
+  const socket = guarded.connect('wss://demo-fstream.binance.com/ws', {});
+  assert.throws(() => socket.send('{"key":"dry-run-key-material"}'), /dry-run-credential-egress/);
+  assert.equal(sent.length, 1);
+});
+
+test('a minimal mainnet-style run places, confirms, cancels and reads back without amend or leverage writes', async () => {
+  const fake = fakeBinance(), records = [];
+  const minimal = { ...profile, minimal: true };
+  const result = await runLiveSmoke({ venue: venueOf('binance'), profile: minimal, transport: fencedTransport(fake.transport, minimal),
+    write: (row) => records.push(row), symbol: 'BTCUSDT', timeoutMs: 2000, WasmEngine });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.cleanupComplete, true);
+  assert.deepEqual(result.skipped, ['amend', 'lower-leverage']);
+  assert.deepEqual(records.filter((r) => r.type === 'command').map((r) => r.op), ['placeOrders', 'cancelOrders', 'cancelSymbolOrders']);
+  assert.equal(fake.calls.some((r) => new URL(r.url).pathname.endsWith('/leverage')), false);
+  assert.equal(fake.calls.filter((r) => r.method === 'POST' && new URL(r.url).pathname.endsWith('/order')).length, 1);
+  assert.equal(fake.orders.size, 0);
 });

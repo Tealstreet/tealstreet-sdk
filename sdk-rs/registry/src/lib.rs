@@ -44,8 +44,10 @@ pub use safe_cex_venue_kraken::sign::hosted as kraken_hosted;
 #[cfg(feature = "asterdex")]
 mod asterdex_setup;
 mod construction;
-#[cfg(feature = "dispatch-signing")]
+#[cfg(feature = "hosted-signing")]
 pub mod hosted_signing;
+#[cfg(feature = "hosted-wallet")]
+pub mod hosted_wallet;
 #[cfg(feature = "hyperliquid")]
 mod hyperliquid_setup;
 #[cfg(feature = "lighter")]
@@ -416,54 +418,6 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     })
 }
 
-/// BloFin's one provider setup from the configured strings. Every private
-/// request and the socket login sign through it; the venue holds only refs.
-/// Passphrase refs keep native inheritance exactly.
-#[cfg(feature = "blofin")]
-fn blofin_signer(
-    options: &EngineOptions,
-) -> Result<
-    (
-        Option<safe_cex_engine::signing::Provider>,
-        safe_cex_engine::signing::Identities,
-    ),
-    VenueError,
-> {
-    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-    let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
-    if options.public_data_only || !present(&options.key) || !present(&options.secret) {
-        return Ok((None, Default::default()));
-    }
-    // Native: no Primary passphrase refuses any slot; an absent Secondary
-    // passphrase inherits Primary's; an empty effective one (including an
-    // explicit empty Secondary, which never falls back) is refused.
-    let passphrase = |read: Option<&String>| {
-        options
-            .passphrase
-            .as_ref()
-            .map(|primary| read.unwrap_or(primary).clone())
-            .filter(|value| !value.is_empty())
-            .map(Secret::new)
-    };
-    let setup = LocalSetup {
-        primary: Some(LocalIdentity {
-            key: Secret::new(options.key.clone().unwrap_or_default()),
-            secret: Secret::new(options.secret.clone().unwrap_or_default()),
-            passphrase: passphrase(None),
-            ..Default::default()
-        }),
-        secondary: options.read_credentials.as_ref().map(|read| LocalIdentity {
-            key: Secret::new(read.key.clone()),
-            secret: Secret::new(read.secret.clone()),
-            passphrase: passphrase(read.passphrase.as_ref()),
-            ..Default::default()
-        }),
-    };
-    let (signer, identities) =
-        LocalSigner::from_setup(setup).map_err(|_| invalid("Invalid BloFin signer setup"))?;
-    Ok((Some(std::sync::Arc::new(signer)), identities))
-}
-
 /// Orderly's one provider setup: the Ed25519 seed is installed as declared
 /// base58 and signs every private read and the socket auth. The presented key
 /// is native's `ed25519:`-prefixed public key; either string may carry the prefix.
@@ -551,7 +505,7 @@ pub fn supported(venue: &str) -> bool {
         #[cfg(feature = "phemex")]
         "phemex" => true,
         #[cfg(feature = "binance")]
-        "binance" | "binancepm" | "binancespot" | "binanceinverse" => true,
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" | "binanceoptions" => true,
         #[cfg(feature = "kucoinspot")]
         "kucoinspot" => true,
         #[cfg(feature = "kucoin")]
@@ -1873,7 +1827,24 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "blofin")]
         "blofin" => {
-            let (provider, identities) = blofin_signer(&options)?;
+            if [&options.key, &options.secret]
+                .iter()
+                .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "BloFin credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
             let mut engine = Engine::new(
                 Blofin::new(BlofinOptions {
                     broker_attribution: options.broker_attribution,
@@ -1883,7 +1854,7 @@ pub fn build_with_signer<T: Visit>(
                 }),
                 entropy,
             )?;
-            engine.set_signer(provider)?;
+            engine.set_signer(signer)?;
             engine.set_identities(identities)?;
             finish(visitor, policy, startup, engine)
         }
@@ -1946,7 +1917,7 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "binance")]
-        "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" | "binanceoptions" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
                 || options.secret.as_ref().is_some_and(|s| !s.is_empty())
                 || options.read_credentials.is_some()
@@ -1977,6 +1948,7 @@ pub fn build_with_signer<T: Visit>(
                         "binancepm" => BinanceVariant::PortfolioMargin,
                         "binancespot" => BinanceVariant::Spot,
                         "binanceinverse" => BinanceVariant::CoinM,
+                        "binanceoptions" => BinanceVariant::Options,
                         _ => BinanceVariant::UsdM,
                     },
                 }),

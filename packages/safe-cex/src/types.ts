@@ -1316,6 +1316,17 @@ export interface RemoteSignerRequest {
       | 'kraken-challenge'
       | 'apexomni-base64'
       | 'bitunix-double-sha256'
+      // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
+      // the digest from; `hyperliquid-address` binds the agent address.
+      | 'hyperliquid-l1'
+      | 'hyperliquid-address'
+      // Lighter: `toSign` is a transaction or auth statement the device re-derives
+      // the signed words from; the reply concatenates the 80-byte signatures.
+      | 'lighter-tx'
+      // Paradex: `toSign` is a closed `paradex/1` descriptor the device rebuilds
+      // the Stark digests from; `paradex-public` binds the Stark public key.
+      | 'paradex-stark'
+      | 'paradex-public'
       | 'coinbase-jwt';
     extraData?: unknown;
   };
