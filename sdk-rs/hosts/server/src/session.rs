@@ -1,6 +1,6 @@
 //! One `/account` socket: the JSON envelope over this user's accounts.
 //! Every account op resolves through (this socket's user, accounts it joined).
-use crate::accounts::{Account, PUBLIC_ACCOUNT, PUBLIC_EXCHANGE, Registry, now_ms};
+use crate::accounts::{Account, PUBLIC_ACCOUNT, PUBLIC_EXCHANGE, Registry};
 use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
 use crate::state::{Log, Metrics};

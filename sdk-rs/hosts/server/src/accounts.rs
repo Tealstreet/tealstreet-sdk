@@ -263,12 +263,8 @@ impl Registry {
             .unwrap()
             .get(&(user.to_owned(), name.to_owned()))
             .cloned()?;
-        account
-            .holders
-            .lock()
-            .unwrap()
-            .contains(&holder)
-            .then_some(account)
+        let holds = account.holders.lock().unwrap().contains(&holder);
+        holds.then_some(account)
     }
 
     /// Lets go of one holder; the last one disposes the account.

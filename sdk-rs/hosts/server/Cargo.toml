@@ -16,7 +16,7 @@ safe-cex-remote-signer = { path = "../remote-signer" }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws", "query", "json"] }
 tokio = { version = "1.53.3", features = ["rt", "rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
-jsonwebtoken = { version = "9.3.1", default-features = false }
+jsonwebtoken = { version = "9.3.1", default-features = false, features = ["use_pem"] }
 base64.workspace = true
 getrandom.workspace = true
 serde.workspace = true

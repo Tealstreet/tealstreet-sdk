@@ -6,6 +6,7 @@ use crate::config::Config;
 use crate::session::{Identity, Session};
 use crate::state::{Log, Metrics};
 use axum::Router;
+use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -121,9 +122,9 @@ async fn upgrade(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Query(query): Query<UpgradeQuery>,
-    upgrade: Option<WebSocketUpgrade>,
+    upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
-    let Some(upgrade) = upgrade else {
+    let Ok(upgrade) = upgrade else {
         return (StatusCode::UPGRADE_REQUIRED, "Expected WebSocket").into_response();
     };
     if app.metrics.connections.load(Ordering::Relaxed) >= app.config.max_connections {
