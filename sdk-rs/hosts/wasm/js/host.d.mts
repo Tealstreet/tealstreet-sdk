@@ -286,7 +286,8 @@ export type HostedSigningInput = { kind: 'credential' }
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
-  operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
+  operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] }
+    | { kind: 'publicAddress'; key: string } | { kind: 'publicKey'; algorithm: SignAlgorithm; key: string })[];
   context: { venue: string; method: string; host: string; path: string };
 }
 export type SigningScope = 'account' | 'balance' | 'orders' | 'positions' | 'settings';
@@ -483,7 +484,7 @@ export class EngineHost {
   hostedSigning(input: HostedSigningInput): Promise<HostedSigningOutput>;
   /** Device answer for a keyless server's wallet ws-auth request, signed by the
    * local provider; refuses an injected signer. Returns the `0x` hex result. */
-  hostedWalletSigning(input: { toSign: string; outputFormat: 'hyperliquid-l1' | 'hyperliquid-address' | 'lighter-tx' }): string;
+  hostedWalletSigning(input: { toSign: string; outputFormat: 'hyperliquid-l1' | 'hyperliquid-address' | 'lighter-tx' | 'paradex-stark' | 'paradex-public' }): string;
   /** Resolves with the command's result for commands that report one. */
   command(command: { op: string; [field: string]: unknown }, options?: CommandOptions): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */

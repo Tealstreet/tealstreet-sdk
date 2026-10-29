@@ -18,9 +18,9 @@ afterEach(() => {
   setRustEngineTransport(nativeTransport);
 });
 
-// Hosted Paradex is outside the Rust beta: the compiled registry refuses a private
-// payloadSigner before any transport or signing work.
-it('refuses hosted Paradex through the SDK and wasm host before I/O', async () => {
+// Paradex declares remote signing with no PayloadSigner lifecycle: a private
+// payloadSigner refuses at construction, before any engine, transport or signing.
+it('refuses a Paradex payloadSigner through the SDK before I/O', () => {
   const vector = vectors.cases[0];
   const io = vi.fn(() => {
     throw new Error('I/O must not start');
@@ -35,7 +35,7 @@ it('refuses hosted Paradex through the SDK and wasm host before I/O', async () =
   setWasmEngineLoader(loadNodeEngine);
   setRustEngineTransport(() => transport);
   const payloadSigner = vi.fn(() => ({ signature: 'never-requested' }));
-  const exchange = new RustEngineExchange(
+  expect(() => new RustEngineExchange(
     'paradex',
     {
       key: 'public-subkey-only',
@@ -47,16 +47,7 @@ it('refuses hosted Paradex through the SDK and wasm host before I/O', async () =
       payloadSigner,
     },
     new DefaultStore(),
-  );
-  try {
-    await expect(exchange.start()).rejects.toMatchObject({
-      kind: 'unsupported',
-      outcome: 'notSent',
-      message: expect.stringContaining('Rust paradex delegated signing is unsupported in this build'),
-    });
-    expect(io).not.toHaveBeenCalled();
-    expect(payloadSigner).not.toHaveBeenCalled();
-  } finally {
-    exchange.dispose();
-  }
-}, 10000);
+  )).toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('PayloadSigner') }));
+  expect(io).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});

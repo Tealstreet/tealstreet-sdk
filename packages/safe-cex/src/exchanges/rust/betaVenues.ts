@@ -53,7 +53,7 @@ export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeO
   if (
     options.publicDataOnly !== true &&
     (options.remoteSigner || options.payloadSigner) &&
-    (name === 'paradex' || deriveRemoteSigningPolicy(name)?.enabled !== true)
+    deriveRemoteSigningPolicy(name)?.enabled !== true
   ) {
     const message = `${name} delegated signing is unsupported in this build`;
     throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });

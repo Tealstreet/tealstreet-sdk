@@ -2371,6 +2371,8 @@ export class BaseExchange implements Exchange {
       case 'hyperliquid-l1':
       case 'hyperliquid-address':
       case 'lighter-tx':
+      case 'paradex-stark':
+      case 'paradex-public':
         return { id: request.id, error: `${outputFormat} requires the Rust engine signer` };
       case 'coinbase-jwt':
         return { id: request.id, error: 'coinbase-jwt requires the CoinbaseExchange signWsAuth override' };

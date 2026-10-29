@@ -27,7 +27,7 @@ coinbase = ["safe-cex-venues/coinbase", "text-ingress"]
 # Polling-only builds isolate the startup subscription decoder.
 cold-subscriptions = []
 breakoutprop = ["safe-cex-venues/breakoutprop", "text-ingress", "cold-subscriptions"]
-paradex = ["safe-cex-venues/paradex", "sign-meta", "dispatch-signing"]
+paradex = ["safe-cex-venues/paradex", "sign-meta", "dispatch-signing", "address-nonce", "hosted-wallet"]
 apexomni = ["safe-cex-venues/apexomni", "text-ingress", "safe-cex-engine/command-apexomni", "dispatch-signing"]
 txflow = ["safe-cex-venues/txflow", "text-ingress"]
 kraken = ["safe-cex-venues/kraken", "text-ingress", "sign-meta"]

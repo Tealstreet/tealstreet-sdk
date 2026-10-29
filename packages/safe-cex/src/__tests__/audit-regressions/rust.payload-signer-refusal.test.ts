@@ -94,9 +94,8 @@ it.each([
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it('leaves Paradex and explicitly public-only payload signers to native construction policy', async () => {
+it('leaves explicitly public-only payload signers to native construction policy', async () => {
   for (const [name, options] of [
-    ['paradex', { payloadSigner, paradexAddress: '0x1', subkeyAddress: '0x2' }],
     ['bybit', { payloadSigner, publicDataOnly: true }],
   ] as const) {
     const { transport } = recordEngine(name);
@@ -107,12 +106,14 @@ it('leaves Paradex and explicitly public-only payload signers to native construc
   }
 });
 
-// Hyperliquid declares remote signing, so its PayloadSigner refusal is the shared
-// delegated policy: refused at construction, before any engine or transport.
-it('refuses a private hyperliquid payloadSigner at construction before any engine', () => {
+// Hyperliquid and Paradex declare remote signing, so their PayloadSigner refusal is
+// the shared delegated policy: refused at construction, before any engine or transport.
+it('refuses a private hyperliquid or paradex payloadSigner at construction before any engine', () => {
   const { construct, transport, io } = recordEngine('hyperliquid');
-  for (const name of ['hyperliquid', 'hyperliquidspot'] as const) {
-    expect(() => new RustEngineExchange(name, { key: 'k', secret: '', payloadSigner } as ExchangeOptions, new DefaultStore()))
+  for (const [name, options] of [
+    ['hyperliquid', {}], ['hyperliquidspot', {}], ['paradex', { paradexAddress: '0x1', subkeyAddress: '0x2' }],
+  ] as const) {
+    expect(() => new RustEngineExchange(name, { key: 'k', secret: '', payloadSigner, ...options } as ExchangeOptions, new DefaultStore()))
       .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
   }
   expect(construct).not.toHaveBeenCalled();

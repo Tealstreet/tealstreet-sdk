@@ -99,13 +99,13 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bitget'), /exceeds 16777216/);
 });
 
-test('Paradex local Stark signing carries its measured family budget', () => {
-  // #2334 run 40610920529, job 'wasm family (paradex)' 122562227698: 1,403,676 bytes after
-  // the hosted-signing split (#2330 interim 1,452,805); ceil KiB plus 2 KiB.
-  assert.equal(WASM_VENUE_OVERRIDES.paradex, 1373 * 1024);
-  assert.equal(wasmBudgetError(1_403_676, 'venue', 'paradex'), undefined);
-  assert.equal(wasmBudgetError(1_405_952, 'venue', 'paradex'), undefined);
-  assert.match(wasmBudgetError(1_405_953, 'venue', 'paradex'), /exceeds 1405952/);
+test('Paradex keyless remote signing carries its ruled family budget', () => {
+  // #2367: local optimized Paradex 1,482,511 bytes (device descriptor parser, PublicKey
+  // setup, hosted-wallet); ddi ruled ceil KiB plus 4 KiB for local/CI drift, no CI wait.
+  assert.equal(WASM_VENUE_OVERRIDES.paradex, 1452 * 1024);
+  assert.equal(wasmBudgetError(1_482_511, 'venue', 'paradex'), undefined);
+  assert.equal(wasmBudgetError(1_486_848, 'venue', 'paradex'), undefined);
+  assert.match(wasmBudgetError(1_486_849, 'venue', 'paradex'), /exceeds 1486848/);
 });
 
 test('the approved combined ceiling accepts 16 MiB exactly and rejects the next byte', () => {

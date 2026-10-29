@@ -9,7 +9,7 @@ Historical Rust-adapter fixtures mock only beta admission through
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, and
-Hyperliquid/Spot and Lighter/Robinhood (remoteSigner only). Provider-mode eligibility still follows each declared remote
+Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
@@ -107,7 +107,12 @@ scalar (the venue's existing parse) and derives any other from an Ethereum key o
 the network's fixed chain, then seals the provider's public key to that provider.
 `paradexAddress`/`subkeyAddress` stay public options; legacy `secret` and
 `passphrase` are ignored. `/auth` and every write are signed at dispatch and fully
-verified against the sealed key. Hosted and delegated Paradex stay refused.
+verified against the sealed key. Keyless `remoteSigner` Paradex (key = the Paradex
+account address) binds the device's Stark public key at setup (`paradex-public`)
+and sends each signing as one closed `paradex/1` descriptor (`paradex-stark`):
+the device's `hostedWalletSigning` (`hosted_wallet.rs`) rebuilds and hashes it at
+its own clock, and the engine verifies every returned `r || s` against the bound
+key and its own hash. PayloadSigner is refused.
 
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned

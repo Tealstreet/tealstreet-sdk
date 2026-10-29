@@ -1,6 +1,7 @@
 use crate::{
     Pending,
     account::{Account, AmendTarget},
+    hosted::{Item, ModifyStatement, OrderStatement},
     sign::Credentials,
     sign::dispatch::{Orders, Preimage, SignedBody},
     wire::StrictNumber as Number,
@@ -49,6 +50,21 @@ impl SignedBody for Placement {
             price: self.price.as_deref(),
             id: None,
         }
+    }
+    fn item(&self, now_ms: u64) -> Item<'_> {
+        Item::Order(OrderStatement {
+            timestamp_ms: now_ms,
+            market: &self.market,
+            side: self.side,
+            order_type: self.kind,
+            size: &self.size,
+            price: self.price.as_deref(),
+            trigger_price: self.trigger_price.as_deref(),
+            instruction: self.instruction,
+            flags: self.flags,
+            stp: self.stp,
+            client_id: self.client_id.as_deref(),
+        })
     }
     fn sign(&mut self, signature: String, timestamp: u64) {
         self.signature = signature;
@@ -1337,6 +1353,18 @@ impl SignedBody for Modify {
             price: Some(&self.price),
             id: Some(&self.id),
         }
+    }
+    fn item(&self, now_ms: u64) -> Item<'_> {
+        Item::Modify(ModifyStatement {
+            id: &self.id,
+            timestamp_ms: now_ms,
+            market: &self.market,
+            side: &self.side,
+            order_type: &self.kind,
+            size: &self.size,
+            price: &self.price,
+            trigger_price: self.trigger_price.as_deref(),
+        })
     }
     fn sign(&mut self, signature: String, timestamp: u64) {
         self.signature = signature;

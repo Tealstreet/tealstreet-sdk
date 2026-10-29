@@ -1021,6 +1021,7 @@ impl WasmEngine {
                         api_key_index: options.api_key_index.clone(),
                         #[cfg(not(feature = "lighter"))]
                         api_key_index: None,
+                        paradex_address: options.paradex_address.clone(),
                     };
                     (venue.to_owned(), identities, account)
                 })

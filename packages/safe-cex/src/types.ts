@@ -1323,6 +1323,10 @@ export interface RemoteSignerRequest {
       // Lighter: `toSign` is a transaction or auth statement the device re-derives
       // the signed words from; the reply concatenates the 80-byte signatures.
       | 'lighter-tx'
+      // Paradex: `toSign` is a closed `paradex/1` descriptor the device rebuilds
+      // the Stark digests from; `paradex-public` binds the Stark public key.
+      | 'paradex-stark'
+      | 'paradex-public'
       | 'coinbase-jwt';
     extraData?: unknown;
   };

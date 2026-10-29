@@ -14,11 +14,100 @@ pub struct Account {
     /// Lighter: the account index, when configured as the Application ID.
     pub application_id: Option<String>,
     pub api_key_index: Option<String>,
+    /// Paradex: the account address this device's Stark key signs for.
+    pub paradex_address: Option<String>,
 }
 
 pub fn admitted(venue: &str) -> bool {
     (cfg!(feature = "hyperliquid") && matches!(venue, "hyperliquid" | "hyperliquidspot"))
         || lighter(venue)
+        || (cfg!(feature = "paradex") && venue == "paradex")
+}
+
+/// The capture bound for a structured statement, from the device's own clock.
+#[cfg(feature = "paradex")]
+const PARADEX_CAPTURE_MS: f64 = safe_cex_engine::signing_capture::MAX_TIMEOUT_MS as f64;
+
+/// Paradex: `paradex-public` returns the Stark public key for the device's own
+/// account; `paradex-stark` rebuilds and hashes a closed `paradex/1` descriptor
+/// for its own account and network at `now_ms`, returning each `r || s` in
+/// item order. A supplied digest is never signed.
+#[cfg(feature = "paradex")]
+fn paradex(
+    identities: &Identities,
+    account: &Account,
+    provider: &Provider,
+    to_sign: &str,
+    output_format: &str,
+    now_ms: f64,
+) -> Result<String, SignError> {
+    use safe_cex_venue_paradex::hosted;
+    let identity = identities.primary.as_ref().ok_or(SignError::Unavailable)?;
+    let signing = identity.signing_ref()?.clone();
+    let own = account
+        .paradex_address
+        .as_deref()
+        .ok_or(SignError::Unavailable)?;
+    let (operations, width) = match output_format {
+        "paradex-public" => {
+            if !to_sign.eq_ignore_ascii_case(own) {
+                return Err(SignError::InvalidRequest);
+            }
+            let key = Operation::PublicKey {
+                algorithm: Algorithm::StarkDigest,
+                key: signing,
+            };
+            (vec![key], 32)
+        }
+        "paradex-stark" => {
+            let binding = hosted::ParadexBinding::new(own, hosted::network_chain(account.testnet))
+                .map_err(|_| SignError::InvalidRequest)?;
+            let descriptor = hosted::ParadexDescriptor::from_json(to_sign)
+                .map_err(|_| SignError::InvalidRequest)?;
+            let digests = hosted::validated_digests(
+                &descriptor,
+                &binding,
+                now_ms,
+                now_ms + PARADEX_CAPTURE_MS,
+            )
+            .map_err(|_| SignError::InvalidRequest)?;
+            let signs = digests
+                .as_slice()
+                .iter()
+                .map(|digest| Operation::Sign {
+                    algorithm: Algorithm::StarkDigest,
+                    key: signing.clone(),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: digest.to_vec(),
+                    }],
+                })
+                .collect();
+            (signs, 64)
+        }
+        _ => return Err(SignError::InvalidRequest),
+    };
+    let work = SignRequest {
+        receipt: Default::default(),
+        context: Context {
+            venue: "paradex".into(),
+            method: "HOSTED".into(),
+            ..Default::default()
+        },
+        operations,
+    };
+    work.validate()?;
+    let result = provider.sign_ready(&work).ok_or(SignError::Unavailable)??;
+    work.validate_result(&result)?;
+    if !result.headers.is_empty()
+        || result.values.len() != work.operations.len()
+        || result.values.iter().any(|value| value.len() != width)
+    {
+        return Err(SignError::InvalidResult);
+    }
+    Ok(format!(
+        "0x{}",
+        safe_cex_crypto::hex(&result.values.concat())
+    ))
 }
 
 fn lighter(venue: &str) -> bool {
@@ -109,6 +198,21 @@ pub fn sign(
 ) -> Result<String, SignError> {
     if !admitted(venue) {
         return Err(SignError::Unsupported);
+    }
+    let paradex_format = output_format.starts_with("paradex-");
+    if paradex_format != (venue == "paradex") {
+        return Err(SignError::InvalidRequest);
+    }
+    #[cfg(feature = "paradex")]
+    if paradex_format {
+        return paradex(
+            identities,
+            account,
+            provider,
+            to_sign,
+            output_format,
+            now_ms,
+        );
     }
     // Lighter signs nothing but its own statements, and no other family signs them.
     if lighter(venue) != (output_format == "lighter-tx") {
