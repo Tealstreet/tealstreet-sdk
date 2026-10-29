@@ -258,7 +258,7 @@ Sessions and resume (same semantics as today):
 
 This has landed as the crate `safe-cex-remote-signer` (`sdk-rs/hosts/remote-signer`, #2381). `src/signer.rs` only wires it in.
 
-- **`SignerLink::new(outbox)`:** create one per account. It is the twin of TS `WebSocketRemoteSigner`, which is also per account.
+- **`SignerLink::new(socket_id, outbox)`:** create one per account. `socket_id` is a `u64` the server assigns per client socket. It is the twin of TS `WebSocketRemoteSigner`, which is also per account.
   - `Outbox` is `Arc<dyn Fn(String) -> bool + Send + Sync>`. It queues one text frame on the account's owning socket and returns false when the frame was not sent.
   - The frames are `{"t":"sign-req","d":RemoteSignerRequest}`, with `t` first, and the timeout is the 15s `SIGN_TIMEOUT`.
 - **`remote_account(link, venue, Some(accountName), engine_options_json)`:** returns a `RemoteAccount` with:
@@ -267,8 +267,8 @@ This has landed as the crate `safe-cex-remote-signer` (`sdk-rs/hosts/remote-sign
   - `on_fatal(cb)`, which fires once after 10 consecutive failures spanning at least 30s. Dispose the account, as today.
 - **Input:** `engine_options_json` holds the options the server would otherwise build. That includes the public `key` and an optional `passphrase`, with no secret.
 - **Output:** `options_json` has those fields stripped and carries `signing` (opaque refs), `remoteSigning: true`, `payloadSigner: false` and `publicMode`.
-- **`sign-res`:** call `link.resolve(d)` on each account link of the socket. It routes by id and returns false for an id it does not know, so offering a response to every account is safe.
-- **Resume:** on park, call `link.suspend()`, which aborts in-flight signs as unavailable without counting them toward the fatal streak. On resume, call `link.attach(new_outbox)`. On dispose, call `link.mark_unavailable()`.
+- **`sign-res`:** call `link.resolve(socket_id, d)` only on links of accounts this socket joined. A request resolves only from the socket it was sent on, and only once. An oversized field settles as an error.
+- **Resume:** on park, call `link.suspend()`, which aborts in-flight signs as unavailable without counting them toward the fatal streak. On resume, call `link.attach(new_socket_id, new_outbox)`, which aborts anything still pending on another socket. On dispose, call `link.mark_unavailable()`.
 - **Echo:** `link.send_echo()` alternates bare and padded-to-last-sign-req probes, one outstanding at a time. Feed `echo-res` `d` to `link.echo_res(d)`, which returns `(rtt, EchoSize)`.
 - **Wire coverage:** the wire is the existing browser responder's ws-auth wire. That covers:
   - the HMAC families, with hex, base64 and hex-base64 encodings, a passphrase Present, and the extraData codecs `secondsTimestamp`, `bybitExpiry` and `binanceSpot`;
