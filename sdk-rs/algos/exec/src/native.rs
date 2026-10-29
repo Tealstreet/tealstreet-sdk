@@ -1,8 +1,8 @@
 //! Adapter to the one shared account runtime. This module owns no scheduler.
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use safe_cex_algos::{AlgoCx, AlgoFactory};
+use safe_cex_algos::{AccountPort, AlgoCx, AlgoFactory};
 use safe_cex_engine::command::decode_command;
 use safe_cex_engine::engine::{Command, CommandId};
 use safe_cex_engine::error::VenueError;
@@ -11,7 +11,11 @@ use serde_json::{Value, json};
 use crate::{Exec, Host};
 
 /// Register once in the server's account algo registry.
-pub struct ExecFactory;
+#[derive(Default)]
+pub struct ExecFactory {
+    parallel: Rc<Cell<usize>>,
+    account: RefCell<Option<Weak<dyn AccountPort>>>,
+}
 
 impl AlgoFactory for ExecFactory {
     fn ops(&self) -> &'static [&'static str] {
@@ -25,11 +29,21 @@ impl AlgoFactory for ExecFactory {
         if cx.scope.is_disposed() {
             return Err("EXEC scope is disposed".into());
         }
+        let mut account = self.account.borrow_mut();
+        if let Some(previous) = account.as_ref().and_then(Weak::upgrade) {
+            if !Rc::ptr_eq(&previous, &cx.port) {
+                return Err("ExecFactory must be account-scoped".into());
+            }
+        } else {
+            *account = Some(Rc::downgrade(&cx.port));
+        }
+        drop(account);
         let payload: Value = serde_json::from_str(data).map_err(|_| "Invalid command payload.")?;
         let exec = Rc::new(RefCell::new(Exec::default()));
         let mut host = Adapter {
             cx: cx.clone(),
             exec: Rc::downgrade(&exec),
+            parallel: self.parallel.clone(),
         };
         exec.borrow_mut().handle(&payload, &mut host);
         Ok(())
@@ -40,14 +54,33 @@ impl AlgoFactory for ExecFactory {
 struct Adapter {
     cx: AlgoCx,
     exec: Weak<RefCell<Exec>>,
+    parallel: Rc<Cell<usize>>,
+}
+struct ParallelReservation(Rc<Cell<usize>>);
+impl Drop for ParallelReservation {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
 }
 impl Host for Adapter {
+    fn parallel_in_flight(&self) -> usize {
+        self.parallel.get()
+    }
     fn snapshot(&self) -> Value {
         let store = self.cx.port.store();
         json!({"venue":store.venue,"markets":store.markets.values().collect::<Vec<_>>(),
             "tickers":store.tickers.values().collect::<Vec<_>>(),"orders":store.orders,"positions":store.positions})
     }
     fn call(&mut self, token: u64, method: &str, args: Value) -> Result<(), Value> {
+        self.call_scoped(token, method, args, false)
+    }
+    fn call_scoped(
+        &mut self,
+        token: u64,
+        method: &str,
+        args: Value,
+        parallel: bool,
+    ) -> Result<(), Value> {
         if self.cx.scope.is_disposed() {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         }
@@ -57,7 +90,19 @@ impl Host for Adapter {
             return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
         };
         let mut adapter = self.clone();
+        let reservation = if parallel {
+            if self.parallel.get() >= crate::MAX_PARALLEL {
+                return Err(
+                    json!({"message":"EXEC command exceeds native resource limits","outcome":"notSent"}),
+                );
+            }
+            self.parallel.set(self.parallel.get() + 1);
+            Some(ParallelReservation(self.parallel.clone()))
+        } else {
+            None
+        };
         self.cx.spawn(async move {
+            let reservation = reservation;
             if adapter.cx.scope.is_disposed() {
                 return;
             }
@@ -68,6 +113,7 @@ impl Host for Adapter {
                 .await
                 .map(|s| serde_json::from_str(&s).unwrap_or(Value::String(s)))
                 .map_err(serialize_error);
+            drop(reservation);
             if !adapter.cx.scope.is_disposed() {
                 exec.borrow_mut().complete(token, result, &mut adapter);
             }
