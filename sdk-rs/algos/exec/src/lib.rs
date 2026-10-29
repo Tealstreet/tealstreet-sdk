@@ -52,6 +52,7 @@ pub struct Exec {
     swarms: HashMap<u64, Swarm>,
 }
 struct Chain {
+    wait_barrier: bool,
     symbol: String,
     req_id: Option<Value>,
     steps: VecDeque<String>,
@@ -209,6 +210,7 @@ impl Exec {
         self.chains.insert(
             id,
             Chain {
+                wait_barrier: false,
                 symbol: object
                     .get("symbol")
                     .and_then(Value::as_str)
@@ -335,6 +337,10 @@ impl Exec {
         };
         if let Some(id) = pending.chain {
             if let Some(chain) = self.chains.get_mut(&id) {
+                let mut result = result;
+                if chain.wait_barrier && result["success"] == false {
+                    stop_wait_chain(chain, &mut result, host);
+                }
                 chain.last = Some(result);
             }
             self.drive(id, host);
@@ -443,6 +449,12 @@ impl Exec {
                 Some(s) => (true, s),
                 None => (false, text.as_str()),
             };
+            if !parallel {
+                chain.wait_barrier = matches!(
+                    positional(text).first().map(String::as_str),
+                    Some("wait" | "sleep")
+                );
+            }
             let action = evaluate(&chain.symbol, text, &host.snapshot(), &chain.req_id, host);
             match action {
                 Evaluation::Text { message, result } => {
@@ -452,8 +464,11 @@ impl Exec {
                     }
                     self.chains.insert(id, chain);
                 }
-                Evaluation::Done(result) => {
+                Evaluation::Done(mut result) => {
                     if !parallel {
+                        if chain.wait_barrier && result["success"] == false {
+                            stop_wait_chain(&mut chain, &mut result, host);
+                        }
                         chain.last = Some(result);
                     }
                     self.chains.insert(id, chain);
@@ -663,6 +678,16 @@ impl Exec {
             }
         }
     }
+}
+
+fn stop_wait_chain(chain: &mut Chain, result: &mut Value, host: &mut impl Host) {
+    chain.steps.clear();
+    let error = format!(
+        "chain stopped: wait did not complete: {}",
+        result["error"].as_str().unwrap_or("wait failed")
+    );
+    log(host, &chain.req_id, &error);
+    result["error"] = json!(error);
 }
 
 fn reply(host: &mut impl Host, req_id: &Option<Value>, mut result: Value) {
