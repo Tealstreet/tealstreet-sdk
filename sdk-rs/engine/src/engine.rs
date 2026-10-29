@@ -6436,6 +6436,11 @@ mod streaming_tests {
                 fills, expected,
                 "revision two represents absent financials and identity explicitly"
             );
+            assert_eq!(
+                crate::wire::fills(frame),
+                Some(vec![execution()]),
+                "the native reader returns what the writer wrote"
+            );
             assert!(engine.take_frame(1.).is_none(), "fill must flush once");
         }
     }
