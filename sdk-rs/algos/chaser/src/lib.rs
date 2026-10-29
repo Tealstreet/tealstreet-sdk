@@ -5,6 +5,7 @@
 
 mod book;
 mod chase;
+mod client_id;
 
 use std::rc::Rc;
 
