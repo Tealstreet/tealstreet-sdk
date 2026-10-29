@@ -387,7 +387,19 @@ impl AccountHandle {
 
     /// `client` must be unique among this account's live clients.
     pub async fn join(&self, client: u64, account_auth: bool) -> Result<ClientLink, &'static str> {
-        let (outgoing, frames) = mpsc::channel(self.config.client_queue_capacity);
+        self.join_with_capacity(client, account_auth, self.config.client_queue_capacity)
+            .await
+    }
+
+    /// `join` with its own outbound queue depth, for trusted in-process clients
+    /// (algos) that must not be dropped as slow peers under a burst.
+    pub async fn join_with_capacity(
+        &self,
+        client: u64,
+        account_auth: bool,
+        capacity: usize,
+    ) -> Result<ClientLink, &'static str> {
+        let (outgoing, frames) = mpsc::channel(capacity.max(1));
         let (cancel, canceled) = watch::channel(false);
         let (ready, joined) = oneshot::channel();
         let join = Control::Join {
