@@ -988,7 +988,7 @@ impl BinanceFutures {
         }
         let page = match venue_error(&response) {
             None => Ok(response.body),
-            Some((_, message)) => Err(VenueError::new(message)),
+            Some(_) => Err(crate::account::read_error(&response)),
         }
         .and_then(|body| {
             Ok(match &mut read {

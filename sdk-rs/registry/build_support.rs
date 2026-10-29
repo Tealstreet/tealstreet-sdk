@@ -67,6 +67,8 @@ enum SignatureEncoding {
     #[default]
     Hex,
     Base64,
+    #[serde(rename = "hex-base64")]
+    Base64Hex,
 }
 
 #[derive(Deserialize)]

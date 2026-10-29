@@ -1,6 +1,7 @@
 use crate::{
     Pending,
     account::{Account, AmendTarget},
+    hosted::{Item, ModifyStatement, OrderStatement},
     sign::Credentials,
     sign::dispatch::{Orders, Preimage, SignedBody},
     wire::StrictNumber as Number,
@@ -9,7 +10,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
-use safe_cex_engine::request_context::{Operation as HttpOperation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation as HttpOperation, Policy, RetryPolicy};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
@@ -49,6 +50,21 @@ impl SignedBody for Placement {
             price: self.price.as_deref(),
             id: None,
         }
+    }
+    fn item(&self, now_ms: u64) -> Item<'_> {
+        Item::Order(OrderStatement {
+            timestamp_ms: now_ms,
+            market: &self.market,
+            side: self.side,
+            order_type: self.kind,
+            size: &self.size,
+            price: self.price.as_deref(),
+            trigger_price: self.trigger_price.as_deref(),
+            instruction: self.instruction,
+            flags: self.flags,
+            stp: self.stp,
+            client_id: self.client_id.as_deref(),
+        })
     }
     fn sign(&mut self, signature: String, timestamp: u64) {
         self.signature = signature;
@@ -100,7 +116,6 @@ enum Kind {
     },
     Cancel(Vec<String>),
     Empty,
-    Rails(String),
     Quotes(String),
     Leverage {
         symbol: String,
@@ -557,6 +572,10 @@ impl Trading {
             );
             return true;
         }
+        if let Command::FetchLeverage { symbol, .. } = &command {
+            self.fetch_leverage(cx, account, symbol);
+            return true;
+        }
         if let Command::PlaceOrders { command, orders } = &command
             && orders.iter().any(capped)
         {
@@ -652,19 +671,6 @@ impl Trading {
                             kind: Kind::Empty,
                         }])
                     }),
-                false,
-                false,
-            ),
-            Command::FetchLeverage { command, symbol } => (
-                command,
-                Ok(VecDeque::from([Operation {
-                    receipts: Vec::new(),
-                    hash: None,
-                    method: Method::Get,
-                    path: "/account/margin".into(),
-                    body: None,
-                    kind: Kind::Rails(symbol),
-                }])),
                 false,
                 false,
             ),
@@ -939,10 +945,6 @@ impl Trading {
             self.complete(cx, account, request, result, false);
             return;
         }
-        let rails = match &request.kind {
-            Kind::Rails(symbol) => Some(symbol.clone()),
-            _ => None,
-        };
         let result = crate::success(response).and_then(|()| match &request.kind {
             Kind::Amend { id, .. } => {
                 let row: Identity = serde_json::from_str(response.body)
@@ -956,78 +958,23 @@ impl Trading {
             Kind::Cancel(ids) if ids.len() == 2 => {
                 decode_cancels(response.body, ids).map(|()| Vec::new())
             }
-            Kind::Rails(symbol) => {
-                #[derive(Deserialize)]
-                struct Row {
-                    market: String,
-                    leverage: f64,
-                }
-                #[derive(Deserialize)]
-                struct Margins {
-                    configs: Vec<Row>,
-                }
-                let margins: Margins = serde_json::from_str(response.body)
-                    .map_err(|_| "invalid Paradex margin settings")?;
-                let leverage = margins
-                    .configs
-                    .iter()
-                    .find(|m| m.market == *symbol)
-                    .map(|m| m.leverage)
-                    .filter(|v| positive(*v))
-                    .unwrap_or(10.);
-                account.set_leverage(cx, symbol, leverage);
-                Ok(Vec::new())
-            }
             Kind::Leverage { symbol, leverage } => {
                 account.set_leverage(cx, symbol, *leverage);
                 Ok(Vec::new())
             }
             _ => Ok(Vec::new()),
         });
-        let result = result.map_err(|error| {
-            let error = match crate::success(response) {
-                Err(_) => answer_failure(response.status, error),
-                Ok(()) => unproven(error),
-            };
-            match request.kind {
-                // A read: no write outcome to classify.
-                Kind::Rails(_) => VenueError {
-                    outcome: None,
-                    ..error
-                },
-                _ => error,
-            }
+        let result = result.map_err(|error| match crate::success(response) {
+            Err(_) => answer_failure(response.status, error),
+            Ok(()) => unproven(error),
         });
         if result.is_ok() && matches!(request.kind, Kind::Amend { .. }) {
             account.amend_ack(cx, response.body);
         }
-        if let Some(symbol) = rails
-            && result.is_ok()
-        {
-            if let Some(job) = self.jobs.remove(&request.job) {
-                #[derive(Serialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Rails {
-                    buy_leverage: f64,
-                    sell_leverage: f64,
-                }
-                let leverage = cx.store.setting(&symbol).map_or(10., |s| s.leverage);
-                match serde_json::to_string(&Rails {
-                    buy_leverage: leverage,
-                    sell_leverage: leverage,
-                })
-                .map_err(|e| e.to_string())
-                {
-                    Ok(data) => cx.done(job.command, data),
-                    Err(error) => cx.fail(job.command, error),
-                };
-            }
-        } else {
-            let rejected = ((400..500).contains(&response.status)
-                && !matches!(response.status, 408 | 429))
-                || ((200..300).contains(&response.status) && crate::success(response).is_err());
-            self.complete(cx, account, request, result, rejected);
-        }
+        let rejected = ((400..500).contains(&response.status)
+            && !matches!(response.status, 408 | 429))
+            || ((200..300).contains(&response.status) && crate::success(response).is_err());
+        self.complete(cx, account, request, result, rejected);
     }
     pub fn on_failed(
         &mut self,
@@ -1040,7 +987,6 @@ impl Trading {
         let error = match request.kind {
             // Reads: the quote read precedes the placement, which was never sent.
             Kind::Quotes(_) => error.outcome(Outcome::NotSent),
-            Kind::Rails(_) => error,
             _ => error.outcome(Outcome::Unknown),
         };
         self.complete(cx, account, request, Err(error), false);
@@ -1079,7 +1025,7 @@ impl Trading {
         result: Result<Vec<String>, VenueError>,
         rejected: bool,
     ) {
-        if !matches!(request.kind, Kind::Quotes(_) | Kind::Rails(_)) {
+        if !matches!(request.kind, Kind::Quotes(_)) {
             account.bump_orders(cx);
             account.bump_positions();
         }
@@ -1092,7 +1038,7 @@ impl Trading {
         };
         match result {
             Ok(ids) => {
-                if !matches!(request.kind, Kind::Quotes(_) | Kind::Rails(_)) {
+                if !matches!(request.kind, Kind::Quotes(_)) {
                     job.effective = true;
                 }
                 job.results.extend(ids);
@@ -1146,6 +1092,96 @@ impl Trading {
             }
         }
         self.advance(cx, account, request.job);
+    }
+    /// A command Read on the JWT Session; it never enters the write queue.
+    fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, account: &mut Account, symbol: &str) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: HttpOperation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        if account.credentials().is_none() {
+            let _ = cx.fail_context(
+                &context,
+                not_sent("Paradex private account is not initialized"),
+            );
+            return;
+        }
+        account.read(
+            cx,
+            context.clone(),
+            "/account/margin",
+            None,
+            Pending::Leverage(context, symbol.to_owned()),
+        );
+    }
+    pub fn leverage_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        account: &mut Account,
+        context: &Context,
+        symbol: &str,
+        response: Response<'_>,
+    ) {
+        #[derive(Deserialize)]
+        struct Row {
+            market: String,
+            leverage: f64,
+        }
+        #[derive(Deserialize)]
+        struct Margins {
+            configs: Vec<Row>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Rails {
+            buy_leverage: f64,
+            sell_leverage: f64,
+        }
+        let margins = crate::success(response)
+            .map_err(|error| answer_failure(response.status, error))
+            .and_then(|()| {
+                serde_json::from_str::<Margins>(response.body)
+                    .map_err(|_| VenueError::new("invalid Paradex margin settings"))
+            });
+        // A read: no write outcome to classify.
+        let margins = match margins {
+            Ok(margins) => margins,
+            Err(error) => {
+                let _ = cx.fail_context(
+                    context,
+                    VenueError {
+                        outcome: None,
+                        ..error
+                    },
+                );
+                return;
+            }
+        };
+        let leverage = margins
+            .configs
+            .iter()
+            .find(|m| m.market == symbol)
+            .map(|m| m.leverage)
+            .filter(|v| positive(*v))
+            .unwrap_or(10.);
+        account.set_leverage(cx, symbol, leverage);
+        let leverage = cx.store.setting(symbol).map_or(10., |s| s.leverage);
+        match serde_json::to_string(&Rails {
+            buy_leverage: leverage,
+            sell_leverage: leverage,
+        }) {
+            Ok(data) => {
+                let _ = cx.done_context(context, data);
+            }
+            Err(error) => {
+                let _ = cx.fail_context(context, VenueError::new(error.to_string()));
+            }
+        }
     }
     fn amend(
         &self,
@@ -1317,6 +1353,18 @@ impl SignedBody for Modify {
             price: Some(&self.price),
             id: Some(&self.id),
         }
+    }
+    fn item(&self, now_ms: u64) -> Item<'_> {
+        Item::Modify(ModifyStatement {
+            id: &self.id,
+            timestamp_ms: now_ms,
+            market: &self.market,
+            side: &self.side,
+            order_type: &self.kind,
+            size: &self.size,
+            price: &self.price,
+            trigger_price: self.trigger_price.as_deref(),
+        })
     }
     fn sign(&mut self, signature: String, timestamp: u64) {
         self.signature = signature;

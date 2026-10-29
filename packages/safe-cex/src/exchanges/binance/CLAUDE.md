@@ -1277,3 +1277,14 @@ Sends `clientOrderId`, rule `^[A-Za-z0-9_-]{1,36}$`. Binance documents no charse
 - **No fee rates, closed PnL, income or funding flow** (`/eapi/v1/bill` exists and is not mapped).
 - **No `sdk-rs` port.** The Rust registry and `ExchangeName` in `sdk-rs` do not list `binanceoptions`.
 
+
+## Rust European Options
+
+`binanceoptions` selects the Binance family's `Options` variant and eapi endpoints.
+It uses installed HMAC identities and managed dispatch, including the existing
+remote-signing contract; the default Options receive window is 5,000 ms. Native
+option symbols and contract quantities are preserved. Only price-based limit
+orders are admitted, with a separate `postOnly` flag and `clientOrderId`; an
+oversized order is refused before transport instead of split. Options balances,
+positions and order rows use their eapi schemas rather than futures reducers.
+The retained TS Options reference polls REST and has no WebSocket implementation.

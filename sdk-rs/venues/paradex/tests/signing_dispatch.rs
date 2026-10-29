@@ -170,7 +170,7 @@ fn a_batch_planned_behind_a_jwt_refresh_shares_its_floored_release_stamp() {
 
 #[test]
 fn only_verified_results_for_the_exact_hashes_bind_a_batch_body() {
-    for case in 0..9 {
+    for case in 0..10 {
         let mut h = deferred();
         h.command(Command::PlaceOrders {
             command: 3,
@@ -185,30 +185,32 @@ fn only_verified_results_for_the_exact_hashes_bind_a_batch_body() {
             0 => {}
             // r and s swapped.
             1 => {
-                let (r, s) = result.values[0].split_at_mut(32);
+                let (r, s) = result.values[1].split_at_mut(32);
                 r.swap_with_slice(s);
             }
             2 => drop(result.values.pop()),
-            3 => result.values.push(result.values[0].clone()),
-            4 => result.values.swap(0, 1),
+            3 => result.values.push(result.values[1].clone()),
+            4 => result.values.swap(1, 2),
             // A well-formed signature over another digest.
             5 => {
                 let mut other = work.clone();
                 if let safe_cex_engine::signing::Operation::Sign { payload, .. } =
-                    &mut other.operations[0]
+                    &mut other.operations[1]
                     && let PayloadPart::Bytes { bytes } = &mut payload[0]
                 {
                     bytes[31] ^= 1;
                 }
-                result.values[0] = provider_sign(&provider, other).values.remove(0);
+                result.values[1] = provider_sign(&provider, other).values.remove(1);
             }
             // A well-formed signature by another key.
             6 => {
                 let (_, other, _) = keyed(options(), &format!("0x{}2", "0".repeat(63)));
-                result.values[0] = provider_sign(&other, work.clone()).values.remove(0);
+                result.values[1] = provider_sign(&other, work.clone()).values.remove(1);
             }
-            7 => result.values[0][..32].fill(0),
-            8 => result.values[0][..32].copy_from_slice(&ORDER),
+            7 => result.values[1][..32].fill(0),
+            8 => result.values[1][..32].copy_from_slice(&ORDER),
+            // Valid signatures beside a commitment to another statement.
+            9 => result.values[0][0] ^= 1,
             _ => unreachable!(),
         }
         answer(&mut h, attempt, result);
@@ -228,7 +230,7 @@ fn an_auth_result_that_does_not_verify_never_sends_auth() {
     h.reply("/system/config", CONFIG);
     let (attempt, work) = sign_work(&mut h);
     let mut result = provider_sign(&h.e.signer().unwrap(), work);
-    let (r, s) = result.values[0].split_at_mut(32);
+    let (r, s) = result.values[1].split_at_mut(32);
     r.swap_with_slice(s);
     answer(&mut h, attempt, result);
     assert!(!h.pending.iter().any(|r| r.url.contains("/auth/")));
@@ -255,7 +257,7 @@ fn not_sent(h: &Harness, command: u32) {
 }
 
 fn swap_r_and_s(result: &mut SignResult) {
-    let (r, s) = result.values[0].split_at_mut(32);
+    let (r, s) = result.values[1].split_at_mut(32);
     r.swap_with_slice(s);
 }
 

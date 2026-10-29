@@ -1,5 +1,6 @@
 import type { ExchangeMetadata } from '../../exchangeMetadata';
 import type { ExchangeAccountConfig } from '../../types';
+import type { RestPool } from './routing/types';
 
 // Single source of truth for the proxy / tunnel / CORS transport resolution that
 // was previously scattered across createExchangeFromAccount.ts (preference →
@@ -10,22 +11,46 @@ import type { ExchangeAccountConfig } from '../../types';
 
 // --- Proxy endpoints -------------------------------------------------------
 
-// AWS whitelisted private proxy pool. These IPs are whitelisted by users on the
-// exchange side (embedded in exchange partnerships), so this traffic MUST stay
-// on AWS — it cannot move to another provider without breaking the allowlists.
-export const PRIVATE_PROXY_GRVT_TINY = 'https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy';
-export const PRIVATE_PROXY_JP = 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy';
-export const PRIVATE_PROXY_ASIA = 'https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy';
+// Whitelisted private proxy pools: the exchange-proxy-edge Worker on the Vultr
+// tunnel host, which checks the user's proxy JWT and forwards to the 9-IP Tokyo
+// fleet (docs/plans/AWS_EXIT.md step 3e). The whitelist is Tokyo-only, so the jp,
+// asia and GRVT pools are one host; the names stay because the routing table and
+// the exchange server's pinned hosts still tell them apart.
+export const PRIVATE_PROXY_JP = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy';
+export const PRIVATE_PROXY_ASIA = PRIVATE_PROXY_JP;
+export const PRIVATE_PROXY_GRVT_TINY = PRIVATE_PROXY_JP;
 
-// AWS public CORS proxy. The ONLY host for unwhitelisted public browser reads and for
-// a secondary read-only key's reads. A Vultr read fleet was built as a cheaper
-// alternative in June 2026 and abandoned 2026-08-20 having never carried traffic.
-export const AWS_PUBLIC_CORS_PROXY = 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
+// Public CORS proxy. The ONLY host for unwhitelisted public browser reads and for a
+// secondary read-only key's reads: the same edge Worker's /api/public_proxy/, which
+// needs no JWT and always egresses from the tunnel hosts' own IPs, never the
+// whitelisted fleet, so public-data weight stays off the IPs users trade through
+// (AWS_EXIT.md step 3d; it replaced AWS's exchange-proxy.jp). Same `<base>/<https url>` shape.
+// ROLLOUT GUARD: do not release the rust lanes until infra/tofu proxy-fleet's
+// `public_cors_enabled` is on and BOTH tunnel hosts carry the public CORS container;
+// before that this host 403s every public read (Binance market data, clocks, ticks).
+export const PUBLIC_CORS_PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy';
+
+export interface ProxyHosts {
+  privateProxy: Record<RestPool, string>;
+  publicCorsProxy: string;
+}
+
+let proxyHosts: ProxyHosts = {
+  privateProxy: { jp: PRIVATE_PROXY_JP, asia: PRIVATE_PROXY_ASIA, tiny: PRIVATE_PROXY_GRVT_TINY },
+  publicCorsProxy: PUBLIC_CORS_PROXY,
+};
+
+/** Pins this runtime's proxy hosts (the hosted exchange server); see `pinTealstreetEgressHosts`. */
+export const setProxyHosts = (hosts: ProxyHosts): void => {
+  proxyHosts = { privateProxy: { ...hosts.privateProxy }, publicCorsProxy: hosts.publicCorsProxy };
+};
+
+export const getPrivateProxyHost = (pool: RestPool): string => proxyHosts.privateProxy[pool];
 
 // Public CORS proxy (CORS-unblocks public/unwhitelisted browser requests). A getter,
 // not an inlined const, because every call site resolves at CALL time — that is the
 // seam any future host rollout would need, and callers must not cache the string.
-export const getPublicCorsProxy = (): string => AWS_PUBLIC_CORS_PROXY;
+export const getPublicCorsProxy = (): string => proxyHosts.publicCorsProxy;
 
 // --- Preference resolution -------------------------------------------------
 

@@ -445,3 +445,32 @@ Next:
    fe7lgm's execution-group API is actual. No local root, timer or ledger.
 4. Remove the staging site once cxxyqr's history Completion bridge and
    55ao7t's session Context are both actual.
+
+## Remote signing admission (claude-dazzy3, 2026-10-29)
+
+BingX now admits `remoteSigner` on Rust, so the three modes work: an exchange-server
+account with local keys, a keyless exchange-server account whose browser signs, and a
+browser wasm account posting directly.
+
+- **Construction row:** `"remoteSigning": {"enabled": true, "payloadSupported": false,
+  "protectedHeaders": ["X-BX-APIKEY"]}`. The signature is the default hex HMAC-SHA256
+  in the query or body, so no `wire` is needed.
+  - `payloadSupported` stays false because the crate has no REST-only private feed.
+    A `payloadSigner` account is a typed refusal, as for Bitget, OKX and Bitunix.
+- **Keyless engine, browser signs:** the dispatch recipe is already plain HMAC work
+  (`Present` key, `Sign hmacSha256 Bytes(query)`). The shared remote signer provider
+  therefore sends one `ws-auth` hex request per signed request, and the listen key is
+  only presented, never signed.
+- **Keyed browser engine answers:**
+  - The registry `hosted_signing` family gains `bingx`, and the registry and wasm
+    `bingx` features gain `hosted-signing`.
+  - `legacySigning.ts` gains a plain hex codec (`exchanges/bingx/bingx.signing.ts`)
+    with the legacy client's `localeCompare`-sorted repeat-format preimage, for
+    `type: 'http'` requests. The livenet listen key stays unsigned.
+- **Pinned by:**
+  - `registry/tests/bingx_hosted_signing.rs` checks against a Node crypto golden.
+  - `rust.bingx-hosted-signing.test.ts` checks that the codec and the legacy
+    interceptor send the same bytes for place, cancel and amend.
+  - `rust.bingx-hosted-provider.wasm.test.ts` checks that a keyless remote-signed
+    account sends the local-key bytes for place, amend, cancel and the listen key,
+    with Node HMAC over the legacy preimage.

@@ -98,41 +98,45 @@ const offProxy = { tealstreetProxy: false };
 const wsRoute = { tealstreetWsRoute: true };
 const bybitBrazil = { bybitSiteId: 'BRA_BTL' as const };
 
+// AWS_EXIT.md step 3e moved every host below from fsjnpy143pbz.{jp,asia} (AWS) to the
+// Vultr host: the tunnel, the relay, the bybitbra/grvt/lighter paths, and the
+// okx/okxeu/bitget/blofin private sockets, which became relay urls in place of the
+// AWS Python ws-proxy paths, as did coinbase's once the relay took root paths (5a); apex went direct. The hosted
+// exchange server keeps the old hosts (services/exchange-server/src/egress-hosts.test.ts).
+const TYO = 'wss://fsjnpy143pbz-tyo.tealstreet.io';
+const relayOf = (upstream: string) => `${TYO}/tunnel?ts-relay=${encodeURIComponent(upstream)}`;
+
 describe('routing table / resolver (Epic 1 net)', () => {
   it('WS hosts reproduce the current hardcoded literals', () => {
     // alwaysProxy (grvt private) — no option gates it.
-    expect(resolveExchangeRouting('grvt', proxy).wsPrivate.host).toBe('wss://fsjnpy143pbz.jp.tealstreet.io/grvt');
+    expect(resolveExchangeRouting('grvt', proxy).wsPrivate.host).toBe(`${TYO}/grvt`);
 
     // proxyConditional: on -> tunnel host, off -> direct.
-    expect(resolveExchangeRouting('okx', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/okx/private',
-    );
-    expect(resolveExchangeRouting('okx', proxy).wsBusiness.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/okx/business',
-    );
+    expect(resolveExchangeRouting('okx', proxy).wsPrivate.host).toBe(relayOf('wss://ws.okx.com/ws/v5/private'));
+    expect(resolveExchangeRouting('okx', proxy).wsBusiness.host).toBe(relayOf('wss://ws.okx.com/ws/v5/business'));
     expect(resolveExchangeRouting('okx', offProxy).wsPrivate).toMatchObject({
       tunnelled: false,
       fallback: 'wss://okx-proxy-ja.tealstreet.io/ws/v5/private',
     });
-    expect(resolveExchangeRouting('blofin', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/blofin/private',
-    );
+    expect(resolveExchangeRouting('blofin', proxy).wsPrivate.host).toBe(relayOf('wss://openapi.blofin.com/ws/private'));
+    // Was the AWS ws-proxy `…asia…/coinbase/private`; the relay dials its host root (5a).
     expect(resolveExchangeRouting('coinbase', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private',
+      relayOf('wss://advanced-trade-ws-user.coinbase.com/'),
     );
-    expect(resolveExchangeRouting('apexomni', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/apex/private',
-    );
+    // Was the AWS ws-proxy `…asia…/apex/private`; apex connects directly since 3e (5c).
+    expect(resolveExchangeRouting('apexomni', proxy).wsPrivate).toEqual({ tunnelled: false });
 
     // bitget private moved from fallbackOnly to proxyConditional + a relay that
     // also rides the tunnelled route (40018 IP-bound logins, 2026-10-21); public
     // is still fallbackOnly. UTA accounts get the v3 equivalents.
     // Literal on purpose: sdk-rs's routing.mjs loads this file with a fixed import map.
     const bitgetRelay = (version: 'v2' | 'v3') =>
-      `wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2F${version}%2Fws%2Fprivate`;
+      `wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2F${version}%2Fws%2Fprivate`;
+    // host and fallback were the AWS ws-proxy `…asia…/bitget/{v2,v3}/private`; since
+    // 3e they are the relay itself, so the relay candidate repeats it.
     expect(resolveExchangeRouting('bitget', offProxy).wsPrivate).toEqual({
       tunnelled: false,
-      fallback: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
+      fallback: bitgetRelay('v2'),
       initialSilentConnects: 1,
       ignoredMessages: ['pong'],
       relay: bitgetRelay('v2'),
@@ -140,12 +144,12 @@ describe('routing table / resolver (Epic 1 net)', () => {
     // The Rust engine host routes its UTA (v3) socket through privateUta by URL.
     expect(resolveExchangeRouting('bitget', proxy).wsPrivate).toEqual({
       tunnelled: true,
-      host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
+      host: bitgetRelay('v2'),
       relay: bitgetRelay('v2'),
     });
     expect(resolveExchangeRouting('bitget', proxy).wsPrivateUta).toEqual({
       tunnelled: true,
-      host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private',
+      host: bitgetRelay('v3'),
       relay: bitgetRelay('v3'),
     });
     expect(resolveExchangeRouting('okx', proxy).wsPrivateUta).toBeUndefined();
@@ -156,35 +160,21 @@ describe('routing table / resolver (Epic 1 net)', () => {
     });
 
     // wsRouteCandidates (lighter): gated by tealstreetWsRoute, NOT tealstreetProxy.
-    expect(resolveExchangeRouting('lighter', wsRoute).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream',
-    );
-    expect(resolveExchangeRouting('lighter', wsRoute).wsPublic.host).toBe(
-      'wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true',
-    );
+    expect(resolveExchangeRouting('lighter', wsRoute).wsPrivate.host).toBe(`${TYO}/lighter/stream`);
+    expect(resolveExchangeRouting('lighter', wsRoute).wsPublic.host).toBe(`${TYO}/lighter/stream?readonly=true`);
     expect(resolveExchangeRouting('lighter', proxy).wsPrivate).toEqual({ tunnelled: false });
-    expect(resolveExchangeRouting('lighter-robinhood', wsRoute).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.jp.tealstreet.io/lighter-rh/stream',
-    );
-    expect(resolveExchangeRouting('lighter-robinhood', wsRoute).wsPublic.host).toBe(
-      'wss://fsjnpy143pbz.jp.tealstreet.io/lighter-rh/stream',
-    );
+    expect(resolveExchangeRouting('lighter-robinhood', wsRoute).wsPrivate.host).toBe(`${TYO}/lighter-rh/stream`);
+    expect(resolveExchangeRouting('lighter-robinhood', wsRoute).wsPublic.host).toBe(`${TYO}/lighter-rh/stream`);
     expect(resolveExchangeRouting('lighter-robinhood', proxy).wsPrivate).toEqual({ tunnelled: false });
 
     // bybitBrazilConditional: Bybit Brazil uses a dedicated proxy path that
     // injects x-site-id upstream. It is keyed only by bybitSiteId, not proxy flags.
-    expect(resolveExchangeRouting('bybit', bybitBrazil).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private',
-    );
-    expect(resolveExchangeRouting('bybit', bybitBrazil).wsPublic.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear',
-    );
+    expect(resolveExchangeRouting('bybit', bybitBrazil).wsPrivate.host).toBe(`${TYO}/bybitbra/v5/private`);
+    expect(resolveExchangeRouting('bybit', bybitBrazil).wsPublic.host).toBe(`${TYO}/bybitbra/v5/public/linear`);
     expect(resolveExchangeRouting('bybitinverse', bybitBrazil).wsPublic.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse',
+      `${TYO}/bybitbra/v5/public/inverse`,
     );
-    expect(resolveExchangeRouting('bybitspot', bybitBrazil).wsPublic.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot',
-    );
+    expect(resolveExchangeRouting('bybitspot', bybitBrazil).wsPublic.host).toBe(`${TYO}/bybitbra/v5/public/spot`);
     // Without the site id the route is direct (plus the athena fallback, asserted below).
     expect(resolveExchangeRouting('bybit', offProxy).wsPrivate.tunnelled).toBe(false);
     expect(resolveExchangeRouting('bybitdemo', bybitBrazil).wsPrivate).toEqual({ tunnelled: false });
@@ -215,17 +205,13 @@ describe('routing table / resolver (Epic 1 net)', () => {
 
   it('variant exchanges inherit their parent class WS routing', () => {
     // okxeu extends OKXExchange {} -> same okx ws classes, but tunnels to the EEA
-    // entity's hosts (wseea.okx.com) via dedicated okxeu/* proxy paths — EEA
+    // entity's hosts (wseea.okx.com) via its own relay upstreams — EEA
     // credentials do not authenticate on the global ws host.
-    expect(resolveExchangeRouting('okxeu', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/private',
-    );
+    expect(resolveExchangeRouting('okxeu', proxy).wsPrivate.host).toBe(relayOf('wss://wseea.okx.com/ws/v5/private'));
     expect(resolveExchangeRouting('okxeu', proxy).wsBusiness.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/business',
+      relayOf('wss://wseea.okx.com/ws/v5/business'),
     );
-    expect(resolveExchangeRouting('okx', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/okx/private',
-    );
+    expect(resolveExchangeRouting('okx', proxy).wsPrivate.host).toBe(relayOf('wss://ws.okx.com/ws/v5/private'));
     expect(resolveExchangeRouting('okxdemo', proxy).wsPrivate).toEqual({ tunnelled: false });
     expect(resolveExchangeRouting('okxdemo', proxy).wsBusiness).toEqual({ tunnelled: false });
     expect(resolveExchangeRouting('okxeudemo', proxy).wsPrivate).toEqual({ tunnelled: false });
@@ -241,7 +227,7 @@ describe('routing table / resolver (Epic 1 net)', () => {
     }
     // coinbasespot extends CoinbaseExchange -> same private proxy host.
     expect(resolveExchangeRouting('coinbasespot', proxy).wsPrivate.host).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private',
+      relayOf('wss://advanced-trade-ws-user.coinbase.com/'),
     );
   });
 
@@ -275,12 +261,12 @@ describe('routing table / resolver (Epic 1 net)', () => {
     // plain passthrough.
     expect(resolveExchangeRouting('bybit', bybitBrazil).wsPrivate).toEqual({
       tunnelled: true,
-      host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private',
+      host: `${TYO}/bybitbra/v5/private`,
     });
     expect(resolveExchangeRouting('bybit', bybitBrazil).wsPublic.fallback).toBeUndefined();
     expect(resolveExchangeRouting('okx', proxy).wsPrivate).toEqual({
       tunnelled: true,
-      host: 'wss://fsjnpy143pbz.asia.tealstreet.io/okx/private',
+      host: relayOf('wss://ws.okx.com/ws/v5/private'),
     });
 
     // Variants whose direct host is NOT stream.bybit.com / ws.okx.com get none:
@@ -293,22 +279,20 @@ describe('routing table / resolver (Epic 1 net)', () => {
 
   it('tunnel relay candidates attach to bybit/okx PRIVATE direct resolutions only', () => {
     // Relay url = the egress region's tunnel host + ?ts-relay=<private upstream>.
-    // bybit is region-conditional: JA -> jp tunnel, else sg.
+    // bybit is region-conditional (JA -> jp tunnel, else sg); both regions are the
+    // one Vultr host since 3e.
     expect(resolveExchangeRouting('bybit', offProxy).wsPrivate.relay).toBe(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
+      'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
     );
     expect(resolveExchangeRouting('bybit', { proxyRegion: 'JA' }).wsPrivate.relay).toBe(
-      'wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
+      'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
     );
     expect(resolveExchangeRouting('bybitinverse', offProxy).wsPrivate.relay).toContain(
       'stream.bybit.com%2Fv5%2Fprivate',
     );
     expect(resolveExchangeRouting('bybitspot', offProxy).wsPrivate.relay).toContain('stream.bybit.com%2Fv5%2Fprivate');
-    // okx's HOW egress is whatever egressRegion.ts says; the relay follows it.
-    const okxTunnelHost = resolveExchangeRouting('okx', offProxy).howEgress === 'jp' ? 'jp' : 'asia';
-    expect(resolveExchangeRouting('okx', offProxy).wsPrivate.relay).toBe(
-      `wss://fsjnpy143pbz.${okxTunnelHost}.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate`,
-    );
+    // okx's HOW egress is whatever egressRegion.ts says; every region is one host.
+    expect(resolveExchangeRouting('okx', offProxy).wsPrivate.relay).toBe(relayOf('wss://ws.okx.com/ws/v5/private'));
     expect(resolveExchangeRouting('okx', offProxy).wsBusiness.relay).toContain(
       'ws.okx.com%2Fws%2Fv5%2Fbusiness',
     );

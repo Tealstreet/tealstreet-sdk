@@ -26,10 +26,10 @@ const weexTape = () => {
 };
 const ids = (response) => JSON.parse(response.body).map((row) => row.orderId ?? row.algoId);
 
-test('all 50 covered venue configurations use deterministic private replay clocks', () => {
+test('all 51 covered venue configurations use deterministic private replay clocks', () => {
   const covered = [
     'apexomni', 'asterdex', 'backpack', 'binance', 'binanceinverse',
-    'binancepm', 'binancespot', 'bingx', 'bitget', 'bitgetinverse',
+    'binanceoptions', 'binancepm', 'binancespot', 'bingx', 'bitget', 'bitgetinverse',
     'bitgetusdc', 'bitrue', 'bitunix', 'blofin', 'breakoutprop',
     'bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'coinbase',
     'coinbasespot', 'cryptocom', 'grvt', 'hyperliquid', 'hyperliquidspot',

@@ -45,6 +45,7 @@ impl Venue for Probe {
                 },
                 invalidation: Invalidation::None,
                 subscription_interval_ms: self.pace,
+                close_floors: &[],
             })
             .unwrap();
         self.feed = Some(feed);

@@ -47,11 +47,15 @@ fn markers(h: &Harness) -> Vec<&safe_cex_engine::log::LogEvent> {
         .collect()
 }
 fn typed_failure(h: &Harness, command: u32, kind: ErrorKind) {
+    typed_failure_with_code(h, command, kind, None);
+}
+/// A read refusal takes its kind from the Binance table and keeps the native code.
+fn typed_failure_with_code(h: &Harness, command: u32, kind: ErrorKind, code: Option<&str>) {
     assert!(h.result(command).unwrap().is_err(), "{:?}", h.done);
     assert_eq!(h.failures.len(), 1);
     assert_eq!(h.failures[0].0, command);
     assert_eq!(h.failures[0].1.kind, Some(kind));
-    assert!(h.failures[0].1.venue_code.is_none());
+    assert_eq!(h.failures[0].1.venue_code.as_deref(), code);
     assert!(markers(h).is_empty());
     assert_eq!(h.command_notices, [(command, "failed")]);
     assert!(h.command_errors.is_empty());
@@ -116,15 +120,13 @@ fn first_pages_reject_instead_of_empty_or_failed_body_prefix_success() {
                 }),
                 _ => h.reply(request.id, 200, "", &format!("[{row},{{\"broken\":true}}]")),
             }
-            typed_failure(
-                &h,
-                91,
-                if failure == 2 {
-                    ErrorKind::Network
-                } else {
-                    ErrorKind::Internal
-                },
-            );
+            let (kind, code) = match failure {
+                0 => (ErrorKind::Rejected, Some("-1")),
+                1 => (ErrorKind::VenueUnavailable, None),
+                2 => (ErrorKind::Network, None),
+                _ => (ErrorKind::Internal, None),
+            };
+            typed_failure_with_code(&h, 91, kind, code);
             assert!(!h.requests.iter().any(|r| r.url.contains(path)));
             // Retired HTTP callbacks cannot publish a second completion.
             h.reply(request.id, 200, "", "[]");
@@ -251,7 +253,7 @@ fn successful_empty_or_excluded_range_pages_do_not_enable_failure_recovery() {
         h.event(Event::TimerFired { timer });
         let r = h.take("/income");
         h.reply(r.id, 503, "", "unavailable");
-        typed_failure(&h, 95, ErrorKind::Internal);
+        typed_failure(&h, 95, ErrorKind::VenueUnavailable);
     }
 }
 

@@ -16,7 +16,7 @@ const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.u
   .map((line) => line.trim().split(':')[0].replaceAll("'", ''));
 
 test('the venue list is read from the family map', () => {
-  assert.equal(venues.length, 50);
+  assert.equal(venues.length, 51);
   for (const venue of venues) assert.doesNotThrow(() => venueFamily(venue), venue);
 });
 

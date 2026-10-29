@@ -1,6 +1,5 @@
 //! Atomic private snapshots, protected from newer stream and command updates.
 use super::*;
-use safe_cex_engine::Fill;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
@@ -17,6 +16,7 @@ use safe_cex_engine::selected_read::{
     SelectedRead,
 };
 use safe_cex_engine::startup::rate_limit_pause_ms;
+use safe_cex_engine::{Fill, OrderSnapshotToken};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -90,7 +90,6 @@ pub(crate) struct Account {
     pub connection: Connection,
     pub margin: Option<MarginType>,
     pub mode_loaded: bool,
-    pub orders_revision: u64,
     pub positions_revision: u64,
     pub balance_revision: u64,
     pub settings_revision: u64,
@@ -212,7 +211,7 @@ pub enum Request {
         page_rows: usize,
         rows: SnapshotBuilder<String, Order>,
         sources: HashMap<String, Source>,
-        revision: u64,
+        snapshot: OrderSnapshotToken,
         /// A Primary-signed reconcile snapshot: only it may clear an order fence.
         reconcile: bool,
         uncertainty_generation: u64,
@@ -775,6 +774,14 @@ impl Blofin {
         if self.account.orders_busy || !self.signed() {
             return;
         }
+        let Some(snapshot) = cx.store.begin_orders_snapshot() else {
+            cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
+                "BloFin order snapshot fence exhausted",
+            );
+            return;
+        };
         self.account.orders_busy = true;
         let reconcile = std::mem::take(&mut self.account.reconcile_owed);
         self.orders_page(
@@ -788,7 +795,7 @@ impl Blofin {
                 page_rows: 0,
                 rows: SnapshotBuilder::default(),
                 sources: HashMap::new(),
-                revision: self.account.orders_revision,
+                snapshot,
                 reconcile,
                 uncertainty_generation: self.account.uncertainty_generation,
                 read_epoch: cx.order_read_epoch(),
@@ -1488,7 +1495,7 @@ impl Blofin {
                 page_rows,
                 rows,
                 mut sources,
-                revision,
+                snapshot,
                 reconcile,
                 uncertainty_generation,
                 read_epoch,
@@ -1507,7 +1514,7 @@ impl Blofin {
                                 page_rows,
                                 rows,
                                 sources,
-                                revision,
+                                snapshot,
                                 reconcile,
                                 uncertainty_generation,
                                 read_epoch,
@@ -1528,7 +1535,7 @@ impl Blofin {
                             page_rows: 0,
                             rows,
                             sources,
-                            revision,
+                            snapshot,
                             reconcile,
                             uncertainty_generation,
                             read_epoch,
@@ -1547,7 +1554,7 @@ impl Blofin {
                             page_rows: 0,
                             rows,
                             sources,
-                            revision,
+                            snapshot,
                             reconcile,
                             uncertainty_generation,
                             read_epoch,
@@ -1561,17 +1568,16 @@ impl Blofin {
                         // complete cumulative rows still prove execution prefixes.
                         self.seed_startup_executions(cx, rows.rows(), &sources);
                     }
-                    if revision == self.account.orders_revision {
-                        let clean = rows.rejected() == 0;
+                    let clean = rows.rejected() == 0;
+                    let committed = cx.store.commit_orders_snapshot([snapshot], |current| {
                         if clean {
                             self.account.order_skips.clear();
                         }
                         let accepted = rows.rows().len();
-                        let mut rows =
-                            rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
+                        let mut rows = rows.commit(current.iter().cloned(), |o| o.id.clone());
                         // Stored copies kept for rejected rows bypass the snapshot's own rules.
                         let mut kept = rows.split_off(accepted);
-                        for order in cx.store.orders() {
+                        for order in current {
                             if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
                                 self.account.remember_terminal(&order.id);
                             }
@@ -1584,15 +1590,15 @@ impl Blofin {
                                     .and_then(|extra| extra.filled_in_placement_units)
                                     .unwrap_or(0.0)
                                     >= self.filled_native(&order.id)
-                                    || cx.store.order(&order.id).is_some())
+                                    || current.iter().any(|existing| existing.id == order.id))
                         });
                         let retained: HashSet<_> =
                             rows.iter().map(|order| order.id.as_str()).collect();
                         sources.retain(|id, _| retained.contains(id.as_str()));
                         for order in &mut rows {
-                            if let Some(existing) = cx
-                                .store
-                                .order(&order.id)
+                            if let Some(existing) = current
+                                .iter()
+                                .find(|existing| existing.id == order.id)
                                 .filter(|existing| existing.filled > order.filled)
                             {
                                 *order = existing.clone();
@@ -1687,7 +1693,9 @@ impl Blofin {
                         }
                         rows.extend(kept);
                         self.account.sources = sources;
-                        cx.store.set_orders(rows);
+                        rows
+                    });
+                    if committed {
                         // The last page's token cannot freshen a pre-mark first page.
                         if clean
                             && reconcile
@@ -1794,7 +1802,7 @@ impl Blofin {
                 if let Ok(Data { data: rows }) =
                     serde_json::from_str::<Data<Vec<&serde_json::value::RawValue>>>(text)
                 {
-                    self.account.orders_revision += 1;
+                    cx.store.invalidate_order_snapshots();
                     for raw in rows {
                         let Ok(StreamOrder {
                             mut row,
