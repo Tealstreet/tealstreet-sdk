@@ -134,3 +134,37 @@ Ruled order:
 ## Callers
 
 A custom host must honour `reject_route` and emit `WsRouteExhausted`, or Bitget UTA and egress parity is lost. No SDK option changes. Recorded in `RUST_CUTOVER_CALLERS.md` at production time.
+
+## Managed adoption (overseer rulings, 2026-10-28)
+
+Owner claude-fe7lgm. Order: #2331 (exhaustion renamed `RouteExhausted`), then
+the engine per-route refusal (C), then Bitget adoption, then Crypto.com.
+
+- **(A) Recovery after exhaustion (ruling 3, restated).** On
+  `Retired { reason: RouteExhausted }` the private feed stays down:
+  - exactly one `AUTH_REJECTED` notice, with the IP-whitelist text;
+  - `account.degraded`, so the account poll refreshes balance, positions and
+    orders in place of the stream;
+  - `start()` never fails with `StartupFailed`, and public feeds are unaffected;
+  - a new start recovers, as in TS (`WsDirectFallback` reports once and stops).
+
+  Managed RED: with Bitget managed, a 40018 on every route ends in exhaustion
+  with one notice, zero private `WsConnect` across 10 backoff periods, polling
+  and public books live, and a fresh engine reconnecting. The legacy
+  zero-reconnect test is its preservation twin.
+- **(B) Close floors.** Every Bitget feed declares `close_floors: &[]`. The TS
+  reference sockets (`reference/bitget/bitget.ws-private.ts`, `bitget.ws-public.ts`,
+  `bitget.ws-secondary-public.ts`) never branch on a close code.
+- **(C) Per-route refusal is engine-owned (option E).**
+  - `AuthEvidence::RouteRefused` retires with `RetireReason::RouteRefused` and
+    retries.
+  - The first refusal of a streak redials at once, matching TS's immediate
+    `switchRoute`. Later refusals wait backoff.
+  - An accepted login resets the streak.
+  - The engine sets `reject_route` on the next connect spec.
+
+  Option V (venue-held, backoff before every switch) was rejected as slower
+  than TS on the first switch.
+- **(D) Size.** The adoption PR's cap follows the HL rule: the CI-measured
+  family size rounded up to the next KiB plus 2 KiB, with a twiggy breakdown.
+  It stops for an overseer ruling above about 110 KB.
