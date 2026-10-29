@@ -162,3 +162,24 @@ describe('Hyperliquid remote signing over the structured ws-auth wire', () => {
     await expect(call(rebound, bindAddress)).rejects.toThrow('Remote signing request refused');
   });
 });
+
+describe('keyless Hyperliquid engine binds its agent address through the device', () => {
+  it('runs the engine setup task over hyperliquid-address before start', async () => {
+    const { EngineHost } = await import('@tealstreet/safe-cex-wasm/host');
+    const { WasmEngine } = await loadNodeEngine();
+    for (const venue of ['hyperliquid', 'hyperliquidspot'] as const) {
+      const keyed = device(venue);
+      const { signer, sign } = server(venue, keyed);
+      const engine = new WasmEngine(venue, JSON.stringify({ key: ACCOUNT, signing: { primary: IDENTITY }, remoteSigning: true }));
+      const io = vi.fn(() => { throw new Error('setup must not use network'); });
+      const host = new EngineHost(engine as never, { now: () => 1_700_000_000_000, prepareHttp: prepareRecordedHttp, request: io, connect: io,
+        setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) },
+      {}, { ownsEngine: true, signer, signerAlgorithms: remoteSignerAlgorithms(venue) });
+      live.push(host);
+      await host.prepareAddressSetup();
+      expect(sign).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ wsAuth: { toSign: ACCOUNT, outputFormat: 'hyperliquid-address' } }));
+      expect((engine as unknown as { addressSetupReady(): boolean }).addressSetupReady()).toBe(true);
+      expect(io).not.toHaveBeenCalled();
+    }
+  });
+});

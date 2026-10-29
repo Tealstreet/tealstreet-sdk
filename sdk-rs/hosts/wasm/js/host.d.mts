@@ -474,6 +474,9 @@ export class EngineHost {
   capabilities(): EngineCapabilities;
   constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: EngineHostOptions);
   start(): void;
+  /** Bind address-bound slots through the injected signer before `start`; resolves
+   * once every setup task has settled (bound or refused). A no-op without a signer. */
+  prepareAddressSetup(): Promise<void>;
   /** Sign compatibility bytes without startup, transport actions or account mutation. */
   hostedSigningClock(): HostedSigningClock;
   hostedSigning(input: HostedSigningInput): Promise<HostedSigningOutput>;

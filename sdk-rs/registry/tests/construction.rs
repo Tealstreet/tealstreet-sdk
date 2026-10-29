@@ -545,7 +545,10 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             let error = construct(venue, &format!(r#"{{"key":"key","secret":"{local}","remoteSigning":true,"payloadSigner":true}}"#)).unwrap_err();
             assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
-            let expected = if safe_cex_venues::remote_signing_policy(venue).enabled {
+            let policy = safe_cex_venues::remote_signing_policy(venue);
+            let expected = if policy.enabled && !policy.payload_supported {
+                format!("Rust {venue} has no REST-only PayloadSigner lifecycle")
+            } else if policy.enabled {
                 format!(
                     "Rust {venue} payloadSigner requires a configured injected signing provider"
                 )

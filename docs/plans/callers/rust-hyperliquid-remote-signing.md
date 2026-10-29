@@ -18,9 +18,14 @@ Obligations, in order:
    `RustEngineExchange.signWsAuth` of a keyed account (the existing route for
    other Rust hosted families). A TS venue class answers both formats with an
    error, which the server counts like any signer error.
-2. exchange-server constructs hosted Hyperliquid accounts with `key` (the
+2. Hosts that inject a `signer` into `EngineHost` call `prepareAddressSetup()`
+   before `start()` (RustEngineExchange does). It negotiates the engine's
+   `publicAddressOwned` setup, answers the PublicAddress task through the signer
+   and acknowledges each retirement only after that provider call has settled.
+   Without it, an address-bound keyless account refuses every signed action.
+3. exchange-server constructs hosted Hyperliquid accounts with `key` (the
    account address), optional `vault`, `remoteSigner`, and no `secret`.
-3. Custom `remoteSigner` implementations must sign `hyperliquid-l1` only after
+4. Custom `remoteSigner` implementations must sign `hyperliquid-l1` only after
    re-deriving the digest from the statement; never sign a supplied digest.
 
 Deletion prerequisites: none added or cleared.
