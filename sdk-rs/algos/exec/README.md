@@ -24,3 +24,9 @@ and amendment sizing/policy, display formatting, timer-backed waits and
 chaser/TWAP delegation. Browser-side script preprocessing stays client-owned.
 The source oracles are `CommandHandler.test.ts`, `worker-host/router*.test.ts`,
 `PriceCommand.ts`, `CancelCommand.ts` and `LeverageCommand.ts` in cli-core.
+
+The native `ExecFactory` implements the shared runtime's `AlgoFactory`; add it
+to the server registry. Its integration tests use the real shared LocalSet
+scope and typed engine commands. Network and venue execution are not exercised.
+Payload bounds and bare-chain failure behavior are specified in the caller
+fragment, including the intentional cross-symbol ID-suffix cancellation rule.

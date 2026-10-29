@@ -2,6 +2,13 @@
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native;
+
+pub const MAX_COMMAND_BYTES: usize = 16 * 1024;
+pub const MAX_STEPS: usize = 128;
+pub const MAX_PARALLEL: usize = 32;
+
 /// The runtime projects its engine store into the existing TS store shape.
 /// `call` routes through the server's engine-backed callMethod translator.
 pub trait Host {
@@ -63,6 +70,22 @@ impl Exec {
             );
             return;
         };
+        if command.len() > MAX_COMMAND_BYTES {
+            resource_refusal(host, &req_id);
+            return;
+        }
+        let steps: VecDeque<String> = command
+            .split(';')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+        let parallel = steps.iter().filter(|s| s.starts_with('@')).count();
+        let in_flight = self.pending.values().filter(|p| p.chain.is_none()).count();
+        if steps.len() > MAX_STEPS || parallel + in_flight > MAX_PARALLEL {
+            resource_refusal(host, &req_id);
+            return;
+        }
         let id = self.id();
         self.chains.insert(
             id,
@@ -73,12 +96,7 @@ impl Exec {
                     .unwrap_or("")
                     .into(),
                 req_id,
-                steps: command
-                    .split(';')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(String::from)
-                    .collect(),
+                steps,
                 last: None,
             },
         );
@@ -202,6 +220,15 @@ fn log(host: &mut impl Host, req_id: &Option<Value>, message: &str) {
 }
 fn done() -> Evaluation {
     Evaluation::Done(json!({"handled":true,"success":true}))
+}
+fn resource_refusal(host: &mut impl Host, req_id: &Option<Value>) {
+    let message = "EXEC command exceeds native resource limits";
+    log(host, req_id, message);
+    reply(
+        host,
+        req_id,
+        json!({"handled":true,"success":false,"error":message}),
+    );
 }
 fn failed(message: String) -> Evaluation {
     Evaluation::Done(json!({"handled":true,"success":false,"error":message}))
