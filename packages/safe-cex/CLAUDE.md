@@ -8,7 +8,7 @@ Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
-Bitget x3 (USDT, USDC, inverse) and Bitunix (#2262). Provider-mode eligibility still follows each declared remote
+Bitget x3 (USDT, USDC, inverse), Bitunix (#2262) and Phemex. Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
@@ -159,7 +159,8 @@ revision; provider text and partial results are not returned on failure.
 A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
 its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
 The BingX native checkpoint keeps hosted admission disabled until those gates.
-Phemex native dispatch signing likewise keeps hosted/delegated admission disabled.
+Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
+in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
 REST and user.auth recipes use provider custody and the signed expiry-only receipt.
 The shared delegated-provider companion admits keyless `remoteSigner` and
