@@ -242,9 +242,27 @@ impl<V: Venue, T: Transport> Host<V, T> {
     #[allow(clippy::manual_async_fn)]
     pub fn run(
         self,
-        mut commands: mpsc::UnboundedReceiver<Command>,
+        commands: mpsc::UnboundedReceiver<Command>,
         flush_every: Duration,
         mut on_frame: impl FnMut(&[u8]),
+        on_notice: impl FnMut(Notice),
+    ) -> impl std::future::Future<Output = Engine<V>> {
+        self.run_with_store(
+            commands,
+            flush_every,
+            move |frame, _| on_frame(frame),
+            on_notice,
+        )
+    }
+
+    /// [`Self::run`], also handing each flush frame's callback the engine store
+    /// it was taken from, for embedders that read typed state (markets) directly.
+    #[allow(clippy::manual_async_fn)]
+    pub fn run_with_store(
+        self,
+        mut commands: mpsc::UnboundedReceiver<Command>,
+        flush_every: Duration,
+        mut on_frame: impl FnMut(&[u8], &safe_cex_engine::Store),
         mut on_notice: impl FnMut(Notice),
     ) -> impl std::future::Future<Output = Engine<V>> {
         #[cfg(feature = "address-nonce")]
@@ -303,7 +321,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
         &mut self,
         commands: &mut mpsc::UnboundedReceiver<Command>,
         flush_every: Duration,
-        on_frame: &mut impl FnMut(&[u8]),
+        on_frame: &mut impl FnMut(&[u8], &safe_cex_engine::Store),
         on_notice: &mut impl FnMut(Notice),
     ) {
         self.turn(|host| {
@@ -366,11 +384,11 @@ impl<V: Venue, T: Transport> Host<V, T> {
         }
     }
 
-    fn frame(&mut self, on_frame: &mut impl FnMut(&[u8])) {
+    fn frame(&mut self, on_frame: &mut impl FnMut(&[u8], &safe_cex_engine::Store)) {
         // Own the result before calling application code, outside the guard.
         let frame = self.turn(|host| host.engine.take_frame((host.clock)()).map(Vec::from));
         if let Some(Some(frame)) = frame {
-            on_frame(&frame);
+            on_frame(&frame, self.engine.store());
         }
     }
 

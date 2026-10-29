@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crypto",
     "engine",
+    "hosts/candle-server",
     "hosts/native",
     "hosts/wasm",
     "registry",
@@ -18,6 +19,7 @@ members = [
 default-members = [
     "crypto",
     "engine",
+    "hosts/candle-server",
     "hosts/native",
     "hosts/wasm",
     "registry",
