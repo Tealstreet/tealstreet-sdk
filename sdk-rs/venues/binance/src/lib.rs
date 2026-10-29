@@ -1199,9 +1199,11 @@ impl BinanceFutures {
         candles: Vec<Candle>,
         response: Response<'_>,
     ) {
-        let Response { status, body, .. } = response;
-        if status != 200 {
-            let _ = cx.fail_context(&context, format!("Binance klines HTTP {status}: {body}"));
+        if response.status != 200 {
+            // The table gives the kind and native code; the text stays as it was.
+            let mut error = account::read_error(&response);
+            error.message = format!("Binance klines HTTP {}: {}", response.status, response.body);
+            let _ = cx.fail_context(&context, error);
             return;
         }
         let _ = cx.done_context(
