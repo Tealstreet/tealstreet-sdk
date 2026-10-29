@@ -140,6 +140,11 @@ export type ExchangeOptions = {
   /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
   readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
+  /**
+   * A main-thread instance paired with a worker that owns the account. Its reads
+   * and trading go to the worker, waiting for the bridge; it never runs an engine.
+   */
+  readonly workerMirror?: boolean;
   /** Retained input compatibility; this build always uses Rust for beta venues. */
   readonly engine?: 'rust';
   readonly privateOnly?: boolean;

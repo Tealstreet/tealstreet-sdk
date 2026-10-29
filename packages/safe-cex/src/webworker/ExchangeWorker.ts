@@ -160,7 +160,9 @@ export class ExchangeWorker {
   ) {
     this._exchangeName = exchangeName;
     this._accountName = accountName;
-    this._options = options;
+    // The worker owns the account's engine; a forwarded mirror flag would stop it from running one.
+    const { workerMirror: _workerMirror, ...ownedOptions } = options;
+    this._options = ownedOptions;
     this._ctx = ctx;
     this._settings = settings;
     this._metadata = metadata;

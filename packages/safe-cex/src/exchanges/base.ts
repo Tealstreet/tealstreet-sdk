@@ -342,6 +342,7 @@ export const WORKER_OPTIONAL_METHODS = [
   'fetchAccountTier',
   'fetchEngineCapabilities',
   // Rust native account reads; a main-thread mirror asks the worker's engine.
+  'getAccount',
   'fetchPositions',
   'fetchBalance',
   'fetchPositionMode',
@@ -362,6 +363,7 @@ const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'fetchHistoricalPositions',
   'fetchAccountTier',
   'fetchEngineCapabilities',
+  'getAccount',
 ]);
 
 /** Worker RPCs that dispatch venue writes: an interrupted one has an unknown outcome. */
