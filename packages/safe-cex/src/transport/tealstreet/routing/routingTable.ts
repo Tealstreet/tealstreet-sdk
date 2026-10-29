@@ -17,9 +17,6 @@ import { exchangeMetadata } from '../../../exchangeMetadata';
 
 // --- WS host literals ---------------------------------------------------------
 const TYO = 'wss://fsjnpy143pbz-tyo.tealstreet.io'; // the Vultr tunnel host (AWS_EXIT.md 3e)
-// AWS. Coinbase's private socket cannot move to the relay until the tunnel accepts an
-// allowlist entry without a path prefix (its socket is the host root; AWS_EXIT.md 5a).
-const ASIA = 'wss://fsjnpy143pbz.asia.tealstreet.io';
 // Tokyo passthrough tunnels (Caddy behind Cloudflare) — the DIRECT-path
 // fallback hosts for bybit/okx.
 const BYBIT_JA = 'wss://bybit-proxy-ja.tealstreet.io';
@@ -35,10 +32,12 @@ const RELAY_UPSTREAM = {
   bitgetPrivate: 'wss://ws.bitget.com/v2/ws/private',
   bitgetPrivateUta: 'wss://ws.bitget.com/v3/ws/private',
   blofinPrivate: 'wss://openapi.blofin.com/ws/private',
+  // The host root: the tunnel matches it since #8265 (an entry ending in `/`).
+  coinbasePrivate: 'wss://advanced-trade-ws-user.coinbase.com/',
 } as const;
 const relay = (upstream: string): string => buildRelayUrl('jp', upstream);
 
-// The browser build's WS hosts. IP-bound private sockets (okx, okxeu, bitget, blofin)
+// The browser build's WS hosts. IP-bound private sockets (okx, okxeu, bitget, blofin, coinbase)
 // go through the tunnel relay, which dials the venue from the 9-IP fleet; they used
 // to be the AWS Python ws-proxy paths (`fsjnpy143pbz.asia…/<venue>/private`), moved
 // in AWS_EXIT.md step 3e. bybitbra, grvt and lighter are containers on the tunnel
@@ -50,7 +49,7 @@ export const BROWSER_WS_HOSTS = {
   okxeuPrivate: relay(RELAY_UPSTREAM.okxeuPrivate),
   okxeuBusiness: relay(RELAY_UPSTREAM.okxeuBusiness),
   blofin: relay(RELAY_UPSTREAM.blofinPrivate),
-  coinbase: `${ASIA}/coinbase/private`,
+  coinbase: relay(RELAY_UPSTREAM.coinbasePrivate),
   bitgetPrivate: relay(RELAY_UPSTREAM.bitgetPrivate),
   bitgetPrivateUta: relay(RELAY_UPSTREAM.bitgetPrivateUta),
   bitgetPublic: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',

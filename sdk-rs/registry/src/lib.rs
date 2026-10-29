@@ -1825,9 +1825,10 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "blofin")]
         "blofin" => {
-            if [&options.key, &options.secret, &options.passphrase]
+            if [&options.key, &options.secret]
                 .iter()
                 .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
+                || options.passphrase.is_some()
                 || options.read_credentials.is_some()
             {
                 return Err(invalid(
