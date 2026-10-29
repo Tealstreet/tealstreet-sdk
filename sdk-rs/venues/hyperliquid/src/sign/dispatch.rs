@@ -39,7 +39,7 @@ impl Exchange {
         }
         let json =
             serde_json::value::to_raw_value(action).map_err(|_| SignError::InvalidRequest)?;
-        let encoded = rmp_serde::to_vec_named(action).map_err(|_| SignError::InvalidRequest)?;
+        let encoded = super::statement::msgpack(json.get())?;
         Ok(Self {
             signing,
             claim,
