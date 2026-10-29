@@ -187,6 +187,8 @@ fn public_only_never_decodes_a_primary() {
 #[test]
 fn public_only_read_provider_grants_no_hosted_or_startup_authority() {
     let _declared = test_policy::declare("backpack", PublicRead);
+    // Without a hosted family linked, hosted signing is absent by construction.
+    #[cfg(feature = "hosted-signing")]
     assert!(!hosted_signing::admitted(
         "backpack",
         &options(true, true, Some(READ_SEED))

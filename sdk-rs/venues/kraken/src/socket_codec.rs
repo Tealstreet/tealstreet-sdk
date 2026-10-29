@@ -36,6 +36,7 @@ pub(super) fn policy(private: bool, futures: bool) -> FeedPolicy {
             Invalidation::Required
         },
         subscription_interval_ms: 0.,
+        close_floors: &[],
     }
 }
 

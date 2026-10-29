@@ -392,6 +392,69 @@ pub mod error_corpus {
         Ok(fixture)
     }
 
+    /// Every code-and-message row of `table` is backed by a recorded fixture whose
+    /// body carries that code and that exact message, so the row's text comes
+    /// from the venue and never from a hand-typed string (ruling on PR2b).
+    pub fn assert_message_rows_recorded(
+        table: &crate::classify::CodeTable,
+        corpus: &[(String, Fixture)],
+    ) {
+        for row in table.rows {
+            if let crate::classify::Key::IntMessage(code, message) = row.key {
+                let recorded = corpus
+                    .iter()
+                    .any(|(_, fixture)| carries(&fixture.body, code, message));
+                assert!(recorded, "code {code} {message:?} has no recorded fixture");
+            }
+        }
+    }
+
+    /// Some JSON object in `text` whose own members hold both the code (number
+    /// or string) and the exact message.
+    fn carries(text: &str, code: i64, message: &str) -> bool {
+        let bytes = text.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'"' => index = string_end(bytes, index),
+                b'{' => {
+                    let end = value_end(bytes, index);
+                    if object_carries(&text[index..end], code, message) {
+                        return true;
+                    }
+                    index += 1;
+                }
+                _ => index += 1,
+            }
+        }
+        false
+    }
+
+    /// The object's direct members, never those of a nested value.
+    fn object_carries(object: &str, code: i64, message: &str) -> bool {
+        let bytes = object.as_bytes();
+        let (codes, mut has_code, mut has_message) =
+            ([code.to_string(), format!("\"{code}\"")], false, false);
+        let mut index = skip_space(bytes, 1);
+        while bytes.get(index) == Some(&b'"') {
+            let colon = skip_space(bytes, string_end(bytes, index));
+            if bytes.get(colon) != Some(&b':') {
+                break;
+            }
+            let start = skip_space(bytes, colon + 1);
+            let stop = value_end(bytes, start);
+            let value = &object[start..stop];
+            has_code |= codes.iter().any(|token| token == value);
+            has_message |= serde_json::from_str::<String>(value).is_ok_and(|text| text == message);
+            index = skip_space(bytes, stop);
+            if bytes.get(index) != Some(&b',') {
+                break;
+            }
+            index = skip_space(bytes, index + 1);
+        }
+        has_code && has_message
+    }
+
     fn is_date(text: &str) -> bool {
         let bytes = text.as_bytes();
         bytes.len() == 10
@@ -629,6 +692,56 @@ pub mod error_corpus {
             let dir = corpus("empty");
             std::fs::write(dir.join("README.md"), "notes").unwrap();
             load(&dir);
+        }
+
+        #[test]
+        fn message_rows_need_a_recording_of_their_exact_text() {
+            use crate::classify::{CodeTable, Key, Row, Verdict};
+            const TABLE: CodeTable = CodeTable {
+                rows: &[Row {
+                    key: Key::IntMessage(
+                        -2010,
+                        "Account has insufficient balance for requested action.",
+                    ),
+                    verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                    only: None,
+                }],
+                success: &[],
+                unlisted: Verdict::Unknown(None),
+                status: &[],
+            };
+            let recorded = |body: &str| {
+                let text = fixture(&format!(
+                    r#""source":"live","body":{}"#,
+                    serde_json::to_string(body).unwrap()
+                ));
+                vec![("case".to_owned(), parse(&text).unwrap())]
+            };
+            assert_message_rows_recorded(
+                &TABLE,
+                &recorded(
+                    r#"{"code":-2010,"msg":"Account has insufficient balance for requested action."}"#,
+                ),
+            );
+            let reworded = std::panic::catch_unwind(|| {
+                assert_message_rows_recorded(
+                    &TABLE,
+                    &recorded(r#"{"code":-2010,"msg":"Account has insufficient balance."}"#),
+                )
+            });
+            assert!(
+                reworded.is_err(),
+                "a different wording is no recording of the row"
+            );
+            let other_code = std::panic::catch_unwind(|| {
+                assert_message_rows_recorded(
+                    &TABLE,
+                    &recorded(
+                        r#"{"code":-2011,"msg":"Account has insufficient balance for requested action."}"#,
+                    ),
+                )
+            });
+            assert!(other_code.is_err(), "the text must come with its own code");
         }
 
         #[test]

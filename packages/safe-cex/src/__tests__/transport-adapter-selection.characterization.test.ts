@@ -1,8 +1,3 @@
-vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
-});
-
 import type { AxiosInstance } from 'axios';
 import type { BaseExchange } from '../exchanges/base';
 import type { ExchangeName, ExchangeOptions } from '../types';
@@ -19,6 +14,11 @@ import {
 } from '../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { DefaultStore } from '../store/store.base';
 import { legacyVenueRegistry as exchangeRegistry } from './reference/legacyVenueRegistry';
+
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+});
 
 // Inspect REST adapter construction, without bootstrapping a remote SDK account.
 vi.mock('./reference/paradex/paradex.sdk', async (original) => ({
@@ -128,6 +128,8 @@ const collectAxiosInstances = (exchange: BaseExchange): Record<string, string> =
 
 const ADAPTER_SELECTION_TIMEOUT_MS = 120_000;
 
+// The binance* and lighter* entries that pin the public CORS proxy moved from AWS's
+// exchange-proxy.jp/api/exchange_proxy to the edge Worker's /api/public_proxy (AWS_EXIT.md 3d).
 describe('transport adapter selection per exchange', () => {
   const exchangeNames = Object.keys(exchangeRegistry).sort() as ExchangeName[];
 

@@ -250,6 +250,16 @@ with no way out.
 
 `HyperliquidExchange.getBuilderInfo()` is the only order-path builder-info gate. Keep it tied to the live `maxBuilderFee` approval state; do not reintroduce environment-based signing helpers.
 
+**Open feature: sub-builders.** Hyperliquid order actions now allow
+`builder.s`, an optional list of up to five sub-builders that receive part of the
+same builder fee. Each entry is `{ b, s }`, where `b` is an existing user address
+and `s` is the share of the builder fee in 0.001% units; shares must be positive
+and sum to at most 100%, with the primary builder receiving the remainder. This
+could support direct partner/affiliate revenue sharing later, but it is NOT wired
+today: `getBuilderInfo()` still returns only `{ b, f }`. Before implementing,
+verify approval semantics, partner wallet eligibility, revenue ingestion, and
+fallback behavior for accounts whose builder approval predates any split.
+
 ### EIP-712 Domain Details
 
 | Domain                         | Name                         | Version | ChainId                     | Usage                                                                |

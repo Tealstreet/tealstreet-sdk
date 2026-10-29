@@ -723,13 +723,16 @@ and cleanup; incomplete cleanup remains a failure.
 After cancel-all, mutable leverage is lowered by one (bounded by the market
 minimum) and restored to its captured value, exercising both writes. Fixed or
 already-minimum leverage is set to its original value without increasing risk.
+A `--mainnet` run skips amend and both leverage writes and reports them as
+skipped (RUST_LIVE_SMOKE.md, Mainnet sequence).
 
 All variables below have the exact prefix `RUST_LIVE_SMOKE_`; concatenate the
 family, selected mode (`TESTNET`, `DEMO`, or `MAINNET`) and suffix, for example
 `RUST_LIVE_SMOKE_BINANCE_TESTNET_KEY`. Every optional field uses the same mode
 prefix. Legacy names and another mode's values are never used as a fallback. Credentials are read
-only from the process environment, never command-line arguments or committed
-configuration. Do not print them or commit shell history, environment files, raw
+only from the process environment or, with `--credentials-stdin`, from one JSON
+object of these suffixes on stdin (see RUST_LIVE_SMOKE.md); never command-line
+arguments or committed configuration. Do not print them or commit shell history, environment files, raw
 requests, or unredacted recordings. The private tape retains the selected
 environment's official URLs and redacts credential material before writing.
 Credential fields shorter than four characters are refused before I/O because
@@ -758,7 +761,8 @@ overrides and refuse unsupported environments before reading credentials.
 | `paradex` | `PARADEX` | `PRIVATE_KEY`, `ACCOUNT_ADDRESS`, `SUBKEY_ADDRESS` | Testnet: `api.testnet.paradex.trade`, `ws.api.testnet.paradex.trade` |
 | `woo` | `WOO` | `KEY`, `SECRET`, `APPLICATION_ID` | Staging through `--testnet`: `api.staging.woox.io`, `wss.staging.woox.io`; public candles use `api-pub.woox.io` |
 | `blofin` | `BLOFIN` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: `demo-trading-openapi.blofin.com` |
-| `okx`, `okxdemo`, `okxeu`, `okxeudemo` | `OKX` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: simulated-trading header, `openapi.okx.com` / `wspap.okx.com` (default TLS 443); EU `eea.okx.com` / `wseeapap.okx.com` (default TLS 443) |
+| `okx`, `okxdemo` | `OKX` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: simulated-trading header, `openapi.okx.com` / `wspap.okx.com` (default TLS 443) |
+| `okxeu`, `okxeudemo` | `OKX_EEA` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: simulated-trading header, `eea.okx.com` / `wseeapap.okx.com` (default TLS 443). EEA keys are separate from global OKX keys. |
 | `kraken` | `KRAKEN` | `KEY`, `SECRET` | Futures demo: `demo-futures.kraken.com` |
 | `coinbase`, `coinbasespot` | `COINBASE` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. CDP key name and ES256 private key PEM. |
 | `backpack` | `BACKPACK` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. Base64 Ed25519 public key and seed. |

@@ -7,6 +7,7 @@ import { Blob as NodeBlob } from 'node:buffer';
 import { createHash, createHmac } from 'node:crypto';
 import { deflateSync, gzipSync } from 'node:zlib';
 
+import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineObject } from '@tealstreet/safe-cex-wasm/workers';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,7 +27,7 @@ import { setDefaultTransport } from './registry';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 import {
-  AWS_PUBLIC_CORS_PROXY,
+  PUBLIC_CORS_PROXY,
   PRIVATE_PROXY_ASIA,
   PRIVATE_PROXY_GRVT_TINY,
   PRIVATE_PROXY_JP,
@@ -591,17 +592,24 @@ describe('engine socket routing at the raw transport boundary', () => {
                 // channel rather than a URL-name heuristic or routed host.
                 const upstream = `wss://venue.example/socket-${channel}`;
                 const handler = handlers(channel);
-                routed.connect(upstream, handler);
+                const socket = routed.connect(upstream, handler);
                 // Bitunix TS classes explicitly select fallback on this option.
                 const target = exchange === 'bitunix' && tealstreetWsRoute
                   ? route.fallback! : route.tunnelled ? route.host! : upstream;
+                const label = `${exchange} ${channel} proxy=${tealstreetProxy} ws=${tealstreetWsRoute} region=${proxyRegion} site=${bybitSiteId}`;
+                // Since AWS_EXIT.md step 3e a proxied okx/okxeu/bitget/blofin private
+                // host IS a relay url, which RelayWebSocket dials, never raw.connect.
+                if (isRelayUrl(target)) {
+                  expect(raw.connect, label).not.toHaveBeenCalled();
+                  socket.close();
+                  continue;
+                }
                 const expectedHeaders = {
                   ...(['bybit', 'bybitinverse', 'bybitspot'].includes(exchange) && bybitSiteId
                     ? { 'x-site-id': bybitSiteId }
                     : {}),
                   ...(new URL(target).hostname.endsWith('.tealstreet.io') ? websocketHeaders : {}),
                 };
-                const label = `${exchange} ${channel} proxy=${tealstreetProxy} ws=${tealstreetWsRoute} region=${proxyRegion} site=${bybitSiteId}`;
                 expect(raw.connect.mock.lastCall?.[0], label).toBe(target);
                 expect(raw.connect.mock.lastCall?.[1].headers, label).toEqual(expectedHeaders);
                 raw.connect.mockClear();
@@ -625,21 +633,17 @@ describe('engine socket routing at the raw transport boundary', () => {
       'wss://stream.bybit.com/v5/private',
       handler,
     );
+    // Was fsjnpy143pbz.asia (AWS) until AWS_EXIT.md step 3e.
     expect(raw.connect).toHaveBeenCalledExactlyOnceWith(
-      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private',
+      'wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private',
       expect.objectContaining({ headers: { ...handler.headers, 'x-site-id': 'BRA_BTL', ...websocketHeaders } }),
     );
   });
 
-  it('browser sockets select the same host without attempting unsupported WAF upgrade headers', () => {
-    const raw = { ...makeRaw(), webSocketHeaders: false };
-    createEngineTransport('okx', options({ tealstreetProxy: true }), raw).connect(
-      'wss://ws.okx.com:8443/ws/v5/private',
-      handlers('private'),
-    );
-    expect(raw.connect.mock.lastCall?.[0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/okx/private');
-    expect(raw.connect.mock.lastCall?.[1].headers).toEqual({});
-  });
+  // 'browser sockets select the same host without attempting unsupported WAF upgrade
+  // headers' was removed with the last browser ws-proxy route: coinbase moved to the
+  // relay (AWS_EXIT.md 5a) after okx/okxeu/bitget/blofin (3e), so no proxied private
+  // socket is dialled through raw.connect any more.
 
   it('two silent connections select the sticky fallback while any message resets the streak', () => {
     const raw = makeRaw();
@@ -689,8 +693,9 @@ describe('engine socket routing at the raw transport boundary', () => {
     const socket = routed.connect(url, handler);
     socket.send('{"op":"auth"}');
     await vi.waitFor(() => expect(mocks.relay).toHaveBeenCalledTimes(1));
+    // Was fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e.
     expect(mocks.relay).toHaveBeenCalledWith(
-      'wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
+      'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
       [],
       { headers: websocketHeaders, ALPNProtocols: ['http/1.1'] },
     );
@@ -743,16 +748,20 @@ describe('native host policy uses the same resolved routes', () => {
       authorizationHeader: 'Authorization',
       headers: browserHeaders,
     });
-    expect(plan.ws.private.host).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/okx/private');
+    // Was the AWS ws-proxy `fsjnpy143pbz.asia…/okx/private` until AWS_EXIT.md step 3e.
+    expect(plan.ws.private.host).toBe(
+      'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate',
+    );
     const raw = makeRaw();
     await createEngineTransport('okx', opts, raw).request(input);
     expect(raw.request.mock.lastCall?.[0].url).toBe(`${plan.http.prefix}/${input.url}`);
     expect(plan.wsHeaders).toEqual(websocketHeaders);
   });
 
+  // Both regions were fsjnpy143pbz.{jp,asia} (AWS) until AWS_EXIT.md step 3e.
   it.each([
-    ['JA', 'jp'],
-    ['SG', 'asia'],
+    ['JA', 'fsjnpy143pbz-tyo'],
+    ['SG', 'fsjnpy143pbz-tyo'],
   ] as const)('HOW region %s supplies exact native tunnel host', (proxyRegion, host) => {
     const plan = resolveEngineRoutingPlan(
       'bybit',
@@ -760,7 +769,7 @@ describe('native host policy uses the same resolved routes', () => {
       'https://api.bybit.com',
     );
     expect(plan.http.mode).toBe('how');
-    expect(plan.http.tunnelUrl).toBe(`wss://fsjnpy143pbz.${host}.tealstreet.io/tunnel`);
+    expect(plan.http.tunnelUrl).toBe(`wss://${host}.tealstreet.io/tunnel`);
     expect(plan.http.prefix).toBe('');
     expect(plan.http.authorize).toBe(false);
     expect(mocks.token).not.toHaveBeenCalled();
@@ -802,7 +811,8 @@ describe('Bybit Brazil routing carries the site identity on every transport', ()
       'wss://stream.bybit.com/v5/private',
       handlers('private'),
     );
-    expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private');
+    // Was fsjnpy143pbz.asia (AWS) until AWS_EXIT.md step 3e.
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private');
     expect(raw.connect.mock.lastCall![1].headers).toEqual({});
   });
 
@@ -903,6 +913,16 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     ...handlers(channel),
     context: { feed, recover },
   });
+  // The private fallback was the AWS ws-proxy `fsjnpy143pbz.asia…/bitget/v2/private`,
+  // dialled through raw.connect, until AWS_EXIT.md step 3e made it the relay itself,
+  // which RelayWebSocket dials asynchronously.
+  const relayV2 = 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate';
+  const relayDials = () => mocks.relay.mock.calls.map(([url]) => url as string);
+  beforeEach(() => {
+    mocks.relay.mockImplementation(function () {
+      return { addEventListener: vi.fn(), send: vi.fn(), close: vi.fn() };
+    });
+  });
 
   it('starts all three same-URL public feeds directly and advances each feed independently', () => {
     const raw = makeRaw();
@@ -921,15 +941,16 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
 
   it.each(['bitget', 'bitgetinverse', 'bitgetusdc'] as const)(
     '%s classic post-write recovery selects and sticks to the declared private fallback',
-    (exchange) => {
+    async (exchange) => {
       const raw = makeRaw();
       const routed = createEngineTransport(exchange, options(), raw);
       routed.connect(privateUrl, withContext('account', false, 'private'));
       raw.connect.mock.lastCall![1].onMessage('{"event":"login","code":"0"}');
       routed.connect(privateUrl, withContext('account', true, 'private'));
-      expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private');
+      await vi.waitFor(() => expect(relayDials()).toEqual([relayV2]));
       routed.connect(privateUrl, withContext('account', false, 'private'));
-      expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private');
+      await vi.waitFor(() => expect(relayDials()).toEqual([relayV2, relayV2]));
+      expect(raw.connect).toHaveBeenCalledOnce();
     },
   );
 
@@ -940,13 +961,19 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     expect(raw.connect.mock.calls.every(([url]) => url === privateUrl)).toBe(true);
   });
 
-  it('UTA private sockets take the v3 privateUta route and never a v2 route', () => {
+  it('UTA private sockets take the v3 privateUta route and never a v2 route', async () => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
-    for (let attempt = 0; attempt < 10; attempt++) routed.connect(utaUrl, withContext('account', true, 'private'));
-    const urls = raw.connect.mock.calls.map(([url]) => url);
-    expect(urls.some((url) => url.includes('/v2/'))).toBe(false);
-    expect(urls.every((url) => url.includes('/v3'))).toBe(true);
+    // A proxied socket's every candidate is the v3 relay since AWS_EXIT.md step 3e.
+    // One dial at a time: concurrent dynamic imports of the mocked relay module can
+    // resolve the real one under Vitest.
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      routed.connect(utaUrl, withContext('account', true, 'private'));
+      await vi.waitFor(() => expect(relayDials()).toHaveLength(attempt));
+    }
+    expect(raw.connect).not.toHaveBeenCalled();
+    expect(relayDials().some((url) => url.includes('%2Fv2%2F'))).toBe(false);
+    expect(relayDials().every((url) => url.includes('%2Fv3%2F'))).toBe(true);
   });
 
   const rejecting = (recover = false) => ({
@@ -955,35 +982,40 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     onRouteExhausted: vi.fn(),
   });
 
-  it('rejectRoute advances exactly one route, even with recover set', () => {
+  it('rejectRoute advances exactly one route, even with recover set', async () => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options(), raw);
     routed.connect(privateUrl, withContext('account', false, 'private'));
     expect(raw.connect.mock.lastCall![0]).toBe(privateUrl);
     routed.connect(privateUrl, rejecting(true));
-    expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private');
-    expect(raw.connect).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(relayDials()).toEqual([relayV2]));
+    expect(raw.connect).toHaveBeenCalledOnce();
   });
 
   it('an exhausted chain reports after connect returns, never dials, and the next connect stays on the last route', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options(), raw);
-    routed.connect(privateUrl, withContext('account', false, 'private'));
+    // Since AWS_EXIT.md step 3e the later routes are relay dials; every socket is
+    // retired at the end so a pending relay import cannot open one in the next test.
+    const sockets = [routed.connect(privateUrl, withContext('account', false, 'private'))];
     const handler = rejecting();
     let dials = raw.connect.mock.calls.length;
     for (let attempt = 0; attempt < 5 && raw.connect.mock.calls.length === dials + attempt; attempt++) {
-      routed.connect(privateUrl, handler);
+      sockets.push(routed.connect(privateUrl, handler));
     }
     dials = raw.connect.mock.calls.length;
     const last = raw.connect.mock.lastCall![0];
     const exhausted = rejecting();
-    routed.connect(privateUrl, exhausted);
+    sockets.push(routed.connect(privateUrl, exhausted));
     expect(raw.connect).toHaveBeenCalledTimes(dials);
     expect(exhausted.onRouteExhausted).not.toHaveBeenCalled();
     raw.setTimeout.mock.lastCall![0]();
     expect(exhausted.onRouteExhausted).toHaveBeenCalledOnce();
-    routed.connect(privateUrl, withContext('account', false, 'private'));
+    sockets.push(routed.connect(privateUrl, withContext('account', false, 'private')));
+    // The last route is the relay, so staying on it never reaches raw.connect again.
+    expect(raw.connect).toHaveBeenCalledTimes(dials);
     expect(raw.connect.mock.lastCall![0]).toBe(last);
+    sockets.forEach((socket) => socket.close());
   });
 
   it('a direct provider has no other egress, so a refusal exhausts at once', () => {
@@ -1011,15 +1043,19 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
   it.each([
     ['pong', true],
     ['{"event":"login","code":"0"}', false],
-  ] as const)('private frame %s counts toward stream proof=%s', (message, fallbackExpected) => {
+  ] as const)('private frame %s counts toward stream proof=%s', async (message, fallbackExpected) => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options(), raw);
     routed.connect(privateUrl, withContext('account', false, 'private'));
     raw.connect.mock.lastCall![1].onMessage(message);
     routed.connect(privateUrl, withContext('account', false, 'private'));
-    expect(raw.connect.mock.lastCall![0]).toBe(
-      fallbackExpected ? 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private' : privateUrl,
-    );
+    if (fallbackExpected) {
+      await vi.waitFor(() => expect(relayDials()).toEqual([relayV2]));
+      expect(raw.connect).toHaveBeenCalledOnce();
+    } else {
+      expect(raw.connect.mock.lastCall![0]).toBe(privateUrl);
+      expect(raw.connect).toHaveBeenCalledTimes(2);
+    }
   });
 });
 
@@ -1228,7 +1264,7 @@ describe('Aster secondary signer HTTP routing', () => {
       const raw = makeRaw();
       const routed = createEngineTransport('asterdex', opts, raw);
       await routed.request(privateRequest(method));
-      expect(raw.request.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${privateRequest(method).url}`);
+      expect(raw.request.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${privateRequest(method).url}`);
       expect(raw.request.mock.lastCall![0].headers['x-mbx-apikey']).toBe('read-wallet');
       for (const write of ['POST', 'PUT', 'DELETE']) {
         await routed.request(privateRequest(write));
@@ -1249,13 +1285,13 @@ describe('Aster secondary signer HTTP routing', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('asterdex', opts, raw);
     await routed.request(privateRequest('GET'));
-    expect(mocks.adapter.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${privateRequest('GET').url}`);
+    expect(mocks.adapter.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${privateRequest('GET').url}`);
     await routed.request(privateRequest('POST'));
     expect(mocks.adapter.mock.lastCall![0].url).toBe(privateRequest('POST').url);
     expect(raw.request).not.toHaveBeenCalled();
     const plan = resolveEngineRoutingPlan('asterdex', opts, baseURL);
     expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false });
-    expect(plan.readHttp).toMatchObject({ mode: 'how', prefix: AWS_PUBLIC_CORS_PROXY, authorize: false });
+    expect(plan.readHttp).toMatchObject({ mode: 'how', prefix: PUBLIC_CORS_PROXY, authorize: false });
     expect(plan.readHttp?.tunnelUrl).toBe(plan.http.tunnelUrl);
     expect(JSON.stringify(plan)).not.toMatch(/read-wallet|read-private-key|venue-key|venue-secret|proxy-jwt/);
     routed.dispose!();
@@ -1328,7 +1364,7 @@ describe('typed public HTTP route hints', () => {
     const url = 'https://fapi.asterdex.com/fapi/v3/time?exact=one%2Btwo';
     for (const [route, expected] of [
       ['direct', url],
-      ['publicCors', `${AWS_PUBLIC_CORS_PROXY}/${url}`],
+      ['publicCors', `${PUBLIC_CORS_PROXY}/${url}`],
     ] as const) {
       await routed.request({ method: 'GET', route, url, headers: {} });
       const sent = raw.request.mock.lastCall![0];
@@ -1343,7 +1379,7 @@ describe('typed public HTTP route hints', () => {
     const plan = resolveEngineRoutingPlan('asterdex', opts, 'https://fapi.asterdex.com');
     expect(plan.publicCorsHttp).toEqual({
       mode: 'direct',
-      prefix: AWS_PUBLIC_CORS_PROXY,
+      prefix: PUBLIC_CORS_PROXY,
       authorize: false,
       authorizationHeader: 'Authorization',
       headers: {},
@@ -1359,7 +1395,7 @@ describe('typed public HTTP route hints', () => {
       const routed = createEngineTransport(exchange, options({ tealstreetTunnel: true }), raw);
       const url = 'https://venue.test/time';
       await routed.request({ method: 'GET', route: 'publicCors', url, headers: {} });
-      expect(raw.request.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${url}`);
+      expect(raw.request.mock.lastCall![0].url).toBe(`${PUBLIC_CORS_PROXY}/${url}`);
       expect(mocks.adapter).not.toHaveBeenCalled();
       expect(mocks.token).not.toHaveBeenCalled();
       routed.dispose!();

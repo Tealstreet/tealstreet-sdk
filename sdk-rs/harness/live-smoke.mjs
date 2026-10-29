@@ -1,5 +1,6 @@
 // Manual credentialed probe. Tests inject a scripted transport; never run in CI
-// against a venue account. Credentials enter only through liveSmokeProfile(env).
+// against a venue account. Credentials enter only through liveSmokeProfile, from
+// the environment or one JSON object on stdin (--credentials-stdin).
 import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,7 +12,7 @@ import { prepareFetch } from '../hosts/wasm/js/managed-http.mjs';
 import { Frame, LOADED_FLAG, MARKET_COLUMNS, MARKET_FLAG, orderEnums } from '../hosts/wasm/js/wire.mjs';
 import { loadEngine } from './engine.mjs';
 import { venueOf } from './venues.mjs';
-import { liveSmokeProfile } from './live-smoke-venues.mjs';
+import { liveSmokeCredentialSets, liveSmokeProfile } from './live-smoke-venues.mjs';
 import { createPrivateRecorder } from './live-smoke-tape.mjs';
 import { venueMarketRules } from './live-smoke-rules.mjs';
 
@@ -94,14 +95,17 @@ export function smokeArgs(args) {
     venue: { type: 'string' }, symbol: { type: 'string' }, out: { type: 'string' },
     testnet: { type: 'boolean' }, demo: { type: 'boolean' }, mainnet: { type: 'boolean' },
     'timeout-ms': { type: 'string', default: '30000' }, help: { type: 'boolean' },
+    'credentials-stdin': { type: 'boolean' }, 'dry-run': { type: 'boolean' }, 'list-credentials': { type: 'boolean' },
   } });
   if (values.help) return { help: true };
+  if (values['list-credentials']) return { listCredentials: true };
   if (!values.venue) fail('venue-required');
   const modes = ['testnet', 'demo', 'mainnet'].filter((mode) => values[mode]);
   if (modes.length > 1) fail('conflicting-environments');
   const timeoutMs = Number(values['timeout-ms']);
   if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120000) fail('invalid-timeout');
-  return { venue: values.venue, symbol: values.symbol, out: values.out, mode: modes[0], timeoutMs };
+  return { venue: values.venue, symbol: values.symbol, out: values.out, mode: modes[0], timeoutMs,
+    credentialsStdin: Boolean(values['credentials-stdin']), dryRun: Boolean(values['dry-run']) };
 }
 
 const deadline = async (promise, ms, stage, signal) => {
@@ -121,6 +125,8 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
   let stage = 'connect', host, flush, selected, originalLeverage;
   let reason;
   let wrote = false, filled = false, successful = false, cleanupComplete = false, stopped = false, cleaning = false;
+  // Mainnet runs place, confirm, cancel and read back only; the rest is reported, not passed.
+  const skipped = profile.minimal ? ['amend', 'lower-leverage'] : [];
   const ids = new Set(), books = new Map();
   const pending = new Set();
   const recorder = createPrivateRecorder(transport, { venue, options: profile.options, secrets: profile.secrets, write });
@@ -219,17 +225,19 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     ids.add(placed[0]);
     await wait(() => snapshot().orders.some((o) => o.id === placed[0] && o.status === 'open'));
     healthy();
-    stage = 'amend';
-    // Recheck the live book: the market may have moved during placement.
-    if (amendPrice >= currentBook().bids[0] * 0.98) fail('market-moved');
-    const amended = await command({ op: 'amendOrder', id: placed[0], price: amendPrice, amount: order.amount });
-    const replacements = Array.isArray(amended) ? amended : amended?.orderIds;
-    if (replacements !== undefined && (!Array.isArray(replacements) || replacements.some((id) => typeof id !== 'string' || !id))) fail('unproven-amendment');
-    for (const id of replacements ?? []) ids.add(id);
-    const amendedIds = replacements?.length ? replacements : [placed[0]];
-    await wait(() => snapshot().orders.some((o) => amendedIds.includes(o.id) && o.status === 'open' &&
-      Math.abs(o.price - amendPrice) < selected.precisionPrice / 10));
-    healthy();
+    if (!skipped.includes('amend')) {
+      stage = 'amend';
+      // Recheck the live book: the market may have moved during placement.
+      if (amendPrice >= currentBook().bids[0] * 0.98) fail('market-moved');
+      const amended = await command({ op: 'amendOrder', id: placed[0], price: amendPrice, amount: order.amount });
+      const replacements = Array.isArray(amended) ? amended : amended?.orderIds;
+      if (replacements !== undefined && (!Array.isArray(replacements) || replacements.some((id) => typeof id !== 'string' || !id))) fail('unproven-amendment');
+      for (const id of replacements ?? []) ids.add(id);
+      const amendedIds = replacements?.length ? replacements : [placed[0]];
+      await wait(() => snapshot().orders.some((o) => amendedIds.includes(o.id) && o.status === 'open' &&
+        Math.abs(o.price - amendPrice) < selected.precisionPrice / 10));
+      healthy();
+    }
     stage = 'cancel';
     const liveIds = snapshot().orders.filter((o) => ids.has(o.id) && o.status === 'open').map((o) => o.id);
     await command({ op: 'cancelOrders', ids: liveIds.length ? liveIds : [...ids].slice(-1) });
@@ -239,14 +247,17 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     healthy();
     // Exercise a real configuration write when a lower leverage is available,
     // after all smoke orders have gone. Fixed/minimum leverage stays unchanged.
-    if (profile.leverage !== 'fixed' && originalLeverage > selected.minLeverage) {
+    if (!skipped.includes('lower-leverage') && profile.leverage !== 'fixed' && originalLeverage > selected.minLeverage) {
       stage = 'lower-leverage';
       const lower = Math.max(selected.minLeverage, Math.floor(originalLeverage - 1));
       await command({ op: 'setLeverage', symbol: selected.symbol, leverage: lower });
       healthy();
     }
-    stage = 'restore-leverage';
-    await command({ op: 'setLeverage', symbol: selected.symbol, leverage: originalLeverage });
+    // A minimal run never changed leverage, so it writes no configuration at all.
+    if (!profile.minimal) {
+      stage = 'restore-leverage';
+      await command({ op: 'setLeverage', symbol: selected.symbol, leverage: originalLeverage });
+    }
     stage = 'verify-cleanup';
     await wait(() => snapshot().orders.length === 0);
     healthy();
@@ -265,7 +276,10 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
       let drained = false;
       try { await deadline(Promise.allSettled([...pending]), timeoutMs, 'drain-writes'); drained = true; } catch { /* A late write prevents cleanup proof. */ }
       try { await cancelAll(); canceled = true; } catch { /* Report cleanup incomplete. */ }
-      try { await command({ op: 'setLeverage', symbol: selected.symbol, leverage: originalLeverage }); restored = true; } catch { /* Still dispose the host. */ }
+      try {
+        if (!profile.minimal) await command({ op: 'setLeverage', symbol: selected.symbol, leverage: originalLeverage });
+        restored = true;
+      } catch { /* Still dispose the host. */ }
       cleanupComplete = drained && canceled && restored && snapshot().orders.length === 0 && !filled && snapshot().positions === 0;
     }
   } finally {
@@ -287,8 +301,10 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     reason = stage;
   }
   cleanupComplete = cleanupComplete && !filled && authoritative;
-  const result = recorder.redact({ ok: successful, stage, ...(successful ? {} : { reason }),
-    cleanupComplete, authoritative, ...(selected ? { symbol: selected.symbol } : {}), commands });
+  // `skipped` holds code constants only, so it is added after redaction.
+  const result = { ...recorder.redact({ ok: successful, stage, ...(successful ? {} : { reason }),
+    cleanupComplete, authoritative, ...(selected ? { symbol: selected.symbol } : {}), commands }),
+  ...(skipped.length ? { skipped } : {}) };
   write({ t: Math.max(0, transport.now() - recorder.epoch), type: 'live-smoke-result', ...result });
   return result;
 }
@@ -331,6 +347,112 @@ export async function verifyLiveAccount({ venue, profile, transport, write, sele
   return passed;
 }
 
+const withoutPath = (options, path) => {
+  const parts = path.split('.');
+  const parent = parts.slice(0, -1).reduce((target, part) => target?.[part], options);
+  if (parent) delete parent[parts.at(-1)];
+};
+
+/** Refuses any outgoing text that carries supplied credential material. */
+export function dryRunTransport(live, secretValues) {
+  const values = secretValues.filter((value) => typeof value === 'string' && value.length >= 4);
+  const guard = (...texts) => {
+    for (const text of texts) if (typeof text === 'string' && values.some((value) => text.includes(value))) fail('dry-run-credential-egress');
+  };
+  const headerText = (headers) => JSON.stringify(Array.isArray(headers) ? headers : Object.entries(headers ?? {}));
+  return {
+    ...live,
+    connect(url, handlers) {
+      guard(url, headerText(handlers?.headers));
+      const socket = live.connect(url, handlers);
+      return { close: () => socket.close(), send(text) { guard(text); socket.send(text); } };
+    },
+    prepareHttp: typeof live.prepareHttp !== 'function' ? undefined : async (request) => {
+      guard(request.url, headerText(request.headers), request.body);
+      const prepared = await live.prepareHttp(request);
+      return { ...prepared, bind(packet) {
+        guard(packet.url, headerText(packet.headers), typeof packet.body === 'string' ? packet.body : undefined);
+        return prepared.bind(packet);
+      } };
+    },
+    request(request) {
+      guard(request.url, headerText(request.headers), typeof request.body === 'string' ? request.body : undefined);
+      return live.request(request);
+    },
+  };
+}
+
+/**
+ * Everything up to the first signed request: supplied credentials are parsed by
+ * the engine constructor but never started; a public-only engine discovers the
+ * market, reads the book and sizes the order the live run would place.
+ */
+export async function dryRunLiveSmoke({ venue, profile, transport, write, symbol, timeoutMs = 30000, WasmEngine, signal }) {
+  let stage = 'credentials', host, flush, selected, plan, reason, ok = false;
+  let credentials = 'absent';
+  const books = new Map();
+  const recorder = createPrivateRecorder(transport, { venue, options: profile.options, secrets: profile.secrets, write });
+  try {
+    if (Object.keys(profile.secrets).length) {
+      const engine = new WasmEngine(venue.rust, JSON.stringify(profile.options));
+      engine.free?.();
+      credentials = 'parsed';
+    }
+    stage = 'connect';
+    const options = structuredClone(profile.options);
+    for (const path of Object.keys(profile.secrets)) withoutPath(options, path);
+    options.publicDataOnly = true;
+    host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), recorder.transport, {
+      onFrame(buffer) {
+        const frame = new Frame(buffer), markets = accountSnapshot(host.snapshot()).markets;
+        for (const book of frame.books()) {
+          const name = markets[book.market]?.symbol;
+          if (name) books.set(name, { bids: [...book.bids], asks: [...book.asks], at: performance.now() });
+        }
+      },
+      onLog() {},
+    });
+    host.start();
+    flush = setInterval(() => host.flush(), 25);
+    const wait = async (predicate) => {
+      const end = performance.now() + timeoutMs;
+      while (!predicate()) {
+        if (recorder.failure) fail('recording-failed');
+        if (signal?.aborted) fail('runner-interrupted');
+        if (performance.now() >= end) fail(`timeout-${stage}`);
+        await sleep(10);
+      }
+    };
+    await wait(() => ((accountSnapshot(host.snapshot()).status?.loaded ?? 0) & LOADED_FLAG.MARKETS) !== 0);
+    stage = 'market';
+    selected = selectSmokeMarket(accountSnapshot(host.snapshot()).markets, symbol);
+    if (!selected) fail('market-not-found');
+    stage = 'book';
+    await host.command({ op: 'subscribeOrderBook', symbol: selected.symbol });
+    await wait(() => books.has(selected.symbol));
+    stage = 'plan';
+    const { amendPrice, ...order } = smokeOrder(selected, books.get(selected.symbol), marketRules(recorder.records, selected, venue),
+      profile.postOnly !== false);
+    plan = { ...order, ...(profile.minimal ? {} : { amendPrice }) };
+    stage = 'complete';
+    ok = true;
+  } catch (error) {
+    reason = error instanceof SmokeFailure ? error.message : 'engine-or-transport-failed';
+  } finally {
+    clearInterval(flush);
+    host?.flush();
+    host?.dispose();
+    recorder.seal?.();
+  }
+  const sequence = ['place', 'confirm-open', ...(profile.minimal ? [] : ['amend']), 'cancel', 'cancel-all',
+    ...(profile.minimal ? [] : ['lower-leverage', 'restore-leverage']), 'verify-readback'];
+  // The plan is numbers sized from public data; the rest are code constants.
+  const result = { ...recorder.redact({ ok, stage, ...(ok ? {} : { reason }), ...(selected ? { symbol: selected.symbol } : {}) }),
+    dryRun: true, credentials, ...(plan ? { plan } : {}), sequence };
+  write({ t: Math.max(0, transport.now() - recorder.epoch), type: 'live-smoke-dry-run', ...result });
+  return result;
+}
+
 export function fencedTransport(live, profile) {
   return {
     ...live,
@@ -369,20 +491,45 @@ export function fencedTransport(live, profile) {
   };
 }
 
-export async function main(args = process.argv.slice(2), env = process.env) {
+const MAX_CREDENTIAL_BYTES = 64 * 1024;
+
+/** One JSON object of field names to string values; the text is never echoed. */
+export async function readCredentials(stream) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    size += chunk.length;
+    if (size > MAX_CREDENTIAL_BYTES) throw new Error('Credential input is too large');
+    chunks.push(Buffer.from(chunk));
+  }
+  let value;
+  try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { throw new Error('Credential input is not JSON'); }
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.values(value).some((item) => typeof item !== 'string'))
+    throw new Error('Credential input must be one object of string fields');
+  return value;
+}
+
+export async function main(args = process.argv.slice(2), env = process.env, stdin = process.stdin) {
   let fd;
   const controller = new AbortController();
   const interrupt = () => controller.abort();
   try {
     const values = smokeArgs(args);
     if (values.help) {
-      console.log('yarn rust:live-smoke --venue <v> [--testnet|--demo|--mainnet] [--symbol <symbol>] [--out <private.jsonl>] [--timeout-ms 30000]');
+      console.log('yarn rust:live-smoke --venue <v> [--testnet|--demo|--mainnet] [--symbol <symbol>] [--out <private.jsonl>] [--timeout-ms 30000] [--credentials-stdin] [--dry-run]');
+      console.log('yarn rust:live-smoke --list-credentials');
       return 0;
     }
-    const profile = liveSmokeProfile(values.venue, values.mode, env);
+    if (values.listCredentials) {
+      console.log(JSON.stringify(liveSmokeCredentialSets(), null, 2));
+      return 0;
+    }
+    const credentials = values.credentialsStdin ? await readCredentials(stdin) : undefined;
+    const profile = liveSmokeProfile(values.venue, values.mode, env, { credentials, allowMissing: values.dryRun });
     const venue = venueOf(values.venue);
     const { WasmEngine } = await loadEngine();
-    const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}-live-private.jsonl`;
+    const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}-live-${values.dryRun ? 'dry-run' : 'private'}.jsonl`;
     mkdirSync(dirname(out), { recursive: true });
     fd = openSync(out, 'wx', 0o600);
     const write = (record) => writeSync(fd, `${JSON.stringify(record)}\n`);
@@ -399,7 +546,10 @@ export async function main(args = process.argv.slice(2), env = process.env) {
         headers: [...response.headers].map(([key, value]) => `${key}: ${value}`).join('\n'),
         body: response.body ?? new Uint8Array() };
     };
-    const result = await runLiveSmoke({ ...values, venue, profile, transport: fencedTransport(network, profile), write, WasmEngine, signal: controller.signal });
+    const fenced = fencedTransport(network, profile);
+    const result = values.dryRun ?
+      await dryRunLiveSmoke({ ...values, venue, profile, transport: dryRunTransport(fenced, profile.secretValues), write, WasmEngine, signal: controller.signal }) :
+      await runLiveSmoke({ ...values, venue, profile, transport: fenced, write, WasmEngine, signal: controller.signal });
     console.log(JSON.stringify({ venue: values.venue, environment: profile.mode, ...result }));
     return result.ok ? 0 : 1;
   } catch {

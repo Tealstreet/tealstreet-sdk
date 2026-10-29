@@ -228,9 +228,13 @@ impl Harness {
 
     /// Closes `path` and returns the delay of the single retry timer it armed.
     fn close(&mut self, path: &str) -> f64 {
+        self.close_with(path, 1006)
+    }
+
+    fn close_with(&mut self, path: &str, code: u16) -> f64 {
         let socket = self.socket(path);
         let before = self.timers.clone();
-        self.event(Event::WsClosed { socket, code: 1006 });
+        self.event(Event::WsClosed { socket, code });
         let fresh: Vec<_> = self
             .timers
             .iter()
@@ -271,6 +275,25 @@ fn flapping_sockets_back_off_although_each_attempt_opens() {
             h.open(path);
             let delay = h.close(path);
             let nominal = (1_000.0 * 2f64.powi(attempt)).min(30_000.0);
+            assert!(
+                (nominal * 0.75..=nominal).contains(&delay),
+                "{path} attempt {attempt}: {delay}"
+            );
+            h.reconnect(path, delay);
+        }
+    }
+}
+
+/// OKX declares no close floors (its TS socket has none), so a 1013 close
+/// keeps the ordinary backoff on every feed.
+#[test]
+fn a_try_again_later_close_keeps_the_ordinary_backoff() {
+    for path in SOCKETS {
+        let mut h = harness(path);
+        for attempt in 0..3 {
+            h.open(path);
+            let delay = h.close_with(path, 1013);
+            let nominal = 1_000.0 * 2f64.powi(attempt);
             assert!(
                 (nominal * 0.75..=nominal).contains(&delay),
                 "{path} attempt {attempt}: {delay}"
