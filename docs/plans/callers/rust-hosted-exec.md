@@ -152,9 +152,12 @@ Manual socket reconnect remains outside hosted EXEC (explicit fixed refusal).
 Tasks/kill inspect the same injected account chaser and TWAP books as direct
 ops. TS ordering is retained (chasers, then TWAPs; bare kill takes the last active
 row), with ID-prefix/all and existing aliases. No independent task book is added.
-Nuke is one account-guarded pass: reduce-only market closes attempt every position
-independently, even after another symbol is Unknown; cancellation uses a fresh
-store's unique symbols, stopping on its first failure as TS cancelAllOrders does.
+Nuke is one account-guarded pass: cancellation first attempts every fresh-store
+symbol independently, even after another symbol is Unknown. It then re-reads
+positions and issues reduce-only market closes for each current position,
+including fills during cancellation, continuing after an independent Unknown.
+This deliberately tightens TS close-first ordering and first-cancel-failure
+short-circuit, per the post-merge money review.
 No write is retried. The guard and account credit return on completion or abort;
 disposal cannot release a later operation. CLI TS passes tries=3, which disables
 its base retry loop; native preserves that single-pass behavior. Intentional,

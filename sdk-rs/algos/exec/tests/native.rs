@@ -587,7 +587,7 @@ fn native_order(symbol: &str) -> safe_cex_engine::model::Order {
     }
 }
 #[tokio::test]
-async fn nuke_attempts_every_position_after_unknown_then_cancels_account_symbols_without_retry() {
+async fn nuke_cancels_account_symbols_then_attempts_every_position_after_unknown_without_retry() {
     LocalSet::new().run_until(async {
         let port=Rc::new(Port::default());wait_market(&port);
         let mut eth=port.store.borrow().markets["BTCUSDT"].clone();eth.symbol="ETHUSDT".into();eth.id="ETHUSDT".into();eth.base="ETH".into();port.store.borrow_mut().markets.insert("ETHUSDT".into(),eth);
@@ -597,13 +597,14 @@ async fn nuke_attempts_every_position_after_unknown_then_cancels_account_symbols
         factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"nuke","reqId":"nuke"}"#,&cx).unwrap();settle_exec().await;
         factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"nuke","reqId":"duplicate"}"#,&cx).unwrap();settle_exec().await;assert_eq!(port.commands.borrow().len(),1);
         assert!(port.events.borrow().iter().any(|(op,e)|op=="exec-result"&&e["reqId"]=="duplicate"&&e["errorDetails"]["outcome"]=="notSent"));
-        port.replies.borrow_mut().remove(0).send(Err(VenueError::new("lost close").outcome(Outcome::Unknown))).unwrap();settle_exec().await;assert_eq!(port.commands.borrow().len(),2);
-        for command in port.commands.borrow().iter() {assert!(matches!(command,Command::PlaceOrders{orders,..} if orders.len()==1 && orders[0].reduce_only==Some(true) && orders[0].amount==0.02));}
+        assert!(matches!(&port.commands.borrow()[0],Command::CancelSymbolOrders{symbol,..} if symbol=="BTCUSDT"));
+        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
+        assert!(matches!(&port.commands.borrow()[1],Command::CancelSymbolOrders{symbol,..} if symbol=="ETHUSDT"));
+        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
+        assert!(matches!(&port.commands.borrow()[2],Command::PlaceOrders{orders,..} if orders[0].symbol=="BTCUSDT"&&orders[0].reduce_only==Some(true)&&orders[0].amount==0.02));
+        port.replies.borrow_mut().remove(0).send(Err(VenueError::new("lost close").outcome(Outcome::Unknown))).unwrap();settle_exec().await;
+        assert!(matches!(&port.commands.borrow()[3],Command::PlaceOrders{orders,..} if orders[0].symbol=="ETHUSDT"&&orders[0].reduce_only==Some(true)&&orders[0].amount==0.02));
         port.replies.borrow_mut().remove(0).send(Ok(r#"["real-eth-close"]"#.into())).unwrap();settle_exec().await;
-        assert!(matches!(&port.commands.borrow()[2],Command::CancelSymbolOrders{symbol,..} if symbol=="BTCUSDT"));
-        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
-        assert!(matches!(&port.commands.borrow()[3],Command::CancelSymbolOrders{symbol,..} if symbol=="ETHUSDT"));
-        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
         let events=port.events.borrow();let result=&events.iter().find(|(op,e)|op=="exec-result"&&e["reqId"]=="nuke").unwrap().1;
         assert_eq!(result["success"],false);assert_eq!(result["errorDetails"]["outcome"],"unknown");assert_eq!(result["errorDetails"]["failedOperationCount"],1);assert_eq!(result["errorDetails"]["partialOrderIds"],json!(["real-eth-close"]));
         assert_eq!(result["errorDetails"]["failedLegs"][0]["symbol"],"BTCUSDT");
@@ -736,4 +737,32 @@ async fn task_list_and_kill_use_injected_chase_and_twap_books_with_ts_ordering()
             cx.scope.dispose();
         })
         .await;
+}
+
+#[tokio::test]
+async fn nuke_cancel_attempts_every_symbol_after_an_unknown_second_cancel() {
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());port.store.borrow_mut().orders=vec![native_order("AAA"),native_order("BBB"),native_order("CCC")];
+        let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();
+        factory.handle("exec",r#"{"symbol":"AAA","command":"nuke ord","reqId":"r"}"#,&cx).unwrap();settle_exec().await;
+        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
+        port.replies.borrow_mut().remove(0).send(Err(VenueError::new("lost cancel").outcome(Outcome::Unknown))).unwrap();settle_exec().await;
+        assert_eq!(port.commands.borrow().len(),3,"third symbol must be attempted after second Unknown");
+        assert!(matches!(&port.commands.borrow()[2],Command::CancelSymbolOrders{symbol,..} if symbol=="CCC"));
+        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
+        let events=port.events.borrow();let result=&events.iter().find(|(op,e)|op=="exec-result"&&e["reqId"]=="r").unwrap().1;
+        assert_eq!(result["errorDetails"]["outcome"],"unknown");assert_eq!(result["errorDetails"]["cancelledSymbolCount"],2);assert_eq!(result["errorDetails"]["failedLegs"][0]["symbol"],"BBB");assert!(result["error"].as_str().unwrap().contains("BBB cancel: lost cancel"));cx.scope.dispose();
+    }).await;
+}
+#[tokio::test]
+async fn nuke_cancels_first_and_reads_positions_again_to_close_fills_during_cancellation() {
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());wait_market(&port);port.store.borrow_mut().orders=vec![native_order("BTCUSDT")];port.store.borrow_mut().positions=vec![native_position("BTCUSDT")];
+        let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"nuke all","reqId":"r"}"#,&cx).unwrap();settle_exec().await;
+        assert!(matches!(&port.commands.borrow()[0],Command::CancelSymbolOrders{symbol,..} if symbol=="BTCUSDT"),"cancel resting exposure before any market close");
+        port.store.borrow_mut().positions[0].contracts=0.03;port.store.borrow_mut().positions[0].notional=1500.;
+        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
+        assert!(matches!(&port.commands.borrow()[1],Command::PlaceOrders{orders,..} if orders[0].amount==0.03 && orders[0].reduce_only==Some(true)),"fresh position includes the fill during cancel");
+        port.replies.borrow_mut().remove(0).send(Ok(r#"["fresh-close"]"#.into())).unwrap();settle_exec().await;assert_eq!(port.commands.borrow().len(),2);cx.scope.dispose();
+    }).await;
 }
