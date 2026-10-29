@@ -283,6 +283,7 @@ fn family(venue: &str) -> bool {
         || bitget
         || (cfg!(feature = "bingx") && venue == "bingx")
         || double_sha256(venue)
+        || (cfg!(feature = "phemex") && venue == "phemex")
         || (cfg!(feature = "asterdex") && venue == "asterdex")
 }
 
