@@ -350,6 +350,8 @@ fn candle_start(interval: Interval, time: f64) -> f64 {
 /// resend, IP not allowed, expired key. 10005 (permission) is left out: a key
 /// lacking only this read's scope may still trade.
 const CREDENTIAL_REJECTIONS: [i64; 4] = [10003, 10004, 10010, 33004];
+/// Bybit's 10010 "Unmatched IP" refusal: the key's IP allowlist excludes this egress.
+const IP_REFUSED_HINT: &str = "Bybit refused this API key from this IP address: the key is restricted to other IPs. Add the current Tealstreet IPs to the key's IP allowlist on Bybit, or create a new key";
 
 /// A command read's native refusal, classified so it keeps its kind.
 pub(crate) fn read_refusal(response: &Response<'_>, prefix: &str) -> Option<VenueError> {
@@ -1173,7 +1175,8 @@ impl BybitLinear {
     /// Only the trading key's own invalid, bad-signature or expired verdicts
     /// deactivate: an IP mismatch or a rejected read-only key leaves it usable.
     fn reject_credentials(&mut self, cx: &mut Cx<'_, Pending>, code: i64, message: &str) {
-        self.reject_credentials_with_hint(cx, code, message, None);
+        let hint = (code == 10010).then_some(IP_REFUSED_HINT);
+        self.reject_credentials_with_hint(cx, code, message, hint);
     }
 
     fn reject_credentials_with_hint(

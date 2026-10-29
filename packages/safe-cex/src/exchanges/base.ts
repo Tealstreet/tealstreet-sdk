@@ -1979,7 +1979,12 @@ export class BaseExchange implements Exchange {
         : {};
     const legacyExtraData = Object.fromEntries(
       Object.entries(structuredExtraData).filter(
-        ([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog' && key !== 'engineEvent',
+        ([key]) =>
+          key !== 'sentryTags' &&
+          key !== 'sentryExtra' &&
+          key !== 'suppressConsoleLog' &&
+          key !== 'engineEvent' &&
+          key !== 'classified',
       ),
     );
 
@@ -2052,9 +2057,11 @@ export class BaseExchange implements Exchange {
       this._lastHttpFailure = undefined;
     }
 
+    // A diagnostic's own classification (engine events) wins over the error value's.
+    const classified = classifiedError(structuredExtraData.classified) ?? classifiedError(err);
     // Typed engine errors (kind/outcome/venueCode) as closed-set tags; explicit tags still win.
     const typedTags = {
-      ...exchangeErrorTags(err),
+      ...exchangeErrorTags(classified),
       ...(structuredExtraData.engineEvent ? { event_code: structuredExtraData.engineEvent.code } : {}),
     };
 
@@ -2091,7 +2098,7 @@ export class BaseExchange implements Exchange {
         // Pass enhanced error context for better toast messages
         enhancedContext: enhancedError?.context,
         engineEvent: structuredExtraData.engineEvent,
-        classified: classifiedError(err),
+        classified,
         suppressConsoleLog,
       });
     } else {
@@ -2126,7 +2133,7 @@ export class BaseExchange implements Exchange {
         enhancedContext: enhancedError?.context,
         // Typed engine errors: kind/outcome/venueCode, so listeners need not match text.
         engineEvent: structuredExtraData.engineEvent,
-        classified: classifiedError(err),
+        classified,
         suppressConsoleLog,
       });
     }

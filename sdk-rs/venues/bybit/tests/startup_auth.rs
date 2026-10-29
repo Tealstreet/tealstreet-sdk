@@ -521,3 +521,88 @@ fn environment_probe_never_runs_for_excluded_networks_products_or_signing_contex
         assert!(!h.has_request("/v5/user/query-api"));
     }
 }
+
+/// Every error-level event's (code, message).
+fn errors(h: &Harness) -> Vec<(&'static str, String)> {
+    h.notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event)
+                if event.level == safe_cex_engine::Level::Error =>
+            {
+                Some((event.code, event.message.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+const UNMATCHED_IP: &str = "Unmatched IP, please check your API key's bound IP addresses.";
+
+#[test]
+fn an_account_info_ip_refusal_fails_startup_visibly_with_the_allowlist_hint() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 200, &rejection(10010, UNMATCHED_IP));
+    let [failure] = h.startup_failures.as_slice() else {
+        panic!(
+            "one startup failure expected: {:?}; logs {:?}",
+            h.startup_failures, h.logs
+        );
+    };
+    assert_eq!(failure.kind, Some(ErrorKind::AuthPermission));
+    assert!(
+        failure.message.contains("IP allowlist"),
+        "{}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains(UNMATCHED_IP),
+        "{}",
+        failure.message
+    );
+    assert!(
+        errors(&h)
+            .iter()
+            .any(|(code, message)| *code == "auth.rejected" && message == &failure.message),
+        "an error-level auth.rejected event is required: {:?}",
+        errors(&h)
+    );
+    // An IP mismatch is not a dead key.
+    assert!(!h.deactivated);
+}
+
+#[test]
+fn any_other_account_info_failure_is_an_error_not_a_warning() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 503, "Service Unavailable");
+    assert!(h.startup_failures.is_empty());
+    assert!(
+        errors(&h)
+            .iter()
+            .any(|(_, message)| message.contains("the private API was rejected")),
+        "{:?}",
+        h.logs
+    );
+}
+
+#[test]
+fn an_account_read_refused_for_the_key_is_an_auth_rejected_error() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 200, support::ACCOUNT_INFO);
+    h.load_public();
+    h.respond(
+        "/v5/account/wallet-balance",
+        200,
+        &rejection(10010, UNMATCHED_IP),
+    );
+    assert!(
+        errors(&h)
+            .iter()
+            .any(|(code, message)| *code == "auth.rejected" && message.contains(UNMATCHED_IP)),
+        "{:?}",
+        errors(&h)
+    );
+}

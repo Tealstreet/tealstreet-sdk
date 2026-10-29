@@ -23,10 +23,10 @@ fn read_notice<'a>(h: &'a Harness, prefix_code: &str) -> &'a safe_cex_engine::lo
     h.events
         .iter()
         .find(|event| {
-            event.code == code::REQUEST_FAILED
+            (event.code == code::REQUEST_FAILED || event.code == code::AUTH_REJECTED)
                 && event.fields.contains(&("venueCode", prefix_code.into()))
         })
-        .unwrap_or_else(|| panic!("no request.failed with {prefix_code}: {:?}", h.events))
+        .unwrap_or_else(|| panic!("no read notice with {prefix_code}: {:?}", h.events))
 }
 
 #[test]
@@ -57,8 +57,9 @@ fn the_corpus_covers_every_recorded_case_with_its_production_path() {
 }
 
 /// Bitget checks the key before the clock: every keyed read answered 400 40037.
-/// After detection, an account read reports it as `request.failed` with the
-/// table's `authInvalid` and the native code; a probe 40037 ends startup instead.
+/// After detection, an account read reports it as a visible `auth.rejected`
+/// Error with the table's `authInvalid` and the native code; a probe 40037 ends
+/// startup instead.
 #[test]
 fn a_rejected_key_on_the_account_reads_is_classified_auth_invalid() {
     for (name, path) in [
@@ -82,6 +83,11 @@ fn a_rejected_key_on_the_account_reads_is_classified_auth_invalid() {
             reply(&mut h, path, fixture);
         }
         let event = read_notice(&h, "40037");
+        assert_eq!(
+            (event.code, event.level),
+            (code::AUTH_REJECTED, safe_cex_engine::Level::Error),
+            "{name}"
+        );
         assert!(
             event.fields.contains(&("kind", "authInvalid".into())),
             "{name}: {:?}",

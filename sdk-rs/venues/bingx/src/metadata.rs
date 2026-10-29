@@ -209,9 +209,9 @@ impl Account {
             return;
         }
         if let Some(error) = response_error(response, false) {
-            cx.notice(
-                Level::Warn,
-                code::REQUEST_FAILED,
+            // A failing private read surfaces as an Error at the retried-failure cadence.
+            cx.retried_failure(
+                "bingx.metadata:private",
                 format!("BingX private request failed: {error}"),
             );
             fail(cx, &leg, metadata_error(error));

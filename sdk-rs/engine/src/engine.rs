@@ -2629,13 +2629,22 @@ impl<P> Cx<'_, P> {
         self.notice(level, log_code::REQUEST_FAILED, message);
     }
 
-    /// [`Self::retried_failure`] for a classified read failure: still
-    /// `request.failed`, now carrying the error's fields ([`Self::notice_error`]).
-    /// An auth kind stays here: account auth evidence is `AccountAuth`, and
-    /// consumers read `auth.rejected` as account-level (bitunix `recovery.rs`).
+    /// [`Self::retried_failure`] for a classified read failure, carrying the
+    /// error's fields ([`Self::notice_error`]). A private read the venue refused
+    /// for the key itself (an auth kind, such as a Bybit 10010 IP mismatch) is
+    /// `auth.rejected`, so hosts show the account's auth failure instead of
+    /// silently empty balances; every other failure stays `request.failed`.
     pub fn retried_failure_error(&mut self, site: &'static str, error: &VenueError) {
         let level = self.retried_failure_level(site, &error.message);
-        self.notice_error(level, log_code::REQUEST_FAILED, error);
+        let code = if matches!(
+            error.kind,
+            Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+        ) {
+            log_code::AUTH_REJECTED
+        } else {
+            log_code::REQUEST_FAILED
+        };
+        self.notice_error(level, code, error);
     }
 
     /// A notice for a classified failure under the caller's `code`. Like
@@ -9037,16 +9046,16 @@ mod public_retry_tests {
             !cx.io.core.auth_failure_counted,
             "an order refusal is no auth evidence"
         );
-        // A read failure stays request.failed, with retried_failure's cadence.
+        // A private read refused for the key is a visible auth.rejected Error,
+        // with retried_failure's cadence.
         let rejected = VenueError::new("API-key format invalid.").kind(ErrorKind::AuthInvalid);
         cx.retried_failure_error("site", &rejected);
         let first = event(std::mem::take(&mut cx.io.core.actions));
         assert_eq!(
             (first.code, first.level),
-            (log_code::REQUEST_FAILED, Level::Error)
+            (log_code::AUTH_REJECTED, Level::Error)
         );
         assert_eq!(first.fields, vec![("kind", "authInvalid".into())]);
-        assert!(!cx.io.core.auth_failure_counted);
         cx.retried_failure_error("site", &rejected);
         assert_eq!(
             event(std::mem::take(&mut cx.io.core.actions)).level,

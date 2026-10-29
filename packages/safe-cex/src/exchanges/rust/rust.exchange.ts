@@ -50,7 +50,7 @@ import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
 
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
-import { isErrorReported, markErrorReported } from '../../commandOutcome';
+import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
@@ -1504,7 +1504,11 @@ export class RustEngineExchange extends BaseExchange {
   private receiveEvent = (event: EngineEvent) => {
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     this.emitter.emit('engine-event', event);
-    if (event.level === 'error') this.emitAndLogError(event.message, undefined, { engineEvent: event });
+    if (event.level === 'error')
+      this.emitAndLogError(event.message, undefined, {
+        engineEvent: event,
+        classified: engineEventClassified(event),
+      });
     else if (event.level !== 'debug')
       this.log(event.message, event.level === 'warn' ? LogSeverity.Warning : LogSeverity.Info, event);
   };

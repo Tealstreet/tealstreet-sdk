@@ -64,7 +64,8 @@ fn reply(h: &mut Harness, path: &str, fixture: &Fixture) {
     h.reply(request.id, fixture.http_status.unwrap(), "", &fixture.body);
 }
 
-/// The background read's notice: still `request.failed`, now carrying the kind.
+/// The background read's notice carries the kind. A read refused for the key
+/// is a visible `auth.rejected` Error; any other refusal stays `request.failed`.
 fn read_notice(h: &Harness, prefix: &str, fixture: &Fixture) {
     let native: serde_json::Value = serde_json::from_str(&fixture.body).unwrap();
     let event = h
@@ -72,11 +73,20 @@ fn read_notice(h: &Harness, prefix: &str, fixture: &Fixture) {
         .iter()
         .find(|event| event.message.starts_with(prefix))
         .unwrap_or_else(|| panic!("no {prefix} notice: {:?}", h.events));
+    let auth = matches!(
+        fixture.expect.kind,
+        Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+    );
     assert_eq!(
         event.code,
-        code::REQUEST_FAILED,
-        "an account read is no auth.rejected"
+        if auth {
+            code::AUTH_REJECTED
+        } else {
+            code::REQUEST_FAILED
+        },
+        "{prefix}"
     );
+    assert_eq!(event.level, safe_cex_engine::Level::Error, "{prefix}");
     let kind = fixture.expect.kind.unwrap().as_str();
     assert!(
         event.fields.contains(&("kind", kind.into())),
