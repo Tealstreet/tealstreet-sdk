@@ -2,25 +2,27 @@
 //! arrive through [`AlgoFactory`], timers run as one driver task, and effects
 //! become engine commands, chaser calls and wire replies.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
-use safe_cex_algos::{AlgoCx, AlgoFactory, Scope};
+use safe_cex_algos::{AlgoCx, AlgoFactory};
+use safe_cex_chaser::{ChaserBook, ChaserOptions};
 use safe_cex_engine::engine::Command;
 use safe_cex_engine::error::{Outcome, VenueError};
-use safe_cex_engine::model::PlaceOrderOpts;
+use safe_cex_engine::model::{OrderSide as EngineSide, PlaceOrderOpts};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 
 use crate::{
-    ChaserProgress, ChaserRequest, OrderKind, TickerQuote, TwapBook, TwapEffect, TwapEnv,
-    TwapMarketView, TwapOrderRequest,
+    ChaserProgress, ChaserRequest, OrderKind, OrderSide, TickerQuote, TwapBook, TwapEffect,
+    TwapEnv, TwapMarketView, TwapOrderRequest,
 };
 
 /// The account's chaser runtime, as TWAP slices use it.
 pub trait TwapChasers {
-    fn start_with_id(&self, cx: &AlgoCx, request: &ChaserRequest);
+    /// An `Err` is the refusal the client sees as an error log.
+    fn start_with_id(&self, cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String>;
     fn progress(&self, chaser_id: &str) -> Option<ChaserProgress>;
     /// Stop the chaser and cancel its open order.
     fn remove(&self, cx: &AlgoCx, chaser_id: &str);
@@ -35,31 +37,43 @@ pub const TWAP_OPS: &[&str] = &[
     "twap:state",
 ];
 
-/// One account's TWAPs. Build one per account registry.
+/// One account's TWAPs, bound to the account's context: the timer driver and
+/// placements outlive the socket that sent an op. Before disposing the account
+/// scope, the server calls [`TwapFactory::terminate_all`].
 pub struct TwapFactory {
     inner: Rc<Inner>,
 }
 
 struct Inner {
+    /// The account's context, never a socket's.
+    cx: AlgoCx,
     book: RefCell<TwapBook>,
     chasers: Rc<dyn TwapChasers>,
     env: RefCell<CxEnv>,
     rescheduled: Notify,
-    /// The driver task's scope; a disposed one means the driver must restart.
-    driver: RefCell<Option<Scope>>,
+    driver_started: Cell<bool>,
 }
 
 impl TwapFactory {
-    pub fn new(chasers: Rc<dyn TwapChasers>) -> Self {
+    pub fn new(account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
         Self {
             inner: Rc::new(Inner {
+                cx: account_cx,
                 book: RefCell::new(TwapBook::new()),
                 chasers,
                 env: RefCell::new(CxEnv::seeded()),
                 rescheduled: Notify::new(),
-                driver: RefCell::new(None),
+                driver_started: Cell::new(false),
             }),
         }
+    }
+
+    /// Stop every TWAP (`twap:stop` each) and send the final state. Chase
+    /// slices are the chaser book's; terminate those through it as well.
+    pub fn terminate_all(&self) {
+        let effects = self.inner.book.borrow_mut().terminate_all();
+        Inner::run(&self.inner, &self.inner.cx, effects);
+        self.inner.rescheduled.notify_one();
     }
 
     /// The store's `activeTWAPs` for `account_name`.
@@ -82,7 +96,9 @@ impl AlgoFactory for TwapFactory {
         TWAP_OPS
     }
 
-    fn handle(&self, op: &str, data: &str, cx: &AlgoCx) -> Result<(), String> {
+    /// `_op_cx` is the sending socket's; TWAPs run on the account's context.
+    fn handle(&self, op: &str, data: &str, _op_cx: &AlgoCx) -> Result<(), String> {
+        let cx = &self.inner.cx;
         let data: Value = serde_json::from_str(data).map_err(|error| format!("{op}: {error}"))?;
         let effects = {
             let mut env = self.inner.env.borrow_mut();
@@ -104,16 +120,10 @@ impl AlgoFactory for TwapFactory {
 
 impl Inner {
     fn ensure_driver(inner: &Rc<Self>, cx: &AlgoCx) {
-        if inner
-            .driver
-            .borrow()
-            .as_ref()
-            .is_some_and(|scope| !scope.is_disposed())
-        {
+        if inner.driver_started.replace(true) {
             inner.rescheduled.notify_one();
             return;
         }
-        inner.driver.replace(Some(cx.scope.clone()));
         let (inner, cx) = (inner.clone(), cx.clone());
         cx.clone().spawn(async move {
             loop {
@@ -161,7 +171,9 @@ impl Inner {
                     Self::place(inner, cx, twap_id, settle_token, &request);
                 }
                 TwapEffect::StartChaser { request, .. } => {
-                    inner.chasers.start_with_id(cx, &request)
+                    if let Err(message) = inner.chasers.start_with_id(cx, &request) {
+                        cx.port.emit("log", json!([message, "error"]).to_string());
+                    }
                 }
                 TwapEffect::RemoveChaser { chaser_id, .. } => inner.chasers.remove(cx, &chaser_id),
                 // `exchange.emitter.emit('log', message, LogSeverity.Error)` on the wire.
@@ -319,5 +331,40 @@ impl TwapEnv for CxEnv {
         (0..21)
             .map(|_| NANOID_ALPHABET[(self.next() >> 58) as usize] as char)
             .collect()
+    }
+}
+
+/// The account's chaser book, shared with the `chaser:*` ops: pass
+/// `ChaserFactory::book(cx)` and register that same `ChaserFactory`.
+impl TwapChasers for Rc<ChaserBook> {
+    fn start_with_id(&self, _cx: &AlgoCx, request: &ChaserRequest) -> Result<(), String> {
+        // TS slices pass no origin, account or terminate rule, and the chaser
+        // ignores `delay`.
+        let options = ChaserOptions {
+            symbol: request.symbol.clone(),
+            size: request.size,
+            side: match request.side {
+                OrderSide::Buy => EngineSide::Buy,
+                OrderSide::Sell => EngineSide::Sell,
+            },
+            max_attempts: f64::from(request.max_attempts),
+            reduce_only: Some(request.reduce_only),
+            origin: None,
+            account_name: None,
+            terminate: None,
+            client_id: None,
+        };
+        ChaserBook::start_with_id(self, request.id.clone(), options)
+    }
+
+    fn progress(&self, chaser_id: &str) -> Option<ChaserProgress> {
+        ChaserBook::progress(self, chaser_id).map(|progress| ChaserProgress {
+            remaining_size: progress.remaining_size,
+            stopped: progress.stopped,
+        })
+    }
+
+    fn remove(&self, _cx: &AlgoCx, chaser_id: &str) {
+        ChaserBook::remove(self, chaser_id);
     }
 }
