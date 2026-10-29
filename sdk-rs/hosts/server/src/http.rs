@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 const TOKEN_GRACE: Duration = Duration::from_secs(30);
 const KEEPALIVE: Duration = Duration::from_secs(10);
 const MAX_MESSAGE_BYTES: usize = 256 * 1024;
+/// A peer that stops reading cannot hold its socket: every write has a deadline.
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct App {
     pub registry: Arc<Registry>,
@@ -166,13 +168,15 @@ fn in_cidr(ip: IpAddr, cidr: &str) -> bool {
 
 /// The client address: `cf-connecting-ip` only from a Cloudflare edge peer.
 pub fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
-    let from_edge = CLOUDFLARE.iter().any(|cidr| in_cidr(peer.ip(), cidr));
+    // A dual-stack listener reports IPv4 peers as ::ffff:a.b.c.d.
+    let peer_ip = peer.ip().to_canonical();
+    let from_edge = CLOUDFLARE.iter().any(|cidr| in_cidr(peer_ip, cidr));
     headers
         .get("cf-connecting-ip")
         .filter(|_| from_edge)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse().ok())
-        .unwrap_or(peer.ip())
+        .unwrap_or(peer_ip)
 }
 
 async fn upgrade(
@@ -244,6 +248,16 @@ async fn upgrade(
     response
 }
 
+async fn send(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    message: Message,
+) -> bool {
+    matches!(
+        tokio::time::timeout(SEND_TIMEOUT, sink.send(message)).await,
+        Ok(Ok(()))
+    )
+}
+
 async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
     app.metrics.connections.fetch_add(1, Ordering::Relaxed);
     let (mut sink, mut stream) = socket.split();
@@ -279,15 +293,15 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
             biased;
             _ = overflow.notified() => {
                 Log::warn("slow client dropped: outbound queue full");
-                let _ = sink.send(close(1013, "Client is not reading; reconnect")).await;
+                send(&mut sink, close(1013, "Client is not reading; reconnect")).await;
                 break;
             }
             _ = &mut expiry => {
-                let _ = sink.send(close(1008, "Tealstreet proxy token expired")).await;
+                send(&mut sink, close(1008, "Tealstreet proxy token expired")).await;
                 break;
             }
             text = outgoing.recv() => match text {
-                Some(text) => if sink.send(Message::Text(text.into())).await.is_err() { break },
+                Some(text) => if !send(&mut sink, Message::Text(text.into())).await { break },
                 None => break,
             },
             incoming = stream.next() => {
@@ -296,7 +310,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
                 match message {
                     Message::Text(text) => {
                         if let Err(violation) = session.handle(text.as_str()).await {
-                            let _ = sink.send(close(1008, violation.0)).await;
+                            send(&mut sink, close(1008, violation.0)).await;
                             break;
                         }
                     }
@@ -309,7 +323,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
                     Log::warn("idle socket dropped");
                     break;
                 }
-                if sink.send(Message::Ping(Vec::new().into())).await.is_err() { break }
+                if !send(&mut sink, Message::Ping(Vec::new().into())).await { break }
             }
         }
     }
