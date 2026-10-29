@@ -741,7 +741,7 @@ impl Command {
         }
     }
 
-    pub(crate) fn completion_id(&self) -> Option<CommandId> {
+    pub fn completion_id(&self) -> Option<CommandId> {
         match self {
             Self::PlaceOrders { command, .. }
             | Self::AmendOrderWithSymbol { command, .. }

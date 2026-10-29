@@ -13,6 +13,10 @@ path = "src/main.rs"
 safe-cex-engine.workspace = true
 safe-cex-native = { workspace = true, features = ["address-nonce"] }
 safe-cex-remote-signer = { path = "../remote-signer" }
+safe-cex-algos = { path = "../../algos/runtime" }
+safe-cex-chaser = { path = "../../algos/chaser" }
+safe-cex-algo-twap = { path = "../../algos/twap" }
+safe-cex-exec = { path = "../../algos/exec" }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws", "query", "json"] }
 tokio = { version = "1.53.3", features = ["rt", "rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }

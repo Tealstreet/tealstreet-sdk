@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::mpsc;
 
 /// The unauthenticated public pseudo-account, as in NX `server.ts`.
 pub const PUBLIC_ACCOUNT: &str = "__pub_bybit";
@@ -60,6 +61,10 @@ pub struct Account {
     pub fingerprint: String,
     /// Live sockets carry their outbox and token; park holders carry none.
     holders: Mutex<Holders>,
+    /// Private accounts' algo host (chaser, TWAP, exec); it also owns disposal.
+    pub algos: Option<mpsc::UnboundedSender<crate::algos::AlgoInput>>,
+    /// Lets algo replies reach the account's signing socket without a cycle.
+    algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>>,
 }
 
 /// A live socket holding an account: where its signing and proxy token go.
@@ -258,6 +263,7 @@ impl Registry {
             .build(user, init, public_only, fingerprint, token, holder, outbox)
             .await?;
         let account = Arc::new(account);
+        *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
         account.hold(holder, live);
         if let Some(remote) = remote {
             // As TS `setFatalFailureCallback`: a signer failing repeatedly disposes the account.
@@ -342,6 +348,28 @@ impl Registry {
         proxy_token.set(if public_only { None } else { token });
         let tokens = proxy_token.provider();
         let config = self.engine_config.clone();
+        let algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>> = Arc::default();
+        let (algos, algo_inbox) = if public_only {
+            (None, None)
+        } else {
+            let (tx, rx) = mpsc::unbounded_channel();
+            (Some(tx), Some(rx))
+        };
+        let algo_client = self.next_id();
+        let algo_signer = link.clone();
+        let owner = algo_owner.clone();
+        let emit: crate::algos::Emit = Box::new(move |text| {
+            let account = owner
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(std::sync::Weak::upgrade);
+            if let Some(account) = account {
+                account.notify(text);
+            }
+        });
+        let algo_venue = venue.clone();
+        let algo_name = init.account_name.clone();
         let (spawned, receive) = tokio::sync::oneshot::channel();
         let placed = self.threads.place(move |placement| {
             let transport = NetworkTransport::with_routing(plan, tokens);
@@ -352,6 +380,17 @@ impl Registry {
                             let _ = task.await;
                             drop(placement);
                         });
+                        if let Some(inbox) = algo_inbox {
+                            tokio::task::spawn_local(crate::algos::run(
+                                handle.clone(),
+                                algo_client,
+                                algo_venue,
+                                algo_name,
+                                emit,
+                                algo_signer,
+                                inbox,
+                            ));
+                        }
                         handle
                     });
             let _ = spawned.send(result.map_err(|error| error.to_string()));
@@ -371,6 +410,8 @@ impl Registry {
             token: proxy_token,
             fingerprint,
             holders: Mutex::default(),
+            algos,
+            algo_owner,
         };
         Ok((account, remote))
     }
@@ -400,11 +441,18 @@ impl Registry {
         }
     }
 
+    /// With algos, their host settles chases first, then disposes the engine and signer.
     fn stop(account: &Account) {
-        if let Some(link) = &account.link {
-            link.mark_unavailable();
+        let handed = account
+            .algos
+            .as_ref()
+            .is_some_and(|algos| algos.send(crate::algos::AlgoInput::Dispose).is_ok());
+        if !handed {
+            if let Some(link) = &account.link {
+                link.mark_unavailable();
+            }
+            account.handle.dispose();
         }
-        account.handle.dispose();
     }
 
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
