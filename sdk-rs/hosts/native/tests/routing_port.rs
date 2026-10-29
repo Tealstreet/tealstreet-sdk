@@ -173,9 +173,22 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
         "https://eea.okx.com",
         Some("https://eea.okx.com"),
     ),
-    ("bitget", "https://api.bitget.com", None),
-    ("bitgetusdc", "https://api.bitget.com", None),
-    ("bitgetinverse", "https://api.bitget.com", None),
+    // Bitget's testnet trades simulated `s*-futures` products on the mainnet host.
+    (
+        "bitget",
+        "https://api.bitget.com",
+        Some("https://api.bitget.com"),
+    ),
+    (
+        "bitgetusdc",
+        "https://api.bitget.com",
+        Some("https://api.bitget.com"),
+    ),
+    (
+        "bitgetinverse",
+        "https://api.bitget.com",
+        Some("https://api.bitget.com"),
+    ),
     (
         "hyperliquid",
         "https://api.hyperliquid.xyz",

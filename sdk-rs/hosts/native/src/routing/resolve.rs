@@ -203,8 +203,8 @@ fn exchange(name: &str) -> Result<&'static Exchange, RoutingError> {
 /// `base_url`. Copied from each venue crate's REST constant, with the registry's
 /// demo-as-testnet choices (OKX demo, Bybit demo) applied. A testnet account on a
 /// venue with no testnet refuses rather than resolving to the live host; the
-/// mainnet host is returned only where the venue's demo rides it (Bitunix's
-/// `x-simulated-trading`, OKX EU's EEA host).
+/// mainnet host is returned only where the venue's demo rides it (Bitget's
+/// simulated `s*-futures` products, Bitunix's `x-simulated-trading`, OKX EU's EEA host).
 pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingError> {
     let pick = |mainnet, test| if testnet { test } else { mainnet };
     Ok(match name {
@@ -222,7 +222,7 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
         "okx" => pick("https://www.okx.com", "https://openapi.okx.com"),
         "okxdemo" => "https://openapi.okx.com",
         "okxeu" | "okxeudemo" => "https://eea.okx.com",
-        "bitget" | "bitgetusdc" | "bitgetinverse" | "bingx" if testnet => {
+        "bingx" if testnet => {
             return Err(RoutingError::NoBaseUrl(name.into()));
         }
         "bitget" | "bitgetusdc" | "bitgetinverse" => "https://api.bitget.com",
