@@ -380,6 +380,8 @@ mod sign_meta {
     #[derive(Serialize)]
     struct Setup {
         operation: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        algorithm: Option<safe_cex_engine::signing::Algorithm>,
         slot: &'static str,
     }
     fn slot_name(slot: CredentialSlot) -> &'static str {
@@ -415,15 +417,20 @@ mod sign_meta {
             let (owner, slot, role) = match meta.kind {
                 SignKind::Setup {
                     generation,
-                    operation: SetupOperation::PublicAddress,
+                    operation,
                     slot,
                 } => {
+                    let (operation, algorithm) = match operation {
+                        SetupOperation::PublicAddress => ("publicAddress", None),
+                        SetupOperation::PublicKey(algorithm) => ("publicKey", Some(algorithm)),
+                    };
                     return Self::Setup(SetupOut {
                         task: meta.task.0,
                         owner: Owner::Setup { generation },
                         deadline_ms: meta.deadline_ms,
                         setup: Setup {
-                            operation: "publicAddress",
+                            operation,
+                            algorithm,
                             slot: slot_name(slot),
                         },
                     });
@@ -581,6 +588,16 @@ mod sign_meta_wire_tests {
                 slot: CredentialSlot::Secondary,
             }),
             r#"{"task":7,"owner":{"kind":"setup","generation":3},"deadlineMs":20001.25,"setup":{"operation":"publicAddress","slot":"secondary"}}"#
+        );
+        assert_eq!(
+            encode(SignKind::Setup {
+                generation: 3,
+                operation: SetupOperation::PublicKey(
+                    safe_cex_engine::signing::Algorithm::StarkDigest
+                ),
+                slot: CredentialSlot::Primary,
+            }),
+            r#"{"task":7,"owner":{"kind":"setup","generation":3},"deadlineMs":20001.25,"setup":{"operation":"publicKey","algorithm":"starkDigest","slot":"primary"}}"#
         );
     }
 }
