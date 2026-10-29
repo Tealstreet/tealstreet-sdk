@@ -166,6 +166,9 @@ pub enum RoutingError {
     SecondaryUnsupported,
     UnsupportedRewrite,
     InvalidTable(String),
+    /// No fixed REST origin: the venue is not served natively, or (HyroTrader)
+    /// its endpoints come from the account's configuration.
+    NoBaseUrl(String),
 }
 
 impl std::fmt::Display for RoutingError {
@@ -182,6 +185,7 @@ impl std::fmt::Display for RoutingError {
             }
             Self::UnsupportedRewrite => write!(f, "Unsupported native URL rewrite"),
             Self::InvalidTable(error) => write!(f, "invalid routing table: {error}"),
+            Self::NoBaseUrl(exchange) => write!(f, "no fixed REST base URL for {exchange}"),
         }
     }
 }
@@ -193,6 +197,54 @@ fn exchange(name: &str) -> Result<&'static Exchange, RoutingError> {
         .exchanges
         .get(name)
         .ok_or_else(|| RoutingError::UnknownExchange(name.into()))
+}
+
+/// The venue's own REST base URL, which `resolve_routing_plan` takes as
+/// `base_url`. Copied from each venue crate's REST constant, with the registry's
+/// demo-as-testnet choices (OKX demo, Bybit demo) applied.
+pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingError> {
+    let pick = |mainnet, test| if testnet { test } else { mainnet };
+    Ok(match name {
+        "binance" => pick("https://fapi.binance.com", "https://demo-fapi.binance.com"),
+        "binancepm" => pick("https://papi.binance.com", "https://demo-fapi.binance.com"),
+        "binanceinverse" => pick("https://dapi.binance.com", "https://demo-dapi.binance.com"),
+        "binancespot" => pick("https://api.binance.com", "https://testnet.binance.vision"),
+        "bybit" | "bybitinverse" | "bybitspot" => {
+            pick("https://api.bybit.com", "https://api-testnet.bybit.com")
+        }
+        "bybitdemo" => pick(
+            "https://api-demo.bybit.com",
+            "https://api-testnet.bybit.com",
+        ),
+        "okx" => pick("https://www.okx.com", "https://openapi.okx.com"),
+        "okxdemo" => "https://openapi.okx.com",
+        "okxeu" | "okxeudemo" => "https://eea.okx.com",
+        "bitget" | "bitgetusdc" | "bitgetinverse" => "https://api.bitget.com",
+        "hyperliquid" | "hyperliquidspot" => pick(
+            "https://api.hyperliquid.xyz",
+            "https://api.hyperliquid-testnet.xyz",
+        ),
+        "blofin" => pick(
+            "https://openapi.blofin.com",
+            "https://demo-trading-openapi.blofin.com",
+        ),
+        "bingx" => "https://open-api.bingx.com",
+        "lighter" => pick(
+            "https://mainnet.zklighter.elliot.ai",
+            "https://testnet-api.lighter.xyz",
+        ),
+        "lighter-robinhood" => pick(
+            "https://api.rh.lighter.xyz",
+            "https://api.rh-testnet.lighter.xyz",
+        ),
+        "paradex" => pick(
+            "https://api.prod.paradex.trade/v1",
+            "https://api.testnet.paradex.trade/v1",
+        ),
+        "phemex" => pick("https://api.phemex.com", "https://testnet-api.phemex.com"),
+        "bitunix" => "https://fapi.bitunix.com",
+        _ => return Err(RoutingError::NoBaseUrl(name.into())),
+    })
 }
 
 /// `accountToExchangeOptions`' transport fields for a hosted account: the

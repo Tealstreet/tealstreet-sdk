@@ -114,3 +114,46 @@ fn an_override_proxy_url_input_refuses() {
     let smuggled = serde_json::json!({"tealstreetProxy": true, "hasKey": true, "overrideProxyUrl": "https://evil.invalid"});
     assert!(serde_json::from_value::<RoutingInputs>(smuggled).is_err());
 }
+
+#[test]
+fn every_core_venue_has_a_base_url_that_resolves() {
+    use safe_cex_native::resolve::rest_base_url;
+    for venue in [
+        "binance",
+        "binancepm",
+        "binanceinverse",
+        "binancespot",
+        "bybit",
+        "bybitinverse",
+        "bybitspot",
+        "bybitdemo",
+        "okx",
+        "okxeu",
+        "okxdemo",
+        "okxeudemo",
+        "bitget",
+        "bitgetusdc",
+        "bitgetinverse",
+        "hyperliquid",
+        "hyperliquidspot",
+        "blofin",
+        "bingx",
+        "lighter",
+        "lighter-robinhood",
+        "paradex",
+        "phemex",
+        "bitunix",
+    ] {
+        for testnet in [false, true] {
+            let base = rest_base_url(venue, testnet).unwrap();
+            let account = AccountTransport {
+                tealstreet_proxy: Some(true),
+                testnet: Some(testnet),
+                ..Default::default()
+            };
+            let inputs = account_transport(venue, &account).unwrap();
+            resolve_routing_plan(venue, &inputs, base, Provider::Tealstreet).unwrap();
+        }
+    }
+    assert!(rest_base_url("hyrotrader", false).is_err());
+}
