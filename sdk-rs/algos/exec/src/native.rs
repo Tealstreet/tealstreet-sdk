@@ -63,6 +63,12 @@ impl Drop for ParallelReservation {
     }
 }
 impl Host for Adapter {
+    fn random(&mut self) -> Result<f64, String> {
+        let mut bytes = [0u8; 8];
+        getrandom::getrandom(&mut bytes).map_err(|_| "Random distribution unavailable")?;
+        Ok((u64::from_le_bytes(bytes) >> 11) as f64 / (1u64 << 53) as f64)
+    }
+
     fn parallel_in_flight(&self) -> usize {
         self.parallel.get()
     }

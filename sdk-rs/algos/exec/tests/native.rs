@@ -337,3 +337,24 @@ fn native_amend_translation_changes_price_only_and_retains_the_real_order_id() {
         matches!(command,Command::AmendOrder{command:99,id,price:Some(123.5),amount:None} if id=="native-id")
     );
 }
+
+#[tokio::test]
+async fn native_swarm_checks_shared_account_credits_before_any_second_payload_slice() {
+    use safe_cex_engine::model::{Limits, Market, MinMax, Precision, Ticker};
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());
+        port.store.borrow_mut().markets.insert("BTCUSDT".into(),Market{
+            id:"BTCUSDT".into(),symbol:"BTCUSDT".into(),pretty_symbol:None,base:"BTC".into(),quote:"USDT".into(),active:true,
+            precision:Precision{amount:0.001,price:0.1},limits:Limits{amount:MinMax{min:0.001,max:1000.},leverage:MinMax{min:1.,max:20.},price:None},
+            contract_size:None,is_expiring:None,is_inverse:None,is_spot:None,is_perpetual:None,is_read_only:None,taker_fee:None,maker_fee:None,
+        });
+        port.store.borrow_mut().tickers.insert("BTCUSDT".into(),Ticker{symbol:"BTCUSDT".into(),last:50000.,..Default::default()});
+        let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();
+        for req in ["one","two"]{factory.handle("exec",&json!({"symbol":"BTCUSDT","command":"swarm buy $5000 into 20","reqId":req}).to_string(),&cx).unwrap();}
+        tokio::task::yield_now().await;
+        assert_eq!(port.commands.borrow().len(),20);
+        assert!(port.commands.borrow().iter().all(|command|matches!(command,Command::PlaceOrders{orders,..} if orders.len()==1 && orders[0].reduce_only==Some(false))));
+        assert!(port.events.borrow().iter().any(|(op,data)|op=="exec-result"&&data["reqId"]=="two"&&data["success"]==false));
+        cx.scope.dispose();tokio::task::yield_now().await;
+    }).await;
+}

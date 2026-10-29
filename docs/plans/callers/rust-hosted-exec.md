@@ -97,3 +97,14 @@ preserves structured partial IDs/count/index, and never resends a failed batch
 or tail. Native bound: 2–128 scale rungs (8x approved); 0/1/noninteger/oversized
 ladders refuse whole before dispatch. Zero-size rungs and unknown explicit
 symbols/modifiers also refuse before any batch is sent.
+
+Swarm uses concurrent independent native market calls with TS equal/irregular
+weight distribution and last-slice lot remainder. It waits for every slice,
+collects fulfilled native IDs in declaration order, and reports partial versus
+all-failed results without retrying a failed/Unknown slice. Every slice shares
+the account credit pool. Native bounds (8x approved): 1–32 slices and enough
+free account credits for the entire swarm before any slice is dispatched;
+otherwise the whole swarm refuses. Irregular weights use the host random
+source; native uses OS randomness and refuses before dispatch if unavailable.
+Browser preprocessing budget/fat-finger state remains absent on this hosted
+worker path, as in TS; no synthetic account state is introduced.

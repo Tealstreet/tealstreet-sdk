@@ -8,6 +8,7 @@ pub mod native;
 mod order_tools;
 mod placement;
 mod protection;
+mod swarm;
 
 pub const MAX_COMMAND_BYTES: usize = 16 * 1024;
 pub const MAX_STEPS: usize = 128;
@@ -19,6 +20,9 @@ pub trait Host {
     fn snapshot(&self) -> Value;
     fn call(&mut self, token: u64, method: &str, args: Value) -> Result<(), Value>;
     fn emit(&mut self, op: &str, data: Value);
+    fn random(&mut self) -> Result<f64, String> {
+        Err("Random distribution unavailable".into())
+    }
     fn parallel_in_flight(&self) -> usize {
         0
     }
@@ -39,6 +43,7 @@ pub struct Exec {
     chains: HashMap<u64, Chain>,
     pending: HashMap<u64, Pending>,
     disposed: bool,
+    swarms: HashMap<u64, Swarm>,
 }
 struct Chain {
     symbol: String,
@@ -57,6 +62,7 @@ struct Pending {
     succeeded: usize,
     failed: usize,
     failure_summary: Option<String>,
+    group: Option<(u64, usize)>,
     current_place: bool,
     failure_context: Option<String>,
 }
@@ -67,6 +73,11 @@ enum Evaluation {
         result: Value,
     },
     Place(VecDeque<placement::Placement>),
+    Swarm {
+        orders: Vec<Value>,
+        symbol: String,
+        side: String,
+    },
     Batch {
         orders: Vec<Value>,
         success: String,
@@ -131,6 +142,14 @@ impl Action {
             )),
         }
     }
+}
+
+struct Swarm {
+    chain: Option<u64>,
+    req_id: Option<Value>,
+    symbol: String,
+    side: String,
+    results: Vec<Option<Result<Value, Value>>>,
 }
 
 impl Exec {
@@ -217,6 +236,10 @@ impl Exec {
             } else {
                 result = Err(json!({"message":"Invalid placement result","outcome":"unknown"}));
             }
+        }
+        if let Some((group, index)) = pending.group {
+            self.complete_swarm(group, index, result, host);
+            return;
         }
         if result.is_ok() {
             pending.succeeded += 1;
@@ -322,11 +345,74 @@ impl Exec {
         }
     }
 
+    fn complete_swarm(
+        &mut self,
+        id: u64,
+        index: usize,
+        result: Result<Value, Value>,
+        host: &mut impl Host,
+    ) {
+        let Some(group) = self.swarms.get_mut(&id) else {
+            return;
+        };
+        if group.results[index].is_some() {
+            return;
+        }
+        group.results[index] = Some(result);
+        if group.results.iter().any(Option::is_none) {
+            return;
+        }
+        let group = self.swarms.remove(&id).unwrap();
+        let mut ids = Vec::new();
+        let mut successes = 0;
+        let mut failures = 0;
+        let mut first_error = None;
+        for result in group.results.into_iter().flatten() {
+            match result {
+                Ok(value) => {
+                    successes += 1;
+                    ids.extend(value.as_array().unwrap().iter().cloned());
+                }
+                Err(error) => {
+                    failures += 1;
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        let result = if successes > 0 {
+            log(
+                host,
+                &group.req_id,
+                &if failures == 0 {
+                    format!(
+                        "Swarm placed: {successes} {} {} order(s)",
+                        group.symbol, group.side
+                    )
+                } else {
+                    format!("Swarm partial: {successes} placed, {failures} failed")
+                },
+            );
+            json!({"handled":true,"success":true,"data":{"orderIds":ids}})
+        } else {
+            log(host, &group.req_id, "Swarm: all orders failed to place");
+            json!({"handled":true,"success":false,"error":"Swarm: all orders failed to place","errorDetails":first_error})
+        };
+        if let Some(chain) = group.chain {
+            if let Some(chain) = self.chains.get_mut(&chain) {
+                chain.last = Some(result);
+            }
+            self.drive(chain, host);
+        }
+    }
+
     /// The owning socket's close disposes its scope; issued writes are not resent.
     pub fn dispose(&mut self) {
         self.disposed = true;
         self.pending.clear();
         self.chains.clear();
+        self.swarms.clear();
     }
 
     fn id(&mut self) -> u64 {
@@ -386,6 +472,7 @@ impl Exec {
                         succeeded: 0,
                         failed: 0,
                         failure_summary: None,
+                        group: None,
                         current_place: false,
                         failure_context: None,
                     };
@@ -406,6 +493,61 @@ impl Exec {
                         return;
                     }
                 }
+                Evaluation::Swarm {
+                    orders,
+                    symbol,
+                    side,
+                } => {
+                    let count = orders.len();
+                    if count + self.pending.len().max(host.parallel_in_flight()) > MAX_PARALLEL {
+                        if !parallel {
+                            chain.last = Some(
+                                json!({"handled":true,"success":false,"error":"EXEC command exceeds native resource limits"}),
+                            );
+                        }
+                        log(
+                            host,
+                            &chain.req_id,
+                            "EXEC command exceeds native resource limits",
+                        );
+                        self.chains.insert(id, chain);
+                        continue;
+                    }
+                    let group = self.id();
+                    let req_id = chain.req_id.clone();
+                    self.swarms.insert(
+                        group,
+                        Swarm {
+                            chain: (!parallel).then_some(id),
+                            req_id: req_id.clone(),
+                            symbol,
+                            side,
+                            results: vec![None; count],
+                        },
+                    );
+                    self.chains.insert(id, chain);
+                    for (index, order) in orders.into_iter().enumerate() {
+                        let pending = Pending {
+                            chain: None,
+                            req_id: req_id.clone(),
+                            success: String::new(),
+                            actions: VecDeque::new(),
+                            attempt_all: false,
+                            order_ids: None,
+                            parallel: true,
+                            succeeded: 0,
+                            failed: 0,
+                            failure_summary: None,
+                            group: Some((group, index)),
+                            current_place: false,
+                            failure_context: None,
+                        };
+                        self.issue(pending, "placeOrder", json!([order]), host);
+                    }
+                    if !parallel {
+                        return;
+                    }
+                }
                 Evaluation::Batch { orders, success } => {
                     let pending = Pending {
                         chain: (!parallel).then_some(id),
@@ -418,6 +560,7 @@ impl Exec {
                         succeeded: 0,
                         failed: 0,
                         failure_summary: None,
+                        group: None,
                         current_place: false,
                         failure_context: None,
                     };
@@ -452,6 +595,7 @@ impl Exec {
                         succeeded: 0,
                         failed: 0,
                         failure_summary,
+                        group: None,
                         current_place: false,
                         failure_context: None,
                     };
@@ -493,6 +637,7 @@ impl Exec {
                             succeeded: 0,
                             failed: 0,
                             failure_summary: None,
+                            group: None,
                             current_place: false,
                             failure_context: None,
                         },
@@ -641,6 +786,14 @@ fn evaluate(
         }
         "buy" | "b" | "sell" | "s" => match placement::parse(symbol, &args, store) {
             Ok(orders) => Evaluation::Place(orders),
+            Err(error) => failed(error),
+        },
+        "swarm" => match swarm::prepare(symbol, &args, store, host) {
+            Ok((orders, symbol, side)) => Evaluation::Swarm {
+                orders,
+                symbol,
+                side,
+            },
             Err(error) => failed(error),
         },
         "scale" | "bump" => order_tools::evaluate(symbol, &args, store, text),
