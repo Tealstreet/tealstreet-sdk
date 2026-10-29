@@ -15,6 +15,7 @@ import { finishBingxRequest, isBingxUnsignedRequest, prepareBingxRequest, serial
 import { finishBitgetRequest, prepareBitgetRequest } from '../bitget/bitget.signing';
 import { BROKER_ID as BITGET_BROKER_ID } from '../bitget/bitget.types';
 import { finishBitunixRequest, isBitunixUnsignedRequest, prepareBitunixRequest } from '../bitunix/bitunix.signing';
+import { finishBlofinRequest, isBlofinUnsignedRequest, prepareBlofinRequest } from '../blofin/blofin.signing';
 import { createBybitRequestInterceptor, isBybitUnsignedSigningRequest } from '../bybit/bybit.signing';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../bybit/bybit.site';
 import { BROKER_ID, RECV_WINDOW } from '../bybit/bybit.types';
@@ -69,7 +70,8 @@ export const signHostedHttp = async (
   const bitunix = name === 'bitunix';
   const bingx = name === 'bingx';
   const phemex = name === 'phemex';
-  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !aster)
+  const blofin = name === 'blofin';
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
   // The legacy Bitget and Phemex interceptors sign every request once credentials exist.
@@ -78,6 +80,7 @@ export const signHostedHttp = async (
     : aster ? isAsterDEXPublicEndpoint(request.config.url)
       : bitunix ? isBitunixUnsignedRequest(request.config.url)
       : bingx ? isBingxUnsignedRequest(request.config.url, options.testnet)
+      : blofin ? isBlofinUnsignedRequest(request.config.url)
       : !bitget && isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
   const needsCredential = primaryComplete && !unsigned;
   const credential = needsCredential ? (await host.hostedSigning({ kind: 'credential' })).credential : undefined;
@@ -126,7 +129,9 @@ export const signHostedHttp = async (
       'X-BX-APIKEY': credential,
       'X-SOURCE-KEY': 'Tealstreet',
       'Content-Type': 'application/json, charset=utf-8',
-    } : phemex ? {} : binance ? {
+    } : phemex ? {} : blofin ? {
+      'Content-Type': 'application/json',
+    } : binance ? {
       'X-MBX-APIKEY': credential,
       'Content-Type': 'application/json, charset=utf-8',
     } : {
@@ -174,6 +179,13 @@ export const signHostedHttp = async (
     const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
     if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
     return finishBingxRequest(prepared, credential, output.signature);
+  } : blofin ? async (config) => {
+    if (isBlofinUnsignedRequest(config.url) || !credential) return config;
+    const prepared = prepareBlofinRequest(config, now(), uuid());
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    const passphrase = output.headers?.find(([key]) => key.toLowerCase() === 'access-passphrase')?.[1];
+    if (output.credential !== credential || !output.signature || !passphrase) throw new Error('Signing identity changed');
+    return finishBlofinRequest(prepared, credential, output.signature, passphrase);
   } : binance
     ? createBinanceRequestInterceptor(signingOptions, name, now)
     : createBybitRequestInterceptor(signingOptions, name, now, siteHeaders));
