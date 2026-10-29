@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "algos/*",
     "crypto",
     "engine",
     "hosts/native",
