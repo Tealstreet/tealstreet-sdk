@@ -6,8 +6,6 @@ IPs shown in the API key form, which follow the egress fleet.
 
 ## Obligations
 
-- None for this text. The API key form takes its IPs from TS
-  `exchangeMetadata`, which lists `privateProxyIpsVultrTokyo` since step 3e.
-  GRVT `privateProxyIps` in the generated
-  `sdk-rs/safe-cex-types/src/exchange_metadata.json` still includes the NAT IP;
-  this change does not regenerate it.
+- None. The API key form takes its IPs from TS `exchangeMetadata`, and the
+  generated `sdk-rs/safe-cex-types/src/exchange_metadata.json` matches it; both
+  list `privateProxyIpsVultrTokyo` for GRVT since step 3e.
