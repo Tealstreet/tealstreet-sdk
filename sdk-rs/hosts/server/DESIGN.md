@@ -56,7 +56,7 @@ connections.
 ## HTTP routes
 
 - **`GET /health`:** `{ok, uptime, release, region, connections, accounts, engineThreads, remoteSigner}`. The last field carries aggregates only: no account, symbol or key ever appears here.
-- **`GET /capabilities` and `GET /account/capabilities`:** the same JSON as `getExchangeServerRuntimeCapabilities()`, with `"runtime":"rust"` and `"frames":1` added.
+- **`GET /capabilities` and `GET /account/capabilities`:** the same JSON as `getExchangeServerRuntimeCapabilities()`, with `"runtime":"rust"` added.
 - **`OPTIONS`** on the three routes above returns 204 with the existing public CORS headers.
 - **WebSocket upgrade:** accepted on `/` and on `/account`.
   - Query parameters: `proxyToken` (alias `token`), `resume`, `resumable=1`.
@@ -108,7 +108,7 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 
 | `t` | `d` | When |
 |---|---|---|
-| `session` | `{resumeId, resumed, frames: 1}` | On open, for `resumable=1` sockets. `frames:1` is the version gate (see Frames) |
+| `session` | `{resumeId, resumed}` | On open, for `resumable=1` sockets |
 | `msg` | `{op, accountName, data, ...}` | Account output (see Frames and Replies) |
 | `sign-req` | the signer request (4yjlw0) | Remote signing |
 | `echo` | `{id, pad}` | Echo probe every `SIGNER_ECHO_PROBE_MS`, default unchanged |
@@ -161,9 +161,7 @@ snapshots, `listenOrderBook` (from `FrameApplier.books`), `listenOHLCV` (from
 Decode uses `@tealstreet/safe-cex-wasm/wire` `Frame`, which is pure JS and
 needs no wasm on the client, plus safe-cex `FrameApplier`.
 
-Version gate: the server's `session` message gains `"frames":1`. A client that
-sees no `frames` field keeps today's `store:delta` path, so old and new servers
-can coexist during the Vultr rollout.
+No version gate (hard cut): the client handles `op:'frame'` unconditionally and still accepts `store` and `store:delta`.
 
 ## Trading (callMethod to engine Command)
 
