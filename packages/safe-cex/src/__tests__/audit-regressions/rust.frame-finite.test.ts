@@ -97,3 +97,35 @@ it('keeps finite values, including a reported zero', () => {
     contracts: 0.025,
   });
 });
+
+// Bybit settings copy the position's leverage, and UiStateHandler copies settings back onto positions.
+const withSettings = (leverage: number, buy?: number, sell?: number) => {
+  const base = frame({ leverage: 5, unrealizedPnl: 0, liquidationPrice: 0 });
+  return {
+    ...base,
+    settings: () => ({
+      count: 1,
+      market: Uint32Array.of(0),
+      leverage: Float64Array.of(leverage),
+      ...(buy !== undefined && { buyLeverage: Float64Array.of(buy) }),
+      ...(sell !== undefined && { sellLeverage: Float64Array.of(sell) }),
+      marginType: () => undefined,
+    }),
+  } as unknown as Frame;
+};
+
+it('omits a symbol whose settings leverage is not finite', () => {
+  const store = new DefaultStore();
+  new FrameApplier(store).apply(withSettings(NaN));
+  expect(store.fetchedLeverage).not.toHaveProperty('BTCUSDT');
+  new FrameApplier(store).apply(withSettings(Infinity, 3));
+  expect(store.fetchedLeverage).not.toHaveProperty('BTCUSDT');
+});
+
+it('keeps finite settings leverage, with a finite side overriding a non-finite total', () => {
+  const store = new DefaultStore();
+  new FrameApplier(store).apply(withSettings(NaN, 3, 4));
+  expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 3, sellLeverage: 4 });
+  new FrameApplier(store).apply(withSettings(10, NaN));
+  expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 10, sellLeverage: 10 });
+});
