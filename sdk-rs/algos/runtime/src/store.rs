@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use safe_cex_engine::model::{
-    Balance, InstrumentClassification, Market, Order, Position, Ticker, UpdateIds,
+    Balance, CoinBalance, InstrumentClassification, Loaded, Market, Order, Position, Ticker,
+    UpdateIds,
 };
 
 /// The account state an algo reads, decoded from engine frames by the port.
@@ -18,6 +19,10 @@ pub struct AlgoStore {
     /// `None` until the account's first balance frame.
     pub balance: Option<Balance>,
     pub private_socket: PrivateSocketHealth,
+    /// Per-coin holdings (TS `balance.coins`); `None` until a frame carries them.
+    pub coins: Option<Vec<CoinBalance>>,
+    /// The frame status section's loaded flags; `None` until one arrives.
+    pub loaded: Option<Loaded>,
     /// Native instrument labels by symbol (TS `market.info` classification),
     /// for the TradFi placement guard. `None` until the venue sends the
     /// section; a symbol absent from a present map has no labels.
