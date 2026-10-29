@@ -190,7 +190,7 @@ pub struct AccountState {
 }
 
 impl AccountState {
-    fn order_terminal(&self, order: &Order) -> bool {
+    pub(crate) fn order_terminal(&self, order: &Order) -> bool {
         self.terminal_algo_ids.contains(&order.id)
             || order.id.parse().is_ok_and(|native: u64| {
                 self.native_executed

@@ -1,10 +1,9 @@
 //! European Options codecs. Native quantities remain contracts, never futures lots.
-use crate::{BinanceFutures, Channel, Pending, Query, Variant, reads};
+use crate::{BinanceFutures, Pending, Query, Variant, reads};
 use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
 use safe_cex_engine::model::{
-    Balance, CurrencyBalance, DerivativeProduct, Limits, Market, MinMax, Order, OrderExtra,
-    OrderSide, OrderStatus, OrderType, Position, PositionSide, Precision, ProductKind, Ticker,
-    TimeInForce,
+    Balance, CurrencyBalance, DerivativeProduct, Limits, Market, MinMax, Order, OrderSide,
+    OrderStatus, OrderType, Position, PositionSide, Precision, ProductKind, Ticker, TimeInForce,
 };
 use safe_cex_engine::request_context::{Context, Scope};
 use safe_cex_engine::store::OrderSnapshotToken;
@@ -306,7 +305,7 @@ impl OrderRow {
             trigger_type: None,
             take_profit: None,
             stop_loss: None,
-            extra: Some(OrderExtra::default()),
+            extra: None,
         })
     }
 }
@@ -395,7 +394,13 @@ impl BinanceFutures {
 
     pub(crate) fn start_options(&mut self, cx: &mut Cx<'_, Pending>) {
         self.options_read(cx, Kind::Markets);
-        self.option_state.poll = Some(cx.set_poll_timer(5_000.));
+        self.options_observed(cx);
+    }
+
+    pub(crate) fn options_observed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now.is_finite() && self.option_state.poll.is_none() {
+            self.option_state.poll = Some(cx.set_poll_timer(5_000.));
+        }
     }
 
     pub(crate) fn options_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -478,14 +483,8 @@ impl BinanceFutures {
             Ok(()) if request.kind == Kind::Markets => {
                 if !self.option_state.started {
                     self.option_state.started = true;
-                    if self.credentials.has_primary() {
-                        self.request_listen_key(cx);
-                    }
                 }
                 self.options_refresh(cx);
-                if self.public.idle() {
-                    self.open_feed(cx, Channel::Public);
-                }
             }
             _ => {}
         }
@@ -667,137 +666,45 @@ impl BinanceFutures {
                     .into_iter()
                     .map(|r| r.order(cx.now))
                     .collect::<Result<Vec<_>, _>>()?;
-                if orders.iter().any(|o| cx.store.market(&o.symbol).is_none()) {
-                    return Err(error("Unknown option order symbol"));
+                let mut seen = HashSet::new();
+                for order in &orders {
+                    if cx.store.market(&order.symbol).is_none() || !seen.insert(order.id.clone()) {
+                        return Err(error("Unknown or duplicate option order identity"));
+                    }
+                    let native = order
+                        .id
+                        .parse()
+                        .map_err(|_| error("Invalid option order ID"))?;
+                    let previous = cx
+                        .store
+                        .order(&order.id)
+                        .filter(|o| o.symbol == order.symbol);
+                    if self.account.order_terminal(order)
+                        || previous.is_some_and(|o| {
+                            matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                        })
+                        || order.filled
+                            < self
+                                .known_native_filled(&order.symbol, native)
+                                .max(previous.map_or(0., |o| o.filled))
+                    {
+                        return Err(error("Stale option order terminal or cumulative quantity"));
+                    }
                 }
                 let token = request
                     .token
                     .take()
                     .ok_or_else(|| error("Missing order snapshot token"))?;
                 // The token spans the entire response; no older read can clear a new mark.
-                if cx.store.orders_snapshot_current(&token) && !self.option_state.orders_owed {
-                    if cx.store.commit_orders_snapshot([token], |_| orders) {
-                        cx.orders_reconciled_since(None, request.read_epoch);
-                    }
+                if cx.store.orders_snapshot_current(&token)
+                    && !self.option_state.orders_owed
+                    && cx.store.commit_orders_snapshot([token], |_| orders)
+                {
+                    cx.orders_reconciled_since(None, request.read_epoch);
                 }
             }
         }
         Ok(())
-    }
-}
-
-#[derive(Deserialize)]
-struct StreamTicker {
-    s: String,
-    c: String,
-    #[serde(rename = "P")]
-    percentage: String,
-    v: String,
-    q: String,
-}
-
-impl BinanceFutures {
-    pub(crate) fn on_options_frame(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        channel: Channel,
-        text: &str,
-    ) {
-        if channel == Channel::Private {
-            // Stream facts request a complete fresh account observation; they cannot
-            // turn a partial position/balance event into a full snapshot.
-            #[derive(Deserialize)]
-            struct Header {
-                e: String,
-            }
-            if let Ok(header) = serde_json::from_str::<Header>(text) {
-                match header.e.as_str() {
-                    "listenKeyExpired" => self.retire(
-                        cx,
-                        channel,
-                        safe_cex_engine::socket_lifecycle::RetireReason::Closed,
-                    ),
-                    "ORDER_TRADE_UPDATE" | "ACCOUNT_UPDATE" => {
-                        cx.store.invalidate_order_snapshots();
-                        self.options_refresh(cx);
-                    }
-                    _ => {}
-                }
-            }
-            return;
-        }
-        #[derive(Deserialize)]
-        struct Header {
-            e: String,
-        }
-        let Ok(header) = serde_json::from_str::<Header>(text) else {
-            return;
-        };
-        match header.e.as_str() {
-            "24hrTicker" => {
-                let Ok(row) = serde_json::from_str::<StreamTicker>(text) else {
-                    return;
-                };
-                let Ok(values) = [&row.c, &row.percentage, &row.v, &row.q]
-                    .map(|s| finite(s))
-                    .into_iter()
-                    .collect::<Result<Vec<_>, _>>()
-                else {
-                    return;
-                };
-                cx.store.update_ticker(&row.s, |ticker| {
-                    ticker.last = values[0];
-                    ticker.percentage = values[1] * 100.;
-                    ticker.volume = values[2];
-                    ticker.quote_volume = values[3];
-                });
-            }
-            "depth" | "depthUpdate" => {
-                let Ok(row) = serde_json::from_str::<crate::wire::DepthEvent>(text) else {
-                    return;
-                };
-                let parse = |rows: Vec<[std::borrow::Cow<'_, str>; 2]>| {
-                    rows.into_iter()
-                        .map(|[p, q]| {
-                            let price = positive(&p)?;
-                            let quantity = finite(&q)?;
-                            if quantity < 0. {
-                                return Err(error("Negative option book quantity"));
-                            }
-                            Ok((price, quantity))
-                        })
-                        .collect::<Result<Vec<_>, VenueError>>()
-                };
-                let (Ok(bids), Ok(asks)) = (parse(row.b), parse(row.a)) else {
-                    return;
-                };
-                let Some(state) = self.books.get_mut(row.s.as_ref()) else {
-                    return;
-                };
-                if matches!(state.sync, crate::Sync::Synced { last_applied, .. } if last_applied >= row.final_update_id)
-                {
-                    return;
-                }
-                state.book.clear();
-                for (p, q) in bids {
-                    state
-                        .book
-                        .apply(safe_cex_engine::book::BookSide::Bids, p, q);
-                }
-                for (p, q) in asks {
-                    state
-                        .book
-                        .apply(safe_cex_engine::book::BookSide::Asks, p, q);
-                }
-                state.sync = crate::Sync::Synced {
-                    last_applied: row.final_update_id,
-                    awaiting_first: false,
-                };
-                cx.book_changed(row.s.as_ref());
-            }
-            "kline" => self.on_market_frame(cx, text),
-            _ => {}
-        }
     }
 }
 
@@ -863,8 +770,10 @@ struct HistoricalOrder {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FillRow {
-    #[serde(deserialize_with = "native_id", alias = "id")]
-    trade_id: u64,
+    #[serde(default, deserialize_with = "optional_native_id")]
+    trade_id: Option<u64>,
+    #[serde(default, deserialize_with = "optional_native_id")]
+    id: Option<u64>,
     #[serde(deserialize_with = "native_id")]
     order_id: u64,
     symbol: String,
@@ -931,6 +840,13 @@ impl BinanceFutures {
             );
             return;
         }
+        if !self.credentials.has_primary() {
+            cx.refuse_command(
+                safe_cex_engine::request_context::Operation::Read,
+                error("Binance Options private credentials are required"),
+            );
+            return;
+        }
         let Ok((selection, id)) = self
             .credentials
             .select(CredentialRole::Read { scope: None })
@@ -992,8 +908,9 @@ impl BinanceFutures {
                 let mut fills = Vec::new();
                 let mut seen = HashSet::new();
                 for row in rows {
+                    let trade_id = row.trade_id.or(row.id).ok_or_else(malformed)?;
                     if symbol.as_deref() != Some(row.symbol.as_str())
-                        || row.trade_id == 0
+                        || trade_id == 0
                         || row.order_id == 0
                         || !row.time.is_finite()
                         || row.time < 0.
@@ -1006,7 +923,7 @@ impl BinanceFutures {
                     {
                         continue;
                     }
-                    if !seen.insert(row.trade_id) {
+                    if !seen.insert(trade_id) {
                         return Err(malformed());
                     }
                     let side = match row.side.as_str() {
@@ -1018,7 +935,7 @@ impl BinanceFutures {
                         return Err(malformed());
                     }
                     fills.push(Fill {
-                        id: row.trade_id.to_string(),
+                        id: trade_id.to_string(),
                         order_id: row.order_id.to_string(),
                         symbol: row.symbol,
                         side,
@@ -1071,4 +988,10 @@ impl BinanceFutures {
             _ => Err(malformed()),
         }
     }
+}
+
+fn optional_native_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    #[derive(Deserialize)]
+    struct Id(#[serde(deserialize_with = "native_id")] u64);
+    Option::<Id>::deserialize(d).map(|id| id.map(|id| id.0))
 }

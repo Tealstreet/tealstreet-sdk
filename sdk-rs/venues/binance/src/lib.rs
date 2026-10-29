@@ -4,6 +4,7 @@ mod candles;
 mod history;
 mod identity;
 mod options;
+mod options_products;
 mod paths;
 mod reads;
 mod session;
@@ -115,6 +116,7 @@ pub enum Pending {
     Background(Context, Box<Pending>),
     Identity(Context),
     Options(Box<options::Request>),
+    OptionsProduct(Box<options_products::Request>),
     ExchangeInfo {
         rows: Vec<Market>,
         rejected: bool,
@@ -601,16 +603,6 @@ impl BinanceFutures {
     /// and sends only the deltas while connected.
     fn interests(&self, cx: &Cx<'_, Pending>, channel: Channel) -> Vec<Interest> {
         let mut topics = Vec::new();
-        if self.is_options() {
-            if channel == Channel::Public {
-                for market in cx.store.markets() {
-                    topics.push(format!("{}@ticker", market.symbol));
-                }
-                topics.extend(self.books.keys().map(|s| format!("{s}@depth20@100ms")));
-                topics.extend(self.candles.keys().map(|(s, i)| format!("{s}@kline_{i}")));
-            }
-            return topics.into_iter().map(Interest::from_wire_args).collect();
-        }
         match channel {
             Channel::Public => {
                 if self.is_spot() {
@@ -1385,6 +1377,7 @@ impl Venue for BinanceFutures {
             },
             Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
             Variant::Options => safe_cex_engine::Capabilities {
+                options: true,
                 fill_history: true,
                 order_history: true,
                 income_history: false,
@@ -1443,6 +1436,9 @@ impl Venue for BinanceFutures {
     }
 
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.options_observed(cx);
+        }
         self.revalue_pending_wallet(cx);
     }
 
@@ -1477,10 +1473,6 @@ impl Venue for BinanceFutures {
                     return;
                 }
             }
-        }
-        if self.is_options() {
-            self.on_options_frame(cx, channel, text);
-            return;
         }
         match channel {
             Channel::Public => {
@@ -1638,6 +1630,10 @@ impl Venue for BinanceFutures {
             self.options_response(cx, *request, response);
             return;
         }
+        if let Pending::OptionsProduct(request) = pending {
+            self.options_product_response(cx, *request, response);
+            return;
+        }
         self.observe_weight(cx, &response);
         if let Pending::Identity(context) = pending {
             self.identity_response(cx, context, response);
@@ -1646,7 +1642,9 @@ impl Venue for BinanceFutures {
         let Response { status, body, .. } = response;
         match pending {
             Pending::Background(..) => unreachable!(),
-            Pending::Identity(_) | Pending::Options(_) => unreachable!(),
+            Pending::Identity(_) | Pending::Options(_) | Pending::OptionsProduct(_) => {
+                unreachable!()
+            }
             Pending::ExchangeInfo { rows, rejected } => {
                 self.on_markets(cx, rows, response, rejected)
             }
@@ -1808,6 +1806,9 @@ impl Venue for BinanceFutures {
         }
         match pending {
             Pending::Options(request) => self.options_failed(cx, *request, error),
+            Pending::OptionsProduct(request) => {
+                self.options_product_failed(cx, *request, error.into())
+            }
             Pending::Background(..) => unreachable!(),
             Pending::Klines { context, .. } => {
                 let _ = cx.fail_context(&context, error.to_owned());
@@ -1883,7 +1884,44 @@ impl Venue for BinanceFutures {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if self.is_options() {
+            self.options_observed(cx);
+        }
+        let command = if self.is_options() {
+            match self.options_product_command(cx, command) {
+                Ok(()) => return,
+                Err(command) => command,
+            }
+        } else {
+            command
+        };
+        if self.is_options()
+            && matches!(
+                command,
+                Command::SubscribeOrderBook { .. }
+                    | Command::SubscribeCandles { .. }
+                    | Command::UnsubscribeOrderBook { .. }
+                    | Command::UnsubscribeCandles { .. }
+            )
+        {
+            cx.notice(
+                Level::Error,
+                code::COMMAND_UNSUPPORTED,
+                "Binance Options streaming is not supported; use REST queries",
+            );
+            return;
+        }
         if let Command::FetchAccount { .. } = command {
+            if self.is_options() {
+                cx.refuse_command(
+                    Operation::Read,
+                    safe_cex_engine::VenueError::new(
+                        "Binance Options account identity lookup is unsupported",
+                    )
+                    .kind(safe_cex_engine::ErrorKind::Unsupported),
+                );
+                return;
+            }
             self.fetch_identity(cx);
             return;
         }
