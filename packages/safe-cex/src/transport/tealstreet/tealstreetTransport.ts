@@ -12,7 +12,7 @@ import {
 import { isNodeOrBunRuntime } from '../../utils/runtime';
 import { markRestProxyHeader } from '../../utils/venueRestDiagnostics';
 import { resolveExchangeRouting } from './routing/resolveExchangeRouting';
-import { getPublicCorsProxy, PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP } from './transportResolution';
+import { getPrivateProxyHost, getPublicCorsProxy } from './transportResolution';
 
 /** Headers the tradetunnel's CloudFront/WAF expects on a non-browser WebSocket upgrade. */
 export const TEALSTREET_WS_HEADERS = {
@@ -134,7 +134,7 @@ export const tealstreetTransport: TransportProvider = {
     // GRVT's venue owns `Authorization`, so its proxy credential rides a separate header.
     const header = exchange === 'grvt' ? 'Tealstreet-Authorization' : 'Authorization';
     return {
-      url: exchange === 'grvt' ? PRIVATE_PROXY_GRVT_TINY : PRIVATE_PROXY_JP,
+      url: getPrivateProxyHost(exchange === 'grvt' ? 'tiny' : 'jp'),
       resolveHeaders: async () => {
         const token = await getProxyToken();
         return token ? { [header]: `Bearer ${token}` } : {};
@@ -142,7 +142,7 @@ export const tealstreetTransport: TransportProvider = {
     };
   },
 
-  serverProxyUrl: () => PRIVATE_PROXY_JP,
+  serverProxyUrl: () => getPrivateProxyHost('jp'),
 
   // A tunnelled account already leaves through a whitelisted egress.
   requireProxy: (options) => ({ ...options, tealstreetProxy: !options.tealstreetTunnel }),

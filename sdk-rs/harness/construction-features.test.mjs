@@ -16,11 +16,18 @@ const setupFeatures = {
   lighter: ['dispatch-signing'],
   hyperliquid: ['dispatch-signing', 'address-nonce'],
   paradex: ['dispatch-signing'],
-  asterdex: ['dispatch-signing', 'address-nonce', 'sign-meta'],
+  // Hosted V1 signing admits AsterDEX without a remoteSigning declaration.
+  asterdex: ['dispatch-signing', 'address-nonce', 'sign-meta', 'hosted-signing'],
 };
+
+// Wallet families answer remote requests through the slim hosted-wallet export.
+const walletDevices = new Set(['hyperliquid', 'lighter', 'paradex']);
+const remoteFeature = (rule) => walletDevices.has(rule.setupMapping) ? 'hosted-wallet' : 'hosted-signing';
 
 function requiredFeatures(rule) {
   const required = new Set(rule.bridge?.dispatchSigning ? ['dispatch-signing'] : []);
+  // Every family that admits remote signing keeps its device signing path.
+  if (rule.remoteSigning?.enabled) required.add(remoteFeature(rule));
   if (rule.setupMapping) {
     assert(Object.hasOwn(setupFeatures, rule.setupMapping), `Unspecified setup mapping: ${rule.setupMapping}`);
     for (const feature of setupFeatures[rule.setupMapping]) required.add(feature);
@@ -51,6 +58,15 @@ for (const [venue, rule] of Object.entries(rules.venues)) {
   });
 }
 
+test('a family that admits remote signing cannot drop hosted signing', () => {
+  const remote = Object.entries(rules.venues).filter(([, rule]) => rule.remoteSigning?.enabled);
+  assert.ok(remote.length > 0);
+  for (const [venue, rule] of remote)
+    assert.ok(enabledFeatures(features, venueFamily(venue)).has(remoteFeature(rule)), venue);
+  assert.throws(() => checkFeatures({ family: ['dispatch-signing'], 'dispatch-signing': [] }, 'family',
+    { bridge: { dispatchSigning: true }, remoteSigning: { enabled: true } }), /hosted-signing/);
+});
+
 test('feature guard rejects missing bootstrap, address setup and signing metadata independently', () => {
   for (const required of ['dispatch-signing', 'address-nonce', 'sign-meta']) {
     const graph = { wallet: ['dispatch-signing', 'address-nonce', 'sign-meta'].filter(feature => feature !== required),
@@ -62,20 +78,20 @@ test('feature guard rejects missing bootstrap, address setup and signing metadat
   assert.throws(() => requiredFeatures({ setupMapping: 'new-mapping' }), /Unspecified setup mapping/);
 });
 
-test('Hyperliquid ScalarOnly setup requires isolated dispatch signing and address setup', () => {
-  const required = ['dispatch-signing', 'address-nonce'];
+test('Hyperliquid ScalarOnly setup requires isolated dispatch signing, address setup and hosted wallet', () => {
+  const required = ['dispatch-signing', 'address-nonce', 'hosted-wallet'];
   for (const missing of required) {
     const graph = { hyperliquid: required.filter(feature => feature !== missing),
-      'dispatch-signing': [], 'address-nonce': [] };
+      'dispatch-signing': [], 'address-nonce': [], 'hosted-wallet': [] };
     assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquid), new RegExp(missing));
     assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquidspot), new RegExp(missing));
   }
 });
 
 test('feature guard follows transitive local features, without borrowing combined defaults', () => {
-  const graph = { wallet: ['bootstrap', 'address-nonce'], bootstrap: ['dispatch-signing'],
+  const graph = { wallet: ['bootstrap', 'address-nonce'], bootstrap: ['dispatch-signing', 'hosted-signing'],
     'address-nonce': ['sign-meta'], default: ['unrelated'], unrelated: ['dispatch-signing'],
-    'dispatch-signing': [], 'sign-meta': [], bare: [] };
+    'dispatch-signing': [], 'hosted-signing': [], 'sign-meta': [], bare: [] };
   checkFeatures(graph, 'wallet', { setupMapping: 'asterdex' });
   assert.throws(() => checkFeatures(graph, 'bare', { bridge: { dispatchSigning: true } }), /dispatch-signing/);
 });

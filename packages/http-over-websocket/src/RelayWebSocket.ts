@@ -19,7 +19,7 @@
 //
 // It is constructed by the vendored ReconnectingWebSocket through its
 // `WebSocket` option, from a URL of the form
-//   wss://fsjnpy143pbz.<region>.tealstreet.io/tunnel?ts-relay=<encoded upstream>
+//   wss://<tunnel host>/tunnel?ts-relay=<encoded upstream>
 // (`buildRelayUrl`), so the exchange classes keep treating it as just another
 // host in `transport/tealstreet/routing/routingTable.ts`. In Node/Bun the inner socket is the `ws`
 // client with whatever upgrade options the caller passed (Origin/UA headers,

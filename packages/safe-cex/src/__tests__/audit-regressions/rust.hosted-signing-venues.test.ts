@@ -1,5 +1,7 @@
 import type { ExchangeName, ExchangeOptions, RemoteSigner, RemoteSignerRequest } from '../../types';
 
+import { createHmac } from 'node:crypto';
+
 import { getPublicKey, verify } from '@noble/ed25519';
 import bs58 from 'bs58';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -126,11 +128,30 @@ describe('OUT hosted accounts are refused while signing references remain availa
       }
     }
   });
+  it('BloFin hosted HTTP and WS auth sign through the Rust provider with the TS wire', async () => {
+    const engine = new RustEngineExchange('blofin', { key: 'k', secret: 's', passphrase: 'p' }, new DefaultStore());
+    try {
+      const signed = await engine.signHttpRequest(request('blofin', 'https://openapi.blofin.com', '/api/v1/account/balance'));
+      expect(signed.error).toBeUndefined();
+      const headers = signed.config!.headers!;
+      const mac = (text: string) => Buffer.from(createHmac('sha256', 's').update(text).digest('hex')).toString('base64');
+      expect(headers['ACCESS-KEY']).toBe('k');
+      expect(headers['ACCESS-PASSPHRASE']).toBe('p');
+      expect(headers['ACCESS-SIGN']).toBe(
+        mac(`/api/v1/account/balanceGET${headers['ACCESS-TIMESTAMP']}${headers['ACCESS-NONCE']}`));
+      await expect(
+        engine.signWsAuth({ id: 'ws-1', type: 'ws-auth', exchangeName: 'blofin',
+          wsAuth: { toSign: '/users/self/verifyGET1nonce', outputFormat: 'hex-base64' } }),
+      ).resolves.toEqual({ id: 'ws-1', wsAuthSignature: mac('/users/self/verifyGET1nonce') });
+    } finally {
+      engine.dispose();
+    }
+  });
   it('an unsupported signing family refuses without a TS or raw-secret fallback', async () => {
-    const engine = new RustEngineExchange('blofin', { key: 'k', secret: 's' }, new DefaultStore());
+    const engine = new RustEngineExchange('krakenspot', { key: 'k', secret: 's' }, new DefaultStore());
     try {
       await expect(
-        engine.signHttpRequest(request('blofin', 'https://openapi.blofin.com', '/api/v1/private/order/create')),
+        engine.signHttpRequest(request('krakenspot', 'https://api.kraken.com', '/0/private/Balance')),
       ).resolves.toEqual({
         id: 'sign-1',
         error: 'Hosted HTTP signing is unsupported in this build',
@@ -139,7 +160,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
         engine.signWsAuth({
           id: 'ws-1',
           type: 'ws-auth',
-          exchangeName: 'blofin',
+          exchangeName: 'krakenspot',
           wsAuth: { toSign: 'x', outputFormat: 'hex' },
         }),
       ).resolves.toEqual({ id: 'ws-1', error: 'Hosted WS auth signing is unsupported in this build' });

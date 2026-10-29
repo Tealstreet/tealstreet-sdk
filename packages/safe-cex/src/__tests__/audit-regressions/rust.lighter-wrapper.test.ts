@@ -41,6 +41,7 @@ const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lig
     httpEnd: noop,
     httpFailed: noop,
     timer: noop,
+    useExternalSigner: () => {},
   };
   const construct = vi.fn(function (_venue: string, _options: string, _setup?: string) {
     return engine;
@@ -103,9 +104,10 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('Rust %s wrapper contra
     });
     expect(exchange.options.secret).toBeUndefined();
   });
-  it('preserves remote-only private account reads without serializing callbacks', async () => {
+  it('signs a remote-signer account through the delegated provider without serializing callbacks', async () => {
     const sign = vi.fn();
     const { exchange, construct } = variantSetup({
+      key: 'lighter-public-key',
       apiKeyIndex: '0',
       applicationId: '42',
       remoteSigner: { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} },
@@ -114,17 +116,18 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('Rust %s wrapper contra
     await exchange.start();
     expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({
       publicDataOnly: false,
-      lighterRemoteSigner: true,
+      // The delegated provider signs, so the read-only remote fallback is off.
+      lighterRemoteSigner: false,
       apiKeyIndex: '0',
+      remoteSigning: true,
+      signing: { primary: expect.any(Object) },
     });
     expect(JSON.parse(construct.mock.calls[0][1]).remoteSigner).toBeUndefined();
     expect(sign).not.toHaveBeenCalled();
   });
-  it('keeps payload-only startup public and explicit public-only authoritative', async () => {
-    const { exchange, construct } = variantSetup({ key: 'account', apiKeyIndex: '0', payloadSigner: vi.fn() });
-    expect(exchange.isPublicDataOnly).toBe(true);
-    await exchange.start();
-    expect(JSON.parse(construct.mock.calls[0][1]).publicDataOnly).toBe(true);
+  it('refuses a private payload-only account and keeps explicit public-only authoritative', async () => {
+    expect(() => variantSetup({ key: 'account', apiKeyIndex: '0', payloadSigner: vi.fn() }))
+      .toThrow('no REST-only PayloadSigner lifecycle');
     const explicit = variantSetup({ publicDataOnly: true, secret: 'local', apiKeyIndex: '0' });
     expect(explicit.exchange.isPublicDataOnly).toBe(true);
   });

@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:19:22.066Z",
+  "endpoint": "/api/v5/account/balance",
+  "http_status": 401,
+  "body": "{\"msg\":\"Invalid OK-ACCESS-KEY\",\"code\":\"50111\"}",
+  "expect": {
+    "kind": "authInvalid",
+    "outcome": null,
+    "path": "read"
+  }
+}

@@ -1198,6 +1198,9 @@ export class RustEngineExchange extends BaseExchange {
       this.dispose();
       throw error;
     }
+    // An injected signer binds address-bound slots before the venue starts.
+    if (this.signerSetup instanceof DelegatedSignerSetup) await this.host?.prepareAddressSetup();
+    if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
     this.host?.start();
     if (this.engineFailure) throw this.engineFailure;
     if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');

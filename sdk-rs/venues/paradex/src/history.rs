@@ -1,17 +1,46 @@
 //! Rare cursor-paged reads never mutate the account store.
 pub mod public_trades;
 use crate::{Pending, account::Account};
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{CommandId, Cx, Method, Outcome, Query, Response, VenueError, json::ArrayAt};
+use safe_cex_engine::{
+    CommandId, Cx, ErrorKind, Method, Outcome, Query, Response, VenueError, json::ArrayAt,
+};
 use serde::{Deserialize, Serialize};
 
 /// Fills pages before the read falls back to order history or stops.
 const FILL_PAGES: u32 = 5;
+
+/// Every private history page is a 20 s Read on the account's JWT Session.
+fn read_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+fn query_symbol(query: &Query) -> Option<&str> {
+    match query {
+        Query::Fills { symbol, .. }
+        | Query::OrderHistory { symbol, .. }
+        | Query::Income { symbol, .. } => symbol.as_deref(),
+        Query::PublicTrades { symbol, .. } | Query::OrderByClientId { symbol, .. } => Some(symbol),
+    }
+}
+/// The native answer for an unlisted market: an empty list, or a lookup miss.
+fn empty_result(query: &Query) -> &'static str {
+    if matches!(query, Query::OrderByClientId { .. }) {
+        "{\"found\":false,\"definitive\":false}"
+    } else {
+        "[]"
+    }
+}
 
 /// Whether a read with an optional output limit has kept enough rows, and
 /// whether it is bounded at all.
@@ -35,13 +64,33 @@ fn page_cap(query: &Query) -> u32 {
 pub struct History;
 pub struct Request {
     query: Query,
-    history: Box<CursorHistory<Output>>,
+    history: Box<ReadCursorHistory<Output>>,
+    /// The page leg in flight; rows and pages are admitted only through it.
+    leg: Option<Context>,
     valid: bool,
     raw_rows: usize,
     fallback: bool,
     lookup_history: bool,
     lookup_complete: bool,
     open_complete: bool,
+}
+impl Request {
+    /// Admit the delivered page through its own leg; a stale leg admits nothing
+    /// and the caller refuses the walk rather than completing it.
+    fn advance(&mut self, cx: &Cx<'_, Pending>, page: CursorPage) -> Option<CursorStep> {
+        let leg = self.leg.as_ref()?;
+        Some(self.history.admit(cx, leg).ok()?.advance(page))
+    }
+    fn advance_probe(&mut self, cx: &Cx<'_, Pending>, page: CursorPage) -> Option<CursorStep> {
+        let leg = self.leg.as_ref()?;
+        Some(self.history.admit(cx, leg).ok()?.advance_probe(page))
+    }
+    fn refuse_unadmitted(self, cx: &mut Cx<'_, Pending>) {
+        let _ = self.history.reject(
+            cx,
+            VenueError::new("Paradex history page was not admitted").kind(ErrorKind::Internal),
+        );
+    }
 }
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -345,13 +394,27 @@ impl History {
             let _ = cx.done_context(&context, "[]".into());
             return;
         }
+        let Ok(root) = cx.admit_http_command(read_policy()) else {
+            return;
+        };
+        // Native precedence: a missing private auth refuses before an unlisted market.
+        if account.credentials().is_some()
+            && query_symbol(&query).is_some_and(|symbol| cx.store.market(symbol).is_none())
+        {
+            let _ = cx.done_context(&root, empty_result(&query).into());
+            return;
+        }
+        let Ok(completion) = ReadCompletion::from_context(cx, command, root) else {
+            return;
+        };
         let request = Request {
-            history: Box::new(CursorHistory::new(
-                Completion::new(command),
+            history: Box::new(ReadCursorHistory::new(
+                completion,
                 CursorWalk::new(page_cap(&query)),
                 stall_message,
                 encode_rows,
             )),
+            leg: None,
             query,
             valid: true,
             raw_rows: 0,
@@ -437,33 +500,19 @@ impl History {
             return;
         }
         if let Some(symbol) = symbol {
+            // Admission answered an unlisted market; one delisted mid-walk ends it.
             let Some(market) = cx.store.market(symbol) else {
-                let result = if matches!(request.query, Query::OrderByClientId { .. }) {
-                    "{\"found\":false,\"definitive\":false}"
-                } else {
-                    "[]"
-                };
-                request.history.advance(CursorPage {
-                    next: None,
-                    rows: 0,
-                    fresh: 0,
-                    want_more: false,
-                });
-                request
-                    .history
-                    .finish_with(cx, Ok(()), |_| Ok(result.into()));
+                self.on_rejected(cx, request, "Paradex market is no longer listed");
                 return;
             };
             params.push(format!("market={}", encode(&market.id)));
         }
-        params.push(format!(
-            "{}={page_size}",
-            if request.fallback {
-                "limit"
-            } else {
-                "page_size"
-            }
-        ));
+        let size = if request.fallback {
+            "limit"
+        } else {
+            "page_size"
+        };
+        params.push(format!("{size}={page_size}"));
         if let Some(from) = from {
             params.push(format!("start_at={}", safe_cex_engine::num::format(from)));
         }
@@ -474,17 +523,30 @@ impl History {
             params.push(format!("cursor={}", encode(cursor)));
         }
         let path = format!("{path}?{}", params.join("&"));
-        account.request(
+        let leg = match cx.http_leg_context(request.history.root(), read_policy()) {
+            Ok(leg) => leg,
+            Err(error) => {
+                let _ = request.history.reject(cx, error.venue_error());
+                return;
+            }
+        };
+        request.leg = Some(leg.clone());
+        account.read(
             cx,
-            Method::Get,
-            path,
-            None,
+            leg,
+            &path,
             Some(ArrayAt::Field("results")),
             Pending::History(request),
         );
     }
 
     pub fn on_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
+        let Some(leg) = request.leg.clone() else {
+            return;
+        };
+        let Ok(mut page) = request.history.admit(cx, &leg) else {
+            return;
+        };
         request.raw_rows += 1;
         if let Query::OrderByClientId {
             symbol,
@@ -497,10 +559,10 @@ impl History {
             };
             if row.market == *symbol
                 && row.client_id == *client_order_id
-                && request.history.fresh(row.id.clone())
+                && page.fresh(row.id.clone())
             {
                 if let Ok(order) = crate::account::map_order(&row) {
-                    request.history.stage(Output::Lookup(order));
+                    page.stage(Output::Lookup(order));
                 } else {
                     request.valid = false;
                 }
@@ -529,7 +591,7 @@ impl History {
         if request.fallback && row.order_id.is_empty() {
             row.order_id = row.id.clone();
         }
-        if !row.id.is_empty() && !request.history.fresh(row.id.clone()) {
+        if !row.id.is_empty() && !page.fresh(row.id.clone()) {
             return;
         }
         match &request.query {
@@ -571,7 +633,7 @@ impl History {
                 let Some(side) = side(&row.side) else {
                     return;
                 };
-                request.history.stage(Output::Fill(Execution {
+                page.stage(Output::Fill(Execution {
                     id: row.id,
                     timestamp: (timestamp / 1000.).floor(),
                     symbol: row.market,
@@ -597,7 +659,7 @@ impl History {
             }
             Query::OrderHistory { .. } => {
                 if let Some(order) = map_order(&row) {
-                    request.history.stage(Output::Order(order));
+                    page.stage(Output::Order(order));
                 }
             }
             Query::OrderByClientId { .. } => unreachable!(),
@@ -644,7 +706,7 @@ impl History {
                         _ => None,
                     };
                     if value != 0. && wanted.is_none_or(|kind| kind == income_type) {
-                        request.history.stage(Output::Income(Income {
+                        page.stage(Output::Income(Income {
                             symbol: row.market.clone(),
                             income_type,
                             income: value,
@@ -659,7 +721,7 @@ impl History {
             }
             Query::PublicTrades { .. } => {
                 if let Some(row) = public_trade(row) {
-                    request.history.stage(row);
+                    page.stage(row);
                 }
             }
         }
@@ -671,6 +733,13 @@ impl History {
         mut request: Request,
         response: Response<'_>,
     ) {
+        let delivered = request
+            .leg
+            .as_ref()
+            .is_some_and(|leg| request.history.validate_delivery(cx, leg).is_ok());
+        if !delivered {
+            return;
+        }
         if let Err(error) = crate::success(response) {
             self.on_failed(cx, request, &error);
             return;
@@ -696,12 +765,16 @@ impl History {
         let next = envelope.next.filter(|s| !s.is_empty());
         if matches!(request.query, Query::OrderByClientId { .. }) && !request.lookup_history {
             if request.history.staged_len() > 0 {
-                request.history.advance(CursorPage {
+                let page = CursorPage {
                     next: None,
                     rows: request.raw_rows,
                     fresh: request.raw_rows,
                     want_more: false,
-                });
+                };
+                if request.advance(cx, page).is_none() {
+                    request.refuse_unadmitted(cx);
+                    return;
+                }
                 self.finish(cx, request, Ok(()));
                 return;
             }
@@ -711,13 +784,17 @@ impl History {
                 fresh: request.raw_rows,
                 want_more: true,
             };
-            match request.history.advance_probe(page) {
+            let Some(step) = request.advance_probe(cx, page) else {
+                request.refuse_unadmitted(cx);
+                return;
+            };
+            match step {
                 CursorStep::More(_) => {
                     self.issue(cx, account, request);
                     return;
                 }
                 CursorStep::Stalled(Stall::RepeatedCursor) => {
-                    request
+                    let _ = request
                         .history
                         .reject(cx, VenueError::new("Paradex repeated open-order cursor"));
                     return;
@@ -727,7 +804,7 @@ impl History {
             request.open_complete = next.is_none();
             request.lookup_history = true;
             if !request.history.restart_stage() {
-                request
+                let _ = request
                     .history
                     .reject(cx, VenueError::new("invalid Paradex lookup stage"));
                 return;
@@ -742,15 +819,19 @@ impl History {
         {
             // Native aggregate fallback ends this empty discovery stage; it is
             // not a partial fill result or a new command/completion owner.
-            request.history.advance(CursorPage {
+            let page = CursorPage {
                 next: None,
                 rows: 0,
                 fresh: 0,
                 want_more: false,
-            });
+            };
+            if request.advance(cx, page).is_none() {
+                request.refuse_unadmitted(cx);
+                return;
+            }
             request.fallback = true;
             if !request.history.restart_stage() {
-                request
+                let _ = request
                     .history
                     .reject(cx, VenueError::new("invalid Paradex fills stage"));
                 return;
@@ -777,21 +858,25 @@ impl History {
             fresh: request.raw_rows,
             want_more: !enough,
         };
-        match request.history.advance(page) {
+        let Some(step) = request.advance(cx, page) else {
+            request.refuse_unadmitted(cx);
+            return;
+        };
+        match step {
             CursorStep::More(_) => {
                 self.issue(cx, account, request);
                 return;
             }
             CursorStep::Stalled(Stall::PageBudget) if bounded => {}
             CursorStep::Stalled(Stall::PageBudget) => {
-                request.history.reject(
+                let _ = request.history.reject(
                     cx,
                     VenueError::new("INCOMPLETE: Paradex history page cap reached"),
                 );
                 return;
             }
             CursorStep::Stalled(_) => {
-                request
+                let _ = request
                     .history
                     .reject(cx, VenueError::new("Paradex repeated history cursor"));
                 return;
@@ -813,7 +898,7 @@ impl History {
         let lookup = matches!(request.query, Query::OrderByClientId { .. });
         let sort = !matches!(request.query, Query::PublicTrades { .. });
         let definitive = request.lookup_complete;
-        request.history.finish_with(cx, result, move |mut rows| {
+        let _ = request.history.finish_with(cx, result, move |mut rows| {
             if lookup {
                 #[derive(Serialize)]
                 struct Lookup<'a> {
@@ -844,15 +929,28 @@ impl History {
         });
     }
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        self.failed(cx, request, VenueError::new(error));
+    }
+    /// A failed page publishes none of its staged rows.
+    pub fn failed(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request, error: VenueError) {
+        let _ = request.history.discard_staged_page();
         if matches!(request.query, Query::OrderByClientId { .. }) {
-            request.history.reject(cx, VenueError::new(error));
+            let _ = request.history.reject(cx, error);
         } else {
-            self.finish(cx, request, Err(VenueError::new(error)));
+            self.finish(cx, request, Err(error));
         }
     }
     pub fn on_rejected(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        request
-            .history
-            .reject(cx, VenueError::new(error).outcome(Outcome::NotSent));
+        self.rejected(cx, request, VenueError::new(error));
+    }
+    /// A page refused before it was sent ends the walk strictly, NotSent: the
+    /// rows accepted so far are never published as a partial result.
+    pub fn rejected(&self, cx: &mut Cx<'_, Pending>, mut request: Request, error: VenueError) {
+        let error = match error.outcome {
+            Some(_) => error,
+            None => error.outcome(Outcome::NotSent),
+        };
+        let _ = request.history.discard_staged_page();
+        let _ = request.history.reject(cx, error);
     }
 }

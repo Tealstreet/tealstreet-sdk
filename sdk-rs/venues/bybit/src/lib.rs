@@ -406,14 +406,6 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     }
 }
 
-/// Bybit's own `retCode`, when the body carries one. An HTTP status is never a
-/// venue code, so a non-JSON or envelope-less failure has none.
-pub(crate) fn native_code(response: &Response<'_>) -> Option<i64> {
-    serde_json::from_str::<Status>(response.body)
-        .ok()
-        .and_then(|status| status.ret_code)
-}
-
 fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
     use safe_cex_engine::startup::{MAX_RATE_LIMIT_PAUSE_MS, rate_limit_pause_ms};
 
@@ -946,6 +938,7 @@ impl BybitLinear {
                     controls: ControlPolicy::Native,
                     invalidation: Invalidation::Required,
                     subscription_interval_ms: SUBSCRIBE_PACE_MS,
+                    close_floors: &[],
                 });
                 match registered {
                     Ok(feed) => {
@@ -974,6 +967,7 @@ impl BybitLinear {
         cx: &mut Cx<'_, Pending>,
         channel: Channel,
         reason: RetireReason,
+        close_code: Option<u16>,
     ) {
         let connection = self.connection(channel);
         connection.socket = None;
@@ -986,15 +980,23 @@ impl BybitLinear {
             }
             self.select_category(category);
         }
-        let message = match reason {
-            RetireReason::Timeout(Timeout::Idle) => {
-                "Bybit socket closed (idle timeout); reconnecting"
+        let message = match (reason, close_code) {
+            (RetireReason::Closed, Some(code)) => {
+                format!("Bybit socket closed ({code}); reconnecting")
             }
-            RetireReason::Timeout(_) => "Bybit socket timed out; reconnecting",
-            RetireReason::Authentication => "Bybit socket authentication failed; reconnecting",
-            RetireReason::Closed => "Bybit socket closed; reconnecting",
-            RetireReason::Stopped => "Bybit socket stopped",
-            RetireReason::RouteExhausted => "Bybit socket refused on every route",
+            (RetireReason::Timeout(Timeout::Idle), _) => {
+                "Bybit socket closed (idle timeout); reconnecting".into()
+            }
+            (RetireReason::Timeout(_), _) => "Bybit socket timed out; reconnecting".into(),
+            (RetireReason::Authentication, _) => {
+                "Bybit socket authentication failed; reconnecting".into()
+            }
+            (RetireReason::Closed, None) => "Bybit socket closed; reconnecting".into(),
+            (RetireReason::Stopped, _) => "Bybit socket stopped".into(),
+            (RetireReason::RouteExhausted, _) => "Bybit socket refused on every route".into(),
+            (RetireReason::RouteRefused, _) => {
+                "Bybit socket route refused; trying the next route".into()
+            }
         };
         cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
     }
@@ -2617,7 +2619,9 @@ impl Venue for BybitLinear {
             }
             LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), r#"{"op":"ping"}"#),
             LifecycleEvent::Reconnect(_) => self.open_feed(cx, channel),
-            LifecycleEvent::Retired { reason, .. } => self.on_socket_retired(cx, channel, reason),
+            LifecycleEvent::Retired {
+                reason, close_code, ..
+            } => self.on_socket_retired(cx, channel, reason, close_code),
             LifecycleEvent::InterestsRefused { error, .. } => return Err(error),
             _ => {}
         }

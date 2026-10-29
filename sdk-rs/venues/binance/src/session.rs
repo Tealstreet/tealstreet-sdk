@@ -96,7 +96,11 @@ impl BinanceFutures {
             pending => pending,
         };
         if let Pending::Account(request) = pending {
-            self.account_request_failed(cx, request, "listenKey session is unavailable".into());
+            self.account_request_failed(
+                cx,
+                request,
+                safe_cex_engine::VenueError::new("listenKey session is unavailable"),
+            );
         }
     }
 }

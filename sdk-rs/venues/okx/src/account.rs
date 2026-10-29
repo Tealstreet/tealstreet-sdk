@@ -279,7 +279,7 @@ impl Okx {
             Ok(context) => context,
             Err(error) => {
                 self.config_unanswered();
-                self.config_failed(cx, &error.venue_error().message);
+                self.config_failed(cx, &error.venue_error());
                 return;
             }
         };
@@ -409,11 +409,15 @@ impl Okx {
         ) {
             Ok(read) => read,
             Err(BackgroundReadError::Selection(_)) => {
-                self.account_failed(cx, request, "OKX account read requires credentials");
+                self.account_failed(
+                    cx,
+                    request,
+                    VenueError::new("OKX account read requires credentials"),
+                );
                 return;
             }
             Err(BackgroundReadError::Admission(error)) => {
-                self.account_failed(cx, request, &error.read_venue_error().message);
+                self.account_failed(cx, request, error.read_venue_error());
                 return;
             }
         };
@@ -433,7 +437,7 @@ impl Okx {
             |_| Pending::Account(request),
         );
         if let Err((Pending::Account(request), error)) = queued {
-            self.account_failed(cx, request, &error.venue_error().message);
+            self.account_failed(cx, request, error.venue_error());
         }
     }
 
@@ -788,7 +792,7 @@ impl Okx {
         let data = match envelope(response.body) {
             Ok(data) => data,
             Err(e) => {
-                self.account_failed(cx, request, &e);
+                self.account_failed(cx, request, read_error(&response, e));
                 return;
             }
         };
@@ -812,14 +816,14 @@ impl Okx {
                 self.account.config_in_flight = false;
                 let configs = serde_json::from_str::<Vec<Config<'_>>>(data);
                 let Ok(configs) = configs else {
-                    self.config_failed(cx, "malformed OKX config");
+                    self.config_failed(cx, &VenueError::new("malformed OKX config"));
                     return;
                 };
                 let Some(config) = configs
                     .first()
                     .filter(|c| matches!(c.pos_mode, "net_mode" | "long_short_mode"))
                 else {
-                    self.config_failed(cx, "missing OKX position mode");
+                    self.config_failed(cx, &VenueError::new("missing OKX position mode"));
                     return;
                 };
                 self.account.config_read_at = cx.now;
@@ -1031,7 +1035,7 @@ impl Okx {
                 });
                 self.recalculate(cx);
             }
-            other => self.account_failed(cx, other, "malformed OKX account list"),
+            other => self.account_failed(cx, other, VenueError::new("malformed OKX account list")),
         }
     }
 
@@ -1122,7 +1126,7 @@ impl Okx {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        error: VenueError,
     ) {
         retire(cx, request.page_context());
         if !self.account_request_current(&request) {
@@ -1141,7 +1145,7 @@ impl Okx {
             }
             Request::Orders { .. } => self.account.orders_in_flight = false,
             Request::Config { .. } => {
-                self.config_failed(cx, error);
+                self.config_failed(cx, &error);
                 return;
             }
             Request::Leverage { context, .. } => {
@@ -1149,20 +1153,20 @@ impl Okx {
                 return;
             }
         }
-        cx.retried_failure("okx.account:852", error);
+        cx.retried_failure_error("okx.account:852", &error);
         if self.account.retry.is_none() {
             self.account.retry = Some(cx.set_timer(5_000.0));
         }
     }
 
     /// Clearing the in-flight flag lets the backoff timer re-enter account_start.
-    fn config_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+    fn config_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &VenueError) {
         self.account.config_in_flight = false;
         if self.account.configured {
             self.account.config_read_at = cx.now;
-            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+            cx.notice_error(Level::Warn, code::REQUEST_FAILED, error);
         } else {
-            cx.retried_failure("okx.account:841", error);
+            cx.retried_failure_error("okx.account:841", error);
             let pause = std::mem::take(&mut self.account.config_pause_ms);
             self.account.startup.failed_after(cx, (), pause);
         }
@@ -2227,6 +2231,24 @@ fn valid_order(o: &OrderRow<'_>) -> bool {
             || o.acc_fill_sz
                 .parse::<f64>()
                 .is_ok_and(|n| n.is_finite() && n >= 0.0))
+}
+
+/// A failed account read, classified by the OKX table: the native code from
+/// the envelope when there is one, else the HTTP status. The text is unchanged.
+pub(crate) fn read_error(response: &Response<'_>, message: String) -> VenueError {
+    use safe_cex_engine::classify::{self, Released};
+    let envelope = serde_json::from_str::<Envelope<'_>>(response.body).ok();
+    let native = envelope
+        .as_ref()
+        .filter(|envelope| !envelope.code.is_empty() && envelope.code != "0")
+        .map(|envelope| crate::trading::native(envelope.code, envelope.msg));
+    classify::read(
+        &crate::trading::CODES,
+        Released::Response(response),
+        native.as_ref(),
+        message,
+    )
+    .error
 }
 
 /// OKX REST authentication codes that no retry can fix (docs-v5 "Error Code",

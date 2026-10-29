@@ -2,21 +2,29 @@ import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import { setTunnelEgressUrls } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineTransport } from './engine';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
-import { AWS_PUBLIC_CORS_PROXY } from './tealstreet/transportResolution';
+import { PUBLIC_CORS_PROXY } from './tealstreet/transportResolution';
 
 const tunnels = vi.hoisted(
   () =>
-    new Map<
-      string,
-      {
+    [] as Array<{
+      url: string | (() => string);
+      state: {
         sent: Array<Record<string, any>>;
         reply: { status: number; data_raw: string; headers: Record<string, string> };
-      }
-    >(),
+      };
+    }>,
 );
+
+// Since AWS_EXIT.md step 3e both regions are one tunnel host, so a test that tells
+// the regions apart pins distinct ones (the HOW singletons resolve their url lazily).
+const TOKYO_HOW_EGRESS = 'wss://jp.tunnel.invalid/tunnel';
+const SINGAPORE_HOW_EGRESS = 'wss://sg.tunnel.invalid/tunnel';
+setTunnelEgressUrls({ jp: TOKYO_HOW_EGRESS, sg: SINGAPORE_HOW_EGRESS });
+const tunnelState = (host: string) =>
+  tunnels.find(({ url }) => (typeof url === 'function' ? url() : url) === host)!.state;
 
 // Exercise the real HOW adapter and its RPC envelope; replace only the wire.
 vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
@@ -29,8 +37,8 @@ vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
     authState = 'Good';
     listeners = new Map<string, (data: unknown) => void>();
     state = { sent: [] as Array<Record<string, any>>, reply: { status: 200, data_raw: '', headers: {} } };
-    constructor(url: string) {
-      tunnels.set(url, this.state);
+    constructor(url: string | (() => string)) {
+      tunnels.push({ url, state: this.state });
     }
     once(event: string, listener: (data: unknown) => void) {
       this.listeners.set(event, listener);
@@ -70,7 +78,7 @@ const rawTransport = (): Transport => ({
 
 describe('engine through the real HOW package', () => {
   beforeEach(() => {
-    for (const state of tunnels.values()) {
+    for (const { state } of tunnels) {
       state.sent.length = 0;
       state.reply = { status: 200, data_raw: '', headers: {} };
     }
@@ -95,7 +103,7 @@ describe('engine through the real HOW package', () => {
       { key: 'fixture-key', secret: 'fixture-secret', ...options, transport: tealstreetTransport },
       raw,
     );
-    const state = tunnels.get(host)!;
+    const state = tunnelState(host);
     const responseBody = ' { "orderId": 900719925474099312345, "price": 1.2300 }\n';
     state.reply = { status: 429, data_raw: responseBody, headers: { 'retry-after': '2' } };
     const orderly = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'].includes(exchange);
@@ -150,7 +158,7 @@ describe('engine through the real HOW package', () => {
       rawTransport(),
     );
     await route.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=linear', headers: {} });
-    expect(tunnels.get(SINGAPORE_HOW_EGRESS)!.sent[0].arg).toEqual({
+    expect(tunnelState(SINGAPORE_HOW_EGRESS).sent[0].arg).toEqual({
       url: 'https://override.example/https://api.bybit.com/v5/market/kline?category=linear',
       method: 'GET',
       params: {},
@@ -172,13 +180,13 @@ describe('engine through the real HOW package', () => {
       },
       raw,
     );
-    const state = tunnels.get(TOKYO_HOW_EGRESS)!;
+    const state = tunnelState(TOKYO_HOW_EGRESS);
     state.reply = { status: 200, data_raw: '{"balance":"1.2300"}', headers: {} };
     const url = 'https://fapi.asterdex.com/fapi/v3/account?user=owner&nonce=1001&signature=exact%2Bbytes';
     await route.request({ method: 'GET', url, headers: { 'X-MBX-APIKEY': 'read-wallet' } });
     expect(state.sent.at(-1)?.arg).toMatchObject({
       method: 'GET',
-      url: `${AWS_PUBLIC_CORS_PROXY}/${url}`,
+      url: `${PUBLIC_CORS_PROXY}/${url}`,
       headers: { 'X-MBX-APIKEY': 'read-wallet' },
     });
     await route.request({ method: 'POST', url, headers: { 'X-MBX-APIKEY': 'primary-wallet' } });
@@ -200,7 +208,7 @@ describe('managed engine through real HOW preparation', () => {
       { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true },
       raw,
     );
-    const state = tunnels.get(SINGAPORE_HOW_EGRESS)!;
+    const state = tunnelState(SINGAPORE_HOW_EGRESS);
     state.sent.length = 0;
     state.reply = { status: 200, data_raw: ' {"id":900719925474099312345}\n', headers: {} };
     const original = {
