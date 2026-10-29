@@ -603,3 +603,60 @@ fn chain_sorts_expiry_then_strike_then_call_before_put() {
     .map(|s| result.find(s).unwrap());
     assert!(indexes.windows(2).all(|w| w[0] < w[1]));
 }
+
+#[test]
+fn catalogue_skips_an_invalid_listing_without_hiding_valid_option_markets() {
+    let envelope: serde_json::Value = serde_json::from_str(INFO).unwrap();
+    let valid = &envelope["optionSymbols"][0];
+    let mut unknown_right = valid.clone();
+    unknown_right["side"] = "UNKNOWN".into();
+    let mut missing_lot = valid.clone();
+    missing_lot["filters"][1]["filterType"] = "UNKNOWN".into();
+    let mut unknown_underlying = valid.clone();
+    unknown_underlying["underlying"] = "UNKNOWN".into();
+    let mut inverted_bounds = valid.clone();
+    inverted_bounds["filters"][1]["minQty"] = "201".into();
+    for invalid in [
+        serde_json::json!({}),
+        unknown_right,
+        missing_lot,
+        unknown_underlying,
+        inverted_bounds,
+    ] {
+        let mut h = Harness::started(Options {
+            variant: Variant::Options,
+            public_data_only: true,
+            ..Options::default()
+        });
+        h.engine.set_log_level(safe_cex_engine::Level::Debug);
+        let mut body = envelope.clone();
+        body["optionSymbols"] = serde_json::json!([invalid, valid]);
+        let body = body.to_string();
+        h.respond("/eapi/v1/exchangeInfo", 200, &body);
+        assert_eq!(h.engine.store().markets().len(), 1);
+        assert_eq!(h.engine.store().markets()[0].symbol, SYMBOL);
+        assert_eq!(h.engine.store().derivative_products().unwrap()[0].market, 0);
+        let skipped: Vec<_> = h
+            .events
+            .iter()
+            .filter(|e| e.code == safe_cex_engine::log::code::ROW_SKIPPED)
+            .collect();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].level, safe_cex_engine::Level::Debug);
+        assert!(skipped[0].fields.is_empty());
+        assert!(h.paths().iter().any(|p| p.contains("/eapi/v1/ticker")));
+    }
+}
+
+#[test]
+fn native_positions_publish_their_fixed_leverage_setting_after_complete_decode() {
+    let mut h = started(true);
+    h.respond("/eapi/v1/position", 200, POSITIONS);
+    let setting = h
+        .engine
+        .store()
+        .setting(SYMBOL)
+        .expect("native Options position setting");
+    assert_eq!(setting.leverage, 1.);
+    assert_eq!(setting.margin_type, None);
+}

@@ -35,3 +35,18 @@ The first codec checkpoint's id/tradeId alias and terminal-snapshot findings
 have real assertion-RED regressions. A fill carrying both native fields selects
 tradeId first. A census that contradicts known terminal or cumulative-fill
 proof publishes nothing and cannot clear the uncertain-placement fence.
+
+
+## Cutover catalogue and family-size rulings
+
+Invalid option listings are skipped and logged at Debug through ROW_SKIPPED,
+matching the reference's per-row filtering. A malformed response envelope still
+fails the read. Valid listings retain native quantity/price validation and their
+correct derivative-product indices after skipped rows.
+
+The Options code and product-semantics currently link into the shared Binance
+family (binance, binancepm, binancespot, binanceinverse and binanceoptions).
+ddi approved the cutover cap of 1417 KiB from the local optimized 1,448,609-byte
+measurement, rounded up to KiB plus 2 KiB. Splitting Options into its own family
+to remove that cost from the other variants is a follow-up; CI remains the
+family-byte record. Options WebSockets remain a separate follow-up.

@@ -6,7 +6,7 @@ use safe_cex_engine::model::{
     OrderStatus, OrderType, Position, PositionSide, Precision, ProductKind, Ticker, TimeInForce,
 };
 use safe_cex_engine::request_context::{Context, Scope};
-use safe_cex_engine::store::OrderSnapshotToken;
+use safe_cex_engine::store::{MarketSetting, OrderSnapshotToken};
 use safe_cex_engine::{Cx, ErrorKind, Level, Response, TimerId, VenueError};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -63,7 +63,7 @@ fn positive(text: &str) -> Result<f64, VenueError> {
 #[serde(rename_all = "camelCase")]
 struct Catalogue {
     option_contracts: Vec<Contract>,
-    option_symbols: Vec<Symbol>,
+    option_symbols: Vec<Box<serde_json::value::RawValue>>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,98 +100,120 @@ struct Filter {
     min_price: Option<String>,
 }
 
-fn catalogue(body: &str) -> Result<(Vec<Market>, Vec<DerivativeProduct>), VenueError> {
+fn catalogue(body: &str) -> Result<(Vec<Market>, Vec<DerivativeProduct>, usize), VenueError> {
     let raw: Catalogue =
         serde_json::from_str(body).map_err(|_| error("Malformed Binance option catalogue"))?;
     let mut markets = Vec::new();
     let mut products = Vec::new();
     let mut seen = HashSet::new();
-    for row in raw.option_symbols {
+    let mut skipped = 0;
+    for raw_row in raw.option_symbols {
+        let Ok(row) = serde_json::from_str::<Symbol>(raw_row.get()) else {
+            skipped += 1;
+            continue;
+        };
         if row.status != "TRADING" {
             continue;
         }
-        let contract = raw
-            .option_contracts
-            .iter()
-            .find(|c| c.underlying == row.underlying)
-            .ok_or_else(|| error("Unknown option underlying"))?;
-        let kind = match row.side.as_str() {
-            "CALL" => ProductKind::Call,
-            "PUT" => ProductKind::Put,
-            _ => return Err(error("Unknown option right")),
+        let Ok((market, product)) = option_market(row, &raw.option_contracts, markets.len() as u32)
+        else {
+            skipped += 1;
+            continue;
         };
-        let lot = row
-            .filters
-            .iter()
-            .find(|f| f.filter_type == "LOT_SIZE")
-            .ok_or_else(|| error("Missing option lot size"))?;
-        let price = row
-            .filters
-            .iter()
-            .find(|f| f.filter_type == "PRICE_FILTER")
-            .ok_or_else(|| error("Missing option price filter"))?;
-        if row.symbol.is_empty()
-            || !seen.insert(row.symbol.clone())
-            || contract.base_asset.is_empty()
-            || contract.settle_asset.is_empty()
-            || row.quote_asset.is_empty()
-            || !row.expiry_date.is_finite()
-            || row.expiry_date <= 0.
-        {
-            return Err(error("Invalid option market identity"));
+        if !seen.insert(market.symbol.clone()) {
+            skipped += 1;
+            continue;
         }
-        let amount = positive(&lot.step_size)?;
-        let minimum = positive(&lot.min_qty)?;
-        let maximum = positive(&lot.max_qty)?;
-        if minimum > maximum {
-            return Err(error("Invalid option quantity bounds"));
-        }
-        products.push(DerivativeProduct {
-            market: markets.len() as u32,
-            kind,
-            underlying: contract.base_asset.clone(),
-            expiry: Some(row.expiry_date),
-            strike: Some(positive(&row.strike_price)?),
-            settlement_asset: Some(contract.settle_asset.clone()),
-            premium_asset: Some(row.quote_asset.clone()),
-            style: Some("european".into()),
-            settlement: Some("cash".into()),
-        });
-        markets.push(Market {
-            id: row.symbol.clone(),
-            symbol: row.symbol,
-            pretty_symbol: None,
-            base: contract.base_asset.clone(),
-            quote: row.quote_asset,
-            active: true,
-            precision: Precision {
-                amount,
-                price: positive(&price.tick_size)?,
-            },
-            limits: Limits {
-                amount: MinMax {
-                    min: minimum,
-                    max: maximum,
-                },
-                leverage: MinMax { min: 1., max: 1. },
-                price: price
-                    .min_price
-                    .as_deref()
-                    .map(finite)
-                    .transpose()?
-                    .map(|min| safe_cex_engine::model::Min { min }),
-            },
-            contract_size: Some(1.),
-            is_expiring: Some(true),
-            is_inverse: None,
-            is_spot: None,
-            is_perpetual: None,
-            is_read_only: None,
-            taker_fee: None,
-            maker_fee: None,
-        });
+        markets.push(market);
+        products.push(product);
     }
-    Ok((markets, products))
+    Ok((markets, products, skipped))
+}
+
+fn option_market(
+    row: Symbol,
+    contracts: &[Contract],
+    index: u32,
+) -> Result<(Market, DerivativeProduct), VenueError> {
+    let contract = contracts
+        .iter()
+        .find(|c| c.underlying == row.underlying)
+        .ok_or_else(|| error("Unknown option underlying"))?;
+    let kind = match row.side.as_str() {
+        "CALL" => ProductKind::Call,
+        "PUT" => ProductKind::Put,
+        _ => return Err(error("Unknown option right")),
+    };
+    let lot = row
+        .filters
+        .iter()
+        .find(|f| f.filter_type == "LOT_SIZE")
+        .ok_or_else(|| error("Missing option lot size"))?;
+    let price = row
+        .filters
+        .iter()
+        .find(|f| f.filter_type == "PRICE_FILTER")
+        .ok_or_else(|| error("Missing option price filter"))?;
+    if row.symbol.is_empty()
+        || contract.base_asset.is_empty()
+        || contract.settle_asset.is_empty()
+        || row.quote_asset.is_empty()
+        || !row.expiry_date.is_finite()
+        || row.expiry_date <= 0.
+    {
+        return Err(error("Invalid option market identity"));
+    }
+    let amount = positive(&lot.step_size)?;
+    let minimum = positive(&lot.min_qty)?;
+    let maximum = positive(&lot.max_qty)?;
+    if minimum > maximum {
+        return Err(error("Invalid option quantity bounds"));
+    }
+    let product = DerivativeProduct {
+        market: index,
+        kind,
+        underlying: contract.base_asset.clone(),
+        expiry: Some(row.expiry_date),
+        strike: Some(positive(&row.strike_price)?),
+        settlement_asset: Some(contract.settle_asset.clone()),
+        premium_asset: Some(row.quote_asset.clone()),
+        style: Some("european".into()),
+        settlement: Some("cash".into()),
+    };
+    let market = Market {
+        id: row.symbol.clone(),
+        symbol: row.symbol,
+        pretty_symbol: None,
+        base: contract.base_asset.clone(),
+        quote: row.quote_asset,
+        active: true,
+        precision: Precision {
+            amount,
+            price: positive(&price.tick_size)?,
+        },
+        limits: Limits {
+            amount: MinMax {
+                min: minimum,
+                max: maximum,
+            },
+            leverage: MinMax { min: 1., max: 1. },
+            price: price
+                .min_price
+                .as_deref()
+                .map(finite)
+                .transpose()?
+                .map(|min| safe_cex_engine::model::Min { min }),
+        },
+        contract_size: Some(1.),
+        is_expiring: Some(true),
+        is_inverse: None,
+        is_spot: None,
+        is_perpetual: None,
+        is_read_only: None,
+        taker_fee: None,
+        maker_fee: None,
+    };
+    Ok((market, product))
 }
 
 #[derive(Deserialize)]
@@ -524,7 +546,10 @@ impl BinanceFutures {
                 return Err(error("History delivered to a Background read"));
             }
             Kind::Markets => {
-                let (markets, products) = catalogue(body)?;
+                let (markets, products, skipped) = catalogue(body)?;
+                for _ in 0..skipped {
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
                 cx.store.set_markets(markets);
                 cx.store.set_derivative_products(products);
                 if !self.credentials.has_primary() {
@@ -657,7 +682,20 @@ impl BinanceFutures {
                         last_update: Some(cx.now),
                     });
                 }
+                let settings: Vec<_> = positions
+                    .iter()
+                    .filter_map(|p| {
+                        Some((
+                            cx.store.market_index(&p.symbol)?,
+                            MarketSetting {
+                                leverage: 1.,
+                                ..MarketSetting::default()
+                            },
+                        ))
+                    })
+                    .collect();
                 cx.store.set_positions(positions);
+                cx.store.set_settings(settings);
             }
             Kind::Orders => {
                 let rows: Vec<OrderRow> =
