@@ -55,7 +55,7 @@ struct Pending {
     parallel: bool,
     succeeded: usize,
     current_place: bool,
-    failure_context: Option<&'static str>,
+    failure_context: Option<String>,
 }
 enum Evaluation {
     Done(Value),
@@ -83,9 +83,15 @@ enum Action {
     Call(&'static str, Value),
 }
 impl Action {
-    fn failure_context(&self) -> Option<&'static str> {
-        matches!(self, Self::Replacement(_))
-            .then_some("stop-loss removed, replacement not confirmed — position unprotected")
+    fn failure_context(&self) -> Option<String> {
+        if let Self::Replacement(order) = self {
+            Some(format!(
+                "{}: stop-loss removed, replacement not confirmed — position unprotected; no stop is in place",
+                order["symbol"].as_str().unwrap_or("unknown symbol")
+            ))
+        } else {
+            None
+        }
     }
     fn prepare(self, store: &Value) -> Result<(&'static str, Value), String> {
         match self {
@@ -248,6 +254,7 @@ impl Exec {
                     .unwrap_or("Command failed");
                 let message = pending
                     .failure_context
+                    .as_ref()
                     .map(|context| format!("{context}: {original}"))
                     .unwrap_or_else(|| original.into());
                 log(
@@ -255,6 +262,9 @@ impl Exec {
                     &pending.req_id,
                     &format!("Error: Command failed: {message}"),
                 );
+                if pending.failure_context.is_some() {
+                    host.emit("error", json!(message));
+                }
                 json!({"handled":true,"success":false,"error":message,"errorReported":true,"errorDetails":error})
             }
         };

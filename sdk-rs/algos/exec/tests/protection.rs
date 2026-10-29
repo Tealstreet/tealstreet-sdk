@@ -276,3 +276,66 @@ fn replacement_preparation_failure_after_cancel_is_also_explicitly_unprotected()
             .contains("position unprotected")
     );
 }
+
+#[test]
+fn unknown_explicit_protective_or_close_symbol_cannot_fall_back_to_focused_position() {
+    for text in [
+        "close ETHFI",
+        "close long SOLX",
+        "stop SOLX 150",
+        "stop 150 SOLX",
+        "be ETHFI",
+        "trail 20% SOLX",
+    ] {
+        let (_, p) = run(text);
+        assert!(p.calls.is_empty(), "{text}");
+        assert!(
+            result(&p)["error"]
+                .as_str()
+                .unwrap()
+                .contains("Unknown symbol"),
+            "{text}"
+        );
+    }
+    for text in ["close", "stop 150"] {
+        let (_, p) = run(text);
+        assert_eq!(p.calls.len(), 1);
+        assert_eq!(p.calls[0].2[0]["symbol"], "BTCUSDT");
+    }
+}
+#[test]
+fn malformed_move_and_trigger_prices_refuse_the_whole_token() {
+    for malformed in ["61k", "61,000", "6100O"] {
+        let mut p = port();
+        p.store["orders"] = json!([{"symbol":"BTCUSDT","id":"abc","type":"limit","side":"sell","status":"open","price":62000}]);
+        let mut e = Exec::default();
+        e.handle(&req(&format!("mv abc {malformed}")), &mut p);
+        assert!(p.calls.is_empty());
+        assert_eq!(result(&p)["error"], "Invalid price");
+        e.handle(&req(&format!("stop 48000 trigger {malformed}")), &mut p);
+        assert!(p.calls.is_empty());
+        assert_eq!(result(&p)["success"], false);
+    }
+}
+#[test]
+fn unprotected_replacement_surfaces_symbol_in_error_result_and_one_error_notice() {
+    let mut p = port();
+    p.store["orders"] = json!([{"symbol":"BTCUSDT","id":"sl","type":"stop_market","side":"sell"}]);
+    let mut e = Exec::default();
+    e.handle(&req("be"), &mut p);
+    e.complete(p.calls[0].0, Ok(json!([])), &mut p);
+    let token = p.calls[1].0;
+    e.complete(
+        token,
+        Err(json!({"message":"lost","outcome":"unknown"})),
+        &mut p,
+    );
+    e.complete(token, Ok(json!(["late"])), &mut p);
+    let message = result(&p)["error"].as_str().unwrap();
+    assert!(message.contains("BTCUSDT"));
+    assert!(message.contains("no stop is in place"));
+    let notices: Vec<_> = p.events.iter().filter(|(op, _)| op == "error").collect();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].1, json!(message));
+    assert_eq!(p.calls.len(), 2);
+}
