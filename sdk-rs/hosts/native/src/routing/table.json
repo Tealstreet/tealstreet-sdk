@@ -1,0 +1,764 @@
+{
+  "hosts": {
+    "privateProxy": {
+      "jp": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "asia": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
+      "tiny": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy"
+    },
+    "publicCorsProxy": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
+    "tunnel": {
+      "jp": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+      "sg": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
+    },
+    "relayQueryParam": "ts-relay"
+  },
+  "restHeaders": {
+    "Origin": "https://trade.tealstreet.io",
+    "Referer": "https://trade.tealstreet.io/",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "cross-site",
+    "sec-fetch-dest": "empty"
+  },
+  "wsHeaders": {
+    "Origin": "https://preview.tealstreet.io",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+  },
+  "tokyoEgress": [
+    "hlnode",
+    "hyperliquid",
+    "hyperliquidspot",
+    "bitunix",
+    "bitrue",
+    "bitget",
+    "binance",
+    "kucoin",
+    "kraken",
+    "breakout",
+    "aster",
+    "paradex",
+    "grvt",
+    "backpack"
+  ],
+  "exchanges": {
+    "apexomni": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": true,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "asterdex": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "backpack": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "binance": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "binanceinverse": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "jp"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": [
+        "JA"
+      ]
+    },
+    "binanceoptions": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "binancepm": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "binancespot": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "bingx": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": true,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "bitget": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "jp",
+        "ws": {
+          "public": {
+            "kind": "fallbackOnly",
+            "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+            "initialSilentConnects": 1
+          },
+          "private": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+            "relayUpstream": "wss://ws.bitget.com/v2/ws/private",
+            "relayWhenTunnelled": true,
+            "initialSilentConnects": 1,
+            "ignoredMessages": [
+              "pong"
+            ]
+          },
+          "privateUta": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "relayUpstream": "wss://ws.bitget.com/v3/ws/private",
+            "relayWhenTunnelled": true
+          }
+        }
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "bitgetinverse": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "jp",
+        "ws": {
+          "public": {
+            "kind": "fallbackOnly",
+            "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+            "initialSilentConnects": 1
+          },
+          "private": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+            "relayUpstream": "wss://ws.bitget.com/v2/ws/private",
+            "relayWhenTunnelled": true,
+            "initialSilentConnects": 1,
+            "ignoredMessages": [
+              "pong"
+            ]
+          },
+          "privateUta": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "relayUpstream": "wss://ws.bitget.com/v3/ws/private",
+            "relayWhenTunnelled": true
+          }
+        }
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "bitgetusdc": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "jp",
+        "ws": {
+          "public": {
+            "kind": "fallbackOnly",
+            "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+            "initialSilentConnects": 1
+          },
+          "private": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+            "relayUpstream": "wss://ws.bitget.com/v2/ws/private",
+            "relayWhenTunnelled": true,
+            "initialSilentConnects": 1,
+            "ignoredMessages": [
+              "pong"
+            ]
+          },
+          "privateUta": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "relayUpstream": "wss://ws.bitget.com/v3/ws/private",
+            "relayWhenTunnelled": true
+          }
+        }
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "bitrue": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "bitunix": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp",
+        "ws": {
+          "public": {
+            "kind": "fallbackOnly",
+            "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/public/"
+          },
+          "private": {
+            "kind": "fallbackOnly",
+            "fallback": "wss://bitunix-fapi-proxy-ja.tealstreet.io/private/"
+          },
+          "business": {
+            "kind": "fallbackOnly",
+            "fallback": "wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2"
+          }
+        }
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "blofin": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg",
+        "ws": {
+          "private": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fopenapi.blofin.com%2Fws%2Fprivate"
+          }
+        }
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "breakoutprop": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "bybit": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "regionConditional",
+        "ws": {
+          "public": {
+            "kind": "bybitBrazilConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/linear"
+          },
+          "private": {
+            "kind": "bybitBrazilConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private",
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
+            "relayUpstream": "wss://stream.bybit.com/v5/private"
+          }
+        }
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": [
+        "SG",
+        "JA"
+      ]
+    },
+    "bybitdemo": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "regionConditional"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": true,
+      "privateProxyRegions": [
+        "SG",
+        "JA"
+      ]
+    },
+    "bybitinverse": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "regionConditional",
+        "ws": {
+          "public": {
+            "kind": "bybitBrazilConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/inverse",
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse"
+          },
+          "private": {
+            "kind": "bybitBrazilConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private",
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
+            "relayUpstream": "wss://stream.bybit.com/v5/private"
+          }
+        }
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": [
+        "SG",
+        "JA"
+      ]
+    },
+    "bybitspot": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "regionConditional",
+        "ws": {
+          "public": {
+            "kind": "bybitBrazilConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/spot",
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot"
+          },
+          "private": {
+            "kind": "bybitBrazilConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private",
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/private",
+            "relayUpstream": "wss://stream.bybit.com/v5/private"
+          }
+        }
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": [
+        "SG",
+        "JA"
+      ]
+    },
+    "coinbase": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg",
+        "ws": {
+          "private": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F"
+          }
+        }
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "coinbasespot": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg",
+        "ws": {
+          "private": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F"
+          }
+        }
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "cryptocom": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": [
+        "JA",
+        "SG"
+      ]
+    },
+    "grvt": {
+      "routing": {
+        "restPool": "tiny",
+        "howEgress": "jp",
+        "ws": {
+          "private": {
+            "kind": "alwaysProxy",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt"
+          }
+        }
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": true,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "hyperliquid": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "hyperliquidspot": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "hyrotrader": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "kodiakfi": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "kraken": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "krakenspot": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "kucoin": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "kucoinspot": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "lighter": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg",
+        "ws": {
+          "public": {
+            "kind": "wsRouteCandidates",
+            "proxy": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream?readonly=true"
+          },
+          "private": {
+            "kind": "wsRouteCandidates",
+            "proxy": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream"
+          }
+        }
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "lighter-robinhood": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg",
+        "ws": {
+          "public": {
+            "kind": "wsRouteCandidates",
+            "proxy": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter-rh/stream"
+          },
+          "private": {
+            "kind": "wsRouteCandidates",
+            "proxy": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter-rh/stream"
+          }
+        }
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "mexc": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "sg"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": [
+        "JA"
+      ]
+    },
+    "mode": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "okx": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "sg",
+        "ws": {
+          "public": {
+            "kind": "direct",
+            "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public"
+          },
+          "private": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
+            "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
+            "relayUpstream": "wss://ws.okx.com/ws/v5/private"
+          },
+          "business": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
+            "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
+            "relayUpstream": "wss://ws.okx.com/ws/v5/business"
+          }
+        }
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "okxdemo": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "sg"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "okxeu": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "sg",
+        "ws": {
+          "private": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwseea.okx.com%2Fws%2Fv5%2Fprivate"
+          },
+          "business": {
+            "kind": "proxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwseea.okx.com%2Fws%2Fv5%2Fbusiness"
+          }
+        }
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "okxeudemo": {
+      "routing": {
+        "restPool": "jp",
+        "howEgress": "sg"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "paradex": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "jp"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": true,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "phemex": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "polymarket": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "salsadex": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "tealstreet-dex": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "txflow": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "weex": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": false,
+      "privateProxyRegions": []
+    },
+    "what": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "woo": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    },
+    "woofi": {
+      "routing": {
+        "restPool": "asia",
+        "howEgress": "sg"
+      },
+      "requiresCors": false,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": []
+    }
+  }
+}

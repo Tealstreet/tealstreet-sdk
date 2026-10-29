@@ -10,6 +10,7 @@ mod routing;
 mod server;
 mod transport;
 
+pub use routing::resolve;
 pub use routing::{
     HttpRoute, HttpRouteMode, ProxyTokenFuture, ProxyTokenProvider, RoutingPlan, SocketChannel,
     SocketChannelRule, WsRoute, WsRoutes,
