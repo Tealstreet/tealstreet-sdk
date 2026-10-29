@@ -91,10 +91,16 @@ it('a keyless Lighter account signs through the browser and sends the local-key 
 it('the keyed Lighter browser refuses a statement for another account', async () => {
   const keyed = new RustEngineExchange('lighter', { key: '', secret: SCALAR, ...ACCOUNT }, new DefaultStore());
   live.push(keyed);
-  const toSign = '{"kind":"auth","chainId":300,"accountIndex":1,"apiKeyIndex":0,"deadline":1700000060}';
+  // A deadline 60 seconds ahead of the device clock, as Lighter auth tokens carry.
+  const deadline = Math.floor(Date.now() / 1000) + 60;
+  const toSign = `{"kind":"auth","chainId":300,"accountIndex":1,"apiKeyIndex":0,"deadline":${deadline}}`;
   await expect(keyed.signWsAuth({ id: 'other', type: 'ws-auth', exchangeName: 'lighter', wsAuth: { toSign, outputFormat: 'lighter-tx' } }))
     .resolves.toMatchObject({ error: expect.any(String) });
   const own = toSign.replace('"accountIndex":1', '"accountIndex":718895');
   await expect(keyed.signWsAuth({ id: 'own', type: 'ws-auth', exchangeName: 'lighter', wsAuth: { toSign: own, outputFormat: 'lighter-tx' } }))
     .resolves.toMatchObject({ wsAuthSignature: expect.stringMatching(/^0x[0-9a-f]{160}$/) });
+  // The device clock refuses a statement that has already expired.
+  const expired = own.replace(`"deadline":${deadline}`, `"deadline":${deadline - 120}`);
+  await expect(keyed.signWsAuth({ id: 'old', type: 'ws-auth', exchangeName: 'lighter', wsAuth: { toSign: expired, outputFormat: 'lighter-tx' } }))
+    .resolves.toMatchObject({ error: expect.any(String) });
 });

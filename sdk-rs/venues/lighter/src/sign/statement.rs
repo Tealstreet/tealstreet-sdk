@@ -189,6 +189,10 @@ pub(super) fn auth(account: &Account, deadline_seconds: u64) -> String {
     statement.text()
 }
 
+/// The furthest ahead a statement may expire: a transaction's lifetime, which
+/// also bounds an auth token's 60-second deadline.
+pub const MAX_LIFETIME_MS: u64 = super::TX_TTL;
+
 /// What a statement asks its signer to sign, re-derived through the same
 /// encoder local issue uses.
 #[derive(Debug, PartialEq)]

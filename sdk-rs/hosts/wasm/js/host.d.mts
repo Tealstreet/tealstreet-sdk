@@ -282,7 +282,7 @@ export interface SignResult {
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
-  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'hyperliquid-l1' | 'hyperliquid-address' | 'lighter-tx' };
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' };
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
@@ -443,6 +443,7 @@ export interface WasmEngineLike {
   setAddressSetupSupport?(protocol: 'publicAddressOwned'): void;
   initializeAddressSetup?(now: number, reinitialize: boolean): string;
   addressSetupReady?(): boolean;
+  hostedWalletSigning?(toSign: string, outputFormat: string, now: number): string;
   addressSetupRetired?(token: string, now: number): string;
   /** Optional engine ownership export; invalid or absent data retains the legacy context. */
   signMeta?(attempt: number): string | undefined;
@@ -480,6 +481,9 @@ export class EngineHost {
   /** Sign compatibility bytes without startup, transport actions or account mutation. */
   hostedSigningClock(): HostedSigningClock;
   hostedSigning(input: HostedSigningInput): Promise<HostedSigningOutput>;
+  /** Device answer for a keyless server's wallet ws-auth request, signed by the
+   * local provider; refuses an injected signer. Returns the `0x` hex result. */
+  hostedWalletSigning(input: { toSign: string; outputFormat: 'hyperliquid-l1' | 'hyperliquid-address' | 'lighter-tx' }): string;
   /** Resolves with the command's result for commands that report one. */
   command(command: { op: string; [field: string]: unknown }, options?: CommandOptions): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */

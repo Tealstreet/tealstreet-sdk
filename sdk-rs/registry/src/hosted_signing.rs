@@ -17,29 +17,6 @@ pub enum OutputFormat {
     /// Bitunix: `hex(sha256(hex(sha256(toSign)) ‖ material))`, never an HMAC.
     #[serde(rename = "bitunix-double-sha256")]
     BitunixDoubleSha256,
-    /// Hyperliquid: `toSign` is the structured L1 statement; the device
-    /// re-derives the digest and returns `0x` hex of `r || s || v`.
-    #[serde(rename = "hyperliquid-l1")]
-    HyperliquidL1,
-    /// Hyperliquid: `toSign` is the signed-in account; returns the agent address.
-    #[serde(rename = "hyperliquid-address")]
-    HyperliquidAddress,
-    /// Lighter: `toSign` is the transaction or auth statement; the device
-    /// re-derives the signed words and returns `0x` hex of each 80-byte
-    /// signature, concatenated in statement order.
-    #[serde(rename = "lighter-tx")]
-    LighterTx,
-}
-
-/// The signed-in account a device signs for, captured at construction.
-#[derive(Clone, Debug, Default)]
-pub struct Account {
-    pub key: Option<String>,
-    pub vault: Option<String>,
-    pub testnet: bool,
-    /// Lighter: the account index, when configured as the Application ID.
-    pub application_id: Option<String>,
-    pub api_key_index: Option<String>,
 }
 
 pub enum Input {
@@ -169,8 +146,6 @@ pub enum OutputKind {
     /// Bitunix HTTP: the double-SHA256 work, with the MAC as its last value.
     DoubleSha256Http(RemoteSigningPolicy),
     WsAuth(OutputFormat),
-    /// Lighter: this many 80-byte signatures, in statement order.
-    Lighter(usize),
 }
 
 impl OutputKind {
@@ -189,9 +164,6 @@ impl OutputKind {
             Self::DoubleSha256Http(_) | Self::WsAuth(OutputFormat::BitunixDoubleSha256) => {
                 (3, Some(2))
             }
-            Self::WsAuth(OutputFormat::HyperliquidAddress) => (1, None),
-            Self::WsAuth(OutputFormat::HyperliquidL1) => (2, None),
-            Self::Lighter(signatures) => (signatures, None),
             _ => (2, Some(1)),
         }
     }
@@ -287,7 +259,7 @@ pub fn admitted(venue: &str, options: &crate::EngineOptions) -> bool {
         "asterdex" => {
             options.asterdex.api_version == Some(safe_cex_venue_asterdex::sign::Version::V1)
         }
-        _ => family(venue) || hyperliquid(venue) || lighter(venue),
+        _ => family(venue),
     }
 }
 
@@ -295,7 +267,7 @@ fn family(venue: &str) -> bool {
     let binance = cfg!(feature = "binance")
         && matches!(
             venue,
-            "binance" | "binancepm" | "binanceinverse" | "binancespot"
+            "binance" | "binancepm" | "binanceinverse" | "binancespot" | "binanceoptions"
         );
     let bybit = cfg!(feature = "bybit")
         && matches!(
@@ -321,129 +293,6 @@ pub fn prepare(
     identities: &Identities,
     input: Input,
 ) -> Result<(SignRequest, OutputKind), SignError> {
-    prepare_for(venue, identities, &Account::default(), input)
-}
-
-fn lighter(venue: &str) -> bool {
-    cfg!(feature = "lighter") && matches!(venue, "lighter" | "lighter-robinhood")
-}
-
-/// Lighter signs only words it re-derives from an allowlisted statement for
-/// this deployment's chain and this account's API key.
-#[cfg(feature = "lighter")]
-fn lighter_work(
-    venue: &str,
-    identity: &Identity,
-    account: &Account,
-    context: Context,
-    to_sign: &str,
-) -> Result<(SignRequest, OutputKind), SignError> {
-    use safe_cex_engine::signing::{Algorithm, PayloadPart};
-    use safe_cex_venue_lighter::sign::{chain_id, statement};
-    let decimal = |value: Option<&str>| value.and_then(|text| text.trim().parse::<u64>().ok());
-    let api_key_index = decimal(account.api_key_index.as_deref())
-        .and_then(|index| u8::try_from(index).ok())
-        .ok_or(SignError::Unavailable)?;
-    let owner = statement::Owner {
-        chain_id: chain_id(venue == "lighter-robinhood", account.testnet),
-        account_index: decimal(account.application_id.as_deref()),
-        api_key_index,
-    };
-    let derived = statement::derive(to_sign, &owner).map_err(|_| SignError::InvalidRequest)?;
-    let signing = identity.signing_ref()?.clone();
-    // The hedged nonce is keyed by the scalar and the message, so fixed entropy
-    // degrades to deterministic signing, never to a reused nonce.
-    let operations = derived
-        .preimages
-        .into_iter()
-        .map(|preimage| {
-            let mut bytes = vec![0; 32];
-            bytes.extend_from_slice(&preimage);
-            Operation::Sign {
-                algorithm: Algorithm::SchnorrDigest,
-                key: signing.clone(),
-                payload: vec![PayloadPart::Bytes { bytes }],
-            }
-        })
-        .collect::<Vec<_>>();
-    let signatures = operations.len();
-    Ok((
-        SignRequest {
-            receipt: SignReceipt::default(),
-            context,
-            operations,
-        },
-        OutputKind::Lighter(signatures),
-    ))
-}
-
-fn hyperliquid(venue: &str) -> bool {
-    cfg!(feature = "hyperliquid") && matches!(venue, "hyperliquid" | "hyperliquidspot")
-}
-
-/// Wallet signing never answers a bare digest: the device derives it from an
-/// allowlisted statement for this account's network and vault.
-#[cfg(feature = "hyperliquid")]
-fn hyperliquid_work(
-    identity: &Identity,
-    account: &Account,
-    context: Context,
-    input: Input,
-) -> Result<(SignRequest, OutputKind), SignError> {
-    use safe_cex_engine::signing::{Algorithm, PayloadPart};
-    use safe_cex_venue_hyperliquid::sign::statement;
-    let Input::WsAuth {
-        to_sign,
-        output_format,
-    } = input
-    else {
-        return Err(SignError::Unsupported);
-    };
-    let signing = identity.signing_ref()?.clone();
-    let mut operations = vec![Operation::PublicAddress {
-        key: signing.clone(),
-    }];
-    match output_format {
-        OutputFormat::HyperliquidAddress => {
-            let own = account.key.as_deref().ok_or(SignError::Unavailable)?;
-            if !to_sign.eq_ignore_ascii_case(own) {
-                return Err(SignError::InvalidRequest);
-            }
-        }
-        OutputFormat::HyperliquidL1 => {
-            let digest = statement::derive(
-                &to_sign,
-                &statement::Account {
-                    mainnet: !account.testnet,
-                    vault: account.vault.as_deref(),
-                },
-            )?;
-            operations.push(Operation::Sign {
-                algorithm: Algorithm::Secp256k1Digest,
-                key: signing,
-                payload: vec![PayloadPart::Bytes {
-                    bytes: digest.to_vec(),
-                }],
-            });
-        }
-        _ => return Err(SignError::InvalidRequest),
-    }
-    Ok((
-        SignRequest {
-            receipt: SignReceipt::default(),
-            context,
-            operations,
-        },
-        OutputKind::WsAuth(output_format),
-    ))
-}
-
-pub fn prepare_for(
-    venue: &str,
-    identities: &Identities,
-    account: &Account,
-    input: Input,
-) -> Result<(SignRequest, OutputKind), SignError> {
     let identity = identities.primary.as_ref().ok_or(SignError::Unavailable)?;
     identity.validate().map_err(|_| SignError::InvalidRequest)?;
     let context = Context {
@@ -451,46 +300,6 @@ pub fn prepare_for(
         method: "HOSTED".into(),
         ..Default::default()
     };
-    let wallet_format = matches!(
-        &input,
-        Input::WsAuth {
-            output_format: OutputFormat::HyperliquidL1 | OutputFormat::HyperliquidAddress,
-            ..
-        }
-    );
-    if wallet_format != hyperliquid(venue) {
-        return Err(if wallet_format {
-            SignError::InvalidRequest
-        } else {
-            SignError::Unsupported
-        });
-    }
-    // Lighter signs nothing but its own statements.
-    let lighter_format = matches!(
-        &input,
-        Input::WsAuth {
-            output_format: OutputFormat::LighterTx,
-            ..
-        }
-    );
-    if lighter_format != lighter(venue) {
-        return Err(if lighter_format {
-            SignError::InvalidRequest
-        } else {
-            SignError::Unsupported
-        });
-    }
-    #[cfg(feature = "lighter")]
-    if let Input::WsAuth { to_sign, .. } = &input
-        && lighter_format
-    {
-        return lighter_work(venue, identity, account, context, to_sign);
-    }
-    #[cfg(feature = "hyperliquid")]
-    if wallet_format {
-        return hyperliquid_work(identity, account, context, input);
-    }
-    let _ = account;
     if !family(venue) {
         return Err(SignError::Unsupported);
     }
@@ -570,47 +379,6 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
     if result.values.len() != expected {
         return Err(SignError::InvalidResult);
     }
-    if let OutputKind::WsAuth(
-        format @ (OutputFormat::HyperliquidAddress | OutputFormat::HyperliquidL1),
-    ) = kind
-    {
-        if !result.headers.is_empty() || result.values[0].len() != 20 {
-            return Err(SignError::InvalidResult);
-        }
-        let value = match format {
-            OutputFormat::HyperliquidAddress => result.values[0].clone(),
-            _ => {
-                let mut signature = result.values[1].clone();
-                if signature.len() != 65 {
-                    return Err(SignError::InvalidResult);
-                }
-                match &mut signature[64] {
-                    v @ (0 | 1) => *v += 27,
-                    27 | 28 => {}
-                    _ => return Err(SignError::InvalidResult),
-                }
-                signature
-            }
-        };
-        return Ok(Output {
-            credential: None,
-            signature: Some(format!("0x{}", safe_cex_crypto::hex(&value))),
-            headers: None,
-        });
-    }
-    if let OutputKind::Lighter(_) = kind {
-        if !result.headers.is_empty() || result.values.iter().any(|value| value.len() != 80) {
-            return Err(SignError::InvalidResult);
-        }
-        return Ok(Output {
-            credential: None,
-            signature: Some(format!(
-                "0x{}",
-                safe_cex_crypto::hex(&result.values.concat())
-            )),
-            headers: None,
-        });
-    }
     let mut headers = Vec::new();
     if let OutputKind::Http(policy) = kind
         && let Some(header) = policy.passphrase_header
@@ -669,14 +437,6 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
             safe_cex_crypto::Encoding::Base64,
         ),
         OutputKind::WsAuth(OutputFormat::BitunixDoubleSha256) => safe_cex_crypto::hex(mac),
-        OutputKind::WsAuth(
-            OutputFormat::HyperliquidL1
-            | OutputFormat::HyperliquidAddress
-            | OutputFormat::LighterTx,
-        )
-        | OutputKind::Lighter(_) => {
-            return Err(SignError::InvalidResult);
-        }
     };
     Ok(Output {
         credential: matches!(kind, OutputKind::Http(_) | OutputKind::DoubleSha256Http(_))
@@ -1046,11 +806,6 @@ mod input_parse_tests {
                 "bitunix-double-sha256",
                 r#"["wsAuth","x","bitunix-double-sha256"]"#,
             ),
-            ("hyperliquid-l1", r#"["wsAuth","x","hyperliquid-l1"]"#),
-            (
-                "hyperliquid-address",
-                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"hyperliquid-address"}"#,
-            ),
         ] {
             let Ok(Input::WsAuth {
                 to_sign,
@@ -1067,9 +822,6 @@ mod input_parse_tests {
                     OutputFormat::Base64 => "base64",
                     OutputFormat::Base64Hex => "hex-base64",
                     OutputFormat::BitunixDoubleSha256 => "bitunix-double-sha256",
-                    OutputFormat::HyperliquidL1 => "hyperliquid-l1",
-                    OutputFormat::HyperliquidAddress => "hyperliquid-address",
-                    OutputFormat::LighterTx => "lighter-tx",
                 }
             );
         }

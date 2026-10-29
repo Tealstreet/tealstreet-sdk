@@ -826,3 +826,59 @@ fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
         );
     }
 }
+
+#[cfg(feature = "binance")]
+#[test]
+fn binance_options_raw_and_explicit_setups_start_eapi_with_the_binance_provider_contract() {
+    struct Inspect;
+    impl Visit for Inspect {
+        type Output = Vec<String>;
+        fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
+            assert!(engine.venue().capabilities().options);
+            engine.start(1000.);
+            safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.)
+                .into_iter()
+                .filter_map(|action| match action {
+                    safe_cex_engine::Action::Http(request) => Some(request.url),
+                    safe_cex_engine::Action::WsConnect { .. } => panic!("Options is REST only"),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+    for options in [
+        r#"{"key":"fixture-key","secret":"fixture-secret"}"#,
+        r#"{"publicDataOnly":true}"#,
+    ] {
+        let urls = build(
+            "binanceoptions",
+            serde_json::from_str(options).unwrap(),
+            Some(safe_cex_engine::test_support::seeded_entropy(17)),
+            Inspect,
+        )
+        .unwrap();
+        assert_eq!(urls, vec!["https://eapi.binance.com/eapi/v1/exchangeInfo"]);
+    }
+    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    let (provider, ids) = safe_cex_venues::local_signer_from_json_for_mode(
+        "binanceoptions",
+        r#"{"primary":{"key":"fixture-key","secret":"fixture-secret"}}"#.into(),
+        &options,
+    )
+    .unwrap();
+    options.signing = Some(ids);
+    let urls = safe_cex_venues::build_with_signer(
+        "binanceoptions",
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Some(provider),
+        Inspect,
+    )
+    .unwrap();
+    assert_eq!(urls, vec!["https://eapi.binance.com/eapi/v1/exchangeInfo"]);
+    #[cfg(feature = "hosted-signing")]
+    assert!(safe_cex_venues::hosted_signing::admitted(
+        "binanceoptions",
+        &serde_json::from_str("{}").unwrap()
+    ));
+}
