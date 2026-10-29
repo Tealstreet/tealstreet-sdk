@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
+mod placement;
 
 pub const MAX_COMMAND_BYTES: usize = 16 * 1024;
 pub const MAX_STEPS: usize = 128;
@@ -46,9 +47,13 @@ struct Pending {
     chain: Option<u64>,
     req_id: Option<Value>,
     success: String,
+    placements: VecDeque<placement::Placement>,
+    order_ids: Option<Vec<String>>,
+    parallel: bool,
 }
 enum Evaluation {
     Done(Value),
+    Place(VecDeque<placement::Placement>),
     Call {
         method: &'static str,
         args: Value,
@@ -128,10 +133,39 @@ impl Exec {
         let Some(pending) = self.pending.remove(&token) else {
             return;
         };
+        let mut pending = pending;
+        let mut result = result;
+        if let (Ok(value), Some(ids)) = (&result, pending.order_ids.as_mut()) {
+            if value
+                .as_array()
+                .is_some_and(|a| a.iter().all(Value::is_string))
+            {
+                if let Some(returned) = value.as_array() {
+                    ids.extend(returned.iter().map(|v| v.as_str().unwrap().to_string()));
+                }
+                if let Some(next) = pending.placements.pop_front() {
+                    match next.prepare(&host.snapshot()) {
+                        Ok(order) => {
+                            self.issue(pending, "placeOrder", json!([order]), host);
+                            return;
+                        }
+                        Err(message) => {
+                            result = Err(json!({"message":message,"outcome":"notSent"}))
+                        }
+                    }
+                }
+            } else {
+                result = Err(json!({"message":"Invalid placement result","outcome":"unknown"}));
+            }
+        }
         let result = match result {
             Ok(_) => {
                 log(host, &pending.req_id, &pending.success);
-                json!({"handled":true,"success":true})
+                let mut result = json!({"handled":true,"success":true});
+                if let Some(ids) = pending.order_ids {
+                    result["data"] = json!({"orderIds":ids});
+                }
+                result
             }
             Err(error) => {
                 let message = error
@@ -151,6 +185,15 @@ impl Exec {
                 chain.last = Some(result);
             }
             self.drive(id, host);
+        }
+    }
+
+    fn issue(&mut self, pending: Pending, method: &str, args: Value, host: &mut impl Host) {
+        let token = self.id();
+        let parallel = pending.parallel;
+        self.pending.insert(token, pending);
+        if let Err(error) = host.call_scoped(token, method, args, parallel) {
+            self.complete(token, Err(error), host);
         }
     }
 
@@ -191,6 +234,40 @@ impl Exec {
                     }
                     self.chains.insert(id, chain);
                 }
+                Evaluation::Place(mut placements) => {
+                    let first = placements
+                        .pop_front()
+                        .expect("placement parser returns at least one");
+                    let order = first.prepare(&host.snapshot());
+                    let pending = Pending {
+                        chain: (!parallel).then_some(id),
+                        req_id: chain.req_id.clone(),
+                        success: if placements.is_empty() {
+                            "Order placed".into()
+                        } else {
+                            "Orders placed".into()
+                        },
+                        placements,
+                        order_ids: Some(Vec::new()),
+                        parallel,
+                    };
+                    self.chains.insert(id, chain);
+                    match order {
+                        Ok(order) => self.issue(pending, "placeOrder", json!([order]), host),
+                        Err(message) => {
+                            let token = self.id();
+                            self.pending.insert(token, pending);
+                            self.complete(
+                                token,
+                                Err(json!({"message":message,"outcome":"notSent"})),
+                                host,
+                            );
+                        }
+                    }
+                    if !parallel {
+                        return;
+                    }
+                }
                 Evaluation::Call {
                     method,
                     args,
@@ -203,6 +280,9 @@ impl Exec {
                             chain: (!parallel).then_some(id),
                             req_id: chain.req_id.clone(),
                             success,
+                            placements: VecDeque::new(),
+                            order_ids: None,
+                            parallel,
                         },
                     );
                     self.chains.insert(id, chain);
@@ -258,10 +338,48 @@ fn rows<'a>(store: &'a Value, key: &str) -> &'a [Value] {
         .unwrap_or(&[])
 }
 fn resolve(store: &Value, symbol: &str) -> Option<String> {
-    rows(store, "markets").iter().find_map(|m| {
-        let s = m.get("symbol")?.as_str()?;
-        (s == symbol || s == symbol.to_uppercase()).then(|| s.into())
-    })
+    let upper = symbol.trim().to_uppercase();
+    let markets = rows(store, "markets");
+    if let Some(m) = markets.iter().find(|m| {
+        m["symbol"]
+            .as_str()
+            .is_some_and(|s| s.eq_ignore_ascii_case(&upper))
+    }) {
+        return m["symbol"].as_str().map(String::from);
+    }
+    let quote = if upper.ends_with("USDC") {
+        "USDC"
+    } else if upper.ends_with("USD") {
+        "USD"
+    } else {
+        "USDT"
+    };
+    let base = markets
+        .iter()
+        .filter_map(|m| m["base"].as_str())
+        .filter(|base| {
+            !base.is_empty()
+                && upper.strip_prefix(base).is_some_and(|rest| {
+                    matches!(
+                        rest,
+                        "" | "USDT"
+                            | "USDC"
+                            | "USD"
+                            | "PERP"
+                            | "-PERP"
+                            | "/USDT"
+                            | "/USDC"
+                            | "/USD"
+                    )
+                })
+        })
+        .max_by_key(|base| base.len())?;
+    markets
+        .iter()
+        .find(|m| m["base"] == base && m["quote"] == quote)?
+        .get("symbol")?
+        .as_str()
+        .map(String::from)
 }
 
 fn evaluate(
@@ -309,8 +427,17 @@ fn evaluate(
             log(host, req_id, &lines.join("\n"));
             done()
         }
+        "buy" | "b" | "sell" | "s" => match placement::parse(symbol, &args, store) {
+            Ok(orders) => Evaluation::Place(orders),
+            Err(error) => failed(error),
+        },
         "cancel" | "x" => cancel(symbol, &args, store),
         "leverage" | "lev" => {
+            if let Some(tail) = args.get(2)
+                && resolve(store, tail).is_none()
+            {
+                return failed(format!("Unknown symbol \"{tail}\""));
+            }
             let target = args
                 .last()
                 .and_then(|s| resolve(store, s))
@@ -355,6 +482,12 @@ fn cancel(symbol: &str, args: &[String], store: &Value) -> Evaluation {
         .unwrap_or_else(|| symbol.into());
     let head = args.get(1).map(String::as_str).unwrap_or("");
     let sub = args.get(2).map(String::as_str).unwrap_or("");
+    if let Some(tail) = args.last().filter(|_| args.len() > 2)
+        && !["buys", "sells", "limits", "stops", "ro", "xro"].contains(&tail.as_str())
+        && resolve(store, tail).is_none()
+    {
+        return failed(format!("Unknown symbol \"{tail}\""));
+    }
     if head.is_empty() || resolve(store, head).is_some() {
         return Evaluation::Call {
             method: "cancelSymbolOrders",

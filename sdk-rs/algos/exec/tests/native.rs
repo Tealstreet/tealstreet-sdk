@@ -260,3 +260,72 @@ async fn settling_and_aborting_return_each_credit_once_in_either_order() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn forty_plain_single_step_payloads_share_the_same_account_budget() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            for req in 0..40 {
+                factory
+                    .handle(
+                        "exec",
+                        &json!({"symbol":"BTCUSDT","command":"cancel","reqId":req}).to_string(),
+                        &cx,
+                    )
+                    .unwrap();
+            }
+            tokio::task::yield_now().await;
+            assert_eq!(port.commands.borrow().len(), 32);
+            assert_eq!(
+                port.events
+                    .borrow()
+                    .iter()
+                    .filter(|(op, data)| op == "exec-result" && data["success"] == false)
+                    .count(),
+                8
+            );
+            for reply in port.replies.borrow_mut().drain(..) {
+                reply.send(Ok("[]".into())).unwrap();
+            }
+            tokio::task::yield_now().await;
+            factory
+                .handle("exec", r#"{"symbol":"BTCUSDT","command":"cancel"}"#, &cx)
+                .unwrap();
+            tokio::task::yield_now().await;
+            assert_eq!(port.commands.borrow().len(), 33);
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn native_buy_uses_engine_store_and_returns_real_ids_without_replaying_unknown() {
+    use safe_cex_engine::model::{Limits, Market, MinMax, Precision, Ticker};
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());
+        port.store.borrow_mut().markets.insert("BTCUSDT".into(),Market{
+            id:"BTCUSDT".into(),symbol:"BTCUSDT".into(),pretty_symbol:None,base:"BTC".into(),quote:"USDT".into(),active:true,
+            precision:Precision{amount:0.001,price:0.1},limits:Limits{amount:MinMax{min:0.001,max:1000.},leverage:MinMax{min:1.,max:20.},price:None},
+            contract_size:None,is_expiring:None,is_inverse:None,is_spot:None,is_perpetual:None,is_read_only:None,taker_fee:None,maker_fee:None,
+        });
+        port.store.borrow_mut().tickers.insert("BTCUSDT".into(),Ticker{symbol:"BTCUSDT".into(),last:50000.,..Default::default()});
+        let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"buy $100 at 49900 po","reqId":"buy"}"#,&cx).unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(port.commands.borrow().len(),1,"{:?}",port.events.borrow());
+        assert!(matches!(&port.commands.borrow()[0],Command::PlaceOrders{orders,..} if orders.len()==1 && orders[0].amount==0.002 && orders[0].price==Some(49900.) && orders[0].client_order_id.is_none()));
+        port.replies.borrow_mut().remove(0).send(Ok(r#"["native-parent","native-stop"]"#.into())).unwrap();
+        tokio::task::yield_now().await;
+        assert!(port.events.borrow().iter().any(|(op,data)|op=="exec-result" && data["data"]["orderIds"]==json!(["native-parent","native-stop"])));
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"buy $100","reqId":"lost"}"#,&cx).unwrap();
+        tokio::task::yield_now().await;
+        port.replies.borrow_mut().remove(0).send(Err(VenueError::new("lost").outcome(Outcome::Unknown))).unwrap();
+        tokio::task::yield_now().await;tokio::task::yield_now().await;
+        assert_eq!(port.commands.borrow().len(),2);
+        assert!(port.events.borrow().iter().any(|(op,data)|op=="exec-result" && data["reqId"]=="lost" && data["errorDetails"]["outcome"]=="unknown"));
+        cx.scope.dispose();
+    }).await;
+}

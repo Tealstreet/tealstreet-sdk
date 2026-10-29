@@ -3910,6 +3910,7 @@ dependencies = [
  "safe-cex-exec",
  "safe-cex-native",
  "safe-cex-remote-signer",
+ "safe-cex-venues",
  "serde",
  "serde_json",
  "tokio",
