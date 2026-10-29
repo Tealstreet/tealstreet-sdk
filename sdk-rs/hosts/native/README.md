@@ -1,11 +1,17 @@
 # Native transport routing
 
 `NetworkTransport::new()` connects directly. Account-backed server callers must
-pass the same resolved routing plan as the JavaScript host. The TypeScript SDK
-owns the venue table, metadata defaults, proxy pools, region choice and feature
-flags; the native host applies a plan and never resolves venue names itself.
+pass the same resolved routing plan as the JavaScript host.
 
-Resolve once at the account boundary, after normalizing its `ExchangeOptions`:
+A native server resolves it with `resolve::account_transport` (the hosted
+account's proxy/tunnel/region defaults) and `resolve::resolve_routing_plan`, a
+port of the TS resolver for the Tealstreet and direct providers with the browser
+relay gate off. Its data is `src/routing/table.json`, generated from the TS tables
+by `packages/safe-cex/src/transport/engine.native-routing-port.test.ts`
+(`UPDATE_NATIVE_ROUTING_PORT=1`), which also writes the TS plans that
+`tests/routing_port.rs` holds it to. Secondary read keys are not routed natively yet.
+
+A JavaScript launcher instead resolves once at the account boundary, after normalizing its `ExchangeOptions`:
 
 ```ts
 import { resolveEngineRoutingPlan } from '@tealstreet/safe-cex/src/transport/engine';
