@@ -76,6 +76,15 @@ pub struct SignedTransaction {
     pub signature: String,
 }
 
+/// The signing chain for a deployment.
+pub fn chain_id(robinhood: bool, testnet: bool) -> u32 {
+    match (robinhood, testnet) {
+        (_, true) => 300,
+        (true, false) => 466_324,
+        (false, false) => 304,
+    }
+}
+
 /// The public signing scope: chain, account and API key slot.
 #[derive(Clone, Copy, Debug)]
 pub struct Account {

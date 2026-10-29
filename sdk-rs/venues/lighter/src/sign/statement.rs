@@ -200,20 +200,35 @@ pub struct Derived {
     pub expiry_ms: u64,
 }
 
-/// Re-derives a statement for the signer that owns `own`. A statement in any
+/// The signer's own scope. An API key signs only for the account it is
+/// registered to, so an unknown account index is bound by the venue instead.
+pub struct Owner {
+    pub chain_id: u32,
+    pub account_index: Option<u64>,
+    pub api_key_index: u8,
+}
+
+/// Re-derives a statement for the signer that owns `owner`. A statement in any
 /// other spelling, for another chain, account or API key, or with a field its
 /// transaction type does not sign is refused.
-pub fn derive(text: &str, own: &Account) -> Result<Derived, String> {
+pub fn derive(text: &str, owner: &Owner) -> Result<Derived, String> {
     let refused = || "Lighter statement refused".to_owned();
     let statement: Statement = serde_json::from_str(text).map_err(|_| refused())?;
     // One spelling per request, so the signer reads exactly what it signs.
     if statement.text() != text
-        || statement.chain_id != own.chain_id
-        || statement.account_index != own.account_index
-        || statement.api_key_index != own.api_key_index
+        || statement.chain_id != owner.chain_id
+        || owner
+            .account_index
+            .is_some_and(|account| account != statement.account_index)
+        || statement.api_key_index != owner.api_key_index
     {
         return Err(refused());
     }
+    let own = &Account::new(
+        statement.chain_id,
+        statement.account_index,
+        statement.api_key_index,
+    )?;
     match (statement.kind, statement.txs, statement.deadline) {
         (Kind::Txs, Some(txs), None) if (1..=super::MAX_BATCH).contains(&txs.len()) => {
             let mut preimages = Vec::with_capacity(txs.len());
@@ -249,6 +264,13 @@ mod tests {
 
     fn account() -> Account {
         Account::new(304, 42, 3).unwrap()
+    }
+    fn owner(chain_id: u32, account_index: Option<u64>, api_key_index: u8) -> Owner {
+        Owner {
+            chain_id,
+            account_index,
+            api_key_index,
+        }
     }
     fn order(order_id: u64, order_type: u8) -> Order {
         Order {
@@ -300,7 +322,7 @@ mod tests {
     fn a_statement_re_derives_the_exact_words_local_issue_signs() {
         let inputs = every_kind();
         let text = txs(&account(), &inputs);
-        let derived = derive(&text, &account()).unwrap();
+        let derived = derive(&text, &owner(304, Some(42), 3)).unwrap();
         assert_eq!(
             derived.preimages,
             inputs
@@ -316,7 +338,7 @@ mod tests {
             token,
             r#"{"kind":"auth","chainId":304,"accountIndex":42,"apiKeyIndex":3,"deadline":1700000060}"#
         );
-        let derived = derive(&token, &account()).unwrap();
+        let derived = derive(&token, &owner(304, Some(42), 3)).unwrap();
         assert_eq!(
             derived.preimages,
             vec![auth_message(&account(), 1_700_000_060).unwrap().1]
@@ -328,19 +350,29 @@ mod tests {
     fn another_signer_spelling_or_field_is_refused() {
         let text = txs(&account(), &every_kind());
         for other in [
-            Account::new(300, 42, 3).unwrap(),
-            Account::new(304, 43, 3).unwrap(),
-            Account::new(304, 42, 4).unwrap(),
+            owner(300, Some(42), 3),
+            owner(304, Some(43), 3),
+            owner(304, None, 4),
         ] {
             assert!(
                 derive(&text, &other).is_err(),
                 "another chain, account or key"
             );
         }
+        assert!(
+            derive(&text, &owner(304, None, 3)).is_ok(),
+            "an unresolved account index is bound by the key itself"
+        );
         let spaced = text.replacen("\"txs\":", "\"txs\": ", 1);
-        assert!(derive(&spaced, &account()).is_err(), "a second spelling");
+        assert!(
+            derive(&spaced, &owner(304, Some(42), 3)).is_err(),
+            "a second spelling"
+        );
         let unknown = text.replacen("{\"kind\"", "{\"extra\":1,\"kind\"", 1);
-        assert!(derive(&unknown, &account()).is_err(), "an unknown field");
+        assert!(
+            derive(&unknown, &owner(304, Some(42), 3)).is_err(),
+            "an unknown field"
+        );
         // A cancel that also carries an order field signs nothing it shows.
         let cancel = txs(&account(), &every_kind()[2..3]);
         let smuggled = cancel.replacen(
@@ -349,16 +381,19 @@ mod tests {
             1,
         );
         assert!(
-            derive(&smuggled, &account()).is_err(),
+            derive(&smuggled, &owner(304, Some(42), 3)).is_err(),
             "a field the type does not sign"
         );
         let invalid = cancel.replacen("\"marketIndex\":1", "\"marketIndex\":255", 1);
         assert!(
-            derive(&invalid, &account()).is_err(),
+            derive(&invalid, &owner(304, Some(42), 3)).is_err(),
             "the encoder's own bounds"
         );
         let mixed = r#"{"kind":"auth","chainId":304,"accountIndex":42,"apiKeyIndex":3,"txs":[],"deadline":1}"#;
-        assert!(derive(mixed, &account()).is_err(), "one kind per statement");
-        assert!(derive(&cancel, &account()).is_ok(), "control");
+        assert!(
+            derive(mixed, &owner(304, Some(42), 3)).is_err(),
+            "one kind per statement"
+        );
+        assert!(derive(&cancel, &owner(304, Some(42), 3)).is_ok(), "control");
     }
 }
