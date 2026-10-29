@@ -1,12 +1,13 @@
 //! Accounts keyed by `(userId, accountName)`: built once, shared by that user's
 //! sockets, disposed when the last holder (live socket or parked resume) lets go.
 use crate::envelope::InitPayload;
+use crate::state::Log;
 use crate::threads::EngineThreads;
 use safe_cex_native::resolve::{self, AccountTransport, Provider};
 use safe_cex_native::{AccountHandle, NetworkTransport, ProxyTokenProvider, ServerConfig};
 use safe_cex_remote_signer::{Outbox, SignerLink, remote_account};
 use serde_json::{Map, Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -57,12 +58,82 @@ pub struct Account {
     pub link: Option<Arc<SignerLink>>,
     pub token: ProxyToken,
     pub fingerprint: String,
-    holders: Mutex<HashSet<u64>>,
+    /// Live sockets carry their outbox and token; park holders carry none.
+    holders: Mutex<Holders>,
+}
+
+/// A live socket holding an account: where its signing and proxy token go.
+#[derive(Clone)]
+pub struct Live {
+    pub outbox: Outbox,
+    pub token: Option<(String, u64)>,
+}
+
+#[derive(Default)]
+struct Holders {
+    by_id: HashMap<u64, Option<Live>>,
+    /// The socket the signer and proxy token follow.
+    signing: Option<u64>,
+}
+
+impl Holders {
+    /// `None` when `leaving` was not signing; otherwise the newest live holder
+    /// to sign through next, or `Some(None)` when none is live.
+    fn successor(&self, leaving: u64) -> Option<Option<(u64, Live)>> {
+        if self.signing != Some(leaving) {
+            return None;
+        }
+        Some(
+            self.by_id
+                .iter()
+                .filter(|(id, _)| **id != leaving)
+                .filter_map(|(id, live)| live.clone().map(|live| (*id, live)))
+                .max_by_key(|(id, _)| *id),
+        )
+    }
 }
 
 impl Account {
     pub fn is_public(&self) -> bool {
         self.link.is_none()
+    }
+
+    /// Signing and the proxy token follow `id` (the newest init or resume).
+    fn sign_through(&self, holders: &mut Holders, id: u64, live: &Live) {
+        holders.signing = Some(id);
+        if let Some(link) = &self.link {
+            link.attach(id, live.outbox.clone());
+            self.token.set(live.token.clone());
+        }
+    }
+
+    /// The signing socket left: hand over to the most recent live holder, or
+    /// suspend when only parked holders remain.
+    fn hand_over(&self, holders: &mut Holders, leaving: u64) {
+        match holders.successor(leaving) {
+            None => {}
+            Some(Some((id, live))) => self.sign_through(holders, id, &live),
+            Some(None) => {
+                holders.signing = None;
+                if let Some(link) = &self.link {
+                    link.suspend();
+                }
+            }
+        }
+    }
+
+    fn hold(&self, id: u64, live: Live) {
+        let mut holders = self.holders.lock().unwrap();
+        holders.by_id.insert(id, Some(live.clone()));
+        self.sign_through(&mut holders, id, &live);
+    }
+
+    /// The current signing socket's outbox, for notices about the account itself.
+    pub fn notify(&self, text: String) {
+        let holders = self.holders.lock().unwrap();
+        if let Some(Some(live)) = holders.signing.and_then(|id| holders.by_id.get(&id)) {
+            (live.outbox)(text);
+        }
     }
 }
 
@@ -107,13 +178,27 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
     }
-    if let Some(builder) = &init.hyperliquid_builder {
+    // As `isUsableBuilder`: an unusable builder falls back to the default.
+    if let Some(builder) = init
+        .hyperliquid_builder
+        .as_ref()
+        .filter(|builder| usable_builder(builder))
+    {
         options.insert("hyperliquidBuilder".into(), json!(builder));
     }
     if public_only {
         options.insert("publicDataOnly".into(), true.into());
     }
     Value::Object(options)
+}
+
+fn usable_builder(builder: &crate::envelope::HyperliquidBuilder) -> bool {
+    let address = builder.address.as_bytes();
+    address.len() == 42
+        && address.starts_with(b"0x")
+        && address[2..].iter().all(u8::is_ascii_hexdigit)
+        && builder.fee_tenths_bps.is_finite()
+        && builder.fee_tenths_bps > 0.0
 }
 
 impl Registry {
@@ -147,7 +232,7 @@ impl Registry {
     /// The account this user's `init` names, built or reused. Reuse requires an
     /// identical fingerprint; otherwise the old account is disposed first.
     pub async fn obtain(
-        &self,
+        self: &Arc<Self>,
         user: &str,
         init: &InitPayload,
         public_only: bool,
@@ -160,22 +245,35 @@ impl Registry {
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
         if let Some(account) = existing {
             if account.fingerprint == fingerprint && account.is_public() == public_only {
-                account.holders.lock().unwrap().insert(holder);
-                if !public_only {
-                    account.token.set(token);
-                }
-                if let Some(link) = &account.link {
-                    link.attach(holder, outbox);
-                }
+                account.hold(holder, Live { outbox, token });
                 return Ok(account);
             }
             self.dispose(&account);
         }
-        let account = Arc::new(
-            self.build(user, init, public_only, fingerprint, token, holder, outbox)
-                .await?,
-        );
-        account.holders.lock().unwrap().insert(holder);
+        let live = Live {
+            outbox: outbox.clone(),
+            token: token.clone(),
+        };
+        let (account, remote) = self
+            .build(user, init, public_only, fingerprint, token, holder, outbox)
+            .await?;
+        let account = Arc::new(account);
+        account.hold(holder, live);
+        if let Some(remote) = remote {
+            // As TS `setFatalFailureCallback`: a signer failing repeatedly disposes the account.
+            let registry = Arc::downgrade(self);
+            let weak = Arc::downgrade(&account);
+            remote.on_fatal(move || {
+                if let (Some(registry), Some(account)) = (registry.upgrade(), weak.upgrade()) {
+                    Log::warn(&format!("signer for {} failing; disposing", account.venue));
+                    account.notify(crate::envelope::error(
+                        Some(&account.name),
+                        "Remote signing failed repeatedly; the account was disposed",
+                    ));
+                    registry.dispose(&account);
+                }
+            });
+        }
         let replaced = self.accounts.lock().unwrap().insert(key, account.clone());
         if let Some(replaced) = replaced {
             // A concurrent init of the same name won the race; the later build stands.
@@ -194,7 +292,7 @@ impl Registry {
         token: Option<(String, u64)>,
         socket: u64,
         outbox: Outbox,
-    ) -> Result<Account, String> {
+    ) -> Result<(Account, Option<safe_cex_remote_signer::RemoteAccount>), String> {
         let venue = init.exchange_name.clone();
         let transport_flags = AccountTransport {
             tealstreet_proxy: init.tealstreet_proxy,
@@ -215,8 +313,8 @@ impl Registry {
             .map_err(|error| error.to_string())?;
         let options = engine_options(init, public_only).to_string();
         let proxy_token = ProxyToken::new();
-        let (link, signer, options) = if public_only {
-            (None, None, options)
+        let (link, signer, options, remote) = if public_only {
+            (None, None, options, None)
         } else {
             let link = SignerLink::new(socket, outbox);
             let remote = remote_account(
@@ -226,7 +324,13 @@ impl Registry {
                 &options,
             )
             .map_err(|error| error.to_string())?;
-            (Some(link), Some(remote.provider), remote.options_json)
+            let options = remote.options_json.clone();
+            (
+                Some(link),
+                Some(remote.provider.clone()),
+                options,
+                Some(remote),
+            )
         };
         // Signer and public-only are one decision: a private account never builds
         // from options without the remote provider (keyed construction).
@@ -258,7 +362,7 @@ impl Registry {
         let handle = receive
             .await
             .map_err(|_| "engine thread failed".to_owned())??;
-        Ok(Account {
+        let account = Account {
             user: user.to_owned(),
             name: init.account_name.clone(),
             venue: init.exchange_name.clone(),
@@ -267,7 +371,8 @@ impl Registry {
             token: proxy_token,
             fingerprint,
             holders: Mutex::default(),
-        })
+        };
+        Ok((account, remote))
     }
 
     /// The account `user` holds under `name` through `holder`, never another user's.
@@ -278,7 +383,7 @@ impl Registry {
             .unwrap()
             .get(&(user.to_owned(), name.to_owned()))
             .cloned()?;
-        let holds = account.holders.lock().unwrap().contains(&holder);
+        let holds = account.holders.lock().unwrap().by_id.contains_key(&holder);
         holds.then_some(account)
     }
 
@@ -286,8 +391,9 @@ impl Registry {
     pub fn release(&self, account: &Arc<Account>, holder: u64) {
         let empty = {
             let mut holders = account.holders.lock().unwrap();
-            holders.remove(&holder);
-            holders.is_empty()
+            holders.by_id.remove(&holder);
+            account.hand_over(&mut holders, holder);
+            holders.by_id.is_empty()
         };
         if empty {
             self.dispose(account);
@@ -312,7 +418,7 @@ impl Registry {
             accounts.remove(&key);
         }
         drop(accounts);
-        account.holders.lock().unwrap().clear();
+        *account.holders.lock().unwrap() = Holders::default();
         Self::stop(account);
     }
 
@@ -329,11 +435,9 @@ impl Registry {
             let park_holder = self.next_id();
             {
                 let mut holders = account.holders.lock().unwrap();
-                holders.remove(&holder);
-                holders.insert(park_holder);
-            }
-            if let Some(link) = &account.link {
-                link.suspend();
+                holders.by_id.remove(&holder);
+                holders.by_id.insert(park_holder, None);
+                account.hand_over(&mut holders, holder);
             }
             parked.push((account, park_holder));
         }
@@ -393,15 +497,14 @@ impl Registry {
         accounts
             .into_iter()
             .map(|(account, park_holder)| {
-                {
-                    let mut holders = account.holders.lock().unwrap();
-                    holders.remove(&park_holder);
-                    holders.insert(holder);
-                }
-                account.token.set(Some(token.clone()));
-                if let Some(link) = &account.link {
-                    link.attach(holder, outbox.clone());
-                }
+                account.holders.lock().unwrap().by_id.remove(&park_holder);
+                account.hold(
+                    holder,
+                    Live {
+                        outbox: outbox.clone(),
+                        token: Some(token.clone()),
+                    },
+                );
                 account
             })
             .collect()
@@ -418,6 +521,64 @@ pub fn resume_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signing_hands_over_to_the_newest_live_holder_then_suspends() {
+        let live = |token: &str| {
+            Some(Live {
+                outbox: Arc::new(|_| true),
+                token: Some((token.to_owned(), u64::MAX)),
+            })
+        };
+        let mut holders = Holders::default();
+        holders.by_id.insert(1, live("first tab"));
+        holders.by_id.insert(2, live("second tab"));
+        holders.by_id.insert(3, None);
+        holders.signing = Some(2);
+        assert!(
+            holders.successor(1).is_none(),
+            "a non-signing tab leaving changes nothing"
+        );
+        holders.by_id.remove(&2);
+        let (id, next) = holders.successor(2).unwrap().unwrap();
+        assert_eq!((id, next.token.unwrap().0.as_str()), (1, "first tab"));
+        holders.signing = Some(1);
+        holders.by_id.remove(&1);
+        assert!(
+            holders.successor(1).unwrap().is_none(),
+            "only a parked holder: suspend"
+        );
+    }
+
+    #[test]
+    fn unusable_builders_fall_back_to_the_default() {
+        let init = |address: &str, fee: f64| InitPayload {
+            account_name: "a".into(),
+            exchange_name: "hyperliquid".into(),
+            hyperliquid_builder: Some(crate::envelope::HyperliquidBuilder {
+                address: address.into(),
+                fee_tenths_bps: fee,
+            }),
+            ..InitPayload::default()
+        };
+        let good = format!("0x{}", "a".repeat(40));
+        assert!(
+            engine_options(&init(&good, 10.0), false)
+                .get("hyperliquidBuilder")
+                .is_some()
+        );
+        for (address, fee) in [
+            (good.as_str(), 0.0),
+            (good.as_str(), f64::NAN),
+            ("0x12", 10.0),
+        ] {
+            assert!(
+                engine_options(&init(address, fee), false)
+                    .get("hyperliquidBuilder")
+                    .is_none()
+            );
+        }
+    }
 
     #[test]
     fn resume_ids_are_128_bit_random_hex() {

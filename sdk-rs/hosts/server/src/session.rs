@@ -3,6 +3,7 @@
 use crate::accounts::{Account, PUBLIC_ACCOUNT, PUBLIC_EXCHANGE, Registry};
 use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
+use crate::out::Out;
 use crate::state::{Log, Metrics};
 use safe_cex_native::{ClientLink, Outgoing};
 use safe_cex_remote_signer::Outbox;
@@ -10,7 +11,6 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 /// Who connected, as verified before the upgrade.
@@ -60,7 +60,7 @@ pub struct Session {
     identity: Identity,
     pub socket: u64,
     pub resume_id: String,
-    out: mpsc::UnboundedSender<String>,
+    out: Out,
     joined: HashMap<String, Joined>,
 }
 
@@ -80,7 +80,7 @@ impl Session {
         registry: Arc<Registry>,
         metrics: Arc<Metrics>,
         identity: Identity,
-        out: mpsc::UnboundedSender<String>,
+        out: Out,
     ) -> Self {
         let socket = registry.next_id();
         Self {
@@ -105,7 +105,7 @@ impl Session {
 
     fn outbox(&self) -> Outbox {
         let out = self.out.clone();
-        Arc::new(move |text: String| out.send(text).is_ok())
+        Arc::new(move |text: String| out.send(text))
     }
 
     /// Called once after the upgrade, for `resumable=1` sockets.
@@ -570,12 +570,7 @@ const WRITE_METHODS: [&str; 9] = [
     "setAllLeverage",
 ];
 
-fn settle(
-    out: &mpsc::UnboundedSender<String>,
-    name: &str,
-    pending: Pending,
-    outcome: Result<Value, Value>,
-) {
+fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) {
     let outcome = match &pending.group {
         None => outcome,
         Some(group) => {
@@ -619,7 +614,7 @@ fn settle(
 async fn pump(
     mut link: ClientLink,
     name: String,
-    out: mpsc::UnboundedSender<String>,
+    out: Out,
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
     draining: Arc<AtomicBool>,
 ) {
@@ -631,10 +626,7 @@ async fn pump(
                     continue;
                 }
                 seq += 1;
-                if out
-                    .send(envelope::frame(&name, seq, seq == 1, &bytes))
-                    .is_err()
-                {
+                if !out.send(envelope::frame(&name, seq, seq == 1, &bytes)) {
                     break;
                 }
             }
@@ -668,7 +660,7 @@ async fn pump(
 }
 
 fn notice_to_msg(
-    out: &mpsc::UnboundedSender<String>,
+    out: &Out,
     name: &str,
     notice: &Value,
     pending: &Arc<Mutex<HashMap<u32, Pending>>>,
@@ -800,7 +792,7 @@ mod tests {
 
     #[test]
     fn a_done_notice_settles_its_request_and_others_stay_pending() {
-        let (out, mut sent) = mpsc::unbounded_channel();
+        let (out, mut sent, _) = Out::channel(16);
         let pending = Arc::new(Mutex::new(HashMap::new()));
         pending.lock().unwrap().insert(
             1,
@@ -835,7 +827,7 @@ mod tests {
 
     #[test]
     fn a_failed_write_reports_its_engine_detail() {
-        let (out, mut sent) = mpsc::unbounded_channel();
+        let (out, mut sent, _) = Out::channel(16);
         let pending = Arc::new(Mutex::new(HashMap::new()));
         pending.lock().unwrap().insert(
             2,

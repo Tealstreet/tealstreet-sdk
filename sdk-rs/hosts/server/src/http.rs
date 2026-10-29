@@ -3,6 +3,7 @@
 use crate::accounts::{Registry, now_ms};
 use crate::auth::Verifier;
 use crate::config::Config;
+use crate::out::{OUTBOUND_CAPACITY, Out};
 use crate::session::{Identity, Session};
 use crate::state::{Log, Metrics};
 use axum::Router;
@@ -20,7 +21,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
 
 /// Grace after `exp` before the socket closes, as `PROXY_TOKEN_RECONNECT_GRACE_MS`.
 const TOKEN_GRACE: Duration = Duration::from_secs(30);
@@ -117,10 +117,59 @@ struct UpgradeQuery {
     resumable: Option<String>,
 }
 
-/// The edge's client address when it is in front; the peer otherwise.
-fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
+/// Cloudflare's published edge ranges (cloudflare.com/ips). Only a peer inside
+/// them may name the client with `cf-connecting-ip`; anyone else is the client.
+const CLOUDFLARE: [&str; 22] = [
+    "173.245.48.0/20",
+    "103.21.244.0/22",
+    "103.22.200.0/22",
+    "103.31.4.0/22",
+    "141.101.64.0/18",
+    "108.162.192.0/18",
+    "190.93.240.0/20",
+    "188.114.96.0/20",
+    "197.234.240.0/22",
+    "198.41.128.0/17",
+    "162.158.0.0/15",
+    "104.16.0.0/13",
+    "104.24.0.0/14",
+    "172.64.0.0/13",
+    "131.0.72.0/22",
+    "2400:cb00::/32",
+    "2606:4700::/32",
+    "2803:f800::/32",
+    "2405:b500::/32",
+    "2405:8100::/32",
+    "2a06:98c0::/29",
+    "2c0f:f248::/32",
+];
+
+fn in_cidr(ip: IpAddr, cidr: &str) -> bool {
+    let Some((base, bits)) = cidr.split_once('/') else {
+        return false;
+    };
+    let (Ok(base), Ok(bits)) = (base.parse::<IpAddr>(), bits.parse::<u32>()) else {
+        return false;
+    };
+    match (ip, base) {
+        (IpAddr::V4(ip), IpAddr::V4(base)) => {
+            let mask = u32::MAX.checked_shl(32 - bits).unwrap_or(0);
+            u32::from(ip) & mask == u32::from(base) & mask
+        }
+        (IpAddr::V6(ip), IpAddr::V6(base)) => {
+            let mask = u128::MAX.checked_shl(128 - bits).unwrap_or(0);
+            u128::from(ip) & mask == u128::from(base) & mask
+        }
+        _ => false,
+    }
+}
+
+/// The client address: `cf-connecting-ip` only from a Cloudflare edge peer.
+pub fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
+    let from_edge = CLOUDFLARE.iter().any(|cidr| in_cidr(peer.ip(), cidr));
     headers
         .get("cf-connecting-ip")
+        .filter(|_| from_edge)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse().ok())
         .unwrap_or(peer.ip())
@@ -198,7 +247,7 @@ async fn upgrade(
 async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
     app.metrics.connections.fetch_add(1, Ordering::Relaxed);
     let (mut sink, mut stream) = socket.split();
-    let (out, mut outgoing) = mpsc::unbounded_channel::<String>();
+    let (out, mut outgoing, overflow) = Out::channel(OUTBOUND_CAPACITY);
     let expires = identity
         .token
         .as_ref()
@@ -228,6 +277,11 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
     loop {
         tokio::select! {
             biased;
+            _ = overflow.notified() => {
+                Log::warn("slow client dropped: outbound queue full");
+                let _ = sink.send(close(1013, "Client is not reading; reconnect")).await;
+                break;
+            }
             _ = &mut expiry => {
                 let _ = sink.send(close(1008, "Tealstreet proxy token expired")).await;
                 break;
@@ -261,4 +315,31 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
     }
     session.close();
     app.metrics.connections.fetch_sub(1, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_cloudflare_peers_may_name_the_client() {
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("9.9.9.9"));
+        let edge: SocketAddr = "172.64.1.2:443".parse().unwrap();
+        let direct: SocketAddr = "5.6.7.8:443".parse().unwrap();
+        assert_eq!(
+            client_ip(&headers, edge),
+            "9.9.9.9".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(
+            client_ip(&headers, direct),
+            direct.ip(),
+            "a spoofed header is ignored"
+        );
+        let edge6: SocketAddr = "[2606:4700::1]:443".parse().unwrap();
+        assert_eq!(
+            client_ip(&headers, edge6),
+            "9.9.9.9".parse::<IpAddr>().unwrap()
+        );
+    }
 }
