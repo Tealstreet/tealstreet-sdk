@@ -135,7 +135,7 @@ fn clean(value: f64) -> f64 {
 pub(crate) fn nearest(value: f64, step: f64) -> f64 {
     clean(js_round(value / step) * step)
 }
-fn adjust(value: f64, step: f64) -> f64 {
+pub(crate) fn adjust(value: f64, step: f64) -> f64 {
     let rounded = js_round(value * (1. / step)) / (1. / step);
     // TS adjust rounds once more to the number of decimals in the lot step.
     let mut decimals = 0;
