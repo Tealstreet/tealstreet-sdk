@@ -15,7 +15,7 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'binance', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex']);
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_391 * 1_024);
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_403 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_952, 'venue', 'asterdex'), undefined);
@@ -33,8 +33,10 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_422_195, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_422_336, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_423_639, 'venue', 'asterdex'), undefined);
-  assert.equal(wasmBudgetError(1_424_384, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_424_385, 'venue', 'asterdex'), /exceeds 1424384/);
+  // Cutover 10-29: release run 40863850081 measured 1,434,289 B.
+  assert.equal(wasmBudgetError(1_434_289, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_436_672, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(1_436_673, 'venue', 'asterdex'), /exceeds 1436672/);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], 1454 * 1024);
     assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1456 * 1024);

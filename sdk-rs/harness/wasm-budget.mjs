@@ -58,7 +58,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #2356 European Options cutover: local optimized Binance family 1,448,609 B;
 // #2368 links the advertised Options decoders: 1,460,760 B locally; ddi ruled
 // ceil KiB + 2 KiB (1429 KiB). Split Options from the family after cutover.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ binance: 1_463_296, hyperliquid: 1_376_256, hyperliquidspot: 1_376_256, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_405_952 });
+// Cutover 10-29: asterdex raised to 1403 KiB (release run 40863850081 measured 1,434,289 B).
+export const WASM_VENUE_OVERRIDES = Object.freeze({ binance: 1_463_296, hyperliquid: 1_376_256, hyperliquidspot: 1_376_256, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_436_672, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_405_952 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
