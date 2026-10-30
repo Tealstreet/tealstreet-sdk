@@ -36,8 +36,10 @@ HTTP groups are not attributed: they report no `sent`/`response`.
 
 **Callers.**
 - SDK: tests that record `host.command` arguments now record only the command.
-- NX: none. The NX worker listener already forwards `engine-event` (#8334) and
-  `log`. `host.mjs` reaches NX as mirrored source, so no wasm release is needed.
+- NX: no code change. The NX worker listener already forwards `engine-event`
+  (#8334) and `log`.
+- Release: `sdk-rs/hosts/wasm/js` is a beta-wasm fingerprint input. Once this
+  is mirrored, NX needs a wasm release and repin at 8ec5498279a or later.
 
 **Obligation.** A new writer placement (19pt8s) uses the same helper:
 `runWithWriteTiming` on the writer side, marks in its RPC, and
