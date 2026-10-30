@@ -190,6 +190,7 @@ async fn run_nuke(mode: &'static str, stall: bool) -> (Value, Vec<String>) {
         }),
         None,
         safe_cex_exchange_server::accounts::PlacedSymbols::default(),
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         inbox_rx,
     ));
     // Let the feed take its join snapshot so the store holds the order and position.

@@ -389,7 +389,16 @@ pub fn balance_info(payload: Option<&Value>, tier: Option<&Value>) -> Option<Val
     info
 }
 
-async fn sync_balance_info(port: Rc<Port>, name: String, payload: bool, tier: bool) {
+/// Engine cache reads (Bybit's last wallet poll, Lighter's last limits read): no
+/// venue request, so no egress weight. Still skipped while no live socket holds
+/// the account, since nobody would receive the result.
+async fn sync_balance_info(
+    port: Rc<Port>,
+    name: String,
+    held: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    payload: bool,
+    tier: bool,
+) {
     let mut every = tokio::time::interval(BALANCE_INFO_EVERY);
     let (mut info_payload, mut tier_name) = (None, None);
     let mut sent = None::<Value>;
@@ -397,8 +406,12 @@ async fn sync_balance_info(port: Rc<Port>, name: String, payload: bool, tier: bo
     loop {
         every.tick().await;
         tick = tick.wrapping_add(1);
-        // As TS: only once the account has started.
-        if !port.store().loaded.is_some_and(|loaded| loaded.balance) {
+        // As TS: only once the account has started; and only for a live holder.
+        if !port.store().loaded.is_some_and(|loaded| loaded.balance)
+            || !held.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            // A socket that comes back gets the current info at once.
+            sent = None;
             continue;
         }
         if payload && let Some(read) = venue_read(&port, VenueAction::FetchBalanceInfo).await {
@@ -421,6 +434,7 @@ async fn sync_balance_info(port: Rc<Port>, name: String, payload: bool, tier: bo
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     handle: AccountHandle,
     client: u64,
@@ -428,6 +442,7 @@ pub async fn run(
     emit: Emit,
     link_signer: Option<std::sync::Arc<safe_cex_remote_signer::SignerLink>>,
     placed: crate::accounts::PlacedSymbols,
+    held: std::sync::Arc<std::sync::atomic::AtomicBool>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     let Ok(mut feed) = Feed::join(handle.clone(), client).await else {
@@ -492,6 +507,7 @@ pub async fn run(
         cx.spawn(sync_balance_info(
             port.clone(),
             name.clone(),
+            held,
             capabilities.balance_info,
             capabilities.account_tier,
         ));
