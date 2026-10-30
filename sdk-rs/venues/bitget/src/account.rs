@@ -149,8 +149,9 @@ pub struct Account {
     last_payload: f64,
     write_check: Option<(TimerId, f64)>,
     degraded: bool,
-    /// When positions, balance and orders were last read over REST while live.
-    last_account_read_at: f64,
+    /// When positions, balance and orders were last read over REST while live;
+    /// `None` after each (re)login, so the first live poll covers the gap.
+    last_account_read_at: Option<f64>,
 }
 
 impl Account {
@@ -1621,6 +1622,7 @@ impl BitgetFutures {
                     return;
                 }
                 self.account.authenticated = true;
+                self.account.last_account_read_at = None;
                 self.account.unanswered_closes = 0;
                 self.account.route_refusals = 0;
                 self.account.route_refused = None;
@@ -2187,12 +2189,15 @@ impl BitgetFutures {
                 // Positions, balance and orders stream on the private topics; REST is the
                 // 60 s safety reconcile, plus positions while one is open (the margin
                 // uPnL is the venue's position PnL, and topics may push only on changes).
-                let reconcile = cx.now - self.account.last_account_read_at >= SAFETY_RECONCILE_MS;
+                let reconcile = self
+                    .account
+                    .last_account_read_at
+                    .is_none_or(|at| cx.now - at >= SAFETY_RECONCILE_MS);
                 if reconcile || cx.store.positions().iter().any(|p| p.contracts > 0.0) {
                     self.refresh_positions(cx);
                 }
                 if reconcile {
-                    self.account.last_account_read_at = cx.now;
+                    self.account.last_account_read_at = Some(cx.now);
                     self.refresh_balance(cx);
                     self.refresh_orders(cx, !self.account.uta);
                 }
