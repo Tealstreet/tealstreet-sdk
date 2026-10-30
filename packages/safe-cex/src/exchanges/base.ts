@@ -82,6 +82,7 @@ import { InProcessPublicDataProvider } from './in-process-public-data';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { FrameApplier, FrameApplyError } from '../store/frameApplier';
 import { ExchangeEmitter } from './exchangeEmitter';
+import { claimWriteTiming, emitWriteTiming, TIMED_WRITE_METHODS } from '../writeTiming';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -1792,18 +1793,24 @@ export class BaseExchange implements Exchange {
     ...args: Parameters<this[M]>
   ): Promise<ReturnType<this[M]>> => {
     const requestId = nanoid();
+    const timing = TIMED_WRITE_METHODS.has(method) ? claimWriteTiming(method).timing : undefined;
 
     return new Promise<ReturnType<this[M]>>((resolve, reject) => {
       const timeout = setTimeout(() => {
         // Timeout path must also remove the listener, otherwise every timed-out
         // call leaks a handleDone closure permanently attached to the emitter.
         this.emitter.off('callMethod:done', handleDone);
+        if (timing) emitWriteTiming(this, timing, 'error');
         reject(this.workerCommandTimeoutError(method, args));
       }, this.workerCommandTimeoutMs(method));
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);
           this.emitter.off('callMethod:done', handleDone);
+          if (timing) {
+            Object.assign(timing.marks, event.timing);
+            emitWriteTiming(this, timing, event.success ? 'ok' : 'error');
+          }
           if (event.success) {
             const result = withHistoryCompleteness(event.result, event.completeness);
             resolve(result);
@@ -1815,7 +1822,7 @@ export class BaseExchange implements Exchange {
       };
       this.emitter.on('callMethod:done', handleDone);
       try {
-        this.emitter.dispatch('callMethod', { method, args, requestId });
+        this.emitter.dispatch('callMethod', { method, args, requestId, ...(timing ? { timing: timing.marks } : {}) });
       } catch (error) {
         clearTimeout(timeout);
         this.emitter.off('callMethod:done', handleDone);

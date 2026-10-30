@@ -363,6 +363,9 @@ export class EngineHost {
     this.socketStats = { public: socketStats(), business: socketStats(), private: socketStats() };
     this.timers = new Map();
     this.commands = new Map();
+    // Timed commands owning a sign attempt, HTTP request or managed preparation.
+    this.stageCauses = new Map();
+    this.stageCause = undefined;
     this.requests = new Map();
     this.managedHttp = new ManagedHttp(this);
     this.socketFailures = new Map();
@@ -448,6 +451,7 @@ export class EngineHost {
     if (this.disposed) return Promise.reject(this.deadError ?? new EngineDisposedError());
     let timeoutMs;
     let onEvent;
+    let onStage;
     try {
       if (command.op === 'scheduleCancel' && command.time != null
           && (!Number.isSafeInteger(command.time) || command.time < 0)) {
@@ -457,6 +461,8 @@ export class EngineHost {
       timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs);
       onEvent = options?.onEvent;
       if (onEvent !== undefined && typeof onEvent !== 'function') throw new TypeError('Command event observer must be a function');
+      onStage = options?.onStage;
+      if (onStage !== undefined && typeof onStage !== 'function') throw new TypeError('Command stage observer must be a function');
     } catch (error) { return Promise.reject(error); }
     const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
@@ -472,13 +478,15 @@ export class EngineHost {
     } catch (error) { return Promise.reject(error); }
     const promise = reply === undefined
       ? Promise.resolve()
-      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent }));
+      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent, onStage }));
     try {
       const startedAt = this.transport.now();
       // Reply commands carry the caller's effective wait; the engine bounds
       // work that should not outlive it (RUST_COMMAND_TIMEOUT.md).
       const json = JSON.stringify(reply === undefined ? command : { ...command, command: reply, timeoutMs });
-      this.run(this.invoke(this.engine.command, json, startedAt));
+      const actions = this.invoke(this.engine.command, json, startedAt);
+      this.stage(reply, 'accepted');
+      this.runFor(reply, actions);
       if (reply === undefined && this.deadError) return Promise.reject(this.deadError);
       const pending = this.commands.get(reply);
       if (pending) {
@@ -519,11 +527,33 @@ export class EngineHost {
     return promise;
   }
 
+  /** Stamps a timed command's stage; observers cannot change the command. */
+  stage(command, name) {
+    const onStage = command === undefined ? undefined : this.commands.get(command)?.onStage;
+    if (!onStage) return;
+    try { onStage(name); } catch { /* Timing is diagnostic only. */ }
+  }
+
+  /** Records that the running timed command owns `key` (a sign, request or preparation). */
+  ownStage(key) {
+    const cause = this.stageCause;
+    if (cause !== undefined && this.commands.get(cause)?.onStage) this.stageCauses.set(key, cause);
+    return cause;
+  }
+
+  /** Runs actions on behalf of a timed command, so what they start is attributed to it. */
+  runFor(cause, actionsJson) {
+    const outer = this.stageCause;
+    this.stageCause = cause;
+    try { this.run(actionsJson); } finally { this.stageCause = outer; }
+  }
+
   settleCommand(id, value, rejected = false) {
     this.assertHttpHandoffIdle();
     const pending = this.commands.get(id);
     if (!pending) return;
     this.commands.delete(id);
+    for (const [key, cause] of this.stageCauses) if (cause === id) this.stageCauses.delete(key);
     try { pending.clearDeadline?.(); } catch { /* A timer adapter cannot strand the caller. */ }
     if (rejected) pending.reject(value);
     else pending.resolve(value);
@@ -691,13 +721,17 @@ export class EngineHost {
     this.assertHttpHandoffIdle();
     if (this.disposed || !active()) return;
     const { engine, transport } = this;
-    this.run(this.invoke(engine.httpStart, id, status, headers, transport.now()));
+    const cause = this.stageCauses.get(`http:${id}`);
+    this.stageCauses.delete(`http:${id}`);
+    this.stage(cause, 'response');
+    const run = (actions) => this.runFor(cause, actions);
+    run(this.invoke(engine.httpStart, id, status, headers, transport.now()));
     if (this.disposed || !active()) return;
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
           if (this.disposed || !active()) return;
-          this.run(this.invoke(engine.httpChunk, id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
+          run(this.invoke(engine.httpChunk, id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
           if (this.disposed || !active()) return;
         }
       } else {
@@ -705,18 +739,18 @@ export class EngineHost {
           if (this.disposed || !active()) return;
           for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
             if (this.disposed || !active()) return;
-            this.run(this.invoke(engine.httpChunk, id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
+            run(this.invoke(engine.httpChunk, id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
             if (this.disposed || !active()) return;
           }
         }
       }
     } catch {
       if (this.disposed || !active()) return;
-      this.run(this.invoke(engine.httpFailed, id, 'HTTP response body failed', transport.now()));
+      run(this.invoke(engine.httpFailed, id, 'HTTP response body failed', transport.now()));
       return;
     }
     if (this.disposed || !active()) return;
-    this.run(this.invoke(engine.httpEnd, id, transport.now()));
+    run(this.invoke(engine.httpEnd, id, transport.now()));
   }
 
   async request(action) {
@@ -739,6 +773,7 @@ export class EngineHost {
       if (!this.disposed) this.run(this.invoke(this.engine.httpFailed, id, 'HTTP transport request failed', this.transport.now()));
     } finally {
       this.requests.delete(id);
+      this.stageCauses.delete(`http:${id}`);
     }
   }
 
@@ -845,12 +880,15 @@ export class EngineHost {
       // An ordinary export failure leaves the legacy context intact.
     }
     if (this.disposed) return;
+    const cause = this.ownStage(`sign:${id}`);
     const pending = this.primitiveSigning(action.work, action.timeoutMs,
       this.signer && ((context) => this.signer(action.work, meta ? { ...context, meta } : context)), (result, code) => {
         if (this.primitiveSignings.get(id) !== pending || this.disposed) return;
         this.primitiveSignings.delete(id);
-        if (code) this.run(this.invoke(this.engine.signFailed, id, code, this.transport.now()));
-        else this.run(this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
+        this.stageCauses.delete(`sign:${id}`);
+        if (!code) this.stage(cause, 'signed');
+        if (code) this.runFor(cause, this.invoke(this.engine.signFailed, id, code, this.transport.now()));
+        else this.runFor(cause, this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
       });
     this.primitiveSignings.set(id, pending);
     this.signingJoins.set(id, pending.joined);
@@ -1149,6 +1187,7 @@ export class EngineHost {
         this.managedHttp.execute(action);
         break;
       case 'http': {
+        this.stage(this.ownStage(`http:${action.request}`), 'sent');
         void this.request(action);
         break;
       }
@@ -1240,6 +1279,7 @@ export class EngineHost {
         break;
       }
       case 'done': {
+        this.stage(action.command, 'reply');
         const pending = this.commands.get(action.command);
         if (!pending) {
           // Late definitive results close the receipt stream without a tombstone.
