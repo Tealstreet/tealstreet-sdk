@@ -15,7 +15,6 @@ safe-cex-native.workspace = true
 safe-cex-venues = { workspace = true, features = ["default"] }
 serde.workspace = true
 serde_json.workspace = true
-ryu-js.workspace = true
 form_urlencoded = "1.2.2"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "query"] }
 tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "net", "process", "io-util", "signal"] }

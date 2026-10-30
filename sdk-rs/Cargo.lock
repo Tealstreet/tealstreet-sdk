@@ -3838,7 +3838,6 @@ dependencies = [
  "axum",
  "form_urlencoded",
  "redis",
- "ryu-js",
  "safe-cex-engine",
  "safe-cex-native",
  "safe-cex-venues",
