@@ -14,7 +14,6 @@ export type RequestsLogEvent = 'grafana-http-request' | 'grafana-http-response' 
 const BODY_CHARS = 4096;
 /** Enough of a body to redact as whole JSON before the log entry is capped. */
 const OBSERVED_CHARS = BODY_CHARS * 4;
-const text = new TextDecoder();
 
 const capped = (value: string) =>
   value.length <= BODY_CHARS ? value : `${value.slice(0, BODY_CHARS)}...truncated (${value.length} chars)`;
@@ -28,6 +27,9 @@ const describe = (request: HttpPacket) => {
 
 /** The response with its body observed, so the log entry is written once the body completes. */
 const observed = (response: HttpResponse, done: (body: string) => void): HttpResponse => {
+  // Per response, never at import: the React Native registry loads without
+  // codecs, and a streaming decoder must not share state across bodies.
+  const text = new TextDecoder();
   if (response.body instanceof Uint8Array) {
     done(text.decode(response.body.subarray(0, OBSERVED_CHARS)));
     return response;
