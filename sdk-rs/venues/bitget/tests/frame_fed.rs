@@ -246,3 +246,33 @@ fn cancel_all_keeps_the_local_request_sequence() {
     assert_eq!(page_writes, local_writes);
     assert!(drain(&mut h).is_empty(), "and no read on the page engine");
 }
+
+#[test]
+fn an_amend_without_a_new_id_resolves_it_with_its_own_lookup_as_local() {
+    // The ORDER_DETAIL read is part of the amend in LOCAL, so it stays.
+    let mut h = fed();
+    h.command(Command::AmendOrder {
+        command: 10,
+        id: "1".into(),
+        price: Some(91.0),
+        amount: None,
+    });
+    let modify = h.take("/modify-order");
+    assert!(h.requests.is_empty(), "{:?}", h.requests);
+    h.reply(modify.id, 200, r#"{"code":"00000","data":{"orderId":"1"}}"#);
+    let lookup = h.take("/order/detail");
+    assert_eq!(lookup.method, Method::Get);
+    h.reply(
+        lookup.id,
+        200,
+        r#"{"code":"00000","data":{"orderId":"2","baseVolume":"0","status":"live"}}"#,
+    );
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 10 && result.is_ok()),
+        "{:?}",
+        h.done
+    );
+    assert!(drain(&mut h).is_empty(), "nothing after the amend settles");
+}
