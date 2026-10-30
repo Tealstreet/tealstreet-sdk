@@ -57,3 +57,53 @@ also stays as the CLI. Deleting the TS venue reference implementations under
 3. B: replace the LOCAL worker with a Rust frame source, then delete the B
    rows. The open B blockers are the three cli-core and NX consumers named
    above.
+
+## Proposal: where post-processor outputs live (blocker 3)
+
+Proposal only, not yet approved. It covers `displayedPositions`,
+`displayedMargin`, `ordersRisk` and the NX snapshot upload.
+
+**Run the independent post-processors on the page, over the page engine's
+store. Hosted mode already does this.** NX `hostedFrameClient.ts` builds
+`independentPostprocessors` per account on the main thread (:68-72) and runs
+them on every hosted frame (:192). The snapshot upload is already a registered
+independent post-processor that runs there. LOCAL would use the same path, so
+every runtime computes these fields the same way and in the same place.
+
+- **What moves:** `BasePostprocessor`, the `independentPostprocessors` list
+  with `registerIndependentPostprocessor`, and the five independent classes.
+  The classes are DisplayedPositions, DisplayedMargin, OrdersRiskProfile and
+  the Chaser/Twap enrichment pair. They move out of `webworker/` (for example to
+  `src/postProcessors/`) unchanged. They are pure functions of `StoreData` plus
+  account context, which is the registry's own definition of
+  "independent".
+- **Where they run:** after each frame the page engine applies, throttled to
+  the worker's current 250 ms (`tuning.dataUpdateThrottleMultiplier`). They
+  write the derived fields into the page's `store.base`. `FrameApplier` never
+  writes those fields, so a later frame can't overwrite them. Run order stays
+  DisplayedPositions before DisplayedMargin.
+- **State:** DisplayedPositions keeps 1m/5m PnL baselines per position
+  (`TimeLimitedQueue`, :136-137), and the OrdersRisk/DisplayedPositions map
+  caches are per instance. So there is one instance set per account on the
+  page, created with the page engine and dropped with it. That matches hosted
+  mode. A page reload loses the baselines, as a worker restart does today.
+- **Snapshot upload:** no change. It stays an NX-registered independent
+  post-processor (it posts to Tealstreet routes, which the OSS package must
+  not do). It already runs on the main thread in hosted mode.
+- **Cost:** the main thread takes on what the worker did at 4 Hz. Hosted users
+  pay this today; measure LOCAL on the largest account (Bybit linear) before
+  cutover. If it is too slow, move `calculateOrdersRisk` first, either to a
+  Rust derivation or by keeping it off the render path.
+
+**Not chosen: compute them in Rust and ship them in frames.** That would port
+`utils/risk.ts` and the displayed-position derivation, add frame sections, and
+grow every family's wasm, where several have only about 10 KB of headroom. It
+would also leave the snapshot upload on the host anyway.
+
+**Exchange-dependent post-processors:**
+- `activeChasers` and `activeTWAPs` come from the algo engine. Once algos run
+  in Rust (B), their state arrives in frames, and the Chaser/Twap
+  post-processors go.
+- `MessageHandlerStatsPostprocessor` measures the TS worker's message handlers.
+  With the worker gone it has nothing to measure; the engine's `getHealth()`
+  counters replace it.
