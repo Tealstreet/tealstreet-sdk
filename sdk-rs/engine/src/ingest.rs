@@ -9,6 +9,8 @@
 //! symbols through it, never to this engine's own indexes.
 //!
 //! Each section has its own decoder below; one not yet implemented is skipped.
+#[cfg(any(test, feature = "source-leverage"))]
+use crate::model::MinMax;
 use crate::model::{Balance, CoinBalance, CurrencyBalance, MarginType, Ticker};
 use crate::store::{MarketSetting, Store};
 use crate::wire::{FORMAT, MAGIC, NONE, TICKER_COLUMNS, section};
@@ -162,6 +164,13 @@ pub struct IngestState {
     pub source_market_ids: Vec<String>,
     /// The source's ticker symbols, by its ticker row (`TICKER_DELTAS` indexes these).
     pub source_tickers: Vec<String>,
+    /// The source's leverage limits, by its market index: private metadata
+    /// (Binance leverage brackets) this engine's public instrument read lacks.
+    #[cfg(any(test, feature = "source-leverage"))]
+    pub source_leverage: Vec<MinMax>,
+    /// Source leverage not yet applied to this engine's own markets.
+    #[cfg(any(test, feature = "source-leverage"))]
+    leverage_pending: bool,
 }
 
 impl IngestState {
@@ -201,6 +210,10 @@ pub fn apply(
     // MARKETS first: every other section indexes the source's table.
     for section in frame.sections.iter().filter(|s| s.kind == section::MARKETS) {
         markets(state, frame, section)?;
+    }
+    #[cfg(any(test, feature = "source-leverage"))]
+    if state.leverage_pending {
+        apply_leverage(store, state);
     }
     for section in &frame.sections {
         match section.kind {
@@ -268,13 +281,71 @@ fn markets(
     // Flags, then ten f64 columns (and revision 1's pretty-symbol refs).
     cursor.bytes(4 * count)?;
     cursor.align8();
+    let columns = cursor.at;
     cursor.bytes(8 * 10 * count)?;
     if section.revision >= 1 {
         cursor.bytes(4 * count)?;
     }
     state.source_markets = symbols;
     state.source_market_ids = ids;
+    #[cfg(any(test, feature = "source-leverage"))]
+    source_leverage(state, section.payload, columns, count)?;
+    #[cfg(not(any(test, feature = "source-leverage")))]
+    let _ = columns;
     Ok(())
+}
+
+/// Keep the source's leverage limits (MARKETS columns four and five).
+#[cfg(any(test, feature = "source-leverage"))]
+fn source_leverage(
+    state: &mut IngestState,
+    payload: &[u8],
+    columns: usize,
+    count: usize,
+) -> Result<(), IngestError> {
+    let mut cursor = Cursor::new(payload);
+    cursor.at = columns + 8 * 4 * count;
+    let mut column = || {
+        (0..count)
+            .map(|_| cursor.f64())
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let (min, max) = (column()?, column()?);
+    state.source_leverage = min
+        .into_iter()
+        .zip(max)
+        .map(|(min, max)| MinMax { min, max })
+        .collect();
+    state.leverage_pending = true;
+    Ok(())
+}
+
+/// Give this engine's markets the source's leverage limits, once its own
+/// instrument read has loaded them; until then each frame tries again.
+#[cfg(any(test, feature = "source-leverage"))]
+fn apply_leverage(store: &mut Store, state: &mut IngestState) {
+    if !store.loaded().markets {
+        return;
+    }
+    let limits: std::collections::HashMap<&str, MinMax> = state
+        .source_markets
+        .iter()
+        .map(String::as_str)
+        .zip(state.source_leverage.iter().copied())
+        .collect();
+    let changed = store.markets().iter().any(|market| {
+        limits
+            .get(market.symbol.as_str())
+            .is_some_and(|limit| *limit != market.limits.leverage)
+    });
+    if changed {
+        store.update_markets(|market| {
+            if let Some(limit) = limits.get(market.symbol.as_str()) {
+                market.limits.leverage = *limit;
+            }
+        });
+    }
+    state.leverage_pending = false;
 }
 
 /// A ticker's numeric fields in `store::TICKER_FIELDS` order; midpoint `NaN` is absent.
@@ -1273,6 +1344,36 @@ pub(crate) mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn source_leverage_limits_reach_this_engines_markets_once_they_load() {
+        let mut source = Store::default();
+        let mut bracketed = market("BTCUSDT");
+        bracketed.limits.leverage = MinMax { min: 1., max: 125. };
+        source.set_markets(vec![bracketed, market("ETHUSDT")]);
+        // This engine's own public read knows no brackets.
+        let public = |symbol| {
+            let mut market = market(symbol);
+            market.limits.leverage = MinMax { min: 1., max: 1. };
+            market
+        };
+        let (mut store, mut state) = (Store::default(), IngestState::default());
+        ingest(&mut source, &mut state, &mut store, true);
+        assert!(store.markets().is_empty());
+
+        store.set_markets(vec![
+            public("ETHUSDT"),
+            public("BTCUSDT"),
+            public("SOLUSDT"),
+        ]);
+        source.set_balance(Balance::default());
+        ingest(&mut source, &mut state, &mut store, false);
+        let leverage = |symbol| store.market(symbol).unwrap().limits.leverage;
+        assert_eq!(leverage("BTCUSDT"), MinMax { min: 1., max: 125. });
+        assert_eq!(leverage("ETHUSDT"), MinMax { min: 1., max: 100. });
+        // A market the source does not list keeps its own limits.
+        assert_eq!(leverage("SOLUSDT"), MinMax { min: 1., max: 1. });
     }
 
     #[test]

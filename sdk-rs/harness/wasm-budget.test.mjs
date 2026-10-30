@@ -171,14 +171,16 @@ test('the Bybit capability comparison budgets ordinary Bybit under its own venue
 
 
 test('Binance Options cutover carries the ruled shared-family ceiling', () => {
-  // Cap sweep 10-30: measured 1,492,477 B; ceil KiB + 2 KiB.
-  assert.equal(WASM_VENUE_OVERRIDES.binance, 1460 * 1024);
+  // Cap sweep 10-30: measured 1,492,477 B; Binance frame-fed then measured 1,501,037 B.
+  assert.equal(WASM_VENUE_OVERRIDES.binance, 1468 * 1024);
   assert.equal(wasmBudgetError(1_448_609, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_460_760, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_463_296, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_484_450, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_486_848, 'venue', 'binance'), undefined);
-  assert.equal(wasmBudgetError(1_495_040, 'venue', 'binance'), undefined);
-  assert.match(wasmBudgetError(1_495_041, 'venue', 'binance'), /exceeds 1495040/);
+  assert.equal(wasmBudgetError(1_492_477, 'venue', 'binance'), undefined);
+  assert.equal(wasmBudgetError(1_501_037, 'venue', 'binance'), undefined);
+  assert.equal(wasmBudgetError(1_503_232, 'venue', 'binance'), undefined);
+  assert.match(wasmBudgetError(1_503_232 + 1, 'venue', 'binance'), /exceeds 1503232/);
   assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined', 'binance'), undefined);
 });

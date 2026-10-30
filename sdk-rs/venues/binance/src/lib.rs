@@ -715,6 +715,11 @@ impl BinanceFutures {
         } else {
             self.discovery.succeeded(cx, &0);
         }
+        // A frame-fed engine loads public instrument metadata only: its data
+        // source supplies the account, leverage brackets and tickers in frames.
+        if cx.frame_fed() {
+            return;
+        }
         if self.credentials.has_primary() {
             self.start_account(cx);
         }
@@ -1323,6 +1328,18 @@ impl Venue for BinanceFutures {
     }
     // An Unknown placement fences its symbol until a fresh, clean open-orders
     // snapshot (`reconcile_orders`) proves what landed.
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.export_limit_stops())
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        if !self.apply_limit_stops(state) {
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                "Unreadable Binance venue state from the data source",
+            );
+        }
+    }
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
