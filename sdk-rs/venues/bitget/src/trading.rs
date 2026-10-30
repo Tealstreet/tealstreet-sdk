@@ -2421,15 +2421,8 @@ impl BitgetFutures {
                     );
                     answer = Answer::Accepted(vec![next.clone()]);
                     job.ids.push(next);
-                } else if cx.frame_fed() {
-                    // No read here: the amend went through, its new order arrives as frames.
-                    let error = VenueError::new(
-                        "Bitget amended the order; its new identity arrives with the account stream",
-                    )
-                    .outcome(Outcome::Unknown);
-                    self.end(cx, job, current, error);
-                    return;
                 } else {
+                    // Frame-fed too: this read is part of the amend's own sequence, as LOCAL.
                     job.calls.push_front(Planned {
                         path: paths::ORDER_DETAIL,
                         payload: Payload {
