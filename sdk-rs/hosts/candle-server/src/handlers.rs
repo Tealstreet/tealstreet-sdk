@@ -713,7 +713,7 @@ mod tests {
     }
 
     #[test]
-    fn length_limits_count_utf16_units_like_the_ts_server() {
+    fn length_limits_count_ts_string_units() {
         // Golden lengths from node's `String.prototype.length`.
         for (text, units) in [("BTCUSDT", 7), ("é", 1), ("😀", 2), ("é😀A", 4)] {
             assert_eq!(utf16_len(text), units, "{text}");
