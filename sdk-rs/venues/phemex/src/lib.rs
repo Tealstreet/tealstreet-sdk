@@ -567,8 +567,11 @@ impl Venue for PhemexPerpetuals {
             .iter()
             .filter_map(|order| order.client_order_id.clone())
             .collect();
-        self.account
-            .frame_ingested(cx.store.loaded().orders, &client_ids);
+        self.account.frame_ingested(
+            cx.source_orders_cover().is_some(),
+            cx.store.loaded().orders,
+            &client_ids,
+        );
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         self.settle_retired_trading(cx);

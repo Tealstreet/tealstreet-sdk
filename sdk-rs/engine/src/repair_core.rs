@@ -670,6 +670,19 @@ impl<P> Cx<'_, P> {
                     return Err(RepairRefusal::Invalid);
                 }
             }
+            Retire::SourceOrders { since } => {
+                if self
+                    .io
+                    .core
+                    .source_orders_cover
+                    .is_none_or(|cover| cover < since)
+                {
+                    return Err(RepairRefusal::NotData);
+                }
+                if orders.next().is_some() {
+                    return Err(RepairRefusal::Invalid);
+                }
+            }
             Retire::CompleteRead(receipt) => {
                 let minted = repairs.grants[grant].minted;
                 let Some(read) = self.current_receipt(receipt) else {
