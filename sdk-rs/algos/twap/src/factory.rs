@@ -4,7 +4,6 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Duration;
 
 use safe_cex_algos::{AlgoCx, AlgoFactory};
 use safe_cex_chaser::{ChaserBook, ChaserOptions};
@@ -177,8 +176,8 @@ impl Inner {
                     None => inner.rescheduled.notified().await,
                     Some(due_at) => {
                         let wait = (due_at - cx.now_ms()).max(0.0);
-                        let woken = tokio::time::timeout(
-                            Duration::from_millis(wait.ceil() as u64),
+                        let woken = safe_cex_algos::executor::timeout(
+                            wait.ceil() as u64,
                             inner.rescheduled.notified(),
                         )
                         .await;

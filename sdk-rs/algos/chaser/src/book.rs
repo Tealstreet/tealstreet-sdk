@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Duration;
 
+use safe_cex_algos::executor::Instant;
 use safe_cex_algos::{AlgoCx, AlgoStore, Change};
 use safe_cex_engine::engine::{Command, Query};
 use safe_cex_engine::error::{Outcome, VenueError};
@@ -9,7 +9,6 @@ use safe_cex_engine::model::{
     CancelOrderRef, Order, OrderSide, OrderStatus, PlaceOrderOpts, RejectReason,
 };
 use serde::Deserialize;
-use tokio::time::Instant;
 
 use crate::chase::{
     ActiveChaser, Chase, ChaserComplete, ChaserOptions, Dirty, adjust, placement_filled,
@@ -394,10 +393,7 @@ impl ChaserBook {
             {
                 let elapsed = at.elapsed().as_millis() as u64;
                 if elapsed < PRICE_CHECK_MIN_INTERVAL_MS {
-                    tokio::time::sleep(Duration::from_millis(
-                        PRICE_CHECK_MIN_INTERVAL_MS - elapsed,
-                    ))
-                    .await;
+                    safe_cex_algos::executor::sleep_ms(PRICE_CHECK_MIN_INTERVAL_MS - elapsed).await;
                     chase.take_dirty();
                 }
             }

@@ -338,7 +338,7 @@ pub(crate) async fn run(
             sustain,
             symbol,
         } => {
-            let start = tokio::time::Instant::now();
+            let start = safe_cex_algos::executor::Instant::now();
             let mut held = None;
             loop {
                 let elapsed = start.elapsed().as_secs_f64() * 1000.;
