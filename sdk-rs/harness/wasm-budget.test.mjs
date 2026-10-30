@@ -160,7 +160,7 @@ test('the Bybit capability comparison budgets ordinary Bybit under its own venue
 
 
 test('Binance Options cutover carries the ruled shared-family ceiling', () => {
-  assert.equal(WASM_VENUE_OVERRIDES.binance, 1461 * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.binance, 1468 * 1024);
   assert.equal(wasmBudgetError(1_448_609, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_460_760, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_463_296, 'venue', 'binance'), undefined);
@@ -168,6 +168,8 @@ test('Binance Options cutover carries the ruled shared-family ceiling', () => {
   assert.equal(wasmBudgetError(1_486_848, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_493_539, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_496_064, 'venue', 'binance'), undefined);
-  assert.match(wasmBudgetError(1_496_065, 'venue', 'binance'), /exceeds 1496064/);
+  assert.equal(wasmBudgetError(1_500_771, 'venue', 'binance'), undefined);
+  assert.equal(wasmBudgetError(1_503_232, 'venue', 'binance'), undefined);
+  assert.match(wasmBudgetError(1_503_233, 'venue', 'binance'), /exceeds 1503232/);
   assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined', 'binance'), undefined);
 });
