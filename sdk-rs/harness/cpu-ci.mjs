@@ -28,7 +28,9 @@ const insist = (ok, message) => { if (!ok) throw new Error(`CPU certification: $
 const same = isDeepStrictEqual;
 const json = (path) => parseCohortJson(readFileSync(path));
 const write = (path, value) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(value, null, 2) + '\n'); };
-const publicCases = (suite) => expectedGateCases(suite).filter((item) => item.tape.endsWith('-public.jsonl.gz'));
+// The collection's roster: every non-private case, including public tapes the
+// workflow generates (Binance Options), not only tracked public fixtures.
+export const publicCases = (suite) => expectedGateCases(suite).filter((item) => !item.tape.endsWith('-private.jsonl'));
 const artifactRef = ({ meta }) => ({ artifactId: meta.id, name: meta.name, digest: meta.digest, bytes: meta.size_in_bytes });
 const fullCase = (report) => Object.fromEntries(['venue', 'tape', 'tapeSha256', 'books', 'private', 'correctnessRuns', 'runs'].map((key) => [key, report[key]]));
 const manifest = () => json(new URL('./known-gate-failures.json', import.meta.url));

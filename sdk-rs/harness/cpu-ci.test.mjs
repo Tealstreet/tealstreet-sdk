@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle, restorePairedRawOutputs, currentPhysical } from './cpu-ci.mjs';
+import { publicCases, validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle, restorePairedRawOutputs, currentPhysical } from './cpu-ci.mjs';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -11,7 +11,7 @@ const dispositions = (decision) => [{ key: 'a'.repeat(64), decision,
   case: { ...expectedGateCases('bitget')[0], tapeSha256: 'b'.repeat(64), private: false, runs: 9, correctnessRuns: 1 } }];
 const plan = () => ({ schema: 1, runId: 1, checkoutSha: 'c'.repeat(40), suites: GATE_SUITES.map((suite, index) =>
   ({ suite, firstArtifactId: index + 2, firstArtifactDigest: 'sha256:' + 'd'.repeat(64),
-    cases: expectedGateCases(suite).filter(item => item.tape.endsWith('-public.jsonl.gz')).map((item, ordinal) => ({
+    cases: publicCases(suite).map((item, ordinal) => ({
       key: (index * 10 + ordinal).toString(16).padStart(64, '0'), decision: 'first',
       case: { ...item, tapeSha256: 'b'.repeat(64), private: false, runs: 9, correctnessRuns: 1 },
     })),
@@ -202,4 +202,12 @@ test('run 40518541502: the physical producer is re-listed until GitHub records i
     await assert.rejects(currentPhysical(x.context, name), /missing unique original physical job/);
     assert.equal(x.sleeps.length, 0);
   }
+});
+
+test('the CPU public roster includes generated public tapes and no private case', () => {
+  const binance = publicCases('binance').map((item) => `${item.venue} ${item.tape}`);
+  assert.ok(binance.includes('binanceoptions sdk-rs/harness/tapes/binanceoptions.jsonl'));
+  assert.ok(binance.includes('binance sdk-rs/harness/fixtures/binance-public.jsonl.gz'));
+  assert.ok(binance.every((item) => !item.endsWith('-private.jsonl')));
+  assert.equal(binance.length, 5);
 });
