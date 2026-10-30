@@ -6,7 +6,28 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { withRequestsLog } from '../../transport/requestsLog';
 import { setWsDiagnosticsEnabled } from '../../utils/wsDiagnostics';
 
-afterEach(() => setWsDiagnosticsEnabled(false));
+// Lets a test make redaction or the toggle check itself throw.
+const faults = vi.hoisted(() => ({ redact: false, toggle: false }));
+vi.mock('../../utils/wsDiagnostics', async (original) => {
+  const actual = await original<typeof import('../../utils/wsDiagnostics')>();
+  return {
+    ...actual,
+    redactWsDiagnosticPayload: (message: string) => {
+      if (faults.redact) throw new Error('redaction failed');
+      return actual.redactWsDiagnosticPayload(message);
+    },
+    isWsDiagnosticsEnabled: () => {
+      if (faults.toggle) throw new Error('toggle unreadable');
+      return actual.isWsDiagnosticsEnabled();
+    },
+  };
+});
+
+afterEach(() => {
+  setWsDiagnosticsEnabled(false);
+  faults.redact = false;
+  faults.toggle = false;
+});
 
 // One value per secret kind the Requests Log must never show.
 const SECRETS = {
@@ -64,12 +85,16 @@ const harness = (
 const leaked = (events: Array<[RequestsLogEvent, string]>) =>
   Object.values(SECRETS).filter((value) => events.some(([, message]) => message.includes(value)));
 
+/** Logging runs off the caller's path, one timer tick later. */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 it('logs nothing and builds nothing while the Requests Log toggle is off', async () => {
   const { transport, events, sockets } = harness();
   await transport.request(signedRequest());
   const socket = transport.connect('wss://private', { channel: 'private', onOpen() {}, onMessage() {}, onClose() {} });
   socket.send('{"op":"subscribe"}');
   sockets[0].handlers.onMessage('{"e":"ORDER_TRADE_UPDATE"}');
+  await tick();
   expect(events).toEqual([]);
 });
 
@@ -81,6 +106,7 @@ it('logs each HTTP request and response with status and timing, every secret red
   }));
   const response = await transport.request(signedRequest());
   expect(new TextDecoder().decode(response.body as Uint8Array)).toContain('orderId');
+  await tick();
   expect(events.map(([event]) => event)).toEqual(['grafana-http-request', 'grafana-http-response']);
   expect(events[0][1]).toMatch(/^Request POST https:\/\/api\.binance\.com\/api\/v3\/order\?symbol=BTCUSDT/);
   expect(events[1][1]).toMatch(/^Response POST .* 200 \{"status":200,"ms":\d+,"body":/);
@@ -91,34 +117,35 @@ it('logs each HTTP request and response with status and timing, every secret red
   }
 });
 
-it('logs a streamed body once it completes, and a managed request at dispatch', async () => {
+it("hands the caller the transport's own promise, response and stream, and never reads a streamed body", async () => {
   setWsDiagnosticsEnabled(true);
-  const { transport, events } = harness(() => ({
-    status: 400,
-    body: (async function* () {
-      yield new TextEncoder().encode('{"code":-1022,');
-      yield new TextEncoder().encode('"msg":"Signature for this request is not valid."}');
-    })(),
-  }));
-  const response = await transport.request(signedRequest());
-  expect(events).toHaveLength(1);
+  const stream = (async function* () {
+    yield new TextEncoder().encode('{"code":-1022}');
+  })();
+  const answer: HttpResponse = { status: 400, body: stream };
+  const { inner, transport, events } = harness(() => answer);
+  const pending = Promise.resolve(answer);
+  inner.request = () => pending;
+  const promise = transport.request(signedRequest());
+  expect(promise).toBe(pending);
+  const response = await promise;
+  expect(response).toBe(answer);
+  expect(response.body).toBe(stream);
+  await tick();
+  expect(events.map(([event]) => event)).toEqual(['grafana-http-request', 'grafana-http-response']);
+  expect(events[1][1]).toContain('(streamed body, not logged)');
   let body = '';
   for await (const chunk of response.body as AsyncIterable<Uint8Array>) body += new TextDecoder().decode(chunk);
-  expect(body).toContain('-1022');
-  expect(events[1][1]).toContain('-1022');
+  expect(body).toBe('{"code":-1022}');
 
   const prepared = await transport.prepareHttp!({ ...signedRequest(), intent: 'primary' });
-  const bound = prepared.bind(signedRequest());
-  expect(events).toHaveLength(2);
-  const managed = await bound.dispatch();
-  for await (const _ of managed.body as AsyncIterable<Uint8Array>) {
-    // The entry is written once the body has been read.
-  }
+  await prepared.bind(signedRequest()).dispatch();
+  await tick();
   expect(events.slice(2).map(([event]) => event)).toEqual(['grafana-http-request', 'grafana-http-response']);
   expect(leaked(events)).toEqual([]);
 });
 
-it('logs private socket frames redacted, skips heartbeats, and leaves public sockets unwrapped', () => {
+it('logs private socket frames redacted after delivering them, skips heartbeats, and leaves public sockets unwrapped', async () => {
   setWsDiagnosticsEnabled(true);
   const { transport, events, sockets } = harness();
   const delivered: string[] = [];
@@ -134,9 +161,11 @@ it('logs private socket frames redacted, skips heartbeats, and leaves public soc
   sockets[0].handlers.onMessage('{"e":"ORDER_TRADE_UPDATE","o":{"i":7}}');
   sockets[0].handlers.onMessage('pong');
   expect(delivered).toEqual(['{"e":"ORDER_TRADE_UPDATE","o":{"i":7}}', 'pong']);
+  expect(sockets[0].sent).toHaveLength(1);
+  expect(events).toEqual([]);
+  await tick();
   expect(events.map(([event]) => event)).toEqual(['grafana-pws-sub', 'grafana-pws']);
   expect(events[1][1]).toContain('ORDER_TRADE_UPDATE');
-  expect(sockets[0].sent).toHaveLength(1);
   expect(leaked(events)).toEqual([]);
 
   const handlers = { channel: 'public' as const, onOpen() {}, onMessage() {}, onClose() {} };
@@ -161,6 +190,7 @@ it('redacts token-shaped keys, query auth, any JWT, and secrets nested in a body
     headers: {},
     body: long,
   });
+  await tick();
   const logged = events.map(([, message]) => message).join('\n');
   for (const secret of [jwt, 'ACCESSVALUE', 'LIGHTERAUTHVALUE', 'REFRESHVALUE']) {
     expect(logged).not.toContain(secret);
@@ -170,59 +200,132 @@ it('redacts token-shaped keys, query auth, any JWT, and secrets nested in a body
   expect(logged).toContain('truncated');
 });
 
-it('never changes a request or frame when logging throws', async () => {
-  setWsDiagnosticsEnabled(true);
-  const answer = () => new TextEncoder().encode('{"orderId":7}');
-  let streamed = false;
-  const inner = harness(() =>
-    streamed
-      ? {
-          status: 200,
-          body: (async function* () {
-            yield answer();
-          })(),
-        }
-      : { status: 200, body: answer() },
-  ).inner;
-  const transport = withRequestsLog(inner, 'binance', () => {
-    throw new Error('log sink down');
-  });
-  const placed = await transport.request(signedRequest());
-  expect(new TextDecoder().decode(placed.body as Uint8Array)).toBe('{"orderId":7}');
-  streamed = true;
-  const read = await transport.request(signedRequest());
-  let body = '';
-  for await (const chunk of read.body as AsyncIterable<Uint8Array>) body += new TextDecoder().decode(chunk);
-  expect(body).toBe('{"orderId":7}');
+/** A Uint8Array whose copy throws: the log's only touch of the caller's bytes. */
+class UncopyableBytes extends Uint8Array {
+  slice(): never {
+    throw new Error('cannot copy');
+  }
+}
 
-  const sent: string[] = [];
-  const delivered: string[] = [];
-  let handlers: Parameters<Transport['connect']>[1] | undefined;
-  const socket = withRequestsLog(
-    { ...inner, connect: (_url, h) => ((handlers = h), { send: (text) => sent.push(text), close: () => {} }) },
-    'binance',
+it('a throw at any logging step leaves what the caller gets identical to the bare transport', async () => {
+  setWsDiagnosticsEnabled(true);
+  const bytes = new TextEncoder().encode('{"orderId":7}');
+  const failure = new Error('venue unreachable');
+  const decoder = globalThis.TextDecoder;
+  const steps: Array<{
+    name: string;
+    emit?: () => void;
+    request?: () => HttpPacket;
+    answer?: () => HttpResponse;
+    timer?: () => never;
+    before?: () => void;
+  }> = [
+    {
+      name: 'emit throws',
+      emit: () => {
+        throw new Error('log sink down');
+      },
+    },
+    {
+      name: 'reading the request throws',
+      request: () =>
+        Object.defineProperty(signedRequest(), 'body', {
+          get: () => {
+            throw new Error('getter');
+          },
+        }),
+    },
+    {
+      name: 'reading the status throws',
+      answer: () =>
+        Object.defineProperty({ body: bytes } as HttpResponse, 'status', {
+          get: () => {
+            throw new Error('getter');
+          },
+        }),
+    },
+    { name: 'copying the body throws', answer: () => ({ status: 200, body: new UncopyableBytes(bytes) }) },
+    {
+      name: 'redaction throws',
+      before: () => {
+        faults.redact = true;
+      },
+    },
+    {
+      name: 'the toggle check throws',
+      before: () => {
+        faults.toggle = true;
+      },
+    },
+    { name: 'no TextDecoder', before: () => Reflect.deleteProperty(globalThis, 'TextDecoder') },
+    {
+      name: 'TextDecoder throws',
+      before: () => {
+        globalThis.TextDecoder = class {
+          constructor() {
+            throw new Error('no codec');
+          }
+        } as unknown as typeof TextDecoder;
+      },
+    },
+    {
+      name: 'the timer throws',
+      timer: () => {
+        throw new Error('no timers');
+      },
+    },
+  ];
+  for (const step of steps) {
+    try {
+      step.before?.();
+      for (const outcome of ['answer', 'reject'] as const) {
+        const answer = step.answer?.() ?? { status: 200, body: bytes };
+        const inner = harness().inner;
+        inner.request = () => (outcome === 'answer' ? Promise.resolve(answer) : Promise.reject(failure));
+        if (step.timer) inner.setTimeout = step.timer;
+        const logged = withRequestsLog(inner, 'binance', step.emit ?? (() => {}));
+        const request = step.request?.() ?? signedRequest();
+        const settle = (promise: Promise<HttpResponse>) =>
+          promise.then(
+            (value) => ({ value }),
+            (error: unknown) => ({ error }),
+          );
+        const bare = await settle(inner.request(request));
+        const viaLog = await settle(logged.request(request));
+        expect(viaLog, step.name).toEqual(bare);
+        if ('value' in viaLog) expect(viaLog.value, step.name).toBe(answer);
+        else expect(viaLog.error, step.name).toBe(failure);
+      }
+      await tick();
+    } finally {
+      globalThis.TextDecoder = decoder;
+      faults.redact = false;
+      faults.toggle = false;
+    }
+  }
+
+  // Sockets: the handler runs and the frame is sent whatever the log does.
+  faults.redact = true;
+  for (const emit of [
+    () => {},
     () => {
       throw new Error('log sink down');
     },
-  ).connect('wss://private', { channel: 'private', onOpen() {}, onMessage: (t) => delivered.push(t), onClose() {} });
-  socket.send('{"op":"subscribe"}');
-  handlers!.onMessage('{"e":"ORDER_TRADE_UPDATE"}');
-  expect(sent).toEqual(['{"op":"subscribe"}']);
-  expect(delivered).toEqual(['{"e":"ORDER_TRADE_UPDATE"}']);
-});
-
-it('passes a response through untouched on a runtime without TextDecoder', async () => {
-  setWsDiagnosticsEnabled(true);
-  const body = new TextEncoder().encode('{"orderId":7}');
-  const { transport, events } = harness(() => ({ status: 200, body }));
-  const decoder = globalThis.TextDecoder;
-  Reflect.deleteProperty(globalThis, 'TextDecoder');
-  try {
-    const response = await transport.request(signedRequest());
-    expect(response.status).toBe(200);
-    expect(response.body).toBe(body);
-  } finally {
-    globalThis.TextDecoder = decoder;
+  ]) {
+    const { inner, sockets } = harness();
+    const delivered: string[] = [];
+    const socket = withRequestsLog(inner, 'binance', emit).connect('wss://private', {
+      channel: 'private',
+      onOpen() {},
+      onMessage: (text) => delivered.push(text),
+      onBinary: (data) => delivered.push(`binary ${data.byteLength}`),
+      onClose() {},
+    });
+    socket.send('{"op":"subscribe"}');
+    sockets[0].handlers.onMessage('{"e":"ORDER_TRADE_UPDATE"}');
+    sockets[0].handlers.onBinary!(new Uint8Array(3));
+    expect(sockets[0].sent).toEqual(['{"op":"subscribe"}']);
+    expect(delivered).toEqual(['{"e":"ORDER_TRADE_UPDATE"}', 'binary 3']);
+    await tick();
   }
-  expect(events.map(([event]) => event)).toEqual(['grafana-http-request']);
 });
