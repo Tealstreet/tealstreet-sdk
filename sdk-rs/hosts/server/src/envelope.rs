@@ -34,6 +34,15 @@ pub struct InitPayload {
     pub proxy_region: Option<String>,
     pub public_only: Option<bool>,
     pub hyperliquid_builder: Option<HyperliquidBuilder>,
+    /// The Hyperliquid vault the account trades; without it orders go to the main wallet.
+    #[serde(default, deserialize_with = "text")]
+    pub vault: Option<String>,
+    /// Bybit's regional site (`BRA_BTL` selects the Brazil host and header).
+    #[serde(default, deserialize_with = "text")]
+    pub bybit_site_id: Option<String>,
+    pub enable_spot_markets: Option<bool>,
+    pub enable_inverse_markets: Option<bool>,
+    pub enable_option_markets: Option<bool>,
     /// Diagnostics only; excluded from the init fingerprint.
     #[serde(skip_serializing)]
     pub verbose: Option<bool>,

@@ -162,6 +162,18 @@ pub struct Registry {
 }
 
 /// Engine options for a hosted account: non-secret init fields only.
+/// HyroTrader's origins are browser build configuration the server does not have;
+/// without them its engine would start with no endpoints.
+pub const HYROTRADER_UNHOSTED: &str = "HyroTrader accounts cannot run on the hosted server: its HyroTrader endpoints are not configured. Turn hosted mode off for this account.";
+
+/// A venue the server cannot run correctly is refused at init, never started degraded.
+pub fn refuse_unhosted(venue: &str) -> Result<(), String> {
+    if venue == "hyrotrader" {
+        return Err(HYROTRADER_UNHOSTED.into());
+    }
+    Ok(())
+}
+
 pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     let mut options = Map::new();
     if !public_only {
@@ -186,6 +198,24 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     }
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
+    }
+    if let Some(vault) = init.vault.as_ref().filter(|vault| !vault.is_empty())
+        && !public_only
+    {
+        options.insert("vault".into(), vault.clone().into());
+    }
+    // As the browser engine: the site and the market toggles shape public data too.
+    if let Some(site) = init.bybit_site_id.as_ref().filter(|site| !site.is_empty()) {
+        options.insert("bybitSiteId".into(), site.clone().into());
+    }
+    for (field, enabled) in [
+        ("enableSpotMarkets", init.enable_spot_markets),
+        ("enableInverseMarkets", init.enable_inverse_markets),
+        ("enableOptionMarkets", init.enable_option_markets),
+    ] {
+        if enabled == Some(true) {
+            options.insert(field.into(), true.into());
+        }
     }
     // As `isUsableBuilder`: an unusable builder falls back to the default.
     // The registry parses `feeTenthsBps` as u32, so it must go out as an integer.
@@ -226,8 +256,11 @@ pub fn prepare(
         proxy_region: init.proxy_region.clone(),
         testnet: init.testnet,
     };
+    refuse_unhosted(venue)?;
     let mut inputs =
         resolve::account_transport(venue, &transport_flags).map_err(|error| error.to_string())?;
+    // The Brazil site has its own host and `x-site-id` header.
+    inputs.bybit_site_id = init.bybit_site_id.clone().filter(|site| !site.is_empty());
     if public_only {
         inputs.public_data_only = Some(true);
         inputs.has_key = false;
@@ -685,6 +718,89 @@ mod tests {
         let public = engine_options(&init, true);
         assert!(public.get("key").is_none() && public.get("passphrase").is_none());
         assert_eq!(public["publicDataOnly"], true);
+    }
+
+    /// The browser's init frame, as ExchangeServerWorker sends it.
+    fn init_frame(fields: &str) -> InitPayload {
+        let frame = format!(
+            r#"{{"t":"init","d":{{"accountName":"a","exchangeName":"hyperliquid","key":"0xabc"{fields}}}}}"#
+        );
+        match serde_json::from_str::<crate::envelope::Inbound>(&frame).unwrap() {
+            crate::envelope::Inbound::Init(init) => *init,
+            _ => panic!("not an init"),
+        }
+    }
+
+    #[test]
+    fn venue_behaviour_fields_reach_the_engine() {
+        let init = init_frame(
+            r#","vault":"0x3333333333333333333333333333333333333333","bybitSiteId":"BRA_BTL","enableSpotMarkets":true,"enableInverseMarkets":true,"enableOptionMarkets":true,"hyperliquidBuilder":{"address":"0x4444444444444444444444444444444444444444","feeTenthsBps":10}"#,
+        );
+        let private = engine_options(&init, false);
+        assert_eq!(
+            private["vault"],
+            "0x3333333333333333333333333333333333333333"
+        );
+        assert_eq!(private["bybitSiteId"], "BRA_BTL");
+        for field in [
+            "enableSpotMarkets",
+            "enableInverseMarkets",
+            "enableOptionMarkets",
+        ] {
+            assert_eq!(private[field], true, "{field}");
+        }
+        // The registry parses the fee as u32: an integer on the wire, not 10.0.
+        assert_eq!(
+            private["hyperliquidBuilder"]["feeTenthsBps"].to_string(),
+            "10"
+        );
+        // A public account trades nothing, so it names no vault; the site still picks its host.
+        let public = engine_options(&init, true);
+        assert!(public.get("vault").is_none());
+        assert_eq!(public["bybitSiteId"], "BRA_BTL");
+    }
+
+    #[test]
+    fn absent_or_off_venue_fields_are_omitted() {
+        let init = init_frame(r#","vault":"","bybitSiteId":"","enableSpotMarkets":false"#);
+        let options = engine_options(&init, false);
+        for field in [
+            "vault",
+            "bybitSiteId",
+            "enableSpotMarkets",
+            "enableInverseMarkets",
+            "enableOptionMarkets",
+        ] {
+            assert!(options.get(field).is_none(), "{field}");
+        }
+    }
+
+    #[test]
+    fn the_venue_fields_change_the_init_fingerprint() {
+        let main = init_frame("");
+        let vault = init_frame(r#","vault":"0x3333333333333333333333333333333333333333""#);
+        assert_ne!(main.fingerprint(), vault.fingerprint());
+    }
+
+    #[test]
+    fn hosted_hyrotrader_is_refused_visibly() {
+        assert_eq!(
+            refuse_unhosted("hyrotrader"),
+            Err(HYROTRADER_UNHOSTED.to_owned())
+        );
+        assert_eq!(refuse_unhosted("bybit"), Ok(()));
+    }
+
+    #[test]
+    fn the_brazil_site_routes_to_its_host_and_header() {
+        let venue = "bybit";
+        let mut inputs = resolve::account_transport(venue, &AccountTransport::default()).unwrap();
+        inputs.bybit_site_id = Some("BRA_BTL".into());
+        let base = resolve::rest_base_url(venue, false).unwrap();
+        let plan =
+            resolve::resolve_routing_plan(venue, &inputs, base, Provider::Tealstreet).unwrap();
+        let text = serde_json::to_string(&plan).unwrap();
+        assert!(text.contains("BRA_BTL"), "{text}");
     }
 
     #[tokio::test]

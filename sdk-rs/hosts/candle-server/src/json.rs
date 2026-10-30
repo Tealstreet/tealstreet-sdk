@@ -87,10 +87,10 @@ impl Object {
 pub fn write_number(value: f64, out: &mut String) {
     if !value.is_finite() {
         out.push_str("null");
-    } else if value == 0.0 {
-        out.push('0');
+    } else if value.fract() == 0.0 && value.abs() < 9_007_199_254_740_992.0 {
+        out.push_str(&(value as i64).to_string());
     } else {
-        out.push_str(ryu_js::Buffer::new().format_finite(value));
+        out.push_str(&serde_json::to_string(&value).expect("a finite number serializes"));
     }
 }
 
@@ -104,7 +104,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn numbers_use_the_javascript_spelling() {
+    fn numbers_render_integral_or_shortest_round_trip() {
         let cases = [
             (100.0, "100"),
             (-0.0, "0"),

@@ -29,7 +29,7 @@ ban 'JS number formatting emulation' 'ryu[-_]js|js_number_string|to_precision|EC
 ban 'emulated promises, microtasks or timers' '\bmicrotask|\bMicrotask|\bPromise[A-Z]?\b|setTimeout|setInterval' $crates
 ban 'Axios or BaseExchange facades' '\bAxios|\bBaseExchange\b|\bbase_exchange\b' $crates
 ban 'JSON map-order or arbitrary-precision emulation' 'preserve_order|arbitrary_precision|IndexMap' $crates
-ban 'deleted port crates' 'safe-cex-(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle-cache|lighter-sdk)\b|safe_cex_(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle_cache|lighter_sdk)\b' $crates
+ban 'deleted port crates' 'safe-cex-(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle-cache|lighter-sdk)([^-_[:alnum:]]|$)|safe_cex_(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle_cache|lighter_sdk)([^-_[:alnum:]]|$)' $crates
 
 # Untyped JSON trees stay out of engine and venue hot paths.
 hot=$(ls -d engine/src registry/src venues/*/src 2>/dev/null || true)
