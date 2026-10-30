@@ -530,10 +530,7 @@ impl WasmEngine {
     #[wasm_bindgen(js_name = algoEmits)]
     pub fn algo_emits(&mut self) -> String {
         let emits = std::mem::take(&mut *self.algos.emits.borrow_mut());
-        let out: Vec<Value> = emits
-            .iter()
-            .map(|(op, data)| emit_json(op, data))
-            .collect();
+        let out: Vec<Value> = emits.iter().map(|(op, data)| emit_json(op, data)).collect();
         Value::Array(out).to_string()
     }
 
