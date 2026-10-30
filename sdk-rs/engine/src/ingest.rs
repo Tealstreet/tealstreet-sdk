@@ -9,8 +9,9 @@
 //! symbols through it, never to this engine's own indexes.
 //!
 //! Each section has its own decoder below; one not yet implemented is skipped.
+use crate::model::Ticker;
 use crate::store::Store;
-use crate::wire::{FORMAT, MAGIC, NONE, section};
+use crate::wire::{FORMAT, MAGIC, NONE, TICKER_COLUMNS, section};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IngestError(pub &'static str);
@@ -159,6 +160,8 @@ pub struct IngestState {
     pub source_markets: Vec<String>,
     /// The source's native market ids, by its market index.
     pub source_market_ids: Vec<String>,
+    /// The source's ticker symbols, by its ticker row (`TICKER_DELTAS` indexes these).
+    pub source_tickers: Vec<String>,
 }
 
 impl IngestState {
@@ -198,7 +201,7 @@ pub fn apply(
     for section in &frame.sections {
         match section.kind {
             section::MARKETS => {}
-            section::TICKERS => tickers(store, state, frame, section)?,
+            section::TICKERS => tickers(store, &mut *state, frame, section)?,
             section::TICKER_DELTAS => ticker_deltas(store, state, frame, section)?,
             section::ORDERS => {
                 orders(store, state, frame, section)?;
@@ -261,21 +264,103 @@ fn markets(
     Ok(())
 }
 
+/// A ticker's numeric fields in `store::TICKER_FIELDS` order; midpoint `NaN` is absent.
+fn set_ticker_field(ticker: &mut Ticker, field: usize, value: f64) {
+    match field {
+        0 => ticker.bid = value,
+        1 => ticker.ask = value,
+        2 => ticker.last = value,
+        3 => ticker.mark = value,
+        4 => ticker.index = value,
+        5 => ticker.percentage = value,
+        6 => ticker.open_interest = value,
+        7 => ticker.funding_rate = value,
+        8 => ticker.funding_time = value,
+        9 => ticker.volume = value,
+        10 => ticker.quote_volume = value,
+        _ => ticker.mid_price = (!value.is_nan()).then_some(value),
+    }
+}
+
+/// `TICKERS` (`Store::write_tickers`): the source's full ticker table. Rows name
+/// a source market, or carry their own symbol and id in the identity tail.
 fn tickers(
-    _: &mut Store,
-    _: &IngestState,
-    _: &Frame<'_>,
-    _: &Section<'_>,
+    store: &mut Store,
+    state: &mut IngestState,
+    frame: &Frame<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    let mut cursor = Cursor::new(section.payload);
+    let count = cursor.u32()? as usize;
+    let markets = (0..count)
+        .map(|_| cursor.u32())
+        .collect::<Result<Vec<_>, _>>()?;
+    cursor.align8();
+    let columns = if section.revision >= 1 {
+        TICKER_COLUMNS
+    } else {
+        11
+    };
+    let mut rows = vec![Ticker::default(); count];
+    for column in 0..columns {
+        for row in &mut rows {
+            set_ticker_field(row, column, cursor.f64()?);
+        }
+    }
+    // The identity tail is present exactly when its 8 bytes per row follow.
+    let tail = count > 0 && section.payload.len() - cursor.at >= 8 * count;
+    if tail {
+        for row in &mut rows {
+            row.symbol = frame.strings.required(cursor.u32()?)?.to_owned();
+        }
+        for row in &mut rows {
+            row.id = frame.strings.required(cursor.u32()?)?.to_owned();
+        }
+    } else {
+        for (row, &market) in rows.iter_mut().zip(&markets) {
+            row.symbol = state.symbol(market)?.to_owned();
+            row.id = state
+                .source_market_ids
+                .get(market as usize)
+                .ok_or(IngestError("market index outside the source's table"))?
+                .clone();
+        }
+    }
+    state.source_tickers = rows.iter().map(|row| row.symbol.clone()).collect();
+    store.set_tickers(rows);
     Ok(())
 }
 
+/// `TICKER_DELTAS`: per changed ticker, its source row, a field mask and the
+/// masked values in field order.
 fn ticker_deltas(
-    _: &mut Store,
-    _: &IngestState,
+    store: &mut Store,
+    state: &IngestState,
     _: &Frame<'_>,
-    _: &Section<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    let mut cursor = Cursor::new(section.payload);
+    while cursor.at < section.payload.len() {
+        let row = cursor.f64()? as usize;
+        let mask = cursor.f64()? as u16;
+        let mut values = [None; TICKER_COLUMNS];
+        for (field, value) in values.iter_mut().enumerate() {
+            if mask & (1 << field) != 0 {
+                *value = Some(cursor.f64()?);
+            }
+        }
+        let symbol = state
+            .source_tickers
+            .get(row)
+            .ok_or(IngestError("ticker row outside the source's table"))?;
+        store.update_ticker(symbol, |ticker| {
+            for (field, value) in values.iter().enumerate() {
+                if let Some(value) = value {
+                    set_ticker_field(ticker, field, *value);
+                }
+            }
+        });
+    }
     Ok(())
 }
 
@@ -435,6 +520,78 @@ pub(crate) mod tests {
         );
         assert!(refused.is_err());
         assert_eq!(state.source_markets, ["BTCUSDT", "ETHUSDT"]);
+    }
+
+    fn ticker(symbol: &str, last: f64, mid: Option<f64>) -> Ticker {
+        Ticker {
+            id: format!("native-{symbol}"),
+            symbol: symbol.into(),
+            bid: last - 1.,
+            ask: last + 1.,
+            last,
+            mark: last + 0.5,
+            index: last - 0.5,
+            mid_price: mid,
+            percentage: 1.5,
+            open_interest: 7.,
+            funding_rate: 0.0001,
+            funding_time: 1_700_000_000_000.,
+            volume: 10.,
+            quote_volume: last * 10.,
+        }
+    }
+
+    #[test]
+    fn tickers_round_trip_with_and_without_midpoints_and_identity_tails() {
+        for mid in [None, Some(100.25)] {
+            let mut source = Store::default();
+            source.set_markets(vec![market("BTCUSDT"), market("ETHUSDT")]);
+            let rows = vec![ticker("ETHUSDT", 10., None), ticker("BTCUSDT", 100., mid)];
+            source.set_tickers(rows.clone());
+            let (mut state, mut store) = (IngestState::default(), Store::default());
+            ingest(&mut source, &mut state, &mut store, true);
+            assert_eq!(store.tickers(), rows.as_slice());
+            assert!(store.loaded().tickers);
+            assert_eq!(state.source_tickers, ["ETHUSDT", "BTCUSDT"]);
+        }
+        // A delisted symbol (no market row) keeps its identity through the tail.
+        let mut source = Store::default();
+        source.set_markets(vec![market("BTCUSDT")]);
+        let rows = vec![ticker("OLDUSDT", 1., None)];
+        source.set_tickers(rows.clone());
+        let mut store = Store::default();
+        ingest(&mut source, &mut IngestState::default(), &mut store, true);
+        assert_eq!(store.tickers(), rows.as_slice());
+    }
+
+    #[test]
+    fn ticker_deltas_apply_only_the_masked_fields_by_source_row() {
+        let mut source = Store::default();
+        source.set_markets(vec![market("BTCUSDT"), market("ETHUSDT")]);
+        source.set_tickers(vec![
+            ticker("BTCUSDT", 100., None),
+            ticker("ETHUSDT", 10., Some(10.)),
+        ]);
+        let (mut state, mut store) = (IngestState::default(), Store::default());
+        ingest(&mut source, &mut state, &mut store, true);
+
+        source.update_ticker("ETHUSDT", |t| {
+            t.last = 11.;
+            t.mid_price = None;
+        });
+        source.update_ticker("BTCUSDT", |t| t.funding_rate = -0.0002);
+        ingest(&mut source, &mut state, &mut store, false);
+        assert_eq!(store.tickers(), source.tickers());
+        assert_eq!(store.ticker("ETHUSDT").unwrap().mid_price, None);
+        assert_eq!(store.ticker("ETHUSDT").unwrap().bid, 9.);
+
+        // A row the source never listed refuses.
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin(section::TICKER_DELTAS);
+        writer.f64s([5., 4., 1.]);
+        writer.end();
+        let frame = writer.finish();
+        assert!(apply(&mut store, &mut state, &parse(&frame).unwrap(), false).is_err());
     }
 
     #[test]
