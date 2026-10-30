@@ -8,6 +8,7 @@
 mod managed_http;
 mod routing;
 mod server;
+mod socket_health;
 mod transport;
 
 pub use routing::resolve;
@@ -21,6 +22,7 @@ pub use server::{
     AccountHandle, BookLevels, ClientLink, FrameServer, InputRefused, Outgoing, ServerConfig,
     spawn_account,
 };
+pub use socket_health::{SOCKET_STALE_MS, SocketHealth, SocketStats, SocketSummary};
 pub use transport::{
     BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PreparedHttp, Transport,
 };
@@ -119,6 +121,7 @@ pub struct Host<V: Venue, T: Transport> {
     events: Events,
     inbox: mpsc::UnboundedReceiver<HostEvent>,
     sockets: HashMap<SocketId, mpsc::UnboundedSender<String>>,
+    socket_health: socket_health::SocketTracker,
     timers: HashMap<TimerId, AbortHandle>,
     managed_http: managed_http::Requests,
     signing_tasks: HashMap<RequestId, managed_http::Task>,
@@ -185,6 +188,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
             events,
             inbox,
             sockets: HashMap::new(),
+            socket_health: Default::default(),
             timers: HashMap::new(),
             managed_http: Default::default(),
             signing_tasks: HashMap::new(),
@@ -403,6 +407,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
         self.managed_http.clear();
         self.signing_tasks.clear();
         self.sockets.clear();
+        self.socket_health.clear();
         for (_, timer) in self.timers.drain() {
             timer.abort();
         }
@@ -433,27 +438,38 @@ impl<V: Venue, T: Transport> Host<V, T> {
             HostEvent::PollScaleChanged(scale) => {
                 engine.handle(now, Event::PollScaleChanged { scale })
             }
-            HostEvent::WsOpened(socket) => engine.handle(now, Event::WsOpened { socket }),
-            HostEvent::WsBinary(socket, data) => engine.handle(
-                now,
-                Event::WsBinary {
-                    socket,
-                    data: &data,
-                },
-            ),
-            HostEvent::WsMessage(socket, text) => engine.handle(
-                now,
-                Event::WsMessage {
-                    socket,
-                    text: &text,
-                },
-            ),
+            HostEvent::WsOpened(socket) => {
+                self.socket_health.opened(socket);
+                engine.handle(now, Event::WsOpened { socket })
+            }
+            HostEvent::WsBinary(socket, data) => {
+                self.socket_health.received(socket);
+                engine.handle(
+                    now,
+                    Event::WsBinary {
+                        socket,
+                        data: &data,
+                    },
+                )
+            }
+            HostEvent::WsMessage(socket, text) => {
+                self.socket_health.received(socket);
+                engine.handle(
+                    now,
+                    Event::WsMessage {
+                        socket,
+                        text: &text,
+                    },
+                )
+            }
             HostEvent::WsClosed(socket, code) => {
                 self.sockets.remove(&socket);
+                self.socket_health.closed(socket, Some(code));
                 engine.handle(now, Event::WsClosed { socket, code })
             }
             HostEvent::WsRouteExhausted(socket) => {
                 self.sockets.remove(&socket);
+                self.socket_health.closed(socket, None);
                 engine.handle(now, Event::WsRouteExhausted { socket })
             }
             HostEvent::HttpStart {
@@ -519,6 +535,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     channel,
                     context,
                 } => {
+                    self.socket_health.connecting(socket, channel.clone());
                     let outgoing = self.transport.connect_encoding(
                         binary,
                         socket,
@@ -538,6 +555,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 // Dropping the sender closes the socket.
                 Action::WsClose { socket } => {
                     self.sockets.remove(&socket);
+                    self.socket_health.closed(socket, None);
                 }
                 Action::Http(request) => self.transport.request(request, self.events.clone()),
                 Action::ManagedHttp(action) => {

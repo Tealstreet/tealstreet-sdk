@@ -1,11 +1,12 @@
 //! One `/account` socket: the JSON envelope over this user's accounts.
 //! Every account op resolves through (this socket's user, accounts it joined).
+use crate::accounts::now_ms;
 use crate::accounts::{Account, PUBLIC_ACCOUNT, PUBLIC_EXCHANGE, Registry};
 use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
 use crate::out::Out;
 use crate::state::{Log, Metrics};
-use safe_cex_native::{ClientLink, Outgoing};
+use safe_cex_native::{AccountHandle, ClientLink, Outgoing, SocketSummary};
 use safe_cex_remote_signer::Outbox;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -30,6 +31,8 @@ struct Pending {
     reply: methods::Reply,
     /// A cancel-all fanned out over symbols: one shared outcome for the group.
     group: Option<Arc<Mutex<Group>>>,
+    /// The engine said this history read returned only part of the window.
+    incomplete: bool,
     /// Order-affecting commands are logged with their result when they settle.
     audit: Option<Audit>,
 }
@@ -300,6 +303,7 @@ impl Session {
         let draining = Arc::new(AtomicBool::new(false));
         let pump = tokio::spawn(pump(
             link,
+            account.handle.clone(),
             account.name.clone(),
             self.out.clone(),
             pending.clone(),
@@ -513,26 +517,26 @@ impl Session {
         } else {
             Vec::new()
         };
-        let plans =
-            match methods::translate(&method, &args, account.handle.capabilities(), &symbols) {
-                Ok(plans) => plans,
-                Err(refused) => {
-                    if crate::audit::ORDER_METHODS.contains(&method.as_str()) {
-                        let who = audit_who(&account);
-                        let origin = format!("socket:{}", self.socket);
-                        let fields = crate::audit::refused_call(&method, &args);
-                        let detail = json!({"name": refused.name, "message": refused.message});
-                        crate::audit::log(
-                            &who,
-                            &origin,
-                            &fields,
-                            crate::audit::result(&Err(detail)),
-                        );
-                    }
-                    self.reply_failure(name, &request_id, refused.name, &refused.message, None);
-                    return;
+        let plans = match methods::translate(
+            &method,
+            &args,
+            account.handle.capabilities(),
+            &symbols,
+            account.is_public(),
+        ) {
+            Ok(plans) => plans,
+            Err(refused) => {
+                if crate::audit::ORDER_METHODS.contains(&method.as_str()) {
+                    let who = audit_who(&account);
+                    let origin = format!("socket:{}", self.socket);
+                    let fields = crate::audit::refused_call(&method, &args);
+                    let detail = json!({"name": refused.name, "message": refused.message});
+                    crate::audit::log(&who, &origin, &fields, crate::audit::result(&Err(detail)));
                 }
-            };
+                self.reply_failure(name, &request_id, refused.name, &refused.message, None);
+                return;
+            }
+        };
         let group = (plans.len() > 1).then(|| {
             Arc::new(Mutex::new(Group {
                 remaining: plans.len(),
@@ -572,6 +576,7 @@ impl Session {
                             method: method.clone(),
                             reply,
                             group: group.clone(),
+                            incomplete: false,
                             audit,
                         },
                     );
@@ -716,24 +721,72 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
                     json!({"orderIds": result, "clientOrderId": client_order_id})
                 }
             };
-            json!({"requestId": pending.request_id, "success": true, "result": result})
+            let mut data =
+                json!({"requestId": pending.request_id, "success": true, "result": result});
+            if pending.incomplete {
+                data["completeness"] = json!({"incomplete": true});
+            }
+            data
         }
         Err(detail) => json!({"requestId": pending.request_id, "success": false, "result": detail}),
     };
     let _ = out.send(envelope::msg(name, "callMethod:done", data));
 }
 
+/// How often a client's `store.socketHealth` is re-derived, as the browser engine's sync.
+const SOCKET_HEALTH_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// `store.socketHealth` from the host's socket state, as `summarizeSocketHealth`.
+pub fn socket_health(summary: SocketSummary) -> Value {
+    json!({
+        "publicHealthy": summary.public_healthy,
+        "privateHealthy": summary.private_healthy,
+        "publicInitialized": summary.public_initialized,
+        "privateInitialized": summary.private_initialized,
+        "publicLastMessage": summary.public_last_message,
+        "privateLastMessage": summary.private_last_message,
+    })
+}
+
 /// Forwards one client's account output: frames as base64 SCXF with a per-client
-/// seq (the first frame is the snapshot), notices as the existing msg ops.
+/// seq (the first frame is the snapshot), notices as the existing msg ops, and
+/// `store.socketHealth`, which frames do not carry, once the snapshot is out.
 async fn pump(
     mut link: ClientLink,
+    handle: AccountHandle,
     name: String,
     out: Out,
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
     draining: Arc<AtomicBool>,
 ) {
     let mut seq = 0u64;
-    while let Some(item) = link.outgoing.recv().await {
+    let mut health_tick = tokio::time::interval(SOCKET_HEALTH_EVERY);
+    let mut sent_health = Value::Null;
+    let report_health = |sent: &mut Value| {
+        let health = socket_health(handle.socket_health().summary(now_ms()));
+        if *sent == health {
+            return true;
+        }
+        *sent = health.clone();
+        out.send(envelope::msg(
+            &name,
+            "store",
+            json!({"socketHealth": health}),
+        ))
+    };
+    loop {
+        let item = tokio::select! {
+            item = link.outgoing.recv() => match item {
+                Some(item) => item,
+                None => break,
+            },
+            _ = health_tick.tick() => {
+                if seq > 0 && !draining.load(Ordering::Relaxed) && !report_health(&mut sent_health) {
+                    break;
+                }
+                continue;
+            }
+        };
         match item {
             Outgoing::Frame(bytes) => {
                 if draining.load(Ordering::Relaxed) {
@@ -741,6 +794,9 @@ async fn pump(
                 }
                 seq += 1;
                 if !out.send(envelope::frame(&name, seq, seq == 1, &bytes)) {
+                    break;
+                }
+                if seq == 1 && !report_health(&mut sent_health) {
                     break;
                 }
             }
@@ -780,6 +836,18 @@ fn notice_to_msg(
     pending: &Arc<Mutex<HashMap<u32, Pending>>>,
 ) {
     let kind = notice["type"].as_str().unwrap_or("");
+    // As the SDK bridge: a partial history read is answered with its rows and a
+    // positive `completeness` marker, never as complete.
+    if kind == "event" && notice["code"] == "history.incomplete" {
+        let owner = notice["fields"]["command"]
+            .as_u64()
+            .and_then(|id| u32::try_from(id).ok());
+        if let Some(id) = owner
+            && let Some(waiting) = pending.lock().unwrap().get_mut(&id)
+        {
+            waiting.incomplete = true;
+        }
+    }
     let command = notice["command"]
         .as_u64()
         .and_then(|id| u32::try_from(id).ok());
@@ -947,6 +1015,7 @@ mod tests {
                 method: "placeOrder".into(),
                 reply: methods::Reply::Result,
                 group: None,
+                incomplete: false,
                 audit: None,
             },
         );
@@ -973,6 +1042,54 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_history_read_replies_with_its_completeness_marker() {
+        let (out, mut sent, _) = Out::channel(16);
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(
+            3,
+            Pending {
+                request_id: "r3".into(),
+                method: "fetchHistoricalFills".into(),
+                reply: methods::Reply::Result,
+                group: None,
+                incomplete: false,
+                audit: None,
+            },
+        );
+        let event = json!({"type":"event","level":"info","code":"history.incomplete","message":"partial","fields":{"command":3}});
+        notice_to_msg(&out, "acct", &event, &pending);
+        sent.try_recv().unwrap();
+        notice_to_msg(
+            &out,
+            "acct",
+            &json!({"type":"done","command":3,"result":"[{\"id\":\"f1\"}]"}),
+            &pending,
+        );
+        let reply: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(
+            reply["d"]["data"],
+            json!({"requestId":"r3","success":true,"result":[{"id":"f1"}],"completeness":{"incomplete":true}})
+        );
+    }
+
+    #[test]
+    fn socket_health_carries_the_store_fields_the_browser_derives() {
+        let health = socket_health(safe_cex_native::SocketSummary {
+            public_healthy: true,
+            private_healthy: true,
+            public_initialized: true,
+            private_initialized: true,
+            public_last_message: Some(5),
+            private_last_message: Some(7),
+        });
+        assert_eq!(
+            health,
+            json!({"publicHealthy":true,"privateHealthy":true,"publicInitialized":true,
+                "privateInitialized":true,"publicLastMessage":5,"privateLastMessage":7})
+        );
+    }
+
+    #[test]
     fn a_failed_write_reports_its_engine_detail() {
         let (out, mut sent, _) = Out::channel(16);
         let pending = Arc::new(Mutex::new(HashMap::new()));
@@ -983,6 +1100,7 @@ mod tests {
                 method: "placeOrder".into(),
                 reply: methods::Reply::Result,
                 group: None,
+                incomplete: false,
                 audit: None,
             },
         );
@@ -1008,6 +1126,7 @@ mod tests {
                     client_order_id: "cid-1".into(),
                 },
                 group: None,
+                incomplete: false,
                 audit: None,
             },
         );

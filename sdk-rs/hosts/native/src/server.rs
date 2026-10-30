@@ -296,6 +296,7 @@ pub struct AccountHandle {
     config: ServerConfig,
     capabilities: safe_cex_engine::Capabilities,
     events: crate::Events,
+    sockets: Arc<std::sync::Mutex<crate::SocketHealth>>,
 }
 
 /// One book's levels, best first, as `(symbol, bids, asks)`.
@@ -323,6 +324,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
     }
     let capabilities = host.engine.capabilities();
     let events = host.event_sender();
+    let sockets = host.socket_health.cell();
     let (commands, inbox) = mpsc::channel(256);
     let (stop, stopped) = watch::channel(false);
     let actor = Account::new(host, config.clone());
@@ -341,6 +343,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
         config,
         capabilities,
         events,
+        sockets,
     };
     Ok((handle, task))
 }
@@ -389,6 +392,14 @@ impl AccountHandle {
     /// The venue's engine capabilities, fixed at construction.
     pub fn capabilities(&self) -> &safe_cex_engine::Capabilities {
         &self.capabilities
+    }
+
+    /// Per-channel socket state the host has observed, for `store.socketHealth`.
+    pub fn socket_health(&self) -> crate::SocketHealth {
+        *self
+            .sockets
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
     }
 
     /// `client` must be unique among this account's live clients.
