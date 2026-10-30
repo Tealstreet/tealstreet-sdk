@@ -19,6 +19,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::request_context::{
     Context, Operation, Owner, Policy, RejectionReports, RetryPolicy, UnprovenEvidence,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -990,6 +991,7 @@ impl BinanceFutures {
                         p.leverage = leverage;
                     }
                 });
+                cx.hold_setting(SettingKey::Leverage(symbol));
                 None
             }
             (Call::MarginType { symbol, isolated }, Ok(_)) => {
@@ -1000,14 +1002,18 @@ impl BinanceFutures {
                 };
                 cx.store
                     .update_setting(&symbol, |s| s.margin_type = Some(margin));
+                cx.hold_setting(SettingKey::MarginType(symbol));
                 None
             }
+            // Binance's dualSidePosition is account-wide: the store's hedge flag.
             (Call::PositionMode { hedged }, Ok(_)) => {
                 cx.store.set_hedged(hedged);
+                cx.hold_setting(SettingKey::Hedged);
                 None
             }
             (Call::PositionMode { hedged }, Err((POSITION_MODE_ALREADY_SET, _))) if !unproven => {
                 cx.store.set_hedged(hedged);
+                cx.hold_setting(SettingKey::Hedged);
                 None
             }
             (_, Err(error)) => Some(error),

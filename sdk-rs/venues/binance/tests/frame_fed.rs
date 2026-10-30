@@ -3,13 +3,14 @@
 //! polls. Fed a LOCAL engine's snapshot, each write sends exactly the requests
 //! LOCAL sends, cancel-then-replace amends included, and never a read.
 mod support;
-use safe_cex_engine::model::PlaceOrderOpts;
+use safe_cex_engine::model::{MarginType, PlaceOrderOpts};
 use safe_cex_engine::{Command, Event, HttpRequest, Method};
 use support::{Harness, Options};
 
 const OPEN_ORDERS: &str = r#"[{"symbol":"BTCUSDT","orderId":12,"clientOrderId":"maker","price":"100","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED","timeInForce":"GTC"}]"#;
 const STOP_LIMIT: &str = r#"[{"algoId":43,"clientAlgoId":"stoplimit","algoType":"CONDITIONAL","orderType":"STOP","symbol":"BTCUSDT","side":"SELL","quantity":"7","price":"89","algoStatus":"NEW","triggerPrice":"90","workingType":"MARK_PRICE"}]"#;
 const POSITION: &str = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"7","entryPrice":"100","markPrice":"100","unRealizedProfit":"0","leverage":"20","marginType":"cross","notional":"700","liquidationPrice":"50"}]"#;
+const SYMBOL_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":20,"maxNotionalValue":"1000000"}]"#;
 const BRACKETS: &str = r#"[{"symbol":"BTCUSDT","brackets":[{"bracket":1,"initialLeverage":50,"notionalCap":5000,"notionalFloor":0,"maintMarginRatio":0.01,"cum":0}]}]"#;
 
 fn keyed() -> Options {
@@ -23,6 +24,15 @@ fn keyed() -> Options {
 /// The data source: a LOCAL USD-M account with one open limit order, one
 /// stop-limit and one position.
 fn local() -> Harness {
+    local_with(POSITION, "[]")
+}
+
+/// A flat LOCAL account whose symbol config sets BTCUSDT at 20x cross.
+fn flat() -> Harness {
+    local_with("[]", SYMBOL_CONFIG)
+}
+
+fn local_with(positions: &str, symbol_config: &str) -> Harness {
     let mut h = Harness::started(keyed());
     h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
     h.respond("/fapi/v1/leverageBracket", 200, BRACKETS);
@@ -35,8 +45,8 @@ fn local() -> Harness {
         200,
         r#"{"dualSidePosition":false}"#,
     );
-    h.respond("/fapi/v3/positionRisk", 200, POSITION);
-    h.respond("/fapi/v1/symbolConfig", 200, "[]");
+    h.respond("/fapi/v3/positionRisk", 200, positions);
+    h.respond("/fapi/v1/symbolConfig", 200, symbol_config);
     h.respond("/fapi/v3/account", 200, r#"{"assets":[]}"#);
     h.respond("/fapi/v1/openOrders", 200, OPEN_ORDERS);
     h.respond("/fapi/v1/openAlgoOrders", 200, STOP_LIMIT);
@@ -278,4 +288,292 @@ fn an_unknown_placement_outcome_is_never_re_sent_or_followed_by_a_read() {
         "no re-send, no read: {:?}",
         fed.paths()
     );
+}
+
+/// The source's current snapshot, ingested by `fed`: stale until the source re-reads.
+fn ingest(source: &mut Harness, fed: &mut Harness) {
+    let frame = source.engine.snapshot_frame(source.now).to_vec();
+    fed.engine.apply_frame(fed.now, &frame, true).unwrap();
+    fed.collect();
+    assert!(
+        fed.requests.is_empty(),
+        "ingest reads nothing: {:?}",
+        fed.paths()
+    );
+}
+
+/// Run a settings write on `fed` alone and confirm it: one request, nothing after.
+fn confirm_write(fed: &mut Harness, command: Command, body: &str) {
+    let id = match &command {
+        Command::SetLeverage { command, .. }
+        | Command::SetMarginType { command, .. }
+        | Command::SetPositionMode { command, .. } => *command,
+        _ => unreachable!("a settings write"),
+    };
+    fed.event(Event::Command(command));
+    assert_eq!(fed.requests.len(), 1, "{:?}", fed.paths());
+    assert_eq!(fed.requests[0].method, Method::Post);
+    let request = fed.requests.remove(0);
+    fed.reply(request.id, 200, "", body);
+    assert!(matches!(fed.result(id), Some(Ok(_))), "{:?}", fed.done);
+    assert!(
+        fed.requests.is_empty(),
+        "nothing follows: {:?}",
+        fed.paths()
+    );
+}
+
+fn hedge(command: u32) -> Command {
+    Command::SetPositionMode {
+        command,
+        hedged: true,
+        symbol: None,
+    }
+}
+
+/// The `positionSide` of the next limit order `h` places, in its one request.
+fn placed_side(h: &mut Harness, command: u32, path: &str) -> String {
+    h.event(Event::Command(Command::PlaceOrders {
+        command,
+        orders: vec![limit()],
+    }));
+    assert_eq!(h.requests.len(), 1, "{:?}", h.paths());
+    let request = h.take(path);
+    let (_, _, params, _) = shape(&request);
+    params
+        .iter()
+        .find_map(|pair| pair.strip_prefix("positionSide="))
+        .expect("positionSide is sent")
+        .to_owned()
+}
+
+/// The source re-reads its position mode and reports `hedged`.
+fn source_reads_mode(source: &mut Harness, command: u32, hedged: bool) {
+    source.event(Event::Command(Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::RefreshSettings { symbol: None },
+    }));
+    source.respond(
+        "/fapi/v1/positionSide/dual",
+        200,
+        &format!(r#"{{"dualSidePosition":{hedged}}}"#),
+    );
+    assert_eq!(source.engine.store().hedged(), hedged);
+}
+
+const MODE_SET: &str = r#"{"code":200,"msg":"success"}"#;
+
+#[test]
+fn settings_writes_are_the_local_request_and_nothing_follows() {
+    let mut source = flat();
+    let mut fed = fed_from(&mut source);
+    same_writes(&mut source, &mut fed, hedge(20), &[MODE_SET]);
+    assert!(matches!(fed.result(20), Some(Ok(_))), "{:?}", fed.done);
+    same_writes(
+        &mut source,
+        &mut fed,
+        Command::SetMarginType {
+            command: 21,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+        &[MODE_SET],
+    );
+    assert!(matches!(fed.result(21), Some(Ok(_))), "{:?}", fed.done);
+    same_writes(
+        &mut source,
+        &mut fed,
+        Command::SetLeverage {
+            command: 22,
+            symbol: "BTCUSDT".into(),
+            leverage: 10.0,
+            side: None,
+        },
+        &[r#"{"symbol":"BTCUSDT","leverage":10,"maxNotionalValue":"5000"}"#],
+    );
+    assert!(matches!(fed.result(22), Some(Ok(_))), "{:?}", fed.done);
+}
+
+#[test]
+fn a_confirmed_hedge_outlasts_a_stale_one_way_frame() {
+    let mut source = flat();
+    let mut fed = fed_from(&mut source);
+    assert!(!fed.engine.store().hedged());
+    confirm_write(&mut fed, hedge(23), MODE_SET);
+    ingest(&mut source, &mut fed);
+    assert!(
+        fed.engine.store().hedged(),
+        "the stale frame kept the hedge"
+    );
+    assert_eq!(placed_side(&mut fed, 24, "/fapi/v1/order"), "LONG");
+}
+
+#[test]
+fn a_hedged_source_frame_releases_the_hold() {
+    let mut source = flat();
+    let mut fed = fed_from(&mut source);
+    confirm_write(&mut fed, hedge(25), MODE_SET);
+    source_reads_mode(&mut source, 26, true);
+    ingest(&mut source, &mut fed);
+    assert!(fed.engine.store().hedged());
+    // Released: the source's later one-way mode applies again.
+    source_reads_mode(&mut source, 27, false);
+    ingest(&mut source, &mut fed);
+    assert!(!fed.engine.store().hedged());
+    assert_eq!(placed_side(&mut fed, 28, "/fapi/v1/order"), "BOTH");
+}
+
+#[test]
+fn confirmed_leverage_and_margin_type_outlast_a_stale_frame() {
+    let mut source = flat();
+    let mut fed = fed_from(&mut source);
+    assert_eq!(fed.engine.store().setting("BTCUSDT").unwrap().leverage, 20.);
+    let leverage = |command| Command::SetLeverage {
+        command,
+        symbol: "BTCUSDT".into(),
+        leverage: 10.0,
+        side: None,
+    };
+    confirm_write(
+        &mut fed,
+        leverage(29),
+        r#"{"symbol":"BTCUSDT","leverage":10,"maxNotionalValue":"5000"}"#,
+    );
+    confirm_write(
+        &mut fed,
+        Command::SetMarginType {
+            command: 30,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+        MODE_SET,
+    );
+    ingest(&mut source, &mut fed);
+    let setting = fed.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.leverage, 10.);
+    assert_eq!(setting.margin_type, Some(MarginType::Isolated));
+    // The kept leverage is the one the next set compares against: no re-send.
+    fed.event(Event::Command(leverage(31)));
+    assert!(fed.requests.is_empty(), "{:?}", fed.paths());
+    assert!(matches!(fed.result(31), Some(Ok(_))), "{:?}", fed.done);
+}
+
+fn read_paths(h: &Harness) -> Vec<String> {
+    shapes(h).into_iter().map(|(_, path, _, _)| path).collect()
+}
+
+#[test]
+fn refresh_settings_reads_the_mode_and_the_symbol_config_and_writes_nothing() {
+    let mut source = flat();
+    source.event(Event::Command(Command::Venue {
+        command: 32,
+        action: safe_cex_engine::VenueAction::RefreshSettings { symbol: None },
+    }));
+    assert!(
+        matches!(source.result(32), Some(Ok(_))),
+        "{:?}",
+        source.done
+    );
+    assert_eq!(read_paths(&source), ["/fapi/v1/positionSide/dual"]);
+    assert!(source.requests.iter().all(|r| r.method == Method::Get));
+    source.requests.clear();
+    source.event(Event::Command(Command::Venue {
+        command: 33,
+        action: safe_cex_engine::VenueAction::RefreshSettings {
+            symbol: Some("BTCUSDT".into()),
+        },
+    }));
+    assert_eq!(
+        read_paths(&source),
+        [
+            "/fapi/v1/positionSide/dual",
+            "/fapi/v3/positionRisk",
+            "/fapi/v1/symbolConfig"
+        ]
+    );
+    assert!(source.requests.iter().all(|r| r.method == Method::Get));
+    source.respond(
+        "/fapi/v1/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    source.respond("/fapi/v3/positionRisk", 200, "[]");
+    source.respond(
+        "/fapi/v1/symbolConfig",
+        200,
+        &SYMBOL_CONFIG.replace("\"leverage\":20", "\"leverage\":10"),
+    );
+    assert_eq!(
+        source.engine.store().setting("BTCUSDT").unwrap().leverage,
+        10.
+    );
+    assert!(source.requests.is_empty(), "{:?}", source.paths());
+}
+
+#[test]
+fn refresh_settings_on_a_frame_fed_engine_reads_nothing() {
+    let mut source = flat();
+    let mut fed = fed_from(&mut source);
+    fed.event(Event::Command(Command::Venue {
+        command: 34,
+        action: safe_cex_engine::VenueAction::RefreshSettings {
+            symbol: Some("BTCUSDT".into()),
+        },
+    }));
+    assert!(fed.requests.is_empty(), "{:?}", fed.paths());
+}
+
+/// A flat portfolio-margin data source, one-way.
+fn portfolio_margin() -> Harness {
+    let mut h = Harness::started(Options {
+        portfolio_margin: true,
+        ..keyed()
+    });
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond("/papi/v1/um/leverageBracket", 200, BRACKETS);
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    h.respond("/papi/v1/listenKey", 200, r#"{"listenKey":"pmkey"}"#);
+    h.respond(
+        "/papi/v1/um/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/papi/v1/um/positionRisk", 200, "[]");
+    h.respond("/papi/v1/balance", 200, "[]");
+    h.respond("/papi/v1/um/openOrders", 200, "[]");
+    h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+    h.requests.clear();
+    h
+}
+
+#[test]
+fn portfolio_margin_holds_a_confirmed_hedge_and_leverage() {
+    let mut source = portfolio_margin();
+    let mut engine = support::engine(Options {
+        portfolio_margin: true,
+        ..keyed()
+    });
+    engine.set_frame_fed().unwrap();
+    let mut fed = Harness::from_engine(engine);
+    fed.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    assert!(fed.requests.is_empty(), "{:?}", fed.paths());
+    fed.now = source.now;
+    ingest(&mut source, &mut fed);
+    confirm_write(&mut fed, hedge(35), MODE_SET);
+    confirm_write(
+        &mut fed,
+        Command::SetLeverage {
+            command: 36,
+            symbol: "BTCUSDT".into(),
+            leverage: 10.0,
+            side: None,
+        },
+        r#"{"symbol":"BTCUSDT","leverage":10,"maxNotionalValue":"5000"}"#,
+    );
+    ingest(&mut source, &mut fed);
+    assert!(fed.engine.store().hedged());
+    assert_eq!(fed.engine.store().setting("BTCUSDT").unwrap().leverage, 10.);
+    assert_eq!(placed_side(&mut fed, 37, "/papi/v1/um/order"), "LONG");
 }

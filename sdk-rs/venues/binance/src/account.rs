@@ -414,6 +414,30 @@ impl BinanceFutures {
         self.account.tick_timer = Some(cx.set_poll_timer(HEALTH_CHECK_MS));
     }
 
+    /// Data source: re-read the position mode and, for a named symbol, the
+    /// positions join whose symbol config carries leverage and margin type.
+    /// Never a write.
+    pub(crate) fn reread_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        if cx.frame_fed()
+            || !self.account.started
+            || !self.credentials.has_primary()
+            || self.is_spot()
+            || self.is_options()
+        {
+            return;
+        }
+        self.background_signed_read(
+            cx,
+            self.paths.position_mode,
+            Query::new(),
+            None,
+            Pending::Account(Request::PositionMode),
+        );
+        if symbol.is_some() {
+            self.fetch_positions(cx);
+        }
+    }
+
     pub(crate) fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
         if !cx.private_feed_policy().streaming() {
             return;

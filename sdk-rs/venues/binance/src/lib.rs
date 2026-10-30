@@ -1435,6 +1435,10 @@ impl Venue for BinanceFutures {
         }
     }
 
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        self.reread_settings(cx, symbol);
+    }
+
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.is_options() {
             self.start_options(cx);
