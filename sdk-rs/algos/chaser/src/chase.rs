@@ -1,11 +1,11 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
+use safe_cex_algos::executor::Instant;
 use safe_cex_algos::{AlgoStore, Scope};
 use safe_cex_engine::model::{Order, OrderSide, PositionSide};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
-use tokio::time::Instant;
 
 /// `chase ... to <length>`: stop once the live price passes the threshold
 /// in the unfavorable direction (up for buys, down for sells).

@@ -1,16 +1,14 @@
 use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
-use std::time::Duration;
-
-use tokio::task::{AbortHandle, spawn_local};
 
 use crate::AccountPort;
+use crate::executor::{self, TaskHandle};
 
 #[derive(Default)]
 struct ScopeState {
     disposed: bool,
-    tasks: Vec<AbortHandle>,
+    tasks: Vec<TaskHandle>,
     children: Vec<Scope>,
 }
 
@@ -41,7 +39,7 @@ impl Scope {
         if self.is_disposed() {
             return;
         }
-        let handle = spawn_local(task).abort_handle();
+        let handle = executor::spawn(task);
         let mut state = self.0.borrow_mut();
         state.tasks.retain(|task| !task.is_finished());
         state.tasks.push(handle);
@@ -104,13 +102,11 @@ impl AlgoCx {
     }
 
     pub async fn sleep_ms(&self, ms: u64) {
-        tokio::time::sleep(Duration::from_millis(ms)).await;
+        executor::sleep_ms(ms).await;
     }
 
     /// Wall-clock epoch milliseconds.
     pub fn now_ms(&self) -> f64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0.0, |elapsed| elapsed.as_secs_f64() * 1000.0)
+        executor::now_ms()
     }
 }

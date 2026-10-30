@@ -8,9 +8,15 @@ description = "Shared runtime for server-side algos (chaser, TWAP, exec) on one 
 [lints]
 workspace = true
 
+[features]
+default = ["tokio-executor"]
+# The native executor (tokio's local tasks and timers); the LOCAL worker's
+# wasm build provides a host-driven one instead.
+tokio-executor = ["tokio/rt", "tokio/time"]
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 safe-cex-engine.workspace = true
-tokio = { version = "1.53.3", features = ["rt", "sync", "time"] }
+tokio = { version = "1.53.3", features = ["sync"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }

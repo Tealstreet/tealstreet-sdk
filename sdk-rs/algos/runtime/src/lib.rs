@@ -5,6 +5,7 @@
 //! account handle to [`AccountPort`]; algos see only this crate's surface.
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod executor;
 mod port;
 mod registry;
 mod scope;
