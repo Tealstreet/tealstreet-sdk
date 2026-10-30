@@ -221,6 +221,7 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
 #[derive(Clone, Copy)]
 struct Startup {
     account: bool,
+    writes_only: bool,
     log_level: Level,
     private_feed: safe_cex_engine::signing_policy::PrivateFeedPolicy,
 }
@@ -234,6 +235,9 @@ fn finish<T: Visit, V: Venue + 'static>(
     engine.set_public_feed_policy(policy).map_err(invalid)?;
     engine.set_private_feed_policy(startup.private_feed)?;
     engine.set_account_startup(startup.account);
+    if startup.writes_only {
+        engine.set_writes_only().map_err(invalid)?;
+    }
     engine.set_log_level(startup.log_level);
     Ok(visitor.visit(engine))
 }
@@ -1284,6 +1288,10 @@ fn read_key_options(
 }
 
 /// Generic options contain opaque references; provider owns all credentials.
+/// Venues whose startup honours `Cx::writes_only` (public metadata only) and
+/// whose write paths read only the writer context.
+pub const WRITER_VENUES: &[&str] = &["bybit"];
+
 pub fn build_with_signer<T: Visit>(
     venue: &str,
     mut options: EngineOptions,
@@ -1375,8 +1383,17 @@ pub fn build_with_signer<T: Visit>(
     if options.private_only && policy == PublicFeedPolicy::Direct {
         return Err(invalid("privateOnly cannot use direct public feeds"));
     }
+    if options.writes_only {
+        if !WRITER_VENUES.contains(&venue) {
+            return Err(invalid(format!("writesOnly is not supported for {venue}")));
+        }
+        if options.public_data_only {
+            return Err(invalid("writesOnly needs an account that can sign"));
+        }
+    }
     let startup = Startup {
-        account: options.account_startup,
+        account: options.account_startup && !options.writes_only,
+        writes_only: options.writes_only,
         private_feed: remote_signing_policy(venue).private_feed(options.payload_signer),
         log_level: match options.log_level.as_deref() {
             None => Level::Info,
@@ -2322,6 +2339,10 @@ pub struct EngineOptions {
     pub signing: Option<safe_cex_engine::signing::Identities>,
     #[serde(default)]
     pub private_only: bool,
+    /// A stateless order writer (`safe_cex_engine::writer`), for the venues in
+    /// [`WRITER_VENUES`].
+    #[serde(default)]
+    pub writes_only: bool,
     /// The SDK sets this when the account can sign (not public-data-only).
     #[serde(default)]
     pub account_startup: bool,

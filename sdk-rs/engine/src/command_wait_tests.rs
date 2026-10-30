@@ -24,6 +24,7 @@ fn deliver(engine: &mut Engine<Probe>, now: f64, json: &str) {
         HostInput::Command {
             command,
             timeout_ms,
+            ..
         } => engine
             .handle_command(now, command, timeout_ms)
             .expect("valid wait"),

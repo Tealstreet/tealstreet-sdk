@@ -1673,6 +1673,8 @@ struct IoCore {
     read_root_sweep_capacity: Option<usize>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
+    /// A stateless writer (`crate::writer`): no sockets, no reads, no store frames.
+    writes_only: bool,
     /// Attempts a Session resume selected with no delivery in this event: the
     /// resume is their issue custody until the outer Plan flush. Reserved at
     /// park, so a resume never allocates.
@@ -1846,6 +1848,7 @@ impl Default for IoCore {
             read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
+            writes_only: false,
             #[cfg(feature = "http-plans")]
             session_resumed: Vec::new(),
             signing: Default::default(),
@@ -2225,16 +2228,23 @@ impl<P> Cx<'_, P> {
         self.io.core.private_feed_policy
     }
 
+    /// A writer loads only public instrument metadata: no account reads, no polls.
+    pub fn writes_only(&self) -> bool {
+        self.io.core.writes_only
+    }
+
     /// `SocketId(0)` stands for a connect the engine suppressed.
     fn inert_socket(&self, socket: SocketId) -> bool {
         socket.0 == 0
             && (self.io.core.public_feed_policy != PublicFeedPolicy::Direct
-                || self.io.core.signing_latch.roles != 0)
+                || self.io.core.signing_latch.roles != 0
+                || self.io.core.writes_only)
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
         let spec = spec.into();
         if self.io.managed_socket_active()
+            || self.io.core.writes_only
             || spec.channel == Some(SocketChannel::Public)
                 && self.io.core.public_feed_policy != PublicFeedPolicy::Direct
             || self.io.core.signing_latch.blocks(spec.channel.as_ref())
@@ -3438,6 +3448,9 @@ pub trait Venue {
     fn guard_order_mutations(&self) -> bool {
         false
     }
+    /// A writer's venue state the store does not hold (hedge mode per symbol,
+    /// position-bound stops): replaced wholesale from the context before each write.
+    fn apply_writer_context(&mut self, _context: &crate::writer::WriterContext) {}
     /// Cancel and amend route only through stored orders: hold one naming an
     /// acknowledged placement until the store has it (`placement_acks`).
     fn cancel_needs_stored_order(&self) -> bool {
@@ -3971,6 +3984,57 @@ impl<V: Venue> Engine<V> {
         }
         self.io.core.public_feed_policy = policy;
         Ok(())
+    }
+
+    /// A stateless writer (`crate::writer`); fixed before startup. It implies no
+    /// public feed and no account startup.
+    pub fn set_writes_only(&mut self) -> Result<(), &'static str> {
+        if self.started {
+            return Err("writesOnly must be configured before startup");
+        }
+        self.io.core.writes_only = true;
+        self.io.core.public_feed_policy = PublicFeedPolicy::Disabled;
+        self.account_startup = false;
+        Ok(())
+    }
+
+    pub fn writes_only(&self) -> bool {
+        self.io.core.writes_only
+    }
+
+    /// Replace the writer's scratch rows with the host's context for the next
+    /// write. Venue settings the store does not hold go to the venue.
+    pub fn apply_writer_context(
+        &mut self,
+        context: crate::writer::WriterContext,
+    ) -> Result<(), &'static str> {
+        if !self.io.core.writes_only {
+            return Err("writer context requires a writesOnly engine");
+        }
+        self.store.set_orders(context.orders());
+        self.store.set_positions(context.positions());
+        self.venue.apply_writer_context(&context);
+        Ok(())
+    }
+
+    /// A host command with its writer context: every write to a writer carries
+    /// one (an absent context is an empty one), and nothing else may carry one.
+    pub fn handle_writer_command(
+        &mut self,
+        now: f64,
+        command: Command,
+        wait_ms: Option<u32>,
+        context: Option<crate::writer::WriterContext>,
+    ) -> Result<(), crate::request_context::Error> {
+        if self.io.core.writes_only {
+            if crate::writer::is_write(&command) {
+                self.apply_writer_context(context.unwrap_or_default())
+                    .map_err(|_| crate::request_context::Error::Invalid)?;
+            }
+        } else if context.is_some() {
+            return Err(crate::request_context::Error::Invalid);
+        }
+        self.handle_command(now, command, wait_ms)
     }
 
     /// Account sections (balance, orders, positions) are expected at startup only
@@ -4544,7 +4608,8 @@ impl<V: Venue> Engine<V> {
             self.duplicate_command();
             return;
         }
-        if self.venue.cancel_needs_stored_order() && !self.releasing {
+        // A writer's context already names every order it may touch.
+        if self.venue.cancel_needs_stored_order() && !self.releasing && !self.io.core.writes_only {
             if let Event::Command(Command::PlaceOrders { command, .. }) = &event {
                 self.io.core.placement_acks.placing(*command);
             } else if matches!(
@@ -4643,6 +4708,16 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
+            Event::Command(command)
+                if cx.io.core.writes_only
+                    && crate::writer::refusal(&command, cx.store.loaded().markets).is_some() =>
+            {
+                let message = crate::writer::refusal(&command, cx.store.loaded().markets)
+                    .expect("checked by the guard");
+                if let Some(id) = command.completion_id() {
+                    cx.refuse_before_entry(id, VenueError::new(message).outcome(crate::Outcome::NotSent));
+                }
+            }
             Event::PollScaleChanged { scale } => {
                 if scale.is_nan() || scale <= 0. {
                     return;
@@ -4997,6 +5072,17 @@ impl<V: Venue> Engine<V> {
         // Never inside a command entry; the hook runs with no HTTP delivery
         // or order-read authority of its own.
         if self.io.core.command_entry.is_some() {
+            return;
+        }
+        // A writer never re-reads: its host resolves an unknown outcome from its
+        // own stream, so no fence may outlive the command that raised it.
+        if self.io.core.writes_only {
+            self.io.core.reconcile_due.clear();
+            let token = self.io.core.order_locks.token();
+            self.io.core.order_locks.reconciled(None, token);
+            if let Some((timer, _)) = self.reconcile_timer.take() {
+                self.io.core.actions.push(Action::ClearTimer { timer });
+            }
             return;
         }
         let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
@@ -6044,6 +6130,13 @@ impl<V: Venue> Engine<V> {
     }
 
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
+        // A writer's rows are the host's own context: it never sends them back.
+        if self.io.core.writes_only {
+            self.io.core.fills.clear();
+            let pending = self.store.take_pending();
+            self.store.recycle_pending(pending);
+            return None;
+        }
         // A fill must not reach a consumer before its order: a book-cadence
         // flush carrying fills writes the store sections with them.
         let store = store || !self.io.core.fills.is_empty();

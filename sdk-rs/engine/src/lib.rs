@@ -58,6 +58,7 @@ pub mod test_support;
 pub mod time;
 pub mod url;
 pub mod wire;
+pub mod writer;
 
 pub use capabilities::{
     AccountLookup, CancelAll, Capabilities, ClosedPositionFormat, FillHistoryTime, LeverageQuery,
