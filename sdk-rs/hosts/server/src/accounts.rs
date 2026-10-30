@@ -69,9 +69,17 @@ pub struct Account {
     algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>>,
     /// Every symbol a placement was attempted on, by a client or an algo.
     pub placed: PlacedSymbols,
+    /// A live socket holds the account (not only parked resumes); account-only
+    /// background reads run just while it does.
+    pub held: Arc<std::sync::atomic::AtomicBool>,
     /// Frame-built account reads in flight; each is a whole engine snapshot.
     pub frame_reads: Arc<tokio::sync::Semaphore>,
+    /// Other store reads in flight (balance, position mode), which may wait for load.
+    pub reads: Arc<tokio::sync::Semaphore>,
 }
+
+/// Concurrent waiting store reads per account; more are refused, not queued.
+pub const MAX_READS: usize = 4;
 
 /// Concurrent `fetchOrders`/`fetchPositions` per account; more are refused, not queued.
 pub const MAX_FRAME_READS: usize = 2;
@@ -185,6 +193,7 @@ impl Account {
     /// Signing and the proxy token follow `id` (the newest init or resume).
     fn sign_through(&self, holders: &mut Holders, id: u64, live: &Live) {
         holders.signing = Some(id);
+        self.held.store(true, Ordering::Relaxed);
         if let Some(link) = &self.link {
             link.attach(id, live.outbox.clone());
             self.token.set(live.token.clone());
@@ -199,6 +208,7 @@ impl Account {
             Some(Some((id, live))) => self.sign_through(holders, id, &live),
             Some(None) => {
                 holders.signing = None;
+                self.held.store(false, Ordering::Relaxed);
                 if let Some(link) = &self.link {
                     link.suspend();
                 }
@@ -510,6 +520,8 @@ impl Registry {
         let algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>> = Arc::default();
         let placed_symbols = PlacedSymbols::default();
         let algo_placed = placed_symbols.clone();
+        let held = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let algo_held = held.clone();
         let (algos, algo_inbox) = if public_only {
             (None, None)
         } else {
@@ -552,6 +564,7 @@ impl Registry {
                                 emit,
                                 algo_signer,
                                 algo_placed,
+                                algo_held,
                                 inbox,
                             ));
                         }
@@ -577,7 +590,9 @@ impl Registry {
             algos,
             algo_owner,
             placed: placed_symbols,
+            held,
             frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
+            reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
         };
         Ok((account, remote))
     }

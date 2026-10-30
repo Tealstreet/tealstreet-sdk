@@ -603,10 +603,15 @@ impl Session {
                 // Off the socket loop: a read may wait for the account's first load.
                 Plan::Read(read) => {
                     let from_frame = read.from_frame();
-                    // Each frame read is a whole engine snapshot on the account loop.
-                    let permit = if from_frame {
-                        match account.frame_reads.clone().try_acquire_owned() {
-                            Ok(permit) => Some(permit),
+                    // Each frame read is a whole engine snapshot; each other read may wait for load.
+                    let limit = if from_frame {
+                        &account.frame_reads
+                    } else {
+                        &account.reads
+                    };
+                    let permit = {
+                        match limit.clone().try_acquire_owned() {
+                            Ok(permit) => permit,
                             Err(_) => {
                                 self.reply_failure(
                                     name,
@@ -618,8 +623,6 @@ impl Session {
                                 continue;
                             }
                         }
-                    } else {
-                        None
                     };
                     let (handle, out) = (account.handle.clone(), self.out.clone());
                     let (name, request_id) = (name.to_owned(), request_id.clone());
