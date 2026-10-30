@@ -1308,6 +1308,7 @@ pub const FRAME_FED_VENUES: &[&str] = &[
     "okxeu",
     "okxdemo",
     "okxeudemo",
+    "phemex",
 ];
 
 pub fn frame_fed_supported(venue: &str) -> bool {
