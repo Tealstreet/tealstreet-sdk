@@ -394,6 +394,13 @@ releases a dead worker's locks, so another tab can then restore it. `twapRestore
 foreign-account rows and running rows whose schedule lapsed, mirroring the
 exchange server. A runtime without Web Locks gets a no-op lock.
 
+A slice is persisted as `state.inFlight` (its size and, for market and limit
+slices, a minted `clientOrderId` sent on the order) before its order goes out,
+and cleared when it is counted. A restore settles it before resuming: found by
+client id counts it; a definitive miss puts the size back; anything else (an
+uncertain lookup, a chaser slice, a venue without client ids) counts it with an
+error toast, because placing it again could double it.
+
 ## Interrupted command replies
 
 Normal disposal fences state immediately, then lets pending native command

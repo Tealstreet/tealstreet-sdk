@@ -106,6 +106,7 @@ vi.mock('../twap/TwapInstance', () => ({
     cleanup() {
       mockCalls.cleanup.push(this);
     }
+    async reconcileInFlight() {}
     awaitOwnerLock() {}
     holdOwnerLock(release: () => void) {
       mockCalls.locks.push({ instance: this, release });
@@ -449,6 +450,16 @@ describe('TwapHandler', () => {
           'TWAP BTCUSDT not restored: its schedule lapsed, so no tab was running it',
         );
         expect(locks.isHeld('tealstreet-twap:test-account:twap-lapsed')).toBe(false);
+      });
+
+      it('restores a TWAP whose last slice was in flight, to settle it', async () => {
+        const last = row('twap-last', 'running');
+        last.state.ordersSizes = [];
+        (last.state as Record<string, unknown>).inFlight = { size: 0.5, clientOrderId: 'cid-last' };
+        handler.handle({ op: 'twap:state', data: [last] });
+        await settle();
+        expect(mockCalls.instances.length).toBe(1);
+        expect(vi.mocked(mockExchange.emitter.emit)).not.toHaveBeenCalled();
       });
 
       it('refuses finished, empty and inflated rows', async () => {

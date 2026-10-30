@@ -428,3 +428,104 @@ describe('TwapInstance', () => {
     });
   });
 });
+
+describe('TwapInstance in-flight slices', () => {
+  const options = (): TwapOptions => ({
+    accountName: 'test-account',
+    activeMarket: createMockMarket(),
+    size: 0.002,
+    duration: 10,
+    ordersCount: 2,
+    side: OrderSide.Buy,
+    chaserDelay: 1000,
+    reduceOnly: false,
+    randomnessPercentage: 0,
+    useLimitOrders: false,
+    useChaserOrders: false,
+  });
+
+  const exchangeWith = (overrides: Record<string, unknown>) =>
+    ({
+      store: { tickers: [] },
+      emitter: { emit: vi.fn() },
+      placeOrder: vi.fn().mockResolvedValue(['order-1']),
+      mintClientOrderId: vi.fn().mockReturnValue('cid-1'),
+      findOrderByClientOrderId: vi.fn(),
+      ...overrides,
+    }) as unknown as Exchange;
+
+  const restored = (exchange: Exchange, inFlight: TwapState['inFlight']) =>
+    new TwapInstance(
+      exchange,
+      createMockWorkerContext(),
+      options(),
+      vi.fn(),
+      {
+        accountName: 'test-account',
+        activeMarket: createMockMarket(),
+        size: 0.002,
+        ordersSizes: [0.001],
+        side: OrderSide.Buy,
+        status: TwapStatus.Running,
+        ordersCount: 2,
+        ordersExecuted: 0,
+        nextOrderAt: Date.now(),
+        inFlight,
+      },
+      'twap-1',
+    );
+
+  it('persists the slice as in flight, with its client id, before the order goes out', async () => {
+    let settle: (ids: string[]) => void = () => {};
+    const exchange = exchangeWith({ placeOrder: vi.fn(() => new Promise<string[]>((done) => (settle = done))) });
+    const instance = new TwapInstance(exchange, createMockWorkerContext(), options(), vi.fn());
+    const started = instance.start();
+    await Promise.resolve();
+    expect(instance.state.inFlight).toEqual({ size: 0.001, clientOrderId: 'cid-1' });
+    expect(instance.state.ordersSizes).toEqual([0.001]);
+    expect((exchange.placeOrder as any).mock.calls[0][0].clientOrderId).toBe('cid-1');
+    settle(['order-1']);
+    await started;
+    expect(instance.state.inFlight).toBeUndefined();
+    expect(instance.state.ordersExecuted).toBe(1);
+  });
+
+  it('counts a restored in-flight slice the venue has, without placing it again', async () => {
+    const exchange = exchangeWith({
+      findOrderByClientOrderId: vi.fn().mockResolvedValue({ found: true, order: { id: 'order-1' } }),
+    });
+    const instance = restored(exchange, { size: 0.001, clientOrderId: 'cid-1' });
+    await instance.reconcileInFlight();
+    expect(exchange.findOrderByClientOrderId).toHaveBeenCalledWith('BTCUSDT', 'cid-1');
+    expect(instance.state.ordersExecuted).toBe(1);
+    expect(instance.state.ordersSizes).toEqual([0.001]);
+    expect(instance.state.inFlight).toBeUndefined();
+    expect(exchange.placeOrder).not.toHaveBeenCalled();
+  });
+
+  it('puts a definitively unplaced slice back to be placed again', async () => {
+    const exchange = exchangeWith({
+      findOrderByClientOrderId: vi.fn().mockResolvedValue({ found: false, definitive: true }),
+    });
+    const instance = restored(exchange, { size: 0.001, clientOrderId: 'cid-1' });
+    await instance.reconcileInFlight();
+    expect(instance.state.ordersExecuted).toBe(0);
+    expect(instance.state.ordersSizes).toEqual([0.001, 0.001]);
+    expect(instance.state.inFlight).toBeUndefined();
+  });
+
+  it('never re-places an unconfirmable slice, and says so', async () => {
+    for (const [lookup, inFlight] of [
+      [vi.fn().mockResolvedValue({ found: false, definitive: false }), { size: 0.001, clientOrderId: 'cid-1' }],
+      [vi.fn().mockRejectedValue(new Error('down')), { size: 0.001, clientOrderId: 'cid-1' }],
+      [vi.fn(), { size: 0.001 }],
+    ] as const) {
+      const exchange = exchangeWith({ findOrderByClientOrderId: lookup });
+      const instance = restored(exchange, inFlight);
+      await instance.reconcileInFlight();
+      expect(instance.state.ordersExecuted).toBe(1);
+      expect(instance.state.ordersSizes).toEqual([0.001]);
+      expect((exchange.emitter.emit as any).mock.calls[0][0]).toBe('error');
+    }
+  });
+});
