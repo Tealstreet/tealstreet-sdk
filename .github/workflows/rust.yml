@@ -43,10 +43,11 @@ permissions:
   actions: read
   pull-requests: read
 
-# Pushes to a branch finish their run (the newest push waits behind it), so
-# landing gets completed results during a merge rush; PR pushes cancel stale runs.
+# Every master push gets its own complete run: one group per sha. A shared
+# group keeps only one pending run, so a merge rush cancelled every commit
+# between the running and the newest one. PR pushes cancel stale runs.
 concurrency:
-  group: rust-${{ github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('rust-pr-{0}', github.ref) || format('rust-{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # No global RUSTFLAGS: it would replace sdk-rs/.cargo/config.toml's flags,
