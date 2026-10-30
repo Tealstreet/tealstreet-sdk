@@ -428,7 +428,9 @@ pub async fn run(
                     if op != "twap:state" {
                         let result = match &dispatched {
                             Some(Ok(())) => Value::from("ok"),
-                            Some(Err(error)) => serde_json::json!({"message": error}),
+                            Some(Err(error)) => {
+                                serde_json::json!({"message": error.chars().take(160).collect::<String>()})
+                            }
                             None => serde_json::json!({"message": "unhandled op"}),
                         };
                         crate::audit::log(&who, &origin, &crate::audit::algo_op(&op, &data), result);
@@ -447,7 +449,12 @@ pub async fn run(
         }
     }
     // Disposal contract: stop TWAPs, let chaser cancels settle, then the scope, then the engine.
-    crate::audit::log(&who, "account disposed", &crate::audit::algo_op("terminateAll", "{}"), "ok".into());
+    crate::audit::log(
+        &who,
+        "account disposed",
+        &crate::audit::algo_op("terminateAll", "{}"),
+        "ok".into(),
+    );
     twap.terminate_all();
     if tokio::time::timeout(SHUTDOWN_DEADLINE, book.shutdown("account disposed"))
         .await

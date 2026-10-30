@@ -520,9 +520,14 @@ impl Session {
                     if crate::audit::ORDER_METHODS.contains(&method.as_str()) {
                         let who = audit_who(&account);
                         let origin = format!("socket:{}", self.socket);
-                        let fields = [("op".to_owned(), Value::from(method.as_str()))].into();
+                        let fields = crate::audit::refused_call(&method, &args);
                         let detail = json!({"name": refused.name, "message": refused.message});
-                        crate::audit::log(&who, &origin, &fields, crate::audit::result(&Err(detail)));
+                        crate::audit::log(
+                            &who,
+                            &origin,
+                            &fields,
+                            crate::audit::result(&Err(detail)),
+                        );
                     }
                     self.reply_failure(name, &request_id, refused.name, &refused.message, None);
                     return;
@@ -1003,6 +1008,7 @@ mod tests {
                     client_order_id: "cid-1".into(),
                 },
                 group: None,
+                audit: None,
             },
         );
         let notice = json!({"type":"done","command":3,"result":"[\"o1\"]"});

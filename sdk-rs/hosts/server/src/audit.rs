@@ -94,7 +94,9 @@ fn pick(source: &Value, fields: &[&str]) -> Map<String, Value> {
 
 /// The audited fields of an engine command (as JSON), or `None` for a read.
 pub fn command(command: &Value) -> Option<Map<String, Value>> {
-    let op = command["op"].as_str().filter(|op| ENGINE_OPS.contains(op))?;
+    let op = command["op"]
+        .as_str()
+        .filter(|op| ENGINE_OPS.contains(op))?;
     let mut fields = pick(command, &COMMAND_FIELDS);
     fields.insert("op".into(), op.into());
     if let Some(ids) = command["ids"].as_array() {
@@ -108,6 +110,25 @@ pub fn command(command: &Value) -> Option<Map<String, Value>> {
         fields.insert("orders".into(), Value::Array(orders));
     }
     Some(fields)
+}
+
+/// The audited fields of a hosted call refused before it became a command.
+pub fn refused_call(method: &str, args: &[Value]) -> Map<String, Value> {
+    let mut fields = match args.first() {
+        Some(Value::Array(orders)) => [(
+            "orders".to_owned(),
+            orders
+                .iter()
+                .map(|order| Value::Object(pick(order, &COMMAND_FIELDS)))
+                .collect(),
+        )]
+        .into_iter()
+        .collect(),
+        Some(first) => pick(first, &COMMAND_FIELDS),
+        None => Map::new(),
+    };
+    fields.insert("op".into(), method.into());
+    fields
 }
 
 /// The audited fields of a typed engine command an algo sent.
@@ -131,7 +152,9 @@ pub fn typed(command: &Command) -> Option<Map<String, Value>> {
             price,
             amount,
             ..
-        } => json!({"op": "amendOrderWithSymbol", "id": id, "symbol": symbol, "price": price, "amount": amount}),
+        } => {
+            json!({"op": "amendOrderWithSymbol", "id": id, "symbol": symbol, "price": price, "amount": amount})
+        }
         Command::CancelSymbolOrders { symbol, .. } => {
             json!({"op": "cancelSymbolOrders", "symbol": symbol})
         }
@@ -225,7 +248,12 @@ mod tests {
             "price": 60000.5, "clientOrderId": "ts-abc", "key": "pub-key", "secret": "s"
         }]});
         let fields = super::command(&command).unwrap();
-        let line = line(&who(), "socket:3/client:9", &fields, result(&Ok(Value::Null)));
+        let line = line(
+            &who(),
+            "socket:3/client:9",
+            &fields,
+            result(&Ok(Value::Null)),
+        );
         assert_eq!(line["msg"], "order audit");
         assert_eq!(line["level"], "info");
         assert_eq!(line["user"], "user-1");
@@ -249,13 +277,24 @@ mod tests {
         let fields =
             super::command(&json!({"op": "setLeverage", "symbol": "ETHUSDT", "leverage": 5.0}))
                 .unwrap();
-        let failed = Err(json!({"name": "ExchangeError", "message": "leverage not modified", "outcome": "unknown", "signature": "sig"}));
+        let failed = Err(
+            json!({"name": "ExchangeError", "message": "leverage not modified", "outcome": "unknown", "signature": "sig"}),
+        );
         let line = line(&who(), "socket:1/client:2", &fields, result(&failed));
         assert_eq!(line["leverage"], 5.0);
         assert_eq!(line["result"]["name"], "ExchangeError");
         assert_eq!(line["result"]["outcome"], "unknown");
         assert!(line["result"].get("signature").is_none());
         assert!(super::command(&json!({"op": "fetchAccount", "command": 1})).is_none());
+    }
+
+    #[test]
+    fn a_refused_call_still_logs_what_was_asked() {
+        let order = json!({"symbol": "BTCUSDT", "side": "buy", "amount": 0.001, "price": 60000, "passphrase": "p"});
+        let fields = refused_call("placeOrderWithClientOrderId", &[order]);
+        assert_eq!(fields["op"], "placeOrderWithClientOrderId");
+        assert_eq!(fields["symbol"], "BTCUSDT");
+        assert!(fields.get("passphrase").is_none());
     }
 
     #[test]
