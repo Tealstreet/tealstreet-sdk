@@ -13,6 +13,7 @@ mod signed_candles;
 pub use sign::dispatch as dispatch_signing;
 mod socket_codec;
 mod trading;
+mod venue_state;
 mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
@@ -543,6 +544,24 @@ impl Venue for PhemexPerpetuals {
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, _: SocketId) {
         self.settle_retired_trading(cx);
     }
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.account.export_venue_state().encode())
+    }
+    fn apply_venue_state(&mut self, _cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
+        if let Some(state) = venue_state::VenueState::decode(bytes) {
+            self.account.apply_venue_state(state);
+        }
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        let client_ids = cx
+            .store
+            .orders()
+            .iter()
+            .filter_map(|order| order.client_order_id.clone())
+            .collect();
+        self.account
+            .frame_ingested(cx.store.loaded().orders, &client_ids);
+    }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         self.settle_retired_trading(cx);
         if self.account_message(cx, socket, text) {
@@ -792,6 +811,10 @@ impl Venue for PhemexPerpetuals {
                 }
                 cx.store.set_markets(rows);
                 self.discovery.succeeded(cx, &false);
+                // Frame-fed: public instrument metadata only; the source sends the rest.
+                if cx.frame_fed() {
+                    return;
+                }
                 self.start_account(cx);
                 self.discovery_tickers(cx);
             }

@@ -245,6 +245,10 @@ impl BitgetFutures {
         at: Option<ArrayAt>,
         request: Request,
     ) {
+        // Frame-fed: account state arrives as frames; this engine reads nothing.
+        if cx.frame_fed() {
+            return;
+        }
         let (credential, identity) = self.read_selection(&path);
         let policy = crate::read_policy(credential);
         let context = match cx.http_context(Scope::Background, policy) {
@@ -408,7 +412,8 @@ impl BitgetFutures {
     }
 
     pub(crate) fn refresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.account.detected
+        if cx.frame_fed()
+            || !self.account.detected
             || self.account.positions_in_flight
             || cx.now < self.account.rest_paused_until
         {
@@ -457,7 +462,8 @@ impl BitgetFutures {
     }
 
     pub(crate) fn refresh_balance(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.account.detected
+        if cx.frame_fed()
+            || !self.account.detected
             || self.account.balance_in_flight
             || cx.now < self.account.rest_paused_until
         {
@@ -488,7 +494,8 @@ impl BitgetFutures {
     }
 
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>, virtual_only: bool) {
-        if !self.account.detected
+        if cx.frame_fed()
+            || !self.account.detected
             || self.account.orders_in_flight
             || cx.now < self.account.rest_paused_until
         {
@@ -1154,7 +1161,8 @@ impl BitgetFutures {
     }
 
     pub(crate) fn promote_uta(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
-        if self.account.uta || self.options.testnet || self.inverse() {
+        // Frame-fed: the data source detects the account type; a 40085 is an error here.
+        if cx.frame_fed() || self.account.uta || self.options.testnet || self.inverse() {
             return false;
         }
         self.account.uta = true;
@@ -2148,6 +2156,10 @@ impl BitgetFutures {
     }
 
     pub(crate) fn note_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Frame-fed: the data source reconciles from its own private stream.
+        if cx.frame_fed() {
+            return;
+        }
         if self.account.uta {
             self.account.orders_dirty = true;
             self.refresh_orders(cx, false);

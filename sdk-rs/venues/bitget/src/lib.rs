@@ -6,6 +6,7 @@ mod identity;
 mod paths;
 mod sign;
 mod trading;
+mod venue_state;
 mod wire;
 
 use book::BookState;
@@ -628,6 +629,25 @@ impl Venue for BitgetFutures {
     fn guard_pending_placements(&self) -> bool {
         true
     }
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(venue_state::encode(
+            self.account.detected,
+            self.account.uta,
+            &self.account.plans,
+            &self.account.trailing,
+        ))
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        let Some(state) = venue_state::decode(state) else {
+            return;
+        };
+        self.account.detected = state.detected;
+        self.account.uta = state.uta;
+        self.account.plans = state.plans;
+        self.account.trailing = state.trailing;
+        // Writes waiting on detection may now plan.
+        self.wake_trading(cx);
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -950,6 +970,9 @@ impl Venue for BitgetFutures {
                     self.discovery.succeeded(cx, DiscoveryRead::Tickers);
                     self.connect(cx, 1);
                     self.connect(cx, 2);
+                } else if cx.frame_fed() {
+                    // The page engine loads instruments only; its data source streams.
+                    self.discovery.succeeded(cx, DiscoveryRead::Markets);
                 } else {
                     self.connect(cx, 0);
                     self.discovery.succeeded(cx, DiscoveryRead::Markets);
