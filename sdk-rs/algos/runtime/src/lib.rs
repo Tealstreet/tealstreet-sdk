@@ -6,6 +6,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 pub mod executor;
+#[cfg(feature = "host-executor")]
+pub mod host_executor;
 mod port;
 mod registry;
 mod scope;

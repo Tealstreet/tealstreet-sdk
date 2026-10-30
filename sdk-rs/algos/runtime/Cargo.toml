@@ -13,6 +13,8 @@ default = ["tokio-executor"]
 # The native executor (tokio's local tasks and timers); the LOCAL worker's
 # wasm build provides a host-driven one instead.
 tokio-executor = ["tokio/rt", "tokio/time"]
+# The LOCAL worker's host-driven executor (no runtime, host-advanced clock).
+host-executor = []
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 safe-cex-engine.workspace = true
