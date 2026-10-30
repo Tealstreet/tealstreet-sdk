@@ -35,6 +35,12 @@ export class CallMethodHandler extends BaseHandler {
       console.log('Calling method', method);
     }
     try {
+      // Mirrors forward every metadata refresh; the worker keeps coalescing them.
+      if (method === 'updateSymbolMetadata') {
+        this.symbolMetadataThrottler.call(...(args as Parameters<typeof this._exchange.updateSymbolMetadata>));
+        this.replySuccess(requestId, null);
+        return;
+      }
       if ([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].includes(method as never)) {
         const call = (this._exchange as unknown as Record<string, unknown>)[method];
         if (typeof call !== 'function') throw new Error(`${this._exchange.name} does not support ${method}`);
@@ -49,9 +55,6 @@ export class CallMethodHandler extends BaseHandler {
           break;
         case 'scheduleCancel':
           result = await this._exchange.scheduleCancel(...(args as Parameters<typeof this._exchange.scheduleCancel>));
-          break;
-        case 'updateSymbolMetadata':
-          this.symbolMetadataThrottler.call(...(args as Parameters<typeof this._exchange.updateSymbolMetadata>));
           break;
         case 'changeMarginType':
           result = await this._exchange.changeMarginType(

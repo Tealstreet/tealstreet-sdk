@@ -278,6 +278,17 @@ const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
   'nukeOrders',
 ]);
 const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode'] as const;
+/**
+ * Engine methods a main-thread worker mirror cannot answer and does not forward:
+ * they throw by name instead of failing later as "engine is not started".
+ */
+export const WORKER_MIRROR_UNSUPPORTED_METHODS = ['validateAccount', 'fetchEngineSnapshot', 'snapshotFrame'] as const;
+export type WorkerMirrorUnsupportedMethod = (typeof WORKER_MIRROR_UNSUPPORTED_METHODS)[number];
+/** The main-thread exchange's surface: everything else forwards or is correct locally. */
+export type WorkerMirrorExchange = Omit<RustEngineExchange, WorkerMirrorUnsupportedMethod | 'fetchFillsForOrderIds'>;
+
+/** Rust-only engine methods (not on BaseExchange) a mirror forwards whole. */
+const RUST_FORWARDED_METHODS = ['fetchStpMode', 'fetchOrderBook'] as const;
 
 /**
  * The hosted server answers `fetchOrders`/`fetchPositions` with its engine's
@@ -527,7 +538,8 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (capabilities.fillsByOrderId) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
+    // Fill lookups serve the worker's chasers; a mirror has no engine to ask.
+    if (capabilities.fillsByOrderId && !this.isWorkerMirror) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
     if (capabilities.accountTier) {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
         if (this.routesToWorker) {
@@ -692,6 +704,7 @@ export class RustEngineExchange extends BaseExchange {
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
     this.forwardToWorker();
+    if (this.isWorkerMirror) this.refuseOnMirror();
     this.stopWorkerCapabilitySync = this.store.subscribe(this.syncWorkerCapabilities);
   }
 
@@ -1139,9 +1152,20 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
+  private refuseOnMirror() {
+    const members = this as unknown as Record<string, unknown>;
+    for (const method of WORKER_MIRROR_UNSUPPORTED_METHODS) {
+      members[method] = () => {
+        const message = `${method} is not available on the main-thread exchange: it runs in the account's worker`;
+        throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+      };
+    }
+  }
+
   private forwardToWorker() {
     // A branded fallback answers locally; wrapping it would hide the brand `capabilities` reads.
-    const capabilities = this.capabilities;
+    // The brand alone decides: a mirror learns the record (options included) only later.
+    const capabilities = super.capabilities;
     const inert = new Set<string>(
       Object.entries(CAPABILITY_METHODS)
         .filter(([capability]) => !capabilities[capability as keyof ExchangeCapabilities])
@@ -1150,17 +1174,21 @@ export class RustEngineExchange extends BaseExchange {
     // Native account reads start an engine, so a mirror asks the worker's instead.
     // Journals are not forwarded: a mirror folds them itself from forwarded raw reads,
     // so the hosted server, which has no TS mappers, only serves those reads.
-    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS];
+    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS, ...RUST_FORWARDED_METHODS];
+    const members = this as unknown as Record<string, unknown>;
     for (const method of methods) {
-      if (inert.has(method)) continue;
-      const local = this[method] as (...args: unknown[]) => Promise<unknown>;
-      (this as Record<WorkerForwardedMethod | NativeAccountRead, unknown>)[method] = async (...args: unknown[]) => {
+      // A capability-defined method this venue lacks stays absent, never a forwarder.
+      if (inert.has(method) || typeof members[method] !== 'function') continue;
+      const local = members[method] as (...args: unknown[]) => Promise<unknown>;
+      // An engine-owning instance calls straight through, keeping its own synchronous refusals.
+      members[method] = (...args: unknown[]) => {
         if (!this.routesToWorker) return local(...args);
-        const result = await this.callWorker(method, ...args);
-        // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-        return method === 'updateOrder'
-          ? decodeWorkerOrderIds(result as WorkerOrderIds)
-          : rowsFromAccountFrame(method, result, args[0]);
+        return this.callWorker(method, ...args).then((result) =>
+          // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+          method === 'updateOrder'
+            ? decodeWorkerOrderIds(result as WorkerOrderIds)
+            : rowsFromAccountFrame(method, result, args[0]),
+        );
       };
     }
   }
@@ -2174,6 +2202,7 @@ export class RustEngineExchange extends BaseExchange {
     const source = capabilities.maxLeverage;
     if (source === 'unsupported') throw new Error('Not implemented');
     if (source === 'rails') {
+      if (this.routesToWorker) return (await this.callWorker('fetchSymbolMaxLeverage', symbol)) as number;
       const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       return Math.max(rails.buyLeverage, rails.sellLeverage);
     }
@@ -2264,6 +2293,9 @@ export class RustEngineExchange extends BaseExchange {
       // Metadata-refreshed rails answer from settings once loaded; before the
       // first refresh (a flat, freshly selected symbol) the venue is read.
       if (query === 'onMetadata' && usable) return cached;
+      // The venue read needs the engine; the worker's frames bring the result back.
+      if (this.routesToWorker)
+        return (await this.callWorker('fetchLeverageForSymbol', symbol)) as FetchedLeverage | null;
       const leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
       this.applier.applyLeverage(symbol, leverage);
