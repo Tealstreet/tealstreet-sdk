@@ -849,7 +849,8 @@ impl Hyperliquid {
                 }
                 let market = cx.store.market(&symbol).ok_or("Market not found")?;
                 // Frame-fed defaults come from the source's settings, never a local seed.
-                if cx.frame_fed() && self.has_setting(market) && cx.store.setting(&symbol).is_none() {
+                if cx.frame_fed() && self.has_setting(market) && cx.store.setting(&symbol).is_none()
+                {
                     return Err(
                         "Hyperliquid settings have not arrived from the data source yet".into(),
                     );

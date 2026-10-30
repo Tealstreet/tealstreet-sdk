@@ -84,7 +84,10 @@ fn place(e: &mut Engine<Hyperliquid>) -> Vec<HttpRequest> {
 #[test]
 fn frame_fed_start_reads_only_public_metadata_and_opens_no_socket() {
     let (e, reads) = page_engine();
-    assert_eq!(reads, ["metaAndAssetCtxs", "perpDexs"].map(String::from).to_vec());
+    assert_eq!(
+        reads,
+        ["metaAndAssetCtxs", "perpDexs"].map(String::from).to_vec()
+    );
     assert!(e.store().loaded().markets);
 }
 
@@ -162,7 +165,9 @@ fn a_leverage_write_before_the_source_settings_refuses_visibly_then_uses_them() 
     set(&mut e, 9);
     let refused = e.drain_plain().collect::<Vec<_>>();
     assert!(
-        refused.iter().any(|a| format!("{a:?}").contains("settings have not arrived")),
+        refused
+            .iter()
+            .any(|a| format!("{a:?}").contains("settings have not arrived")),
         "{refused:?}"
     );
     assert!(requests(&mut e).is_empty());
@@ -208,7 +213,12 @@ fn confirm_one(e: &mut Engine<Hyperliquid>) -> bool {
     assert_eq!(sent.len(), 1, "{sent:?}");
     let body: Value = serde_json::from_str(sent[0].body.as_deref().unwrap()).unwrap();
     assert_eq!(body["action"]["type"], "updateLeverage");
-    reply(e, &sent[0], 200, r#"{"status":"ok","response":{"type":"default"}}"#);
+    reply(
+        e,
+        &sent[0],
+        200,
+        r#"{"status":"ok","response":{"type":"default"}}"#,
+    );
     body["action"]["isCross"].as_bool().unwrap()
 }
 
@@ -243,7 +253,10 @@ fn a_source_frame_that_agrees_releases_the_hold() {
     // Released: the source owns the setting again, even back to cross.
     e.apply_frame(2200.0, &stale, true).unwrap();
     leverage(&mut e, 32, 7.0);
-    assert!(confirm_one(&mut e), "after release the source's cross applies");
+    assert!(
+        confirm_one(&mut e),
+        "after release the source's cross applies"
+    );
 }
 
 #[test]
@@ -290,7 +303,10 @@ fn the_page_engine_s_own_builder_approval_outlasts_a_source_that_has_not_read_it
         })
         .collect::<Vec<_>>();
     assert_eq!(read.len(), 1, "only the approval read before the write");
-    let builder = read.iter().find(|r| kind(r) == "maxBuilderFee").expect("one approval read");
+    let builder = read
+        .iter()
+        .find(|r| kind(r) == "maxBuilderFee")
+        .expect("one approval read");
     reply(&mut e, builder, 200, "30");
     let write = requests(&mut e);
     assert_eq!(write.len(), 1);
