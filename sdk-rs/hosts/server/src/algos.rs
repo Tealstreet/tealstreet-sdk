@@ -19,6 +19,8 @@ pub enum AlgoInput {
     Op {
         op: String,
         data: String,
+        /// The socket that sent it, for the order audit line.
+        origin: String,
     },
     /// A socket of this account closed: its chases end, as today.
     SocketClosed,
@@ -65,6 +67,7 @@ struct Port {
     next: Cell<CommandId>,
     pending: RefCell<HashMap<CommandId, oneshot::Sender<Result<String, VenueError>>>>,
     name: String,
+    who: crate::audit::Who,
     emit: Emit,
 }
 
@@ -83,6 +86,7 @@ impl AccountPort for Port {
         id
     }
     fn command(&self, command: Command) -> CommandFuture {
+        let audit = crate::audit::typed(&command).map(|fields| (self.who.clone(), fields));
         let id = command.completion_id();
         let (tx, rx) = oneshot::channel();
         if let Some(id) = id {
@@ -93,19 +97,24 @@ impl AccountPort for Port {
             self.pending.borrow_mut().remove(&id);
         }
         Box::pin(async move {
-            if !sent {
+            let result = if !sent {
                 let mut error = VenueError::new("account is busy; command not sent");
                 error.outcome = Some(Outcome::NotSent);
-                return Err(error);
+                Err(error)
+            } else {
+                match id {
+                    Some(_) => rx.await.unwrap_or_else(|_| {
+                        let mut error = VenueError::new("account stopped");
+                        error.outcome = Some(Outcome::Unknown);
+                        Err(error)
+                    }),
+                    None => Ok("null".into()),
+                }
+            };
+            if let Some((who, fields)) = audit {
+                crate::audit::log(&who, "algo", &fields, crate::audit::venue_result(&result));
             }
-            match id {
-                Some(_) => rx.await.unwrap_or_else(|_| {
-                    let mut error = VenueError::new("account stopped");
-                    error.outcome = Some(Outcome::Unknown);
-                    Err(error)
-                }),
-                None => Ok("null".into()),
-            }
+            result
         })
     }
     fn emit(&self, op: &str, data: String) {
@@ -328,8 +337,7 @@ impl Feed {
 pub async fn run(
     handle: AccountHandle,
     client: u64,
-    venue: String,
-    name: String,
+    who: crate::audit::Who,
     emit: Emit,
     link_signer: Option<std::sync::Arc<safe_cex_remote_signer::SignerLink>>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
@@ -341,17 +349,19 @@ pub async fn run(
         }
         return;
     };
+    let name = who.account.clone();
     let port = Rc::new(Port {
         handle: handle.clone(),
         client: Cell::new(client),
         store: RefCell::new(AlgoStore {
-            venue,
+            venue: who.venue.clone(),
             ..AlgoStore::default()
         }),
         subscribers: RefCell::default(),
         next: Cell::new(0),
         pending: RefCell::default(),
         name: name.clone(),
+        who: who.clone(),
         emit,
     });
     let scope = Scope::new();
@@ -413,20 +423,31 @@ pub async fn run(
                 }
             }
             input = inbox.recv() => match input {
-                Some(AlgoInput::Op { op, data }) => {
-                    if let Some(Err(error)) = registry.dispatch(&op, &data, &cx) {
+                Some(AlgoInput::Op { op, data, origin }) => {
+                    let dispatched = registry.dispatch(&op, &data, &cx);
+                    if op != "twap:state" {
+                        let result = match &dispatched {
+                            Some(Ok(())) => Value::from("ok"),
+                            Some(Err(error)) => serde_json::json!({"message": error}),
+                            None => serde_json::json!({"message": "unhandled op"}),
+                        };
+                        crate::audit::log(&who, &origin, &crate::audit::algo_op(&op, &data), result);
+                    }
+                    if let Some(Err(error)) = dispatched {
                         port.emit("error", Value::String(error).to_string());
                     }
                     publish(&mut published);
                 }
                 Some(AlgoInput::SocketClosed) => {
                     let _ = registry.dispatch("chaser:terminateAll", "{}", &cx);
+                    crate::audit::log(&who, "socket closed", &crate::audit::algo_op("chaser:terminateAll", "{}"), "ok".into());
                 }
                 Some(AlgoInput::Dispose) | None => break,
             },
         }
     }
     // Disposal contract: stop TWAPs, let chaser cancels settle, then the scope, then the engine.
+    crate::audit::log(&who, "account disposed", &crate::audit::algo_op("terminateAll", "{}"), "ok".into());
     twap.terminate_all();
     if tokio::time::timeout(SHUTDOWN_DEADLINE, book.shutdown("account disposed"))
         .await

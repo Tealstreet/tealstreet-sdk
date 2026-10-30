@@ -30,6 +30,14 @@ struct Pending {
     returns_unit: bool,
     /// A cancel-all fanned out over symbols: one shared outcome for the group.
     group: Option<Arc<Mutex<Group>>>,
+    /// Order-affecting commands are logged with their result when they settle.
+    audit: Option<Audit>,
+}
+
+struct Audit {
+    who: crate::audit::Who,
+    origin: String,
+    fields: serde_json::Map<String, Value>,
 }
 
 struct Group {
@@ -401,6 +409,7 @@ impl Session {
                         .send(crate::algos::AlgoInput::Op {
                             op: op.to_owned(),
                             data: msg.data.to_string(),
+                            origin: format!("socket:{}", self.socket),
                         })
                         .is_ok()
                 });
@@ -508,6 +517,13 @@ impl Session {
             match methods::translate(&method, &args, account.handle.capabilities(), &symbols) {
                 Ok(plans) => plans,
                 Err(refused) => {
+                    if crate::audit::ORDER_METHODS.contains(&method.as_str()) {
+                        let who = audit_who(&account);
+                        let origin = format!("socket:{}", self.socket);
+                        let fields = [("op".to_owned(), Value::from(method.as_str()))].into();
+                        let detail = json!({"name": refused.name, "message": refused.message});
+                        crate::audit::log(&who, &origin, &fields, crate::audit::result(&Err(detail)));
+                    }
                     self.reply_failure(name, &request_id, refused.name, &refused.message, None);
                     return;
                 }
@@ -542,6 +558,11 @@ impl Session {
                     };
                     joined.next_command = id;
                     command["command"] = id.into();
+                    let audit = crate::audit::command(&command).map(|fields| Audit {
+                        who: audit_who(&joined.account),
+                        origin: format!("socket:{}/client:{}", self.socket, joined.client.id),
+                        fields,
+                    });
                     joined.client.pending.lock().unwrap().insert(
                         id,
                         Pending {
@@ -549,6 +570,7 @@ impl Session {
                             method: method.clone(),
                             returns_unit,
                             group: group.clone(),
+                            audit,
                         },
                     );
                     let client = joined.client.id;
@@ -642,7 +664,23 @@ const WRITE_METHODS: [&str; 9] = [
     "setAllLeverage",
 ];
 
+fn audit_who(account: &Account) -> crate::audit::Who {
+    crate::audit::Who {
+        user: account.user.clone(),
+        account: account.name.clone(),
+        venue: account.venue.clone(),
+    }
+}
+
 fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) {
+    if let Some(audit) = &pending.audit {
+        crate::audit::log(
+            &audit.who,
+            &audit.origin,
+            &audit.fields,
+            crate::audit::result(&outcome),
+        );
+    }
     let outcome = match &pending.group {
         None => outcome,
         Some(group) => {
@@ -905,6 +943,7 @@ mod tests {
                 method: "placeOrder".into(),
                 returns_unit: false,
                 group: None,
+                audit: None,
             },
         );
         notice_to_msg(&out, "acct", &json!({"type":"event","command":1}), &pending);
@@ -940,6 +979,7 @@ mod tests {
                 method: "placeOrder".into(),
                 returns_unit: false,
                 group: None,
+                audit: None,
             },
         );
         let notice =
