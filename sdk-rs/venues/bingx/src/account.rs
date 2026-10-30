@@ -1219,9 +1219,7 @@ impl Account {
                         format!("BingX malformed leverage response for {symbol}"),
                     );
                 }
-                self.settle_symbol_settings(cx, &symbol, id, |read| {
-                    read.leverage = Some(rails)
-                });
+                self.settle_symbol_settings(cx, &symbol, id, |read| read.leverage = Some(rails));
             }
             Request::SymbolMarginType { id, symbol } => {
                 let margin_type = metadata::margin_type_answer(response.body);
