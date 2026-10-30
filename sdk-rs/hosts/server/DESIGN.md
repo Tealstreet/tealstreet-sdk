@@ -256,7 +256,7 @@ Sessions and resume (same semantics as today):
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
   - A different fingerprint disposes the account and rebuilds it.
 - **Resume alias:** a used `resumeId` stays valid as an alias for 120s, which is `RESUME_ALIAS_MS`.
-- **Grace expiry:** parked accounts are disposed with the reason `no browser for 60s`, recorded in the order audit log. The `error` the algo host emits then reaches no one (no browser is attached), so a client returning later sees its algos gone with no notice; delivering it on the next session is not built.
+- **Grace expiry:** parked accounts are disposed with the reason `no browser for 60s`, recorded in the order audit log. No browser is attached to tell, so when chases or TWAPs were running the registry keeps one notice per (user, account) and sends it as an `error` on that account's next init; it is dropped once delivered or after 24 hours.
 
 ## Remote signer (claude-4yjlw0)
 
