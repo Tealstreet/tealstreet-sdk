@@ -31,12 +31,19 @@ pub enum AlgoInput {
     /// A socket joined (a resume or another tab): resend the algo store rows.
     Joined,
     /// The account is going away: settle algos, then dispose the engine.
-    /// The reason reaches the order audit log and the client.
-    Dispose { reason: String },
+    /// The reason reaches the order audit log and the client. With no browser
+    /// to tell, `stopped` keeps the notice for the account's next init.
+    Dispose {
+        reason: String,
+        stopped: Option<StopNotice>,
+    },
 }
 
 /// Where algo replies go: the account's current signing socket.
 pub type Emit = Box<dyn Fn(String) + Send>;
+
+/// Keeps a stop notice for a client that is not there to see it.
+pub type StopNotice = Box<dyn FnOnce(String) + Send>;
 
 /// Bound on settling chaser cancels before the engine is disposed anyway.
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
@@ -529,7 +536,7 @@ pub async fn run(
     }
     // True only when the account itself is going away; a failed algo feed ends
     // the algos and leaves the account running.
-    let disposing = loop {
+    let ended = loop {
         tokio::select! {
             batch = feed.next() => {
                 let Some(batch) = batch else { break None };
@@ -605,13 +612,17 @@ pub async fn run(
                     published.clear();
                     publish(&mut published);
                 }
-                Some(AlgoInput::Dispose { reason }) => break Some(reason),
-                None => break Some("account disposed".to_owned()),
+                Some(AlgoInput::Dispose { reason, stopped }) => break Some((reason, stopped)),
+                None => break Some(("account disposed".to_owned(), None)),
             },
         }
     };
     // Disposal contract: stop TWAPs, let chaser cancels settle, then the scope, then the engine.
-    let reason = disposing.as_deref().unwrap_or("algo feed ended");
+    let (disposing, reason, stopped) = match ended {
+        Some((reason, stopped)) => (true, reason, stopped),
+        None => (false, "algo feed ended".to_owned(), None),
+    };
+    let reason = reason.as_str();
     crate::audit::log(
         &who,
         reason,
@@ -619,11 +630,11 @@ pub async fn run(
         "ok".into(),
     );
     if !book.active_chasers().is_empty() || !twap.active_twaps(&name).is_empty() {
-        (port.emit)(crate::envelope::msg(
-            &name,
-            "error",
-            Value::String(format!("Chases and TWAPs stopped: {reason}")),
-        ));
+        let notice = format!("Chases and TWAPs stopped: {reason}");
+        match stopped {
+            Some(stopped) => stopped(notice),
+            None => (port.emit)(crate::envelope::msg(&name, "error", Value::String(notice))),
+        }
     }
     twap.terminate_all();
     if tokio::time::timeout(SHUTDOWN_DEADLINE, book.shutdown(reason))
@@ -636,7 +647,7 @@ pub async fn run(
     }
     scope.dispose();
     handle.leave(feed.client());
-    if disposing.is_none() {
+    if !disposing {
         crate::state::Log::warn(&format!(
             "{name}: algo feed ended; algos stopped, the account keeps running"
         ));

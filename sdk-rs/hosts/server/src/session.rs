@@ -294,6 +294,14 @@ impl Session {
             Ok(account) => {
                 self.metrics.note_init();
                 self.join(account).await;
+                // Algos stopped while no browser was attached: say why, once.
+                if let Some(notice) = self.registry.take_notice(self.user(), &init.account_name) {
+                    self.send(envelope::msg(
+                        &init.account_name,
+                        "error",
+                        Value::String(notice),
+                    ));
+                }
             }
             Err(error) => {
                 Log::warn(&format!("init {} refused: {error}", init.account_name));
