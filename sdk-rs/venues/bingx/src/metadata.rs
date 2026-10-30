@@ -18,7 +18,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::{CredentialSlot, Cx, ErrorKind, Level, Method, Response, VenueError};
 
-const MARGIN_TYPE: &str = "/openApi/swap/v2/trade/marginType";
+pub(super) const MARGIN_TYPE: &str = "/openApi/swap/v2/trade/marginType";
 /// One native 20s attempt plus one fresh re-signed attempt per read: 40s per
 /// call, 80s for the serial pair.
 const READ: [CallBound<'static>; 1] = [CallBound {
@@ -52,6 +52,24 @@ pub struct Leg {
     /// Present once the leverage read settled; selects the margin-type read.
     leverage: Option<(f64, f64)>,
     resent: bool,
+}
+
+/// A leverage read's validated (long, short) rails.
+pub(super) fn leverage_answer(body: &str) -> Option<(f64, f64)> {
+    serde_json::from_str::<Data<Leverage>>(body)
+        .ok()
+        .map(|p| p.data)
+        .filter(|l| l.long_leverage > 0.0 && l.short_leverage > 0.0)
+        .map(|l| (l.long_leverage, l.short_leverage))
+}
+/// A margin-type read's validated margin type.
+pub(super) fn margin_type_answer(body: &str) -> Option<MarginType> {
+    let parsed = serde_json::from_str::<Data<MarginMode<'_>>>(body).ok()?;
+    match parsed.data.margin_type.as_ref() {
+        "ISOLATED" => Some(MarginType::Isolated),
+        "CROSSED" => Some(MarginType::Cross),
+        _ => None,
+    }
 }
 
 fn credential(credentials: &Credentials) -> Credential {
@@ -219,15 +237,10 @@ impl Account {
         }
         let current = cx.store.metadata_eligible(&leg.token);
         let Some((buy, sell)) = leg.leverage else {
-            let rails = serde_json::from_str::<Data<Leverage>>(response.body)
-                .ok()
-                .map(|p| p.data)
-                .filter(|l| l.long_leverage > 0.0 && l.short_leverage > 0.0);
-            let Some(rails) = rails else {
+            let Some(read) = leverage_answer(response.body) else {
                 fail(cx, &leg, metadata_error("Invalid BingX leverage metadata"));
                 return;
             };
-            let read = (rails.long_leverage, rails.short_leverage);
             if !current {
                 answer_current(cx, &leg, read);
                 return;
@@ -269,14 +282,9 @@ impl Account {
             answer_current(cx, &leg, (buy, sell));
             return;
         }
-        let parsed = serde_json::from_str::<Data<MarginMode<'_>>>(response.body);
-        let margin = match parsed.as_ref().map(|row| row.data.margin_type.as_ref()) {
-            Ok("ISOLATED") => MarginType::Isolated,
-            Ok("CROSSED") => MarginType::Cross,
-            _ => {
-                fail(cx, &leg, metadata_error("Invalid BingX margin metadata"));
-                return;
-            }
+        let Some(margin) = margin_type_answer(response.body) else {
+            fail(cx, &leg, metadata_error("Invalid BingX margin metadata"));
+            return;
         };
         if cx
             .finish_plan_call(&leg.plan, &leg.slot, &leg.context)
