@@ -2,7 +2,9 @@
 //! (safe-cex `rust.exchange.ts`) sends to `WasmEngine.command`. Every produced
 //! command still passes the engine's typed decoder; an unknown method never
 //! gets a guessed command.
-use safe_cex_engine::capabilities::{AccountLookup, CancelAll, FillHistoryTime};
+use safe_cex_engine::capabilities::{
+    AccountLookup, CancelAll, FillHistoryTime, LeverageQuery, MaxLeverage,
+};
 use safe_cex_engine::{Capabilities, Store};
 use serde_json::{Map, Value, json};
 
@@ -186,20 +188,6 @@ fn order(value: &Value) -> Result<Value, Refused> {
     Ok(Value::Object(fields.clone()))
 }
 
-/// `value`'s field when present and not null (JSON turns `undefined` into absence or null).
-fn present<'a>(value: &'a Value, field: &str) -> Option<&'a Value> {
-    value.get(field).filter(|value| !value.is_null())
-}
-
-/// Copies the present `(from, to)` fields of `source`, as the TS command spreads them.
-fn optional(out: &mut Map<String, Value>, source: &Value, pairs: &[(&'static str, &'static str)]) {
-    for (from, to) in pairs {
-        if let Some(value) = present(source, from) {
-            out.insert((*to).into(), value.clone());
-        }
-    }
-}
-
 fn symbols(value: &Value) -> Result<Option<Vec<String>>, Refused> {
     match value {
         Value::Null => Ok(None),
@@ -210,24 +198,6 @@ fn symbols(value: &Value) -> Result<Option<Vec<String>>, Refused> {
             .map(Some),
         _ => Err(refused("TypeError", "symbols must be an array")),
     }
-}
-
-/// `fetchHistoricalFills` bounds, as `rust.exchange.ts` `milliseconds`.
-fn fill_bound(value: Option<&Value>, nonnegative: bool) -> Option<Value> {
-    let value = value?.as_f64().filter(|value| value.is_finite())?;
-    if nonnegative && value < 0.0 {
-        return None;
-    }
-    let already = if nonnegative {
-        value >= 1_000_000_000_000.0
-    } else {
-        value > 1_000_000_000_000.0
-    };
-    Some(
-        (if already { value } else { value * 1000.0 })
-            .floor()
-            .into(),
-    )
 }
 
 fn command(op: &str, fields: Map<String, Value>, returns_unit: bool) -> Plan {
@@ -251,13 +221,53 @@ fn fields(pairs: impl IntoIterator<Item = (&'static str, Value)>) -> Map<String,
         .collect()
 }
 
+/// An optional history field the engine reads as `u32`; a JS number is accepted
+/// only when it is a whole number in range, so it never reaches it as `10.0`.
+fn limit(value: Option<&Value>) -> Result<Option<Value>, Refused> {
+    match value.filter(|value| !value.is_null()) {
+        None => Ok(None),
+        Some(value) => value
+            .as_f64()
+            .filter(|limit| limit.fract() == 0.0 && *limit >= 0.0 && *limit <= f64::from(u32::MAX))
+            .map(|limit| Some((limit as u32).into()))
+            .ok_or_else(|| refused("TypeError", "limit must be a whole number")),
+    }
+}
+
+/// An optional history bound or filter, passed through when present.
+fn optional(options: &Value, field: &str) -> Option<Value> {
+    options.get(field).filter(|value| !value.is_null()).cloned()
+}
+
+/// As `fetchHistoricalFills`: seconds become milliseconds where the venue's
+/// history clock needs it, and a negative or non-finite bound is dropped.
+fn fill_bound(value: Option<Value>, time: FillHistoryTime) -> Option<Value> {
+    if time == FillHistoryTime::AsProvided {
+        return value;
+    }
+    let value = value?.as_f64().filter(|value| value.is_finite())?;
+    let nonnegative = time == FillHistoryTime::NonnegativeSecondsOrMilliseconds;
+    if nonnegative && value < 0.0 {
+        return None;
+    }
+    let milliseconds = if nonnegative {
+        value >= 1e12
+    } else {
+        value > 1e12
+    };
+    let value = if milliseconds { value } else { value * 1000.0 };
+    Some(value.floor().into())
+}
+
 /// Translates one hosted `callMethod`. `open_order_symbols` (engine store) answers
-/// cancel-all for venues whose engine cancels one symbol at a time.
+/// cancel-all for venues whose engine cancels one symbol at a time; a
+/// `public_only` account has no private reads.
 pub fn translate(
     method: &str,
     args: &[Value],
     capabilities: &Capabilities,
     open_order_symbols: &[String],
+    public_only: bool,
 ) -> Result<Vec<Plan>, Refused> {
     let size = serde_json::to_string(args).map_or(usize::MAX, |json| json.len());
     if size > MAX_ARGS_BYTES {
@@ -458,6 +468,77 @@ pub fn translate(
             }
             one(command("setPositionMode", out, true))
         }
+        // As `RustEngineExchange.updateSymbolMetadata`: the venue's rails or maximum
+        // reach the engine store, and the next frame carries them.
+        "updateSymbolMetadata" => {
+            let symbol = text(arg(args, 0), "symbol")?;
+            if public_only {
+                return one(Plan::Reply(Value::Null));
+            }
+            let op = if capabilities.max_leverage == MaxLeverage::Query {
+                "fetchMaxLeverage"
+            } else if matches!(
+                capabilities.leverage_query,
+                LeverageQuery::OnMetadata | LeverageQuery::OnReadAndMetadata
+            ) {
+                "fetchLeverage"
+            } else {
+                return one(Plan::Reply(Value::Null));
+            };
+            one(command(op, fields([("symbol", symbol.into())]), true))
+        }
+        "fetchHistoricalFills" if capabilities.fill_history => {
+            let options = arg(args, 0);
+            let (from, to) = (optional(options, "from"), optional(options, "to"));
+            if capabilities.finite_history_bounds
+                && [&from, &to]
+                    .into_iter()
+                    .flatten()
+                    .any(|bound| !bound.as_f64().is_some_and(f64::is_finite))
+            {
+                return Err(refused("Error", "history bounds must be finite"));
+            }
+            let mut out = Map::new();
+            for field in ["symbol", "orderId"] {
+                if let Some(value) = optional(options, field) {
+                    out.insert(field.into(), text(&value, field)?.into());
+                }
+            }
+            let time = capabilities.fill_history_time;
+            for (field, bound) in [("from", from), ("to", to)] {
+                if let Some(bound) = fill_bound(bound, time) {
+                    out.insert(field.into(), finite(&bound, field)?.into());
+                }
+            }
+            if let Some(limit) = limit(options.get("limit"))? {
+                out.insert("limit".into(), limit);
+            }
+            one(command("fetchFills", out, false))
+        }
+        "fetchHistoricalOrders" if capabilities.order_history => {
+            let options = arg(args, 0);
+            if capabilities.reject_order_history_filters
+                && (optional(options, "orderId").is_some() || optional(options, "status").is_some())
+            {
+                return Err(refused(
+                    "Error",
+                    "order history does not support orderId or status filters",
+                ));
+            }
+            let mut out = Map::new();
+            if let Some(symbol) = optional(options, "symbol") {
+                out.insert("symbol".into(), text(&symbol, "symbol")?.into());
+            }
+            for field in ["from", "to"] {
+                if let Some(bound) = optional(options, field) {
+                    out.insert(field.into(), finite(&bound, field)?.into());
+                }
+            }
+            if let Some(limit) = limit(options.get("limit"))? {
+                out.insert("limit".into(), limit);
+            }
+            one(command("fetchOrderHistory", out, false))
+        }
         // A main-thread mirror learns the record here (`loadWorkerCapabilities`).
         "fetchEngineCapabilities" => one(Plan::Reply(
             serde_json::to_value(capabilities)
@@ -469,103 +550,50 @@ pub fn translate(
                 one(command("fetchAccount", Map::new(), false))
             }
         },
+        // Native account reads, answered from the engine store as rust.exchange.ts does.
         "fetchOrders" => one(Plan::Read(StoreRead::Orders(symbols(arg(args, 0))?))),
         "fetchPositions" => one(Plan::Read(StoreRead::Positions(symbols(arg(args, 0))?))),
         "fetchBalance" => one(Plan::Read(StoreRead::Balance)),
         "fetchPositionMode" => one(Plan::Read(StoreRead::PositionMode)),
         "fetchOHLCV" => {
-            let opts = arg(args, 0);
+            let options = arg(args, 0);
             let mut out = fields([
-                ("symbol", text(&opts["symbol"], "symbol")?.into()),
-                ("interval", text(&opts["interval"], "interval")?.into()),
+                ("symbol", text(&options["symbol"], "symbol")?.into()),
+                ("interval", text(&options["interval"], "interval")?.into()),
             ]);
-            optional(
-                &mut out,
-                opts,
-                &[("limit", "limit"), ("from", "from"), ("to", "to")],
-            );
+            for field in ["from", "to"] {
+                if let Some(bound) = optional(options, field) {
+                    out.insert(field.into(), finite(&bound, field)?.into());
+                }
+            }
+            if let Some(limit) = limit(options.get("limit"))? {
+                out.insert("limit".into(), limit);
+            }
             one(command("fetchCandles", out, false))
         }
         "fetchPublicTrades" => {
             let mut out = fields([("symbol", text(arg(args, 0), "symbol")?.into())]);
-            if let Some(limit) = args.get(1).filter(|limit| !limit.is_null()) {
-                out.insert("limit".into(), limit.clone());
+            if let Some(limit) = limit(args.get(1))? {
+                out.insert("limit".into(), limit);
             }
             one(command("fetchPublicTrades", out, false))
         }
-        "fetchHistoricalFills" => {
-            let opts = arg(args, 0);
-            let bounds = [present(opts, "from"), present(opts, "to")];
-            if capabilities.finite_history_bounds
-                && bounds
-                    .iter()
-                    .flatten()
-                    .any(|bound| !bound.as_f64().is_some_and(f64::is_finite))
-            {
-                return Err(refused("Error", "Coinbase history bounds must be finite"));
-            }
-            let mut out = Map::new();
-            optional(
-                &mut out,
-                opts,
-                &[
-                    ("symbol", "symbol"),
-                    ("orderId", "orderId"),
-                    ("limit", "limit"),
-                ],
-            );
-            match capabilities.fill_history_time {
-                FillHistoryTime::AsProvided => {
-                    optional(&mut out, opts, &[("from", "from"), ("to", "to")])
-                }
-                time => {
-                    let nonnegative = time == FillHistoryTime::NonnegativeSecondsOrMilliseconds;
-                    for (field, bound) in ["from", "to"].into_iter().zip(bounds) {
-                        if let Some(bound) = fill_bound(bound, nonnegative) {
-                            out.insert(field.into(), bound);
-                        }
-                    }
-                }
-            }
-            one(command("fetchFills", out, false))
-        }
-        "fetchHistoricalOrders" => {
-            let opts = arg(args, 0);
-            if capabilities.reject_order_history_filters
-                && (present(opts, "orderId").is_some() || present(opts, "status").is_some())
-            {
-                return Err(refused(
-                    "Error",
-                    "order history does not support orderId or status filters",
-                ));
-            }
-            let mut out = Map::new();
-            optional(
-                &mut out,
-                opts,
-                &[
-                    ("symbol", "symbol"),
-                    ("from", "from"),
-                    ("to", "to"),
-                    ("limit", "limit"),
-                ],
-            );
-            one(command("fetchOrderHistory", out, false))
-        }
         "fetchIncomeHistory" => {
-            let opts = arg(args, 0);
+            let options = arg(args, 0);
             let mut out = Map::new();
-            optional(
-                &mut out,
-                opts,
-                &[
-                    ("symbol", "symbol"),
-                    ("incomeType", "incomeType"),
-                    ("startTime", "from"),
-                    ("endTime", "to"),
-                    ("limit", "limit"),
-                ],
-            );
+            for (from, to) in [("symbol", "symbol"), ("incomeType", "incomeType")] {
+                if let Some(value) = optional(options, from) {
+                    out.insert(to.into(), text(&value, from)?.into());
+                }
+            }
+            for (from, to) in [("startTime", "from"), ("endTime", "to")] {
+                if let Some(bound) = optional(options, from) {
+                    out.insert(to.into(), finite(&bound, from)?.into());
+                }
+            }
+            if let Some(limit) = limit(options.get("limit"))? {
+                out.insert("limit".into(), limit);
+            }
             one(command("fetchIncome", out, false))
         }
         "fetchIncomeHistoryRange" => {
@@ -595,7 +623,7 @@ mod tests {
 
     fn single(method: &str, args: Value, capabilities: &Capabilities) -> Value {
         let Value::Array(args) = args else { panic!() };
-        match translate(method, &args, capabilities, &[])
+        match translate(method, &args, capabilities, &[], false)
             .unwrap()
             .as_slice()
         {
@@ -621,7 +649,8 @@ mod tests {
             "price":60000,"postOnly":true,"clientOrderId":"1730250000000-abc"});
         for args in [json!([order.clone()]), json!([order.clone(), null])] {
             let Value::Array(args) = args else { panic!() };
-            let plans = translate("placeOrderWithClientOrderId", &args, &caps(), &[]).unwrap();
+            let plans =
+                translate("placeOrderWithClientOrderId", &args, &caps(), &[], false).unwrap();
             assert_eq!(
                 plans,
                 vec![Plan::Command {
@@ -636,7 +665,7 @@ mod tests {
         without.as_object_mut().unwrap().remove("clientOrderId");
         for args in [vec![without.clone()], vec![without, json!("abc")]] {
             let refusal =
-                translate("placeOrderWithClientOrderId", &args, &caps(), &[]).unwrap_err();
+                translate("placeOrderWithClientOrderId", &args, &caps(), &[], false).unwrap_err();
             assert!(refusal.message.contains("requires a clientOrderId"));
         }
     }
@@ -646,7 +675,8 @@ mod tests {
         for field in ["accountName", "key", "secret", "passphrase"] {
             let mut order = json!({"symbol":"BTCUSDT","amount":1});
             order[field] = "x".into();
-            let refusal = translate("placeOrders", &[json!([order])], &caps(), &[]).unwrap_err();
+            let refusal =
+                translate("placeOrders", &[json!([order])], &caps(), &[], false).unwrap_err();
             assert!(refusal.message.contains(field), "{field}");
         }
     }
@@ -654,9 +684,9 @@ mod tests {
     #[test]
     fn non_finite_and_oversized_arguments_refuse_before_the_engine() {
         let order = json!({"symbol":"BTCUSDT","amount":"1e999"});
-        assert!(translate("placeOrder", &[order], &caps(), &[]).is_err());
+        assert!(translate("placeOrder", &[order], &caps(), &[], false).is_err());
         let huge = json!([{"symbol": "x".repeat(MAX_ARGS_BYTES)}]);
-        let refusal = translate("placeOrders", &[huge], &caps(), &[]).unwrap_err();
+        let refusal = translate("placeOrders", &[huge], &caps(), &[], false).unwrap_err();
         assert_eq!(refusal.name, "RangeError");
     }
 
@@ -703,10 +733,10 @@ mod tests {
             ..caps()
         };
         let symbols = ["ETH".to_owned(), "BTC".to_owned(), "ETH".to_owned()];
-        let plans = translate("cancelAllOrders", &[], &each, &symbols).unwrap();
+        let plans = translate("cancelAllOrders", &[], &each, &symbols, false).unwrap();
         assert_eq!(plans.len(), 2);
         assert_eq!(
-            translate("cancelAllOrders", &[], &each, &[]).unwrap(),
+            translate("cancelAllOrders", &[], &each, &[], false).unwrap(),
             vec![Plan::Reply(Value::Null)]
         );
     }
@@ -714,7 +744,7 @@ mod tests {
     /// Translates the web's real `args` and proves the engine's typed decoder takes the command.
     fn web(method: &str, args: Value, capabilities: &Capabilities) -> (Value, Reply) {
         let Value::Array(args) = args else { panic!() };
-        let plans = translate(method, &args, capabilities, &[]).unwrap();
+        let plans = translate(method, &args, capabilities, &[], false).unwrap();
         let [Plan::Command { command, reply }] = plans.as_slice() else {
             panic!("{method}: {plans:?}")
         };
@@ -727,7 +757,10 @@ mod tests {
 
     fn read(method: &str, args: Value, capabilities: &Capabilities) -> StoreRead {
         let Value::Array(args) = args else { panic!() };
-        match translate(method, &args, capabilities, &[]).unwrap().pop() {
+        match translate(method, &args, capabilities, &[], false)
+            .unwrap()
+            .pop()
+        {
             Some(Plan::Read(read)) => read,
             other => panic!("{method}: {other:?}"),
         }
@@ -883,6 +916,7 @@ mod tests {
                 &[json!(false), symbol.clone()],
                 &caps(),
                 &[],
+                false,
             )
             .unwrap_err();
             assert_eq!(refusal.message, "Symbol is required");
@@ -909,7 +943,7 @@ mod tests {
     // Mirror `loadCapabilities` and `getAccount`.
     #[test]
     fn web_capabilities_and_account_reads() {
-        let Plan::Reply(record) = translate("fetchEngineCapabilities", &[], &caps(), &[])
+        let Plan::Reply(record) = translate("fetchEngineCapabilities", &[], &caps(), &[], false)
             .unwrap()
             .remove(0)
         else {
@@ -925,7 +959,7 @@ mod tests {
             account: AccountLookup::Unsupported,
             ..caps()
         };
-        assert!(translate("getAccount", &[], &none, &[]).is_err());
+        assert!(translate("getAccount", &[], &none, &[], false).is_err());
     }
 
     // eagerExchangeWarmStart -> fetchOrders() / fetchPositions(); nuke and the mirror read the rest.
@@ -985,59 +1019,150 @@ mod tests {
         web("fetchPublicTrades", json!(["BTCUSDT", 50]), &caps());
     }
 
-    // Web: collectAccountAxes -> fetchHistoricalFills({symbol?, from, to}) / fetchHistoricalOrders({from, to}).
+    // Web: collectAccountAxes -> fetchHistoricalFills({symbol?, from, to}) / fetchHistoricalOrders({from, to});
+    // income reads from the PnL views.
     #[test]
-    fn web_history_reads_decode_with_rust_exchange_ts_bounds() {
+    fn web_history_reads_decode() {
+        let history = Capabilities {
+            fill_history: true,
+            order_history: true,
+            ..caps()
+        };
         let (command, _) = web(
             "fetchHistoricalFills",
             json!([{"symbol":"BTCUSDT","from":1_700_000_000_000u64,"to":1_700_000_100_000u64}]),
-            &caps(),
-        );
-        assert_eq!(command["from"], 1_700_000_000_000u64);
-        let seconds = Capabilities {
-            fill_history_time: FillHistoryTime::SecondsOrMilliseconds,
-            ..caps()
-        };
-        let (command, _) = web(
-            "fetchHistoricalFills",
-            json!([{"from":1_700_000_000,"to":1_700_000_000_000u64}]),
-            &seconds,
+            &history,
         );
         assert_eq!(command["from"], json!(1_700_000_000_000.0));
-        assert_eq!(command["to"], json!(1_700_000_000_000.0));
-        let (command, _) = web("fetchHistoricalOrders", json!([{"from":1,"to":2}]), &caps());
-        assert_eq!(command, json!({"op":"fetchOrderHistory","from":1,"to":2}));
-        let strict = Capabilities {
-            reject_order_history_filters: true,
-            ..caps()
-        };
-        assert!(
-            translate(
-                "fetchHistoricalOrders",
-                &[json!({"status":"filled"})],
-                &strict,
-                &[]
-            )
-            .is_err()
+        web("fetchHistoricalFills", json!([null]), &history);
+        let (command, _) = web(
+            "fetchHistoricalOrders",
+            json!([{"from":1,"to":2}]),
+            &history,
         );
+        assert_eq!(
+            command,
+            json!({"op":"fetchOrderHistory","from":1.0,"to":2.0})
+        );
+        web("fetchHistoricalOrders", json!([]), &history);
         let (command, _) = web(
             "fetchIncomeHistory",
-            json!([{"symbol":"BTCUSDT","startTime":1,"endTime":2}]),
+            json!([{"symbol":"BTCUSDT","startTime":1,"endTime":2,"limit":100.0}]),
             &caps(),
         );
         assert_eq!(
             command,
-            json!({"op":"fetchIncome","symbol":"BTCUSDT","from":1,"to":2})
+            json!({"op":"fetchIncome","symbol":"BTCUSDT","from":1.0,"to":2.0,"limit":100})
         );
         let (command, _) = web("fetchIncomeHistoryRange", json!([1, 2, null]), &caps());
         assert_eq!(command, json!({"op":"fetchIncome","from":1.0,"to":2.0}));
-        web("fetchHistoricalFills", json!([null]), &caps());
-        web("fetchHistoricalOrders", json!([]), &caps());
+        web(
+            "fetchIncomeHistoryRange",
+            json!([1, 2, "FUNDING_FEE"]),
+            &caps(),
+        );
     }
 
     #[test]
     fn unknown_methods_are_refused_not_guessed() {
-        let refusal = translate("withdraw", &[], &caps(), &[]).unwrap_err();
+        let refusal = translate("withdraw", &[], &caps(), &[], false).unwrap_err();
         assert_eq!(refusal.name, "UnsupportedMethod");
+    }
+
+    #[test]
+    fn symbol_metadata_reads_what_the_browser_engine_reads() {
+        let symbol = json!(["BTCUSDT"]);
+        let quiet = translate(
+            "updateSymbolMetadata",
+            &[json!("BTCUSDT")],
+            &caps(),
+            &[],
+            false,
+        );
+        assert_eq!(quiet.unwrap(), vec![Plan::Reply(Value::Null)]);
+        let query = Capabilities {
+            max_leverage: MaxLeverage::Query,
+            ..caps()
+        };
+        assert_eq!(
+            single("updateSymbolMetadata", symbol.clone(), &query),
+            json!({"op":"fetchMaxLeverage","symbol":"BTCUSDT"})
+        );
+        for leverage_query in [LeverageQuery::OnMetadata, LeverageQuery::OnReadAndMetadata] {
+            let rails = Capabilities {
+                leverage_query,
+                ..caps()
+            };
+            assert_eq!(
+                single("updateSymbolMetadata", symbol.clone(), &rails),
+                json!({"op":"fetchLeverage","symbol":"BTCUSDT"})
+            );
+            let public = translate(
+                "updateSymbolMetadata",
+                &[json!("BTCUSDT")],
+                &rails,
+                &[],
+                true,
+            );
+            assert_eq!(public.unwrap(), vec![Plan::Reply(Value::Null)]);
+        }
+    }
+
+    #[test]
+    fn history_reads_become_engine_queries_with_integer_limits() {
+        let history = Capabilities {
+            fill_history: true,
+            order_history: true,
+            fill_history_time: FillHistoryTime::SecondsOrMilliseconds,
+            ..caps()
+        };
+        assert_eq!(
+            single(
+                "fetchHistoricalFills",
+                json!([{"symbol":"BTCUSDT","from":1_700_000_000,"to":1_700_000_100_000_u64,"limit":100}]),
+                &history,
+            ),
+            json!({"op":"fetchFills","symbol":"BTCUSDT","from":1_700_000_000_000.0,
+                "to":1_700_000_100_000.0,"limit":100})
+        );
+        let command = single(
+            "fetchHistoricalOrders",
+            json!([{"from":1.0,"to":2.0,"limit":50.0}]),
+            &history,
+        );
+        // The engine reads `limit` as u32: it must go out as 50, never 50.0.
+        assert_eq!(
+            command,
+            json!({"op":"fetchOrderHistory","from":1.0,"to":2.0,"limit":50})
+        );
+        assert_eq!(command["limit"].to_string(), "50");
+        for limit in [json!(1.5), json!(-1), json!("10")] {
+            let refused = translate(
+                "fetchHistoricalOrders",
+                &[json!({ "limit": limit })],
+                &history,
+                &[],
+                false,
+            );
+            assert_eq!(refused.unwrap_err().name, "TypeError", "{limit}");
+        }
+        let without = Capabilities {
+            fill_history: false,
+            ..caps()
+        };
+        let without = translate("fetchHistoricalFills", &[json!({})], &without, &[], false);
+        assert_eq!(without.unwrap_err().name, "UnsupportedMethod");
+        let strict = Capabilities {
+            reject_order_history_filters: true,
+            ..history
+        };
+        let filtered = translate(
+            "fetchHistoricalOrders",
+            &[json!({"orderId":"1"})],
+            &strict,
+            &[],
+            false,
+        );
+        assert_eq!(filtered.unwrap_err().name, "Error");
     }
 }

@@ -1,6 +1,7 @@
 //! The native hosted exchange server; see DESIGN.md.
 pub mod accounts;
 pub mod algos;
+pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod envelope;
