@@ -301,3 +301,95 @@ fn a_frame_written_right_after_an_unknown_placement_keeps_its_fence() {
     });
     assert_eq!(h.requests.len(), 1, "{:?}", h.paths());
 }
+
+/// A data source's snapshot whose STATUS and VENUE_STATE say BTCUSDT is `hedged`.
+fn mode_frame(hedged: bool) -> Vec<u8> {
+    let mut source = safe_cex_engine::Store::default();
+    source.set_hedged(hedged);
+    let mut state = vec![1u8];
+    state.extend_from_slice(&1u32.to_le_bytes());
+    state.extend_from_slice(&[0, u8::from(hedged)]);
+    state.extend_from_slice(&7u16.to_le_bytes());
+    state.extend_from_slice(b"BTCUSDT");
+    state.extend_from_slice(&0u32.to_le_bytes());
+    let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.0);
+    source.write(&source.account_snapshot(), &mut writer);
+    writer.venue_state(&state);
+    writer.finish()
+}
+
+fn placed_index(h: &mut Harness, command: u32) -> String {
+    h.command(Command::PlaceOrders {
+        command,
+        orders: vec![support::order()],
+    });
+    assert_eq!(h.requests.len(), 1, "{:?}", h.paths());
+    let body = h.take("/v5/order/create").body.clone().unwrap();
+    let at = body.find(r#""positionIdx":"#).expect("positionIdx") + 14;
+    body[at..at + 1].to_owned()
+}
+
+/// A one-way account switched to hedge mode on this page engine.
+fn switched_to_hedge() -> Harness {
+    let mut h = frame_fed();
+    load(&mut h);
+    h.engine
+        .apply_frame(h.now, &mode_frame(false), true)
+        .unwrap();
+    h.collect();
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: None,
+    });
+    let request = h.take("/v5/position/switch-mode");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{},"retExtInfo":{},"time":1672281607343}"#,
+    );
+    assert!(matches!(h.result(1), Some(Ok(_))), "{:?}", h.result(1));
+    assert!(h.requests.is_empty(), "no positions read: {:?}", h.paths());
+    h
+}
+
+#[test]
+fn a_switched_mode_outlasts_a_source_that_has_not_re_read_it() {
+    let mut h = switched_to_hedge();
+    assert!(h.engine.store().hedged());
+    // The source still reports one-way: this engine's confirmed switch stands.
+    h.engine
+        .apply_frame(h.now, &mode_frame(false), false)
+        .unwrap();
+    h.collect();
+    assert!(h.engine.store().hedged());
+    assert_eq!(placed_index(&mut h, 2), "1", "hedged buy opens long");
+}
+
+#[test]
+fn the_hold_clears_once_the_source_agrees() {
+    let mut h = switched_to_hedge();
+    h.engine
+        .apply_frame(h.now, &mode_frame(true), false)
+        .unwrap();
+    h.collect();
+    // Released: a later source change applies again.
+    h.engine
+        .apply_frame(h.now, &mode_frame(false), false)
+        .unwrap();
+    h.collect();
+    assert!(!h.engine.store().hedged());
+    assert_eq!(placed_index(&mut h, 2), "0");
+}
+
+#[test]
+fn an_unconfirmed_hold_expires_and_the_source_wins() {
+    let mut h = switched_to_hedge();
+    h.advance(safe_cex_engine::setting_holds::HOLD_MS);
+    h.engine
+        .apply_frame(h.now, &mode_frame(false), false)
+        .unwrap();
+    h.collect();
+    assert!(!h.engine.store().hedged());
+    assert_eq!(placed_index(&mut h, 2), "0");
+}

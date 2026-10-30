@@ -1038,6 +1038,10 @@ fn spot_rows(
     true
 }
 
+/// Frame-fed hold on this engine's own builder-approval read.
+pub(crate) const BUILDER_HOLD: safe_cex_engine::setting_holds::SettingKey =
+    safe_cex_engine::setting_holds::SettingKey::Venue("builder", String::new());
+
 impl Venue for Hyperliquid {
     fn managed_sockets() -> bool {
         true
@@ -1182,14 +1186,31 @@ impl Venue for Hyperliquid {
         };
         Some(vec![1, builder])
     }
-    fn apply_venue_state(&mut self, _cx: &mut Cx<'_, Pending>, state: &[u8]) {
-        if let [1, builder, ..] = state {
-            self.account.builder_approved = match builder {
-                1 => Some(false),
-                2 => Some(true),
-                _ => self.account.builder_approved,
-            };
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        let source = match state {
+            [1, 1, ..] => Some(false),
+            [1, 2, ..] => Some(true),
+            _ => return,
+        };
+        // A held approval (this engine's own read) wins until the source agrees.
+        if cx.setting_held(&BUILDER_HOLD) {
+            if source != self.account.builder_approved {
+                return;
+            }
+            cx.release_setting(&BUILDER_HOLD);
         }
+        self.account.builder_approved = source;
+    }
+    /// Source side: the venue's existing setting re-reads, never a write.
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        if self.options.public_data_only || self.user().is_none() {
+            return;
+        }
+        match symbol {
+            Some(symbol) => self.refresh_uncertain_settings(cx, symbol),
+            None => self.refresh_account(cx),
+        }
+        self.check_builder(cx);
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         // Public prices cannot establish a private snapshot or mark it loaded.

@@ -178,3 +178,145 @@ fn a_leverage_write_before_the_source_settings_refuses_visibly_then_uses_them() 
     assert_eq!(body["action"]["isCross"], true);
     assert_eq!(body["action"]["leverage"], 5);
 }
+
+fn margin(e: &mut Engine<Hyperliquid>, command: u32, isolated: bool) {
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetMarginType {
+            command,
+            symbol: "BTC-PERP".into(),
+            isolated,
+        }),
+    );
+}
+
+fn leverage(e: &mut Engine<Hyperliquid>, command: u32, leverage: f64) {
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetLeverage {
+            command,
+            symbol: "BTC-PERP".into(),
+            leverage,
+            side: None,
+        }),
+    );
+}
+
+/// The one leverage write sent, answered ok; returns its isCross.
+fn confirm_one(e: &mut Engine<Hyperliquid>) -> bool {
+    let sent = requests(e);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let body: Value = serde_json::from_str(sent[0].body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["action"]["type"], "updateLeverage");
+    reply(e, &sent[0], 200, r#"{"status":"ok","response":{"type":"default"}}"#);
+    body["action"]["isCross"].as_bool().unwrap()
+}
+
+#[test]
+fn a_confirmed_margin_change_outlasts_a_stale_source_frame() {
+    let (mut source, _) = ready("disabled");
+    let stale = source.snapshot_frame(1500.0).to_vec();
+    let (mut e, _) = page_engine();
+    e.apply_frame(1500.0, &stale, true).unwrap();
+    margin(&mut e, 20, true);
+    assert!(!confirm_one(&mut e));
+
+    // The source has not re-read: its frame still says cross.
+    e.apply_frame(2100.0, &stale, true).unwrap();
+    leverage(&mut e, 21, 7.0);
+    assert!(!confirm_one(&mut e), "the held isolated margin wins");
+}
+
+#[test]
+fn a_source_frame_that_agrees_releases_the_hold() {
+    let (mut source, _) = ready("disabled");
+    let stale = source.snapshot_frame(1500.0).to_vec();
+    margin(&mut source, 30, true);
+    assert!(!confirm_one(&mut source));
+    let agreeing = source.snapshot_frame(2050.0).to_vec();
+
+    let (mut e, _) = page_engine();
+    e.apply_frame(1500.0, &stale, true).unwrap();
+    margin(&mut e, 31, true);
+    assert!(!confirm_one(&mut e));
+    e.apply_frame(2100.0, &agreeing, true).unwrap();
+    // Released: the source owns the setting again, even back to cross.
+    e.apply_frame(2200.0, &stale, true).unwrap();
+    leverage(&mut e, 32, 7.0);
+    assert!(confirm_one(&mut e), "after release the source's cross applies");
+}
+
+#[test]
+fn refresh_settings_on_a_source_only_re_reads() {
+    let (mut source, _) = ready("disabled");
+    source.handle(
+        2000.0,
+        Event::Command(Command::Venue {
+            command: 40,
+            action: safe_cex_engine::VenueAction::RefreshSettings {
+                symbol: Some("BTC-PERP".into()),
+            },
+        }),
+    );
+    let sent = requests(&mut source);
+    assert!(!sent.is_empty());
+    assert!(sent.iter().all(|r| r.url.ends_with("/info")), "{sent:?}");
+    let reads = sent.iter().map(kind).collect::<Vec<_>>();
+    assert!(reads.contains(&"activeAssetData".to_string()), "{reads:?}");
+    assert!(reads.contains(&"maxBuilderFee".to_string()), "{reads:?}");
+}
+
+#[test]
+fn the_page_engine_s_own_builder_approval_outlasts_a_source_that_has_not_read_it() {
+    let (mut e, _) = page_engine();
+    // No source state yet: the first placement reads the approval once.
+    let order: PlaceOrderOpts = serde_json::from_str(
+        r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":1}"#,
+    )
+    .unwrap();
+    e.handle(
+        2000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 50,
+            orders: vec![order.clone()],
+        }),
+    );
+    // Answered within the builder wait: collect without advancing timers.
+    let read = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(read.len(), 1, "only the approval read before the write");
+    let builder = read.iter().find(|r| kind(r) == "maxBuilderFee").expect("one approval read");
+    reply(&mut e, builder, 200, "30");
+    let write = requests(&mut e);
+    assert_eq!(write.len(), 1);
+    assert!(write[0].url.ends_with("/exchange"));
+    let body: Value = serde_json::from_str(write[0].body.as_deref().unwrap()).unwrap();
+    assert!(body["action"]["builder"].is_object(), "{body}");
+    reply(
+        &mut e,
+        &write[0],
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":1}}]}}}"#,
+    );
+
+    // A source that saw a refusal (VENUE_STATE builder = 1) does not undo it.
+    let (mut source, _) = ready_custom("disabled", false, None, "0");
+    let refused = source.snapshot_frame(2100.0).to_vec();
+    e.apply_frame(2100.0, &refused, true).unwrap();
+    e.handle(
+        2200.0,
+        Event::Command(Command::PlaceOrders {
+            command: 51,
+            orders: vec![order],
+        }),
+    );
+    let sent = requests(&mut e);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let body: Value = serde_json::from_str(sent[0].body.as_deref().unwrap()).unwrap();
+    assert!(body["action"]["builder"].is_object(), "{body}");
+}

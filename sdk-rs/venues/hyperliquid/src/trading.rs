@@ -2,6 +2,7 @@
 mod custody;
 mod schedule;
 pub(crate) use custody::PACING;
+use safe_cex_engine::setting_holds::SettingKey;
 
 use crate::{
     Builder, Hyperliquid, Pending,
@@ -1161,6 +1162,9 @@ impl Hyperliquid {
                         p.margin_type = Some(margin);
                     }
                 });
+                // Frame-fed: hold the confirmed rails until the source re-reads them.
+                cx.hold_setting(SettingKey::Leverage(symbol.clone()));
+                cx.hold_setting(SettingKey::MarginType(symbol.clone()));
             }
         }
         if let Some(job) = self.trading.active.as_mut()

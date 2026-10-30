@@ -3512,3 +3512,21 @@ fn an_open_position_keeps_its_per_tick_position_read_while_the_wallet_waits() {
         }
     }
 }
+
+#[test]
+fn a_settings_refresh_re_reads_the_mode_and_writes_nothing() {
+    let mut h = ready();
+    h.command(Command::Venue {
+        command: 40,
+        action: safe_cex_engine::VenueAction::RefreshSettings { symbol: None },
+    });
+    assert_eq!(h.result(40), Some(&Ok("null".to_owned())));
+    assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get),
+        "no write: {:?}",
+        h.paths()
+    );
+}
