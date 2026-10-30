@@ -243,6 +243,9 @@ fn markets(
     frame: &Frame<'_>,
     section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    if section.revision > 1 {
+        return Err(IngestError("unknown MARKETS revision"));
+    }
     let mut cursor = Cursor::new(section.payload);
     let count = cursor.u32()? as usize;
     let (mut symbols, mut ids) = (Vec::with_capacity(count), Vec::with_capacity(count));
@@ -290,6 +293,9 @@ fn tickers(
     frame: &Frame<'_>,
     section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    if section.revision > 1 {
+        return Err(IngestError("unknown TICKERS revision"));
+    }
     let mut cursor = Cursor::new(section.payload);
     let count = cursor.u32()? as usize;
     let markets = (0..count)
@@ -341,19 +347,29 @@ fn ticker_deltas(
 ) -> Result<(), IngestError> {
     let mut cursor = Cursor::new(section.payload);
     while cursor.at < section.payload.len() {
-        let row = cursor.f64()? as usize;
-        let mask = cursor.f64()? as u16;
+        let (row, mask) = (cursor.f64()?, cursor.f64()?);
+        let whole = |value: f64, limit: f64| value.fract() == 0.0 && (0.0..limit).contains(&value);
+        if !whole(row, u32::MAX as f64) || !whole(mask, (1u32 << TICKER_COLUMNS) as f64) {
+            return Err(IngestError("ticker delta row or mask is malformed"));
+        }
+        let (row, mask) = (row as usize, mask as u16);
         let mut values = [None; TICKER_COLUMNS];
         for (field, value) in values.iter_mut().enumerate() {
             if mask & (1 << field) != 0 {
                 *value = Some(cursor.f64()?);
             }
         }
+        // By row, not symbol: a duplicate symbol must not redirect an earlier row.
         let symbol = state
             .source_tickers
             .get(row)
             .ok_or(IngestError("ticker row outside the source's table"))?;
-        store.update_ticker(symbol, |ticker| {
+        if store.tickers().get(row).map(|ticker| &ticker.symbol) != Some(symbol) {
+            return Err(IngestError(
+                "ticker row no longer matches the source's table",
+            ));
+        }
+        store.update_ticker_at(row as u32, |ticker| {
             for (field, value) in values.iter().enumerate() {
                 if let Some(value) = value {
                     set_ticker_field(ticker, field, *value);
@@ -783,13 +799,30 @@ pub(crate) mod tests {
         assert_eq!(store.ticker("ETHUSDT").unwrap().mid_price, None);
         assert_eq!(store.ticker("ETHUSDT").unwrap().bid, 9.);
 
-        // A row the source never listed refuses.
-        let mut writer = FrameWriter::new(Vec::new(), 0.0);
-        writer.begin(section::TICKER_DELTAS);
-        writer.f64s([5., 4., 1.]);
-        writer.end();
-        let frame = writer.finish();
-        assert!(apply(&mut store, &mut state, &parse(&frame).unwrap(), false).is_err());
+        // A row the source never listed, a fractional or NaN row, and a mask bit
+        // past the columns all refuse rather than desynchronizing the section.
+        for entry in [
+            [5., 4., 1.],
+            [0.5, 4., 1.],
+            [f64::NAN, 4., 1.],
+            [0., 4096., 1.],
+        ] {
+            let mut writer = FrameWriter::new(Vec::new(), 0.0);
+            writer.begin(section::TICKER_DELTAS);
+            writer.f64s(entry);
+            writer.end();
+            let frame = writer.finish();
+            assert!(apply(&mut store, &mut state, &parse(&frame).unwrap(), false).is_err());
+        }
+        // An unknown TICKERS or MARKETS revision refuses.
+        for kind in [section::TICKERS, section::MARKETS] {
+            let mut writer = FrameWriter::new(Vec::new(), 0.0);
+            writer.begin_revision(kind, 2);
+            writer.u32(0);
+            writer.end();
+            let frame = writer.finish();
+            assert!(apply(&mut store, &mut state, &parse(&frame).unwrap(), false).is_err());
+        }
     }
 
     #[test]
@@ -873,6 +906,22 @@ pub(crate) mod tests {
         assert!(applied.orders && applied.positions);
         assert_eq!(store.orders(), source.orders());
         assert_eq!(store.positions(), source.positions());
+    }
+
+    #[test]
+    fn deltas_follow_the_source_row_even_when_a_symbol_repeats() {
+        let mut source = Store::default();
+        source.set_markets(vec![market("BTCUSDT")]);
+        source.set_tickers(vec![
+            ticker("BTCUSDT", 100., None),
+            ticker("BTCUSDT", 200., None),
+        ]);
+        let (mut state, mut store) = (IngestState::default(), Store::default());
+        ingest(&mut source, &mut state, &mut store, true);
+        source.update_ticker_at(0, |t| t.last = 101.);
+        ingest(&mut source, &mut state, &mut store, false);
+        assert_eq!(store.tickers()[0].last, 101.);
+        assert_eq!(store.tickers()[1].last, 200.);
     }
 
     #[test]
