@@ -251,7 +251,7 @@ Sessions and resume (same semantics as today):
 - **On close, `resumable=1` sockets:**
   - private accounts are parked under `resumeId` for 60s, bound to `userId`;
   - other accounts are disposed;
-  - chasers and TWAPs die with the socket, as today.
+  - chases die with the socket, as today; TWAPs live with the account, through the park, until it is disposed (see Multi-node for holding them while parked).
 - **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts the parked accounts. It then receives `session {resumed:true}`.
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
   - A different fingerprint disposes the account and rebuilds it.
@@ -335,9 +335,76 @@ a socket uses, as one more in-process client:
 - **Commands:** `command(client, Command)` gives a completion through the same done notice. The no-retry and orphan rules apply.
 - **Timers:** a tokio `LocalSet` on the account thread, so algos may hold `!Send` state beside the engine.
 - **Lifecycle:**
-  - Algos are owned by the account entry in `accounts.rs`. They die on dispose, and on the close of the socket that started them, which matches today's rule that chases die with the socket.
-  - They are not parked on resume in v1.
+  - Algos are owned by the account entry in `accounts.rs` and die on dispose. Any socket close ends the account's chases (today's rule); TWAPs keep running while the account is parked.
 - **Wire:** algo ops (`chaser:*`, `twap:*`, `exec`) reach the algo through a registry in `accounts.rs`: `fn algo(op) -> Option<&dyn AlgoFactory>`. Replies use the existing op names.
+
+## Multi-node (fe7lgm; post-cutover design, not implemented)
+
+Today `connect-tyo` is one Cloudflare tunnel to exchange-01. exchange-02 is a
+cold standby with cloudflared off. Losing exchange-01 drops every hosted user
+until someone starts the standby by hand. This section plans two boxes
+without letting one account run on both.
+
+### Invariants
+
+1. **One owner.** A private `(userId, accountName)` has a running engine and algo host on at most one node at a time. Two owners could mean two TWAP schedules or two chase loops placing orders for the same key.
+2. **Resume where issued.** A `resumeId` only means something on the node that issued it, because parked accounts live in that process's memory.
+3. **Fail closed.** If a node cannot tell whether it owns an account, it does not run algos for it. A user can always recover with a fresh `init`.
+
+### Topology: active/standby behind a load balancer
+
+- **Both boxes run the server.** Each has its own Cloudflare tunnel and cloudflared. Neither box is cold any more.
+- **Per-node hostnames.** Each tunnel serves `connect-tyo-<node>.tealstreet.io`, for example `connect-tyo-01`. It is used only for resumes.
+- **`connect-tyo.tealstreet.io` sits on a Cloudflare Load Balancer:**
+  - the primary pool is exchange-01's tunnel and the fallback pool is exchange-02's;
+  - pools are health-checked on `GET /health`;
+  - it is failover, not round-robin, so all fresh inits land on one node and invariant 1 holds without coordination in the steady state.
+- **No automatic fail-back.** After a failover, the operator marks the old primary's pool disabled until a quiet window. Otherwise new inits split across both nodes while old sessions still run on the other one.
+- **New environment variable:** `TEALSTREET_NODE` (for example `01`) is the node's identity. It appears in `/health`, in every log line (including `order audit`) and in the session frame. It is identity, not a feature switch: every node runs the same code.
+
+### Session frame and client resume
+
+- **The session frame gains the node:** `session {resumeId, resumed, node}`. The web worker (`ExchangeServerWorker.ts`) stores `node` beside `resumeId`.
+- **Reconnect with a `resumeId`:**
+  1. The client first dials `wss://connect-tyo-<node>.tealstreet.io/account?resume=<id>&resumable=1`, with a 5s open timeout.
+  2. `session {resumed:true}` continues as today.
+- **Fallback:** the client uses a fresh `init` on `wss://connect-tyo.tealstreet.io/account` (no `resume`) and drops the old id when:
+  - the per-node dial fails or times out;
+  - it returns `resumed:false`;
+  - it closes with 1013 (overloaded).
+- **A resume that reaches the wrong node** (an old client, or the load balancer) finds no parked session. It gets `resumed:false` with a fresh `resumeId`, as today, and the client re-inits on that socket. The server never forwards sockets between nodes.
+
+### Parked sessions on failover
+
+- **When a node dies:** its live and parked accounts die with it.
+  - Resting venue orders stay on the venue.
+  - The client's fresh `init` on the survivor rebuilds the account from the venue, so open orders and positions reappear in the snapshot.
+- **When a node is alive but unreachable** (a tunnel or network partition): its parked accounts would otherwise live out the 60s grace while the client re-inits elsewhere. Two measures cover this:
+  - **Parked algos hold.** On park, the account's TWAP schedules pause and place nothing new until a resume adopts the account. Chases already end at socket close. Grace expiry terminates the held TWAPs and disposes the account as today. This is a change: today a parked account's TWAPs keep placing for up to 60s.
+  - **Evict on init.** Before building a private account, a node sends `POST /internal/evict {userId, accountName}` to each peer (`TEALSTREET_PEERS`, a node to private-address list).
+    - The request is authenticated with an HMAC under `EXCHANGE_SERVER_PEER_SECRET` and is served only on the private interface, never through the tunnel.
+    - The peer disposes any parked holder of that account, running algo shutdown first.
+    - A peer that holds the account for a live socket replies `409 {node}`. The initiating node then refuses the init with `msg {op:'error', data:['account is active on node <node>']}` plus a `redirect {node}` hint. A client that gets the hint retries on that node's hostname.
+    - An unreachable peer does not block the init; the bounded risk of not waiting is covered by the next point.
+- **A bounded window remains.** If a peer is alive, holds a parked account, and cannot be reached for eviction, it can still hold that account for up to 60s. Its algos are held, so it places nothing. This is the accepted residual.
+
+### Server-side algos on failover
+
+- **Chases end** when their socket closes (unchanged), so a failover never moves a chase.
+  - A chase's resting limit order stays on the venue as an ordinary open order.
+  - The client shows it, and the user can cancel or re-chase.
+- **TWAPs move only through the client.** The browser keeps its TWAP state and sends `twap:state` after the init on the new node, which restores schedules there; restore already skips ids it holds. There is no server-to-server algo transfer: the client's copy is the one record both nodes can see.
+- **Duplicate risk.** `twap:state` restoring on a node while another node still runs the same TWAP is the only path to duplicate algo orders. Invariant 1 (load balancer failover, held parked algos, evict on init) closes it. Note that `twap:state` places orders, so it is a write: the `order audit` log must record it like `twap:start`.
+- **Exec** commands are one-shot. A failover mid-command reports through the order's normal outcome, `unknown` when the completion was lost, and the client reconciles from the snapshot.
+
+### Later: a shared lease
+
+If active/active is ever wanted, the server should hold an owner lease per `(userId, accountName)` in Redis instead of relying on the evict call:
+
+- The lease is `SET acct:<user>:<name> <node> NX PX 15000`, renewed every 5s.
+- A node that loses its lease stops the account's algos at once and disposes it.
+- `REDIS_URL` is already in the environment contract.
+- This adds a dependency, so it waits for the Cargo.lock freeze to lift.
 
 ## Not in v1 (after cutover)
 
