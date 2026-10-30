@@ -299,18 +299,21 @@ impl State {
         if !cx.setting_held(&margin) && !cx.setting_held(&leverage) {
             return kept_mode;
         }
+        // A source with no context for the symbol has not confirmed it either.
+        let reported = state.contexts.get(symbol).copied();
         let source = state.contexts.entry(symbol.into()).or_insert(mine);
         if cx.setting_held(&margin) {
-            if source.margin_type == mine.margin_type {
+            if reported.is_some_and(|r| r.margin_type == mine.margin_type) {
                 cx.release_setting(&margin);
             }
             source.margin_type = mine.margin_type;
         }
         if cx.setting_held(&leverage) {
             let same = |a: f64, b: f64| a.to_bits() == b.to_bits();
-            if same(source.long_leverage, mine.long_leverage)
-                && same(source.short_leverage, mine.short_leverage)
-            {
+            if reported.is_some_and(|r| {
+                same(r.long_leverage, mine.long_leverage)
+                    && same(r.short_leverage, mine.short_leverage)
+            }) {
                 cx.release_setting(&leverage);
             }
             source.long_leverage = mine.long_leverage;
