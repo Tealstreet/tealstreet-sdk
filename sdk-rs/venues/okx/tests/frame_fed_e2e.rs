@@ -173,7 +173,9 @@ fn the_page_engine_writes_from_the_sources_frames_and_its_next_frame_settles_the
     );
 
     // 4. An unknown outcome is never re-sent; the source's next ORDERS frame is
-    //    the reconcile, after which the symbol takes a new write.
+    //    the reconcile once written past the fence grace (a frame written
+    //    sooner can predate the venue showing the lost order); after it the
+    //    symbol takes a new write.
     let lost = send(
         &mut page,
         Command::PlaceOrders {
@@ -192,8 +194,8 @@ fn the_page_engine_writes_from_the_sources_frames_and_its_next_frame_settles_the
     source
         .store_mut()
         .set_orders(vec![resting("701", 39000.), resting("703", 39600.)]);
-    let settled = source.take_frame(7.0).expect("orders changed").to_vec();
-    page.apply_frame(7.0, &settled, false).unwrap();
+    let settled = source.take_frame(3_107.0).expect("orders changed").to_vec();
+    page.apply_frame(3_107.0, &settled, false).unwrap();
     assert!(
         page.store().order("703").is_some(),
         "the lost write landed and is now known"
@@ -204,7 +206,7 @@ fn the_page_engine_writes_from_the_sources_frames_and_its_next_frame_settles_the
             command: 4,
             orders: vec![place(39700.)],
         },
-        8.0,
+        3_108.0,
     );
     assert_eq!(
         requests(&next).len(),
@@ -220,15 +222,15 @@ fn the_page_engine_writes_from_the_sources_frames_and_its_next_frame_settles_the
             hedged: true,
             symbol: None,
         },
-        9.0,
+        3_109.0,
     );
     assert!(
         requests(&mode).is_empty(),
         "refused: the ingested long is open"
     );
     source.store_mut().set_positions(vec![]);
-    let flat = source.take_frame(10.0).expect("positions changed").to_vec();
-    page.apply_frame(10.0, &flat, false).unwrap();
+    let flat = source.take_frame(3_110.0).expect("positions changed").to_vec();
+    page.apply_frame(3_110.0, &flat, false).unwrap();
     let mode = send(
         &mut page,
         Command::SetPositionMode {
@@ -236,7 +238,7 @@ fn the_page_engine_writes_from_the_sources_frames_and_its_next_frame_settles_the
             hedged: true,
             symbol: None,
         },
-        11.0,
+        3_111.0,
     );
     let sent = requests(&mode);
     assert_eq!(sent.len(), 1, "{sent:?}");

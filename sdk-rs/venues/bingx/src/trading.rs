@@ -4,6 +4,8 @@
 use crate::Pending;
 #[path = "trading/context.rs"]
 mod context;
+#[path = "trading/venue_state.rs"]
+mod venue_state;
 
 /// BingX key refusals (common codes): bad signature, key without the permission,
 /// incorrect key, IP not whitelisted. Reads and writes share this one list.
@@ -137,6 +139,10 @@ pub struct Trading {
     /// Retired settings writes whose metadata custody finishes at the next callback.
     retired_settings: Vec<CommandId>,
     observed: HashMap<String, Observation>,
+    /// Frame-fed: source observations whose order has not been ingested yet.
+    pending_observed: HashMap<String, (String, String, bool, String)>,
+    /// Frame-fed: the data source knows the position mode (VENUE_STATE).
+    mode_known: bool,
 }
 
 #[derive(Deserialize)]
@@ -875,6 +881,10 @@ impl Trading {
     }
 
     fn place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
+        // Position side and reduce-only follow the mode; never guess one-way.
+        if cx.frame_fed() && !self.mode_known {
+            return Err("BingX position mode is not loaded yet".into());
+        }
         if orders.iter().any(|order| {
             order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
         }) {
