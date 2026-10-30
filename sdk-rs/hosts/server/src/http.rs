@@ -269,6 +269,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
     let mut session = Session::new(app.registry.clone(), app.metrics.clone(), identity, out);
     let mut loaded = session.take_loaded();
     session.open().await;
+    let taken_over = session.taken_over();
     let close_at = expires.map(|expires_at_ms| {
         let remaining = Duration::from_millis(expires_at_ms.saturating_sub(now_ms()));
         tokio::time::Instant::now() + remaining + TOKEN_GRACE
@@ -301,6 +302,11 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
                 send(&mut sink, close(1008, "Tealstreet proxy token expired")).await;
                 break;
             }
+            // A resume of this session arrived on a new socket: this one is dead.
+            _ = taken_over.notified() => {
+                Log::info("session taken over by a resume");
+                break;
+            }
             Some((name, client)) = loaded.recv() => session.account_loaded(&name, client).await,
             text = outgoing.recv() => match text {
                 Some(text) => if !send(&mut sink, Message::Text(text.into())).await { break },
@@ -309,6 +315,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
             incoming = stream.next() => {
                 let Some(Ok(message)) = incoming else { break };
                 last_seen = tokio::time::Instant::now();
+                session.heard();
                 match message {
                     Message::Text(text) => {
                         if let Err(violation) = session.handle(text.as_str()).await {
