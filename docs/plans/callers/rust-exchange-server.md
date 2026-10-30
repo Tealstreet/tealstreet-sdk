@@ -22,3 +22,4 @@ health is reported as unknown, because the engine exposes none.
 **Not yet wired.** Shared public feeds.
 
 - `engine_options` (hosts/server/src/accounts.rs): the Hyperliquid builder fee goes out as an integer `feeTenthsBps`, since the registry parses it as u32; a fractional or out-of-range fee falls back to the default builder.
+- `methods::translate` placeOrderWithClientOrderId: reads `clientOrderId` from the single order argument (base.ts shape), refuses a call without one, and replies `{orderIds, clientOrderId}` via `Reply::Placed`; `Plan::Command.returns_unit` became `reply: Reply`.
