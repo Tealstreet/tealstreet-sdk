@@ -1297,6 +1297,8 @@ fn read_key_options(
 pub const FRAME_FED_VENUES: &[&str] = &[
     "binance",
     "binanceinverse",
+    "binancepm",
+    "binancespot",
     "bingx",
     "bitget",
     "bitgetinverse",
