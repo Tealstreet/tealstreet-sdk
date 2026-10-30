@@ -76,9 +76,10 @@ fn key<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::E
 }
 
 impl InitPayload {
-    /// Identifies what an account was built from; an identical resumed init keeps it.
+    /// Identifies what an account's engine is built from; an init with the same
+    /// one shares the account (see `accounts::build_fingerprint`).
     pub fn fingerprint(&self) -> String {
-        serde_json::to_string(self).expect("init payload serializes")
+        crate::accounts::build_fingerprint(self)
     }
 }
 
