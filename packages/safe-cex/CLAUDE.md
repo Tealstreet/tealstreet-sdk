@@ -406,6 +406,19 @@ included, because the web starts the worker from
 engine it builds read the stripped `engineOptions`. Stripping the mirror's
 options left the worker keyless: a public-only engine with no private event.
 
+Every public mirror method is classified in
+`__tests__/audit-regressions/rust.mirror-forwarding.test.ts` as forwarded to the
+worker, mirror-local, unsupported, or a write (moving to the main-thread writer
+engine); an unclassified method fails typecheck. Engine reads forward
+(`WORKER_FORWARDED_METHODS`, plus the Rust-only `fetchStpMode` and
+`fetchOrderBook`). `fetchLeverageForSymbol` and `fetchSymbolMaxLeverage` answer
+from frame-fed rails and ask the worker only for a venue read. On a mirror,
+`validateAccount`, `fetchEngineSnapshot` and `snapshotFrame` throw a named
+`unsupported` error, and `fetchFillsForOrderIds` is never adopted;
+`WorkerMirrorExchange` is the type without them. Forwarding decides a method is
+an inert fallback by its brand, not by the capability record a mirror learns
+later.
+
 A bridged mirror never builds an engine for capabilities. In frame mode it
 adopts the record a snapshot frame carries; in store-payload mode (and from
 `loadCapabilities`) it asks the worker (`fetchEngineCapabilities`) once the

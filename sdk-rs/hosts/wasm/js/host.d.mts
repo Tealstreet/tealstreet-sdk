@@ -342,6 +342,9 @@ export interface CommandOptions {
    * Installed before dispatch and released on settlement, timeout or disposal.
    * Observer failures cannot replace the native result. */
   onEvent?(event: EngineEvent): void;
+  /** Stamps this write's engine stages: `signed` only for a provider signer, and
+   * `sent`/`response` for requests this command started. Observer failures are ignored. */
+  onStage?(stage: 'accepted' | 'signed' | 'sent' | 'response' | 'reply'): void;
 }
 
 export interface EngineEvent {

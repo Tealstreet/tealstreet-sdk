@@ -24,6 +24,8 @@ export class TwapInstance {
   /** Per-slice timeout timers used by `twap chase` policy enforcement.
    *  Stored so terminate() can cancel them. */
   private sliceTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Releases the cross-tab owner lock (`twapLock.ts`) once the TWAP ends. */
+  private releaseOwnerLock: (() => void) | undefined;
 
   constructor(
     exchange: Exchange,
@@ -50,8 +52,18 @@ export class TwapInstance {
     return this.trackedLimitOrderIds;
   }
 
+  /** Hold the cross-tab owner lock until the TWAP completes or stops. */
+  holdOwnerLock(release: () => void) {
+    if (this.state.status === TwapStatus.Completed) release();
+    else this.releaseOwnerLock = release;
+  }
+
   private updateState(state: Partial<TwapState>) {
     this.state = { ...this.state, ...state };
+    if (this.state.status === TwapStatus.Completed && this.releaseOwnerLock) {
+      this.releaseOwnerLock();
+      this.releaseOwnerLock = undefined;
+    }
     this.updateStateCallback(this.state);
     this.ctx.postMessage({ op: 'twap:stateUpdate', data: twapManager.serializeState() });
   }

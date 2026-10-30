@@ -61,7 +61,7 @@ it.each([true, false])('GRVT SDK uses the transport-selected authentication prot
 it.each(['grvt', 'woo'] as const)('%s cancel-all reaches the engine even with an empty local order snapshot', async (name) => {
   const exchange = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
   const command = vi.fn().mockResolvedValue([]);
-  Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  Object.assign(exchange, { host: { command: (input: unknown) => command(input), dispose: vi.fn() } });
   adoptEngineCapabilities(exchange);
   try {
     await exchange.cancelAllOrders();

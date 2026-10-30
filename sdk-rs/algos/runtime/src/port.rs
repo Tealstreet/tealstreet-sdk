@@ -2,8 +2,10 @@ use std::cell::Ref;
 use std::future::Future;
 use std::pin::Pin;
 
+use safe_cex_engine::Capabilities;
 use safe_cex_engine::engine::{Command, CommandId, Fill};
 use safe_cex_engine::error::VenueError;
+use safe_cex_engine::model::CancelOrderRef;
 use tokio::sync::mpsc;
 
 use crate::AlgoStore;
@@ -36,7 +38,55 @@ pub trait AccountPort {
     fn subscribe(&self) -> mpsc::UnboundedReceiver<Change>;
     fn next_command_id(&self) -> CommandId;
     fn command(&self, command: Command) -> CommandFuture;
+    /// The venue's capability record: which cancel and amend forms it accepts.
+    fn capabilities(&self) -> Capabilities;
     /// A wire reply to the client that started the algo, under an existing op
     /// name (`chaser:complete`, `warning`, `error`, `log`, ...) with JSON data.
     fn emit(&self, op: &str, data: String);
+}
+
+/// A cancel of `orders` in the form the venue accepts: symbol-routed where its
+/// engine declares `cancel_with_symbols`, else by id (Bybit refuses the
+/// symbol-routed form outright, so the order would stay live).
+pub fn cancel_command(
+    capabilities: &Capabilities,
+    command: CommandId,
+    orders: Vec<CancelOrderRef>,
+) -> Command {
+    if capabilities.cancel_with_symbols {
+        Command::CancelOrdersWithSymbols { command, orders }
+    } else {
+        Command::CancelOrders {
+            command,
+            ids: orders.into_iter().map(|order| order.id).collect(),
+        }
+    }
+}
+
+/// An amend in the form the venue accepts: with its symbol where the engine
+/// declares `amend_with_symbol`, else by id.
+pub fn amend_command(
+    capabilities: &Capabilities,
+    command: CommandId,
+    id: String,
+    symbol: String,
+    price: Option<f64>,
+    amount: Option<f64>,
+) -> Command {
+    if capabilities.amend_with_symbol {
+        Command::AmendOrderWithSymbol {
+            command,
+            id,
+            symbol,
+            price,
+            amount,
+        }
+    } else {
+        Command::AmendOrder {
+            command,
+            id,
+            price,
+            amount,
+        }
+    }
 }
