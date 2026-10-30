@@ -4,6 +4,8 @@ use std::collections::{HashMap, VecDeque};
 
 mod algo_commands;
 mod capabilities;
+// Chart rendering and wait polling run only in the native host.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod chart;
 mod configuration;
 mod display;
@@ -14,6 +16,7 @@ mod order_tools;
 mod placement;
 mod protection;
 mod swarm;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod waits;
 
 pub const MAX_COMMAND_BYTES: usize = 16 * 1024;

@@ -246,9 +246,9 @@ jobs:
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
       - name: Build every crate for wasm32
-        run: cargo build --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --target wasm32-unknown-unknown
+        run: cargo build --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --exclude safe-cex-candle-server --exclude safe-cex-exchange-server --exclude safe-cex-remote-signer --target wasm32-unknown-unknown
       - name: Lint every crate for wasm32
-        run: cargo clippy --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --exclude safe-cex-candle-server --exclude safe-cex-exchange-server --exclude safe-cex-remote-signer --target wasm32-unknown-unknown -- -D warnings
       - name: Lint explicit WASM Mutation-barrier host support
         run: cargo clippy --locked -p safe-cex-wasm --no-default-features --features bitunix,http-mutation-barriers --target wasm32-unknown-unknown -- -D warnings
 
