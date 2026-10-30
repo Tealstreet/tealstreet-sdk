@@ -481,6 +481,14 @@ impl AccountHandle {
         result.await.ok()
     }
 
+    /// The account's whole current state as one SCXF snapshot frame, for a
+    /// consumer that decodes rows with the same applier as the stream.
+    pub async fn snapshot_frame(&self) -> Option<Vec<u8>> {
+        let (reply, result) = oneshot::channel();
+        self.commands.send(Control::Snapshot(reply)).await.ok()?;
+        result.await.ok()
+    }
+
     /// A typed engine command from an in-process client (algos). `false` when
     /// the account's queue is full or it stopped: the command was not sent.
     pub fn command(&self, client: u64, command: Command) -> bool {
@@ -551,6 +559,7 @@ enum Control {
     },
     Leave(u64),
     Read(Box<dyn FnOnce(&safe_cex_engine::Store) + Send>),
+    Snapshot(oneshot::Sender<Vec<u8>>),
     Books(Vec<String>, oneshot::Sender<Vec<BookLevels>>),
 }
 
@@ -676,6 +685,15 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                     Some(Control::Leave(client)) => self.leave(client),
                     Some(Control::Read(read)) => read(self.host.engine.store()),
+                    Some(Control::Snapshot(reply)) => {
+                        // Absolute values only: a one-off read leaves every stream baseline alone.
+                        let frame = self
+                            .host
+                            .turn(|host| host.engine.snapshot_frame((host.clock)()).to_vec());
+                        if let Some(frame) = frame {
+                            let _ = reply.send(frame);
+                        }
+                    }
                     Some(Control::Books(symbols, reply)) => {
                         let books = symbols
                             .into_iter()
@@ -2677,6 +2695,29 @@ mod tests {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_snapshot_read_returns_one_whole_scxf_frame() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (handle, _task) = spawn_account(
+                    Host::new(
+                        safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                        NoTransport,
+                    ),
+                    ServerConfig::default(),
+                )
+                .unwrap();
+                let frame = handle
+                    .snapshot_frame()
+                    .await
+                    .expect("a live account answers");
+                assert_eq!(frame[..4], 0x4658_4353_u32.to_le_bytes());
+                handle.dispose();
+            })
+            .await;
     }
 
     #[tokio::test]

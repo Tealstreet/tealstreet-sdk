@@ -577,16 +577,28 @@ impl Session {
                     }
                 }
                 Plan::Read(read) => {
-                    let answer = account
+                    let closed = || methods::Refused {
+                        name: "Error",
+                        message: "account is closed".into(),
+                    };
+                    let from_frame = read.from_frame();
+                    let mut answer = account
                         .handle
                         .read(move |store| methods::read_store(&read, store))
                         .await
-                        .unwrap_or_else(|| {
-                            Err(methods::Refused {
-                                name: "Error",
-                                message: "account is closed".into(),
+                        .unwrap_or_else(|| Err(closed()));
+                    if from_frame && answer.is_ok() {
+                        use base64::Engine as _;
+                        answer = account
+                            .handle
+                            .snapshot_frame()
+                            .await
+                            .map(|frame| {
+                                let frame = base64::engine::general_purpose::STANDARD.encode(frame);
+                                json!({ "accountFrame": frame })
                             })
-                        });
+                            .ok_or_else(closed);
+                    }
                     match answer {
                         Ok(result) => self.send(envelope::msg(
                             name,

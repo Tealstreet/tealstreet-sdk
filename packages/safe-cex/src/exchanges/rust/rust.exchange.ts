@@ -59,6 +59,7 @@ import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
+import { DefaultStore } from '../../store/store.base';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
@@ -275,6 +276,21 @@ const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
   'nukeOrders',
 ]);
 const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode'] as const;
+
+/**
+ * The hosted server answers `fetchOrders`/`fetchPositions` with its engine's
+ * snapshot frame, so the rows come from the same FrameApplier as the worker's,
+ * native-unit extras and NaN handling included. A worker's rows pass through.
+ */
+const rowsFromAccountFrame = (method: string, result: unknown, symbols: unknown): unknown => {
+  const frame = (result as { accountFrame?: unknown } | null | undefined)?.accountFrame;
+  if ((method !== 'fetchOrders' && method !== 'fetchPositions') || typeof frame !== 'string') return result;
+  const bytes = Uint8Array.from(atob(frame), (char) => char.charCodeAt(0));
+  const store = new DefaultStore();
+  new FrameApplier(store).apply(new Frame(bytes.buffer));
+  const rows: ReadonlyArray<{ symbol: string }> = method === 'fetchOrders' ? store.orders : store.positions;
+  return Array.isArray(symbols) ? rows.filter((row) => symbols.includes(row.symbol)) : rows;
+};
 type NativeAccountRead = (typeof NATIVE_ACCOUNT_READS)[number];
 const MULTI_COMMAND_WAIT_FACTOR = 5;
 const WORKER_CAPABILITY_RETRY_MS = 30_000;
@@ -1140,7 +1156,9 @@ export class RustEngineExchange extends BaseExchange {
         if (!this.routesToWorker) return local(...args);
         const result = await this.callWorker(method, ...args);
         // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-        return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
+        return method === 'updateOrder'
+          ? decodeWorkerOrderIds(result as WorkerOrderIds)
+          : rowsFromAccountFrame(method, result, args[0]);
       };
     }
   }
