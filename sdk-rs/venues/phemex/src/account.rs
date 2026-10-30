@@ -330,7 +330,16 @@ impl State {
     }
     /// Frame-fed: the source's order snapshot is this engine's, once it has loaded;
     /// a lost placement the source's orders now show is no longer lost.
-    pub(crate) fn frame_ingested(&mut self, orders_loaded: bool, client_ids: &HashSet<String>) {
+    pub(crate) fn frame_ingested(
+        &mut self,
+        orders: bool,
+        orders_loaded: bool,
+        client_ids: &HashSet<String>,
+    ) {
+        // A create-ack sent before these orders must not upsert over them.
+        if orders {
+            self.order_revision += 1;
+        }
         self.authenticated = orders_loaded;
         self.snapshot = orders_loaded;
         self.open = orders_loaded;
@@ -340,6 +349,18 @@ impl State {
         }
         self.reconcile
             .retain(|_, entry| !entry.lost.is_empty() || !entry.cancel.is_empty());
+    }
+    /// Frame-fed: removes each symbol's lost placements whose signed expiry
+    /// is at or before `cover`, returning the symbol and that expiry.
+    pub(crate) fn take_proven_lost(&mut self, cover: f64) -> Vec<(String, f64)> {
+        let proven: Vec<_> = (self.reconcile.iter())
+            .filter(|(_, entry)| entry.not_before <= cover)
+            .map(|(symbol, entry)| (symbol.clone(), entry.not_before))
+            .collect();
+        for (symbol, _) in &proven {
+            self.reconcile.remove(symbol);
+        }
+        proven
     }
     pub fn orders_ready(&self) -> bool {
         self.authenticated && self.snapshot && self.open && !self.uncertainty_overflow
@@ -1635,6 +1656,7 @@ impl PhemexPerpetuals {
             self.cancel_landed(cx, &symbol);
         }
         self.retire_late_subjects(cx, None);
+        self.expire_lost_from_frames(cx);
     }
     /// Cancels any stored order a cancel-all owes on `symbol`, however it arrived.
     fn cancel_landed(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {

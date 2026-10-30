@@ -508,7 +508,11 @@ fn an_unreadable_venue_state_warns_once_per_outage_and_keeps_the_last_state() {
     let mut e = frame_fed();
     e.apply_frame(1001., &source_snapshot(), true).unwrap();
     e.drain_actions().for_each(drop);
-    assert_eq!(malformed(&mut e, 1002.), 1, "the first unreadable state warns");
+    assert_eq!(
+        malformed(&mut e, 1002.),
+        1,
+        "the first unreadable state warns"
+    );
     assert_eq!(malformed(&mut e, 1003.), 0, "not again for the same outage");
     assert_eq!(
         placed_pos_side(&mut e, "caller-1").as_deref(),
@@ -518,4 +522,115 @@ fn an_unreadable_venue_state_warns_once_per_outage_and_keeps_the_last_state() {
     e.apply_frame(1004., &source_snapshot(), true).unwrap();
     e.drain_actions().for_each(drop);
     assert_eq!(malformed(&mut e, 1005.), 1, "a new outage warns again");
+}
+
+/// A page whose source has loaded empty orders, with `caller-1` lost and a
+/// cancel-all on BTCUSDT covering it.
+fn lost_and_canceled() -> (Engine<PhemexPerpetuals>, Engine<PhemexPerpetuals>) {
+    let mut e = frame_fed();
+    let mut source = source("Hedged");
+    source.store_mut().set_orders(vec![]);
+    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let sent = requests(&command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![order("caller-1")],
+        },
+    ));
+    e.handle(
+        1002.,
+        Event::HttpFailed {
+            request: sent[0].id,
+            error: "connection reset",
+        },
+    );
+    e.drain_actions().for_each(drop);
+    command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 2,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    (e, source)
+}
+
+fn warned_about(actions: &[Action], text: &str) -> bool {
+    actions
+        .iter()
+        .any(|a| matches!(a, Action::Notice(Notice::Event(e)) if e.message.contains(text)))
+}
+
+#[test]
+fn a_lost_placement_ends_once_a_source_frame_covers_its_signed_expiry() {
+    let (mut e, mut source) = lost_and_canceled();
+    // A frame written before the signed expiry proves nothing: still refused.
+    e.apply_frame(1003., &source.snapshot_frame(1003.).to_vec(), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 3,
+            orders: vec![order("caller-1")],
+        },
+    );
+    assert!(requests(&a).is_empty(), "{:?}", requests(&a));
+
+    // One written well past it, without the order: it never landed.
+    let late = 10_000_000.;
+    e.apply_frame(late, &source.snapshot_frame(late).to_vec(), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 4,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    assert!(
+        !warned_about(&a, "caller-1"),
+        "no repeated unknown-outcome warning: {a:?}"
+    );
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 5,
+            orders: vec![order("caller-1")],
+        },
+    );
+    assert_eq!(requests(&a).len(), 1, "the clOrdID is free again: {a:?}");
+}
+
+#[test]
+fn a_create_ack_does_not_reopen_an_order_an_orders_frame_showed_closed() {
+    let mut e = frame_fed();
+    let mut source = source("Hedged");
+    source.store_mut().set_orders(vec![]);
+    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let sent = requests(&command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![order("caller-1")],
+        },
+    ));
+    // The source sees it fill before the page's ack arrives.
+    let mut filled = landed(0.01);
+    filled.id = "real-1".into();
+    filled.status = OrderStatus::Closed;
+    source.store_mut().set_orders(vec![filled]);
+    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+        .unwrap();
+    respond(&mut e, &sent[0], &ack(&sent[0], "real-1").to_string());
+    assert_eq!(
+        e.store().order("real-1").map(|o| o.status),
+        Some(OrderStatus::Closed)
+    );
 }
