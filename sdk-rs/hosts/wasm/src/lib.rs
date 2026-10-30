@@ -159,6 +159,8 @@ trait AnyEngine {
     ) -> Result<(), &'static str>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
+    /// The data source's clock offset for a frame-fed engine.
+    fn set_source_clock_offset(&mut self, _offset_ms: Option<f64>) {}
     /// A data source's frame into a frame-fed engine (`Engine::apply_frame`).
     fn apply_frame(&mut self, _now: f64, _frame: &[u8], _snapshot: bool) -> Result<(), String> {
         Err("frame ingest requires a frameFed engine".into())
@@ -321,6 +323,10 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
     fn apply_frame(&mut self, now: f64, frame: &[u8], snapshot: bool) -> Result<(), String> {
         Engine::apply_frame(self, now, frame, snapshot).map_err(|error| error.0.to_owned())
+    }
+
+    fn set_source_clock_offset(&mut self, offset_ms: Option<f64>) {
+        Engine::set_source_clock_offset(self, offset_ms);
     }
 
     fn handle(&mut self, now: f64, event: Event<'_>) {
@@ -1240,6 +1246,14 @@ impl WasmEngine {
 
     /// Apply a data source's SCXF frame to a frame-fed engine; `snapshot`
     /// replaces the account sections. Returns the flushed actions, like `command`.
+    /// The data source's clock minus this page's, in ms: 0 for the LOCAL
+    /// worker, the measured server offset for COSIGNED/DELEGATED. Fences lift
+    /// on one clock once set; until then they wait 30 s.
+    #[wasm_bindgen(js_name = setSourceClockOffset)]
+    pub fn set_source_clock_offset(&mut self, offset_ms: Option<f64>) {
+        self.inner.set_source_clock_offset(offset_ms);
+    }
+
     #[wasm_bindgen(js_name = applyFrame)]
     pub fn apply_frame(
         &mut self,
