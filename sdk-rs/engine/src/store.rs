@@ -689,6 +689,13 @@ impl Store {
         }
     }
 
+    /// Back to never supplied: a frame-fed source that no longer reports collateral.
+    pub fn clear_coin_balances(&mut self) {
+        if self.coin_balances.take().is_some() {
+            self.changes.balance = true;
+        }
+    }
+
     /// `None` means unspecified; an explicitly empty slice clears the consumer.
     pub fn currency_balances(&self) -> Option<&[CurrencyBalance]> {
         self.currency_balances.as_deref()
