@@ -954,6 +954,28 @@ export class RustEngineExchange extends BaseExchange {
     host.flush();
   };
 
+  /**
+   * A frame-fed engine confirmed a settings write: its data source re-reads the
+   * settings, so the hold the engine keeps over the source's frames can clear.
+   */
+  private refreshSourceSettings = (symbol: unknown) => {
+    void this.refreshAccountSettings(typeof symbol === 'string' ? symbol : undefined).catch(
+      (error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.log(`${this.name} could not ask its data source to re-read settings: ${reason}`, LogSeverity.Warning);
+      },
+    );
+  };
+
+  /** Data source: re-read the settings a frame-fed engine changed, for one symbol or the account. */
+  refreshAccountSettings = async (symbol?: string): Promise<void> => {
+    if (this.routesToWorker) {
+      await this.callWorker('refreshAccountSettings', ...(symbol !== undefined ? [symbol] : []));
+      return;
+    }
+    await this.command({ op: 'refreshSettings', ...(symbol !== undefined ? { symbol } : {}) }, { report: false });
+  };
+
   /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere. */
   stopAccountAlgos = (): Promise<NukeResult> => stopLocalAccountAlgos(this);
 
@@ -1069,6 +1091,7 @@ export class RustEngineExchange extends BaseExchange {
       options,
       (transportFactory ?? synchronizedEngineTransport)(),
       this.signerSetup,
+      (message) => this.emitAndLogError(message),
     );
     const engine = constructEngine(
       WasmEngine,
@@ -1675,6 +1698,7 @@ export class RustEngineExchange extends BaseExchange {
 
   private receiveEvent = (event: EngineEvent) => {
     if (event.code === 'auth.rejected') this.noteAuthFailure();
+    if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
     this.emitter.emit('engine-event', event);
     if (event.level === 'error')
       this.emitAndLogError(event.message, undefined, {

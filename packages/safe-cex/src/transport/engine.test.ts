@@ -42,11 +42,13 @@ const mocks = vi.hoisted(() => ({
   nodeRuntime: vi.fn(() => true),
 }));
 
-vi.mock('../accessToken', () => ({
+vi.mock('../accessToken', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../accessToken')>()),
   getProxyToken: mocks.token,
   captureProxyTokenProvider: () => null,
   withProxyTokenProvider: (_provider: unknown, fn: () => unknown) => fn(),
-  bindProxyTokenLookup: () => async () => '',
+  // The real binder looks the token up through getProxyToken.
+  bindProxyTokenLookup: () => () => mocks.token(),
 }));
 vi.mock('../index', () => ({ createExchange: vi.fn() }));
 vi.mock('../utils/runtime', () => ({ isNodeOrBunRuntime: mocks.nodeRuntime }));
@@ -319,15 +321,27 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     expect(mocks.createAdapter).not.toHaveBeenCalled();
   });
 
-  it('resolves the proxy token for each operation, including an initially empty credential', async () => {
-    mocks.token.mockResolvedValueOnce('').mockResolvedValueOnce('refreshed-jwt');
-    const raw = makeRaw();
-    const routed = createEngineTransport('bybit', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw);
-    await routed.request(request());
-    await routed.request(request());
-    expect(raw.request.mock.calls[0][0].headers).not.toHaveProperty('Authorization');
-    expect(raw.request.mock.calls[1][0].headers.Authorization).toBe('Bearer refreshed-jwt');
-    expect(mocks.token).toHaveBeenCalledTimes(2);
+  it('resolves the proxy token for each operation, waiting out an initially empty credential', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.token
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('refreshed-jwt')
+        .mockResolvedValueOnce('rotated-jwt');
+      const raw = makeRaw();
+      const routed = createEngineTransport('bybit', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw);
+      const first = routed.request(request());
+      await vi.advanceTimersByTimeAsync(1_000);
+      await first;
+      await routed.request(request());
+      // The warming '' never reached the edge; each operation read its own token.
+      expect(raw.request).toHaveBeenCalledTimes(2);
+      expect(raw.request.mock.calls[0][0].headers.Authorization).toBe('Bearer refreshed-jwt');
+      expect(raw.request.mock.calls[1][0].headers.Authorization).toBe('Bearer rotated-jwt');
+      expect(mocks.token).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([false, true])('overrideProxyUrl rewrites the venue URL with proxy=%s', async (tealstreetProxy) => {

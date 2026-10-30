@@ -123,6 +123,10 @@ enum CommandIn {
     FetchBalanceInfo {
         command: u32,
     },
+    RefreshSettings {
+        command: u32,
+        symbol: Option<String>,
+    },
     FetchClosedPositions {
         command: u32,
         symbol: Option<String>,
@@ -221,6 +225,7 @@ enum Op {
     FetchAccountTier,
     SetAccountTier,
     FetchBalanceInfo,
+    RefreshSettings,
     FetchClosedPositions,
     FetchLeverage,
     FetchMaxLeverage,
@@ -434,6 +439,14 @@ struct SetAccountTierIn {
 #[serde(expecting = "struct variant CommandIn::FetchBalanceInfo with 1 element")]
 struct FetchBalanceInfoIn {
     command: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::RefreshSettings with 2 elements")]
+struct RefreshSettingsIn {
+    command: u32,
+    #[serde(default)]
+    symbol: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -729,6 +742,10 @@ fn decode_payload(op: Op, json: &str) -> Result<CommandIn, serde_json::Error> {
             let FetchBalanceInfoIn { command } = payload(json)?;
             CommandIn::FetchBalanceInfo { command }
         }
+        Op::RefreshSettings => {
+            let RefreshSettingsIn { command, symbol } = payload(json)?;
+            CommandIn::RefreshSettings { command, symbol }
+        }
         Op::FetchClosedPositions => {
             let FetchClosedPositionsIn {
                 command,
@@ -970,6 +987,10 @@ impl From<CommandIn> for Command {
             CommandIn::FetchBalanceInfo { command } => Self::Venue {
                 command,
                 action: crate::VenueAction::FetchBalanceInfo,
+            },
+            CommandIn::RefreshSettings { command, symbol } => Self::Venue {
+                command,
+                action: crate::VenueAction::RefreshSettings { symbol },
             },
             CommandIn::FetchClosedPositions {
                 command,

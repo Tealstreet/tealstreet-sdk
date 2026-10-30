@@ -50,9 +50,11 @@ const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
       const command = JSON.parse(json) as { op: string; command?: number };
       fake.commands.push(command);
       const result = command.op === 'placeOrders' ? ['placed-1'] : null;
-      return command.command === undefined
-        ? '[]'
-        : JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result) }]);
+      if (command.command === undefined) return '[]';
+      const done = { op: 'done', command: command.command, result: JSON.stringify(result) };
+      // A confirmed settings write holds it over the source, as a frame-fed venue does.
+      const held = { op: 'event', level: 'info', code: 'settings.held', message: 'held', fields: { symbol: 'BTCUSDT' } };
+      return JSON.stringify(command.op === 'setPositionMode' ? [held, done] : [done]);
     },
     applyFrame: (bytes: Uint8Array, snapshot: boolean) => {
       if (fake.refuseNext) {
@@ -122,6 +124,18 @@ describe('frame-fed main-thread mirror', () => {
     expect(mirror.calls).not.toContain('placeOrder');
     expect(mirror.calls).not.toContain('setLeverage');
     expect(mirror.calls).not.toContain('cancelSymbolOrders');
+  });
+
+  it('asks its data source to re-read a setting it holds', async () => {
+    const fake = fakeEngine();
+    const mirror = mirrorWith(fake);
+    exchange = mirror.exchange;
+    await exchange.frameFedReady;
+    await exchange.changePositionMode(true, 'BTCUSDT');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fake.commands.map((command) => command.op)).toContain('setPositionMode');
+    expect(mirror.calls).toContain('refreshAccountSettings');
+    expect(mirror.calls).not.toContain('changePositionMode');
   });
 
   it('drops source deltas until a snapshot, then ingests in order', async () => {
