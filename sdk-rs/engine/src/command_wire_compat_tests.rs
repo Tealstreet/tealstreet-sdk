@@ -141,6 +141,11 @@ mod legacy {
         FetchBalanceInfo {
             command: u32,
         },
+        RefreshSettings {
+            command: u32,
+            #[serde(default)]
+            symbol: Option<String>,
+        },
         FetchClosedPositions {
             command: u32,
             #[serde(default)]
@@ -346,6 +351,10 @@ mod legacy {
                     command,
                     action: crate::VenueAction::FetchBalanceInfo,
                 },
+                CommandIn::RefreshSettings { command, symbol } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::RefreshSettings { symbol },
+                },
                 CommandIn::FetchClosedPositions {
                     command,
                     symbol,
@@ -534,6 +543,11 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
             ("tier", r#""plus""#),
         ],
         vec![("op", r#""fetchBalanceInfo""#), ("command", "12")],
+        vec![
+            ("op", r#""refreshSettings""#),
+            ("command", "12"),
+            ("symbol", r#""BTCUSDT""#),
+        ],
         vec![
             ("op", r#""fetchClosedPositions""#),
             ("command", "13"),
