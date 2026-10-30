@@ -52,6 +52,8 @@ struct State {
     heard_at: Instant,
     /// `heard_at` of the socket the last `attach` replaced.
     heard_before_attach: Instant,
+    /// When the signing socket last changed.
+    attached_at: Instant,
     /// id → (token, socket it was sent on, its sign-req frame, waiter).
     pending: HashMap<String, (u64, SocketId, String, Waiter)>,
     next_token: u64,
@@ -77,6 +79,7 @@ impl SignerLink {
                 unavailable_since: None,
                 heard_at: Instant::now(),
                 heard_before_attach: Instant::now(),
+                attached_at: Instant::now(),
                 pending: HashMap::new(),
                 next_token: 0,
                 last_sign_req_bytes: 0,
@@ -111,10 +114,11 @@ impl SignerLink {
         self.state().heard_at
     }
 
-    /// The last frame from the socket the latest `attach` replaced: what was
-    /// sent after this may never have arrived.
-    pub fn heard_before_attach(&self) -> Instant {
-        self.state().heard_before_attach
+    /// Whether something sent at `sent` may never have reached the browser: no
+    /// frame followed it on the socket it went to, as far as this link can tell.
+    pub fn unheard_since(&self, sent: Instant) -> bool {
+        let state = self.state();
+        (sent > state.heard_before_attach && sent <= state.attached_at) || sent > state.heard_at
     }
 
     /// How long the client has been gone, if it is.
@@ -253,6 +257,7 @@ impl SignerLink {
         }
         if state.socket != socket {
             state.heard_before_attach = state.heard_at;
+            state.attached_at = Instant::now();
         }
         state.socket = socket;
         state.out = out.clone();

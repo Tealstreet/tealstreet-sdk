@@ -171,12 +171,16 @@ impl Port {
         unheard.push_back((Instant::now(), data.to_owned()));
     }
 
-    /// The errors no frame followed, once: `heard` is the browser's last frame.
-    fn take_unheard(&self, heard: Option<Instant>) -> Vec<String> {
+    /// The errors no frame followed, once.
+    fn take_unheard(&self) -> Vec<String> {
         self.unheard
             .borrow_mut()
             .drain(..)
-            .filter(|(sent, _)| heard.is_none_or(|heard| *sent > heard))
+            .filter(|(sent, _)| {
+                self.signer
+                    .as_ref()
+                    .is_none_or(|signer| signer.unheard_since(*sent))
+            })
             .map(|(_, data)| data)
             .collect()
     }
@@ -576,8 +580,9 @@ pub async fn run(
                     published.clear();
                     publish(&mut published);
                     // What it stopped for while the browser was gone, once.
-                    let heard = link_signer.as_ref().map(|signer| signer.heard_before_attach());
-                    for data in port.take_unheard(heard) {
+                    for data in port.take_unheard() {
+                        // Kept again: this socket may be dying too.
+                        port.keep_unheard(&data);
                         (port.emit)(algo_msg(&name, "error", data));
                     }
                 }
@@ -602,8 +607,7 @@ pub async fn run(
         .then(|| format!("Chases and TWAPs stopped: {reason}"));
     // Kept for the next init only when no browser is there to be sent them.
     let unheard_notices = || -> Vec<String> {
-        let heard = link_signer.as_ref().map(|signer| signer.heard_at());
-        port.take_unheard(heard)
+        port.take_unheard()
             .into_iter()
             .map(|data| serde_json::from_str(&data).unwrap_or(data))
             .collect()
