@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { OrderSide, OrderStopTriggerType } from '../../types';
 import { TwapInstance } from '../twap/TwapInstance';
-import { setTwapLockManager } from '../twap/twapLock';
+import { setTwapLockManager, TWAP_RESTORE_LOCK_WAIT_MS } from '../twap/twapLock';
 import { twapManager } from '../twap/TwapManager';
 import { TwapHandler } from './TwapHandler';
 
@@ -363,8 +363,16 @@ describe('TwapHandler', () => {
           mockSettings,
           mockMetadata,
         );
-        handlerB.handle({ op: 'twap:state', data: [row('twap-dup', 'running')] });
-        await settle();
+        vi.useFakeTimers();
+        try {
+          handlerB.handle({ op: 'twap:state', data: [row('twap-dup', 'running')] });
+          await settle();
+          // Still asking: a reloading tab's old worker may not have let go yet.
+          expect(mockCalls.terminate).toEqual([]);
+          await vi.advanceTimersByTimeAsync(TWAP_RESTORE_LOCK_WAIT_MS + 500);
+        } finally {
+          vi.useRealTimers();
+        }
         // Built synchronously for the worker's ownership tracking, stopped before it ran.
         expect(mockCalls.instances.length).toBe(2);
         expect(mockCalls.terminate).toEqual([mockCalls.instances[1]]);
@@ -373,6 +381,38 @@ describe('TwapHandler', () => {
           'error',
           'TWAP BTCUSDT not restored: it is running in another tab',
         );
+      });
+
+      it('a reloaded tab takes over once its old worker lets go of the lock', async () => {
+        handler.handle({ op: 'twap:state', data: [row('twap-reload', 'running')] });
+        await settle();
+        (twapManager.runningTwaps as Map<string, any>).clear();
+        setTwapLockManager(locks.forWorker('worker-b'));
+        const exchangeB = { name: 'bybit', emitter: { emit: vi.fn() } } as unknown as Exchange;
+        const ctxB = { postMessage: vi.fn() } as unknown as Worker;
+        const handlerB = new TwapHandler(
+          'test-account',
+          'bybit' as ExchangeName,
+          exchangeB,
+          ctxB,
+          mockSettings,
+          mockMetadata,
+        );
+        vi.useFakeTimers();
+        try {
+          handlerB.handle({ op: 'twap:state', data: [row('twap-reload', 'running')] });
+          await settle();
+          // The old page's worker is torn down a second into the new one's restore.
+          await vi.advanceTimersByTimeAsync(1_000);
+          locks.crash('worker-a');
+          await vi.advanceTimersByTimeAsync(500);
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(mockCalls.terminate).toEqual([]);
+        expect(mockCalls.resume.length).toBe(2);
+        expect(vi.mocked(exchangeB.emitter.emit)).not.toHaveBeenCalled();
+        expect(locks.isHeld('tealstreet-twap:test-account:twap-reload')).toBe(true);
       });
 
       it('a TWAP whose owner worker died can be restored by another tab', async () => {

@@ -49,3 +49,21 @@ export const acquireTwapLock = (name: string): Promise<(() => void) | null> => {
       .catch(() => resolve(null));
   });
 };
+
+/** How long a restore keeps asking for a lock its own reloaded tab may still hold. */
+export const TWAP_RESTORE_LOCK_WAIT_MS = 5_000;
+const TWAP_RESTORE_LOCK_RETRY_MS = 250;
+
+/**
+ * `acquireTwapLock`, retried for `waitMs`. A reloaded tab's previous worker
+ * holds its locks until the browser tears it down, which can be after the new
+ * worker restores; refusing on the first try would end a TWAP no tab runs.
+ */
+export const acquireTwapLockWithin = async (name: string, waitMs: number): Promise<(() => void) | null> => {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const release = await acquireTwapLock(name);
+    if (release || Date.now() >= deadline) return release;
+    await new Promise((resolve) => setTimeout(resolve, TWAP_RESTORE_LOCK_RETRY_MS));
+  }
+};
