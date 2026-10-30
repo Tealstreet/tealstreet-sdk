@@ -9,12 +9,13 @@ import { AxiosHeaders } from 'axios';
 import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 import { tunnelEgressUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/host';
-import { captureProxyTokenProvider, withProxyTokenProvider } from '../accessToken';
+import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { directTransport } from './direct';
 import { getTransport } from './registry';
 import {
+  isTealstreetProxyAuthFailureBody,
   proxyAuthorizationHeader,
   TEALSTREET_REST_HEADERS,
   TEALSTREET_WS_HEADERS,
@@ -386,6 +387,27 @@ const untilAborted = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> =
     );
   });
 
+/** Reports a proxy-authorization failure once per streak; a proxy-accepted response ends it. */
+interface ProxyAuthorizationNotice {
+  failed(message: string): void;
+  accepted(): void;
+}
+
+const readBody = async (body: HttpResponse['body']): Promise<Uint8Array> => {
+  if (body instanceof Uint8Array) return body;
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of body) chunks.push(chunk);
+  const bytes = new Uint8Array(chunks.reduce((length, chunk) => length + chunk.length, 0));
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+  return bytes;
+};
+
+const PROXY_AUTHORIZATION_MISSING = 'Tealstreet proxy authorization missing';
+
 const httpTransport = (
   exchange: ExchangeName,
   options: ExchangeOptions,
@@ -393,6 +415,7 @@ const httpTransport = (
   provider: TransportProvider,
   routing: ResolvedRouting,
   publicPrefix?: string,
+  proxyAuthorization?: ProxyAuthorizationNotice,
 ): {
   mode: 'direct' | 'how';
   request: Transport['request'];
@@ -413,6 +436,22 @@ const httpTransport = (
   // requests start from timers, sockets and shared public feeds, so keep the
   // provider of the context that created this account's transport.
   const proxyTokenProvider = captureProxyTokenProvider();
+  // The edge's 401 is our authorization, not the venue's verdict on the key: the
+  // engine would classify it as a refused key, so it fails as a transport error
+  // (retried by the venue's read policy) after asking for a fresh token.
+  const checkProxyAuthorization = async (response: HttpResponse): Promise<HttpResponse> => {
+    if (response.status !== 401) {
+      proxyAuthorization?.accepted();
+      return response;
+    }
+    const body = await readBody(response.body);
+    const text = new TextDecoder().decode(body);
+    if (!isTealstreetProxyAuthFailureBody(text)) return { ...response, body };
+    void withProxyTokenProvider(proxyTokenProvider, refreshProxyToken).catch(() => undefined);
+    const message = `[${exchange}] Tealstreet proxy refused our proxy authorization (HTTP 401: ${text}); refreshing the proxy token and retrying`;
+    proxyAuthorization?.failed(message);
+    throw new Error(message);
+  };
   const prepare = async (request: Request, intent?: CredentialIntent): Promise<PreparedHttp> => {
     if (disposed) throw new Error('Engine transport disposed');
     const controller = new AbortController();
@@ -689,6 +728,9 @@ const httpTransport = (
               try {
                 const response = send();
                 return untilAborted(response, signal)
+                  .then((value) =>
+                    route.proxied && !adapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
+                  )
                   .then(wrap)
                   .catch((error) => {
                     cancel();
@@ -705,6 +747,12 @@ const httpTransport = (
       };
     } catch (error) {
       cancel();
+      if ((error as { name?: unknown })?.name === 'ProxyTokenUnavailableError') {
+        const reason = (error as Error).message;
+        proxyAuthorization?.failed(
+          reason.includes(PROXY_AUTHORIZATION_MISSING) ? reason : `[${exchange}] ${PROXY_AUTHORIZATION_MISSING}: ${reason}`,
+        );
+      }
       if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw new HttpPreparationError('timedOut');
       throw error;
     }
@@ -729,6 +777,7 @@ export const createEngineTransport = (
   options: ExchangeOptions,
   transport: Transport,
   credentials?: { hasSecondary: boolean },
+  onProxyAuthorizationFailure?: (message: string) => void,
 ): Transport => {
   assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
@@ -775,7 +824,22 @@ export const createEngineTransport = (
     }
   }
   const fallbacks = new Map<string, WsDirectFallback>();
-  const http = httpTransport(exchange, options, transport, provider, restRouting);
+  let proxyAuthorizationFailing = false;
+  const proxyAuthorization: ProxyAuthorizationNotice = {
+    failed: (message) => {
+      if (proxyAuthorizationFailing) return;
+      proxyAuthorizationFailing = true;
+      try {
+        onProxyAuthorizationFailure?.(message);
+      } catch {
+        /* A reporting listener cannot fail the request. */
+      }
+    },
+    accepted: () => {
+      proxyAuthorizationFailing = false;
+    },
+  };
+  const http = httpTransport(exchange, options, transport, provider, restRouting, undefined, proxyAuthorization);
   // Explicit public requests bypass account proxy/tunnel policy. URLs stay in
   // the host; venues choose only the typed route name.
   const directHttp = httpTransport(exchange, options, transport, provider, restRouting, '');
@@ -789,7 +853,15 @@ export const createEngineTransport = (
       ? secondaryReadOptions(options, provider)
       : undefined;
   const readHttp = readOptions
-    ? httpTransport(exchange, readOptions, transport, provider, resolved(exchange, readOptions, provider).restRouting)
+    ? httpTransport(
+        exchange,
+        readOptions,
+        transport,
+        provider,
+        resolved(exchange, readOptions, provider).restRouting,
+        undefined,
+        proxyAuthorization,
+      )
     : undefined;
   return {
     // Protocol negotiation must use the same resolved route as connect(),

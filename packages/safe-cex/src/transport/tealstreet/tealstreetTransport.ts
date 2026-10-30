@@ -3,7 +3,7 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { ResolvedRouting, TransportProvider } from '../types';
 
 import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import { getProxyToken } from '../../accessToken';
+import { bindProxyTokenLookup, getProxyToken, ProxyTokenUnavailableError } from '../../accessToken';
 import {
   axiosHttpOverWebsocketAdapter,
   bigIntAxiosHttpOverWebsocketAdapter,
@@ -29,6 +29,39 @@ export const TEALSTREET_REST_HEADERS = {
   'sec-fetch-mode': 'cors',
   'sec-fetch-site': 'cross-site',
   'sec-fetch-dest': 'empty',
+};
+
+/** The edge's own refusal of our proxy authorization, as opposed to a venue's 401. */
+export const isTealstreetProxyAuthFailureBody = (body: unknown): boolean => {
+  const message =
+    typeof body === 'string'
+      ? body
+      : body && typeof body === 'object' && 'message' in body && typeof body.message === 'string'
+        ? body.message
+        : '';
+
+  return message === 'Authorization header is missing' || message === 'Invalid JWT';
+};
+
+/** How long a proxied request waits for a warming proxy token. */
+export const PROXY_TOKEN_WAIT_MS = 15_000;
+const PROXY_TOKEN_POLL_MS = 500;
+
+const proxyAuthorizationMissingMessage = (exchange: ExchangeName): string =>
+  `[${exchange}] Tealstreet proxy authorization missing: no proxy token within ${PROXY_TOKEN_WAIT_MS / 1000}s, so the private request was not sent`;
+
+/** A non-empty proxy token, or `ProxyTokenUnavailableError` once the wait is over. */
+const awaitProxyToken = async (exchange: ExchangeName, signal?: AbortSignal): Promise<string> => {
+  // Bound before the first await: the polls below run outside the caller's token scope.
+  const lookup = bindProxyTokenLookup();
+  const deadline = Date.now() + PROXY_TOKEN_WAIT_MS;
+  for (;;) {
+    const token = await lookup();
+    if (token) return token;
+    if (signal?.aborted || Date.now() >= deadline)
+      throw new ProxyTokenUnavailableError(proxyAuthorizationMissingMessage(exchange));
+    await new Promise((resolve) => setTimeout(resolve, PROXY_TOKEN_POLL_MS));
+  }
 };
 
 export const proxyAuthorizationHeader = (exchange: ExchangeName): string =>
@@ -86,26 +119,17 @@ export const tealstreetTransport: TransportProvider = {
       baseURL: options.overrideProxyUrl ? `${options.overrideProxyUrl}/${config?.baseURL}` : baseURLWithProxy,
       proxied,
       authorize: async (request) => {
-        // Get proxy token from SharedWorker (handles all fetching centrally)
-        const token = await getProxyToken();
+        // The browser SharedWorker and the CLI return '' while warming. A request
+        // sent without the header gets the edge's 401, which reads as a refused
+        // venue key, so it waits for a token or fails as our own authorization.
+        const token = await awaitProxyToken(exchange, request.signal as AbortSignal | undefined);
 
         // Use Tealstreet-Authorization when the venue has its own Authorization
         // semantics. Breakout DXtrade and MEXC WEB/APP sessions own Authorization; MEXC
         // OPEN-API auth rides on ApiKey/Request-Time/Signature headers.
         // The proxy will check Tealstreet-Authorization first, then fall back to Authorization
-        //
-        // Only when there is something to send. `Bearer ` with nothing after it is
-        // a MALFORMED credential, not an absent one, and it is strictly worse:
-        // the edge reports it as "Authorization header is missing", which is then
-        // the only string anyone downstream has to go on — and it points at the
-        // venue rather than at us. A host can still hold '' here legitimately
-        // (the browser SharedWorker and the CLI both return it while warming);
-        // exchange-server cannot, since `getProxyToken` throws for it instead.
-        markRestProxyHeader(request, token ? 'present' : 'empty');
-
-        if (token) {
-          request.headers[proxyAuthorizationHeader(exchange)] = `Bearer ${token}`;
-        }
+        markRestProxyHeader(request, 'present');
+        request.headers[proxyAuthorizationHeader(exchange)] = `Bearer ${token}`;
 
         // Add browser-like headers for CLI requests to proxy
         // Cloudflare Worker requires these headers for CORS validation
