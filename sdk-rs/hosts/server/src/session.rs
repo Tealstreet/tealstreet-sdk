@@ -27,7 +27,7 @@ pub struct Identity {
 struct Pending {
     request_id: Value,
     method: String,
-    returns_unit: bool,
+    reply: methods::Reply,
     /// A cancel-all fanned out over symbols: one shared outcome for the group.
     group: Option<Arc<Mutex<Group>>>,
     /// Order-affecting commands are logged with their result when they settle.
@@ -541,10 +541,7 @@ impl Session {
                     "callMethod:done",
                     json!({"requestId": request_id, "success": true, "result": result}),
                 )),
-                Plan::Command {
-                    mut command,
-                    returns_unit,
-                } => {
+                Plan::Command { mut command, reply } => {
                     let joined = self.joined.get_mut(name).unwrap();
                     let Some(id) = joined.next_command.checked_add(1) else {
                         self.reply_failure(
@@ -568,7 +565,7 @@ impl Session {
                         Pending {
                             request_id: request_id.clone(),
                             method: method.clone(),
-                            returns_unit,
+                            reply,
                             group: group.clone(),
                             audit,
                         },
@@ -707,10 +704,12 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
     };
     let data = match outcome {
         Ok(result) => {
-            let result = if pending.returns_unit {
-                Value::Null
-            } else {
-                result
+            let result = match pending.reply {
+                methods::Reply::Result => result,
+                methods::Reply::Unit => Value::Null,
+                methods::Reply::Placed { client_order_id } => {
+                    json!({"orderIds": result, "clientOrderId": client_order_id})
+                }
             };
             json!({"requestId": pending.request_id, "success": true, "result": result})
         }
@@ -941,7 +940,7 @@ mod tests {
             Pending {
                 request_id: "r1".into(),
                 method: "placeOrder".into(),
-                returns_unit: false,
+                reply: methods::Reply::Result,
                 group: None,
                 audit: None,
             },
@@ -977,7 +976,7 @@ mod tests {
             Pending {
                 request_id: json!(7),
                 method: "placeOrder".into(),
-                returns_unit: false,
+                reply: methods::Reply::Result,
                 group: None,
                 audit: None,
             },
@@ -989,5 +988,29 @@ mod tests {
         assert_eq!(reply["d"]["data"]["success"], false);
         assert_eq!(reply["d"]["data"]["result"]["outcome"], "unknown");
         assert_eq!(reply["d"]["data"]["result"]["message"], "rejected");
+    }
+
+    #[test]
+    fn a_placement_with_client_order_id_returns_the_ids_and_the_client_order_id() {
+        let (out, mut sent, _) = Out::channel(16);
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(
+            3,
+            Pending {
+                request_id: json!(9),
+                method: "placeOrderWithClientOrderId".into(),
+                reply: methods::Reply::Placed {
+                    client_order_id: "cid-1".into(),
+                },
+                group: None,
+            },
+        );
+        let notice = json!({"type":"done","command":3,"result":"[\"o1\"]"});
+        notice_to_msg(&out, "acct", &notice, &pending);
+        let reply: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(
+            reply["d"]["data"],
+            json!({"requestId":9,"success":true,"result":{"orderIds":["o1"],"clientOrderId":"cid-1"}})
+        );
     }
 }

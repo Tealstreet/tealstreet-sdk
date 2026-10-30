@@ -12,10 +12,23 @@ pub const MAX_ARGS_BYTES: usize = 64 * 1024;
 /// What a method becomes: one engine command, or a direct reply.
 #[derive(Debug, PartialEq)]
 pub enum Plan {
-    /// `returns_unit`: the TS method returns `undefined`, not the engine result.
-    Command { command: Value, returns_unit: bool },
+    Command {
+        command: Value,
+        reply: Reply,
+    },
     /// Answered without the engine (`cancelAllOrders` with nothing to cancel).
     Reply(Value),
+}
+
+/// What the method returns once its command is done.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Reply {
+    /// The engine result as is.
+    Result,
+    /// The TS method returns `undefined`, not the engine result.
+    Unit,
+    /// `placeOrderWithClientOrderId`: `{orderIds, clientOrderId}`, as base.ts.
+    Placed { client_order_id: String },
 }
 
 #[derive(Debug, PartialEq)]
@@ -89,7 +102,11 @@ fn command(op: &str, fields: Map<String, Value>, returns_unit: bool) -> Plan {
     command.extend(fields);
     Plan::Command {
         command: Value::Object(command),
-        returns_unit,
+        reply: if returns_unit {
+            Reply::Unit
+        } else {
+            Reply::Result
+        },
     }
 }
 
@@ -125,17 +142,30 @@ pub fn translate(
                 false,
             ))
         }
-        "placeOrder" | "placeOrderWithClientOrderId" => {
-            let mut order = order(arg(args, 0))?;
-            if method == "placeOrderWithClientOrderId" {
-                let id = text(arg(args, 1), "clientOrderId")?;
-                order["clientOrderId"] = id.into();
-            }
+        "placeOrder" => {
+            let order = order(arg(args, 0))?;
             one(command(
                 "placeOrders",
                 fields([("orders", json!([order]))]),
                 false,
             ))
+        }
+        // As base.ts: the ID rides inside the one order argument, and a call
+        // without one never places an untracked order in its name.
+        "placeOrderWithClientOrderId" => {
+            let order = order(arg(args, 0))?;
+            let Some(id) = order["clientOrderId"].as_str().map(str::to_owned) else {
+                return Err(refused(
+                    "Error",
+                    "placeOrderWithClientOrderId requires a clientOrderId",
+                ));
+            };
+            one(Plan::Command {
+                command: json!({"op": "placeOrders", "orders": [order]}),
+                reply: Reply::Placed {
+                    client_order_id: id,
+                },
+            })
         }
         "updateOrder" => {
             let request = arg(args, 0);
@@ -319,12 +349,33 @@ mod tests {
             single("placeOrder", json!([order.clone()]), &caps()),
             json!({"op":"placeOrders","orders":[order]})
         );
-        let with_id = single(
-            "placeOrderWithClientOrderId",
-            json!([order, "abc"]),
-            &caps(),
-        );
-        assert_eq!(with_id["orders"][0]["clientOrderId"], "abc");
+    }
+
+    #[test]
+    fn place_order_with_client_order_id_reads_the_id_from_the_order_like_base_ts() {
+        // The web's sendOrder: `placeOrderWithClientOrderId({...order, clientOrderId})`.
+        let order = json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":0.001,
+            "price":60000,"postOnly":true,"clientOrderId":"1730250000000-abc"});
+        for args in [json!([order.clone()]), json!([order.clone(), null])] {
+            let Value::Array(args) = args else { panic!() };
+            let plans = translate("placeOrderWithClientOrderId", &args, &caps(), &[]).unwrap();
+            assert_eq!(
+                plans,
+                vec![Plan::Command {
+                    command: json!({"op":"placeOrders","orders":[order.clone()]}),
+                    reply: Reply::Placed {
+                        client_order_id: "1730250000000-abc".into()
+                    },
+                }]
+            );
+        }
+        let mut without = order.clone();
+        without.as_object_mut().unwrap().remove("clientOrderId");
+        for args in [vec![without.clone()], vec![without, json!("abc")]] {
+            let refusal =
+                translate("placeOrderWithClientOrderId", &args, &caps(), &[]).unwrap_err();
+            assert!(refusal.message.contains("requires a clientOrderId"));
+        }
     }
 
     #[test]
