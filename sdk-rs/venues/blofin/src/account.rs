@@ -20,6 +20,8 @@ use safe_cex_engine::{Fill, OrderSnapshotToken};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+mod venue_state;
+
 /// BloFin counts REST limits per one-minute window, so a 418/429 without
 /// `Retry-After` waits out a whole window before the settings read retries.
 const RATE_LIMIT_PAUSE_MS: f64 = 60_000.0;
@@ -735,7 +737,8 @@ impl Blofin {
         cx.notice(Level::Error, code::STREAM_UNAVAILABLE, error.message);
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.account_busy || !self.signed() {
+        // Frame-fed: positions and balance arrive as frames.
+        if cx.frame_fed() || self.account.account_busy || !self.signed() {
             return;
         }
         self.account.account_busy = true;
@@ -771,7 +774,8 @@ impl Blofin {
         self.refresh_orders(cx, 1);
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>, attempt: u32) {
-        if self.account.orders_busy || !self.signed() {
+        // Frame-fed: the data source's ORDERS frames are the reconcile.
+        if cx.frame_fed() || self.account.orders_busy || !self.signed() {
             return;
         }
         let Some(snapshot) = cx.store.begin_orders_snapshot() else {
