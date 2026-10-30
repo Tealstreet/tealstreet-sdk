@@ -20,3 +20,5 @@ health is reported as unknown, because the engine exposes none.
 **Pacing.** Account starts run at about 7 per second per process, with up to 60 ms of jitter.
 
 **Not yet wired.** Shared public feeds.
+
+- `engine_options` (hosts/server/src/accounts.rs): the Hyperliquid builder fee goes out as an integer `feeTenthsBps`, since the registry parses it as u32; a fractional or out-of-range fee falls back to the default builder.
