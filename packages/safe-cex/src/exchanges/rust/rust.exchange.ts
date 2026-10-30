@@ -52,6 +52,13 @@ import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
+import {
+  claimWriteTiming,
+  emitWriteTiming,
+  runWithWriteTiming,
+  TIMED_WRITE_METHODS,
+  WriteTiming,
+} from '../../writeTiming';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
@@ -1125,8 +1132,11 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
   private callWorker = async (method: string, ...args: unknown[]): Promise<unknown> => {
+    const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
+    timing?.mark('called');
     await this.untilWorkerBridge();
-    return (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+    const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+    return timing ? runWithWriteTiming(timing, call) : call();
   };
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
@@ -1667,7 +1677,7 @@ export class RustEngineExchange extends BaseExchange {
   /** `report: false` is for background reads whose caller owns the failure's visibility. */
   private command = async <T>(
     command: { op: string; [field: string]: unknown },
-    { report = true }: { report?: boolean } = {},
+    { report = true, timing }: { report?: boolean; timing?: WriteTiming } = {},
   ): Promise<T> => {
     try {
       if (this.engineFailure) throw this.engineFailure;
@@ -1680,9 +1690,24 @@ export class RustEngineExchange extends BaseExchange {
             : Boolean(value && typeof value === 'object' && Object.values(value).some(invalid));
         if (invalid(command)) throw new Error('Coinbase command numbers must be finite');
       }
-      return (await this.host.command(command)) as T;
+      return (await (timing ? this.host.command(command, { onStage: timing.mark }) : this.host.command(command))) as T;
     } catch (error) {
       if (report) this.reportCommandError(error);
+      throw error;
+    }
+  };
+
+  /** A user write: its stages are stamped, and emitted here unless a caller in another thread owns them. */
+  private writeCommand = async <T>(
+    claimed: ReturnType<typeof claimWriteTiming>,
+    command: { op: string; [field: string]: unknown },
+  ): Promise<T> => {
+    try {
+      const result = await this.command<T>(command, { timing: claimed.timing });
+      if (claimed.owned) emitWriteTiming(this, claimed.timing, 'ok');
+      return result;
+    } catch (error) {
+      if (claimed.owned) emitWriteTiming(this, claimed.timing, 'error');
       throw error;
     }
   };
@@ -1695,6 +1720,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
+    const timing = claimWriteTiming('placeOrders');
     const ready = this.capabilitiesFor('placeOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
     for (const order of orders) {
@@ -1753,7 +1779,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.capabilityRecord?.cancelAll === 'eachPlacedSymbol') {
       for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
     }
-    return this.command<string[]>({ op: 'placeOrders', orders });
+    return this.writeCommand<string[]>(timing, { op: 'placeOrders', orders });
   };
 
   placeOrder = async (opts: AsterDEXPlaceOrderOpts) => {
@@ -1762,6 +1788,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+    const timing = claimWriteTiming('amendOrder');
     const price = 'price' in update ? update.price : undefined;
     const amount = 'amount' in update ? update.amount : undefined;
     if (price === undefined && amount === undefined) throw new Error('Order amendment requires a price or amount');
@@ -1769,7 +1796,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Order amendment price and amount must be finite numbers');
     }
     const withSymbol = this.capabilityRecord?.amendWithSymbol;
-    const result = await this.command<string[] | { orderIds: string[]; clientOrderId: string }>({
+    const result = await this.writeCommand<string[] | { orderIds: string[]; clientOrderId: string }>(timing, {
       op: withSymbol ? 'amendOrderWithSymbol' : 'amendOrder',
       id: order.id,
       ...(withSymbol ? { symbol: order.symbol } : {}),
@@ -1780,14 +1807,15 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   cancelOrders = async (orders: Order[]) => {
+    const timing = claimWriteTiming('cancelOrders');
     const descriptors = orders.map(({ id, symbol, type }) => ({ id, symbol, type }));
     if (this.capabilityRecord?.cancelWithSymbols) {
-      await this.command({ op: 'cancelOrdersWithSymbols', orders: descriptors });
-    } else await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id), orders: descriptors });
+      await this.writeCommand(timing, { op: 'cancelOrdersWithSymbols', orders: descriptors });
+    } else await this.writeCommand(timing, { op: 'cancelOrders', ids: orders.map((order) => order.id), orders: descriptors });
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    await this.command({ op: 'cancelSymbolOrders', symbol });
+    await this.writeCommand(claimWriteTiming('cancelSymbolOrders'), { op: 'cancelSymbolOrders', symbol });
   };
 
   nuke = async (_tries = 0) => this.runNativeNuke(true);

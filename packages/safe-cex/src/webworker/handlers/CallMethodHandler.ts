@@ -2,6 +2,7 @@ import { serializeCommandError } from '../../commandOutcome';
 import { historyCompletenessOf } from '../../historyCompleteness';
 import { CallableMethodsInWorker, WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
 import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
+import { runWithWriteTiming, WriteTiming, type WriteMarks } from '../../writeTiming';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 import { ThrottleManager } from './ThrottleManager';
@@ -21,16 +22,25 @@ export class CallMethodHandler extends BaseHandler {
     );
   }
 
-  private replySuccess = (requestId: string, result: unknown) => {
+  private replySuccess = (requestId: string, result: unknown, timing?: WriteTiming) => {
     const completeness = historyCompletenessOf(result);
     this._ctx.postMessage({
       op: 'callMethod:done',
-      data: { requestId, result, success: true, ...(completeness ? { completeness } : {}) },
+      data: {
+        requestId,
+        result,
+        success: true,
+        ...(completeness ? { completeness } : {}),
+        ...(timing ? { timing: timing.marks } : {}),
+      },
     });
   };
 
-  handleCallMethod = async (requestId: string, method: CallableMethodsInWorker, args: any[]) => {
+  handleCallMethod = async (requestId: string, method: CallableMethodsInWorker, args: any[], marks?: WriteMarks) => {
     let result: any = null;
+    // The caller's write timing: the exchange stamps the engine stages and the caller emits.
+    const timing = marks ? new WriteTiming(method, { ...marks }) : undefined;
+    timing?.mark('received');
     if (logging) {
       console.log('Calling method', method);
     }
@@ -38,9 +48,10 @@ export class CallMethodHandler extends BaseHandler {
       if ([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].includes(method as never)) {
         const call = (this._exchange as unknown as Record<string, unknown>)[method];
         if (typeof call !== 'function') throw new Error(`${this._exchange.name} does not support ${method}`);
-        result = await (call as (...callArgs: unknown[]) => Promise<unknown>)(...args);
+        const start = () => (call as (...callArgs: unknown[]) => Promise<unknown>)(...args);
+        result = await (timing ? runWithWriteTiming(timing, start) : start());
         if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
-        this.replySuccess(requestId, result);
+        this.replySuccess(requestId, result, timing);
         return;
       }
       switch (method) {
@@ -131,7 +142,7 @@ export class CallMethodHandler extends BaseHandler {
       const serializedError = serializeCommandError(e);
       this._ctx.postMessage({
         op: 'callMethod:done',
-        data: { requestId, success: false, result: serializedError },
+        data: { requestId, success: false, result: serializedError, ...(timing ? { timing: timing.marks } : {}) },
       });
     }
   };
@@ -139,10 +150,15 @@ export class CallMethodHandler extends BaseHandler {
   handle(payload: StoreWorkerPayload): void {
     switch (payload.op) {
       case 'callMethod':
-        const { requestId, method, args }: { requestId: string; method: CallableMethodsInWorker; args: any[] } = {
+        const {
+          requestId,
+          method,
+          args,
+          timing,
+        }: { requestId: string; method: CallableMethodsInWorker; args: any[]; timing?: WriteMarks } = {
           ...payload.data,
         };
-        this.handleCallMethod(requestId, method, args);
+        this.handleCallMethod(requestId, method, args, timing);
         break;
     }
   }

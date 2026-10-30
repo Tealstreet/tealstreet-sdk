@@ -16,6 +16,14 @@ The matching BaseExchange receiver restores it before resolving or notifying
 result observers; senders and receivers must upgrade together. Never infer a
 complete window from missing metadata or attach a notice to another request.
 
+## Write timing marks
+
+User-write `callMethod` requests carry optional `data.timing` (write stage
+marks, epoch ms), and their `callMethod:done` reply returns the merged marks.
+The handler hands them to the exchange with `runWithWriteTiming`; the
+main-thread caller emits the one `write.timing` event. See
+`docs/plans/callers/rust-write-timing.md`.
+
 ## Time synchronization
 
 The browser main thread owns public time polling. It synchronizes once per
