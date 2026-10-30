@@ -380,64 +380,6 @@ fn raw_wallet_account(body: &str) -> Option<String> {
     Some(envelope.result?.list.first()?.get().to_owned())
 }
 
-/// The first account of a `wallet` topic frame, verbatim.
-fn raw_topic_wallet(text: &str) -> Option<serde_json::Value> {
-    #[derive(serde::Deserialize)]
-    struct Frame {
-        data: Vec<serde_json::Value>,
-    }
-    serde_json::from_str::<Frame>(text)
-        .ok()?
-        .data
-        .into_iter()
-        .next()
-}
-
-/// `balance.info` kept current from wallet pushes between REST reads: the push's
-/// account fields replace the stored ones, and its coins merge into theirs by
-/// `coin`, since a push may list only the coins (and fields) that changed.
-pub(crate) fn merge_wallet_info(
-    stored: Option<String>,
-    pushed: &serde_json::Value,
-) -> Option<String> {
-    use serde_json::Value;
-    let Value::Object(pushed) = pushed else {
-        return stored;
-    };
-    let mut info = match stored.as_deref().map(serde_json::from_str::<Value>) {
-        Some(Ok(Value::Object(info))) => info,
-        _ => serde_json::Map::new(),
-    };
-    for (field, value) in pushed {
-        if field != "coin" {
-            info.insert(field.clone(), value.clone());
-        }
-    }
-    if let Some(Value::Array(pushed_coins)) = pushed.get("coin") {
-        let mut coins = match info.remove("coin") {
-            Some(Value::Array(coins)) => coins,
-            _ => Vec::new(),
-        };
-        for coin in pushed_coins {
-            match (
-                coins.iter_mut().find(|known| known["coin"] == coin["coin"]),
-                coin,
-            ) {
-                // Field by field: a push may omit fields REST carries (`marginCollateral`).
-                (Some(Value::Object(known)), Value::Object(pushed)) => {
-                    for (field, value) in pushed {
-                        known.insert(field.clone(), value.clone());
-                    }
-                }
-                (Some(known), _) => *known = coin.clone(),
-                (None, _) => coins.push(coin.clone()),
-            }
-        }
-        info.insert("coin".into(), Value::Array(coins));
-    }
-    serde_json::to_string(&Value::Object(info)).ok()
-}
-
 fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
     row.account_type.as_deref() == Some("UNIFIED")
         && (float_of(&row.total_equity).is_finite()
@@ -2124,9 +2066,6 @@ impl BybitLinear {
                         return;
                     }
                     self.account.wallet = Some(Wallet::from_wire(account));
-                    if let Some(raw) = raw_topic_wallet(text) {
-                        self.balance_info = merge_wallet_info(self.balance_info.take(), &raw);
-                    }
                     // A push may list only changed coins; merge, keeping explicit zeros.
                     let mut coins = self.account.coins.take().unwrap_or_default();
                     for coin in coin_balances(account) {
