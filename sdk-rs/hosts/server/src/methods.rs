@@ -22,11 +22,19 @@ pub enum Plan {
     Reply(Value),
     /// Answered from the account's engine store, as `rust.exchange.ts` reads its own.
     Read(StoreRead),
+    /// A command sent once the account's private sections load (`getAccount` on
+    /// `afterLoad` venues, which TS sends after `start()`), or refused after `READ_WAIT`.
+    AfterLoad {
+        command: Value,
+        reply: Reply,
+    },
+    /// A fresh full snapshot of the engine's state to this socket, then `result`.
+    Resnapshot(Value),
     /// Exec's nuke on the account's algo host: `all`, `positions` or `orders`.
     Nuke(&'static str),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StoreRead {
     Orders(Option<Vec<String>>),
     Positions(Option<Vec<String>>),
@@ -75,7 +83,80 @@ impl StoreRead {
     }
 }
 
-/// Answers a store read; reads wait for nothing, so an unloaded section refuses.
+/// How long a store read waits for its sections, as `untilNativeData` in rust.exchange.ts.
+pub const READ_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+const READ_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Whether `read`'s sections have loaded (markets plus the section it reads).
+pub fn read_loaded(read: &StoreRead, store: &Store) -> bool {
+    let loaded = store.loaded();
+    loaded.markets
+        && match read {
+            StoreRead::Orders(_) | StoreRead::ClientOrder { .. } => loaded.orders,
+            StoreRead::Positions(_) | StoreRead::PositionMode => loaded.positions,
+            StoreRead::Balance => loaded.balance,
+        }
+}
+
+/// Answers `read` once its sections load, or refuses after `wait` (eager warm-start
+/// reads arrive before the first load).
+pub async fn read_when_loaded(
+    handle: &safe_cex_native::AccountHandle,
+    read: StoreRead,
+    wait: std::time::Duration,
+) -> Result<Value, Refused> {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        let attempt = read.clone();
+        let answer = handle
+            .read(move |store| read_loaded(&attempt, store).then(|| read_store(&attempt, store)))
+            .await;
+        match answer {
+            None => return Err(refused("Error", "account is closed")),
+            Some(Some(answer)) => return answer,
+            Some(None) if tokio::time::Instant::now() >= deadline => {
+                let what = match read {
+                    StoreRead::Orders(_) | StoreRead::ClientOrder { .. } => "orders",
+                    StoreRead::Positions(_) | StoreRead::PositionMode => "positions",
+                    StoreRead::Balance => "balances",
+                };
+                return Err(refused(
+                    "Error",
+                    format!("{what} did not load within {}s", wait.as_secs()),
+                ));
+            }
+            Some(None) => tokio::time::sleep(READ_POLL).await,
+        }
+    }
+}
+
+/// Waits up to `wait` for the account's start: markets, balance, orders and positions.
+pub async fn until_account_loaded(
+    handle: &safe_cex_native::AccountHandle,
+    wait: std::time::Duration,
+) -> Result<(), Refused> {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        let loaded = handle.read(|store| store.loaded()).await;
+        match loaded {
+            None => return Err(refused("Error", "account is closed")),
+            Some(loaded)
+                if loaded.markets && loaded.balance && loaded.orders && loaded.positions =>
+            {
+                return Ok(());
+            }
+            Some(_) if tokio::time::Instant::now() >= deadline => {
+                return Err(refused(
+                    "Error",
+                    format!("the account did not load within {}s", wait.as_secs()),
+                ));
+            }
+            Some(_) => tokio::time::sleep(READ_POLL).await,
+        }
+    }
+}
+
+/// Answers a store read from loaded sections; an unloaded section refuses.
 pub fn read_store(read: &StoreRead, store: &Store) -> Result<Value, Refused> {
     let loaded = store.loaded();
     let ready = |section: bool, what: &str| {
@@ -195,6 +276,12 @@ fn symbols(value: &Value) -> Result<Option<Vec<String>>, Refused> {
             .map(Some),
         _ => Err(refused("TypeError", "symbols must be an array")),
     }
+}
+
+fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_millis() as f64)
 }
 
 fn command(op: &str, fields: Map<String, Value>, returns_unit: bool) -> Plan {
@@ -536,6 +623,46 @@ pub fn translate(
             }
             one(command("fetchOrderHistory", out, false))
         }
+        // The engine owns venue reconciliation (it has no command for it); these
+        // re-baseline the caller from the engine with a fresh full snapshot.
+        "fetchAndSetPrivateSnapshot" => one(Plan::Resnapshot(Value::Null)),
+        // TS answers whether every socket recovered.
+        "recoverAfterOffline" => one(Plan::Resnapshot(Value::Bool(true))),
+        // Hyperliquid's dead-man switch, validated as rust.exchange.ts does: a safe
+        // integer UTC ms at least 5s ahead, or null/absent to clear it.
+        "scheduleCancel" => {
+            let mut out = Map::new();
+            if let Some(time) = args.first().filter(|time| !time.is_null()) {
+                let time = time
+                    .as_f64()
+                    .filter(|time| time.fract() == 0.0 && time.abs() <= 9_007_199_254_740_991.0)
+                    .ok_or_else(|| {
+                        refused(
+                            "Error",
+                            "Hyperliquid scheduleCancel time must be a safe integer UTC timestamp in milliseconds",
+                        )
+                    })?;
+                if !capabilities.schedule_cancel {
+                    return Err(refused(
+                        "Error",
+                        "scheduleCancel is unavailable for this venue",
+                    ));
+                }
+                if time < now_ms() + 5_000.0 {
+                    return Err(refused(
+                        "Error",
+                        "Hyperliquid scheduleCancel time must be at least 5 seconds in the future",
+                    ));
+                }
+                out.insert("time".into(), (time as i64).into());
+            } else if !capabilities.schedule_cancel {
+                return Err(refused(
+                    "Error",
+                    "scheduleCancel is unavailable for this venue",
+                ));
+            }
+            one(command("scheduleCancel", out, true))
+        }
         // The close-all button: exec's nuke, which awaits and reports every leg.
         "nuke" | "nukePositions" | "nukeOrders" if public_only => {
             Err(refused("Error", "A public account has nothing to nuke"))
@@ -550,9 +677,11 @@ pub fn translate(
         )),
         "getAccount" => match capabilities.account {
             AccountLookup::Unsupported => Err(refused("Error", "Not implemented")),
-            AccountLookup::Query | AccountLookup::AfterLoad => {
-                one(command("fetchAccount", Map::new(), false))
-            }
+            AccountLookup::Query => one(command("fetchAccount", Map::new(), false)),
+            AccountLookup::AfterLoad => one(Plan::AfterLoad {
+                command: json!({"op": "fetchAccount"}),
+                reply: Reply::Result,
+            }),
         },
         // Native account reads, answered from the engine store as rust.exchange.ts does.
         "fetchOrders" => one(Plan::Read(StoreRead::Orders(symbols(arg(args, 0))?))),
@@ -973,6 +1102,21 @@ mod tests {
             ..caps()
         };
         web("getAccount", json!([]), &query);
+        let after_load = Capabilities {
+            account: AccountLookup::AfterLoad,
+            ..caps()
+        };
+        let plans = translate("getAccount", &[], &after_load, &[], false).unwrap();
+        let [Plan::AfterLoad { command, reply }] = plans.as_slice() else {
+            panic!("{plans:?}")
+        };
+        assert_eq!(
+            (command, reply),
+            (&json!({"op":"fetchAccount"}), &Reply::Result)
+        );
+        let mut wire = command.clone();
+        wire["command"] = 1.into();
+        safe_cex_engine::command::decode_host_input(&wire.to_string()).unwrap();
         let none = Capabilities {
             account: AccountLookup::Unsupported,
             ..caps()
@@ -1097,6 +1241,45 @@ mod tests {
                 vec![Plan::Nuke(mode)]
             );
             assert!(translate(method, &[], &caps(), &[], true).is_err());
+        }
+    }
+
+    // Web: sendOutcome / cancelOrders / updateOrder resync, ConnectionStateWorker / desktopRecovery.
+    #[test]
+    fn web_resync_methods_re_snapshot_and_answer_like_ts() {
+        assert_eq!(
+            translate("fetchAndSetPrivateSnapshot", &[], &caps(), &[], false).unwrap(),
+            vec![Plan::Resnapshot(Value::Null)]
+        );
+        assert_eq!(
+            translate("recoverAfterOffline", &[], &caps(), &[], false).unwrap(),
+            vec![Plan::Resnapshot(Value::Bool(true))]
+        );
+    }
+
+    // Hyperliquid dead-man switch: scheduleCancel(time) / scheduleCancel(null).
+    #[test]
+    fn web_schedule_cancel_decodes_and_validates_like_rust_exchange_ts() {
+        let hyperliquid = Capabilities {
+            schedule_cancel: true,
+            ..caps()
+        };
+        let at = (now_ms() + 60_000.0).floor();
+        let (command, reply) = web("scheduleCancel", json!([at]), &hyperliquid);
+        assert_eq!(command, json!({"op":"scheduleCancel","time":at as i64}));
+        assert_eq!(reply, Reply::Unit);
+        let (command, _) = web("scheduleCancel", json!([null]), &hyperliquid);
+        assert_eq!(command, json!({"op":"scheduleCancel"}));
+        let soon = now_ms() + 1_000.0;
+        for (args, capabilities, message) in [
+            (json!([soon.floor()]), &hyperliquid, "at least 5 seconds"),
+            (json!([at + 0.5]), &hyperliquid, "safe integer"),
+            (json!([at]), &caps(), "unavailable"),
+            (json!([]), &caps(), "unavailable"),
+        ] {
+            let Value::Array(args) = args else { panic!() };
+            let refusal = translate("scheduleCancel", &args, capabilities, &[], false).unwrap_err();
+            assert!(refusal.message.contains(message), "{}", refusal.message);
         }
     }
 

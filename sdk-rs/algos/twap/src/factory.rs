@@ -208,14 +208,11 @@ impl Inner {
                 }
                 TwapEffect::StartChaser { request, .. } => {
                     if let Err(message) = inner.chasers.start_with_id(cx, &request) {
-                        cx.port.emit("log", json!([message, "error"]).to_string());
+                        report(cx, &message);
                     }
                 }
                 TwapEffect::RemoveChaser { chaser_id, .. } => inner.chasers.remove(cx, &chaser_id),
-                // `exchange.emitter.emit('log', message, LogSeverity.Error)` on the wire.
-                TwapEffect::Log { message } => {
-                    cx.port.emit("log", json!([message, "error"]).to_string())
-                }
+                TwapEffect::Log { message } => report(cx, &message),
                 TwapEffect::StateUpdate { data } => {
                     cx.port.emit("twap:stateUpdate", data.to_string())
                 }
@@ -403,4 +400,10 @@ impl TwapChasers for Rc<ChaserBook> {
     fn remove(&self, _cx: &AlgoCx, chaser_id: &str) {
         ChaserBook::remove(self, chaser_id);
     }
+}
+
+/// A TWAP error the user must see: the `error` op is what the web toasts.
+/// TS used `log` (`LogSeverity.Error`), which reaches only the exchange log.
+fn report(cx: &AlgoCx, message: &str) {
+    cx.port.emit("error", json!(message).to_string());
 }

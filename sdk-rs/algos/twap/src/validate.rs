@@ -46,6 +46,10 @@ pub fn options(options: &TwapOptions) -> Result<(), String> {
 /// from another tab: refuse anything finished, inflated or no longer driven.
 pub fn restored(options: &TwapOptions, state: &TwapState, now_ms: f64) -> Result<(), String> {
     self::options(options)?;
+    // Clients file the echoed state under its accountName.
+    if state.account_name != options.account_name {
+        return Err("restored state names another account than its options".to_owned());
+    }
     if state.orders_count != options.orders_count
         || state.orders_sizes.len() > options.orders_count as usize
     {
