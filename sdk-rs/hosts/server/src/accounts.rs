@@ -317,8 +317,18 @@ struct OpenSession {
     parked: Vec<tokio::sync::oneshot::Sender<()>>,
 }
 
-/// Stop notices by (user, account), each with when it was kept.
-type Notices = Arc<Mutex<HashMap<(String, String), (String, tokio::time::Instant)>>>;
+/// Why an account's algos stopped, until its owning session has been told.
+struct StopRecord {
+    text: String,
+    at: tokio::time::Instant,
+    /// The resume id of the session whose expiry stopped them.
+    owner: String,
+    /// Another session has been told: a tab reopened, or another device.
+    told_other: bool,
+}
+
+/// Stop notices by (user, account).
+type Notices = Arc<Mutex<HashMap<(String, String), StopRecord>>>;
 
 /// How long an undelivered stop notice waits for the account's next init.
 pub const NOTICE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -783,24 +793,44 @@ impl Registry {
         }
     }
 
-    /// The stop notice kept for `user`'s account `name`, once, if still fresh.
-    pub fn take_notice(&self, user: &str, name: &str) -> Option<String> {
-        let (notice, at) = self
-            .notices
-            .lock()
-            .unwrap()
-            .remove(&(user.to_owned(), name.to_owned()))?;
-        (at.elapsed() < NOTICE_TTL).then_some(notice)
+    /// The stop notice for a session that resumed `from`, if it is still owed one.
+    /// Another session's init must not cost the owner it, and a session that can't
+    /// be the owner (a reopened tab, a second device) is told once between them.
+    pub fn take_notice(&self, user: &str, name: &str, from: Option<&str>) -> Option<String> {
+        let mut notices = self.notices.lock().unwrap();
+        let key = (user.to_owned(), name.to_owned());
+        let record = notices.get_mut(&key)?;
+        if record.at.elapsed() >= NOTICE_TTL {
+            notices.remove(&key);
+            return None;
+        }
+        if from == Some(record.owner.as_str()) {
+            return notices.remove(&key).map(|record| record.text);
+        }
+        if record.told_other {
+            return None;
+        }
+        record.told_other = true;
+        Some(record.text.clone())
     }
 
     /// Where the algo host leaves a notice for a browser that is gone.
-    fn keep_notice(&self, account: &Account) -> crate::algos::StopNotice {
+    pub(crate) fn keep_notice(&self, account: &Account, owner: &str) -> crate::algos::StopNotice {
         let notices = self.notices.clone();
         let key = (account.user.clone(), account.name.clone());
-        Box::new(move |notice| {
+        let owner = owner.to_owned();
+        Box::new(move |text| {
             let mut notices = notices.lock().unwrap();
-            notices.retain(|_, (_, at)| at.elapsed() < NOTICE_TTL);
-            notices.insert(key.clone(), (notice, tokio::time::Instant::now()));
+            notices.retain(|_, record| record.at.elapsed() < NOTICE_TTL);
+            notices.insert(
+                key.clone(),
+                StopRecord {
+                    text,
+                    at: tokio::time::Instant::now(),
+                    owner: owner.clone(),
+                    told_other: false,
+                },
+            );
         })
     }
 
@@ -904,7 +934,7 @@ impl Registry {
                         holders.by_id.is_empty()
                     };
                     if last {
-                        let stopped = registry.keep_notice(&account);
+                        let stopped = registry.keep_notice(&account, &resume_id);
                         registry.dispose_for(&account, &reason, Some(stopped));
                     }
                 }
@@ -1194,34 +1224,51 @@ pub(crate) mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_stop_notice_reaches_the_next_init_once_and_expires_after_a_day() {
+    async fn a_stop_notice_reaches_its_owner_past_another_session_and_expires_after_a_day() {
         tokio::task::LocalSet::new()
             .run_until(async {
                 let registry = registry();
                 let (account, _algos) = held_account();
-                (registry.keep_notice(&account))(
-                    "Chases and TWAPs stopped: no browser for 60s".into(),
-                );
+                (registry.keep_notice(&account, "owner"))("stopped".into());
                 assert_eq!(
-                    registry.take_notice("other", "acct"),
+                    registry.take_notice("other", "acct", Some("owner")),
                     None,
                     "never another user's"
                 );
                 assert_eq!(
-                    registry.take_notice("u", "acct").as_deref(),
-                    Some("Chases and TWAPs stopped: no browser for 60s")
+                    registry.take_notice("u", "acct", None).as_deref(),
+                    Some("stopped"),
+                    "a second device, or a reopened tab, is told"
                 );
-                assert_eq!(registry.take_notice("u", "acct"), None, "delivered once");
-                (registry.keep_notice(&account))("first".into());
-                (registry.keep_notice(&account))("second".into());
                 assert_eq!(
-                    registry.take_notice("u", "acct").as_deref(),
+                    registry.take_notice("u", "acct", Some("elsewhere")),
+                    None,
+                    "and a page load after it is not told again"
+                );
+                assert_eq!(
+                    registry.take_notice("u", "acct", Some("owner")).as_deref(),
+                    Some("stopped"),
+                    "the device that owned the chase still is"
+                );
+                assert_eq!(
+                    registry.take_notice("u", "acct", Some("owner")),
+                    None,
+                    "once"
+                );
+                (registry.keep_notice(&account, "owner"))("first".into());
+                (registry.keep_notice(&account, "owner"))("second".into());
+                assert_eq!(
+                    registry.take_notice("u", "acct", Some("owner")).as_deref(),
                     Some("second"),
                     "one per account"
                 );
-                (registry.keep_notice(&account))("stale".into());
+                (registry.keep_notice(&account, "owner"))("stale".into());
                 tokio::time::sleep(NOTICE_TTL).await;
-                assert_eq!(registry.take_notice("u", "acct"), None, "dropped after 24h");
+                assert_eq!(
+                    registry.take_notice("u", "acct", Some("owner")),
+                    None,
+                    "dropped after 24h"
+                );
             })
             .await;
     }

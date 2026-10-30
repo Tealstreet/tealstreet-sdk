@@ -592,7 +592,7 @@ async fn disposing_for_no_browser_stops_the_chases_and_says_why() {
             .await;
             assert!(
                 ops.iter().any(|d| d["op"] == "error"
-                    && d["data"][0] == "Chases and TWAPs stopped: no browser for 60s"),
+                    && d["data"][0] == "Chase on BTCUSDT stopped: no browser for 60s."),
                 "{ops:?}"
             );
             assert!(
@@ -633,7 +633,7 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
                     .await
                     .unwrap()
                     .unwrap(),
-                "Chases and TWAPs stopped: no browser for 60s"
+                "Chase on BTCUSDT stopped: no browser for 60s. Its order may still be open: check it."
             );
             while let Ok(text) = algos.out.try_recv() {
                 let message: Value = serde_json::from_str(&text).unwrap();

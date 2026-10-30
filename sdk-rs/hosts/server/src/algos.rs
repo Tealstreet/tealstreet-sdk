@@ -2,8 +2,10 @@
 //! `AccountPort` over `AccountHandle`, run on an engine thread's `LocalSet`.
 use safe_cex_algos::projection::{self, Snapshot};
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoStore, Change, CommandFuture, Registry, Scope};
+use safe_cex_chaser::ActiveChaser;
 use safe_cex_engine::engine::{Command, CommandId, Fill, VenueAction};
 use safe_cex_engine::error::{Outcome, VenueError};
+use safe_cex_engine::model::OrderStatus;
 use safe_cex_native::{AccountHandle, Outgoing};
 use serde_json::Value;
 use std::cell::{Cell, Ref, RefCell};
@@ -102,6 +104,8 @@ struct Port {
     signer: Option<Arc<safe_cex_remote_signer::SignerLink>>,
     /// A send proves nothing until a frame follows it on that socket.
     unheard: RefCell<VecDeque<Unheard>>,
+    /// Errors raised so far, to tell whether a shutdown raised any.
+    errors: Cell<u64>,
 }
 
 impl AccountPort for Port {
@@ -156,6 +160,7 @@ impl AccountPort for Port {
     }
     fn emit(&self, op: &str, data: String) {
         if op == "error" {
+            self.errors.set(self.errors.get() + 1);
             crate::state::Log::warn(&format!("algo error {}: {data}", self.name));
             let holding = (self.broadcast)(Some(algo_error(&self.name, &data)));
             self.keep_unheard(data, holding);
@@ -180,6 +185,55 @@ fn algo_msg(account_name: &str, op: &str, data: String) -> String {
 fn algo_error(account_name: &str, data: &str) -> String {
     let data: Value = serde_json::from_str(data).unwrap_or_else(|_| Value::String(data.to_owned()));
     crate::envelope::algo_error(account_name, data)
+}
+
+/// Which algos stopped, and with `may_rest` that their orders may still be open:
+/// with no browser, a cancel cannot be signed.
+fn stop_notice(
+    chasers: &[ActiveChaser],
+    twaps: &[Value],
+    store: &AlgoStore,
+    reason: &str,
+    may_rest: bool,
+) -> Option<String> {
+    let chases = chasers.iter().map(|chase| {
+        let resting = may_rest
+            && chase.current_order_ids.iter().any(|id| {
+                store.order(id).is_none_or(|order| {
+                    !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+                })
+            });
+        let check = if resting {
+            " Its order may still be open: check it."
+        } else {
+            ""
+        };
+        format!("Chase on {} stopped: {reason}.{check}", chase.symbol)
+    });
+    let twaps = twaps.iter().map(|twap| {
+        let market = twap["activeMarket"]["symbol"]
+            .as_str()
+            .unwrap_or("this account");
+        let check = if may_rest {
+            " Its orders may still be open: check them."
+        } else {
+            ""
+        };
+        format!("TWAP on {market} stopped: {reason}.{check}")
+    });
+    let lines: Vec<String> = chases.chain(twaps).collect();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// The terminateAll audit result: ok only when every cancel settled.
+fn shutdown_result(deadline_passed: bool, errors_raised: bool) -> Value {
+    if deadline_passed {
+        serde_json::json!({"message": "cancels unsettled: shutdown deadline passed; orders may rest"})
+    } else if errors_raised {
+        serde_json::json!({"message": "cancels failed; orders may rest"})
+    } else {
+        "ok".into()
+    }
 }
 
 impl Port {
@@ -504,6 +558,7 @@ pub async fn run(
         placed: placed.clone(),
         signer: link_signer.clone(),
         unheard: RefCell::default(),
+        errors: Cell::new(0),
     });
     let scope = Scope::new();
     let cx = AlgoCx::new(port.clone(), scope.clone());
@@ -652,14 +707,9 @@ pub async fn run(
         None => (false, "algo feed ended".to_owned(), None),
     };
     let reason = reason.as_str();
-    crate::audit::log(
-        &who,
-        reason,
-        &crate::audit::algo_op("terminateAll", "{}"),
-        "ok".into(),
-    );
-    let stop_notice = (!book.active_chasers().is_empty() || !twap.active_twaps(&name).is_empty())
-        .then(|| format!("Chases and TWAPs stopped: {reason}"));
+    let (chasers, twaps) = (book.active_chasers(), twap.active_twaps(&name));
+    let stop_notice = |may_rest| stop_notice(&chasers, &twaps, &port.store(), reason, may_rest);
+    let (stopped_notice, unsettled_notice) = (stop_notice(false), stop_notice(true));
     // Kept for the next init only when no browser is there to be sent them.
     let unheard_notices = || -> Vec<String> {
         port.take_unheard()
@@ -671,13 +721,13 @@ pub async fn run(
     match &stopped {
         Some(stopped) => {
             notices = unheard_notices();
-            notices.extend(stop_notice);
+            notices.extend(unsettled_notice.clone());
             if !notices.is_empty() {
                 stopped(notices.join("\n"));
             }
         }
         None => {
-            if let Some(notice) = stop_notice {
+            if let Some(notice) = stopped_notice {
                 (port.broadcast)(Some(crate::envelope::algo_error(
                     &name,
                     Value::String(notice),
@@ -686,14 +736,30 @@ pub async fn run(
         }
     }
     twap.terminate_all();
-    if tokio::time::timeout(SHUTDOWN_DEADLINE, book.shutdown(reason))
+    let errors_before = port.errors.get();
+    let deadline_passed = tokio::time::timeout(SHUTDOWN_DEADLINE, book.shutdown(reason))
         .await
-        .is_err()
-    {
+        .is_err();
+    if deadline_passed {
         crate::state::Log::warn(&format!(
             "{name}: chaser shutdown passed its deadline; cancels may be unsettled and orders may rest"
         ));
+        // A live browser was told they stopped; now it must check the orders.
+        if stopped.is_none()
+            && let Some(notice) = unsettled_notice
+        {
+            (port.broadcast)(Some(crate::envelope::algo_error(
+                &name,
+                Value::String(notice),
+            )));
+        }
     }
+    crate::audit::log(
+        &who,
+        reason,
+        &crate::audit::algo_op("terminateAll", "{}"),
+        shutdown_result(deadline_passed, port.errors.get() != errors_before),
+    );
     // Its cancels can fail too, with no browser to tell: a fuller notice replaces the first.
     if let Some(stopped) = &stopped {
         let raised = unheard_notices();
@@ -743,6 +809,23 @@ impl Drop for NukeReply {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_audit_reads_ok_only_when_every_cancel_settled() {
+        assert_eq!(shutdown_result(false, false), Value::from("ok"));
+        assert!(
+            shutdown_result(true, false)["message"]
+                .as_str()
+                .unwrap()
+                .contains("unsettled")
+        );
+        assert!(
+            shutdown_result(false, true)["message"]
+                .as_str()
+                .unwrap()
+                .contains("failed")
+        );
+    }
 
     /// What `exchangeAccountController` hands its listeners for an algo op.
     fn web_listener_args(frame: &str) -> (String, Vec<Value>) {
