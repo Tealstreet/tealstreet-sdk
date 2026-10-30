@@ -1621,6 +1621,21 @@ impl PhemexPerpetuals {
                 .retain(|(_, generation)| *generation > read.generation);
         }
     }
+    /// Frame-fed: a placement a cancel-all covered that the source's orders now
+    /// show is canceled here, before `frame_ingested` stops tracking it.
+    pub(crate) fn cancel_landed_from_frames(&mut self, cx: &mut Cx<'_, Pending>) {
+        let owed: Vec<_> = self
+            .account
+            .reconcile
+            .iter()
+            .filter(|(_, entry)| !entry.cancel.is_empty())
+            .map(|(symbol, _)| symbol.clone())
+            .collect();
+        for symbol in owed {
+            self.cancel_landed(cx, &symbol);
+        }
+        self.retire_late_subjects(cx, None);
+    }
     /// Cancels any stored order a cancel-all owes on `symbol`, however it arrived.
     fn cancel_landed(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         let Some(entry) = self

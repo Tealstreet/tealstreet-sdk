@@ -395,3 +395,98 @@ fn a_source_without_the_symbols_context_does_not_release_a_held_margin_type() {
         sent[0].url
     );
 }
+
+fn landed(filled: f64) -> Order {
+    Order {
+        id: "landed".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: "BTCUSDT".into(),
+        kind: OrderType::Limit,
+        side: OrderSide::Buy,
+        price: 69000.,
+        amount: 0.01,
+        filled,
+        remaining: 0.01 - filled,
+        reduce_only: false,
+        close: None,
+        client_order_id: Some("caller-1".into()),
+        time_in_force: None,
+        last_update: 0.,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    }
+}
+
+/// An unknown placement of `caller-1`, then a cancel-all on BTCUSDT, then a
+/// source frame showing that placement landed.
+fn late_landing(filled: f64) -> Vec<Action> {
+    let mut e = frame_fed();
+    let mut source = source("Hedged");
+    source.store_mut().set_orders(vec![]);
+    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![order("caller-1")],
+        },
+    );
+    let sent = requests(&a);
+    e.handle(
+        1002.,
+        Event::HttpFailed {
+            request: sent[0].id,
+            error: "connection reset",
+        },
+    );
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 2,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    assert!(
+        a.iter().any(
+            |a| matches!(a, Action::Notice(Notice::Event(e)) if e.message.contains("caller-1"))
+        ),
+        "cancel-all warns about the unknown placement: {a:?}"
+    );
+    source.store_mut().set_orders(vec![landed(filled)]);
+    e.apply_frame(1003., &source.snapshot_frame(1003.).to_vec(), true)
+        .unwrap();
+    e.drain_actions().collect()
+}
+
+#[test]
+fn a_placement_that_lands_after_a_frame_fed_cancel_all_is_canceled() {
+    let a = late_landing(0.);
+    let cancels: Vec<_> = requests(&a)
+        .into_iter()
+        .filter(|r| r.method == safe_cex_engine::Method::Delete)
+        .collect();
+    assert_eq!(cancels.len(), 1, "{:?}", requests(&a));
+    assert_eq!(param(&cancels[0], "orderID").as_deref(), Some("landed"));
+}
+
+#[test]
+fn a_late_placement_that_filled_is_canceled_and_reported() {
+    let a = late_landing(0.004);
+    assert!(
+        requests(&a)
+            .iter()
+            .any(|r| r.method == safe_cex_engine::Method::Delete),
+        "{:?}",
+        requests(&a)
+    );
+    assert!(
+        a.iter().any(|a| matches!(a, Action::Notice(Notice::Event(e)) if e.message.contains("landed after cancel-all"))),
+        "{a:?}"
+    );
+}
