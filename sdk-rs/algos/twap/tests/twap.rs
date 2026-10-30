@@ -912,3 +912,212 @@ fn an_account_runs_at_most_twenty_twaps() {
     assert!(logs(&effects).is_empty());
     assert_eq!(book.ids().count(), 20);
 }
+
+// Restore safety: twap:state replays one tab's sessionStorage, which can be
+// stale, duplicated into another tab, or re-sent on every account load.
+
+const SLICE_MS: f64 = 120_000.0; // duration 10 min / 5 slices
+
+fn diagnostics(effects: &[TwapEffect]) -> Vec<&str> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            TwapEffect::Diagnostic { message } => Some(message.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn restore_refuses_finished_unstarted_and_empty_twaps() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    let due = env.now + 5_000.0;
+    let mut empty = persisted("empty", "running", due);
+    empty["state"]["ordersSizes"] = json!([]);
+    let restore = json!([
+        persisted("done", "completed", due),
+        persisted("idle", "idle", due),
+        empty
+    ]);
+    let effects = book.handle("twap:state", &restore, &mut env, &view);
+    assert_eq!(
+        logs(&effects),
+        [
+            "TWAP BTCUSDT not restored: it already completed",
+            "TWAP BTCUSDT not restored: it never started",
+            "TWAP BTCUSDT not restored: no slices remain",
+        ]
+    );
+    assert_eq!(book.ids().count(), 0);
+    env.advance(SLICE_MS * 10.0);
+    assert!(placements(&book.wake(&mut env, &view)).is_empty());
+}
+
+#[test]
+fn restore_refuses_slices_beyond_the_remaining_size_or_count() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    let due = env.now + 5_000.0;
+    let mut inflated = persisted("inflated", "running", due);
+    inflated["state"]["ordersSizes"] = json!([0.6, 0.6]);
+    let mut overcounted = persisted("overcounted", "running", due);
+    overcounted["state"]["ordersExecuted"] = json!(4);
+    let mut negative = persisted("negative", "running", due);
+    negative["state"]["ordersSizes"] = json!([0.5, -0.5]);
+    let restore = json!([
+        inflated,
+        overcounted,
+        negative,
+        persisted("ok", "running", due)
+    ]);
+    let effects = book.handle("twap:state", &restore, &mut env, &view);
+    assert_eq!(
+        logs(&effects),
+        [
+            "TWAP BTCUSDT not restored: remaining slices exceed the TWAP size",
+            "TWAP BTCUSDT not restored: remaining and executed slices exceed ordersCount",
+            "TWAP BTCUSDT not restored: restored slice sizes must be finite and non-negative",
+        ]
+    );
+    assert_eq!(book.ids().collect::<Vec<_>>(), ["ok"]);
+    // Only what remained is placed: 0.5 + 0.5, never more than the size.
+    let mut placed = Vec::new();
+    for _ in 0..4 {
+        env.advance(SLICE_MS);
+        let effects = book.wake(&mut env, &view);
+        placed.extend(market_amounts(&effects));
+        settle_all(&mut book, &mut env, "ok", &effects, Ok(vec!["o".into()]));
+    }
+    assert_eq!(placed, [0.5, 0.5]);
+    assert!(book.get("ok").is_none(), "completed after its last slice");
+}
+
+#[test]
+fn restore_refuses_a_running_twap_whose_schedule_lapsed() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    let lapsed_at = env.now - SLICE_MS - safe_cex_algo_twap::SCHEDULE_GRACE_MS - 1.0;
+    let within = env.now - SLICE_MS;
+    let restore = json!([
+        persisted("lapsed", "running", lapsed_at),
+        persisted("fresh", "running", within),
+        // Paused TWAPs keep their place; they place nothing until resumed.
+        persisted("paused", "paused", lapsed_at)
+    ]);
+    let effects = book.handle("twap:state", &restore, &mut env, &view);
+    assert_eq!(
+        logs(&effects),
+        ["TWAP BTCUSDT not restored: its schedule lapsed, so no client was running it"]
+    );
+    assert_eq!(book.ids().collect::<Vec<_>>(), ["fresh", "paused"]);
+}
+
+#[test]
+fn a_late_restore_resumes_pacing_without_a_catch_up_burst() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    let restore = json!([persisted("late", "running", env.now - SLICE_MS)]);
+    book.handle("twap:state", &restore, &mut env, &view);
+    // One overdue slice now, then the normal interval, never a backlog.
+    let first = book.wake(&mut env, &view);
+    assert_eq!(market_amounts(&first), [0.5]);
+    settle_all(&mut book, &mut env, "late", &first, Ok(vec!["o1".into()]));
+    env.advance(SLICE_MS - 1.0);
+    assert!(placements(&book.wake(&mut env, &view)).is_empty());
+    env.advance(1.0);
+    assert_eq!(market_amounts(&book.wake(&mut env, &view)), [0.5]);
+}
+
+#[test]
+fn a_resumed_paused_twap_paces_from_now() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    let restore = json!([persisted("p", "paused", env.now - 3_600_000.0)]);
+    let effects = book.handle("twap:state", &restore, &mut env, &view);
+    assert!(placements(&effects).is_empty());
+    env.advance(SLICE_MS * 5.0);
+    assert!(
+        placements(&book.wake(&mut env, &view)).is_empty(),
+        "paused places nothing"
+    );
+    book.handle("twap:resume", &json!("p"), &mut env, &view);
+    let first = book.wake(&mut env, &view);
+    assert_eq!(market_amounts(&first), [0.5]);
+    settle_all(&mut book, &mut env, "p", &first, Ok(vec!["o1".into()]));
+    env.advance(SLICE_MS - 1.0);
+    assert!(placements(&book.wake(&mut env, &view)).is_empty());
+}
+
+#[test]
+fn two_holders_restoring_the_same_twap_run_it_once() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    let due = env.now + 5_000.0;
+    // Two tabs (or a re-sent load) carry the same rows; one carries it twice.
+    let rows = json!([
+        persisted("t", "running", due),
+        persisted("t", "running", due)
+    ]);
+    book.handle("twap:state", &rows, &mut env, &view);
+    book.handle("twap:state", &rows, &mut env, &view);
+    assert_eq!(book.ids().collect::<Vec<_>>(), ["t"]);
+    env.advance(5_000.0);
+    assert_eq!(placements(&book.wake(&mut env, &view)).len(), 1);
+}
+
+#[test]
+fn restore_never_revives_a_stopped_or_finished_twap() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    // A TWAP the server started and the user stopped from another tab.
+    let (stopped, first) = start(&mut book, &mut env, &view, json!({}));
+    let stale = book.serialize_state()[&stopped].clone();
+    book.handle("twap:stop", &json!(stopped), &mut env, &view);
+    settle_all(&mut book, &mut env, &stopped, &first, Ok(vec!["o".into()]));
+    // A TWAP that ran to its end.
+    let restore = json!([persisted("ran", "running", env.now + 1_000.0)]);
+    book.handle("twap:state", &restore, &mut env, &view);
+    for _ in 0..3 {
+        env.advance(SLICE_MS);
+        let effects = book.wake(&mut env, &view);
+        settle_all(&mut book, &mut env, "ran", &effects, Ok(vec!["o".into()]));
+    }
+    assert!(book.get("ran").is_none());
+
+    let resurrect = json!([
+        { "id": stopped, "options": stale["options"], "state": stale["state"] },
+        persisted("ran", "running", env.now + 1_000.0)
+    ]);
+    let effects = book.handle("twap:state", &resurrect, &mut env, &view);
+    assert_eq!(
+        diagnostics(&effects),
+        [
+            format!("TWAP {stopped} not restored: it already finished"),
+            "TWAP ran not restored: it already finished".to_owned(),
+        ]
+    );
+    assert_eq!(book.ids().count(), 0);
+    env.advance(SLICE_MS * 10.0);
+    assert!(placements(&book.wake(&mut env, &view)).is_empty());
+}
+
+#[test]
+fn restore_never_replaces_a_twap_finishing_its_last_placement() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new();
+    let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 1 }));
+    let stale = json!({ "id": id, "options": options(json!({ "ordersCount": 1 })), "state": {
+        "accountName": "test-account", "activeMarket": { "symbol": "BTCUSDT" }, "size": 1.0,
+        "ordersSizes": [1.0], "side": "buy", "status": "running", "ordersCount": 1,
+        "ordersExecuted": 0, "nextOrderAt": env.now,
+    }});
+    // Stopped while its only slice is in flight; the entry lingers until it settles.
+    book.handle("twap:stop", &json!(id), &mut env, &view);
+    let restored = book.handle("twap:state", &json!([stale]), &mut env, &view);
+    assert!(placements(&restored).is_empty());
+    settle_all(&mut book, &mut env, &id, &effects, Ok(vec!["o".into()]));
+    env.advance(SLICE_MS * 2.0);
+    assert!(placements(&book.wake(&mut env, &view)).is_empty());
+    assert!(book.get(&id).is_none());
+}
