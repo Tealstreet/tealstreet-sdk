@@ -55,6 +55,20 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "binanceoptions": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": false,
+    "incomeRange": false,
+    "closedPnl": false,
+    "optionChain": true,
+    "optionExpiries": true,
+    "accountGreeks": true
+  },
   "binancepm": {
     "startup": true,
     "trading": true,

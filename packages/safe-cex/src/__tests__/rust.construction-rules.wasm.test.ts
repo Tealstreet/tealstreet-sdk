@@ -12,7 +12,7 @@ import { afterEach, expect, it } from 'vitest';
 
 import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE, resolveAsterDEXApiVersion } from '../exchanges/asterdex/asterdex.types';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
-import { deriveBridgeConstruction } from '../exchanges/rust/construction';
+import { deriveBridgeConstruction, deriveRemoteSigningPolicy } from '../exchanges/rust/construction';
 import { RUST_VENUES } from '../exchanges/rust/rust.exchange';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
@@ -183,11 +183,26 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot',
     };
     setRustEngineTransport(() => transport);
     let signatures = 0;
+    // A venue with hosted remote signing but no payload signing refuses in the bridge, at construction.
+    const bridgeRefuses = deriveRemoteSigningPolicy(name)?.payloadSupported === false;
     for (const secret of name.startsWith('lighter') || name === 'hyperliquidspot' ? ['local'] : ['', 'local']) {
-      const exchange = new RustEngineExchange(name, {
+      const options = {
         key: 'key', secret, apiKeyIndex: '2', testnet: true,
         payloadSigner: async () => { signatures++; return { signature: 'unexpected' }; },
-      }, new DefaultStore());
+      };
+      if (bridgeRefuses) {
+        let failure: unknown;
+        try {
+          running.push(new RustEngineExchange(name, options, new DefaultStore()));
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toMatchObject({
+          message: 'This Rust account has no REST-only PayloadSigner lifecycle', kind: 'unsupported', outcome: 'notSent',
+        });
+        continue;
+      }
+      const exchange = new RustEngineExchange(name, options, new DefaultStore());
       running.push(exchange);
       const message = `Rust ${name} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
       await expect(exchange.start()).rejects.toMatchObject({ message, kind: 'unsupported', outcome: 'notSent' });
