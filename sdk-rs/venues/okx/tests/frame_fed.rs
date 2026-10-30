@@ -66,7 +66,7 @@ fn loaded() -> Engine<Okx> {
 }
 
 /// The store as ingested data-source frames leave it, then the frame hook. A
-/// delta frame keeps the seeded store (the section decoders arrive separately).
+/// delta keeps the seeded store; `frame_fed_e2e.rs` drives real source frames.
 fn ingested(engine: &mut Engine<Okx>, orders: Vec<Order>, hedged: bool) {
     let store = engine.store_mut();
     store.set_hedged(hedged);
