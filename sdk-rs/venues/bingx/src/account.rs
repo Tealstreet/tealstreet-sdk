@@ -48,6 +48,14 @@ pub enum Request {
     PositionMode {
         revision: u64,
     },
+    SymbolLeverage {
+        id: u64,
+        symbol: String,
+    },
+    SymbolMarginType {
+        id: u64,
+        symbol: String,
+    },
     Balance {
         revision: u64,
         first: Option<Balance>,
@@ -76,6 +84,15 @@ pub enum Request {
 
 type OrderMeta = (Order, String, String, bool, String);
 
+/// One background per-symbol settings refresh. Both legs share the issue-time
+/// stamp, so their merged row publishes once and never over a newer write.
+struct SymbolSettingsRead {
+    id: u64,
+    stamp: Observation,
+    leverage: Option<Option<(f64, f64)>>,
+    margin_type: Option<Option<MarginType>>,
+}
+
 struct KeyRetry {
     timer: Option<TimerId>,
     not_before: f64,
@@ -103,6 +120,8 @@ pub struct Account {
     orders_witness: Option<OrderSnapshotToken>,
     positions_revision: u64,
     settings_revision: u64,
+    symbol_settings: HashMap<String, SymbolSettingsRead>,
+    symbol_settings_sequence: u64,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
@@ -623,6 +642,124 @@ impl Account {
         );
     }
 
+    /// Data source: re-read the position mode, whose response re-reads the
+    /// positions that carry margin type and leverage, and a named symbol's own
+    /// leverage and margin type, which a flat symbol's positions never carry.
+    /// Never a write.
+    pub fn refresh_settings(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: &Credentials,
+        symbol: Option<&str>,
+    ) {
+        if cx.frame_fed() || !self.started {
+            return;
+        }
+        self.fetch_mode(cx, credentials);
+        if let Some(symbol) = symbol {
+            self.fetch_symbol_settings(cx, credentials, symbol);
+        }
+    }
+
+    /// A newer refresh of the same symbol supersedes an unanswered one.
+    fn fetch_symbol_settings(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: &Credentials,
+        symbol: &str,
+    ) {
+        let Some(native) = cx.store.market(symbol).map(|market| market.id.clone()) else {
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("BingX settings refresh skipped unknown market {symbol}"),
+            );
+            return;
+        };
+        self.symbol_settings_sequence = self.symbol_settings_sequence.wrapping_add(1);
+        let id = self.symbol_settings_sequence;
+        self.symbol_settings.insert(
+            symbol.to_owned(),
+            SymbolSettingsRead {
+                id,
+                stamp: cx.store.metadata_observation(),
+                leverage: None,
+                margin_type: None,
+            },
+        );
+        for (path, request) in [
+            (
+                crate::paths::LEVERAGE,
+                Request::SymbolLeverage {
+                    id,
+                    symbol: symbol.to_owned(),
+                },
+            ),
+            (
+                metadata::MARGIN_TYPE,
+                Request::SymbolMarginType {
+                    id,
+                    symbol: symbol.to_owned(),
+                },
+            ),
+        ] {
+            self.read_snapshot(
+                cx,
+                credentials,
+                path,
+                Params::new().str("symbol", &native),
+                request,
+                false,
+                None,
+            );
+        }
+    }
+
+    /// Records one leg's answer (None when it failed); once both legs answered,
+    /// merges them over the stored row so one leg's failure keeps the other field.
+    fn settle_symbol_settings(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        id: u64,
+        answer: impl FnOnce(&mut SymbolSettingsRead),
+    ) {
+        let Some(read) = self.symbol_settings.get_mut(symbol).filter(|r| r.id == id) else {
+            return;
+        };
+        answer(read);
+        let (Some(leverage), Some(margin_type)) = (read.leverage, read.margin_type) else {
+            return;
+        };
+        let Some(read) = self.symbol_settings.remove(symbol) else {
+            return;
+        };
+        if leverage.is_none() && margin_type.is_none() {
+            return;
+        }
+        let mut setting = cx.store.setting(symbol).unwrap_or_default();
+        if let Some((buy, sell)) = leverage {
+            setting.leverage = buy;
+            setting.buy_leverage = Some(buy);
+            setting.sell_leverage = Some(sell);
+        }
+        if let Some(margin_type) = margin_type {
+            setting.margin_type = Some(margin_type);
+        }
+        match ObservedSetting::new(setting) {
+            Ok(value) => {
+                if cx.store.observe_setting(symbol, &read.stamp, value) {
+                    self.settings_changed();
+                }
+            }
+            Err(_) => cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
+                format!("BingX settings refresh for {symbol} is incomplete"),
+            ),
+        }
+    }
+
     pub(crate) fn mode_known(&self) -> bool {
         self.mode_known
     }
@@ -1073,6 +1210,32 @@ impl Account {
                     self.fetch_mode(cx, credentials);
                 }
             }
+            Request::SymbolLeverage { id, symbol } => {
+                let rails = metadata::leverage_answer(response.body);
+                if rails.is_none() {
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        format!("BingX malformed leverage response for {symbol}"),
+                    );
+                }
+                self.settle_symbol_settings(cx, &symbol, id, |read| {
+                    read.leverage = Some(rails)
+                });
+            }
+            Request::SymbolMarginType { id, symbol } => {
+                let margin_type = metadata::margin_type_answer(response.body);
+                if margin_type.is_none() {
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        format!("BingX malformed margin type response for {symbol}"),
+                    );
+                }
+                self.settle_symbol_settings(cx, &symbol, id, |read| {
+                    read.margin_type = Some(margin_type)
+                });
+            }
             Request::Balance {
                 revision,
                 first,
@@ -1258,6 +1421,26 @@ impl Account {
         {
             return;
         }
+        let refresh = match &request {
+            Request::SymbolLeverage { id, symbol } => Some((*id, symbol, true)),
+            Request::SymbolMarginType { id, symbol } => Some((*id, symbol, false)),
+            _ => None,
+        };
+        if let Some((id, symbol, leverage)) = refresh {
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("BingX settings refresh for {symbol} failed: {error}"),
+            );
+            self.settle_symbol_settings(cx, symbol, id, |read| {
+                if leverage {
+                    read.leverage = Some(None);
+                } else {
+                    read.margin_type = Some(None);
+                }
+            });
+            return;
+        }
         // A failing private read surfaces as an Error at the retried-failure cadence.
         cx.retried_failure(
             "bingx.account:private",
@@ -1275,6 +1458,7 @@ impl Account {
                 self.keepalive = Some(cx.set_timer(RETRY_MS));
             }
             Request::PositionMode { .. } => self.mode_in_flight = false,
+            Request::SymbolLeverage { .. } | Request::SymbolMarginType { .. } => {}
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
             Request::OpenOrders { owner, .. } => {
@@ -1788,7 +1972,9 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
 pub(crate) fn auth_scope(request: &Request) -> Option<safe_cex_engine::AccountReadScope> {
     use safe_cex_engine::AccountReadScope::*;
     Some(match request {
-        Request::PositionMode { .. } => Settings,
+        Request::PositionMode { .. }
+        | Request::SymbolLeverage { .. }
+        | Request::SymbolMarginType { .. } => Settings,
         Request::Balance { .. } => Balance,
         Request::Positions { .. } => Positions,
         Request::OpenOrders { .. } => Orders,

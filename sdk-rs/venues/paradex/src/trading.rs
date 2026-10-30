@@ -960,6 +960,10 @@ impl Trading {
             }
             Kind::Leverage { symbol, leverage } => {
                 account.set_leverage(cx, symbol, *leverage);
+                // Frame-fed: keep this write's leverage until the source's frames agree.
+                cx.hold_setting(safe_cex_engine::setting_holds::SettingKey::Leverage(
+                    symbol.clone(),
+                ));
                 Ok(Vec::new())
             }
             _ => Ok(Vec::new()),

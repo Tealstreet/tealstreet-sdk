@@ -21,6 +21,7 @@ use safe_cex_engine::request_context::plan::Slot;
 use safe_cex_engine::request_context::{
     Context, Error, HttpOwnerRetirement, Plan, ReconciliationData,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -1670,6 +1671,7 @@ fn apply(trading: &mut Trading, cx: &mut Cx<'_, Pending>, call: &Call, canceled:
                     p.leverage = *leverage;
                 }
             });
+            cx.hold_setting(SettingKey::Leverage(symbol.clone()));
         }
         Call::Margin { symbol, isolated } => {
             cx.store.update_setting(symbol, |s| {
@@ -1679,8 +1681,12 @@ fn apply(trading: &mut Trading, cx: &mut Cx<'_, Pending>, call: &Call, canceled:
                     MarginType::Cross
                 })
             });
+            cx.hold_setting(SettingKey::MarginType(symbol.clone()));
         }
-        Call::Mode { hedged } => cx.store.set_hedged(*hedged),
+        Call::Mode { hedged } => {
+            cx.store.set_hedged(*hedged);
+            cx.hold_setting(SettingKey::Hedged);
+        }
     }
 }
 

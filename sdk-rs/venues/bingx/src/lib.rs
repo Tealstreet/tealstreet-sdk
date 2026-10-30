@@ -705,6 +705,11 @@ impl Venue for Bingx {
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
         self.trading.refresh_observed(cx.store);
     }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        if let Some(keys) = self.credentials.as_ref() {
+            self.account.refresh_settings(cx, keys, symbol);
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(error) = self.config_error {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);

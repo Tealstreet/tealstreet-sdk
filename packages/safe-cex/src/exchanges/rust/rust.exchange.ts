@@ -352,6 +352,10 @@ const LOADED_SECTIONS = [
   [LOADED_FLAG.BALANCE, 'balance'],
 ] as const;
 
+/** Frames whose clock samples estimate the data source's offset, and the change worth resetting it for. */
+const SOURCE_CLOCK_SAMPLES = 20;
+const SOURCE_CLOCK_STEP_MS = 25;
+
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
 const SOCKET_HEALTH_SYNC_MS = 5_000;
@@ -469,6 +473,9 @@ export class RustEngineExchange extends BaseExchange {
   private frameFed = false;
   private frameFedEngine = false;
   private sourceBaseline = false;
+  /** Recent (source write time - arrival) samples, and the offset last handed to the engine. */
+  private sourceClockSamples: number[] = [];
+  private sourceClockOffset?: number;
   get isFrameFed(): boolean {
     return this.frameFed;
   }
@@ -941,6 +948,7 @@ export class RustEngineExchange extends BaseExchange {
     const host = this.host;
     if (!this.frameFed || !host || this.isDisposed || this.engineFailure) return;
     if (!snapshot && !this.sourceBaseline) return;
+    this.noteSourceClock(host, frame);
     try {
       host.applyFrame(frame, snapshot);
     } catch (error) {
@@ -952,6 +960,47 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.sourceBaseline = true;
     host.flush();
+  };
+
+  /**
+   * A frame-fed engine confirmed a settings write: its data source re-reads the
+   * settings, so the hold the engine keeps over the source's frames can clear.
+   */
+  private refreshSourceSettings = (symbol: unknown) => {
+    void this.refreshAccountSettings(typeof symbol === 'string' ? symbol : undefined).catch(
+      (error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.log(`${this.name} could not ask its data source to re-read settings: ${reason}`, LogSeverity.Warning);
+      },
+    );
+  };
+
+  /** Data source: re-read the settings a frame-fed engine changed, for one symbol or the account. */
+  refreshAccountSettings = async (symbol?: string): Promise<void> => {
+    if (this.routesToWorker) {
+      await this.callWorker('refreshAccountSettings', ...(symbol !== undefined ? [symbol] : []));
+      return;
+    }
+    await this.command({ op: 'refreshSettings', ...(symbol !== undefined ? { symbol } : {}) }, { report: false });
+  };
+
+  /**
+   * The source's clock minus this engine's, from each frame's flush time (header
+   * bytes 8-15): transit only delays a frame, so the largest recent sample is the
+   * closest estimate. A LOCAL worker shares this page's clock and measures ~0;
+   * a hosted server measures its real offset.
+   */
+  private noteSourceClock = (host: EngineHost, frame: ArrayBuffer) => {
+    if (frame.byteLength < 16) return;
+    const written = new DataView(frame).getFloat64(8, true);
+    if (!Number.isFinite(written) || written <= 0) return;
+    const samples = this.sourceClockSamples;
+    samples.push(written - this.engineNow());
+    if (samples.length > SOURCE_CLOCK_SAMPLES) samples.shift();
+    const offset = Math.round(Math.max(...samples));
+    if (this.sourceClockOffset !== undefined && Math.abs(offset - this.sourceClockOffset) < SOURCE_CLOCK_STEP_MS) return;
+    this.sourceClockOffset = offset;
+    host.setSourceClockOffset(offset);
   };
 
   /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere. */
@@ -1676,6 +1725,7 @@ export class RustEngineExchange extends BaseExchange {
 
   private receiveEvent = (event: EngineEvent) => {
     if (event.code === 'auth.rejected') this.noteAuthFailure();
+    if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
     this.emitter.emit('engine-event', event);
     if (event.level === 'error')
       this.emitAndLogError(event.message, undefined, {

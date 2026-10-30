@@ -2,6 +2,7 @@
 mod custody;
 mod schedule;
 pub(crate) use custody::PACING;
+use safe_cex_engine::setting_holds::SettingKey;
 
 use crate::{
     Builder, Hyperliquid, Pending,
@@ -848,7 +849,8 @@ impl Hyperliquid {
                 }
                 let market = cx.store.market(&symbol).ok_or("Market not found")?;
                 // Frame-fed defaults come from the source's settings, never a local seed.
-                if cx.frame_fed() && self.has_setting(market) && cx.store.setting(&symbol).is_none() {
+                if cx.frame_fed() && self.has_setting(market) && cx.store.setting(&symbol).is_none()
+                {
                     return Err(
                         "Hyperliquid settings have not arrived from the data source yet".into(),
                     );
@@ -1161,6 +1163,9 @@ impl Hyperliquid {
                         p.margin_type = Some(margin);
                     }
                 });
+                // Frame-fed: hold the confirmed rails until the source re-reads them.
+                cx.hold_setting(SettingKey::Leverage(symbol.clone()));
+                cx.hold_setting(SettingKey::MarginType(symbol.clone()));
             }
         }
         if let Some(job) = self.trading.active.as_mut()

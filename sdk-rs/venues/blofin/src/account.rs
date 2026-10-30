@@ -583,7 +583,7 @@ impl Blofin {
         self.read_setting(cx, StartupRead::Margin);
         self.read_setting(cx, StartupRead::Mode);
     }
-    fn read_setting(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
+    pub(crate) fn read_setting(&mut self, cx: &mut Cx<'_, Pending>, read: StartupRead) {
         let revision = self.account.settings_revision;
         let (path, request) = match read {
             StartupRead::Margin => ("/api/v1/account/margin-mode", Request::Margin { revision }),

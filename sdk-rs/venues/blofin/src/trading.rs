@@ -11,6 +11,7 @@ use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     HttpOwnerRetirement, Plan, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{CommandWait, ErrorKind, Outcome, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1597,6 +1598,32 @@ impl Blofin {
         }
         self.next_job(cx);
     }
+    /// Frame-fed: keep a confirmed margin mode over stale source frames until
+    /// the source reports it (`safe_cex_engine::setting_holds`).
+    pub(crate) fn hold_margin_over_source(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        ours: Option<MarginType>,
+    ) {
+        if !cx.setting_held(&margin_hold()) {
+            return;
+        }
+        if self.account.margin == ours {
+            cx.release_setting(&margin_hold());
+        } else {
+            self.account.margin = ours;
+        }
+    }
+    /// Frame-fed: a held margin mode outlasts the source's per-symbol settings.
+    pub(crate) fn reapply_held_margin(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(mode) = self
+            .account
+            .margin
+            .filter(|_| cx.setting_held(&margin_hold()))
+        {
+            margin_on_flat_symbols(cx, mode);
+        }
+    }
     /// Commit effects apply only after a successful terminal.
     fn commit(&mut self, cx: &mut Cx<'_, Pending>, commit: &Commit) {
         match commit {
@@ -1614,34 +1641,21 @@ impl Blofin {
                         p.leverage = *leverage;
                     }
                 });
+                cx.hold_setting(SettingKey::Leverage(symbol.clone()));
             }
             Commit::Margin(mode) => {
                 self.account.settings_revision += 1;
                 self.account.positions_revision += 1;
                 self.account.margin = Some(*mode);
-                let symbols = cx
-                    .store
-                    .markets()
-                    .iter()
-                    .map(|m| m.symbol.clone())
-                    .collect::<Vec<_>>();
-                for symbol in symbols {
-                    if !cx
-                        .store
-                        .positions()
-                        .iter()
-                        .any(|p| p.symbol == symbol && p.contracts > 0.0)
-                    {
-                        cx.store
-                            .update_setting(&symbol, |s| s.margin_type = Some(*mode));
-                    }
-                }
+                margin_on_flat_symbols(cx, *mode);
+                cx.hold_setting(margin_hold());
                 self.refresh_account(cx);
             }
             Commit::Mode(hedged) => {
                 self.account.settings_revision += 1;
                 self.account.positions_revision += 1;
                 cx.store.set_hedged(*hedged);
+                cx.hold_setting(SettingKey::Hedged);
             }
         }
     }
@@ -2156,6 +2170,32 @@ pub(crate) fn trade_reconciliation(
     request: &Request,
 ) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
     ReconciliationData::new(request.step.path.to_owned())
+}
+
+/// The account margin mode lives in VENUE_STATE, so it holds under a venue key.
+fn margin_hold() -> SettingKey {
+    SettingKey::Venue("margin", String::new())
+}
+
+/// A margin-mode change applies to every symbol without an open position.
+fn margin_on_flat_symbols(cx: &mut Cx<'_, Pending>, mode: MarginType) {
+    let symbols = cx
+        .store
+        .markets()
+        .iter()
+        .map(|m| m.symbol.clone())
+        .collect::<Vec<_>>();
+    for symbol in symbols {
+        if !cx
+            .store
+            .positions()
+            .iter()
+            .any(|p| p.symbol == symbol && p.contracts > 0.0)
+        {
+            cx.store
+                .update_setting(&symbol, |s| s.margin_type = Some(mode));
+        }
+    }
 }
 
 #[cfg(test)]

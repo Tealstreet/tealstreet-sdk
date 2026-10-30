@@ -76,7 +76,18 @@ fn terminal(actions: &[Action], command: u32) -> Option<Notice> {
 /// A data source's snapshot: resting order 42 on ETH and Lighter's VENUE_STATE
 /// (version 1: account 718895, tier plus).
 fn source_frame() -> Vec<u8> {
+    source_frame_with(None)
+}
+
+/// The same snapshot with ETH at `leverage` (cross).
+fn source_frame_with(leverage: Option<f64>) -> Vec<u8> {
     let mut source = safe_cex_engine::Store::default();
+    if let Some(leverage) = leverage {
+        source.update_setting("ETH", |s| {
+            s.leverage = leverage;
+            s.margin_type = Some(MarginType::Cross);
+        });
+    }
     source.set_orders(vec![Order {
         id: "42".into(),
         parent_id: None,
@@ -297,4 +308,115 @@ fn a_local_source_exports_its_resolved_account_index() {
         }),
     );
     seed_nonce(&mut e, &mut timers);
+}
+
+fn tx_info(r: &HttpRequest) -> serde_json::Value {
+    let body = r.body.as_deref().unwrap();
+    let raw = body
+        .split('&')
+        .find_map(|p| p.strip_prefix("tx_info="))
+        .unwrap();
+    let mut out = Vec::new();
+    let mut bytes = raw.bytes();
+    while let Some(b) = bytes.next() {
+        if b == b'%' {
+            let pair = [bytes.next().unwrap(), bytes.next().unwrap()];
+            out.push(u8::from_str_radix(std::str::from_utf8(&pair).unwrap(), 16).unwrap());
+        } else {
+            out.push(if b == b'+' { b' ' } else { b });
+        }
+    }
+    serde_json::from_slice(&out).unwrap()
+}
+
+fn ingest(e: &mut Engine<Lighter>, timers: &mut Timers, frame: &[u8]) {
+    e.apply_frame(NOW, frame, true).unwrap();
+    assert!(
+        http(&run(e, timers, NOW)).is_empty(),
+        "ingest reads nothing"
+    );
+}
+
+/// Fed at leverage 5, then this engine's own SetLeverage 10 confirmed.
+fn fed_then_leverage_ten() -> (Engine<Lighter>, Timers) {
+    let (mut e, mut timers) = page_engine();
+    ingest(&mut e, &mut timers, &source_frame_with(Some(5.0)));
+    e.handle(
+        NOW,
+        Event::Command(Command::SetLeverage {
+            command: 30,
+            symbol: "ETH".into(),
+            leverage: 10.0,
+            side: None,
+        }),
+    );
+    let sent = http(&seed_nonce(&mut e, &mut timers));
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let done = ack(&mut e, &mut timers, &sent[0]);
+    assert!(
+        matches!(terminal(&done, 30), Some(Notice::CommandDone { .. })),
+        "{done:?}"
+    );
+    assert_eq!(e.store().setting("ETH").unwrap().leverage, 10.0);
+    (e, timers)
+}
+
+#[test]
+fn a_confirmed_leverage_outlasts_a_stale_source_frame() {
+    let (mut e, mut timers) = fed_then_leverage_ten();
+    ingest(&mut e, &mut timers, &source_frame_with(Some(5.0)));
+    assert_eq!(e.store().setting("ETH").unwrap().leverage, 10.0);
+    // A margin write composes the held leverage: one transaction at 10x.
+    e.handle(
+        NOW,
+        Event::Command(Command::SetMarginType {
+            command: 31,
+            symbol: "ETH".into(),
+            isolated: true,
+        }),
+    );
+    let sent = http(&run(&mut e, &mut timers, NOW));
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(sent[0].url.ends_with("/api/v1/sendTx"));
+    assert_eq!(tx_info(&sent[0])["InitialMarginFraction"], 1000);
+    assert_eq!(tx_info(&sent[0])["MarginMode"], 1);
+}
+
+#[test]
+fn a_source_frame_with_the_new_leverage_releases_the_hold() {
+    let (mut e, mut timers) = fed_then_leverage_ten();
+    ingest(&mut e, &mut timers, &source_frame_with(Some(10.0)));
+    // Released: the source's next value applies again.
+    ingest(&mut e, &mut timers, &source_frame_with(Some(5.0)));
+    assert_eq!(e.store().setting("ETH").unwrap().leverage, 5.0);
+}
+
+#[test]
+fn a_source_refresh_settings_re_reads_the_account_snapshot_and_writes_nothing() {
+    let (mut source, _) = ready();
+    source.drain_actions().count();
+    source.handle(
+        NOW,
+        Event::Command(Command::Venue {
+            command: 50,
+            action: safe_cex_engine::VenueAction::RefreshSettings {
+                symbol: Some("ETH".into()),
+            },
+        }),
+    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut source, NOW);
+    assert!(
+        matches!(terminal(&out, 50), Some(Notice::CommandDone { .. })),
+        "{out:?}"
+    );
+    let sent = http(&out);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].method, safe_cex_engine::Method::Get);
+    assert!(
+        sent[0]
+            .url
+            .ends_with("/api/v1/account?by=index&value=718895"),
+        "{}",
+        sent[0].url
+    );
 }

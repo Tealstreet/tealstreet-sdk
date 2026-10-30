@@ -8,6 +8,7 @@ mod public;
 mod sbe;
 pub mod sign;
 mod trading;
+mod venue_state;
 mod wire;
 
 use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue, book::Book};
@@ -137,6 +138,25 @@ impl Venue for Paradex {
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);
+    }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        // Paradex reads every market's margin config at once.
+        self.account.refresh_settings(cx);
+    }
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.account.export_venue_state())
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        if let Err(error) = self.account.apply_venue_state(state) {
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                safe_cex_engine::log::code::STREAM_MALFORMED,
+                error,
+            );
+        }
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.prune_native(cx.store);
     }
     // reconcile_uncertain starts an order read dispatched after the write.
     fn fence_uncertain_placements(&self) -> bool {
