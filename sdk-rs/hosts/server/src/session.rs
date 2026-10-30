@@ -1400,17 +1400,99 @@ mod tests {
                 );
                 assert!(errors.iter().all(Value::is_string), "{errors:?}");
 
-                // A second join has nothing left to say.
-                account
-                    .algos
-                    .as_ref()
-                    .unwrap()
-                    .send(crate::algos::AlgoInput::Joined)
-                    .unwrap();
+                // Once a frame shows this socket got them, a re-join has nothing to say.
+                session.heard();
+                let joined = || {
+                    account
+                        .algos
+                        .as_ref()
+                        .unwrap()
+                        .send(crate::algos::AlgoInput::Joined)
+                        .unwrap();
+                };
+                joined();
                 settle().await;
                 while let Ok(frame) = sent.try_recv() {
                     assert!(!frame.contains(r#""op":"error""#), "{frame}");
                 }
+                // An error answered on this socket stays answered on a same-socket re-join.
+                refuse(&account);
+                settle().await;
+                session.heard();
+                while sent.try_recv().is_ok() {}
+                joined();
+                settle().await;
+                while let Ok(frame) = sent.try_recv() {
+                    assert!(!frame.contains(r#""op":"error""#), "stale repeat: {frame}");
+                }
+            })
+            .await;
+    }
+
+    /// A flapping link: the replay goes into a socket that dies too, before any
+    /// frame from it, so the next resume repeats it.
+    #[tokio::test]
+    async fn a_replay_into_a_socket_that_also_dies_is_repeated_on_the_next_resume() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account = crate::accounts::tests::held_account_running_algos(
+                    link.clone(),
+                    init.fingerprint(),
+                );
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                account
+                    .algos
+                    .as_ref()
+                    .unwrap()
+                    .send(crate::algos::AlgoInput::Op {
+                        op: "chaser:start".into(),
+                        data: "not a chase".into(),
+                        origin: "test".into(),
+                    })
+                    .unwrap();
+                settle().await;
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                let resume = |from: &str| Identity {
+                    user: Some("u".into()),
+                    token: Some(("t".into(), u64::MAX)),
+                    resume_from: Some(from.into()),
+                    resumable: true,
+                };
+                let errors = |sent: &mut tokio::sync::mpsc::Receiver<String>| {
+                    let mut count = 0;
+                    while let Ok(frame) = sent.try_recv() {
+                        count += usize::from(frame.contains(r#""op":"error""#));
+                    }
+                    count
+                };
+                let (out, mut sent, _) = Out::channel(64);
+                let mut first = Session::new(
+                    registry.clone(),
+                    Arc::new(Metrics::default()),
+                    resume("r1"),
+                    out,
+                );
+                first.open().await;
+                settle().await;
+                assert_eq!(errors(&mut sent), 1, "replayed to the first resume");
+                let dead = first.resume_id.clone();
+                first.close();
+                let (out, mut sent, _) = Out::channel(64);
+                let mut second =
+                    Session::new(registry, Arc::new(Metrics::default()), resume(&dead), out);
+                second.open().await;
+                settle().await;
+                assert_eq!(errors(&mut sent), 1, "no frame came back: replayed again");
             })
             .await;
     }
