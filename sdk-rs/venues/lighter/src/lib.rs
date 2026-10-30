@@ -819,6 +819,12 @@ impl Venue for Lighter {
         }
         self.apply_limits_tier_code(state.tier);
     }
+    /// Data source: re-read the account snapshot, which carries each market's
+    /// leverage and margin type. Never a write; the tier is the source's own
+    /// write (a frame-fed engine refuses it), so it needs no refresh.
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        self.refresh_account(cx);
+    }
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
