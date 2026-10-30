@@ -12,7 +12,8 @@ ban() {
   shift 2
   local hits
   hits=$(grep -rnE --include='*.rs' --include='Cargo.toml' "$pattern" "$@" 2>/dev/null \
-    | sed -E "s/$allowed//g" | grep -E "$pattern" || true)
+    | sed -E "s/$allowed//g" | sed -E "${candle_wire:+/^hosts\/candle-server\//s/$candle_wire//g}" \
+    | grep -E "$pattern" || true)
   if [[ -n $hits ]]; then
     echo "BANNED: $description"
     echo "$hits"
@@ -24,8 +25,13 @@ crates=$(ls -d engine/ crypto/ hosts/*/ registry/ venues/*/)
 
 # JavaScript value, number, string and runtime emulation.
 ban 'JS-shaped value types' '\bJs[A-Z][A-Za-z]*\b|\bjs_runtime\b|\bJsValue\b' $crates
+# The candle server serves the legacy JS wire byte-for-byte to live clients, so
+# its UTF-16 length helper and ryu-js number writer alone are exempt there.
+candle_wire='utf16_len|text\.encode_utf16\(\)\.count\(\)'
 ban 'UTF-16 string emulation' 'encode_utf16|from_utf16|[Uu]tf16' $crates
+candle_wire=':ryu-js\.workspace = true$|ryu_js::Buffer::new\(\)\.format_finite'
 ban 'JS number formatting emulation' 'ryu[-_]js|js_number_string|to_precision|ECMAScript' $crates
+candle_wire=
 ban 'emulated promises, microtasks or timers' '\bmicrotask|\bMicrotask|\bPromise[A-Z]?\b|setTimeout|setInterval' $crates
 ban 'Axios or BaseExchange facades' '\bAxios|\bBaseExchange\b|\bbase_exchange\b' $crates
 ban 'JSON map-order or arbitrary-precision emulation' 'preserve_order|arbitrary_precision|IndexMap' $crates
