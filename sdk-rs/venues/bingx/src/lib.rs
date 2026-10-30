@@ -690,6 +690,21 @@ impl Venue for Bingx {
     }
 
     type Pending = Pending;
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.trading.export_venue_state(self.account.mode_known()))
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        if !self.trading.apply_venue_state(state, cx.store) {
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                "Unreadable BingX venue state from the data source",
+            );
+        }
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.trading.refresh_observed(cx.store);
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(error) = self.config_error {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
@@ -973,6 +988,10 @@ impl Venue for Bingx {
                 }
                 if refresh {
                     self.remap_market_slots(cx, &previous);
+                    return;
+                }
+                // Frame-fed: tickers and the account arrive as frames.
+                if cx.frame_fed() {
                     return;
                 }
                 if let Some(c) = &self.credentials {

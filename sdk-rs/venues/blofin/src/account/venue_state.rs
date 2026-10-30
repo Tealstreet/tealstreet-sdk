@@ -10,6 +10,7 @@
 //! value is NaN.
 use super::{Account, Source};
 use safe_cex_engine::model::MarginType;
+use std::collections::{HashMap, VecDeque};
 
 const VERSION: u8 = 1;
 const MODE_LOADED: u8 = 1;
@@ -98,9 +99,14 @@ impl Account {
                 put_f64(&mut out, value);
             }
         }
-        out.extend_from_slice(&(self.fill_order.len() as u32).to_le_bytes());
-        for id in &self.fill_order {
-            let (qty, value) = self.fills.get(id).copied().unwrap_or((f64::NAN, None));
+        // Only ids with recorded progress: an evicted id has nothing to verify.
+        let fills: Vec<_> = self
+            .fill_order
+            .iter()
+            .filter_map(|id| Some((id, *self.fills.get(id)?)))
+            .collect();
+        out.extend_from_slice(&(fills.len() as u32).to_le_bytes());
+        for (id, (qty, value)) in fills {
             put_str(&mut out, id);
             put_f64(&mut out, qty);
             put_f64(&mut out, value.unwrap_or(f64::NAN));
@@ -117,8 +123,13 @@ impl Account {
         self.mode_loaded = mode_loaded;
         self.margin = margin;
         self.sources = sources;
-        self.fill_order = fills.iter().map(|(id, _)| id.clone()).collect();
-        self.fills = fills.into_iter().collect();
+        self.fills = HashMap::new();
+        self.fill_order = VecDeque::new();
+        for (id, progress) in fills {
+            if self.fills.insert(id.clone(), progress).is_none() {
+                self.fill_order.push_back(id);
+            }
+        }
         true
     }
 }
@@ -126,7 +137,7 @@ impl Account {
 type Decoded = (
     bool,
     Option<MarginType>,
-    std::collections::HashMap<String, Source>,
+    HashMap<String, Source>,
     Vec<(String, (f64, Option<f64>))>,
 );
 
@@ -141,7 +152,7 @@ fn decode(bytes: &[u8]) -> Option<Decoded> {
     } else {
         MarginType::Cross
     });
-    let mut sources = std::collections::HashMap::new();
+    let mut sources = HashMap::new();
     for _ in 0..reader.u32()? {
         let id = reader.string()?;
         let mut text = || reader.string();
