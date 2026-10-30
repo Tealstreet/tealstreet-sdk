@@ -525,6 +525,32 @@ impl Session {
                     "callMethod:done",
                     json!({"requestId": request_id, "success": true, "result": result}),
                 )),
+                Plan::Read(read) => {
+                    let answer = account
+                        .handle
+                        .read(move |store| methods::read_store(&read, store))
+                        .await
+                        .unwrap_or_else(|| {
+                            Err(methods::Refused {
+                                name: "Error",
+                                message: "account is closed".into(),
+                            })
+                        });
+                    match answer {
+                        Ok(result) => self.send(envelope::msg(
+                            name,
+                            "callMethod:done",
+                            json!({"requestId": request_id, "success": true, "result": result}),
+                        )),
+                        Err(refused) => self.reply_failure(
+                            name,
+                            &request_id,
+                            refused.name,
+                            &refused.message,
+                            None,
+                        ),
+                    }
+                }
                 Plan::Command { mut command, reply } => {
                     let joined = self.joined.get_mut(name).unwrap();
                     let Some(id) = joined.next_command.checked_add(1) else {
@@ -669,6 +695,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             let result = match pending.reply {
                 methods::Reply::Result => result,
                 methods::Reply::Unit => Value::Null,
+                methods::Reply::OrderIds => methods::worker_order_ids(result),
                 methods::Reply::Placed { client_order_id } => {
                     json!({"orderIds": result, "clientOrderId": client_order_id})
                 }
