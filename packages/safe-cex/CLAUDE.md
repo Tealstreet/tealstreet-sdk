@@ -372,13 +372,17 @@ The web builds a second `RustEngineExchange` on the main thread; the worker's
 instance owns the engine. An instance with a `callMethod` listener (the host's
 worker bridge) forwards the `WORKER_FORWARDED_METHODS` in `exchanges/base.ts`
 (trading, nuke, client-ID lookup, public trades, candles, history axes; plus
-`fetchHistoricalPositions` and the native account reads `fetchOrders`,
-`fetchPositions`, `fetchBalance` and `fetchPositionMode` by name, since those
-wait on native state and would otherwise start a local engine; the worker
-answers them as `WORKER_OPTIONAL_METHODS`, and a mirror's `syncAccountState` is
-a no-op because worker frames keep its store current) whole through
-`callMethodInWorker`, so preflight, placement scopes and nuke retries run
-against the worker's state and report there once. This holds even if a
+the native account reads `fetchOrders`, `fetchPositions`, `fetchBalance` and
+`fetchPositionMode` by name, since those wait on native state and would
+otherwise start a local engine; the worker answers them as
+`WORKER_OPTIONAL_METHODS`, and a mirror's `syncAccountState` is a no-op because
+worker frames keep its store current) whole through `callMethodInWorker`, so
+preflight, placement scopes and nuke retries run against the worker's state and
+report there once. `fetchHistoricalPositions` is NOT forwarded: the mirror
+loads the worker's capability record and folds the journal itself with the TS
+mappers, from forwarded raw reads (fills, orders, income, and the raw
+`fetchClosedPositions` rows), because the hosted Rust server has no TS mappers
+and serves only those reads. This holds even if a
 main-thread read (`fetchMarkets` during warm start) started a local engine; the
 worker never has that listener. Without a bridge, an instance runs locally.
 `updateOrder` crosses as `{ orderIds, clientOrderId }` because array properties

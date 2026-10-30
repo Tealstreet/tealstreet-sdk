@@ -772,6 +772,14 @@ pub fn socket_health(summary: SocketSummary) -> Value {
         "privateInitialized": summary.private_initialized,
         "publicLastMessage": summary.public_last_message,
         "privateLastMessage": summary.private_last_message,
+        "publicCloseCode": summary.public.close_code,
+        "publicCloseCountTotal": summary.public.close_count_total,
+        "publicCloseStreak": summary.public.close_streak,
+        "publicReconnectPaused": false,
+        "privateCloseCode": summary.private.close_code,
+        "privateCloseCountTotal": summary.private.close_count_total,
+        "privateCloseStreak": summary.private.close_streak,
+        "privateReconnectPaused": false,
     })
 }
 
@@ -1108,11 +1116,20 @@ mod tests {
             private_initialized: true,
             public_last_message: Some(5),
             private_last_message: Some(7),
+            public: safe_cex_native::SocketDiagnostics {
+                close_code: Some(1006),
+                close_count_total: 3,
+                close_streak: 1,
+            },
+            private: safe_cex_native::SocketDiagnostics::default(),
         });
         assert_eq!(
             health,
             json!({"publicHealthy":true,"privateHealthy":true,"publicInitialized":true,
-                "privateInitialized":true,"publicLastMessage":5,"privateLastMessage":7})
+                "privateInitialized":true,"publicLastMessage":5,"privateLastMessage":7,
+                "publicCloseCode":1006,"publicCloseCountTotal":3,"publicCloseStreak":1,
+                "publicReconnectPaused":false,"privateCloseCode":null,"privateCloseCountTotal":0,
+                "privateCloseStreak":0,"privateReconnectPaused":false})
         );
     }
 

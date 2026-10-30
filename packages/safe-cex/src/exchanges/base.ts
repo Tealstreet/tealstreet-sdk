@@ -338,6 +338,8 @@ export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
  */
 export const WORKER_OPTIONAL_METHODS = [
   'fetchHistoricalPositions',
+  // Rust raw closed-position rows, which a main-thread mirror maps into its journal.
+  'fetchClosedPositions',
   'changeAccountTier',
   'fetchAccountTier',
   'fetchEngineCapabilities',
@@ -361,6 +363,7 @@ const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'fetchIncomeHistory',
   'fetchIncomeHistoryRange',
   'fetchHistoricalPositions',
+  'fetchClosedPositions',
   'fetchAccountTier',
   'fetchEngineCapabilities',
   'getAccount',

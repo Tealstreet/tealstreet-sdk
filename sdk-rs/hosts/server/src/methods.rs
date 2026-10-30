@@ -606,6 +606,20 @@ pub fn translate(
             }
             one(command("fetchIncome", out, false))
         }
+        // The raw rows a mirror's journal maps; it folds the journal itself.
+        "fetchClosedPositions" if capabilities.closed_positions => {
+            let options = arg(args, 0);
+            let mut out = Map::new();
+            if let Some(symbol) = optional(options, "symbol") {
+                out.insert("symbol".into(), text(&symbol, "symbol")?.into());
+            }
+            for field in ["from", "to"] {
+                if let Some(bound) = optional(options, field) {
+                    out.insert(field.into(), finite(&bound, field)?.into());
+                }
+            }
+            one(command("fetchClosedPositions", out, false))
+        }
         _ => Err(refused(
             "UnsupportedMethod",
             format!("{method} is not supported on the Rust exchange server"),
@@ -1164,5 +1178,57 @@ mod tests {
             false,
         );
         assert_eq!(filtered.unwrap_err().name, "Error");
+    }
+
+    #[test]
+    fn journal_reads_reach_the_engine_and_capabilities_answer_directly() {
+        let journal = Capabilities {
+            closed_positions: true,
+            income_history: true,
+            ..caps()
+        };
+        assert_eq!(
+            single(
+                "fetchClosedPositions",
+                json!([{"symbol":"BTCUSDT","from":1000,"to":2000}]),
+                &journal
+            ),
+            json!({"op":"fetchClosedPositions","symbol":"BTCUSDT","from":1000.0,"to":2000.0})
+        );
+        assert_eq!(
+            single("fetchIncomeHistoryRange", json!([1000, 2000]), &journal),
+            json!({"op":"fetchIncome","from":1000.0,"to":2000.0})
+        );
+        let income = single(
+            "fetchIncomeHistory",
+            json!([{"startTime":1,"endTime":2,"incomeType":"FUNDING","limit":10}]),
+            &journal,
+        );
+        assert_eq!(
+            income,
+            json!({"op":"fetchIncome","from":1.0,"to":2.0,"incomeType":"FUNDING","limit":10})
+        );
+        assert_eq!(income["limit"].to_string(), "10");
+        let refused = translate(
+            "fetchClosedPositions",
+            &[json!({"from":"soon"})],
+            &journal,
+            &[],
+            false,
+        );
+        assert_eq!(refused.unwrap_err().name, "TypeError");
+        let closed = Capabilities {
+            closed_positions: false,
+            ..caps()
+        };
+        let unsupported = translate("fetchClosedPositions", &[json!({})], &closed, &[], false);
+        assert_eq!(unsupported.unwrap_err().name, "UnsupportedMethod");
+        let plans = translate("fetchEngineCapabilities", &[], &journal, &[], false).unwrap();
+        let [Plan::Reply(record)] = plans.as_slice() else {
+            panic!("a direct reply")
+        };
+        let record = record.clone();
+        assert_eq!(record, serde_json::to_value(journal).unwrap());
+        assert_eq!(record["closedPositions"], true);
     }
 }
