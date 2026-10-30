@@ -1,7 +1,7 @@
 //! Server-side algos (chaser, TWAP, exec) for one private account: an
 //! `AccountPort` over `AccountHandle`, run on an engine thread's `LocalSet`.
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoStore, Change, CommandFuture, Registry, Scope};
-use safe_cex_engine::engine::{Command, CommandId, Fill};
+use safe_cex_engine::engine::{Command, CommandId, Fill, VenueAction};
 use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_engine::model::{
     Balance, CoinBalance, InstrumentClassification, Loaded, Market, Order, Position, Ticker,
@@ -351,6 +351,90 @@ impl Feed {
 
 /// Runs one account's algos until `Dispose` (or the inbox closes), then
 /// settles chases and disposes the engine. Call inside a `LocalSet`.
+/// As `rust.exchange.ts` `syncBalanceInfo` (every 2 s) and the Lighter tier sync
+/// (every 15 s): `balance.info` comes from reads frames do not carry.
+const BALANCE_INFO_EVERY: Duration = Duration::from_secs(2);
+const TIER_EVERY_TICKS: u32 = 15 / 2;
+/// Resent unchanged this often, so a socket that took the account over since gets it.
+const BALANCE_INFO_RESEND_TICKS: u32 = 15;
+
+/// One read through the account port: its JSON result, or nothing on failure
+/// (the engine reports read failures itself; the last payload stays).
+async fn venue_read(port: &Port, action: VenueAction) -> Option<Value> {
+    let command = Command::Venue {
+        command: port.next_command_id(),
+        action,
+    };
+    let text = port.command(command).await.ok()?;
+    serde_json::from_str::<Value>(&text)
+        .ok()
+        .filter(|value| !value.is_null())
+}
+
+/// `balance.info` as the browser engine composes it: the venue payload, with
+/// Lighter's tier at `lighterAccountLimits.user_tier_name`.
+pub fn balance_info(payload: Option<&Value>, tier: Option<&Value>) -> Option<Value> {
+    let mut info = payload.cloned();
+    if let Some(tier) = tier {
+        let mut object = match info {
+            Some(Value::Object(object)) => object,
+            _ => serde_json::Map::new(),
+        };
+        object.insert(
+            "lighterAccountLimits".into(),
+            serde_json::json!({ "user_tier_name": tier }),
+        );
+        info = Some(Value::Object(object));
+    }
+    info
+}
+
+/// Engine cache reads (Bybit's last wallet poll, Lighter's last limits read): no
+/// venue request, so no egress weight. Still skipped while no live socket holds
+/// the account, since nobody would receive the result.
+async fn sync_balance_info(
+    port: Rc<Port>,
+    name: String,
+    held: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    payload: bool,
+    tier: bool,
+) {
+    let mut every = tokio::time::interval(BALANCE_INFO_EVERY);
+    let (mut info_payload, mut tier_name) = (None, None);
+    let mut sent = None::<Value>;
+    let mut tick = 0u32;
+    loop {
+        every.tick().await;
+        tick = tick.wrapping_add(1);
+        // As TS: only once the account has started; and only for a live holder.
+        if !port.store().loaded.is_some_and(|loaded| loaded.balance)
+            || !held.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            // A socket that comes back gets the current info at once.
+            sent = None;
+            continue;
+        }
+        if payload && let Some(read) = venue_read(&port, VenueAction::FetchBalanceInfo).await {
+            info_payload = Some(read);
+        }
+        if tier
+            && tick % TIER_EVERY_TICKS == 1
+            && let Some(read) = venue_read(&port, VenueAction::FetchAccountTier).await
+        {
+            tier_name = Some(read);
+        }
+        let Some(info) = balance_info(info_payload.as_ref(), tier_name.as_ref()) else {
+            continue;
+        };
+        if sent.as_ref() != Some(&info) || tick.is_multiple_of(BALANCE_INFO_RESEND_TICKS) {
+            let rows = serde_json::json!({ "balance": { "info": info } });
+            (port.emit)(crate::envelope::msg(&name, "store", rows));
+            sent = Some(info);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     handle: AccountHandle,
     client: u64,
@@ -358,6 +442,7 @@ pub async fn run(
     emit: Emit,
     link_signer: Option<std::sync::Arc<safe_cex_remote_signer::SignerLink>>,
     placed: crate::accounts::PlacedSymbols,
+    held: std::sync::Arc<std::sync::atomic::AtomicBool>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     let Ok(mut feed) = Feed::join(handle.clone(), client).await else {
@@ -426,6 +511,16 @@ pub async fn run(
             *published = text;
         }
     };
+    let capabilities = handle.capabilities();
+    if capabilities.balance_info || capabilities.account_tier {
+        cx.spawn(sync_balance_info(
+            port.clone(),
+            name.clone(),
+            held,
+            capabilities.balance_info,
+            capabilities.account_tier,
+        ));
+    }
     loop {
         tokio::select! {
             batch = feed.next() => {
@@ -733,6 +828,23 @@ mod tests {
             "unknown, never claimed healthy"
         );
         assert_eq!(store.markets.len(), 2);
+    }
+
+    #[test]
+    fn balance_info_is_the_payload_with_the_lighter_tier_merged_in() {
+        let wallet = serde_json::json!({"accountType": "UNIFIED", "coin": []});
+        assert_eq!(balance_info(Some(&wallet), None), Some(wallet.clone()));
+        let assets = serde_json::json!([{"asset": "USDT"}]);
+        assert_eq!(balance_info(Some(&assets), None), Some(assets));
+        assert_eq!(
+            balance_info(None, Some(&Value::from("premium"))),
+            Some(serde_json::json!({"lighterAccountLimits": {"user_tier_name": "premium"}}))
+        );
+        assert_eq!(
+            balance_info(Some(&wallet), Some(&Value::from("plus"))).unwrap()["accountType"],
+            "UNIFIED"
+        );
+        assert_eq!(balance_info(None, None), None);
     }
 
     #[test]

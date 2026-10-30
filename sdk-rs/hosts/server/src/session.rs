@@ -70,8 +70,6 @@ struct Joined {
     /// Book and candle subscribe commands this socket holds, by command text and count.
     /// The engine keeps one demand per client, so a re-snapshot replays each key once.
     subscriptions: HashMap<String, u32>,
-    /// This client's in-flight store reads and after-load waits (`MAX_WAITING_READS`).
-    reads: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 pub struct Session {
@@ -289,7 +287,6 @@ impl Session {
                         old: Vec::new(),
                         next_command: 0,
                         subscriptions: HashMap::new(),
-                        reads: Arc::default(),
                     },
                 );
             }
@@ -605,16 +602,32 @@ impl Session {
                 }
                 // Off the socket loop: a read may wait for the account's first load.
                 Plan::Read(read) => {
-                    let Some(slot) = methods::ReadSlot::take(&self.joined[name].reads) else {
-                        let message = methods::too_many_reads();
-                        self.reply_failure(name, &request_id, "Error", &message, Some("notSent"));
-                        continue;
+                    let from_frame = read.from_frame();
+                    // Each frame read is a whole engine snapshot; each other read may wait for load.
+                    let limit = if from_frame {
+                        &account.frame_reads
+                    } else {
+                        &account.reads
+                    };
+                    let permit = {
+                        match limit.clone().try_acquire_owned() {
+                            Ok(permit) => permit,
+                            Err(_) => {
+                                self.reply_failure(
+                                    name,
+                                    &request_id,
+                                    "Error",
+                                    "too many account reads in flight; retry shortly",
+                                    None,
+                                );
+                                continue;
+                            }
+                        }
                     };
                     let (handle, out) = (account.handle.clone(), self.out.clone());
                     let (name, request_id) = (name.to_owned(), request_id.clone());
                     tokio::spawn(async move {
-                        let _slot = slot;
-                        let from_frame = read.from_frame();
+                        let _permit = permit;
                         let mut answer =
                             methods::read_when_loaded(&handle, read, methods::READ_WAIT).await;
                         if from_frame && answer.is_ok() {
@@ -665,13 +678,21 @@ impl Session {
         reply: methods::Reply,
         after_load: bool,
     ) {
-        let slot = if after_load {
-            let Some(slot) = methods::ReadSlot::take(&self.joined[name].reads) else {
-                let message = methods::too_many_reads();
-                self.reply_failure(name, request_id, "Error", &message, Some("notSent"));
-                return;
-            };
-            Some(slot)
+        // An after-load wait polls the account like a waiting read, under the same cap.
+        let permit = if after_load {
+            match self.joined[name].account.reads.clone().try_acquire_owned() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    self.reply_failure(
+                        name,
+                        request_id,
+                        "Error",
+                        "too many account reads in flight; retry shortly",
+                        None,
+                    );
+                    return;
+                }
+            }
         } else {
             None
         };
@@ -729,7 +750,7 @@ impl Session {
             return send();
         };
         tokio::spawn(async move {
-            let _slot = slot;
+            let _permit = permit;
             match methods::until_account_loaded(&handle, methods::READ_WAIT).await {
                 Ok(()) => send(),
                 Err(refused) => {

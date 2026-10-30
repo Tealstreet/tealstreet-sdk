@@ -83,36 +83,6 @@ impl StoreRead {
     }
 }
 
-/// Store reads and after-load waits a client may have in flight at once. Each
-/// one holds a slot of the account's command channel while it polls, so past
-/// this cap they are refused rather than left to crowd out the client's orders.
-pub const MAX_WAITING_READS: usize = 16;
-
-/// One of a client's `MAX_WAITING_READS` slots, released when dropped.
-pub struct ReadSlot(std::sync::Arc<std::sync::atomic::AtomicUsize>);
-
-impl ReadSlot {
-    pub fn take(count: &std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Option<Self> {
-        use std::sync::atomic::Ordering;
-        count
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < MAX_WAITING_READS).then_some(n + 1)
-            })
-            .ok()
-            .map(|_| Self(count.clone()))
-    }
-}
-
-impl Drop for ReadSlot {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
-    }
-}
-
-pub fn too_many_reads() -> String {
-    format!("{MAX_WAITING_READS} reads are already waiting on this account; retry once they answer")
-}
-
 /// How long a store read waits for its sections, as `untilNativeData` in rust.exchange.ts.
 pub const READ_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 const READ_POLL: std::time::Duration = std::time::Duration::from_millis(50);
@@ -1311,24 +1281,6 @@ mod tests {
             let refusal = translate("scheduleCancel", &args, capabilities, &[], false).unwrap_err();
             assert!(refusal.message.contains(message), "{}", refusal.message);
         }
-    }
-
-    #[test]
-    fn a_client_holds_at_most_sixteen_waiting_reads_and_a_settled_one_frees_its_slot() {
-        let count = std::sync::Arc::default();
-        let slots: Vec<_> = (0..MAX_WAITING_READS)
-            .map(|_| ReadSlot::take(&count).expect("within the cap"))
-            .collect();
-        assert!(
-            ReadSlot::take(&count).is_none(),
-            "the 17th waiting read is refused"
-        );
-        drop(slots.into_iter().next());
-        assert!(
-            ReadSlot::take(&count).is_some(),
-            "an answered read frees its slot"
-        );
-        assert!(too_many_reads().starts_with("16 reads are already waiting"));
     }
 
     #[test]
