@@ -655,6 +655,11 @@ pub async fn candles(app: &App, query: &Query) -> Reply {
                 .unwrap_or_else(|| "exchange reported an error".into()),
         );
     }
+    // Some venues answer [] for a market missing from an unloaded catalogue, so
+    // this empty proves nothing and must not become a cacheable 200.
+    if candles.is_empty() && !resident.markets_loaded() {
+        return metadata_unavailable();
+    }
     let normalized = clean_candles(
         candles
             .into_iter()

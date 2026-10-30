@@ -44,7 +44,7 @@ amplify venue market loads. Per-IP rate limiting belongs to the edge.
 The first request for a venue waits for its catalogue, at most 30 s, and stops
 waiting at the first failed or empty read while the engine retries behind it.
 Until the catalogue loads, `symbols` and `markets` answer 503 and candles skip
-the symbol precheck.
+the symbol precheck, answering 503 rather than an empty 200.
 
 Known differences from the TS server:
 - `/api/market-data/markets` sorts ties with an approximation of ICU

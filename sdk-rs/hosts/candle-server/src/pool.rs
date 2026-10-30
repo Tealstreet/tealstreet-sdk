@@ -51,6 +51,7 @@ struct Shared {
     markets_loaded: Cell<bool>,
     error_seq: Cell<u64>,
     startup_read_failed: Cell<bool>,
+    startup_over: Cell<bool>,
     startup_signal: Notify,
     last_error: RefCell<Option<String>>,
     pending: RefCell<HashMap<u32, oneshot::Sender<Result<String, String>>>>,
@@ -72,33 +73,7 @@ impl Shared {
         match notice {
             Notice::CommandDone { command, result } => self.settle(command, Ok(result)),
             Notice::CommandFailed { command, error } => self.settle(command, Err(error.message)),
-            // A failed or empty catalogue read keeps retrying inside the engine at
-            // Warn, so no error ends the startup wait; requests must not sit it out.
-            Notice::Event(event)
-                if matches!(event.code, code::REQUEST_FAILED | code::SNAPSHOT_DISCARDED) =>
-            {
-                eprintln!(
-                    "[candle-server] exchange startup read failed code={} message={}",
-                    event.code, event.message
-                );
-                self.startup_read_failed.set(true);
-                self.startup_signal.notify_one();
-            }
-            // Carries the cause (such as an empty catalogue) once retries add up.
-            Notice::Event(event) if event.code == code::STARTUP_DEGRADED => {
-                eprintln!("[candle-server] {}", event.message);
-            }
-            // An error-level event is the venue's failure signal, like the TS
-            // emitter 'error' channel the pool latches.
-            Notice::Event(event) if event.level == Level::Error => {
-                self.error_seq.set(self.error_seq.get() + 1);
-                eprintln!(
-                    "[candle-server] exchange reported an error code={} message={}",
-                    event.code, event.message
-                );
-                *self.last_error.borrow_mut() = Some(event.message);
-                self.startup_signal.notify_one();
-            }
+            Notice::Event(event) => self.on_event(event),
             Notice::StartupFailed { error } => {
                 self.error_seq.set(self.error_seq.get() + 1);
                 eprintln!("[candle-server] exchange startup failed: {}", error.message);
@@ -106,6 +81,35 @@ impl Shared {
                 self.startup_signal.notify_one();
             }
             _ => {}
+        }
+    }
+
+    fn on_event(&self, event: safe_cex_engine::LogEvent) {
+        // A failed or empty catalogue read keeps retrying inside the engine at
+        // Warn, so no error ends the startup wait; requests must not sit it out.
+        if matches!(event.code, code::REQUEST_FAILED | code::SNAPSHOT_DISCARDED)
+            && !self.startup_over.get()
+        {
+            eprintln!(
+                "[candle-server] exchange startup read failed code={} message={}",
+                event.code, event.message
+            );
+            self.startup_read_failed.set(true);
+            self.startup_signal.notify_one();
+        }
+        // An error-level event is the venue's failure signal, like the TS
+        // emitter 'error' channel the pool latches.
+        if event.level == Level::Error {
+            self.error_seq.set(self.error_seq.get() + 1);
+            eprintln!(
+                "[candle-server] exchange reported an error code={} message={}",
+                event.code, event.message
+            );
+            *self.last_error.borrow_mut() = Some(event.message);
+            self.startup_signal.notify_one();
+        } else if event.code == code::STARTUP_DEGRADED {
+            // Carries the cause (such as an empty catalogue) once retries add up.
+            eprintln!("[candle-server] {}", event.message);
         }
     }
 
@@ -358,9 +362,10 @@ impl Pool {
         let name = venue.to_owned();
         tokio::task::spawn_local(async move {
             let _ = tokio::time::timeout(STARTUP_WAIT, watcher.startup_settled(&mut ready)).await;
+            watcher.startup_over.set(true);
             if !watcher.markets_loaded.get() {
                 eprintln!(
-                    "[candle-server] could not load markets, symbol precheck disabled for this venue exchange={name}"
+                    "[candle-server] markets not loaded, engine still retrying; symbol precheck off until they load exchange={name}"
                 );
             }
             starting.set(starting.get() - 1);
@@ -414,30 +419,57 @@ impl Pool {
 mod tests {
     use super::*;
 
-    fn warning(code: &'static str) -> Notice {
-        Notice::Event(safe_cex_engine::log::LogEvent {
-            level: Level::Warn,
+    fn event(level: Level, code: &'static str) -> Notice {
+        Notice::Event(safe_cex_engine::LogEvent {
+            level,
             code,
             message: "read failed".into(),
             fields: Vec::new(),
         })
     }
 
-    async fn settles_on(notice: Notice) -> bool {
+    /// Whether a waiter already parked in its select is woken by `notice`.
+    async fn wakes_the_wait(notice: Notice) -> bool {
         let shared = Rc::new(Shared::default());
         let (_sender, mut frames) = watch::channel(0_u64);
         let waiter = shared.clone();
-        let wait = tokio::time::timeout(Duration::from_secs(5), async move {
+        let wait = tokio::task::spawn_local(async move {
             waiter.startup_settled(&mut frames).await;
         });
+        tokio::task::yield_now().await;
+        assert!(!wait.is_finished(), "the wait must be parked first");
         shared.on_notice(notice);
-        wait.await.is_ok()
+        tokio::time::timeout(Duration::from_secs(5), wait)
+            .await
+            .is_ok()
     }
 
     #[tokio::test]
-    async fn a_failed_catalogue_read_ends_the_startup_wait_with_no_frame() {
-        assert!(settles_on(warning(code::REQUEST_FAILED)).await);
-        assert!(settles_on(warning(code::SNAPSHOT_DISCARDED)).await);
+    async fn a_failed_catalogue_read_wakes_the_parked_startup_wait() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                assert!(wakes_the_wait(event(Level::Warn, code::REQUEST_FAILED)).await);
+                assert!(wakes_the_wait(event(Level::Warn, code::SNAPSHOT_DISCARDED)).await);
+            })
+            .await;
+    }
+
+    #[test]
+    fn an_error_level_read_failure_still_latches_the_error() {
+        let shared = Shared::default();
+        shared.on_notice(event(Level::Error, code::REQUEST_FAILED));
+        assert_eq!(shared.error_seq.get(), 1);
+        assert_eq!(shared.last_error.borrow().as_deref(), Some("read failed"));
+        assert!(shared.startup_read_failed.get());
+    }
+
+    #[test]
+    fn a_read_failure_after_startup_is_not_a_startup_failure() {
+        let shared = Shared::default();
+        shared.startup_over.set(true);
+        shared.on_notice(event(Level::Warn, code::REQUEST_FAILED));
+        assert!(!shared.startup_read_failed.get());
+        assert_eq!(shared.error_seq.get(), 0);
     }
 
     #[test]
