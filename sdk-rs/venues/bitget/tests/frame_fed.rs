@@ -390,3 +390,27 @@ fn refresh_settings_re_reads_the_config_and_writes_nothing() {
         uta.requests[0].url
     );
 }
+
+#[test]
+fn a_frame_without_status_or_settings_does_not_release_the_hedge_hold() {
+    let mut source = Harness::classic();
+    let mut h = page_switched_to_hedge(&mut source);
+    // A ticker- or orders-only delta carries no STATUS or SETTINGS: no evidence either way.
+    let quiet = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.0).finish();
+    h.engine.apply_frame(h.now, &quiet, false).unwrap();
+    h.collect();
+    assert!(h.engine.store().hedged());
+    // The source's next, stale one-way frame still cannot undo the write.
+    apply_source(&mut h, &mut source);
+    assert!(h.engine.store().hedged());
+    place(&mut h);
+    let sent = std::mem::take(&mut h.requests);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(
+        sent[0]
+            .body
+            .as_deref()
+            .unwrap()
+            .contains(r#""tradeSide":"open""#)
+    );
+}
