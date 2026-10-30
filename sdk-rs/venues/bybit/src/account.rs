@@ -380,71 +380,6 @@ fn raw_wallet_account(body: &str) -> Option<String> {
     Some(envelope.result?.list.first()?.get().to_owned())
 }
 
-/// A JSON object whose values stay verbatim; key order is not significant.
-pub(crate) type RawObject = std::collections::BTreeMap<String, Box<serde_json::value::RawValue>>;
-type RawArray = Vec<Box<serde_json::value::RawValue>>;
-
-fn raw_object(raw: &serde_json::value::RawValue) -> Option<RawObject> {
-    serde_json::from_str(raw.get()).ok()
-}
-
-/// The first account of a `wallet` topic frame, verbatim; `None` unless it is an object.
-fn raw_topic_wallet(text: &str) -> Option<RawObject> {
-    #[derive(serde::Deserialize)]
-    struct Frame {
-        data: RawArray,
-    }
-    raw_object(serde_json::from_str::<Frame>(text).ok()?.data.first()?)
-}
-
-/// A coin row's `coin` identity: missing, `null` and a non-object row all compare equal.
-fn coin_identity(row: &serde_json::value::RawValue) -> Option<String> {
-    raw_object(row)?
-        .get("coin")
-        .map(|coin| coin.get().to_owned())
-        .filter(|coin| coin != "null")
-}
-
-/// `balance.info` kept current from wallet pushes between REST reads: the push's
-/// account fields replace the stored ones, and its coins merge into theirs by
-/// `coin`, since a push may list only the coins (and fields) that changed.
-pub(crate) fn merge_wallet_info(stored: Option<String>, pushed: &RawObject) -> Option<String> {
-    let mut info: RawObject = stored
-        .as_deref()
-        .and_then(|stored| serde_json::from_str(stored).ok())
-        .unwrap_or_default();
-    for (field, value) in pushed {
-        if field != "coin" {
-            info.insert(field.clone(), value.clone());
-        }
-    }
-    if let Some(pushed_coins) = pushed
-        .get("coin")
-        .and_then(|coins| serde_json::from_str::<RawArray>(coins.get()).ok())
-    {
-        let mut coins: RawArray = info
-            .remove("coin")
-            .and_then(|coins| serde_json::from_str(coins.get()).ok())
-            .unwrap_or_default();
-        for coin in pushed_coins {
-            let identity = coin_identity(&coin);
-            match coins.iter_mut().find(|known| coin_identity(known) == identity) {
-                Some(known) => match (raw_object(known), raw_object(&coin)) {
-                    // Field by field: a push may omit fields REST carries (`marginCollateral`).
-                    (Some(mut merged), Some(fields)) => {
-                        merged.extend(fields);
-                        *known = serde_json::value::to_raw_value(&merged).ok()?;
-                    }
-                    _ => *known = coin,
-                },
-                None => coins.push(coin),
-            }
-        }
-        info.insert("coin".into(), serde_json::value::to_raw_value(&coins).ok()?);
-    }
-    serde_json::to_string(&info).ok()
-}
-
 fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
     row.account_type.as_deref() == Some("UNIFIED")
         && (float_of(&row.total_equity).is_finite()
@@ -2131,9 +2066,6 @@ impl BybitLinear {
                         return;
                     }
                     self.account.wallet = Some(Wallet::from_wire(account));
-                    if let Some(raw) = raw_topic_wallet(text) {
-                        self.balance_info = merge_wallet_info(self.balance_info.take(), &raw);
-                    }
                     // A push may list only changed coins; merge, keeping explicit zeros.
                     let mut coins = self.account.coins.take().unwrap_or_default();
                     for coin in coin_balances(account) {
@@ -3310,38 +3242,5 @@ mod tests {
             );
             assert!(mapped.notional > 0.0);
         }
-    }
-
-    #[test]
-    fn wallet_pushes_merge_into_the_stored_account_by_field_and_coin() {
-        let push = |text: &str| raw_topic_wallet(&format!(r#"{{"topic":"wallet","data":[{text}]}}"#));
-        let stored = r#"{"accountType":"UNIFIED","totalEquity":"1","coin":[{"coin":"USDT","equity":"1","marginCollateral":true},{"coin":"BTC","equity":"0.1"},{"equity":"9"}]}"#;
-        let pushed = push(
-            r#"{"totalEquity":"2","totalPerpUPL":"0.5","coin":[{"coin":"USDT","equity":"2"},{"coin":"ETH","equity":"3"},"replaced"]}"#,
-        )
-        .unwrap();
-        // Keys are sorted; rows a push does not name stay verbatim.
-        assert_eq!(
-            merge_wallet_info(Some(stored.into()), &pushed).as_deref(),
-            Some(concat!(
-                r#"{"accountType":"UNIFIED","coin":[{"coin":"USDT","equity":"2","marginCollateral":true},"#,
-                r#"{"coin":"BTC","equity":"0.1"},"replaced",{"coin":"ETH","equity":"3"}],"#,
-                r#""totalEquity":"2","totalPerpUPL":"0.5"}"#
-            ))
-        );
-        // Raw values stay verbatim, including number spelling.
-        let exact = push(r#"{"totalEquity":1.50}"#).unwrap();
-        assert_eq!(merge_wallet_info(None, &exact).as_deref(), Some(r#"{"totalEquity":1.50}"#));
-        // No coin array leaves stored coins alone; a non-object push is ignored by the caller.
-        let fields = push(r#"{"totalEquity":"3","coin":"none"}"#).unwrap();
-        assert_eq!(
-            merge_wallet_info(Some(stored.into()), &fields).as_deref(),
-            Some(concat!(
-                r#"{"accountType":"UNIFIED","coin":[{"coin":"USDT","equity":"1","marginCollateral":true},"#,
-                r#"{"coin":"BTC","equity":"0.1"},{"equity":"9"}],"totalEquity":"3"}"#
-            ))
-        );
-        assert!(push("[1]").is_none());
-        assert!(raw_topic_wallet("not json").is_none());
     }
 }
