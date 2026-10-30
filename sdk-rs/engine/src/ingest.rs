@@ -584,12 +584,26 @@ fn settings(
     Ok(())
 }
 
+/// `STATUS`: the source's loaded bits, hedged flag and latency. This engine's
+/// own instrument read owns its markets bit; the source's account bits rule.
 fn status(
-    _: &mut Store,
+    store: &mut Store,
     _: &IngestState,
     _: &Frame<'_>,
-    _: &Section<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    use crate::wire::{loaded_flag, status_flag};
+    let mut cursor = Cursor::new(section.payload);
+    let (loaded, flags, latency) = (cursor.u32()?, cursor.u32()?, cursor.f64()?);
+    let has = |flag: u32| loaded & flag != 0;
+    store.set_loaded(|bits| {
+        bits.balance = has(loaded_flag::BALANCE);
+        bits.orders = has(loaded_flag::ORDERS);
+        bits.tickers = has(loaded_flag::TICKERS);
+        bits.positions = has(loaded_flag::POSITIONS);
+    });
+    store.set_hedged(flags & status_flag::HEDGED != 0);
+    store.set_latency(latency);
     Ok(())
 }
 
@@ -859,6 +873,45 @@ pub(crate) mod tests {
         assert!(applied.orders && applied.positions);
         assert_eq!(store.orders(), source.orders());
         assert_eq!(store.positions(), source.positions());
+    }
+
+    #[test]
+    fn status_carries_account_loaded_bits_hedged_and_latency_but_not_markets() {
+        let mut source = Store::default();
+        source.set_hedged(true);
+        source.set_latency(42.5);
+        source.set_loaded(|bits| {
+            bits.balance = true;
+            bits.positions = true;
+            bits.markets = true;
+        });
+        let mut store = Store::default();
+        ingest(&mut source, &mut IngestState::default(), &mut store, true);
+        assert!(store.hedged());
+        assert_eq!(store.latency(), 42.5);
+        let loaded = store.loaded();
+        assert!(loaded.balance && loaded.positions);
+        assert!(!loaded.orders && !loaded.tickers && !loaded.markets);
+
+        // A later status turns bits off again, and a truncated one refuses.
+        source.set_hedged(false);
+        source.set_loaded(|bits| bits.balance = false);
+        ingest(&mut source, &mut IngestState::default(), &mut store, false);
+        assert!(!store.hedged() && !store.loaded().balance && store.loaded().positions);
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin(section::STATUS);
+        writer.u32(1);
+        writer.end();
+        let frame = writer.finish();
+        assert!(
+            apply(
+                &mut store,
+                &mut IngestState::default(),
+                &parse(&frame).unwrap(),
+                false
+            )
+            .is_err()
+        );
     }
 
     #[test]
