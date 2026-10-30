@@ -30,10 +30,11 @@ type Fake = {
   commands: Array<{ op: string; [field: string]: unknown }>;
   applied: Array<{ snapshot: boolean; bytes: number }>;
   started: number;
+  constructed: number;
 };
 
 const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
-  const fake: Fake = { commands: [], applied: [], started: 0 };
+  const fake: Fake = { commands: [], applied: [], started: 0, constructed: 0 };
   const idle = () => '[]';
   const frame = () =>
     new Uint8Array(
@@ -75,6 +76,7 @@ const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
     takeFrame: frame,
   };
   const construct = function () {
+    fake.constructed += 1;
     return engine;
   };
   setWasmEngineLoader(async () => ({
@@ -173,9 +175,22 @@ describe('frame-fed main-thread mirror', () => {
     exchange = mirror.exchange;
     await expect(exchange.frameFedReady).resolves.toBe(false);
     expect(fake.started).toBe(0);
+    expect(fake.constructed).toBe(0);
     await exchange.placeOrder(order);
     expect(mirror.calls).toContain('placeOrder');
     expect(fake.commands.map((command) => command.op)).not.toContain('placeOrders');
+  });
+
+  it('builds nothing on main with a wasm that has no frameFedSupported export', async () => {
+    const fake = fakeEngine();
+    const construct = vi.fn();
+    setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
+    const mirror = mirrorWith(fake);
+    exchange = mirror.exchange;
+    await expect(exchange.frameFedReady).resolves.toBe(false);
+    expect(construct).not.toHaveBeenCalled();
+    await exchange.placeOrder(order);
+    expect(mirror.calls).toContain('placeOrder');
   });
 
   it('never starts an engine that does not report itself frame-fed', async () => {
