@@ -13,7 +13,7 @@ pub struct Who {
     pub venue: String,
 }
 
-const ENGINE_OPS: [&str; 10] = [
+const ENGINE_OPS: [&str; 11] = [
     "placeOrders",
     "cancelOrders",
     "cancelOrdersWithSymbols",
@@ -24,10 +24,12 @@ const ENGINE_OPS: [&str; 10] = [
     "setMarginType",
     "setPositionMode",
     "setStpMode",
+    // Hyperliquid's dead-man switch: it cancels every open order at `time`.
+    "scheduleCancel",
 ];
 
 /// Hosted `callMethod`s that change orders or account settings.
-pub const ORDER_METHODS: [&str; 11] = [
+pub const ORDER_METHODS: [&str; 15] = [
     "placeOrders",
     "placeOrder",
     "placeOrderWithClientOrderId",
@@ -39,9 +41,13 @@ pub const ORDER_METHODS: [&str; 11] = [
     "setAllLeverage",
     "changeMarginType",
     "changePositionMode",
+    "scheduleCancel",
+    "nuke",
+    "nukePositions",
+    "nukeOrders",
 ];
 
-const COMMAND_FIELDS: [&str; 13] = [
+const COMMAND_FIELDS: [&str; 14] = [
     "symbol",
     "side",
     "type",
@@ -55,6 +61,7 @@ const COMMAND_FIELDS: [&str; 13] = [
     "isolated",
     "hedged",
     "mode",
+    "time",
 ];
 
 const ALGO_FIELDS: [&str; 13] = [
@@ -253,6 +260,20 @@ pub fn log(who: &Who, origin: &str, fields: &Map<String, Value>, result: Value) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dead_man_switch_is_audited_with_its_time() {
+        let fields =
+            command(&json!({"op":"scheduleCancel","command":3,"time":1_800_000_000_000_i64}))
+                .expect("scheduleCancel cancels orders, so it is audited");
+        assert_eq!(fields["op"], "scheduleCancel");
+        assert_eq!(fields["time"], 1_800_000_000_000_i64);
+        assert!(
+            command(&json!({"op":"scheduleCancel","command":4})).is_some(),
+            "a clear too"
+        );
+        assert!(ORDER_METHODS.contains(&"scheduleCancel"));
+    }
 
     fn who() -> Who {
         Who {

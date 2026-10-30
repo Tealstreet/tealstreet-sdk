@@ -319,8 +319,8 @@ impl Session {
     }
 
     /// A new client on the same account takes a full snapshot (seq 1); the old
-    /// one stops forwarding frames and leaves once its replies are in.
-    /// A fresh full snapshot for this socket's client; false when none could start.
+    /// one stops forwarding frames and leaves once its replies are in. False when
+    /// no new client could join.
     async fn resnapshot(&mut self, name: &str) -> bool {
         let Some(account) = self.joined.get(name).map(|joined| joined.account.clone()) else {
             return false;
