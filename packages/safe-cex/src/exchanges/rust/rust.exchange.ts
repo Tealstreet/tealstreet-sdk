@@ -324,7 +324,6 @@ const FRAME_FED_WRITES: ReadonlySet<string> = new Set([
   'scheduleCancel',
 ]);
 
-type FrameFedHost = EngineHost & { applyFrame?: (frame: ArrayBuffer, snapshot: boolean) => void };
 
 /**
  * The hosted server answers `fetchOrders`/`fetchPositions` with its engine's
@@ -918,7 +917,7 @@ export class RustEngineExchange extends BaseExchange {
       this.log(`${this.name} manual writes stay on the account's data source: ${reason}`, LogSeverity.Warning);
       return false;
     }
-    const host = this.host as FrameFedHost | undefined;
+    const host = this.host;
     const construction = this.constructionRecord as { frameFed?: boolean } | undefined;
     // Never start an engine that would open the venue's own streams on main.
     if (!host || this.isDisposed || !this.frameFedEngine || typeof host.applyFrame !== 'function') return false;
@@ -939,11 +938,19 @@ export class RustEngineExchange extends BaseExchange {
    * `frameFedReady` resolves, and again after any gap or reconnect.
    */
   ingestSourceFrame = (frame: ArrayBuffer, snapshot: boolean): void => {
-    const host = this.host as FrameFedHost | undefined;
-    if (!this.frameFed || !host?.applyFrame || this.isDisposed || this.engineFailure) return;
+    const host = this.host;
+    if (!this.frameFed || !host || this.isDisposed || this.engineFailure) return;
     if (!snapshot && !this.sourceBaseline) return;
+    try {
+      host.applyFrame(frame, snapshot);
+    } catch (error) {
+      // A refused frame leaves no baseline to apply deltas to: drop them until a fresh snapshot.
+      this.sourceBaseline = false;
+      console.error(`${this.name} source frame refused`, error);
+      if (!this.engineFailure) this.emitter.emit('frameFed:needsSnapshot');
+      return;
+    }
     this.sourceBaseline = true;
-    host.applyFrame(frame, snapshot);
     host.flush();
   };
 
