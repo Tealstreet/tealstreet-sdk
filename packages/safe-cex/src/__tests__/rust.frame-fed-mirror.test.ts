@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
-import { OrderSide, OrderType, PositionSide } from '../types';
+import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
 import { consumerFrame } from './cutover/consumerFrame';
 import { engineCapabilities } from './fixtures/engineCapabilities';
 
@@ -50,7 +50,7 @@ const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
     command: (json: string) => {
       const command = JSON.parse(json) as { op: string; command?: number };
       fake.commands.push(command);
-      const result = command.op === 'placeOrders' ? ['placed-1'] : null;
+      const result = ['placeOrders', 'amendOrder', 'amendOrderWithSymbol'].includes(command.op) ? ['placed-1'] : null;
       if (command.command === undefined) return '[]';
       const done = { op: 'done', command: command.command, result: JSON.stringify(result) };
       // A confirmed settings write holds it over the source, as a frame-fed venue does.
@@ -121,13 +121,18 @@ describe('frame-fed main-thread mirror', () => {
     await expect(exchange.placeOrder(order)).resolves.toEqual(['placed-1']);
     await exchange.callMethodInWorker('setLeverage', 'BTCUSDT', 5);
     await exchange.cancelSymbolOrders('BTCUSDT');
+    await exchange.updateOrder({
+      order: { ...order, id: 'placed-1', status: OrderStatus.Open, filled: 0, remaining: 1, reduceOnly: false },
+      update: { price: 3 },
+    } as never);
 
-    expect(fake.commands.map((command) => command.op)).toEqual(
-      expect.arrayContaining(['placeOrders', 'setLeverage', 'cancelSymbolOrders']),
-    );
+    const ops = fake.commands.map((command) => command.op);
+    expect(ops).toEqual(expect.arrayContaining(['placeOrders', 'setLeverage', 'cancelSymbolOrders']));
+    expect(ops.some((op) => op === 'amendOrder' || op === 'amendOrderWithSymbol')).toBe(true);
     expect(mirror.calls).not.toContain('placeOrder');
     expect(mirror.calls).not.toContain('setLeverage');
     expect(mirror.calls).not.toContain('cancelSymbolOrders');
+    expect(mirror.calls).not.toContain('updateOrder');
   });
 
   it('asks its data source to re-read a setting it holds', async () => {
