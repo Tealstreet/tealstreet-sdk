@@ -382,6 +382,9 @@ export class ExchangeWorker {
         return false;
       }
 
+      // An engine built with algos runs this account's chasers, TWAPs and CLI;
+      // start them before the buffered ops that drive them.
+      if (this._exchange instanceof RustEngineExchange) this._exchange.startAlgos(this._accountName);
       this._flushBufferedMessages();
       if (startupToken !== this._startupToken || this._exchange?.isDisposed) {
         return false;
@@ -1257,6 +1260,10 @@ export class ExchangeWorker {
       });
       exchange.on('engine-dead', (error: Error) => {
         if (isCurrent()) this._handleEngineDead(error);
+      });
+      // Rust TWAPs' persisted rows, posted as the TS TwapInstance posts them (not as args).
+      exchange.on('twap:stateUpdate', (data: unknown) => {
+        if (isCurrent()) this._ctx.postMessage({ op: 'twap:stateUpdate', data });
       });
     }
 

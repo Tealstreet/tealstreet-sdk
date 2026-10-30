@@ -15,6 +15,8 @@ import type { ExchangeErrorKind } from '../../commandOutcome';
 import type { Store } from '../../store/store.interface';
 import type {
   AccountGreeks,
+  ActiveChaser,
+  ActiveTWAP,
   Candle,
   ClosedPnlEntry,
   ExchangeAccount,
@@ -356,6 +358,11 @@ const LOADED_SECTIONS = [
 /** Frames whose clock samples estimate the data source's offset, and the change worth resetting it for. */
 const SOURCE_CLOCK_SAMPLES = 20;
 const SOURCE_CLOCK_STEP_MS = 25;
+
+/** A nuke waits this long for stopped Rust chases to settle their cancels. */
+const NUKE_ALGO_STOP_MS = 10_000;
+
+type AlgoRows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -1016,7 +1023,77 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere. */
-  stopAccountAlgos = (): Promise<NukeResult> => stopLocalAccountAlgos(this);
+  stopAccountAlgos = (): Promise<NukeResult> =>
+    this.runsRustAlgos ? this.stopRustAlgos() : stopLocalAccountAlgos(this);
+
+  private algoRows: AlgoRows = { activeChasers: [], activeTWAPs: [] };
+  private readonly algoRowWaiters = new Set<() => void>();
+
+  /** Chaser, TWAP and exec ops run in this account's engine (an `algos` build). */
+  get runsRustAlgos(): boolean {
+    return this.host?.algosRunning === true;
+  }
+
+  /** Start the engine's algos under the worker's account name; false on a build without them. */
+  startAlgos = (accountName: string): boolean => {
+    const host = this.host;
+    if (!host || this.isDisposed || this.engineFailure) return false;
+    try {
+      host.algoStart(accountName);
+      return true;
+    } catch (error) {
+      if (error instanceof ExchangeError && error.kind === 'unsupported') return false;
+      throw error;
+    }
+  };
+
+  /** One worker algo op; a refusal reaches the user as the TS handlers' did. */
+  algoOp = (op: string, data: unknown): void => {
+    try {
+      if (!this.host) throw new Error(`${this.name} engine is not started`);
+      this.host.algoOp(op, data);
+    } catch (error) {
+      this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  /** Rust algo replies, under the op names the TS algos emit. `store` carries the rows
+   * frames do not; `twap:stateUpdate` is posted as is by the worker. */
+  private receiveAlgoEmit = (op: string, data: unknown) => {
+    if (op === 'store') {
+      if (this.isDisposed) return;
+      this.algoRows = { ...this.algoRows, ...(data as Partial<AlgoRows>) };
+      this.store.update(data as Partial<AlgoRows>);
+      for (const wake of [...this.algoRowWaiters]) wake();
+      return;
+    }
+    this.emitter.emit(op, data);
+  };
+
+  /** As `stopAccountAlgos.ts`: TWAPs first, then every chase, waiting for their cancels. */
+  private stopRustAlgos = async (): Promise<NukeResult> => {
+    const stoppedTwaps = this.algoRows.activeTWAPs.map((twap) => twap.id);
+    for (const id of stoppedTwaps) this.algoOp('twap:stop', id);
+    const stoppedChasers = this.algoRows.activeChasers.filter((chase) => !chase.isStopped).map((chase) => chase.id);
+    for (const id of stoppedChasers) this.algoOp('chaser:terminate', id);
+    const settled = await new Promise<boolean>((resolve) => {
+      const done = (value: boolean) => {
+        clearTimeout(timer);
+        this.algoRowWaiters.delete(check);
+        resolve(value);
+      };
+      const check = () => {
+        if (!this.runsRustAlgos) done(false);
+        else if (this.algoRows.activeChasers.length === 0) done(true);
+      };
+      const timer = setTimeout(() => done(false), NUKE_ALGO_STOP_MS);
+      this.algoRowWaiters.add(check);
+      check();
+    });
+    if (!settled && stoppedChasers.length)
+      this.log('Stopped chases did not confirm their cancels before the nuke; orders may rest', LogSeverity.Warning);
+    return { stoppedChasers, stoppedTwaps };
+  };
 
   // Startup is single-use, including failures; a retry needs a new account instance.
   start = (): Promise<void> => {
@@ -1244,6 +1321,7 @@ export class RustEngineExchange extends BaseExchange {
           onDead: this.receiveEngineFailure,
           onCommandProgress: this.receiveCommandProgress,
           onAccountAuth: this.receiveAccountAuth,
+          onAlgoEmit: this.receiveAlgoEmit,
           onDeactivate: () => {
             this.noteAuthFailure();
             this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
@@ -2039,7 +2117,7 @@ export class RustEngineExchange extends BaseExchange {
   private stopAlgosForNuke = async (): Promise<NukeResult> => {
     const stopped = this.isWorkerMirror
       ? ((await this.callWorker('stopAccountAlgos')) as NukeResult)
-      : await stopLocalAccountAlgos(this);
+      : await this.stopAccountAlgos();
     const count = stopped.stoppedChasers.length + stopped.stoppedTwaps.length;
     if (count)
       this.log(
@@ -2781,8 +2859,19 @@ export class RustEngineExchange extends BaseExchange {
     this.stopPollingConfig = undefined;
     this.flushTimers.forEach(clearInterval);
     this.flushTimers = [];
-    this.host?.dispose();
+    const host = this.host;
     this.host = undefined;
+    // Running chases cancel their resting orders first (bounded by the engine).
+    if (host?.algosRunning) {
+      let stopping: Promise<void>;
+      try {
+        stopping = host.algoDispose('account disposed');
+      } catch {
+        stopping = Promise.resolve();
+      }
+      void stopping.finally(() => host.dispose());
+    } else host?.dispose();
+    for (const wake of [...this.algoRowWaiters]) wake();
     super.dispose();
     for (const wake of this.startupWaiters) wake();
   }

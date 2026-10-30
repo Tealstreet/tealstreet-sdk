@@ -7,10 +7,20 @@ import { twapRestoreRefusal } from '../twap/twapRestoreRefusal';
 import { TwapState } from '../twap/TwapState';
 import { BaseHandler } from './BaseHandler';
 
+const TWAP_OPS = new Set<StoreWorkerPayload['op']>([
+  'twap:start',
+  'twap:resume',
+  'twap:cleanup',
+  'twap:pause',
+  'twap:stop',
+  'twap:state',
+]);
+
 type PersistedTwap = { id: string; options: TwapOptions; state: TwapState };
 
 export class TwapHandler extends BaseHandler {
   handle(payload: StoreWorkerPayload): void {
+    if (TWAP_OPS.has(payload.op) && this.runInRustAlgos(payload)) return;
     switch (payload.op) {
       case 'twap:start':
         const options = payload.data;

@@ -377,6 +377,10 @@ export class EngineHost {
     this.wsEncoder = undefined;
     this.wsScratch = undefined;
     this.wsScratchBusy = false;
+    this.algosStarted = false;
+    this.algoTimer = undefined;
+    this.algoTimerAt = undefined;
+    this.algosStopped = undefined;
   }
 
   start() {
@@ -584,6 +588,8 @@ export class EngineHost {
     this.assertHttpHandoffIdle();
     if (this.disposed) return;
     const frame = this.invoke(this.engine.takeFrame, this.transport.now(), marketOnly);
+    // A taken frame carries fills and state to the algos, which may wake them.
+    this.armAlgos();
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
 
@@ -696,6 +702,101 @@ export class EngineHost {
     try { this.handlers.onSocketChange?.(); } catch { /* Health observers must not break socket handling. */ }
   }
 
+  /** Start this account's Rust algos (chaser, TWAP, exec) on an `algos` engine
+   * build. Their replies reach `handlers.onAlgoEmit(op, data)`. */
+  algoStart(accountName) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (typeof this.engine.algoStart !== 'function')
+      throw new ExchangeError('This engine has no algos', { kind: 'unsupported', outcome: 'notSent' });
+    this.invoke(this.engine.algoStart, accountName, this.transport.now(), Date.now());
+    if (this.deadError) throw this.deadError;
+    this.algosStarted = true;
+    this.armAlgos();
+  }
+
+  get algosRunning() { return this.algosStarted && !this.disposed; }
+
+  /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if the engine refuses it. */
+  algoOp(op, data) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (!this.algosStarted) throw new ExchangeError('Algos are not running', { kind: 'unsupported', outcome: 'notSent' });
+    this.runAlgos(this.invoke(this.engine.algoOp, op, JSON.stringify(data ?? null), this.transport.now(), Date.now()));
+    if (this.deadError) throw this.deadError;
+  }
+
+  /** Stop every algo: TWAPs at once, chases once their cancels settle (bounded by
+   * the engine). Resolves when they are gone; dispose the host after that. */
+  algoDispose(reason) {
+    this.assertHttpHandoffIdle();
+    if (!this.algosRunning) return Promise.resolve();
+    const stopped = this.algosStopped ??= {};
+    stopped.promise ??= new Promise((resolve) => { stopped.resolve = resolve; });
+    this.runAlgos(this.invoke(this.engine.algoDispose, this.transport.now(), Date.now(), reason));
+    return stopped.promise;
+  }
+
+  advanceAlgos() {
+    this.runAlgos(this.invoke(this.engine.algoAdvance, this.transport.now(), Date.now()));
+  }
+
+  runAlgos(actionsJson) {
+    try { this.runActions(actionsJson); }
+    finally { this.deliverAlgoEmits(); }
+    this.armAlgos();
+  }
+
+  deliverAlgoEmits() {
+    if (this.disposed) return;
+    const json = this.invoke(this.engine.algoEmits);
+    if (!json) return;
+    for (const { op, data } of JSON.parse(json)) {
+      try { this.handlers.onAlgoEmit?.(op, data); }
+      catch (error) {
+        try { this.handlers.onLog?.('error', `Algo reply handler failed: ${error?.message ?? error}`); }
+        catch { /* An observer cannot strand the remaining replies. */ }
+      }
+    }
+  }
+
+  /** Keep exactly one timer armed at the engine's next algo deadline. Every engine
+   * call that can wake algo work (completions, frames) ends here through `run`. */
+  armAlgos() {
+    if (!this.algosStarted || this.disposed) return;
+    if (!this.invoke(this.engine.algoRunning)) {
+      this.algosStarted = false;
+      this.clearAlgoTimer();
+      this.algosStopped?.resolve?.();
+      return;
+    }
+    const at = this.invoke(this.engine.algoDeadline);
+    if (this.disposed || at === this.algoTimerAt) return;
+    this.clearAlgoTimer();
+    if (at === undefined) return;
+    let fired = false;
+    let handle;
+    const notify = () => {
+      if (this.deferHttpNotification(notify)) return;
+      if (fired || this.disposed || this.algoTimer !== handle) return;
+      fired = true;
+      this.algoTimer = this.algoTimerAt = undefined;
+      this.advanceAlgos();
+    };
+    handle = this.transport.setTimeout(notify, Math.max(0, at - this.transport.now()));
+    if (fired || this.disposed) return;
+    this.algoTimer = handle;
+    this.algoTimerAt = at;
+  }
+
+  clearAlgoTimer() {
+    const handle = this.algoTimer;
+    this.algoTimer = this.algoTimerAt = undefined;
+    if (handle !== undefined) {
+      try { this.transport.clearTimeout(handle); } catch { /* Its callback is revoked even if cancellation fails. */ }
+    }
+  }
+
   dispose() {
     this.assertHttpHandoffIdle();
     if (this.disposed) return;
@@ -727,6 +828,9 @@ export class EngineHost {
     this.socketRecords.clear();
     this.wsScratch = undefined;
     this.timers.clear();
+    attempt(() => this.clearAlgoTimer());
+    this.algosStarted = false;
+    attempt(() => this.algosStopped?.resolve?.());
     attempt(() => this.transport.dispose?.());
     // Release provider-owned keys on normal disposal instead of retaining the
     // wasm allocation (and an injected callback) until garbage collection.
@@ -1021,6 +1125,12 @@ export class EngineHost {
   }
 
   run(actionsJson) {
+    this.runActions(actionsJson);
+    // Completions for algo commands never reach the host as actions, so arm even when none came back.
+    this.armAlgos();
+  }
+
+  runActions(actionsJson) {
     this.assertHttpHandoffIdle();
     if (this.disposed || !actionsJson) return;
     let unknown;

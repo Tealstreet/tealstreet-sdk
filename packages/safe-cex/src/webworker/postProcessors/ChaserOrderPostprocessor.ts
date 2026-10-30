@@ -4,6 +4,8 @@ import { ExchangeDependentPostprocessor } from './ExchangeDependentPostprocessor
 
 export class ChaserOrderPostprocessor extends ExchangeDependentPostprocessor {
   process(store: Writable<StoreData>): void {
+    // A Rust-algo account's engine publishes its own `activeChasers` rows into the store.
+    if ((this._exchange as { runsRustAlgos?: boolean }).runsRustAlgos === true) return;
     const instances = chaserOrderManagerInstance.instances;
     const activeChasers: Writable<ActiveChaser[]> = [];
 

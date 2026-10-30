@@ -379,6 +379,19 @@ account name, so terminating one worker cannot stop another same-name account.
 `TwapInstance.start()` checks termination again after its awaited placement;
 otherwise a reply arriving after terminate could schedule another old slice.
 
+## Rust algos on Rust-engine accounts
+
+An engine built with the `algos` feature runs the account's chaser, TWAP and
+`exec` ops itself: `BaseHandler.runInRustAlgos` sends them to
+`RustEngineExchange.algoOp` (starting the algos if the op beats the worker's own
+`startAlgos`), and the TS `ChaserOrderInstance`/`TwapInstance`/command executor
+never run for that account. Replies keep the TS op names: `chaser:complete`,
+`error`, `warning`, `log`, `exec-log` and `exec-result` go through the exchange
+emitter, `twap:stateUpdate` is posted with the persisted map as `data`, and the
+`activeChasers`/`activeTWAPs` rows land in the store (their TS post-processors
+skip such accounts). Disposal lets chases cancel their orders before the engine
+goes. These TWAPs take no cross-tab Web Lock.
+
 ## TWAP restore and the cross-tab owner lock
 
 `twap:state` replays one tab's `sessionStorage['twaps']`, and a duplicated tab

@@ -7,6 +7,7 @@ export class CommandHandler extends BaseHandler {
   handle(payload: StoreWorkerPayload): void {
     switch (payload.op) {
       case 'exec': {
+        if (this.runInRustAlgos(payload)) break;
         const data = payload.data && typeof payload.data === 'object' ? payload.data : undefined;
         const reqId = data?.reqId;
         if (!data) {

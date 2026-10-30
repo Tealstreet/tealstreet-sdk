@@ -4,6 +4,12 @@ import { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 
+type RustAlgoExchange = {
+  runsRustAlgos: boolean;
+  startAlgos(accountName: string): boolean;
+  algoOp(op: string, data: unknown): void;
+};
+
 const PENDING_TIMEOUT_MS = 30_000;
 const PENDING_POLL_MS = 500;
 const PENDING_TIMEOUT_REPORT_COOLDOWN_MS = 5 * 60_000;
@@ -41,6 +47,19 @@ export abstract class BaseHandler {
   }
 
   abstract handle(payload: StoreWorkerPayload): void;
+
+  /**
+   * A Rust-engine account built with algos runs chaser, TWAP and exec ops in its
+   * engine (`RustEngineExchange.algoOp`), never in the TS algos. True when sent there.
+   * An op arriving while the account still starts starts its algos first.
+   */
+  protected runInRustAlgos(payload: StoreWorkerPayload): boolean {
+    const exchange = this._exchange as Partial<RustAlgoExchange>;
+    if (typeof exchange.algoOp !== 'function') return false;
+    if (!exchange.runsRustAlgos && !exchange.startAlgos?.(this._accountName)) return false;
+    exchange.algoOp(payload.op, payload.data);
+    return true;
+  }
 
   /**
    * Buffer a payload until markets are loaded. Returns true if buffered,
