@@ -12,6 +12,7 @@ mod policy;
 mod refresh;
 mod sign;
 mod trading;
+mod venue_state;
 mod wire;
 
 use paths::Paths;
@@ -2550,6 +2551,44 @@ impl Venue for BybitLinear {
         // A frame-fed engine loads public instrument metadata only.
         if self.credentials.is_some() && !cx.frame_fed() {
             self.request_account_info(cx);
+        }
+    }
+
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        let mut state = venue_state::VenueState::default();
+        let accounts = std::iter::once((self.category, &self.account)).chain(
+            self.products
+                .iter()
+                .map(|product| (product.category, &product.account)),
+        );
+        for (category, account) in accounts {
+            let category = venue_state::category_code(category);
+            for (symbol, hedged) in &account.position_modes {
+                state.modes.insert((category, symbol.clone()), *hedged);
+            }
+            state.bound.extend(account.position_bound.iter().cloned());
+        }
+        Some(state.encode())
+    }
+
+    fn apply_venue_state(&mut self, _cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
+        let Some(state) = venue_state::VenueState::decode(bytes) else {
+            return;
+        };
+        let accounts = std::iter::once((self.category, &mut self.account)).chain(
+            self.products
+                .iter_mut()
+                .map(|product| (product.category, &mut product.account)),
+        );
+        for (category, account) in accounts {
+            let category = venue_state::category_code(category);
+            // The source's modes win; a mode only this engine knows stays.
+            for ((code, symbol), hedged) in &state.modes {
+                if *code == category {
+                    account.position_modes.insert(symbol.clone(), *hedged);
+                }
+            }
+            account.position_bound = state.bound.iter().cloned().collect();
         }
     }
 
