@@ -144,3 +144,37 @@ fn an_unknown_placement_outcome_is_never_re_sent_or_read_back() {
     let later = requests(&mut e);
     assert!(later.is_empty(), "{later:?}");
 }
+
+#[test]
+fn a_leverage_write_before_the_source_settings_refuses_visibly_then_uses_them() {
+    let (mut e, _) = page_engine();
+    let set = |e: &mut Engine<Hyperliquid>, command| {
+        e.handle(
+            2000.0,
+            Event::Command(Command::SetLeverage {
+                command,
+                symbol: "BTC-PERP".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+    };
+    set(&mut e, 9);
+    let refused = e.drain_plain().collect::<Vec<_>>();
+    assert!(
+        refused.iter().any(|a| format!("{a:?}").contains("settings have not arrived")),
+        "{refused:?}"
+    );
+    assert!(requests(&mut e).is_empty());
+
+    let (mut source, _) = ready("disabled");
+    let frame = source.snapshot_frame(1500.0).to_vec();
+    e.apply_frame(1500.0, &frame, true).unwrap();
+    set(&mut e, 10);
+    let sent = requests(&mut e);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let body: Value = serde_json::from_str(sent[0].body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["action"]["type"], "updateLeverage");
+    assert_eq!(body["action"]["isCross"], true);
+    assert_eq!(body["action"]["leverage"], 5);
+}
