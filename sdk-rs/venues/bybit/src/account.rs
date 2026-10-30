@@ -266,6 +266,9 @@ pub struct AccountState {
     /// Bybit permits different position modes on different symbols.
     pub position_modes: HashMap<String, bool>,
     pub position_bound: HashSet<String>,
+    /// Frame-fed: the mode this engine switched to, held over the data source
+    /// until its VENUE_STATE agrees (`SettingKey::Venue(MODE_HOLD, category)`).
+    pub held_mode: Option<bool>,
 }
 
 impl AccountState {
