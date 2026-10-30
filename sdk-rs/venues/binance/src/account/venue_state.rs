@@ -10,16 +10,15 @@
 //! keeps its full maps, which also guard against reused client ids; the export
 //! stays bounded and unchanged state is not resent.
 //!
-//! Version 2, little-endian: a version byte; the stop ids; the PM owners as
-//! (client, symbol, kind 0 regular or 1 strategy, native u64); the strategy
-//! and spot maps as (symbol, client, native u64). Each list is a u32 count and
-//! sorted rows; strings are a u32 length and UTF-8 bytes. Version 1 carried
-//! only the stop ids.
+//! Version 2, little-endian: a version byte; the stop ids; then the PM owners,
+//! the strategy map and the spot map as rows of (client, symbol, kind, native
+//! u64), where an owner's kind is 0 regular or 1 strategy and a map's is 0. Each
+//! list is a u32 count and sorted rows; strings are a u32 length and UTF-8
+//! bytes. Version 1 carried only the stop ids.
 use super::{PmOrderOwner, PmOrderSource};
 use crate::BinanceFutures;
 use safe_cex_engine::Store;
 use safe_cex_engine::model::OrderStatus;
-use std::collections::{HashMap, HashSet};
 
 const VERSION: u8 = 2;
 const STOPS_ONLY: u8 = 1;
@@ -56,23 +55,36 @@ impl<'a> Reader<'a> {
     }
 }
 
-type ClientNative = HashMap<(String, String), u64>;
+/// One routing row: (key, symbol, kind, native). PM owners key by client with
+/// kind 0 regular or 1 strategy; the client-to-native maps key by client, kind 0.
+type Row<'a> = (&'a str, &'a str, u8, u64);
+
+fn put_rows(out: &mut Vec<u8>, mut rows: Vec<Row<'_>>) {
+    rows.sort_unstable();
+    put_count(out, rows.len());
+    for (key, symbol, kind, native) in rows {
+        put_str(out, key);
+        put_str(out, symbol);
+        out.push(kind);
+        out.extend_from_slice(&native.to_le_bytes());
+    }
+}
+
+fn read_rows(reader: &mut Reader<'_>) -> Option<Vec<(String, String, u8, u64)>> {
+    let mut rows = Vec::new();
+    for _ in 0..reader.u32()? {
+        let (key, symbol) = (reader.string()?, reader.string()?);
+        rows.push((key, symbol, reader.u8()?, reader.u64()?));
+    }
+    Some(rows)
+}
 
 #[derive(Default)]
 struct Decoded {
-    stops: HashSet<String>,
-    owners: HashMap<String, PmOrderOwner>,
-    strategy: ClientNative,
-    spot: ClientNative,
-}
-
-fn client_native(reader: &mut Reader<'_>) -> Option<ClientNative> {
-    let mut rows = HashMap::new();
-    for _ in 0..reader.u32()? {
-        let (symbol, client) = (reader.string()?, reader.string()?);
-        rows.insert((symbol, client), reader.u64()?);
-    }
-    Some(rows)
+    stops: Vec<String>,
+    owners: Vec<(String, String, u8, u64)>,
+    strategy: Vec<(String, String, u8, u64)>,
+    spot: Vec<(String, String, u8, u64)>,
 }
 
 fn decode(bytes: &[u8]) -> Option<Decoded> {
@@ -83,83 +95,71 @@ fn decode(bytes: &[u8]) -> Option<Decoded> {
     }
     let mut decoded = Decoded::default();
     for _ in 0..reader.u32()? {
-        decoded.stops.insert(reader.string()?);
+        decoded.stops.push(reader.string()?);
     }
     if version == VERSION {
-        for _ in 0..reader.u32()? {
-            let (client, symbol) = (reader.string()?, reader.string()?);
-            let kind = reader.u8()?;
-            let native = reader.u64()?;
-            let source = match kind {
-                0 => PmOrderSource::Regular(native),
-                1 => PmOrderSource::Strategy(native),
-                _ => return None,
-            };
-            decoded
-                .owners
-                .insert(client, PmOrderOwner { symbol, source });
+        decoded.owners = read_rows(&mut reader)?;
+        if decoded.owners.iter().any(|row| row.2 > 1) {
+            return None;
         }
-        decoded.strategy = client_native(&mut reader)?;
-        decoded.spot = client_native(&mut reader)?;
+        decoded.strategy = read_rows(&mut reader)?;
+        decoded.spot = read_rows(&mut reader)?;
     }
     reader.0.is_empty().then_some(decoded)
-}
-
-fn put_client_native(out: &mut Vec<u8>, rows: &ClientNative, open: &HashSet<(&str, &str)>) {
-    let mut kept: Vec<_> = rows
-        .iter()
-        .filter(|((symbol, client), _)| open.contains(&(symbol.as_str(), client.as_str())))
-        .collect();
-    kept.sort();
-    put_count(out, kept.len());
-    for ((symbol, client), native) in kept {
-        put_str(out, symbol);
-        put_str(out, client);
-        out.extend_from_slice(&native.to_le_bytes());
-    }
 }
 
 impl BinanceFutures {
     pub(crate) fn export_venue_state(&self, store: &Store) -> Vec<u8> {
         // Store order ids are the client ids these maps are keyed by.
-        let open: HashSet<(&str, &str)> = store
-            .orders()
-            .iter()
-            .filter(|order| order.status == OrderStatus::Open)
-            .map(|order| (order.symbol.as_str(), order.id.as_str()))
-            .collect();
-        let open_ids: HashSet<&str> = open.iter().map(|(_, id)| *id).collect();
+        let open = |symbol: &str, client: &str| {
+            store
+                .order(client)
+                .is_some_and(|order| order.status == OrderStatus::Open && order.symbol == symbol)
+        };
         let account = &self.account;
         let mut out = vec![VERSION];
-        let mut stops: Vec<&String> = account
+        let mut stops: Vec<&str> = account
             .limit_stops
             .iter()
-            .filter(|id| open_ids.contains(id.as_str()))
+            .map(String::as_str)
+            .filter(|id| {
+                store
+                    .order(id)
+                    .is_some_and(|order| order.status == OrderStatus::Open)
+            })
             .collect();
-        stops.sort();
+        stops.sort_unstable();
         put_count(&mut out, stops.len());
         for id in stops {
             put_str(&mut out, id);
         }
-        let mut owners: Vec<_> = account
-            .pm_order_owners
-            .iter()
-            .filter(|(client, owner)| open.contains(&(owner.symbol.as_str(), client.as_str())))
-            .collect();
-        owners.sort_by(|a, b| a.0.cmp(b.0));
-        put_count(&mut out, owners.len());
-        for (client, owner) in owners {
-            put_str(&mut out, client);
-            put_str(&mut out, &owner.symbol);
-            let (kind, native) = match owner.source {
-                PmOrderSource::Regular(native) => (0u8, native),
-                PmOrderSource::Strategy(native) => (1u8, native),
-            };
-            out.push(kind);
-            out.extend_from_slice(&native.to_le_bytes());
+        put_rows(
+            &mut out,
+            account
+                .pm_order_owners
+                .iter()
+                .filter(|(client, owner)| open(&owner.symbol, client))
+                .map(|(client, owner)| match owner.source {
+                    PmOrderSource::Regular(native) => {
+                        (client.as_str(), owner.symbol.as_str(), 0, native)
+                    }
+                    PmOrderSource::Strategy(native) => {
+                        (client.as_str(), owner.symbol.as_str(), 1, native)
+                    }
+                })
+                .collect(),
+        );
+        for map in [&account.strategy_client_native, &account.spot_client_native] {
+            put_rows(
+                &mut out,
+                map.iter()
+                    .filter(|((symbol, client), _)| open(symbol, client))
+                    .map(|((symbol, client), native)| {
+                        (client.as_str(), symbol.as_str(), 0, *native)
+                    })
+                    .collect(),
+            );
         }
-        put_client_native(&mut out, &account.strategy_client_native, &open);
-        put_client_native(&mut out, &account.spot_client_native, &open);
         out
     }
 
@@ -171,10 +171,25 @@ impl BinanceFutures {
             return false;
         };
         let account = &mut self.account;
-        account.limit_stops = decoded.stops;
-        account.pm_order_owners.extend(decoded.owners);
-        account.strategy_client_native.extend(decoded.strategy);
-        account.spot_client_native.extend(decoded.spot);
+        account.limit_stops = decoded.stops.into_iter().collect();
+        for (client, symbol, kind, native) in decoded.owners {
+            let source = if kind == 0 {
+                PmOrderSource::Regular(native)
+            } else {
+                PmOrderSource::Strategy(native)
+            };
+            account
+                .pm_order_owners
+                .insert(client, PmOrderOwner { symbol, source });
+        }
+        for (client, symbol, _, native) in decoded.strategy {
+            account
+                .strategy_client_native
+                .insert((symbol, client), native);
+        }
+        for (client, symbol, _, native) in decoded.spot {
+            account.spot_client_native.insert((symbol, client), native);
+        }
         true
     }
 }
@@ -189,7 +204,7 @@ mod tests {
         put_count(&mut v1, 1);
         put_str(&mut v1, "stop-1");
         let decoded = decode(&v1).unwrap();
-        assert!(decoded.stops.contains("stop-1") && decoded.owners.is_empty());
+        assert!(decoded.stops == ["stop-1"] && decoded.owners.is_empty());
         let mut trailing = v1.clone();
         trailing.push(0);
         assert!(decode(&trailing).is_none());
