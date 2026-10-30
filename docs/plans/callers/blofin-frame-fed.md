@@ -13,3 +13,17 @@
 **Obligation.** None.
 
 **Deletion prerequisites.** The forwarding write path for BloFin may go once the main-thread engine uses frame-fed mode.
+
+## Settings holds
+
+**Change.** A frame-fed BloFin engine holds its confirmed settings writes
+(`safe_cex_engine::setting_holds`) until the source re-reads them:
+- position mode under `Hedged`;
+- leverage under `Leverage(symbol)`;
+- the account margin mode under `Venue("margin")`.
+
+The margin mode lives in VENUE_STATE:
+- while it is held, `apply_venue_state` keeps this engine's value until the source reports the same one, which releases the hold;
+- `on_frame_ingested` re-applies the held mode to flat symbols' settings rows, matching the write's own rule.
+
+On the source, `refresh_settings` re-runs the existing margin-mode and position-mode reads and the account refresh, which carries leverage. It never writes.
