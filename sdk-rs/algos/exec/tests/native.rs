@@ -373,7 +373,7 @@ async fn cli_twap_starts_exactly_one_real_shared_schedule_and_list_stop_use_it()
         });
         port.store.borrow_mut().tickers.insert("BTCUSDT".into(),Ticker{symbol:"BTCUSDT".into(),last:50000.,bid:49999.,ask:50001.,..Default::default()});
         let cx=AlgoCx::new(port.clone(),Scope::new());let book=ChaserBook::new(cx.clone());
-        let twap=TwapFactory::new(cx.clone(),Rc::new(book.clone()));
+        let twap=TwapFactory::new("trusted-account",cx.clone(),Rc::new(book.clone()));
         let exec=ExecFactory::with_algos("trusted-account".into(),book.clone(),twap.clone());
         exec.handle("exec",r#"{"symbol":"BTCUSDT","command":"twap buy $1000 into 2 over 1","reqId":"start","accountName":"untrusted"}"#,&cx).unwrap();
         for _ in 0..8 {tokio::task::yield_now().await;}
@@ -688,7 +688,7 @@ async fn task_list_and_kill_use_injected_chase_and_twap_books_with_ts_ordering()
             wait_market(&port);
             let cx = AlgoCx::new(port.clone(), Scope::new());
             let book = ChaserBook::new(cx.clone());
-            let twap = TwapFactory::new(cx.clone(), Rc::new(book.clone()));
+            let twap = TwapFactory::new("a", cx.clone(), Rc::new(book.clone()));
             let factory = ExecFactory::with_algos("a".into(), book.clone(), twap.clone());
             for command in ["chase buy $100", "twap buy $1000 into 2 over 1", "tasks"] {
                 factory

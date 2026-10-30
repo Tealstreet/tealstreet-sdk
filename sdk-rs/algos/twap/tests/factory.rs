@@ -110,7 +110,7 @@ async fn runs_slices_on_the_interval_and_reports_state() {
         .run_until(async {
             let port = Rc::new(Port::default());
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
             factory
                 .handle("twap:start", &twap_options(json!({})), &cx)
                 .unwrap();
@@ -140,7 +140,7 @@ async fn a_failed_slice_logs_an_error_and_continues() {
             let port = Rc::new(Port::default());
             port.fail.set(true);
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
             factory
                 .handle("twap:start", &twap_options(json!({})), &cx)
                 .unwrap();
@@ -161,7 +161,7 @@ async fn chaser_slices_start_through_the_chaser_runtime() {
             let port = Rc::new(Port::default());
             let chasers = Rc::new(Chasers::default());
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new(cx.clone(), chasers.clone());
+            let factory = TwapFactory::new("a", cx.clone(), chasers.clone());
             factory
                 .handle(
                     "twap:start",
@@ -187,7 +187,7 @@ async fn closing_the_sending_socket_leaves_the_schedule_running() {
             let port = Rc::new(Port::default());
             let account = AlgoCx::new(port.clone(), Scope::new());
             let socket = account.child();
-            let factory = TwapFactory::new(account.clone(), Rc::new(Chasers::default()));
+            let factory = TwapFactory::new("a", account.clone(), Rc::new(Chasers::default()));
             let options = twap_options(json!({ "ordersCount": 4 }));
             factory.handle("twap:start", &options, &socket).unwrap();
             settle().await;
@@ -205,7 +205,7 @@ async fn terminate_all_stops_every_twap_and_reports_it() {
         .run_until(async {
             let port = Rc::new(Port::default());
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
             for _ in 0..2 {
                 factory
                     .handle(
@@ -237,7 +237,7 @@ fn rejects_malformed_payloads() {
         .unwrap();
     LocalSet::new().block_on(&rt, async {
         let cx = AlgoCx::new(Rc::new(Port::default()), Scope::new());
-        let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
+        let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
         assert!(factory.handle("twap:pause", "{", &cx).is_err());
     });
 }
@@ -300,7 +300,7 @@ async fn chase_slices_run_on_the_account_chaser_book() {
             }
             let cx = AlgoCx::new(port.clone(), Scope::new());
             let book = safe_cex_chaser::ChaserFactory::new(cx.clone()).book();
-            let factory = TwapFactory::new(cx.clone(), Rc::new(book.clone()));
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(book.clone()));
             let options = twap_options(
                 json!({ "useChaserOrders": true, "timeoutPct": 50, "timeoutAction": "next" }),
             );
@@ -370,7 +370,7 @@ async fn typed_start_and_stop_for_the_exec_twap_command() {
         .run_until(async {
             let port = Rc::new(Port::default());
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let factory = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
             let options: safe_cex_algo_twap::TwapOptions =
                 serde_json::from_str(&twap_options(json!({ "origin": "cli" }))).unwrap();
 
@@ -406,7 +406,7 @@ async fn clones_share_one_book() {
         .run_until(async {
             let port = Rc::new(Port::default());
             let cx = AlgoCx::new(port.clone(), Scope::new());
-            let registered = TwapFactory::new(cx.clone(), Rc::new(Chasers::default()));
+            let registered = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
             let exec_handle = registered.clone();
             registered
                 .handle("twap:start", &twap_options(json!({})), &cx)

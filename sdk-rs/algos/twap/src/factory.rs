@@ -59,11 +59,12 @@ struct Inner {
 }
 
 impl TwapFactory {
-    pub fn new(account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
+    /// `account_name` is the account's `accountName`; TWAPs naming another are refused.
+    pub fn new(account_name: &str, account_cx: AlgoCx, chasers: Rc<dyn TwapChasers>) -> Self {
         Self {
             inner: Rc::new(Inner {
                 cx: account_cx,
-                book: RefCell::new(TwapBook::new()),
+                book: RefCell::new(TwapBook::new(account_name)),
                 chasers,
                 env: RefCell::new(CxEnv::seeded()),
                 rescheduled: Notify::new(),
