@@ -1,12 +1,15 @@
+import type { ExchangeName } from '../types';
 import type { AppSettingsWorkerType } from '../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../webworker/ExchangeMetadataWorkerType';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
+import { aggregateBybitClosedPnl } from '../journal/bybit.position-adapter';
 import { DefaultStore } from '../store/store.base';
-import { OrderSide, OrderType } from '../types';
+import { OrderSide, OrderType, PositionSide } from '../types';
 import { ExchangeWorker } from '../webworker/ExchangeWorker';
+import { engineCapabilities } from './fixtures/engineCapabilities';
 
 const order = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 2 };
 
@@ -208,16 +211,96 @@ describe('main-thread Rust trading routing', () => {
     await main.fetchHistoricalOrders(window);
     await main.fetchIncomeHistory({ startTime: 1, endTime: 2 });
     await main.fetchIncomeHistoryRange(1, 2);
-    await main.fetchHistoricalPositions!({ ...window, account: 'a' });
     expect(calls.map(({ method }) => method)).toEqual([
       'fetchOHLCV',
       'fetchHistoricalFills',
       'fetchHistoricalOrders',
       'fetchIncomeHistory',
       'fetchIncomeHistoryRange',
-      'fetchHistoricalPositions',
     ]);
     expect(main.hasStarted).toBe(false);
+  });
+
+  /** A mirror whose worker (or hosted server) answers each method from `answers`. */
+  const answering = (name: ExchangeName, answers: Record<string, unknown>) => {
+    setWasmEngineLoader(() => new Promise(() => {}));
+    main = new RustEngineExchange(name, { key: 'k', secret: 's' }, new DefaultStore());
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      queueMicrotask(() =>
+        main!.emitter.emit('callMethod:done', {
+          requestId: event.requestId,
+          success: true,
+          result: answers[event.method],
+        }),
+      );
+    });
+    return calls;
+  };
+
+  it('folds the Bybit journal on the mirror from forwarded raw closed-position rows and orders', async () => {
+    const rows = [
+      {
+        symbol: 'BTCUSDT',
+        orderId: 'o1',
+        side: 'Sell',
+        closedSize: '1',
+        avgEntryPrice: '100',
+        avgExitPrice: '110',
+        closedPnl: '10',
+        createdTime: '1000',
+        updatedTime: '1001',
+      },
+    ];
+    const orders = [{ id: 'o1', positionSide: PositionSide.Long }];
+    const calls = answering('bybit', {
+      fetchEngineCapabilities: JSON.parse(engineCapabilities('bybit')),
+      fetchClosedPositions: rows,
+      fetchHistoricalOrders: orders,
+    });
+    const window = { from: 1_000, to: 2_000 };
+    const records = await main!.fetchHistoricalPositions!({ ...window, account: 'a' });
+    expect(records).toEqual(
+      aggregateBybitClosedPnl(rows, {
+        account: 'a',
+        resolveSettleCurrency: () => 'USDT',
+        resolveLeg: (orderId: string) => (orderId === 'o1' ? PositionSide.Long : undefined),
+      }),
+    );
+    expect(records.length).toBe(1);
+    expect(calls).toEqual([
+      { method: 'fetchEngineCapabilities', args: [] },
+      { method: 'fetchClosedPositions', args: [window] },
+      { method: 'fetchHistoricalOrders', args: [window] },
+    ]);
+    expect(main!.hasStarted).toBe(false);
+  });
+
+  it('folds a fill venue journal on the mirror from forwarded fills and income', async () => {
+    const calls = answering('kraken', {
+      fetchEngineCapabilities: JSON.parse(engineCapabilities('kraken')),
+      fetchHistoricalFills: [],
+      fetchIncomeHistoryRange: [],
+    });
+    await expect(main!.fetchHistoricalPositions!({ from: 1_000, to: 2_000, account: 'a' })).resolves.toEqual([]);
+    const methods = calls.map(({ method }) => method);
+    expect(methods[0]).toBe('fetchEngineCapabilities');
+    expect(methods).toContain('fetchHistoricalFills');
+    expect(methods).not.toContain('fetchHistoricalPositions');
+    expect(main!.hasStarted).toBe(false);
+  });
+
+  it('answers a mirror journal read on the worker with the engine rows', async () => {
+    const worker = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, new DefaultStore());
+    const command = vi
+      .spyOn(worker as unknown as { command: (c: Record<string, unknown>) => Promise<unknown> }, 'command')
+      .mockResolvedValue([{ symbol: 'BTCUSDT' }]);
+    await expect(worker.fetchClosedPositions({ symbol: 'BTCUSDT', from: 1, to: 2 })).resolves.toEqual([
+      { symbol: 'BTCUSDT' },
+    ]);
+    expect(command.mock.calls[0][0]).toEqual({ op: 'fetchClosedPositions', symbol: 'BTCUSDT', from: 1, to: 2 });
+    worker.dispose();
   });
 
   it('forwards main-thread native account reads to the worker without starting an engine', async () => {

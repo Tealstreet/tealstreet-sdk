@@ -49,6 +49,31 @@ pub struct SocketSummary {
     pub private_initialized: bool,
     pub public_last_message: Option<u64>,
     pub private_last_message: Option<u64>,
+    pub public: SocketDiagnostics,
+    pub private: SocketDiagnostics,
+}
+
+/// `summarizeSocketDiagnostics`: the most recent close and the summed counters.
+/// Engine venues own their backoff, so a reconnect is never paused.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SocketDiagnostics {
+    pub close_code: Option<u16>,
+    pub close_count_total: u32,
+    pub close_streak: u32,
+}
+
+impl SocketDiagnostics {
+    fn of(channels: &[&SocketStats]) -> Self {
+        let latest = channels
+            .iter()
+            .filter(|stats| stats.last_close_code.is_some())
+            .max_by_key(|stats| stats.last_close_at);
+        Self {
+            close_code: latest.and_then(|stats| stats.last_close_code),
+            close_count_total: channels.iter().map(|stats| stats.closes).sum(),
+            close_streak: channels.iter().map(|stats| stats.close_streak).sum(),
+        }
+    }
 }
 
 impl SocketHealth {
@@ -72,6 +97,8 @@ impl SocketHealth {
             private_initialized: private.is_some(),
             public_last_message: last(&public),
             private_last_message: last(private.as_slice()),
+            public: SocketDiagnostics::of(&[&self.public, &self.business]),
+            private: SocketDiagnostics::of(&[&self.private]),
         }
     }
 }
@@ -225,6 +252,32 @@ mod tests {
         assert!(fresh.private_healthy && fresh.public_healthy && fresh.public_initialized);
         let stale = health.summary(1_000 + SOCKET_STALE_MS);
         assert!(stale.private_initialized && !stale.private_healthy && !stale.public_healthy);
+    }
+
+    #[test]
+    fn diagnostics_take_the_latest_close_and_sum_the_counters() {
+        let closed = |code, at, closes, streak| SocketStats {
+            last_close_code: Some(code),
+            last_close_at: at,
+            closes,
+            close_streak: streak,
+            ..SocketStats::default()
+        };
+        let health = SocketHealth {
+            public: closed(1006, 10, 2, 1),
+            business: closed(1000, 20, 3, 0),
+            private: SocketStats::default(),
+        };
+        let summary = health.summary(30);
+        assert_eq!(
+            summary.public,
+            SocketDiagnostics {
+                close_code: Some(1000),
+                close_count_total: 5,
+                close_streak: 1,
+            }
+        );
+        assert_eq!(summary.private, SocketDiagnostics::default());
     }
 
     #[test]

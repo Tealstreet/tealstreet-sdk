@@ -678,6 +678,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   override fetchHistoricalPositions = async (opts: Parameters<BaseExchange['fetchHistoricalPositions']>[0]) => {
+    if (this.routesToWorker && !this.host && !this.capabilityRecord) await this.loadWorkerCapabilities();
     const ready = this.capabilitiesFor('fetchHistoricalPositions');
     const capabilities = ready instanceof Promise ? await ready : ready;
     switch (capabilities.positionHistory) {
@@ -1129,17 +1130,18 @@ export class RustEngineExchange extends BaseExchange {
         .map(([, method]) => method),
     );
     // Native account reads start an engine, so a mirror asks the worker's instead.
-    const methods = [...WORKER_FORWARDED_METHODS, 'fetchHistoricalPositions' as const, ...NATIVE_ACCOUNT_READS];
+    // Journals are not forwarded: a mirror folds them itself from forwarded raw reads,
+    // so the hosted server, which has no TS mappers, only serves those reads.
+    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS];
     for (const method of methods) {
       if (inert.has(method)) continue;
       const local = this[method] as (...args: unknown[]) => Promise<unknown>;
-      (this as Record<WorkerForwardedMethod | 'fetchHistoricalPositions' | NativeAccountRead, unknown>)[method] =
-        async (...args: unknown[]) => {
-          if (!this.routesToWorker) return local(...args);
-          const result = await this.callWorker(method, ...args);
-          // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-          return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
-        };
+      (this as Record<WorkerForwardedMethod | NativeAccountRead, unknown>)[method] = async (...args: unknown[]) => {
+        if (!this.routesToWorker) return local(...args);
+        const result = await this.callWorker(method, ...args);
+        // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+        return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
+      };
     }
   }
 
@@ -2259,10 +2261,15 @@ export class RustEngineExchange extends BaseExchange {
 
   /** The venue's raw closed-position rows, for the same TS mappers the TS venue uses. */
   private fetchClosedPositionRows = (opts: { symbol?: string; from?: number; to?: number }, report = true) =>
-    this.command<Array<Record<string, any>>>(
-      { op: 'fetchClosedPositions', symbol: opts.symbol, from: opts.from, to: opts.to },
-      { report },
-    );
+    this.routesToWorker
+      ? (this.callWorker('fetchClosedPositions', opts) as Promise<Array<Record<string, any>>>)
+      : this.command<Array<Record<string, any>>>(
+          { op: 'fetchClosedPositions', symbol: opts.symbol, from: opts.from, to: opts.to },
+          { report },
+        );
+
+  /** Worker side of a mirror's journal read: the raw rows, which the mirror maps. */
+  fetchClosedPositions = (opts: { symbol?: string; from?: number; to?: number }) => this.fetchClosedPositionRows(opts);
 
   /**
    * Journal paths read the reported closed axis and THROW on a failed read, as TS does: an

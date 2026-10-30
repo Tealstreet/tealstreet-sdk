@@ -22,7 +22,9 @@ pub use server::{
     AccountHandle, BookLevels, ClientLink, FrameServer, InputRefused, Outgoing, ServerConfig,
     spawn_account,
 };
-pub use socket_health::{SOCKET_STALE_MS, SocketHealth, SocketStats, SocketSummary};
+pub use socket_health::{
+    SOCKET_STALE_MS, SocketDiagnostics, SocketHealth, SocketStats, SocketSummary,
+};
 pub use transport::{
     BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PreparedHttp, Transport,
 };
