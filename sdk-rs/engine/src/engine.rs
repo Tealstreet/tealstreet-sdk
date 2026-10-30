@@ -3744,6 +3744,10 @@ pub struct Engine<V: Venue> {
     account_startup: bool,
     /// Frame-fed: the data source's market table, between ingested frames.
     ingest: crate::ingest::IngestState,
+    /// Frame-fed: when each uncertain fence was raised, as (order-lock epoch,
+    /// host time); a source frame lifts it only once written well after.
+    #[cfg(feature = "order-locks")]
+    fence_marks: Vec<(u64, f64)>,
     /// Data source: the VENUE_STATE bytes last sent, so unchanged state is not resent.
     venue_state_sent: Option<Vec<u8>>,
     shared_books: HashMap<String, Book>,
@@ -3835,6 +3839,8 @@ impl<V: Venue> Engine<V> {
             releasing: false,
             account_startup: false,
             ingest: Default::default(),
+            #[cfg(feature = "order-locks")]
+            fence_marks: Vec::new(),
             venue_state_sent: None,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
@@ -4048,13 +4054,25 @@ impl<V: Venue> Engine<V> {
         }
         self.venue.on_frame_ingested(&mut cx);
         if applied.orders {
-            // The source's orders are the reconcile: no fence outlives them,
-            // and holds waiting for an acknowledged order may now release.
+            // The source's orders are the reconcile, but only for a fence raised
+            // well before the source wrote them: a frame written right after a
+            // lost write can predate the venue showing it, and lifting then
+            // would let a retry place twice.
             #[cfg(feature = "order-locks")]
             {
-                let token = self.io.core.order_locks.token();
-                self.io.core.order_locks.reconciled(None, token);
+                let written = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
+                let lifted = self
+                    .fence_marks
+                    .iter()
+                    .filter(|(_, at)| *at + crate::frame_fed::FENCE_GRACE_MS <= written)
+                    .map(|(token, _)| *token)
+                    .max();
+                if let Some(token) = lifted {
+                    self.io.core.order_locks.reconciled(None, token);
+                    self.fence_marks.retain(|(mark, _)| *mark > token);
+                }
             }
+            // Holds waiting for an acknowledged order may now release.
             self.release_held(now);
         }
         self.finish_event_scope(now);
@@ -5101,11 +5119,17 @@ impl<V: Venue> Engine<V> {
             return;
         }
         // A frame-fed engine never re-reads: its data source's frames carry the
-        // outcome, so no fence may outlive the command that raised it.
+        // outcome, and only they lift a fence (`apply_frame`).
         if self.io.core.frame_fed {
             self.io.core.reconcile_due.clear();
             let token = self.io.core.order_locks.token();
-            self.io.core.order_locks.reconciled(None, token);
+            if self
+                .fence_marks
+                .last()
+                .is_none_or(|(mark, _)| *mark < token)
+            {
+                self.fence_marks.push((token, now));
+            }
             if let Some((timer, _)) = self.reconcile_timer.take() {
                 self.io.core.actions.push(Action::ClearTimer { timer });
             }
