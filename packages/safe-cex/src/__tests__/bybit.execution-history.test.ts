@@ -317,7 +317,15 @@ const assertMicrosecondOrderHistoryTimestamp = async (
     return Promise.reject(new Error(`Unexpected URL ${url}`));
   });
 
-  const executions = await exchange.fetchHistoricalFills({ symbol, limit: 50 });
+  // An explicit window around the fixture: with the default range the result
+  // depended on today's date once the fixture (2026-10-27) fell inside it.
+  const fixtureMs = 1793096306496;
+  const executions = await exchange.fetchHistoricalFills({
+    symbol,
+    limit: 50,
+    from: fixtureMs - 60 * 60 * 1000,
+    to: fixtureMs + 60 * 60 * 1000,
+  });
 
   expect(executions).toEqual([
     {
