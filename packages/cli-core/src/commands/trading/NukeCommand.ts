@@ -1,3 +1,4 @@
+import { describeStoppedAlgos } from '@tealstreet/safe-cex/src/nukeResult';
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 
@@ -24,12 +25,17 @@ export class NukeCommand extends TradingBaseCommand {
     const logNukeError = (operation: string) => (e: unknown) => {
       this.printWarning(ctx, `Warning: ${operation} may have failed: ${(e as Error).message}`);
     };
+    // The running chasers and TWAPs the nuke stopped first, so none re-places.
+    const reportStopped = (result: unknown) => {
+      const stopped = describeStoppedAlgos(result);
+      if (stopped) this.printWarning(ctx, stopped);
+    };
 
     if (!args[1]) {
       if (!exchange.nuke) {
         return this.error('Exchange does not support nuke operation');
       }
-      exchange.nuke(3).catch(logNukeError('Nuke'));
+      exchange.nuke(3).then(reportStopped, logNukeError('Nuke'));
       this.printInfo(ctx, 'Nuking in progress...');
       return this.success();
     }
@@ -39,7 +45,7 @@ export class NukeCommand extends TradingBaseCommand {
         if (!exchange.nuke) {
           return this.error('Exchange does not support nuke operation');
         }
-        exchange.nuke(3).catch(logNukeError('Nuke'));
+        exchange.nuke(3).then(reportStopped, logNukeError('Nuke'));
         this.printInfo(ctx, 'Nuking in progress...');
         return this.success();
 
@@ -48,7 +54,7 @@ export class NukeCommand extends TradingBaseCommand {
         if (!exchange.nukePositions) {
           return this.error('Exchange does not support nuking positions');
         }
-        exchange.nukePositions(3).catch(logNukeError('Nuke positions'));
+        exchange.nukePositions(3).then(reportStopped, logNukeError('Nuke positions'));
         this.printInfo(ctx, 'Nuking all positions with max retries of 3.');
         return this.success();
 
@@ -57,7 +63,7 @@ export class NukeCommand extends TradingBaseCommand {
         if (!exchange.nukeOrders) {
           return this.error('Exchange does not support nuking orders');
         }
-        exchange.nukeOrders().catch(logNukeError('Nuke orders'));
+        exchange.nukeOrders().then(reportStopped, logNukeError('Nuke orders'));
         this.printInfo(ctx, 'Nuking all orders.');
         return this.success();
 
