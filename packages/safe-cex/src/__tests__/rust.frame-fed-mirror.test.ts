@@ -3,26 +3,11 @@ import type { WasmEngineModule } from '../exchanges/rust/rust.exchange';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderType, PositionSide } from '../types';
 import { consumerFrame } from './cutover/consumerFrame';
 import { engineCapabilities } from './fixtures/engineCapabilities';
-
-// The host wrapper lands with the engine's ingest (fe7lgm); this is its contract.
-type IngestingHost = EngineHost & { applyFrame?: (frame: ArrayBuffer, snapshot: boolean) => void };
-const hostPrototype = EngineHost.prototype as IngestingHost & {
-  run(actions: string): void;
-  engine: WasmEngineLike & { applyFrame(bytes: Uint8Array, snapshot: boolean, now: number): string };
-  transport: { now(): number };
-};
-const hadApplyFrame = 'applyFrame' in hostPrototype;
-if (!hadApplyFrame) {
-  hostPrototype.applyFrame = function (this: typeof hostPrototype, frame: ArrayBuffer, snapshot: boolean) {
-    this.run(this.engine.applyFrame(new Uint8Array(frame), snapshot, this.transport.now()));
-  };
-}
 
 const order = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 2 };
 
@@ -31,6 +16,7 @@ type Fake = {
   applied: Array<{ snapshot: boolean; bytes: number }>;
   started: number;
   constructed: number;
+  refuseNext?: boolean;
 };
 
 const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
@@ -69,6 +55,10 @@ const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
         : JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result) }]);
     },
     applyFrame: (bytes: Uint8Array, snapshot: boolean) => {
+      if (fake.refuseNext) {
+        fake.refuseNext = false;
+        throw new Error('frame refused');
+      }
       fake.applied.push({ snapshot, bytes: bytes.byteLength });
       return '[]';
     },
@@ -147,6 +137,21 @@ describe('frame-fed main-thread mirror', () => {
       { snapshot: true, bytes: 16 },
       { snapshot: false, bytes: 8 },
     ]);
+  });
+
+  it('asks for a fresh snapshot when the engine refuses a source frame, and drops deltas until then', async () => {
+    const fake = fakeEngine();
+    exchange = mirrorWith(fake).exchange;
+    await exchange.frameFedReady;
+    exchange.ingestSourceFrame(new ArrayBuffer(16), true);
+    const needsSnapshot = vi.fn();
+    exchange.on('frameFed:needsSnapshot', needsSnapshot);
+    fake.refuseNext = true;
+    exchange.ingestSourceFrame(new ArrayBuffer(8), false);
+    expect(needsSnapshot).toHaveBeenCalledOnce();
+    exchange.ingestSourceFrame(new ArrayBuffer(4), false);
+    exchange.ingestSourceFrame(new ArrayBuffer(32), true);
+    expect(fake.applied.map((frame) => frame.bytes)).toEqual([16, 32]);
   });
 
   it('fills the UI store from its own engine frames', async () => {
