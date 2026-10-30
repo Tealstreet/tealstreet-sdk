@@ -307,6 +307,9 @@ impl Session {
         let name = account.name.clone();
         match self.client(&account).await {
             Ok(client) => {
+                if let Some(algos) = &account.algos {
+                    let _ = algos.send(crate::algos::AlgoInput::Joined);
+                }
                 self.joined.insert(
                     name,
                     Joined {
@@ -827,10 +830,6 @@ impl Session {
             for client in std::iter::once(joined.client).chain(joined.old) {
                 client.pump.abort();
                 joined.account.handle.leave(client.id);
-            }
-            // Chases die with the socket that may have started them, as today.
-            if let Some(algos) = &joined.account.algos {
-                let _ = algos.send(crate::algos::AlgoInput::SocketClosed);
             }
             if self.identity.resumable
                 && self.identity.user.is_some()

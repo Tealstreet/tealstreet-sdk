@@ -481,7 +481,7 @@ impl Registry {
         let replaced = self.accounts.lock().unwrap().insert(key, account.clone());
         if let Some(replaced) = replaced {
             // A concurrent init of the same name won the race; the later build stands.
-            Self::stop(&replaced);
+            Self::stop(&replaced, "account replaced by a newer init");
         }
         Ok(account)
     }
@@ -611,6 +611,11 @@ impl Registry {
 
     /// Lets go of one holder; the last one disposes the account.
     pub fn release(&self, account: &Arc<Account>, holder: u64) {
+        self.release_for(account, holder, "account disposed");
+    }
+
+    /// `release`, recording why the account goes if this was its last holder.
+    fn release_for(&self, account: &Arc<Account>, holder: u64, reason: &str) {
         let empty = {
             let mut holders = account.holders.lock().unwrap();
             holders.by_id.remove(&holder);
@@ -618,16 +623,19 @@ impl Registry {
             holders.by_id.is_empty()
         };
         if empty {
-            self.dispose(account);
+            self.dispose_for(account, reason);
         }
     }
 
     /// With algos, their host settles chases first, then disposes the engine and signer.
-    fn stop(account: &Account) {
-        let handed = account
-            .algos
-            .as_ref()
-            .is_some_and(|algos| algos.send(crate::algos::AlgoInput::Dispose).is_ok());
+    fn stop(account: &Account, reason: &str) {
+        let handed = account.algos.as_ref().is_some_and(|algos| {
+            algos
+                .send(crate::algos::AlgoInput::Dispose {
+                    reason: reason.to_owned(),
+                })
+                .is_ok()
+        });
         if !handed {
             if let Some(link) = &account.link {
                 link.mark_unavailable();
@@ -638,6 +646,10 @@ impl Registry {
 
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
     pub fn dispose(&self, account: &Arc<Account>) {
+        self.dispose_for(account, "account disposed");
+    }
+
+    fn dispose_for(&self, account: &Arc<Account>, reason: &str) {
         let mut accounts = self.accounts.lock().unwrap();
         let key = (account.user.clone(), account.name.clone());
         if accounts
@@ -648,7 +660,7 @@ impl Registry {
         }
         drop(accounts);
         *account.holders.lock().unwrap() = Holders::default();
-        Self::stop(account);
+        Self::stop(account, reason);
     }
 
     /// Moves a closing socket's private accounts under `resume_id` for the grace
@@ -687,8 +699,9 @@ impl Registry {
             tokio::time::sleep(grace).await;
             let expired = registry.parked.lock().unwrap().remove(&resume_id);
             if let Some(expired) = expired {
+                let reason = format!("no browser for {}s", grace.as_secs());
                 for (account, park_holder) in expired.accounts {
-                    registry.release(&account, park_holder);
+                    registry.release_for(&account, park_holder, &reason);
                 }
             }
             // A resumed id stays an alias for one more grace window.

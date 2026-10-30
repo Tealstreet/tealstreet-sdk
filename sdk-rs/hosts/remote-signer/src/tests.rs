@@ -790,3 +790,65 @@ async fn a_fixed_request_id_waits_for_the_previous_one() {
     assert!(a.is_ok() && b.is_ok());
     assert_eq!(seen.lock().unwrap().len(), 2);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_sign_during_a_parked_gap_waits_for_the_browser_within_the_timeout() {
+    let link = SignerLink::new(1, Arc::new(|_| true));
+    link.suspend();
+    let waiting = {
+        let link = link.clone();
+        tokio::spawn(async move { link.round_trip("gap", &json!({ "id": "gap" })).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    let sent = Arc::new(Mutex::new(Vec::<String>::new()));
+    let record = sent.clone();
+    link.attach(
+        2,
+        Arc::new(move |frame| record.lock().unwrap().push(frame).eq(&())),
+    );
+    tokio::task::yield_now().await;
+    assert_eq!(
+        sent.lock().unwrap().len(),
+        1,
+        "sent over the reattached socket"
+    );
+    assert!(link.resolve(2, json!({ "id": "gap", "wsAuthSignature": "00" })));
+    assert_eq!(waiting.await.unwrap().unwrap()["wsAuthSignature"], "00");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sign_during_a_parked_gap_fails_after_the_timeout_and_sends_nothing() {
+    let sent = Arc::new(Mutex::new(0));
+    let count = sent.clone();
+    let link = SignerLink::new(
+        1,
+        Arc::new(move |_| {
+            *count.lock().unwrap() += 1;
+            true
+        }),
+    );
+    link.suspend();
+    let started = tokio::time::Instant::now();
+    assert_eq!(
+        link.round_trip("gap", &json!({ "id": "gap" })).await,
+        Err(crate::link::Failure::Suspended)
+    );
+    assert_eq!(started.elapsed(), SIGN_TIMEOUT);
+    assert_eq!(*sent.lock().unwrap(), 0);
+    // A browser back after the timeout signs new requests again.
+    link.attach(2, Arc::new(|_| true));
+    assert!(link.is_available());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sign_waiting_out_a_gap_fails_at_once_when_the_session_ends() {
+    let link = SignerLink::new(1, Arc::new(|_| true));
+    link.suspend();
+    let waiting = {
+        let link = link.clone();
+        tokio::spawn(async move { link.round_trip("gap", &json!({ "id": "gap" })).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    link.mark_unavailable();
+    assert_eq!(waiting.await.unwrap(), Err(crate::link::Failure::Unavailable));
+}
