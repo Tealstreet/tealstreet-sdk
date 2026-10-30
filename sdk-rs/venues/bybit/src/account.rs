@@ -20,8 +20,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// Positions and the wallet are re-read this often; the stream carries
 /// changes in between, so this only repairs what a dropped frame missed.
 const RECONCILE_INTERVAL_MS: f64 = 5_000.0;
-/// While the private topics are live, positions and the wallet come from them;
-/// REST re-reads them only this often as a safety reconcile (TS polled every tick).
+/// While the private topics are live, positions (with no position open) and the
+/// wallet come from them; REST re-reads them only this often as a safety
+/// reconcile (TS polled every tick).
 const SAFETY_RECONCILE_MS: f64 = 60_000.0;
 /// Consecutive Hyro reads the private stream may overtake before one is admitted.
 const HYRO_OVERTAKEN_READS: u8 = 2;
@@ -1885,12 +1886,22 @@ impl BybitLinear {
             self.account.last_orders_retry_at = now;
             self.fetch_orders(cx);
         }
-        if !self.account_reads_due(now) {
-            return;
+        let reconcile = self.account_reads_due(now);
+        // Position unrealized PnL is venue-reported and the position topic may push
+        // only on position changes, so an open position keeps its per-tick read.
+        if reconcile
+            || cx
+                .store
+                .positions()
+                .iter()
+                .any(|position| position.contracts > 0.0)
+        {
+            self.fetch_positions(cx);
         }
-        self.account.last_account_read_at = now;
-        self.fetch_positions(cx);
-        self.fetch_wallet(cx);
+        if reconcile {
+            self.account.last_account_read_at = now;
+            self.fetch_wallet(cx);
+        }
     }
 
     /// Positions and the wallet stream on the private topics; REST re-reads them

@@ -3479,3 +3479,45 @@ fn live_private_topics_turn_position_and_wallet_polls_into_a_60s_safety_reconcil
     h.advance(POLL_MS);
     assert!(polls_account(&h), "{:?}", h.paths());
 }
+
+#[test]
+fn an_open_position_keeps_its_per_tick_position_read_while_the_wallet_waits() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    respond_snapshot(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"c"}"#,
+    );
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe","conn_id":"c"}"#,
+    );
+    // The gap read reports an open BTCUSDT long.
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY_LIST);
+    }
+    while h.has_request("/v5/position/list") {
+        h.respond("/v5/position/list", 200, POSITIONS);
+    }
+    while h.has_request("/v5/account/wallet-balance") {
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
+    }
+    let pong = r#"{"success":true,"ret_msg":"pong","conn_id":"c","op":"pong"}"#;
+    for _ in 0..11 {
+        h.advance(POLL_MS);
+        h.message("/v5/private", pong);
+        // Venue-reported unrealized PnL: positions every tick; the wallet waits.
+        assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
+        assert!(
+            !h.has_request("/v5/account/wallet-balance"),
+            "{:?}",
+            h.paths()
+        );
+        while h.has_request("/v5/position/list") {
+            h.respond("/v5/position/list", 200, POSITIONS);
+        }
+    }
+}
