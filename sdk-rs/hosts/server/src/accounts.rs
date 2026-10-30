@@ -450,8 +450,11 @@ impl Registry {
                 account.notify(text);
             }
         });
-        let algo_venue = venue.clone();
-        let algo_name = init.account_name.clone();
+        let algo_who = crate::audit::Who {
+            user: user.to_owned(),
+            account: init.account_name.clone(),
+            venue: venue.clone(),
+        };
         let (spawned, receive) = tokio::sync::oneshot::channel();
         let placed = self.threads.place(move |placement| {
             let transport = NetworkTransport::with_routing(plan, tokens);
@@ -466,8 +469,7 @@ impl Registry {
                             tokio::task::spawn_local(crate::algos::run(
                                 handle.clone(),
                                 algo_client,
-                                algo_venue,
-                                algo_name,
+                                algo_who,
                                 emit,
                                 algo_signer,
                                 inbox,
