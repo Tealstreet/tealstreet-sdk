@@ -28,6 +28,8 @@ pub enum Plan {
         command: Value,
         reply: Reply,
     },
+    /// A fresh full snapshot of the engine's state to this socket, then `result`.
+    Resnapshot(Value),
     /// Exec's nuke on the account's algo host: `all`, `positions` or `orders`.
     Nuke(&'static str),
 }
@@ -620,6 +622,11 @@ pub fn translate(
             }
             one(command("fetchOrderHistory", out, false))
         }
+        // The engine owns venue reconciliation (it has no command for it); these
+        // re-baseline the caller from the engine with a fresh full snapshot.
+        "fetchAndSetPrivateSnapshot" => one(Plan::Resnapshot(Value::Null)),
+        // TS answers whether every socket recovered.
+        "recoverAfterOffline" => one(Plan::Resnapshot(Value::Bool(true))),
         // The close-all button: exec's nuke, which awaits and reports every leg.
         "nuke" | "nukePositions" | "nukeOrders" if public_only => {
             Err(refused("Error", "A public account has nothing to nuke"))
@@ -1196,6 +1203,19 @@ mod tests {
             );
             assert!(translate(method, &[], &caps(), &[], true).is_err());
         }
+    }
+
+    // Web: sendOutcome / cancelOrders / updateOrder resync, ConnectionStateWorker / desktopRecovery.
+    #[test]
+    fn web_resync_methods_re_snapshot_and_answer_like_ts() {
+        assert_eq!(
+            translate("fetchAndSetPrivateSnapshot", &[], &caps(), &[], false).unwrap(),
+            vec![Plan::Resnapshot(Value::Null)]
+        );
+        assert_eq!(
+            translate("recoverAfterOffline", &[], &caps(), &[], false).unwrap(),
+            vec![Plan::Resnapshot(Value::Bool(true))]
+        );
     }
 
     #[test]

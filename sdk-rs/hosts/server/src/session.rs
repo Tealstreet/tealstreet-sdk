@@ -320,9 +320,10 @@ impl Session {
 
     /// A new client on the same account takes a full snapshot (seq 1); the old
     /// one stops forwarding frames and leaves once its replies are in.
-    async fn resnapshot(&mut self, name: &str) {
+    /// A fresh full snapshot for this socket's client; false when none could start.
+    async fn resnapshot(&mut self, name: &str) -> bool {
         let Some(account) = self.joined.get(name).map(|joined| joined.account.clone()) else {
-            return;
+            return false;
         };
         match self.client(&account).await {
             Ok(client) => {
@@ -344,8 +345,12 @@ impl Session {
                 } else {
                     joined.old.push(old);
                 }
+                true
             }
-            Err(error) => self.send(envelope::error(Some(name), error)),
+            Err(error) => {
+                self.send(envelope::error(Some(name), error));
+                false
+            }
         }
     }
 
@@ -376,7 +381,9 @@ impl Session {
             .and_then(Value::as_str)
             .map(str::to_owned);
         match (msg.op.as_str(), symbol, interval) {
-            ("sendSnapshot", _, _) => self.resnapshot(&name).await,
+            ("sendSnapshot", _, _) => {
+                self.resnapshot(&name).await;
+            }
             ("subscribeOrderBook", Some(symbol), _) => self.subscribe(
                 &name,
                 json!({"op": "subscribeOrderBook", "symbol": symbol}),
@@ -573,6 +580,23 @@ impl Session {
                             "Error",
                             "nuke is unavailable for this account",
                             Some("notSent"),
+                        );
+                    }
+                }
+                Plan::Resnapshot(result) => {
+                    if self.resnapshot(name).await {
+                        self.send(envelope::msg(
+                            name,
+                            "callMethod:done",
+                            json!({"requestId": request_id, "success": true, "result": result}),
+                        ));
+                    } else {
+                        self.reply_failure(
+                            name,
+                            &request_id,
+                            "Error",
+                            "the account could not re-snapshot",
+                            None,
                         );
                     }
                 }
