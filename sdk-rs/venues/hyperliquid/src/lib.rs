@@ -470,6 +470,10 @@ impl Hyperliquid {
         }
     }
     fn start_socket(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Frame-fed engines stream nothing; their data source does.
+        if cx.frame_fed() {
+            return;
+        }
         if let Err(error) = self.managed_connect(cx) {
             Self::socket_refused(cx, error);
         }
