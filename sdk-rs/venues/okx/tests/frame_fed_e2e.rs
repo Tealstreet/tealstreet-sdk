@@ -348,7 +348,7 @@ fn placed_pos_side(page: &mut Engine<Okx>, command: u32, now: f64) -> bool {
 fn a_confirmed_position_mode_outlasts_a_stale_source_frame() {
     let mut source = flat_source();
     let mut page = frame_fed();
-    page.apply_frame(2.0, &source.snapshot_frame(2.0).to_vec(), true)
+    page.apply_frame(2.0, source.snapshot_frame(2.0), true)
         .unwrap();
     assert!(!page.store().hedged());
     set_mode(&mut page, 1, true, 3.0);
@@ -371,16 +371,16 @@ fn a_confirmed_position_mode_outlasts_a_stale_source_frame() {
 fn a_source_frame_with_the_new_mode_releases_the_hold() {
     let mut source = flat_source();
     let mut page = frame_fed();
-    page.apply_frame(2.0, &source.snapshot_frame(2.0).to_vec(), true)
+    page.apply_frame(2.0, source.snapshot_frame(2.0), true)
         .unwrap();
     set_mode(&mut page, 1, true, 3.0);
     source.store_mut().set_hedged(true);
-    page.apply_frame(4.0, &source.snapshot_frame(4.0).to_vec(), true)
+    page.apply_frame(4.0, source.snapshot_frame(4.0), true)
         .unwrap();
     assert!(page.store().hedged());
     // Released: a later change on the source now applies at once.
     source.store_mut().set_hedged(false);
-    page.apply_frame(5.0, &source.snapshot_frame(5.0).to_vec(), true)
+    page.apply_frame(5.0, source.snapshot_frame(5.0), true)
         .unwrap();
     assert!(!page.store().hedged());
 }
@@ -392,7 +392,7 @@ fn a_confirmed_leverage_outlasts_a_stale_source_frame_until_the_hold_expires() {
         .store_mut()
         .update_setting("BTCUSDT", |s| s.leverage = 5.);
     let mut page = frame_fed();
-    page.apply_frame(2.0, &source.snapshot_frame(2.0).to_vec(), true)
+    page.apply_frame(2.0, source.snapshot_frame(2.0), true)
         .unwrap();
     let sent = send(
         &mut page,
@@ -411,12 +411,12 @@ fn a_confirmed_leverage_outlasts_a_stale_source_frame_until_the_hold_expires() {
         3.1,
     );
     let _ = prepared(&mut page, 3.1);
-    page.apply_frame(4.0, &source.snapshot_frame(4.0).to_vec(), true)
+    page.apply_frame(4.0, source.snapshot_frame(4.0), true)
         .unwrap();
     assert_eq!(page.store().setting("BTCUSDT").unwrap().leverage, 10.);
     // The source never confirms it: after the hold the source's value applies.
     let late = 3.1 + safe_cex_engine::setting_holds::HOLD_MS;
-    page.apply_frame(late, &source.snapshot_frame(late).to_vec(), true)
+    page.apply_frame(late, source.snapshot_frame(late), true)
         .unwrap();
     assert_eq!(page.store().setting("BTCUSDT").unwrap().leverage, 5.);
 }
@@ -459,7 +459,7 @@ fn a_flat_symbols_leverage_is_confirmed_by_the_sources_refresh_read() {
         .store_mut()
         .update_setting("BTCUSDT", |s| s.leverage = 5.);
     let mut page = frame_fed();
-    page.apply_frame(2.0, &source.snapshot_frame(2.0).to_vec(), true)
+    page.apply_frame(2.0, source.snapshot_frame(2.0), true)
         .unwrap();
     let sent = send(
         &mut page,
@@ -510,13 +510,13 @@ fn a_flat_symbols_leverage_is_confirmed_by_the_sources_refresh_read() {
     assert_eq!(source.store().setting("BTCUSDT").unwrap().leverage, 10.);
 
     // Its next frame agrees, so the page's hold releases at once.
-    page.apply_frame(5.0, &source.snapshot_frame(5.0).to_vec(), true)
+    page.apply_frame(5.0, source.snapshot_frame(5.0), true)
         .unwrap();
     assert_eq!(page.store().setting("BTCUSDT").unwrap().leverage, 10.);
     source
         .store_mut()
         .update_setting("BTCUSDT", |s| s.leverage = 7.);
-    page.apply_frame(6.0, &source.snapshot_frame(6.0).to_vec(), true)
+    page.apply_frame(6.0, source.snapshot_frame(6.0), true)
         .unwrap();
     assert_eq!(
         page.store().setting("BTCUSDT").unwrap().leverage,
