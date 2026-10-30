@@ -87,10 +87,10 @@ impl Object {
 pub fn write_number(value: f64, out: &mut String) {
     if !value.is_finite() {
         out.push_str("null");
-    } else if value.fract() == 0.0 && value.abs() < 9_007_199_254_740_992.0 {
-        out.push_str(&(value as i64).to_string());
+    } else if value == 0.0 {
+        out.push('0');
     } else {
-        out.push_str(&serde_json::to_string(&value).expect("a finite number serializes"));
+        out.push_str(ryu_js::Buffer::new().format_finite(value));
     }
 }
 
@@ -104,7 +104,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn numbers_render_integral_or_shortest_round_trip() {
+    fn numbers_use_the_javascript_spelling() {
         let cases = [
             (100.0, "100"),
             (-0.0, "0"),
@@ -112,6 +112,21 @@ mod tests {
             (1e21, "1e+21"),
             (1.5e-7, "1.5e-7"),
             (123456789012.5, "123456789012.5"),
+            // Golden spellings from node's `JSON.stringify`.
+            (-42.0, "-42"),
+            (1e-7, "1e-7"),
+            (1e-6, "0.000001"),
+            (0.0000015, "0.0000015"),
+            (0.00001234, "0.00001234"),
+            (9007199254740991.0, "9007199254740991"),
+            (9007199254740992.0, "9007199254740992"),
+            (1e16, "10000000000000000"),
+            (12345678901234567890.0, "12345678901234567000"),
+            (1e20, "100000000000000000000"),
+            (1.5e21, "1.5e+21"),
+            (-1e21, "-1e+21"),
+            (1e300, "1e+300"),
+            (5e-324, "5e-324"),
             (f64::NAN, "null"),
             (f64::INFINITY, "null"),
         ];
