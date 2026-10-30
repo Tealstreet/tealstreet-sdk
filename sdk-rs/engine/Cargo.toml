@@ -31,6 +31,9 @@ managed-sockets = []
 # Opt-in native receive, initial-payload and stability timing.
 socket-native-timing = ["managed-sockets"]
 order-locks = []
+# Frame-fed ingest applies the source's MARKETS leverage limits; only venues
+# whose limits are private metadata (Binance brackets) link it.
+source-leverage = []
 # Read-only signing-task metadata for hosted signing; only Kraken and Paradex link it.
 sign-meta = []
 # Engine-issued repair cancel/replace authority; only Phemex and Backpack link it.
