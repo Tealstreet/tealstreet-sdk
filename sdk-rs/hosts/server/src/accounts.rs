@@ -234,6 +234,24 @@ impl Account {
         self.sign_through(&mut holders, id, &live);
     }
 
+    /// Sends a frame, if given, to every live socket holding this account.
+    fn reach_live(&self, text: Option<String>) -> crate::algos::Holding {
+        let holders = self.holders.lock().unwrap();
+        let mut holding = crate::algos::Holding::default();
+        for (id, holder) in &holders.by_id {
+            match holder {
+                Some(live) => {
+                    holding.live.push(*id);
+                    if let Some(text) = &text {
+                        (live.outbox)(text.clone());
+                    }
+                }
+                None => holding.parked = true,
+            }
+        }
+        holding
+    }
+
     /// The current signing socket's outbox, for notices about the account itself.
     pub fn notify(&self, text: String) {
         let holders = self.holders.lock().unwrap();
@@ -241,6 +259,30 @@ impl Account {
             (live.outbox)(text);
         }
     }
+}
+
+/// How an account's algo host reaches its sockets, without a cycle back to it.
+fn algo_reach(
+    owner: Arc<Mutex<Option<std::sync::Weak<Account>>>>,
+) -> (crate::algos::Emit, crate::algos::Broadcast) {
+    let upgrade = |owner: &Mutex<Option<std::sync::Weak<Account>>>| {
+        owner
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade)
+    };
+    let emit_owner = owner.clone();
+    (
+        Box::new(move |text| {
+            if let Some(account) = upgrade(&emit_owner) {
+                account.notify(text);
+            }
+        }),
+        Box::new(move |text| {
+            upgrade(&owner).map_or_else(Default::default, |account| account.reach_live(text))
+        }),
+    )
 }
 
 struct Parked {
@@ -658,16 +700,7 @@ impl Registry {
         let algo_client = self.next_id();
         let algo_signer = link.clone();
         let owner = algo_owner.clone();
-        let emit: crate::algos::Emit = Box::new(move |text| {
-            let account = owner
-                .lock()
-                .unwrap()
-                .as_ref()
-                .and_then(std::sync::Weak::upgrade);
-            if let Some(account) = account {
-                account.notify(text);
-            }
-        });
+        let (emit, broadcast) = algo_reach(owner);
         let algo_who = crate::audit::Who {
             user: user.to_owned(),
             account: init.account_name.clone(),
@@ -689,6 +722,7 @@ impl Registry {
                                 algo_client,
                                 algo_who,
                                 emit,
+                                broadcast,
                                 algo_signer,
                                 algo_placed,
                                 algo_held,
@@ -1108,16 +1142,7 @@ pub(crate) mod tests {
         let (account, inbox) = held_account_with(Some(link.clone()), fingerprint);
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
         let owner = account.algo_owner.clone();
-        let emit: crate::algos::Emit = Box::new(move |text| {
-            let account = owner
-                .lock()
-                .unwrap()
-                .as_ref()
-                .and_then(std::sync::Weak::upgrade);
-            if let Some(account) = account {
-                account.notify(text);
-            }
-        });
+        let (emit, broadcast) = algo_reach(owner);
         tokio::task::spawn_local(crate::algos::run(
             account.handle.clone(),
             1_000_000,
@@ -1127,12 +1152,24 @@ pub(crate) mod tests {
                 venue: account.venue.clone(),
             },
             emit,
+            broadcast,
             Some(link),
             account.placed.clone(),
             account.held.clone(),
             inbox,
         ));
         account
+    }
+
+    /// Another live socket holding `account`, which then signs through it.
+    pub(crate) fn hold_live(account: &Account, id: u64, outbox: Outbox) {
+        account.hold(
+            id,
+            Live {
+                outbox,
+                token: None,
+            },
+        );
     }
 
     /// The socket `account` signs through.

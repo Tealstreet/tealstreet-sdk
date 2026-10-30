@@ -224,15 +224,29 @@ impl ChaserBook {
         self.emit_json("error", message);
     }
 
+    /// The store shows the order finished: filled or cancelled, nothing to cancel.
+    fn known_closed(&self, id: &str) -> bool {
+        self.store().order(id).is_some_and(|order| {
+            matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+        })
+    }
+
     /// A stopping chase's cancel the venue refused leaves the order open: say so,
     /// rather than reporting the chase finished as if nothing were left behind.
-    fn cancel_failed(&self, symbol: &str, ids: &str, error: &VenueError) {
+    /// Not for an order the store has since seen finish, while the cancel waited.
+    fn cancel_failed(&self, symbol: &str, ids: &[String], error: &VenueError) {
         let gone = ["already canceled", "already filled", "never placed"]
             .iter()
             .any(|phrase| error.message.contains(phrase));
-        if !gone {
+        let open: Vec<&str> = ids
+            .iter()
+            .filter(|id| !self.known_closed(id))
+            .map(String::as_str)
+            .collect();
+        if !gone && !open.is_empty() {
             self.error(&format!(
-                "Chaser could not cancel {symbol} order {ids}: {}; it may still be open",
+                "Chaser could not cancel {symbol} order {}: {}; it may still be open",
+                open.join(", "),
                 error.message
             ));
         }
@@ -572,10 +586,15 @@ impl ChaserBook {
                 let filled_or_gone = ["already canceled", "already filled", "never placed"]
                     .iter()
                     .any(|phrase| message.contains(phrase));
-                if !(fill_tracked && filled_or_gone) {
+                let finished_meanwhile = to_cancel.iter().all(|id| self.known_closed(id));
+                if !(fill_tracked && filled_or_gone) && !finished_meanwhile {
                     self.error("Chaser failed to cancel orders, stopping");
                     chase.mark_complete("Failed to cancel orders");
                     return Ok(());
+                }
+                // Before any replacement, so a fill not yet applied cannot overfill.
+                if finished_meanwhile {
+                    self.apply_order_fill_state(chase, &self.tracked_orders(chase));
                 }
             }
         }
@@ -779,7 +798,7 @@ impl ChaserBook {
                 if !ids.is_empty() {
                     // STOP raced the placement: cancel what landed ourselves.
                     if let Err(error) = self.cancel(&chase.options.symbol, &ids).await {
-                        self.cancel_failed(&chase.options.symbol, &ids.join(", "), &error);
+                        self.cancel_failed(&chase.options.symbol, &ids, &error);
                     }
                 }
                 return Vec::new();
@@ -865,12 +884,15 @@ impl ChaserBook {
         self.detach(&chase);
         let ids = chase.take_current();
         for id in &ids {
+            if self.known_closed(id) {
+                continue;
+            }
             let symbol = self.store().order(id).map_or_else(
                 || chase.options.symbol.clone(),
                 |order| order.symbol.clone(),
             );
             if let Err(error) = self.cancel(&symbol, std::slice::from_ref(id)).await {
-                self.cancel_failed(&symbol, id, &error);
+                self.cancel_failed(&symbol, std::slice::from_ref(id), &error);
             }
         }
         if owns_completion {

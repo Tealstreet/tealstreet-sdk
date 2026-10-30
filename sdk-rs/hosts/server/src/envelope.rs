@@ -149,6 +149,19 @@ pub fn error(account_name: Option<&str>, message: &str) -> String {
     )
 }
 
+/// An algo error: shown even over a reconnect or to a hidden tab (`forceToast`), which
+/// would otherwise only log it, since it can mean an order is left resting.
+pub fn algo_error(account_name: &str, message: Value) -> String {
+    envelope(
+        "msg",
+        json!({
+            "op": "error",
+            "accountName": account_name,
+            "data": [message, {"forceToast": true}],
+        }),
+    )
+}
+
 /// An init the server will not build: shown to the user at once (`forceToast`),
 /// and marked `initRefused` so the client can stop waiting for that account to load.
 pub fn init_refused(account_name: &str, message: &str) -> String {

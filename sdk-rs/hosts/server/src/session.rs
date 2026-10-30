@@ -363,9 +363,8 @@ impl Session {
                 self.join(account).await;
                 // Algos stopped while no browser was attached: say why, once.
                 if let Some(notice) = self.registry.take_notice(self.user(), &init.account_name) {
-                    self.send(envelope::msg(
+                    self.send(envelope::algo_error(
                         &init.account_name,
-                        "error",
                         Value::String(notice),
                     ));
                 }
@@ -1398,7 +1397,12 @@ mod tests {
                     2,
                     "the two unheard errors, once each: {errors:?}"
                 );
-                assert!(errors.iter().all(Value::is_string), "{errors:?}");
+                assert!(
+                    errors
+                        .iter()
+                        .all(|data| data[0].is_string() && data[1]["forceToast"] == true),
+                    "shown even with the reconnect still settling: {errors:?}"
+                );
 
                 // Once a frame shows this socket got them, a re-join has nothing to say.
                 session.heard();
@@ -1488,6 +1492,96 @@ mod tests {
                     errors(),
                     2,
                     "the gap's error too, and the new one not twice"
+                );
+            })
+            .await;
+    }
+
+    /// A second device holds the account while the signing tab drops. It sees the
+    /// error live, and its frames, or the hand-over to it, must not cost the tab its copy.
+    #[tokio::test]
+    async fn a_second_device_sees_the_error_and_the_dropped_tab_still_gets_it() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account = crate::accounts::tests::held_account_running_algos(
+                    link.clone(),
+                    init.fingerprint(),
+                );
+                crate::accounts::tests::register(&registry, &account);
+                let second = Arc::new(Mutex::new(Vec::<String>::new()));
+                let record = second.clone();
+                let outbox: Outbox = Arc::new(move |frame| {
+                    record.lock().unwrap().push(frame);
+                    true
+                });
+                crate::accounts::tests::hold_live(&account, 3, outbox);
+                crate::accounts::tests::hold_live(&account, 7, Arc::new(|_| true));
+                settle().await;
+                let refuse = || {
+                    account
+                        .algos
+                        .as_ref()
+                        .unwrap()
+                        .send(crate::algos::AlgoInput::Op {
+                            op: "chaser:start".into(),
+                            data: "not a chase".into(),
+                            origin: "test".into(),
+                        })
+                        .unwrap();
+                };
+                let errors = |frames: &[String]| {
+                    frames
+                        .iter()
+                        .filter(|frame| frame.contains(r#""op":"error""#))
+                        .count()
+                };
+                // The tab is gone but looks live; the second device is fine.
+                refuse();
+                settle().await;
+                link.heard(3);
+                assert_eq!(
+                    errors(&second.lock().unwrap()),
+                    1,
+                    "the second device, live"
+                );
+                // Its drop is seen: signing hands over, which attaches and marks it heard.
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                assert_eq!(crate::accounts::tests::signing(&account), Some(3));
+                // Raised with the tab parked: only the second device can be told now.
+                refuse();
+                settle().await;
+                link.heard(3);
+                assert_eq!(errors(&second.lock().unwrap()), 2);
+
+                let (out, mut sent, _) = Out::channel(64);
+                let identity = Identity {
+                    user: Some("u".into()),
+                    token: Some(("t".into(), u64::MAX)),
+                    resume_from: Some("r1".into()),
+                    resumable: true,
+                };
+                let mut session =
+                    Session::new(registry, Arc::new(Metrics::default()), identity, out);
+                session.open().await;
+                settle().await;
+                let mut replayed = 0;
+                while let Ok(frame) = sent.try_recv() {
+                    replayed += usize::from(frame.contains(r#""op":"error""#));
+                }
+                assert_eq!(replayed, 2, "the tab gets both, once each");
+                assert_eq!(
+                    errors(&second.lock().unwrap()),
+                    2,
+                    "the second device is not told again"
                 );
             })
             .await;

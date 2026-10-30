@@ -447,6 +447,75 @@ async fn a_refused_cancel_on_stop_says_the_order_may_still_be_open() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_order_filled_before_the_drop_is_neither_cancelled_nor_reported_open() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (_factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.refuse_cancels();
+        port.update_order("o1", |order| order.status = OrderStatus::Closed);
+        settle(10).await;
+        assert!(port.cancels().is_empty(), "{:?}", port.cancels());
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+        assert_eq!(port.completes().len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_order_that_fills_while_its_cancel_waits_is_not_reported_open() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (_factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        // As in a drop: the sign times out, and the fill lands on the venue meanwhile.
+        let weak = Rc::downgrade(&port);
+        *port.responder.borrow_mut() = Box::new(move |command| match command {
+            Command::CancelOrders { .. } | Command::CancelOrdersWithSymbols { .. } => {
+                weak.upgrade().unwrap().update_order("o1", |order| {
+                    order.status = OrderStatus::Closed;
+                });
+                Err(VenueError::new("cancel refused").outcome(Outcome::NotSent))
+            }
+            _ => Ok("null".into()),
+        });
+        port.set_ticker(101.0, 101.5);
+        settle(2000).await;
+        assert_eq!(port.cancels(), ["o1"], "the one that raced, none after");
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+        assert_eq!(port.placements().len(), 1, "no replacement");
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_order_still_open_when_its_cancel_is_refused_is_reported() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (_factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.refuse_cancels();
+        port.set_ticker(101.0, 101.5);
+        settle(2000).await;
+        let errors = port.errors();
+        assert!(
+            errors.iter().any(|e| e.contains("failed to cancel")),
+            "{errors:?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("o1") && e.contains("may still be open")),
+            "{errors:?}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_favorable_move_leaves_the_order_resting() {
     local(async {
         let port = FakePort::new("bybit");

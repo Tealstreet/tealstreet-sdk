@@ -50,10 +50,8 @@ struct State {
     unavailable_since: Option<Instant>,
     /// The last frame of any kind from the signing socket.
     heard_at: Instant,
-    /// `heard_at` of the socket the last `attach` replaced.
-    heard_before_attach: Instant,
-    /// When the signing socket last changed.
-    attached_at: Instant,
+    /// The last frame from each recent socket, signing or not.
+    heard_by: HashMap<SocketId, Instant>,
     /// id → (token, socket it was sent on, its sign-req frame, waiter).
     pending: HashMap<String, (u64, SocketId, String, Waiter)>,
     next_token: u64,
@@ -61,6 +59,9 @@ struct State {
     echo: Option<(u64, Instant, EchoSize)>,
     echo_seq: u64,
 }
+
+/// Sockets `heard_by` remembers; more than a few only on a link flapping for minutes.
+const HEARD_SOCKETS: usize = 16;
 
 pub struct SignerLink {
     state: Mutex<State>,
@@ -78,8 +79,7 @@ impl SignerLink {
                 suspended: false,
                 unavailable_since: None,
                 heard_at: Instant::now(),
-                heard_before_attach: Instant::now(),
-                attached_at: Instant::now(),
+                heard_by: HashMap::new(),
                 pending: HashMap::new(),
                 next_token: 0,
                 last_sign_req_bytes: 0,
@@ -104,8 +104,18 @@ impl SignerLink {
     /// Any frame from `socket`: the browser behind the signing socket is there.
     pub fn heard(&self, socket: SocketId) {
         let mut state = self.state();
+        let now = Instant::now();
         if state.socket == socket {
-            state.heard_at = Instant::now();
+            state.heard_at = now;
+        }
+        state.heard_by.insert(socket, now);
+        if state.heard_by.len() > HEARD_SOCKETS {
+            let oldest = state
+                .heard_by
+                .iter()
+                .min_by_key(|(_, at)| **at)
+                .map(|(id, _)| *id);
+            oldest.map(|id| state.heard_by.remove(&id));
         }
     }
 
@@ -114,16 +124,17 @@ impl SignerLink {
         self.state().heard_at
     }
 
-    /// Whether something sent at `sent` may never have reached the browser: no
-    /// frame followed it on the socket it went to, as far as this link can tell.
-    pub fn unheard_since(&self, sent: Instant) -> bool {
-        let state = self.state();
-        (sent > state.heard_before_attach && sent <= state.attached_at) || sent > state.heard_at
+    /// Whether a frame from `socket` followed something sent to it at `sent`.
+    pub fn heard_since(&self, socket: SocketId, sent: Instant) -> bool {
+        self.state()
+            .heard_by
+            .get(&socket)
+            .is_some_and(|at| *at > sent)
     }
 
-    /// Whether something sent at `sent` went to the current signing socket.
-    pub fn sent_on_current_socket(&self, sent: Instant) -> bool {
-        sent > self.state().attached_at
+    /// The socket signing goes through now.
+    pub fn socket(&self) -> SocketId {
+        self.state().socket
     }
 
     /// How long the client has been gone, if it is.
@@ -259,10 +270,6 @@ impl SignerLink {
                 *sent = socket;
                 moved.push((id.clone(), frame.clone()));
             }
-        }
-        if state.socket != socket {
-            state.heard_before_attach = state.heard_at;
-            state.attached_at = Instant::now();
         }
         state.socket = socket;
         state.out = out.clone();
