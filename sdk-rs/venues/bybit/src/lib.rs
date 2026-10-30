@@ -2608,6 +2608,7 @@ impl Venue for BybitLinear {
 
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
         let Some(state) = venue_state::VenueState::decode(bytes) else {
+            cx.venue_state_unreadable("Unreadable Bybit venue state from the data source");
             return;
         };
         let accounts = std::iter::once((self.category, &mut self.account)).chain(

@@ -1681,6 +1681,10 @@ struct IoCore {
     frame_fed: bool,
     /// Frame-fed: settings this engine confirmed, kept over the source's frames.
     setting_holds: crate::setting_holds::SettingHolds,
+    /// Frame-fed: the source's VENUE_STATE in the frame being applied was
+    /// unreadable, and whether that outage has already warned.
+    venue_state_unreadable: bool,
+    venue_state_warned: bool,
     /// Frame-fed, during `on_frame_ingested`: see `Cx::source_orders_cover`.
     pub(crate) source_orders_cover: Option<f64>,
     /// Attempts a Session resume selected with no delivery in this event: the
@@ -1858,6 +1862,8 @@ impl Default for IoCore {
             private_feed_policy: Default::default(),
             frame_fed: false,
             setting_holds: Default::default(),
+            venue_state_unreadable: false,
+            venue_state_warned: false,
             source_orders_cover: None,
             #[cfg(feature = "http-plans")]
             session_resumed: Vec::new(),
@@ -2274,6 +2280,16 @@ impl<P> Cx<'_, P> {
 
     pub fn setting_held(&self, key: &crate::setting_holds::SettingKey) -> bool {
         self.io.core.setting_holds.held(key)
+    }
+
+    /// Frame-fed, in `apply_venue_state`: the source's VENUE_STATE could not be
+    /// read, so this engine keeps its last state. Warns once, until a readable
+    /// one arrives.
+    pub fn venue_state_unreadable(&mut self, message: &str) {
+        self.io.core.venue_state_unreadable = true;
+        if !std::mem::replace(&mut self.io.core.venue_state_warned, true) {
+            self.notice(Level::Warn, crate::log::code::STREAM_MALFORMED, message);
+        }
     }
 
     pub fn release_setting(&mut self, key: &crate::setting_holds::SettingKey) {
@@ -4131,7 +4147,9 @@ impl<V: Venue> Engine<V> {
             );
         }
         if let Some(state) = &applied.venue_state {
+            cx.io.core.venue_state_unreadable = false;
             self.venue.apply_venue_state(&mut cx, state);
+            cx.io.core.venue_state_warned = cx.io.core.venue_state_unreadable;
             cx.io.core.setting_holds.dispute_venue_keys();
         }
         // The source's orders are the reconcile, but only for a write sent well

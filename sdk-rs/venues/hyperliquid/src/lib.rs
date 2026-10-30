@@ -1190,7 +1190,14 @@ impl Venue for Hyperliquid {
         let source = match state {
             [1, 1, ..] => Some(false),
             [1, 2, ..] => Some(true),
-            _ => return,
+            // The source has not read the approval yet.
+            [1, 0, ..] => return,
+            _ => {
+                cx.venue_state_unreadable(
+                    "Unreadable Hyperliquid venue state from the data source",
+                );
+                return;
+            }
         };
         // A held approval (this engine's own read) wins until the source agrees.
         if cx.setting_held(&BUILDER_HOLD) {

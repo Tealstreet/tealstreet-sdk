@@ -1336,11 +1336,7 @@ impl Venue for BinanceFutures {
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
         if !BinanceFutures::apply_venue_state(self, state) {
-            cx.notice(
-                Level::Warn,
-                code::STREAM_MALFORMED,
-                "Unreadable Binance venue state from the data source",
-            );
+            cx.venue_state_unreadable("Unreadable Binance venue state from the data source");
         }
     }
     fn fence_uncertain_placements(&self) -> bool {

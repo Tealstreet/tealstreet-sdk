@@ -695,11 +695,7 @@ impl Venue for Bingx {
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
         if !self.trading.apply_venue_state(state, cx.store) {
-            cx.notice(
-                Level::Warn,
-                code::STREAM_MALFORMED,
-                "Unreadable BingX venue state from the data source",
-            );
+            cx.venue_state_unreadable("Unreadable BingX venue state from the data source");
         }
     }
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {

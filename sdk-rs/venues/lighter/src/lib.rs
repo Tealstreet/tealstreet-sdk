@@ -812,6 +812,7 @@ impl Venue for Lighter {
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
         let Some(state) = venue_state::VenueState::decode(bytes) else {
+            cx.venue_state_unreadable("Unreadable Lighter venue state from the data source");
             return;
         };
         if let Some(account) = state.account_index {
