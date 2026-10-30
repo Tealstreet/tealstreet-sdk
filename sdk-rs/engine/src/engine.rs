@@ -3786,6 +3786,9 @@ pub struct Engine<V: Venue> {
     /// host time); a source frame lifts it only once written well after.
     #[cfg(feature = "order-locks")]
     fence_marks: Vec<(u64, f64)>,
+    /// Frame-fed: the data source's clock minus this host's, in ms, as the
+    /// host measured it (`None` until it has).
+    source_clock_offset: Option<f64>,
     /// Data source: the VENUE_STATE bytes last sent, so unchanged state is not resent.
     venue_state_sent: Option<Vec<u8>>,
     shared_books: HashMap<String, Book>,
@@ -3879,6 +3882,7 @@ impl<V: Venue> Engine<V> {
             ingest: Default::default(),
             #[cfg(feature = "order-locks")]
             fence_marks: Vec::new(),
+            source_clock_offset: None,
             venue_state_sent: None,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
@@ -4062,6 +4066,14 @@ impl<V: Venue> Engine<V> {
         self.io.core.frame_fed
     }
 
+    /// Frame-fed: the data source's clock minus this host's clock, in ms (0 for
+    /// a same-machine worker; the measured server offset for an exchange
+    /// server). Fences then lift on one clock; until it is set they wait
+    /// `frame_fed::UNSYNCED_FENCE_GRACE_MS`.
+    pub fn set_source_clock_offset(&mut self, offset_ms: Option<f64>) {
+        self.source_clock_offset = offset_ms.filter(|offset| offset.is_finite());
+    }
+
     /// Frame-fed: apply a data source's SCXF frame (`crate::ingest`). A
     /// snapshot replaces the account sections. On `Err` the store may be
     /// partly applied: the host asks its source for a re-snapshot.
@@ -4108,11 +4120,17 @@ impl<V: Venue> Engine<V> {
             // would let a retry place twice.
             #[cfg(feature = "order-locks")]
             {
-                let written = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
+                let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
+                // On this host's clock when the offset is known; otherwise a
+                // grace long enough to absorb the unmeasured skew.
+                let (written, grace) = match self.source_clock_offset {
+                    Some(offset) => (stamp - offset, crate::frame_fed::FENCE_GRACE_MS),
+                    None => (stamp, crate::frame_fed::UNSYNCED_FENCE_GRACE_MS),
+                };
                 let lifted = self
                     .fence_marks
                     .iter()
-                    .filter(|(_, at)| *at + crate::frame_fed::FENCE_GRACE_MS <= written)
+                    .filter(|(_, at)| *at + grace <= written)
                     .map(|(token, _)| *token)
                     .max();
                 if let Some(token) = lifted {
