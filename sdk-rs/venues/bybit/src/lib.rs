@@ -13,6 +13,18 @@ mod refresh;
 mod sign;
 mod trading;
 mod venue_state;
+
+/// Frame-fed: a held position-mode switch, per product category code.
+const MODE_HOLD: &str = "bybit.position_mode";
+
+fn mode_hold(category: u8) -> SettingKey {
+    SettingKey::Venue(MODE_HOLD, category.to_string())
+}
+
+/// A mode switch covers every inverse coin, and on linear only USDT perps.
+fn switched_with_mode(category: u8, quote: &str) -> bool {
+    category == venue_state::category_code(Category::Inverse) || quote == "USDT"
+}
 mod wire;
 
 use paths::Paths;
@@ -22,6 +34,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::credential_selection::{CredentialRole, Selection, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::model::{
     Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
     Precision, ProductKind, Ticker,
@@ -602,6 +615,28 @@ impl BybitLinear {
 
     fn any_hedged(&self) -> bool {
         self.account.has_hedged() || self.products.iter().any(|state| state.account.has_hedged())
+    }
+
+    /// Frame-fed: a confirmed switch sets every symbol it covers, since no
+    /// positions read follows to re-learn them, and holds that over the source.
+    pub(crate) fn hold_position_mode(&mut self, cx: &mut Cx<'_, Pending>, hedged: bool) {
+        let category = self.category;
+        let symbols: Vec<String> = cx
+            .store
+            .markets()
+            .iter()
+            .filter(|market| {
+                self.category_for(&market.symbol) == category
+                    && switched_with_mode(venue_state::category_code(category), &market.quote)
+            })
+            .map(|market| market.symbol.clone())
+            .collect();
+        for symbol in symbols {
+            self.account.position_modes.insert(symbol, hedged);
+        }
+        self.account.held_mode = Some(hedged);
+        cx.hold_setting(SettingKey::Hedged);
+        cx.hold_setting(mode_hold(venue_state::category_code(category)));
     }
 
     fn symbol_mode(&self, symbol: &str) -> Option<bool> {
@@ -2571,7 +2606,7 @@ impl Venue for BybitLinear {
         Some(state.encode())
     }
 
-    fn apply_venue_state(&mut self, _cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
         let Some(state) = venue_state::VenueState::decode(bytes) else {
             return;
         };
@@ -2580,16 +2615,50 @@ impl Venue for BybitLinear {
                 .iter_mut()
                 .map(|product| (product.category, &mut product.account)),
         );
+        let mut released = Vec::new();
         for (category, account) in accounts {
             let category = venue_state::category_code(category);
-            // The source's modes win; a mode only this engine knows stays.
+            let key = mode_hold(category);
+            let held = account.held_mode.filter(|_| cx.setting_held(&key));
+            account.held_mode = held;
+            let (mut seen, mut agrees) = (false, true);
+            // The source's modes win, except over a switch this engine holds;
+            // a mode only this engine knows stays.
             for ((code, symbol), hedged) in &state.modes {
-                if *code == category {
-                    account.position_modes.insert(symbol.clone(), *hedged);
+                if *code != category {
+                    continue;
                 }
+                let quote = cx.store.market(symbol).map(|market| market.quote.as_str());
+                if let Some(mine) = held
+                    && quote.is_some_and(|quote| switched_with_mode(category, quote))
+                {
+                    seen = true;
+                    if *hedged != mine {
+                        agrees = false;
+                        continue;
+                    }
+                }
+                account.position_modes.insert(symbol.clone(), *hedged);
+            }
+            if held.is_some() && seen && agrees {
+                account.held_mode = None;
+                released.push(key);
             }
             account.position_bound = state.bound.iter().cloned().collect();
         }
+        for key in released {
+            cx.release_setting(&key);
+        }
+    }
+
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        // A page engine changed this account's mode: re-learn it as after a
+        // switch of our own, so the next VENUE_STATE carries it.
+        if cx.frame_fed() || self.credentials.is_none() || self.variant.is_spot() {
+            return;
+        }
+        self.select_category(self.primary_category);
+        self.refresh_after_mode_change(cx);
     }
 
     fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}

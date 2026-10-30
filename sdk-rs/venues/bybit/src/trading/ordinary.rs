@@ -1208,6 +1208,10 @@ impl BybitLinear {
     fn apply_position_mode(&mut self, cx: &mut Cx<'_, Pending>, hedged: bool) {
         cx.store.set_hedged(hedged);
         self.trading.mode_version += 1;
+        if cx.frame_fed() {
+            self.hold_position_mode(cx, hedged);
+            return;
+        }
         self.refresh_after_mode_change(cx);
     }
 
