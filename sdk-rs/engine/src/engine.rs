@@ -4117,6 +4117,7 @@ impl<V: Venue> Engine<V> {
         }
         if let Some(state) = &applied.venue_state {
             self.venue.apply_venue_state(&mut cx, state);
+            cx.io.core.setting_holds.dispute_venue_keys();
         }
         self.venue.on_frame_ingested(&mut cx);
         if applied.orders {

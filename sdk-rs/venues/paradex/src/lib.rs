@@ -139,6 +139,10 @@ impl Venue for Paradex {
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);
     }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        // Paradex reads every market's margin config at once.
+        self.account.refresh_settings(cx);
+    }
     fn export_venue_state(&self) -> Option<Vec<u8>> {
         Some(self.account.export_venue_state())
     }

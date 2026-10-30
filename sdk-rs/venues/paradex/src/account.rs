@@ -1159,6 +1159,11 @@ impl Account {
             self.positions(cx, false);
         }
     }
+    /// `Venue::refresh_settings`: re-read the margin configs (leverage); never a write.
+    pub fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.margins(cx, false);
+    }
+
     fn margins(&mut self, cx: &mut Cx<'_, Pending>, boot: bool) {
         // Frame-fed: the data source's frames carry the account; nothing is read here.
         if cx.frame_fed() {

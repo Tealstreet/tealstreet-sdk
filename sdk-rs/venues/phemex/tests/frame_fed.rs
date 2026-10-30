@@ -124,6 +124,13 @@ fn source_snapshot() -> Vec<u8> {
 
 /// A normal (data-source) engine whose account read gives BTCUSDT `mode`.
 fn source(mode: &str) -> Engine<PhemexPerpetuals> {
+    source_with(vec![
+        json!({"symbol":"BTCUSDT","currency":"USDT","posMode":mode,"posSide":if mode == "Hedged" { "Long" } else { "Merged" },"size":"0","leverageRr":"-10","crossMargin":true}),
+    ])
+}
+
+/// A normal (data-source) engine whose USDT account read returns `rows`.
+fn source_with(rows: Vec<Value>) -> Engine<PhemexPerpetuals> {
     let mut e = support::prepared_engine(keyed());
     e.start(0.);
     let a: Vec<_> = e.drain_actions().collect();
@@ -143,9 +150,7 @@ fn source(mode: &str) -> Engine<PhemexPerpetuals> {
             "USDT"
         };
         let rows = if currency == "USDT" {
-            vec![
-                json!({"symbol":"BTCUSDT","currency":"USDT","posMode":mode,"posSide":if mode == "Hedged" { "Long" } else { "Merged" },"size":"0","leverageRr":"-10","crossMargin":true}),
-            ]
+            rows.clone()
         } else {
             vec![]
         };
@@ -343,5 +348,50 @@ fn refresh_settings_on_a_source_re_reads_the_account_and_writes_nothing() {
         sent.iter()
             .all(|r| r.method == safe_cex_engine::Method::Get),
         "{sent:?}"
+    );
+}
+
+#[test]
+fn a_source_without_the_symbols_context_does_not_release_a_held_margin_type() {
+    let mut e = frame_fed();
+    let mut cross = source("OneWay");
+    e.apply_frame(1001., &cross.snapshot_frame(1001.).to_vec(), true)
+        .unwrap();
+    let a = command(
+        &mut e,
+        Command::SetMarginType {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+    );
+    let sent = requests(&a);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    respond(&mut e, &sent[0], r#"{"code":0,"data":null}"#);
+
+    // The source's VENUE_STATE has no BTCUSDT context: that confirms nothing.
+    let mut empty = source_with(vec![]);
+    e.apply_frame(1002., &empty.snapshot_frame(1002.).to_vec(), true)
+        .unwrap();
+    // A stale one, still cross, must not overwrite the confirmed isolated margin.
+    e.apply_frame(1003., &cross.snapshot_frame(1003.).to_vec(), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 8,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.,
+            side: None,
+        },
+    );
+    let sent = requests(&a);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(
+        param(&sent[0], "leverageRr").as_deref(),
+        Some("20"),
+        "isolated leverage, not a cross-signed one: {}",
+        sent[0].url
     );
 }

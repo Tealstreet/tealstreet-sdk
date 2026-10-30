@@ -140,7 +140,11 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Vec<NativeOrder>, &'static str> {
                 if n > 64 {
                     return Err("too many Paradex order flags");
                 }
-                Some((0..n).map(|_| reader.text()).collect::<Result<Vec<_>, _>>()?)
+                Some(
+                    (0..n)
+                        .map(|_| reader.text())
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
             }
             _ => return Err("invalid Paradex venue state flags"),
         };
@@ -214,10 +218,16 @@ mod tests {
         let mut bytes = encode([row("1", None, None)].iter());
         let mut other = bytes.clone();
         other[0] = 2;
-        assert_eq!(decode(&other).unwrap_err(), "unsupported Paradex venue state version");
+        assert_eq!(
+            decode(&other).unwrap_err(),
+            "unsupported Paradex venue state version"
+        );
         assert!(decode(&bytes[..bytes.len() - 1]).is_err());
         bytes.push(0);
-        assert_eq!(decode(&bytes).unwrap_err(), "trailing bytes after Paradex venue state");
+        assert_eq!(
+            decode(&bytes).unwrap_err(),
+            "trailing bytes after Paradex venue state"
+        );
         assert!(decode(&[]).is_err());
     }
 
@@ -225,6 +235,9 @@ mod tests {
     fn an_oversized_count_refuses_before_allocating() {
         let mut bytes = vec![VERSION];
         bytes.extend_from_slice(&u32::MAX.to_le_bytes());
-        assert_eq!(decode(&bytes).unwrap_err(), "too many Paradex venue state rows");
+        assert_eq!(
+            decode(&bytes).unwrap_err(),
+            "too many Paradex venue state rows"
+        );
     }
 }
