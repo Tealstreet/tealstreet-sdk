@@ -74,16 +74,52 @@ pub struct Account {
 /// Symbols a placement was attempted on, kept for the account's lifetime, as
 /// `rust.exchange.ts` `attemptedPlacementSymbols`: on `eachPlacedSymbol` venues a
 /// cancel-all also cancels them, since frames can lag a placement's ACK.
+/// Only the account's own markets are kept, and at most `MAX_PLACED_SYMBOLS`:
+/// client text must never widen a cancel-all fan-out through the shared egress.
 #[derive(Clone, Default)]
-pub struct PlacedSymbols(Arc<Mutex<std::collections::BTreeSet<String>>>);
+pub struct PlacedSymbols(Arc<Mutex<Placed>>);
+
+pub const MAX_PLACED_SYMBOLS: usize = 256;
+
+#[derive(Default)]
+struct Placed {
+    symbols: std::collections::BTreeSet<String>,
+    markets: std::collections::HashSet<String>,
+    warned: bool,
+}
 
 impl PlacedSymbols {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Placed> {
+        self.0.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// The account's engine markets; recorded symbols outside them are dropped.
+    pub fn sync_markets<'a>(&self, markets: impl ExactSizeIterator<Item = &'a String>) {
+        let mut placed = self.lock();
+        if placed.markets.len() == markets.len() {
+            return;
+        }
+        placed.markets = markets.cloned().collect();
+        let Placed {
+            symbols, markets, ..
+        } = &mut *placed;
+        symbols.retain(|symbol| markets.contains(symbol));
+    }
+
     pub fn record<'a>(&self, symbols: impl IntoIterator<Item = &'a str>) {
-        let mut placed = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        let mut placed = self.lock();
         for symbol in symbols {
-            if !placed.contains(symbol) {
-                placed.insert(symbol.to_owned());
+            if placed.symbols.contains(symbol) || !placed.markets.contains(symbol) {
+                continue;
             }
+            if placed.symbols.len() >= MAX_PLACED_SYMBOLS {
+                if !placed.warned {
+                    placed.warned = true;
+                    Log::warn("placed-symbol scopes full; later placements are not recorded");
+                }
+                continue;
+            }
+            placed.symbols.insert(symbol.to_owned());
         }
     }
 
@@ -97,8 +133,7 @@ impl PlacedSymbols {
     }
 
     pub fn symbols(&self) -> Vec<String> {
-        let placed = self.0.lock().unwrap_or_else(|error| error.into_inner());
-        placed.iter().cloned().collect()
+        self.lock().symbols.iter().cloned().collect()
     }
 }
 
@@ -885,17 +920,33 @@ mod tests {
     }
 
     #[test]
-    fn placed_symbols_keep_every_attempted_placement_scope() {
+    fn placed_symbols_keep_only_the_accounts_markets_and_are_capped() {
         let placed = PlacedSymbols::default();
+        placed.record(["BTC-USDT-SWAP"]);
+        assert!(
+            placed.symbols().is_empty(),
+            "nothing before markets are known"
+        );
+        let markets: Vec<String> = (0..MAX_PLACED_SYMBOLS + 10)
+            .map(|index| format!("M{index}"))
+            .chain(["BTC-USDT-SWAP".into(), "ETH-USDT-SWAP".into()])
+            .collect();
+        placed.sync_markets(markets.iter());
         placed.record_command(&json!({"op":"placeOrders","orders":[
             {"symbol":"BTC-USDT-SWAP","side":"buy"},
+            {"symbol":"JUNK-1","side":"buy"},
             {"symbol":"ETH-USDT-SWAP","side":"sell"},
         ]}));
-        placed.record_command(&json!({"op":"cancelSymbolOrders","symbol":"SOL-USDT-SWAP"}));
-        placed.record(["BTC-USDT-SWAP", "XRP-USDT-SWAP"]);
-        assert_eq!(
-            placed.symbols(),
-            ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "XRP-USDT-SWAP"]
+        placed.record_command(&json!({"op":"cancelSymbolOrders","symbol":"M1"}));
+        assert_eq!(placed.symbols(), ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
+        placed.record(markets.iter().map(String::as_str));
+        assert_eq!(placed.symbols().len(), MAX_PLACED_SYMBOLS);
+        placed.sync_markets(markets[..3].iter());
+        assert!(
+            placed
+                .symbols()
+                .iter()
+                .all(|symbol| markets[..3].contains(symbol))
         );
     }
 

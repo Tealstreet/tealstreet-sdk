@@ -180,6 +180,7 @@ async fn nuke(mode: &'static str) -> (Value, Vec<String>) {
             let _ = tx.send(text);
         }),
         None,
+        safe_cex_exchange_server::accounts::PlacedSymbols::default(),
         inbox_rx,
     ));
     // Let the feed take its join snapshot so the store holds the order and position.

@@ -206,7 +206,9 @@ fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>, rejoined: 
 
 impl Port {
     fn apply(&self, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
-        apply(&mut self.store.borrow_mut(), snapshot, fills, rejoined)
+        let change = apply(&mut self.store.borrow_mut(), snapshot, fills, rejoined);
+        self.placed.sync_markets(self.store.borrow().markets.keys());
+        change
     }
 
     fn settle(&self, notice: &Value) {
