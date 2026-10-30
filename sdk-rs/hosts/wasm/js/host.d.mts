@@ -126,6 +126,12 @@ export interface EngineHandlers {
   onAlgoEmit?(op: string, data: unknown): void;
 }
 
+export interface AlgoStopAllResult {
+  stoppedChasers: string[];
+  stoppedTwaps: string[];
+  settled: boolean;
+}
+
 export interface AccountAuthResult {
   readonly credential: 'primary' | 'secondary';
   readonly scope: 'account' | 'balance' | 'orders' | 'positions' | 'settings';
@@ -436,6 +442,7 @@ export interface WasmEngineLike {
   algoDeadline?(): number | undefined;
   algoEmits?(): string;
   algoDispose?(now: number, wall: number, reason?: string): string;
+  algoStopAll?(now: number, wall: number, reason?: string): string;
   algoRunning?(): boolean;
   /** A `frameFed` engine's ingest of one data-source frame; returns actions JSON. */
   applyFrame?(frame: Uint8Array, snapshot: boolean, now: number): string;
@@ -530,6 +537,10 @@ export class EngineHost {
   /** Stop every algo (chases once their cancels settle, bounded); resolves when
    * they are gone. Dispose the host after that. */
   algoDispose(reason?: string): Promise<void>;
+  /** A nuke's first step: stop every TWAP and chase, the algos staying up.
+   * Resolves once chase cancels settle (bounded by the engine at 10 s);
+   * `settled` is false when they did not or the algos ended first. */
+  algoStopAll(reason?: string): Promise<AlgoStopAllResult>;
   dispose(): void;
 }
 

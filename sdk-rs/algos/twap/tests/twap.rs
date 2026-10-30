@@ -49,6 +49,7 @@ impl TwapEnv for Env {
 struct View {
     ticker: Option<TickerQuote>,
     chasers: HashMap<String, ChaserProgress>,
+    client_id: Option<String>,
 }
 
 impl TwapMarketView for View {
@@ -57,6 +58,9 @@ impl TwapMarketView for View {
     }
     fn chaser(&self, chaser_id: &str) -> Option<ChaserProgress> {
         self.chasers.get(chaser_id).copied()
+    }
+    fn client_order_id(&self, _request: &safe_cex_algo_twap::TwapOrderRequest) -> Option<String> {
+        self.client_id.clone()
     }
 }
 
@@ -1164,4 +1168,137 @@ fn restore_refuses_state_filed_under_another_account() {
         ["TWAP BTCUSDT not restored: restored state names another account than its options"]
     );
     assert_eq!(book.ids().count(), 0);
+}
+
+// --- TwapState.inFlight (TwapInstance.reconcileInFlight) ---
+
+#[test]
+fn a_placing_slice_is_persisted_in_flight_with_its_client_id_until_it_settles() {
+    let mut env = Env::new();
+    let view = View {
+        client_id: Some("x-caller-1".into()),
+        ..View::default()
+    };
+    let mut book = TwapBook::new("test-account");
+    let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
+    assert_eq!(
+        placements(&effects)[0].1.client_order_id.as_deref(),
+        Some("x-caller-1")
+    );
+    let persisted = state_updates(&effects).last().copied().unwrap().clone();
+    assert_eq!(
+        persisted[&id]["state"]["inFlight"],
+        json!({ "size": 0.5, "clientOrderId": "x-caller-1" })
+    );
+    assert_eq!(persisted[&id]["state"]["ordersSizes"], json!([0.5]));
+
+    let settled = settle_all(&mut book, &mut env, &id, &effects, Ok(vec!["o1".into()]));
+    let persisted = state_updates(&settled).last().copied().unwrap().clone();
+    assert!(persisted[&id]["state"].get("inFlight").is_none());
+    assert_eq!(persisted[&id]["state"]["ordersExecuted"], 1);
+}
+
+fn in_flight_row(env: &Env, sizes: Value, executed: u32, in_flight: Value) -> Value {
+    json!([{ "id": "restored", "options": options(json!({ "ordersCount": 2 })), "state": {
+        "accountName": "test-account", "activeMarket": { "symbol": "BTCUSDT" }, "size": 1.0,
+        "ordersSizes": sizes, "side": "buy", "status": "running", "ordersCount": 2,
+        "ordersExecuted": executed, "nextOrderAt": env.now, "inFlight": in_flight,
+    } }])
+}
+
+#[test]
+fn an_unreconciled_in_flight_slice_is_counted_and_never_placed_again() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let restore = in_flight_row(
+        &env,
+        json!([0.5]),
+        0,
+        json!({ "size": 0.5, "clientOrderId": "c1" }),
+    );
+    let effects = book.handle("twap:state", &restore, &mut env, &view);
+    assert!(effects.contains(&TwapEffect::Log {
+        message: "TWAP BTCUSDT: a 0.5 slice was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.".into()
+    }));
+    let instance = book.get("restored").unwrap();
+    assert_eq!(instance.state.orders_executed, 1);
+    assert_eq!(instance.state.in_flight, None);
+    let persisted = state_updates(&effects).last().copied().unwrap().clone();
+    assert!(persisted["restored"]["state"].get("inFlight").is_none());
+
+    // Only the remaining slice is placed.
+    let woken = book.wake(&mut env, &view);
+    assert_eq!(market_amounts(&woken), vec![0.5]);
+}
+
+#[test]
+fn a_last_slice_in_flight_is_restored_and_completes_without_placing() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let restore = in_flight_row(&env, json!([]), 1, json!({ "size": 0.5 }));
+    book.handle("twap:state", &restore, &mut env, &view);
+    assert_eq!(book.get("restored").unwrap().state.orders_executed, 2);
+    let woken = book.wake(&mut env, &view);
+    assert!(placements(&woken).is_empty());
+    assert!(
+        book.get("restored").is_none(),
+        "nothing remains, so it completed"
+    );
+}
+
+#[test]
+fn an_in_flight_slice_counts_toward_the_restore_bounds() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    for (sizes, executed, in_flight, reason) in [
+        (
+            json!([0.5]),
+            1,
+            json!({ "size": 0.5 }),
+            "remaining and executed slices exceed ordersCount",
+        ),
+        (
+            json!([0.6]),
+            0,
+            json!({ "size": 0.6 }),
+            "remaining slices exceed the TWAP size",
+        ),
+        (
+            json!([0.5]),
+            0,
+            json!({ "size": 0 }),
+            "its in-flight slice is invalid",
+        ),
+    ] {
+        let effects = book.handle(
+            "twap:state",
+            &in_flight_row(&env, sizes, executed, in_flight),
+            &mut env,
+            &view,
+        );
+        assert!(
+            effects.contains(&TwapEffect::Log {
+                message: format!("TWAP BTCUSDT not restored: {reason}")
+            }),
+            "{reason}: {effects:?}"
+        );
+    }
+    let mut lapsed = in_flight_row(&env, json!([0.5]), 0, json!({ "size": 0.5 }));
+    lapsed[0]["state"]["nextOrderAt"] = json!(env.now - 600_000.0);
+    let effects = book.handle("twap:state", &lapsed, &mut env, &view);
+    assert!(effects.contains(&TwapEffect::Log {
+        message: "TWAP BTCUSDT not restored: its schedule lapsed, so no client was running it; a slice may have been in flight, check open orders and fills".into()
+    }));
+    assert!(book.get("restored").is_none());
+}
+
+#[test]
+fn a_restored_paused_twap_is_persisted_so_the_host_sees_it_adopted() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let mut restore = in_flight_row(&env, json!([0.5, 0.5]), 0, Value::Null);
+    restore[0]["state"]["status"] = json!("paused");
+    let effects = book.handle("twap:state", &restore, &mut env, &view);
+    let persisted = state_updates(&effects).last().copied().unwrap().clone();
+    assert_eq!(persisted["restored"]["state"]["status"], "paused");
 }

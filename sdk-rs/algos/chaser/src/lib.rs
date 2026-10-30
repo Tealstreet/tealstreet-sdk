@@ -17,6 +17,7 @@ pub use book::{
 pub use chase::{
     ActiveChaser, ChaserComplete, ChaserOptions, Terminate, TerminateKind, adjust, placement_filled,
 };
+pub use client_id::ClientIdMinter;
 
 /// The `chaser:*` ops for one account.
 ///

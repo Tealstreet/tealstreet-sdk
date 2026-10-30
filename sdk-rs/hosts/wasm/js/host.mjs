@@ -381,6 +381,7 @@ export class EngineHost {
     this.algoTimer = undefined;
     this.algoTimerAt = undefined;
     this.algosStopped = undefined;
+    this.algoStopAllWaiters = [];
   }
 
   start() {
@@ -737,6 +738,26 @@ export class EngineHost {
     return stopped.promise;
   }
 
+  /** A nuke's first step: stop every TWAP and chase, the algos staying up for
+   * new ops. Resolves `{ stoppedChasers, stoppedTwaps, settled }` once chase
+   * cancels settle (at most 10 s on the algo clock); `settled` is false when they
+   * did not, or the algos ended first. */
+  algoStopAll(reason) {
+    this.assertHttpHandoffIdle();
+    if (!this.algosRunning) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
+    if (typeof this.engine.algoStopAll !== 'function')
+      throw new ExchangeError('This engine cannot stop its algos for a nuke', { kind: 'unsupported', outcome: 'notSent' });
+    const stopped = new Promise((resolve) => this.algoStopAllWaiters.push(resolve));
+    this.runAlgos(this.invoke(this.engine.algoStopAll, this.transport.now(), Date.now(), reason));
+    if (this.deadError) throw this.deadError;
+    return stopped;
+  }
+
+  /** Waits whose report can no longer come: the algos ended or the host went. */
+  abandonAlgoStopAll() {
+    for (const resolve of this.algoStopAllWaiters.splice(0)) resolve({ stoppedChasers: [], stoppedTwaps: [], settled: false });
+  }
+
   advanceAlgos() {
     this.runAlgos(this.invoke(this.engine.algoAdvance, this.transport.now(), Date.now()));
   }
@@ -752,6 +773,11 @@ export class EngineHost {
     const json = this.invoke(this.engine.algoEmits);
     if (!json) return;
     for (const { op, data } of JSON.parse(json)) {
+      // The answer to `algoStopAll`, oldest wait first; the worker never sees it.
+      if (op === 'algos:stopped') {
+        this.algoStopAllWaiters.shift()?.(data);
+        continue;
+      }
       try { this.handlers.onAlgoEmit?.(op, data); }
       catch (error) {
         try { this.handlers.onLog?.('error', `Algo reply handler failed: ${error?.message ?? error}`); }
@@ -767,6 +793,7 @@ export class EngineHost {
     if (!this.invoke(this.engine.algoRunning)) {
       this.algosStarted = false;
       this.clearAlgoTimer();
+      this.abandonAlgoStopAll();
       this.algosStopped?.resolve?.();
       return;
     }
@@ -830,6 +857,7 @@ export class EngineHost {
     this.timers.clear();
     attempt(() => this.clearAlgoTimer());
     this.algosStarted = false;
+    attempt(() => this.abandonAlgoStopAll());
     attempt(() => this.algosStopped?.resolve?.());
     attempt(() => this.transport.dispose?.());
     // Release provider-owned keys on normal disposal instead of retaining the

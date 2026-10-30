@@ -39,6 +39,8 @@ export function binanceVenue({ clock = 'virtual' } = {}) {
   const sockets = [];
   const placements = [];
   const cancels = [];
+  /** Client order ids the engine looked up. */
+  const lookups = [];
   const unknown = new Set();
   let nextOrder = 5000;
   const respond = (packet) => {
@@ -63,6 +65,11 @@ export function binanceVenue({ clock = 'virtual' } = {}) {
       order.status = 'CANCELED';
       setImmediate(() => orderUpdate(order, { x: 'CANCELED', X: 'CANCELED' }));
       return json(order);
+    }
+    if (url.pathname === '/fapi/v1/order' && packet.method === 'GET') {
+      const order = placements.find((placed) => placed.clientOrderId === params.get('origClientOrderId'));
+      lookups.push(params.get('origClientOrderId'));
+      return order ? json(order) : json({ code: -2013, msg: 'Order does not exist.' }, 400);
     }
     if (Object.hasOwn(STARTUP, url.pathname)) return json(STARTUP[url.pathname]);
     unknown.add(`${packet.method} ${url.pathname}`);
@@ -120,6 +127,6 @@ export function binanceVenue({ clock = 'virtual' } = {}) {
   /** The user stream reports `order` filled in one trade. */
   const fill = (order) => (order.status = 'FILLED', orderUpdate(order, { x: 'TRADE', X: 'FILLED', ap: order.price, l: order.origQty, z: order.origQty,
     L: order.price, t: 70000 + order.orderId }));
-  return { transport, placements, cancels, unknown, settle, advance, fill, privateSocket, timers };
+  return { transport, placements, cancels, lookups, unknown, settle, advance, fill, privateSocket, timers };
 }
 

@@ -4,11 +4,17 @@ import { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 
-type RustAlgoExchange = {
+export type RustAlgoExchange = {
   runsRustAlgos: boolean;
-  startAlgos(accountName: string): boolean;
+  routeAlgoOp(accountName: string, op: string, rust: () => void, ts: () => void): boolean;
   algoOp(op: string, data: unknown): void;
 };
+
+/** An exchange whose engine may run this account's algos (`RustEngineExchange`). */
+export const rustAlgoExchange = (exchange: unknown): RustAlgoExchange | undefined =>
+  typeof (exchange as Partial<RustAlgoExchange> | undefined)?.routeAlgoOp === 'function'
+    ? (exchange as RustAlgoExchange)
+    : undefined;
 
 const PENDING_TIMEOUT_MS = 30_000;
 const PENDING_POLL_MS = 500;
@@ -50,15 +56,19 @@ export abstract class BaseHandler {
 
   /**
    * A Rust-engine account built with algos runs chaser, TWAP and exec ops in its
-   * engine (`RustEngineExchange.algoOp`), never in the TS algos. True when sent there.
-   * An op arriving while the account still starts starts its algos first.
+   * engine (`rust`, by default `RustEngineExchange.algoOp`), never in the TS
+   * algos. True when sent there, or held until the engine host starts: the
+   * exchange then replays it here, in Rust or through this handler's TS path.
    */
-  protected runInRustAlgos(payload: StoreWorkerPayload): boolean {
-    const exchange = this._exchange as Partial<RustAlgoExchange>;
-    if (typeof exchange.algoOp !== 'function') return false;
-    if (!exchange.runsRustAlgos && !exchange.startAlgos?.(this._accountName)) return false;
-    exchange.algoOp(payload.op, payload.data);
-    return true;
+  protected runInRustAlgos(payload: StoreWorkerPayload, rust?: () => void): boolean {
+    const exchange = rustAlgoExchange(this._exchange);
+    if (!exchange) return false;
+    return exchange.routeAlgoOp(
+      this._accountName,
+      payload.op,
+      rust ?? (() => exchange.algoOp(payload.op, payload.data)),
+      () => this.handle(payload),
+    );
   }
 
   /**

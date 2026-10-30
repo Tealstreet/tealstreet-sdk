@@ -70,15 +70,23 @@ pub fn restored(options: &TwapOptions, state: &TwapState, now_ms: f64) -> Result
         TwapStatus::Idle => return Err("it never started".to_owned()),
         TwapStatus::Running | TwapStatus::Paused => {}
     }
-    if state.orders_sizes.is_empty() {
+    let in_flight = state.in_flight.as_ref();
+    // A last slice still being placed is settled on restore, not refused.
+    if state.orders_sizes.is_empty() && in_flight.is_none() {
         return Err("no slices remain".to_owned());
     }
-    if state.orders_sizes.len() as u64 + u64::from(state.orders_executed)
+    if in_flight.is_some_and(|slice| !(slice.size.is_finite() && slice.size > 0.0)) {
+        return Err("its in-flight slice is invalid".to_owned());
+    }
+    if state.orders_sizes.len() as u64
+        + u64::from(state.orders_executed)
+        + u64::from(in_flight.is_some())
         > u64::from(options.orders_count)
     {
         return Err("remaining and executed slices exceed ordersCount".to_owned());
     }
-    let remaining: f64 = state.orders_sizes.iter().sum();
+    let remaining: f64 =
+        state.orders_sizes.iter().sum::<f64>() + in_flight.map_or(0.0, |slice| slice.size);
     if remaining > options.size * (1.0 + 1e-9) {
         return Err("remaining slices exceed the TWAP size".to_owned());
     }
@@ -89,7 +97,12 @@ pub fn restored(options: &TwapOptions, state: &TwapState, now_ms: f64) -> Result
             + interval_ms * (1.0 + options.randomness_percentage / 100.0)
             + SCHEDULE_GRACE_MS;
         if now_ms > latest_ms {
-            return Err("its schedule lapsed, so no client was running it".to_owned());
+            return Err(if in_flight.is_some() {
+                "its schedule lapsed, so no client was running it; a slice may have been in flight, check open orders and fills"
+            } else {
+                "its schedule lapsed, so no client was running it"
+            }
+            .to_owned());
         }
     }
     Ok(())

@@ -382,15 +382,24 @@ otherwise a reply arriving after terminate could schedule another old slice.
 ## Rust algos on Rust-engine accounts
 
 An engine built with the `algos` feature runs the account's chaser, TWAP and
-`exec` ops itself: `BaseHandler.runInRustAlgos` sends them to
-`RustEngineExchange.algoOp` (starting the algos if the op beats the worker's own
-`startAlgos`), and the TS `ChaserOrderInstance`/`TwapInstance`/command executor
-never run for that account. Replies keep the TS op names: `chaser:complete`,
-`error`, `warning`, `log`, `exec-log` and `exec-result` go through the exchange
-emitter, `twap:stateUpdate` is posted with the persisted map as `data`, and the
+`exec` ops itself: `BaseHandler.runInRustAlgos` routes them through
+`RustEngineExchange.routeAlgoOp`, and the TS `ChaserOrderInstance`/`TwapInstance`/
+command executor never run for that account. An op that arrives before the
+engine host exists waits in the exchange (bounded) and is replayed in order once
+the host decides Rust or TS; disposal reports any still waiting as an error.
+Replies keep the TS op names: `chaser:complete`, `error`, `warning`, `log`,
+`exec-log` and `exec-result` go through the exchange emitter, and the
 `activeChasers`/`activeTWAPs` rows land in the store (their TS post-processors
 skip such accounts). Disposal lets chases cancel their orders before the engine
-goes. These TWAPs take no cross-tab Web Lock.
+goes; a nuke stops every TWAP and chase through the engine's `algoStopAll`.
+
+These TWAPs keep the TS rules below through `twap/RustTwapOwnership.ts`, owned by
+`TwapHandler` so a separately loaded algos module gets them too: it takes each
+running TWAP's Web Lock, holds a restored row until it has the lock and has
+settled the row's `inFlight` slice (the Rust TWAP persists the marker, with the
+client order id it places under), and posts `twap:stateUpdate` as the algos'
+rows plus restores still waiting. On engine death the worker posts `{}` for
+them before teardown.
 
 ## TWAP restore and the cross-tab owner lock
 

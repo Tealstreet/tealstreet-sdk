@@ -6,12 +6,15 @@ use safe_cex_engine::model::{
     Limits, Market, MinMax, Order, OrderStatus, OrderType, Precision, Ticker,
 };
 use safe_cex_engine::{Cx, Engine, Response, SocketId, TimerId, Venue};
+use std::collections::HashMap;
 
 const WALL: f64 = 1_700_000_000_000.0;
 
 struct TestVenue {
     commands: Rc<RefCell<Vec<Command>>>,
     next_order: u32,
+    /// What a REST fills query reports per order id.
+    rest_fills: RestFills,
 }
 
 impl Venue for TestVenue {
@@ -83,6 +86,23 @@ impl Venue for TestVenue {
                 }
                 cx.done(*id, "[]".into());
             }
+            Command::Query {
+                command: id,
+                query:
+                    safe_cex_engine::engine::Query::Fills {
+                        order_id: Some(order_id),
+                        ..
+                    },
+            } => {
+                let rows = self
+                    .rest_fills
+                    .borrow()
+                    .get(order_id)
+                    .map_or_else(Vec::new, |qty| {
+                        vec![serde_json::json!({ "orderId": order_id, "qty": qty })]
+                    });
+                cx.done(*id, Value::from(rows).to_string());
+            }
             other => {
                 if let Some(id) = other.completion_id() {
                     cx.done(id, "null".into());
@@ -131,10 +151,20 @@ fn market() -> Market {
 }
 
 fn engine() -> (WasmEngine, Rc<RefCell<Vec<Command>>>) {
+    let (engine, commands, _) = engine_on("testvenue");
+    (engine, commands)
+}
+
+type RestFills = Rc<RefCell<HashMap<String, f64>>>;
+
+/// A test engine whose algo store names `venue`, and the REST fills it reports.
+fn engine_on(venue_name: &str) -> (WasmEngine, Rc<RefCell<Vec<Command>>>, RestFills) {
     let commands = Rc::new(RefCell::new(Vec::new()));
+    let rest_fills = Rc::new(RefCell::new(HashMap::new()));
     let venue = TestVenue {
         commands: commands.clone(),
         next_order: 0,
+        rest_fills: rest_fills.clone(),
     };
     let Ok(mut engine) = Engine::new(venue, Some(crate::production_entropy().unwrap())) else {
         panic!("test engine must construct");
@@ -149,8 +179,9 @@ fn engine() -> (WasmEngine, Rc<RefCell<Vec<Command>>>) {
         ..Ticker::default()
     }]);
     (
-        WasmEngine::for_algo_tests("testvenue", Box::new(engine)),
+        WasmEngine::for_algo_tests(venue_name, Box::new(engine)),
         commands,
+        rest_fills,
     )
 }
 
@@ -331,4 +362,105 @@ fn only_algo_completions_are_held_back_from_the_js_host() {
             result: "[]".into(),
         })]
     );
+}
+
+fn cancels_of(commands: &RefCell<Vec<Command>>, order_id: &str) -> usize {
+    commands
+        .borrow()
+        .iter()
+        .filter(|command| {
+            matches!(command, Command::CancelOrders { ids, .. } if ids == &[order_id.to_owned()])
+        })
+        .count()
+}
+
+#[test]
+fn stop_all_stops_twaps_and_chases_and_reports_once_cancels_settle() {
+    let (mut engine, commands) = engine();
+    engine.algo_start("acct", 0.0, WALL).unwrap();
+    engine.algo_op("chaser:start", BUY_ONE, 0.0, WALL).unwrap();
+    let twap = serde_json::json!({
+        "accountName": "acct", "activeMarket": { "symbol": "BTCUSDT" }, "size": 1, "duration": 1,
+        "ordersCount": 2, "side": "buy", "randomnessPercentage": 0,
+    });
+    engine
+        .algo_op("twap:start", &twap.to_string(), 0.0, WALL)
+        .unwrap();
+    engine.algo_advance(1100.0, WALL + 1100.0);
+    let rows = emits(&mut engine);
+    let store = rows
+        .iter()
+        .rev()
+        .find(|emit| emit["op"] == "store")
+        .unwrap();
+    let chase_id = store["data"]["activeChasers"][0]["id"].clone();
+    let twap_id = store["data"]["activeTWAPs"][0]["id"].clone();
+
+    engine.algo_stop_all(1200.0, WALL + 1200.0, None).unwrap();
+    assert_eq!(
+        cancels_of(&commands, "o1"),
+        1,
+        "the chase cancelled its order"
+    );
+    let stopped = emits(&mut engine);
+    let report = stopped
+        .iter()
+        .find(|emit| emit["op"] == "algos:stopped")
+        .unwrap_or_else(|| panic!("no algos:stopped in {stopped:?}"));
+    assert_eq!(
+        report["data"],
+        serde_json::json!({ "stoppedChasers": [chase_id], "stoppedTwaps": [twap_id], "settled": true })
+    );
+    assert!(stopped.contains(&serde_json::json!({ "op": "twap:stateUpdate", "data": {} })));
+    let store = stopped
+        .iter()
+        .rev()
+        .find(|emit| emit["op"] == "store")
+        .unwrap();
+    assert_eq!(store["data"]["activeTWAPs"], serde_json::json!([]));
+    assert_eq!(store["data"]["activeChasers"], serde_json::json!([]));
+    assert!(
+        !stopped.iter().any(|emit| emit["op"] == "error"),
+        "a nuke is not a disposal: {stopped:?}"
+    );
+
+    // The account stays up: new ops still run.
+    assert!(engine.algo_running());
+    let before = placements(&commands).len();
+    engine
+        .algo_op("chaser:start", BUY_ONE, 1300.0, WALL + 1300.0)
+        .unwrap();
+    assert_eq!(placements(&commands).len(), before + 1);
+}
+
+#[test]
+fn a_fill_tracked_chase_reports_its_rest_reconciled_fill_on_completion() {
+    // TS `ChaserOrderManager.emitComplete` on FILL_RECONCILED_VENUES: a fill that
+    // beat the final cancel reaches `chaser:complete` only over REST.
+    let (mut engine, commands, rest_fills) = engine_on("hyperliquid");
+    engine.algo_start("acct", 0.0, WALL).unwrap();
+    let chase =
+        r#"{"symbol":"BTCUSDT","size":1,"side":"buy","maxAttempts":10,"delay":0,"clientId":"c1"}"#;
+    engine.algo_op("chaser:start", chase, 0.0, WALL).unwrap();
+    engine.algo_advance(1100.0, WALL + 1100.0);
+    let rows = emits(&mut engine);
+    let store = rows
+        .iter()
+        .rev()
+        .find(|emit| emit["op"] == "store")
+        .unwrap();
+    let chase_id = store["data"]["activeChasers"][0]["id"].to_string();
+    rest_fills.borrow_mut().insert("o1".into(), 0.4);
+
+    engine
+        .algo_op("chaser:terminate", &chase_id, 1200.0, WALL + 1200.0)
+        .unwrap();
+    assert_eq!(cancels_of(&commands, "o1"), 1);
+    let done = emits(&mut engine);
+    let complete = done
+        .iter()
+        .find(|emit| emit["op"] == "chaser:complete")
+        .unwrap_or_else(|| panic!("no chaser:complete in {done:?}"));
+    assert_eq!(complete["data"]["clientId"], "c1");
+    assert_eq!(complete["data"]["filled"], 0.4);
 }

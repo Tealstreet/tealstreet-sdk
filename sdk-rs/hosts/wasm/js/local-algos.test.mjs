@@ -102,3 +102,61 @@ test('algoDispose stops a resting chase, cancels its order and lets the host dis
     assert.throws(() => host.algoOp('chaser:start', {}), /not running/);
   } finally { host.dispose(); }
 });
+
+const TWAP = { accountName: 'acct', activeMarket: { symbol: 'BTCUSDT' }, size: 0.004, duration: 1, ordersCount: 2,
+  side: 'buy', chaserDelay: 1000, reduceOnly: false, randomnessPercentage: 0, useLimitOrders: false, useChaserOrders: false };
+const stateUpdates = (emits) => emits.filter((emit) => emit.op === 'twap:stateUpdate').map((emit) => emit.data);
+
+test('a TWAP slice is persisted in flight with the client id it is placed under, until it settles', enabled, async () => {
+  const { venue, host, emits } = await startedAccount();
+  try {
+    host.algoOp('twap:start', TWAP);
+    const [placing] = Object.values(stateUpdates(emits).at(-1));
+    assert.equal(placing.state.inFlight.size, 0.002);
+    assert.match(placing.state.inFlight.clientOrderId, /^x-s3vFFRQp[0-9a-f]{26}$/);
+    assert.deepEqual(placing.state.ordersSizes, [0.002], 'the slice left ordersSizes before its order went out');
+    await venue.settle();
+    assert.equal(venue.placements[0].clientOrderId, placing.state.inFlight.clientOrderId);
+    // The completion wakes the TWAP; the host timer then runs it.
+    await venue.advance(10);
+    const [placed] = Object.values(stateUpdates(emits).at(-1));
+    assert.equal(placed.state.inFlight, undefined, 'cleared once the placement settled');
+    assert.equal(placed.state.ordersExecuted, 1);
+  } finally { host.dispose(); }
+});
+
+test('algoStopAll stops TWAPs and chases, waits for the chase cancels, and keeps the algos up', enabled, async () => {
+  const { venue, host, emits } = await startedAccount();
+  try {
+    host.algoOp('chaser:start', { symbol: 'BTCUSDT', size: 0.002, side: 'buy', maxAttempts: 10 });
+    host.algoOp('twap:start', TWAP);
+    await venue.settle();
+    const rows = lastRows(emits);
+    assert.equal(rows.activeChasers.length, 1);
+    assert.equal(rows.activeTWAPs.length, 1);
+    const chase = venue.placements.find((order) => order.type === 'LIMIT');
+
+    let result;
+    const stopping = host.algoStopAll().then((value) => { result = value; });
+    assert.equal(result, undefined, 'answers only once the cancel settles');
+    for (let i = 0; i < 20 && !result; i++) await venue.advance(250);
+    await stopping;
+    assert.deepEqual(result, { stoppedChasers: [rows.activeChasers[0].id], stoppedTwaps: [rows.activeTWAPs[0].id], settled: true });
+    assert.deepEqual(venue.cancels, [String(chase.orderId)]);
+    assert.deepEqual(stateUpdates(emits).at(-1), {}, 'the stopped TWAP is no longer persisted');
+    assert.deepEqual(lastRows(emits), { activeChasers: [], activeTWAPs: [] });
+    assert.ok(!emits.some((emit) => emit.op === 'algos:stopped'), 'the report answers the wait, not the worker');
+    assert.equal(host.algosRunning, true);
+    await venue.advance(60_000);
+    assert.equal(venue.placements.length, 2, 'the stopped TWAP places no second slice');
+  } finally { host.dispose(); }
+});
+
+test('an algoStopAll wait still answers when the host is disposed first', enabled, async () => {
+  const { venue, host } = await startedAccount();
+  host.algoOp('chaser:start', { symbol: 'BTCUSDT', size: 0.002, side: 'buy', maxAttempts: 10 });
+  await venue.settle();
+  const stopping = host.algoStopAll();
+  host.dispose();
+  assert.equal((await stopping).settled, false);
+});

@@ -141,6 +141,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   // The worker's own handlers call these on the engine they own; a mirror has none.
   startAlgos: 'mirror',
   algoOp: 'mirror',
+  routeAlgoOp: 'mirror',
   refreshAccountSettings: 'worker',
   ingestSourceFrame: 'mirror',
 };

@@ -118,8 +118,22 @@ pub struct TwapState {
         serialize_with = "js_option_number"
     )]
     pub started_at: Option<f64>,
+    /// The slice being placed, persisted (already out of `ordersSizes`) before
+    /// its order goes out and cleared once it settles, as TS `TwapState.inFlight`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_flight: Option<InFlightSlice>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InFlightSlice {
+    #[serde(serialize_with = "js_number")]
+    pub size: f64,
+    /// The caller id the slice order carried, for a restore to look it up by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_order_id: Option<String>,
 }
 
 /// One `twap:state` restore entry, as the client persisted it.

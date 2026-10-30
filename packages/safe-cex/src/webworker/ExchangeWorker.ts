@@ -1090,6 +1090,11 @@ export class ExchangeWorker {
     // error per routine message would toast on every symbol switch.
   }
 
+  /** TWAPs in the engine's Rust algos died with it: post their final state, as TS stops its own. */
+  private _finishRustTwaps() {
+    for (const handler of this._handlers) if (handler instanceof TwapHandler) handler.finishRustTwaps();
+  }
+
   private _stopOwnedTwaps() {
     for (const twap of this._ownedTwaps) {
       void twap.terminate().catch((error: unknown) => this.logError('Unable to stop interrupted TWAP.', error));
@@ -1117,6 +1122,8 @@ export class ExchangeWorker {
     // counters before releasing it, so the replacement cannot rewind them.
     this._recoveryUpdateIds = { ...this._store.updateIds };
     if (!this._started || this._recovering) {
+      // An op that beat startup can have started a Rust TWAP already.
+      this._finishRustTwaps();
       this._invalidateReadiness();
       return;
     }
@@ -1133,6 +1140,7 @@ export class ExchangeWorker {
     });
     // Stop TWAPs while their handler context is still current, so the final
     // completed state reaches the main thread that persists and resumes them.
+    this._finishRustTwaps();
     this._stopOwnedTwaps();
     this._generation++;
     this._clearRuntimePipeline();
@@ -1260,10 +1268,6 @@ export class ExchangeWorker {
       });
       exchange.on('engine-dead', (error: Error) => {
         if (isCurrent()) this._handleEngineDead(error);
-      });
-      // Rust TWAPs' persisted rows, posted as the TS TwapInstance posts them (not as args).
-      exchange.on('twap:stateUpdate', (data: unknown) => {
-        if (isCurrent()) this._ctx.postMessage({ op: 'twap:stateUpdate', data });
       });
     }
 

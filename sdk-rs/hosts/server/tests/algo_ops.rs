@@ -434,7 +434,15 @@ async fn twap_state_restores_the_rows_its_own_state_updates_persisted() {
         .run_until(async {
             let mut first = Algos::start().await;
             first.op("twap:start", web_twap());
-            let update = first.next("twap:stateUpdate", |_| true).await;
+            // Once the first slice settled: a row persisted mid-placement is settled on restore.
+            let update = first
+                .next("twap:stateUpdate", |data| {
+                    data.as_object().is_some_and(|rows| {
+                        rows.values()
+                            .all(|row| row["state"].get("inFlight").is_none())
+                    })
+                })
+                .await;
             let (id, row) = update["data"]
                 .as_object()
                 .unwrap()
