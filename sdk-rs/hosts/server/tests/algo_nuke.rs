@@ -38,6 +38,8 @@ impl Transport for Quiet {
 struct NukeVenue {
     book: Book,
     commands: Arc<Mutex<Vec<String>>>,
+    /// Never settles a command, as a venue that stops answering.
+    stall: bool,
 }
 impl Venue for NukeVenue {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -142,7 +144,9 @@ impl Venue for NukeVenue {
             other => (format!("{other:?}"), "null"),
         };
         self.commands.lock().unwrap().push(name);
-        cx.done(id, result.into());
+        if !self.stall {
+            cx.done(id, result.into());
+        }
     }
     fn book(&self, _: &str) -> Option<&Book> {
         Some(&self.book)
@@ -153,10 +157,15 @@ impl Venue for NukeVenue {
 }
 
 async fn nuke(mode: &'static str) -> (Value, Vec<String>) {
+    run_nuke(mode, false).await
+}
+
+async fn run_nuke(mode: &'static str, stall: bool) -> (Value, Vec<String>) {
     let commands = Arc::new(Mutex::new(Vec::new()));
     let engine = safe_cex_engine::test_support::seeded_engine(NukeVenue {
         book: Book::default(),
         commands: commands.clone(),
+        stall,
     });
     let config = ServerConfig {
         flush_every: Duration::from_millis(1),
@@ -191,6 +200,11 @@ async fn nuke(mode: &'static str) -> (Value, Vec<String>) {
             request_id: "r-nuke".into(),
         })
         .unwrap();
+    if stall {
+        // The cancel never settles; the account is disposed with the nuke mid-leg.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        inbox.send(AlgoInput::Dispose).unwrap();
+    }
     let done = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let text = rx.recv().await.expect("algo host alive");
@@ -222,6 +236,8 @@ async fn nuke_cancels_each_order_symbol_closes_each_position_and_answers_once() 
             assert!(commands[1].starts_with("place "), "{commands:?}");
             assert!(commands[1].contains("\"side\":\"sell\""), "{commands:?}");
             assert!(commands[1].contains("\"reduceOnly\":true"), "{commands:?}");
+            // The whole long, in its native amount, never more.
+            assert!(commands[1].contains("\"amount\":0.001"), "{commands:?}");
         })
         .await;
 }
@@ -237,6 +253,26 @@ async fn nuke_positions_and_nuke_orders_run_one_half() {
             let (done, commands) = nuke("orders").await;
             assert_eq!(done["success"], true);
             assert_eq!(commands, vec!["cancel BTCUSDT".to_owned()]);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_nuke_interrupted_by_disposal_still_answers_with_an_unknown_outcome() {
+    LocalSet::new()
+        .run_until(async {
+            let (done, commands) = run_nuke("all", true).await;
+            assert_eq!(commands, vec!["cancel BTCUSDT".to_owned()]);
+            assert_eq!(done["requestId"], "r-nuke");
+            assert_eq!(done["success"], false);
+            assert_eq!(done["result"]["outcome"], "unknown");
+            assert!(
+                done["result"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Nuke interrupted"),
+                "{done}"
+            );
         })
         .await;
 }
