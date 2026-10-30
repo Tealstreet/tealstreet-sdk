@@ -1331,6 +1331,9 @@ impl Venue for BinanceFutures {
     fn export_venue_state_for(&self, store: &safe_cex_engine::Store) -> Option<Vec<u8>> {
         Some(self.export_venue_state(store))
     }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.prune_venue_state(cx.store);
+    }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
         if !BinanceFutures::apply_venue_state(self, state) {
             cx.notice(

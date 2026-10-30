@@ -6,7 +6,8 @@
 //! - Portfolio margin and spot cancel routing: each client id's owner (regular
 //!   or strategy native id, by symbol) and the per-symbol client-to-native maps.
 //!
-//! Only rows for orders the source's store holds open are exported. The source
+//! Only rows for orders the source's store holds live (open, or creating,
+//! updating or canceling) are exported. The source
 //! keeps its full maps, which also guard against reused client ids; the export
 //! stays bounded and unchanged state is not resent.
 //!
@@ -108,25 +109,26 @@ fn decode(bytes: &[u8]) -> Option<Decoded> {
     reader.0.is_empty().then_some(decoded)
 }
 
+/// Whether the store holds `client` as a live order, on `symbol` when given.
+/// Store order ids are the client ids these maps are keyed by. A transient
+/// state (a chaser updating a stop-limit, a cancel in flight) is still live.
+fn live(store: &Store, symbol: Option<&str>, client: &str) -> bool {
+    store.order(client).is_some_and(|order| {
+        !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+            && symbol.is_none_or(|symbol| order.symbol == symbol)
+    })
+}
+
 impl BinanceFutures {
     pub(crate) fn export_venue_state(&self, store: &Store) -> Vec<u8> {
-        // Store order ids are the client ids these maps are keyed by.
-        let open = |symbol: &str, client: &str| {
-            store
-                .order(client)
-                .is_some_and(|order| order.status == OrderStatus::Open && order.symbol == symbol)
-        };
+        let open = |symbol: &str, client: &str| live(store, Some(symbol), client);
         let account = &self.account;
         let mut out = vec![VERSION];
         let mut stops: Vec<&str> = account
             .limit_stops
             .iter()
             .map(String::as_str)
-            .filter(|id| {
-                store
-                    .order(id)
-                    .is_some_and(|order| order.status == OrderStatus::Open)
-            })
+            .filter(|id| live(store, None, id))
             .collect();
         stops.sort_unstable();
         put_count(&mut out, stops.len());
@@ -163,15 +165,15 @@ impl BinanceFutures {
         out
     }
 
-    /// Apply a data source's state: its stop ids replace ours, and its routing
-    /// rows overwrite ours while this engine's own fresh placements stay.
-    /// `false` leaves everything unchanged for an unreadable payload.
+    /// Apply a data source's state: its stop ids and routing rows join ours, so
+    /// this engine's own fresh placements stay until `prune_venue_state` sees
+    /// their orders end. `false` leaves everything unchanged for an unreadable payload.
     pub(crate) fn apply_venue_state(&mut self, bytes: &[u8]) -> bool {
         let Some(decoded) = decode(bytes) else {
             return false;
         };
         let account = &mut self.account;
-        account.limit_stops = decoded.stops.into_iter().collect();
+        account.limit_stops.extend(decoded.stops);
         for (client, symbol, kind, native) in decoded.owners {
             let source = if kind == 0 {
                 PmOrderSource::Regular(native)
@@ -192,11 +194,71 @@ impl BinanceFutures {
         }
         true
     }
+
+    /// Frame-fed: keep only rows whose orders the ingested store holds live.
+    pub(crate) fn prune_venue_state(&mut self, store: &Store) {
+        let account = &mut self.account;
+        account.limit_stops.retain(|id| live(store, None, id));
+        account
+            .pm_order_owners
+            .retain(|client, owner| live(store, Some(&owner.symbol), client));
+        for map in [
+            &mut account.strategy_client_native,
+            &mut account.spot_client_native,
+        ] {
+            map.retain(|(symbol, client), _| live(store, Some(symbol), client));
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transient_states_are_live_and_terminal_ones_are_not() {
+        use safe_cex_engine::model::{Order, OrderSide, OrderType};
+        let order = |id: &str, status| Order {
+            id: id.into(),
+            parent_id: None,
+            status,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 1.,
+            amount: 1.,
+            filled: 0.,
+            remaining: 1.,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        };
+        let mut store = Store::default();
+        store.set_orders(vec![
+            order("open", OrderStatus::Open),
+            order("creating", OrderStatus::Creating),
+            order("updating", OrderStatus::Updating),
+            order("canceling", OrderStatus::Canceling),
+            order("closed", OrderStatus::Closed),
+            order("canceled", OrderStatus::Canceled),
+        ]);
+        for id in ["open", "creating", "updating", "canceling"] {
+            assert!(live(&store, Some("BTCUSDT"), id), "{id}");
+        }
+        for id in ["closed", "canceled", "absent"] {
+            assert!(!live(&store, None, id), "{id}");
+        }
+        assert!(
+            !live(&store, Some("ETHUSDT"), "open"),
+            "another symbol's row"
+        );
+    }
 
     #[test]
     fn version_one_still_reads_and_bad_payloads_refuse() {
