@@ -9,7 +9,8 @@
 //! symbols through it, never to this engine's own indexes.
 //!
 //! Each section has its own decoder below; one not yet implemented is skipped.
-use crate::store::Store;
+use crate::model::{Balance, CoinBalance, CurrencyBalance, MarginType};
+use crate::store::{MarketSetting, Store};
 use crate::wire::{FORMAT, MAGIC, NONE, section};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,21 +272,135 @@ fn positions(
     Ok(())
 }
 
+/// The aggregate, then the collateral tail, then the per-currency tail (whose
+/// flag bit 0 says the source has no collateral). An absent tail keeps the
+/// store's own, as the writer omits a tail the source never supplied.
 fn balance(
-    _: &mut Store,
+    store: &mut Store,
     _: &IngestState,
-    _: &Frame<'_>,
-    _: &Section<'_>,
+    frame: &Frame<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    let mut cursor = Cursor::new(section.payload);
+    let aggregate = |cursor: &mut Cursor<'_>| -> Result<Balance, IngestError> {
+        Ok(Balance {
+            used: cursor.f64()?,
+            free: cursor.f64()?,
+            total: cursor.f64()?,
+            upnl: cursor.f64()?,
+        })
+    };
+    let balance = aggregate(&mut cursor)?;
+    store.set_balance(balance);
+    if cursor.at >= section.payload.len() {
+        return Ok(());
+    }
+    let count = cursor.u32()? as usize;
+    let bases = (0..count)
+        .map(|_| frame.strings.required(cursor.u32()?))
+        .collect::<Result<Vec<_>, _>>()?;
+    cursor.align8();
+    let amounts = (0..count)
+        .map(|_| cursor.f64())
+        .collect::<Result<Vec<_>, _>>()?;
+    let notionals = (0..count)
+        .map(|_| cursor.f64())
+        .collect::<Result<Vec<_>, _>>()?;
+    let coins = bases
+        .into_iter()
+        .zip(amounts.into_iter().zip(notionals))
+        .map(|(base, (amount, notional))| CoinBalance {
+            base: base.to_owned(),
+            amount,
+            notional,
+        })
+        .collect();
+    if cursor.at >= section.payload.len() {
+        store.set_coin_balances(coins);
+        return Ok(());
+    }
+    let count = cursor.u32()? as usize;
+    let flags = cursor.u32()?;
+    let names = (0..count)
+        .map(|_| frame.strings.required(cursor.u32()?))
+        .collect::<Result<Vec<_>, _>>()?;
+    cursor.align8();
+    let mut columns = [const { Vec::new() }; 4];
+    for column in &mut columns {
+        *column = (0..count)
+            .map(|_| cursor.f64())
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    let [totals, free, used, upnl] = columns;
+    let currencies = (0..count)
+        .map(|i| CurrencyBalance {
+            currency: names[i].to_owned(),
+            balance: Balance {
+                total: totals[i],
+                free: free[i],
+                used: used[i],
+                upnl: upnl[i],
+            },
+        })
+        .collect();
+    if flags & 1 == 0 {
+        store.set_coin_balances(coins);
+    }
+    store.set_currency_balances(currencies);
     Ok(())
 }
 
+/// Rows of market ref and margin type, then scalar, buy and sell leverage
+/// columns, then (revision one) symbol refs. Every row keys by symbol, so a
+/// setting for a market the source has not listed survives. A side leverage
+/// equal to the scalar was written for an unset side and decodes as unset.
 fn settings(
-    _: &mut Store,
-    _: &IngestState,
-    _: &Frame<'_>,
-    _: &Section<'_>,
+    store: &mut Store,
+    state: &IngestState,
+    frame: &Frame<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    let mut cursor = Cursor::new(section.payload);
+    let count = cursor.u32()? as usize;
+    let markets = (0..count)
+        .map(|_| cursor.u32())
+        .collect::<Result<Vec<_>, _>>()?;
+    let margins = (0..count)
+        .map(|_| cursor.u32())
+        .collect::<Result<Vec<_>, _>>()?;
+    cursor.align8();
+    let mut column = || {
+        (0..count)
+            .map(|_| cursor.f64())
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let (leverage, buy, sell) = (column()?, column()?, column()?);
+    let symbols = if section.revision >= 1 {
+        (0..count)
+            .map(|_| frame.strings.required(cursor.u32()?))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        markets
+            .iter()
+            .map(|market| state.symbol(*market))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let side = |value: f64, scalar: f64| (value.to_bits() != scalar.to_bits()).then_some(value);
+    store.replace_settings((0..count).map(|i| {
+        (
+            symbols[i],
+            MarketSetting {
+                leverage: leverage[i],
+                margin_type: match margins[i] {
+                    1 => Some(MarginType::Isolated),
+                    2 => Some(MarginType::Cross),
+                    _ => None,
+                },
+                buy_leverage: side(buy[i], leverage[i]),
+                sell_leverage: side(sell[i], leverage[i]),
+            },
+        )
+    }));
     Ok(())
 }
 
@@ -333,6 +448,196 @@ pub(crate) mod tests {
         let applied = apply(&mut store, &mut IngestState::default(), &parsed, false).unwrap();
         assert_eq!(applied.venue_state.as_deref(), Some(&b"abc"[..]));
         assert!(parse(&frame[..12]).is_err());
+    }
+
+    use crate::model::{Balance, CoinBalance, CurrencyBalance, MarginType};
+    use crate::store::MarketSetting;
+
+    fn sections_of(store: &Store, kind: u16) -> Vec<Vec<u8>> {
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        store.write(&store.account_snapshot(), &mut writer);
+        let frame = writer.finish();
+        crate::wire::sections(&frame)
+            .filter(|(k, _)| *k == kind)
+            .map(|(_, payload)| payload.to_vec())
+            .collect()
+    }
+
+    fn funded() -> Store {
+        let mut store = Store::default();
+        store.set_balance(Balance {
+            used: 1.5,
+            free: 8.5,
+            total: 10.,
+            upnl: -0.25,
+        });
+        store
+    }
+
+    #[test]
+    fn balance_alone_round_trips() {
+        let source = funded();
+        let (store, _) = round_trip(&source);
+        assert_eq!(store.balance(), source.balance());
+        assert!(store.loaded().balance);
+        assert_eq!(store.coin_balances(), None);
+        assert_eq!(store.currency_balances(), None);
+        assert_eq!(
+            sections_of(&store, section::BALANCE),
+            sections_of(&source, section::BALANCE)
+        );
+    }
+
+    #[test]
+    fn balance_round_trips_with_collateral_and_currency_tails() {
+        let mut source = funded();
+        source.set_coin_balances(vec![
+            CoinBalance {
+                base: "BTC".into(),
+                amount: 0.5,
+                notional: 50_000.,
+            },
+            CoinBalance {
+                base: "USDT".into(),
+                amount: 120.,
+                notional: 120.,
+            },
+        ]);
+        let (store, _) = round_trip(&source);
+        assert_eq!(store.coin_balances(), source.coin_balances());
+        assert_eq!(store.currency_balances(), None);
+        source.set_currency_balances(vec![CurrencyBalance {
+            currency: "ETH".into(),
+            balance: Balance {
+                total: 2.,
+                free: 1.25,
+                used: 0.75,
+                upnl: 0.,
+            },
+        }]);
+        let (store, _) = round_trip(&source);
+        assert_eq!(store.coin_balances(), source.coin_balances());
+        assert_eq!(store.currency_balances(), source.currency_balances());
+        assert_eq!(
+            sections_of(&store, section::BALANCE),
+            sections_of(&source, section::BALANCE)
+        );
+    }
+
+    #[test]
+    fn currencies_without_collateral_leave_coins_unset() {
+        let mut source = funded();
+        source.set_currency_balances(vec![]);
+        let (store, _) = round_trip(&source);
+        assert_eq!(store.coin_balances(), None);
+        assert_eq!(store.currency_balances(), Some(&[][..]));
+        assert_eq!(
+            sections_of(&store, section::BALANCE),
+            sections_of(&source, section::BALANCE)
+        );
+    }
+
+    #[test]
+    fn a_balance_delta_without_tails_keeps_the_ingested_holdings() {
+        let mut source = funded();
+        source.set_coin_balances(vec![CoinBalance {
+            base: "BTC".into(),
+            amount: 1.,
+            notional: 100.,
+        }]);
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        source.write(&source.account_snapshot(), &mut writer);
+        let snapshot = writer.finish();
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin(section::BALANCE);
+        writer.f64s([2., 3., 5., 0.]);
+        writer.end();
+        let delta = writer.finish();
+        let (mut store, mut state) = (Store::default(), IngestState::default());
+        apply(&mut store, &mut state, &parse(&snapshot).unwrap(), true).unwrap();
+        apply(&mut store, &mut state, &parse(&delta).unwrap(), false).unwrap();
+        assert_eq!(store.balance().total, 5.);
+        assert_eq!(store.coin_balances(), source.coin_balances());
+    }
+
+    #[test]
+    fn settings_round_trip_by_symbol_including_unlisted_markets() {
+        let mut source = Store::default();
+        source.set_markets(vec![
+            crate::store::tests::market("A"),
+            crate::store::tests::market("B"),
+        ]);
+        source.update_setting("B", |s| {
+            s.leverage = 20.;
+            s.margin_type = Some(MarginType::Isolated);
+        });
+        source.update_setting("A", |s| {
+            s.leverage = 5.;
+            s.margin_type = Some(MarginType::Cross);
+            s.buy_leverage = Some(3.);
+            s.sell_leverage = Some(7.);
+        });
+        // A setting reported before its market was listed keeps its symbol.
+        source.update_setting("Z", |s| s.leverage = 2.);
+        let (store, _) = round_trip(&source);
+        for symbol in ["A", "B", "Z"] {
+            assert_eq!(store.setting(symbol), source.setting(symbol), "{symbol}");
+        }
+        let mut relisted = Store::default();
+        relisted.set_markets(source.markets().to_vec());
+        relisted.replace_settings(["A", "B", "Z"].map(|s| (s, store.setting(s).unwrap())));
+        assert_eq!(
+            sections_of(&relisted, section::SETTINGS),
+            sections_of(&source, section::SETTINGS)
+        );
+    }
+
+    #[test]
+    fn revision_zero_settings_map_through_the_source_market_table() {
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin(section::SETTINGS);
+        writer.u32(1);
+        writer.u32(1);
+        writer.u32(MarginType::Cross as u32 + 1);
+        writer.pad();
+        writer.f64s([10., 10., 4.]);
+        writer.end();
+        let frame = writer.finish();
+        let mut state = IngestState {
+            source_markets: vec!["A".into(), "B".into()],
+        };
+        let mut store = Store::default();
+        apply(&mut store, &mut state, &parse(&frame).unwrap(), false).unwrap();
+        assert_eq!(
+            store.setting("B"),
+            Some(MarketSetting {
+                leverage: 10.,
+                margin_type: Some(MarginType::Cross),
+                buy_leverage: None,
+                sell_leverage: Some(4.),
+            })
+        );
+        state.source_markets.clear();
+        assert!(apply(&mut store, &mut state, &parse(&frame).unwrap(), false).is_err());
+    }
+
+    #[test]
+    fn a_truncated_balance_is_refused() {
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin(section::BALANCE);
+        writer.f64s([1., 2.]);
+        writer.end();
+        let frame = writer.finish();
+        let mut store = Store::default();
+        assert!(
+            apply(
+                &mut store,
+                &mut IngestState::default(),
+                &parse(&frame).unwrap(),
+                false
+            )
+            .is_err()
+        );
     }
 
     #[test]
