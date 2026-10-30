@@ -552,6 +552,15 @@ pub fn translate(
             }
             one(command("setPositionMode", out, true))
         }
+        // A frame-fed page engine changed a setting: re-read it so its next frame agrees.
+        "refreshAccountSettings" if public_only => one(Plan::Reply(Value::Null)),
+        "refreshAccountSettings" => {
+            let mut out = Map::new();
+            if let Some(symbol) = args.first().filter(|symbol| !symbol.is_null()) {
+                out.insert("symbol".into(), text(symbol, "symbol")?.into());
+            }
+            one(command("refreshSettings", out, true))
+        }
         // As `RustEngineExchange.updateSymbolMetadata`: the venue's rails or maximum
         // reach the engine store, and the next frame carries them.
         "updateSymbolMetadata" => {
@@ -1270,6 +1279,27 @@ mod tests {
             );
             assert!(translate(method, &[], &caps(), &[], true).is_err());
         }
+    }
+
+    // A frame-fed page engine after a settings write (RustEngineExchange.refreshSourceSettings).
+    #[test]
+    fn web_refresh_account_settings_asks_the_engine_to_re_read() {
+        web("refreshAccountSettings", json!(["BTCUSDT"]), &caps());
+        assert_eq!(
+            translate("refreshAccountSettings", &[], &caps(), &[], false).unwrap(),
+            vec![command("refreshSettings", Map::new(), true)]
+        );
+        assert_eq!(
+            translate(
+                "refreshAccountSettings",
+                &[json!("BTCUSDT")],
+                &caps(),
+                &[],
+                true
+            )
+            .unwrap(),
+            vec![Plan::Reply(Value::Null)]
+        );
     }
 
     // Web: sendOutcome / cancelOrders / updateOrder resync, ConnectionStateWorker / desktopRecovery.
