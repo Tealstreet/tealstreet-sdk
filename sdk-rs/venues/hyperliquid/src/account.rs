@@ -228,8 +228,11 @@ impl Hyperliquid {
     ) {
         // Frame-fed: account state arrives as frames; only an unknown builder
         // approval is read, once, before the first placement.
-        if cx.frame_fed() && !matches!(request, Request::Builder) {
-            return;
+        if cx.frame_fed() {
+            match &request {
+                Request::Builder => {}
+                _ => return,
+            }
         }
         let weight = match &request {
             Request::Role => 60,
