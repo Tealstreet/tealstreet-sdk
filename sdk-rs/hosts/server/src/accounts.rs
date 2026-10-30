@@ -494,7 +494,7 @@ impl Registry {
             differs.join(", ")
         ));
         Some(format!(
-            "{} is open on another connection with different settings ({}); it keeps running there. Reload that window, or this one, so both use the same settings.",
+            "{} is open in another window or on another device with different settings ({}). The change was not applied and that copy keeps running: close it there, or reload both, and this one will load with the new settings.",
             init.account_name,
             differs.join(", ")
         ))
@@ -1230,11 +1230,19 @@ mod tests {
                         .map(|_| ())
                         .unwrap_err();
                     assert!(refused.contains("enableSpotMarkets"), "{refused}");
+                    assert!(
+                        refused.contains("close it there, or reload both"),
+                        "{refused}"
+                    );
                 }
                 assert!(registry.rebuild_refusal("u", &other, false, 8).is_some());
                 assert!(
                     registry.rebuild_refusal("u", &init, false, 8).is_none(),
                     "same settings join"
+                );
+                assert!(
+                    registry.rebuild_refusal("u", &other, false, 7).is_none(),
+                    "the holder itself changing its settings rebuilds"
                 );
                 assert!(algos.try_recv().is_err(), "the live holder's algos run on");
                 assert_eq!(account.holders.lock().unwrap().signing, Some(7));
