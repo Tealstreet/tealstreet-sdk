@@ -221,8 +221,13 @@ impl Host for Adapter {
         };
         let command = if wait.is_none() && nuke_mode.is_none() {
             Some(
-                translate(method, &args, self.cx.port.next_command_id())
-                    .map_err(|error| json!({"message":error,"outcome":"notSent"}))?,
+                translate(
+                    method,
+                    &args,
+                    self.cx.port.next_command_id(),
+                    &self.cx.port.capabilities(),
+                )
+                .map_err(|error| json!({"message":error,"outcome":"notSent"}))?,
             )
         } else {
             None
@@ -294,7 +299,12 @@ impl Host for Adapter {
 }
 
 /// The initial callMethod subset; the engine decoder validates every command.
-pub fn translate(method: &str, args: &Value, id: CommandId) -> Result<Command, String> {
+pub fn translate(
+    method: &str,
+    args: &Value,
+    id: CommandId,
+    capabilities: &safe_cex_engine::Capabilities,
+) -> Result<Command, String> {
     let args = args.as_array().ok_or("Invalid method arguments")?;
     let symbol = || {
         args.first()
@@ -323,10 +333,11 @@ pub fn translate(method: &str, args: &Value, id: CommandId) -> Result<Command, S
                     Ok(json!({"id":id,"symbol":symbol}))
                 })
                 .collect();
-            return Ok(Command::CancelOrdersWithSymbols {
-                command: id,
-                orders: serde_json::from_value(Value::Array(orders?)).map_err(|e| e.to_string())?,
-            });
+            return Ok(safe_cex_algos::cancel_command(
+                capabilities,
+                id,
+                serde_json::from_value(Value::Array(orders?)).map_err(|e| e.to_string())?,
+            ));
         }
         "placeOrders" => {
             json!({"op":"placeOrders","command":id,"orders":args.first().filter(|v|v.is_array()).ok_or("Missing orders")?})
@@ -340,7 +351,32 @@ pub fn translate(method: &str, args: &Value, id: CommandId) -> Result<Command, S
                 .as_str()
                 .filter(|s| !s.is_empty())
                 .ok_or("Missing order ID")?;
-            json!({"op":"amendOrder","command":id,"id":order_id,"price":input["update"]["price"]})
+            let number = |field: &str| -> Result<Option<f64>, String> {
+                match &input["update"][field] {
+                    Value::Null => Ok(None),
+                    value => value
+                        .as_f64()
+                        .filter(|n| n.is_finite())
+                        .map(Some)
+                        .ok_or_else(|| format!("Invalid update {field}")),
+                }
+            };
+            let (price, amount) = (number("price")?, number("amount")?);
+            if price.is_none() && amount.is_none() {
+                return Err("Order amendment requires a price or amount".into());
+            }
+            let symbol = input["order"]["symbol"].as_str().unwrap_or_default();
+            if capabilities.amend_with_symbol && symbol.is_empty() {
+                return Err("Missing order symbol".into());
+            }
+            return Ok(safe_cex_algos::amend_command(
+                capabilities,
+                id,
+                order_id.to_owned(),
+                symbol.to_owned(),
+                price,
+                amount,
+            ));
         }
         "fetchOHLCV" => {
             let query = args.first().ok_or("Missing candle query")?;

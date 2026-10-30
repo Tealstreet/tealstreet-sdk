@@ -225,6 +225,20 @@ impl ChaserBook {
         self.emit_json("error", message);
     }
 
+    /// A stopping chase's cancel the venue refused leaves the order open: say so,
+    /// rather than reporting the chase finished as if nothing were left behind.
+    fn cancel_failed(&self, symbol: &str, ids: &str, error: &VenueError) {
+        let gone = ["already canceled", "already filled", "never placed"]
+            .iter()
+            .any(|phrase| error.message.contains(phrase));
+        if !gone {
+            self.error(&format!(
+                "Chaser could not cancel {symbol} order {ids}: {}; it may still be open",
+                error.message
+            ));
+        }
+    }
+
     fn log(&self, chase: &Chase, message: &str) {
         self.emit_json("log", &format!("[CHASER{}] {message}", chase.id));
     }
@@ -336,7 +350,8 @@ impl ChaserBook {
                 symbol: symbol.into(),
             })
             .collect();
-        self.command(|command| Command::CancelOrdersWithSymbols { command, orders })
+        let capabilities = self.cx.port.capabilities();
+        self.command(|command| safe_cex_algos::cancel_command(&capabilities, command, orders))
             .await
     }
 
@@ -767,7 +782,9 @@ impl ChaserBook {
             if chase.is_stopped() {
                 if !ids.is_empty() {
                     // STOP raced the placement: cancel what landed ourselves.
-                    let _ = self.cancel(&chase.options.symbol, &ids).await;
+                    if let Err(error) = self.cancel(&chase.options.symbol, &ids).await {
+                        self.cancel_failed(&chase.options.symbol, &ids.join(", "), &error);
+                    }
                 }
                 return Vec::new();
             }
@@ -856,7 +873,9 @@ impl ChaserBook {
                 || chase.options.symbol.clone(),
                 |order| order.symbol.clone(),
             );
-            let _ = self.cancel(&symbol, std::slice::from_ref(id)).await;
+            if let Err(error) = self.cancel(&symbol, std::slice::from_ref(id)).await {
+                self.cancel_failed(&symbol, id, &error);
+            }
         }
         if owns_completion {
             self.emit_complete(&chase).await;

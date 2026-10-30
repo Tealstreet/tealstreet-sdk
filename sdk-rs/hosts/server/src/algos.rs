@@ -131,6 +131,9 @@ impl AccountPort for Port {
     fn emit(&self, op: &str, data: String) {
         (self.emit)(algo_msg(&self.name, op, data));
     }
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        *self.handle.capabilities()
+    }
 }
 
 /// An algo's reply as the worker posted it: `{op, data}` with `data` verbatim.
