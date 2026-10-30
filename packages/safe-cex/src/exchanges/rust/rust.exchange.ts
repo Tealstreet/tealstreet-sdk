@@ -1027,14 +1027,15 @@ export class RustEngineExchange extends BaseExchange {
     host.setSourceClockOffset(offset);
   };
 
-  /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere. */
+  /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere: the
+   * worker's run in its Rust algos; an in-process CLI's run in the TS algos. */
   stopAccountAlgos = (): Promise<NukeResult> =>
     this.runsRustAlgos ? this.stopRustAlgos() : stopLocalAccountAlgos(this);
 
-  /** Where this account's algo ops run, once its engine host exists to say. */
-  private algoRoute: 'rust' | 'ts' | undefined;
+  /** Whether this account's engine runs algos, once its engine host exists to say. */
+  private algoRoute: 'rust' | 'unsupported' | undefined;
   /** Algo ops that arrived before the engine host, replayed in order once it decides. */
-  private queuedAlgoOps: { op: string; rust: () => void; ts: () => void }[] = [];
+  private queuedAlgoOps: { op: string; rust: () => void; refuse: (message: string) => void }[] = [];
 
   /** Chaser, TWAP and exec ops run in this account's engine (an `algos` build). */
   get runsRustAlgos(): boolean {
@@ -1052,50 +1053,54 @@ export class RustEngineExchange extends BaseExchange {
       this.algoRoute = 'rust';
     } catch (error) {
       if (!(error instanceof ExchangeError && error.kind === 'unsupported')) throw error;
-      this.algoRoute = 'ts';
+      this.algoRoute = 'unsupported';
     }
     this.replayQueuedAlgoOps();
     return this.algoRoute === 'rust';
   };
 
   /**
-   * Route one worker algo op: `rust` runs it in the engine, `ts` in the TS algos.
-   * True when it ran in Rust or waits for the engine host; false means run `ts`
-   * now. An op that waits is replayed in arrival order once the host decides.
+   * Route one worker algo op to the engine's Rust algos: `rust` runs it there,
+   * now or, before the engine host exists, once it starts (bounded, in arrival
+   * order). An op that cannot run there reaches `refuse` with the reason.
    */
-  routeAlgoOp = (accountName: string, op: string, rust: () => void, ts: () => void): boolean => {
+  routeAlgoOp = (accountName: string, op: string, rust: () => void, refuse: (message: string) => void): void => {
     if (!this.algoRoute) this.startAlgos(accountName);
     if (this.algoRoute === 'rust') {
       rust();
-      return true;
+      return;
     }
-    if (this.algoRoute === 'ts') return false;
+    if (this.algoRoute === 'unsupported') {
+      refuse(this.noAlgosMessage(op));
+      return;
+    }
     if (this.isDisposed || this.engineFailure) {
-      this.emitter.emit('error', `${op} was not run: the ${this.name} engine stopped before it could run algos`);
-      return true;
+      refuse(`${op} was not run: the ${this.name} engine stopped before it could run algos`);
+      return;
     }
     if (this.queuedAlgoOps.length >= MAX_QUEUED_ALGO_OPS) {
-      this.emitter.emit('error', `${op} was not run: too many algo requests are waiting for the ${this.name} engine to start`);
-      return true;
+      refuse(`${op} was not run: too many algo requests are waiting for the ${this.name} engine to start`);
+      return;
     }
-    this.queuedAlgoOps.push({ op, rust, ts });
-    return true;
+    this.queuedAlgoOps.push({ op, rust, refuse });
   };
+
+  private noAlgosMessage = (op: string) => `${op} was not run: this ${this.name} engine build has no algos`;
 
   private replayQueuedAlgoOps() {
     const queued = this.queuedAlgoOps.splice(0);
-    for (const { op, rust, ts } of queued) {
+    for (const { op, rust, refuse } of queued) {
       try {
         if (this.algoRoute === 'rust') rust();
-        else if (this.algoRoute === 'ts') ts();
-        else this.emitter.emit('error', `${op} was not run: the ${this.name} engine never started`);
+        else if (this.algoRoute === 'unsupported') refuse(this.noAlgosMessage(op));
+        else refuse(`${op} was not run: the ${this.name} engine never started`);
       } catch (error) {
-        this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
+        refuse(`${op} failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
 
-  /** One worker algo op; a refusal reaches the user as the TS handlers' did. */
+  /** One worker algo op; a refusal reaches the user as an `error` event. */
   algoOp = (op: string, data: unknown): void => {
     try {
       if (!this.host) throw new Error(`${this.name} engine is not started`);
@@ -1105,7 +1110,7 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
-  /** Rust algo replies, under the op names the TS algos emit. `store` carries the rows
+  /** Rust algo replies, under the worker's algo op names. `store` carries the rows
    * frames do not; the worker's TWAP handler persists `twap:stateUpdate`. */
   private receiveAlgoEmit = (op: string, data: unknown) => {
     if (op === 'store') {

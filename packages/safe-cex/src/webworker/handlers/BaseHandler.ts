@@ -6,7 +6,7 @@ import { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 export type RustAlgoExchange = {
   runsRustAlgos: boolean;
-  routeAlgoOp(accountName: string, op: string, rust: () => void, ts: () => void): boolean;
+  routeAlgoOp(accountName: string, op: string, rust: () => void, refuse: (message: string) => void): void;
   algoOp(op: string, data: unknown): void;
 };
 
@@ -55,19 +55,26 @@ export abstract class BaseHandler {
   abstract handle(payload: StoreWorkerPayload): void;
 
   /**
-   * A Rust-engine account built with algos runs chaser, TWAP and exec ops in its
-   * engine (`rust`, by default `RustEngineExchange.algoOp`), never in the TS
-   * algos. True when sent there, or held until the engine host starts: the
-   * exchange then replays it here, in Rust or through this handler's TS path.
+   * Chaser, TWAP and exec ops run only in the account engine's Rust algos
+   * (`rust`, by default `RustEngineExchange.algoOp`): now, or once the engine
+   * host starts. An op that cannot run there reaches `refuse` with the reason,
+   * by default as an `error` event.
    */
-  protected runInRustAlgos(payload: StoreWorkerPayload, rust?: () => void): boolean {
+  protected runInRustAlgos(
+    payload: StoreWorkerPayload,
+    rust?: () => void,
+    refuse: (message: string) => void = (message) => this._exchange.emitter.emit('error', message),
+  ): void {
     const exchange = rustAlgoExchange(this._exchange);
-    if (!exchange) return false;
-    return exchange.routeAlgoOp(
+    if (!exchange) {
+      refuse(`${payload.op} was not run: algos run only on a Rust engine account`);
+      return;
+    }
+    exchange.routeAlgoOp(
       this._accountName,
       payload.op,
       rust ?? (() => exchange.algoOp(payload.op, payload.data)),
-      () => this.handle(payload),
+      refuse,
     );
   }
 

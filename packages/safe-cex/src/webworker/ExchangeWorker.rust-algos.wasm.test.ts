@@ -4,14 +4,12 @@ import { binanceVenue } from '../../../../sdk-rs/hosts/wasm/js/binance-venue-fix
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { virtualClock } from '../utils/virtualClock';
-import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { ExchangeWorker } from './ExchangeWorker';
 import { setTwapLockManager, type TwapLockManager } from './twap/twapLock';
-import { twapManager } from './twap/TwapManager';
 
 // The local worker on a real `algos` build of the Binance engine (built with
 // `bash sdk-rs/harness/build.sh --venue binance`): chaser and TWAP ops run in
-// the engine, and their replies reach main under the TS handlers' op names.
+// the engine, and their replies reach main under the worker's algo op names.
 const engine = await loadNodeEngine().catch(() => undefined);
 const algos = typeof (engine?.WasmEngine.prototype as { algoStart?: unknown } | undefined)?.algoStart === 'function';
 
@@ -47,8 +45,6 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(virtualClock, 'start').mockResolvedValue();
   setWasmEngineLoader(loadNodeEngine);
-  vi.spyOn(chaserOrderManagerInstance, 'add');
-  vi.spyOn(twapManager, 'add');
 });
 afterEach(() => {
   workers.splice(0).forEach((worker) => worker.dispose());
@@ -76,8 +72,6 @@ it.skipIf(!algos)('a local chase runs in the engine and posts chaser:complete wh
     data: [expect.objectContaining({ clientId: 'chase-1', symbol: 'BTCUSDT', filled: 0.002, stopReason: 'Completed' })],
   });
   expect(lastStore(messages, 'activeChasers')).toEqual([]);
-  expect(chaserOrderManagerInstance.add).not.toHaveBeenCalled();
-  expect(chaserOrderManagerInstance.instances).toHaveLength(0);
 });
 
 it.skipIf(!algos)('a two-slice TWAP places on the host timer, persists its rows and completes', async () => {
@@ -101,7 +95,7 @@ it.skipIf(!algos)('a two-slice TWAP places on the host timer, persists its rows 
   await vi.advanceTimersByTimeAsync(300);
   expect(venue.placements.map((order: { type: string }) => order.type)).toEqual(['MARKET']);
   const persisted = messages.filter((message) => message.op === 'twap:stateUpdate').at(-1);
-  // Posted as the TS TwapInstance posts it: the persisted map itself, not listener args.
+  // Posted as the persisted map itself, not listener args.
   expect(Object.values(persisted!.data)).toEqual([
     expect.objectContaining({ options: expect.objectContaining({ accountName: 'acct' }) }),
   ]);
@@ -114,8 +108,6 @@ it.skipIf(!algos)('a two-slice TWAP places on the host timer, persists its rows 
   await vi.advanceTimersByTimeAsync(1_000);
   expect(messages.filter((message) => message.op === 'twap:stateUpdate').at(-1)?.data).toEqual({});
   expect(lastStore(messages, 'activeTWAPs')).toEqual([]);
-  expect(twapManager.add).not.toHaveBeenCalled();
-  expect(twapManager.runningTwaps.size).toBe(0);
 });
 
 it.skipIf(!algos)('disposing the worker cancels a resting chase before the engine goes', async () => {
@@ -200,7 +192,6 @@ it.skipIf(!algos)('a restored Rust TWAP re-places an in-flight slice the venue n
   expect(lastPersisted(messages)['restored-twap'].state).toMatchObject({ ordersSizes: [0.002], ordersExecuted: 1 });
   await vi.advanceTimersByTimeAsync(31_000);
   expect(venue.placements).toHaveLength(2);
-  expect(twapManager.add).not.toHaveBeenCalled();
 });
 
 it.skipIf(!algos)('a Rust TWAP another tab runs is not restored', async () => {
@@ -276,13 +267,12 @@ it.skipIf(!algos)('an algo op that beats the engine host waits for it, then runs
     op: 'chaser:start',
     data: { symbol: 'BTCUSDT', size: 0.002, side: 'buy', maxAttempts: 10, clientId: 'early' },
   });
-  expect(chaserOrderManagerInstance.add).not.toHaveBeenCalled();
+  expect(venue.placements).toHaveLength(0);
   openEngine();
   await vi.advanceTimersByTimeAsync(1_000);
   expect(await started).toBe(true);
   await vi.advanceTimersByTimeAsync(300);
   expect(venue.placements).toHaveLength(1);
-  expect(chaserOrderManagerInstance.add).not.toHaveBeenCalled();
   expect(errorsIn(messages)).toEqual([]);
 });
 
@@ -306,5 +296,4 @@ it.skipIf(!algos)('an algo op still waiting when the account is disposed is repo
   worker.handlePayload({ op: 'chaser:start', data: { symbol: 'BTCUSDT', size: 0.002, side: 'buy', maxAttempts: 10 } });
   worker.dispose();
   expect(errors).toEqual(['chaser:start was not run: the binance engine never started']);
-  expect(chaserOrderManagerInstance.add).not.toHaveBeenCalled();
 });

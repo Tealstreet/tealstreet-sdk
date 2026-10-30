@@ -11,10 +11,9 @@ type Row = { options: TwapOptions; state: TwapState };
 type PersistedTwap = Row & { id: string };
 
 /**
- * The TS TWAP rules a TWAP running in the Rust algos keeps (`TwapHandler`,
- * `TwapInstance`): one cross-tab Web Lock per TWAP, a restore that runs only
- * once it holds the lock and has settled its in-flight slice, and a final
- * persisted state when the engine dies. The algos persist their own rows
+ * The worker's rules for a TWAP running in the Rust algos: one cross-tab Web
+ * Lock per TWAP, a restore that runs only once it holds the lock and has
+ * settled its in-flight slice, and a final persisted state when the engine dies. The algos persist their own rows
  * (`twap:stateUpdate`); this posts them with the restores still waiting.
  */
 export class RustTwapOwnership {
@@ -38,7 +37,7 @@ export class RustTwapOwnership {
     if (op === 'twap:state') return this.restore(data);
     const row = typeof data === 'string' ? this.pending.get(data) : undefined;
     if (!row) return this.send(op, data);
-    // As a restored TwapInstance awaiting its lock: resume waits for the lock.
+    // A restored row awaiting its lock: resume waits for the lock.
     if (op === 'twap:stop') this.pending.delete(data as string);
     else if (op === 'twap:pause' && row.state.status === TwapStatus.Running) row.state = { ...row.state, status: TwapStatus.Paused };
     else if (op === 'twap:cleanup') row.state = { ...row.state, markForCleanup: true };
