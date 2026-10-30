@@ -15,11 +15,13 @@ import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 import { setWsRelayEnabled } from './tealstreet/wsRelay';
 
 const mocks = vi.hoisted(() => ({ adapter: vi.fn(), factory: vi.fn() }));
-vi.mock('../accessToken', () => ({
+vi.mock('../accessToken', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../accessToken')>()),
   getProxyToken: async () => 'fixture-proxy-token',
   captureProxyTokenProvider: () => null,
   withProxyTokenProvider: (_provider: unknown, fn: () => unknown) => fn(),
-  bindProxyTokenLookup: () => async () => '',
+  // The real binder looks the token up through getProxyToken.
+  bindProxyTokenLookup: () => async () => 'fixture-proxy-token',
 }));
 vi.mock('../utils/runtime', () => ({ isNodeOrBunRuntime: () => true }));
 vi.mock('../httpOverWebsocket/axiosHttpOverWebsocketAdapter', () => ({

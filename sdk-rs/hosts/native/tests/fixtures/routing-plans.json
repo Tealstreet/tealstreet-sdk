@@ -4286,7 +4286,7 @@
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F"
         },
         "business": {}
       },
@@ -4405,8 +4405,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4414,8 +4414,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4423,8 +4423,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4432,8 +4432,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4441,8 +4441,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4521,7 +4521,7 @@
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F"
         },
         "business": {}
       },
@@ -4640,8 +4640,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4649,8 +4649,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4658,8 +4658,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4667,8 +4667,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4676,8 +4676,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4747,7 +4747,7 @@
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F"
         },
         "business": {}
       },
@@ -4856,8 +4856,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4865,8 +4865,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4874,8 +4874,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4883,8 +4883,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4892,8 +4892,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
