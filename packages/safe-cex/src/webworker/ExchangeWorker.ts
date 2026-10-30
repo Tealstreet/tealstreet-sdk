@@ -382,9 +382,6 @@ export class ExchangeWorker {
         return false;
       }
 
-      // An engine built with algos runs this account's chasers, TWAPs and CLI;
-      // start them before the buffered ops that drive them.
-      if (this._exchange instanceof RustEngineExchange) this._exchange.startAlgos(this._accountName);
       this._flushBufferedMessages();
       if (startupToken !== this._startupToken || this._exchange?.isDisposed) {
         return false;
@@ -1090,11 +1087,6 @@ export class ExchangeWorker {
     // error per routine message would toast on every symbol switch.
   }
 
-  /** TWAPs in the engine's Rust algos died with it: post their final state, as TS stops its own. */
-  private _finishRustTwaps() {
-    for (const handler of this._handlers) if (handler instanceof TwapHandler) handler.finishRustTwaps();
-  }
-
   private _stopOwnedTwaps() {
     for (const twap of this._ownedTwaps) {
       void twap.terminate().catch((error: unknown) => this.logError('Unable to stop interrupted TWAP.', error));
@@ -1122,8 +1114,6 @@ export class ExchangeWorker {
     // counters before releasing it, so the replacement cannot rewind them.
     this._recoveryUpdateIds = { ...this._store.updateIds };
     if (!this._started || this._recovering) {
-      // An op that beat startup can have started a Rust TWAP already.
-      this._finishRustTwaps();
       this._invalidateReadiness();
       return;
     }
@@ -1140,7 +1130,6 @@ export class ExchangeWorker {
     });
     // Stop TWAPs while their handler context is still current, so the final
     // completed state reaches the main thread that persists and resumes them.
-    this._finishRustTwaps();
     this._stopOwnedTwaps();
     this._generation++;
     this._clearRuntimePipeline();

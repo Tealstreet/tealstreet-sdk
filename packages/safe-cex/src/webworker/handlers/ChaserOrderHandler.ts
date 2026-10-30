@@ -4,11 +4,8 @@ import { ChaserOrderOptions } from '../chaserOrder/ChaserOrderOptions';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
-const CHASER_OPS = new Set<StoreWorkerPayload['op']>(['chaser:start', 'chaser:terminate', 'chaser:terminateAll']);
-
 export class ChaserOrderHandler extends BaseHandler {
   handle(payload: StoreWorkerPayload): void {
-    if (CHASER_OPS.has(payload.op) && this.runInRustAlgos(payload)) return;
     switch (payload.op) {
       case 'chaser:start':
         const options = payload.data as ChaserOrderOptions;

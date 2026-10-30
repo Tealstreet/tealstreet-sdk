@@ -5,8 +5,6 @@ import { ExchangeDependentPostprocessor } from './ExchangeDependentPostprocessor
 
 export class TwapPostprocessor extends ExchangeDependentPostprocessor {
   process(store: Writable<StoreData>): void {
-    // A Rust-algo account's engine publishes its own `activeTWAPs` rows into the store.
-    if ((this._exchange as { runsRustAlgos?: boolean }).runsRustAlgos === true) return;
     const activeTWAPs: Writable<typeof store.activeTWAPs> = [];
 
     for (const twapInstance of twapManager.runningTwaps.values()) {

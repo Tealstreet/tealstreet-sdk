@@ -5,45 +5,12 @@ import { twapManager } from '../twap/TwapManager';
 import { TwapOptions } from '../twap/TwapOptions';
 import { twapRestoreRefusal } from '../twap/twapRestoreRefusal';
 import { TwapState } from '../twap/TwapState';
-import { RustTwapOwnership } from '../twap/RustTwapOwnership';
-import { BaseHandler, rustAlgoExchange } from './BaseHandler';
-
-const TWAP_OPS = new Set<StoreWorkerPayload['op']>([
-  'twap:start',
-  'twap:resume',
-  'twap:cleanup',
-  'twap:pause',
-  'twap:stop',
-  'twap:state',
-]);
+import { BaseHandler } from './BaseHandler';
 
 type PersistedTwap = { id: string; options: TwapOptions; state: TwapState };
 
 export class TwapHandler extends BaseHandler {
-  /** The lock, restore and crash rules for this account's TWAPs in the Rust algos. */
-  private readonly rustTwaps?: RustTwapOwnership;
-
-  constructor(...args: ConstructorParameters<typeof BaseHandler>) {
-    super(...args);
-    const exchange = rustAlgoExchange(this._exchange);
-    if (!exchange) return;
-    this.rustTwaps = new RustTwapOwnership(
-      this._exchange,
-      (op, data) => exchange.algoOp(op, data),
-      (rows) => this._ctx.postMessage({ op: 'twap:stateUpdate', data: rows }),
-    );
-    // Exec's `twap` command starts them too, so listen before any op arrives.
-    this._exchange.on('twap:stateUpdate', this.rustTwaps.receive);
-  }
-
   handle(payload: StoreWorkerPayload): void {
-    const rustTwaps = this.rustTwaps;
-    if (
-      TWAP_OPS.has(payload.op) &&
-      rustTwaps &&
-      this.runInRustAlgos(payload, () => rustTwaps.handle(payload.op, payload.data))
-    )
-      return;
     switch (payload.op) {
       case 'twap:start':
         const options = payload.data;
@@ -135,19 +102,6 @@ export class TwapHandler extends BaseHandler {
     }
     // Rewrites this tab's rows, so a refused row is not restored and refused on every load.
     if (refused) this._ctx.postMessage({ op: 'twap:stateUpdate', data: twapManager.serializeState() });
-  }
-
-  /** The engine died: post its TWAPs' final state while this handler's context is current. */
-  finishRustTwaps() {
-    this.rustTwaps?.finish();
-  }
-
-  override dispose() {
-    if (this.rustTwaps) {
-      this._exchange.off('twap:stateUpdate', this.rustTwaps.receive);
-      this.rustTwaps.dispose();
-    }
-    super.dispose();
   }
 
   private refuse(message: string) {
