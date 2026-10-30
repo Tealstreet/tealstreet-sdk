@@ -829,6 +829,11 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
         init.proxy_region.is_some(),
         init.verbose.is_some(),
         init.hyperliquid_builder.is_some(),
+        init.vault.is_some(),
+        init.bybit_site_id.is_some(),
+        init.enable_spot_markets.is_some(),
+        init.enable_inverse_markets.is_some(),
+        init.enable_option_markets.is_some(),
     ];
     present
         .contains(&true)
@@ -860,6 +865,33 @@ mod tests {
         let mut routed = public_init();
         routed.tealstreet_proxy = Some(true);
         assert!(unauthenticated_init_refusal(&routed).is_some());
+        for venue_field in [
+            InitPayload {
+                vault: Some(String::new()),
+                ..public_init()
+            },
+            InitPayload {
+                bybit_site_id: Some("BRA_BTL".into()),
+                ..public_init()
+            },
+            InitPayload {
+                enable_spot_markets: Some(false),
+                ..public_init()
+            },
+            InitPayload {
+                enable_inverse_markets: Some(true),
+                ..public_init()
+            },
+            InitPayload {
+                enable_option_markets: Some(true),
+                ..public_init()
+            },
+        ] {
+            assert!(
+                unauthenticated_init_refusal(&venue_field).is_some(),
+                "{venue_field:?}"
+            );
+        }
     }
 
     #[test]
