@@ -1302,6 +1302,8 @@ pub const FRAME_FED_VENUES: &[&str] = &[
     "bybitdemo",
     "hyperliquid",
     "hyperliquidspot",
+    "lighter",
+    "lighter-robinhood",
     "okx",
     "okxeu",
     "okxdemo",
