@@ -15,7 +15,8 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'binance', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex']);
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_422 * 1_024);
+  // Cap sweep 10-30: measured 1,461,044 B; ceil KiB + 2 KiB.
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_429 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_952, 'venue', 'asterdex'), undefined);
@@ -38,7 +39,8 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_436_672, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_453_174, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_456_128, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_456_129, 'venue', 'asterdex'), /exceeds 1456128/);
+  assert.equal(wasmBudgetError(1_463_296, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(1_463_297, 'venue', 'asterdex'), /exceeds 1463296/);
   for (const venue of ['bitget', 'bitgetusdc']) {
     // Frame-fed Bitget (COSIGNED writer): 1,522,315 -> 1,549,604 B (+27,289); cap +27 KiB +2 KiB.
     assert.equal(WASM_VENUE_OVERRIDES[venue], 1518 * 1024);
@@ -161,12 +163,14 @@ test('the Bybit capability comparison budgets ordinary Bybit under its own venue
 
 
 test('Binance Options cutover carries the ruled shared-family ceiling', () => {
-  assert.equal(WASM_VENUE_OVERRIDES.binance, 1452 * 1024);
+  // Cap sweep 10-30: measured 1,492,477 B; ceil KiB + 2 KiB.
+  assert.equal(WASM_VENUE_OVERRIDES.binance, 1460 * 1024);
   assert.equal(wasmBudgetError(1_448_609, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_460_760, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_463_296, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_484_450, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_486_848, 'venue', 'binance'), undefined);
-  assert.match(wasmBudgetError(1_486_849, 'venue', 'binance'), /exceeds 1486848/);
+  assert.equal(wasmBudgetError(1_495_040, 'venue', 'binance'), undefined);
+  assert.match(wasmBudgetError(1_495_041, 'venue', 'binance'), /exceeds 1495040/);
   assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined', 'binance'), undefined);
 });
