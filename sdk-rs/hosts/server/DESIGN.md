@@ -406,6 +406,22 @@ If active/active is ever wanted, the server should hold an owner lease per `(use
 - `REDIS_URL` is already in the environment contract.
 - This adds a dependency, so it waits for the Cargo.lock freeze to lift.
 
+## Hosted method scope (claude-dazzy3)
+
+A COSIGNED account's main-thread mirror forwards each engine read to this
+server by its `callMethod` name, using the same list as LOCAL
+(`rust.mirror-forwarding.test.ts`, SDK #2506).
+
+- **Translated:**
+  - `fetchOrderBook` (when the venue has `orderBookQuery`);
+  - `fetchStpMode` (`stpControls`; private accounts);
+  - `fetchLeverageForSymbol` as the engine's `fetchLeverage`. The mirror answers from its frame-fed rails first and asks only when they can't; a public account gets `null`.
+- **Unsupported on hosted.** These are visible `UnsupportedMethod` refusals, never a guessed command, and are pinned by `options_stp_writes_and_rails_max_leverage_stay_unsupported_hosted`:
+  - `fetchOptionChain`, `fetchOptionExpiries`, `fetchAccountGreeks`: options are out of scope;
+  - `changeStpMode`: AsterDEX only, not a core venue;
+  - `fetchSymbolMaxLeverage` with the `rails` source (Polymarket). The `market` source answers on the mirror.
+- HyroTrader accounts are refused at init (`HYROTRADER_UNHOSTED`): their endpoints are browser build configuration.
+
 ## Not in v1 (after cutover)
 
 - `exec` (hosted CLI), and the hosted chaser and TWAP. These run in the TS worker today; they need native ports.
