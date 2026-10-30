@@ -923,6 +923,23 @@ impl Venue for Okx {
         self.account_after_uncertain_write(cx);
     }
 
+    // Frame-fed: the data source reads the config before its orders and
+    // positions, so once both have arrived the hedged flag is the account's.
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        let loaded = cx.store.loaded();
+        self.account.ready = loaded.orders && loaded.positions;
+        // An acknowledged placement the store now holds cancels through the store.
+        let stored: std::collections::HashSet<&str> = cx
+            .store
+            .orders()
+            .iter()
+            .map(|order| order.id.as_str())
+            .collect();
+        self.trading
+            .acknowledged
+            .retain(|id, _| !stored.contains(id.as_str()));
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -1431,7 +1448,9 @@ impl Venue for Okx {
                             .push(market.id.clone());
                     }
                 }
-                if !was_loaded {
+                // A frame-fed engine loads public instrument metadata only.
+                if cx.frame_fed() {
+                } else if !was_loaded {
                     self.ticker_seed(cx, false);
                     self.account_start(cx);
                 } else if added {
@@ -1656,7 +1675,7 @@ impl Venue for Okx {
                 self.load_catalogue(cx);
             } else if read == DiscoveryRead::Markets {
                 self.start(cx);
-            } else {
+            } else if !cx.frame_fed() {
                 self.ticker_seed(cx, false);
             }
             return;
