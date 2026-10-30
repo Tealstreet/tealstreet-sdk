@@ -898,7 +898,27 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
 }
 
 /// How often a client's `store.socketHealth` is re-derived, as the browser engine's sync.
-const SOCKET_HEALTH_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+const SOCKET_HEALTH_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
+/// Last-message times alone change on every frame; they go out at most this often.
+const SOCKET_HEALTH_TIMES_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether `health` should replace what the client last got: any flag or close
+/// diagnostic at once (a socket coming up or going down), timestamps alone only
+/// once `since_sent` reaches `SOCKET_HEALTH_TIMES_EVERY`.
+pub fn socket_health_due(sent: &Value, health: &Value, since_sent: std::time::Duration) -> bool {
+    if sent == health {
+        return false;
+    }
+    let state = |value: &Value| {
+        let mut value = value.clone();
+        if let Some(fields) = value.as_object_mut() {
+            fields.remove("publicLastMessage");
+            fields.remove("privateLastMessage");
+        }
+        value
+    };
+    state(sent) != state(health) || since_sent >= SOCKET_HEALTH_TIMES_EVERY
+}
 
 /// `store.socketHealth` from the host's socket state, as `summarizeSocketHealth`.
 pub fn socket_health(summary: SocketSummary) -> Value {
@@ -933,13 +953,13 @@ async fn pump(
 ) {
     let mut seq = 0u64;
     let mut health_tick = tokio::time::interval(SOCKET_HEALTH_EVERY);
-    let mut sent_health = Value::Null;
-    let report_health = |sent: &mut Value| {
+    let mut sent_health = (Value::Null, std::time::Instant::now());
+    let report_health = |sent: &mut (Value, std::time::Instant)| {
         let health = socket_health(handle.socket_health().summary(now_ms()));
-        if *sent == health {
+        if !socket_health_due(&sent.0, &health, sent.1.elapsed()) {
             return true;
         }
-        *sent = health.clone();
+        *sent = (health.clone(), std::time::Instant::now());
         out.send(envelope::msg(
             &name,
             "store",
@@ -1242,6 +1262,22 @@ mod tests {
             reply["d"]["data"],
             json!({"requestId":"r3","success":true,"result":[{"id":"f1"}],"completeness":{"incomplete":true}})
         );
+    }
+
+    #[test]
+    fn socket_health_goes_out_at_once_on_a_state_change_and_paces_timestamps() {
+        use std::time::Duration;
+        let down = json!({"privateInitialized": false, "privateLastMessage": null});
+        let up = json!({"privateInitialized": true, "privateLastMessage": 10});
+        let later = json!({"privateInitialized": true, "privateLastMessage": 20});
+        assert!(socket_health_due(&Value::Null, &down, Duration::ZERO));
+        assert!(
+            socket_health_due(&down, &up, Duration::ZERO),
+            "a socket coming up"
+        );
+        assert!(!socket_health_due(&up, &up, Duration::from_secs(60)));
+        assert!(!socket_health_due(&up, &later, Duration::from_secs(4)));
+        assert!(socket_health_due(&up, &later, Duration::from_secs(5)));
     }
 
     #[test]
