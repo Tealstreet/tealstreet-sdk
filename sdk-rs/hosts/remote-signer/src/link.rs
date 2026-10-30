@@ -121,6 +121,11 @@ impl SignerLink {
         (sent > state.heard_before_attach && sent <= state.attached_at) || sent > state.heard_at
     }
 
+    /// Whether something sent at `sent` went to the current signing socket.
+    pub fn sent_on_current_socket(&self, sent: Instant) -> bool {
+        sent > self.state().attached_at
+    }
+
     /// How long the client has been gone, if it is.
     pub fn absent_for(&self) -> Option<Duration> {
         self.state().unavailable_since.map(|since| since.elapsed())
