@@ -69,7 +69,12 @@ pub struct Account {
     algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>>,
     /// Every symbol a placement was attempted on, by a client or an algo.
     pub placed: PlacedSymbols,
+    /// Frame-built account reads in flight; each is a whole engine snapshot.
+    pub frame_reads: Arc<tokio::sync::Semaphore>,
 }
+
+/// Concurrent `fetchOrders`/`fetchPositions` per account; more are refused, not queued.
+pub const MAX_FRAME_READS: usize = 2;
 
 /// Symbols a placement was attempted on, kept for the account's lifetime, as
 /// `rust.exchange.ts` `attemptedPlacementSymbols`: on `eachPlacedSymbol` venues a
@@ -572,6 +577,7 @@ impl Registry {
             algos,
             algo_owner,
             placed: placed_symbols,
+            frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
         };
         Ok((account, remote))
     }

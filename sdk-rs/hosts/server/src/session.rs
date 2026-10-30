@@ -602,10 +602,29 @@ impl Session {
                 }
                 // Off the socket loop: a read may wait for the account's first load.
                 Plan::Read(read) => {
+                    let from_frame = read.from_frame();
+                    // Each frame read is a whole engine snapshot on the account loop.
+                    let permit = if from_frame {
+                        match account.frame_reads.clone().try_acquire_owned() {
+                            Ok(permit) => Some(permit),
+                            Err(_) => {
+                                self.reply_failure(
+                                    name,
+                                    &request_id,
+                                    "Error",
+                                    "too many account reads in flight; retry shortly",
+                                    None,
+                                );
+                                continue;
+                            }
+                        }
+                    } else {
+                        None
+                    };
                     let (handle, out) = (account.handle.clone(), self.out.clone());
                     let (name, request_id) = (name.to_owned(), request_id.clone());
                     tokio::spawn(async move {
-                        let from_frame = read.from_frame();
+                        let _permit = permit;
                         let mut answer =
                             methods::read_when_loaded(&handle, read, methods::READ_WAIT).await;
                         if from_frame && answer.is_ok() {
