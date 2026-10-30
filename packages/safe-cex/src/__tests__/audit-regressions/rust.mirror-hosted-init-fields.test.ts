@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
@@ -10,6 +5,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import rules from '../../exchanges/rust/construction-rules.json';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 /**
  * Hosted accounts start on exchange-server from the mirror's `exchange.options`,
