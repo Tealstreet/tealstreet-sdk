@@ -455,8 +455,54 @@ impl Registry {
         &self.threads
     }
 
+    /// Why `holder`'s init of an account must not rebuild it: another live
+    /// socket holds that account under a different fingerprint, and disposing
+    /// it would stop that client's account and algos (two clients would flap).
+    pub fn rebuild_refusal(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        holder: u64,
+    ) -> Option<String> {
+        // Shared public data carries no signer or algos; it rebuilds as before.
+        if public_only {
+            return None;
+        }
+        let key = (user.to_owned(), init.account_name.clone());
+        let account = self.accounts.lock().unwrap().get(&key).cloned()?;
+        let fingerprint = init.fingerprint();
+        if account.fingerprint == fingerprint && !account.is_public() {
+            return None;
+        }
+        let others: Vec<u64> = account
+            .holders
+            .lock()
+            .unwrap()
+            .by_id
+            .iter()
+            .filter(|(id, live)| **id != holder && live.is_some())
+            .map(|(id, _)| *id)
+            .collect();
+        if others.is_empty() {
+            return None;
+        }
+        let differs = differing_fields(&account.fingerprint, &fingerprint);
+        Log::warn(&format!(
+            "init {} from socket {holder} refused: socket(s) {others:?} hold it with other settings ({})",
+            init.account_name,
+            differs.join(", ")
+        ));
+        Some(format!(
+            "{} is open on another connection with different settings ({}); it keeps running there. Reload that window, or this one, so both use the same settings.",
+            init.account_name,
+            differs.join(", ")
+        ))
+    }
+
     /// The account this user's `init` names, built or reused. Reuse requires an
-    /// identical fingerprint; otherwise the old account is disposed first.
+    /// identical fingerprint; otherwise the old account is disposed first, but
+    /// never while another live socket holds it (see `rebuild_refusal`).
     pub async fn obtain(
         self: &Arc<Self>,
         user: &str,
@@ -473,6 +519,9 @@ impl Registry {
             if account.fingerprint == fingerprint && account.is_public() == public_only {
                 account.hold(holder, Live { outbox, token });
                 return Ok(account);
+            }
+            if let Some(refusal) = self.rebuild_refusal(user, init, public_only, holder) {
+                return Err(refusal);
             }
             self.dispose(&account);
         }
@@ -695,6 +744,18 @@ impl Registry {
         reason: &str,
         stopped: Option<crate::algos::StopNotice>,
     ) {
+        let holders: Vec<u64> = account
+            .holders
+            .lock()
+            .unwrap()
+            .by_id
+            .keys()
+            .copied()
+            .collect();
+        Log::info(&format!(
+            "dispose {}: {reason} (holders {holders:?})",
+            account.name
+        ));
         let mut accounts = self.accounts.lock().unwrap();
         let key = (account.user.clone(), account.name.clone());
         if accounts
@@ -846,6 +907,23 @@ impl Registry {
             })
             .collect()
     }
+}
+
+/// The top-level init fields (names only) on which two fingerprints differ.
+fn differing_fields(old: &str, new: &str) -> Vec<String> {
+    let parse = |text: &str| {
+        serde_json::from_str::<serde_json::Map<String, Value>>(text).unwrap_or_default()
+    };
+    let (old, new) = (parse(old), parse(new));
+    let mut fields: Vec<String> = old
+        .keys()
+        .chain(new.keys())
+        .filter(|field| old.get(*field) != new.get(*field))
+        .cloned()
+        .collect();
+    fields.sort();
+    fields.dedup();
+    fields
 }
 
 /// 128 bits from the OS CSPRNG, hex; never derived from time, counters or users.
@@ -1122,6 +1200,76 @@ mod tests {
                 assert_eq!(account.holders.lock().unwrap().signing, Some(8));
             })
             .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_second_client_with_other_settings_never_disposes_a_live_account() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bitget".into(),
+                    ..InitPayload::default()
+                };
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .insert(("u".into(), "acct".into()), account.clone());
+                let other = InitPayload {
+                    enable_spot_markets: Some(true),
+                    ..init.clone()
+                };
+                for _ in 0..3 {
+                    let refused = registry
+                        .obtain("u", &other, false, 8, None, Arc::new(|_| true))
+                        .await
+                        .map(|_| ())
+                        .unwrap_err();
+                    assert!(refused.contains("enableSpotMarkets"), "{refused}");
+                }
+                assert!(registry.rebuild_refusal("u", &other, false, 8).is_some());
+                assert!(
+                    registry.rebuild_refusal("u", &init, false, 8).is_none(),
+                    "same settings join"
+                );
+                assert!(algos.try_recv().is_err(), "the live holder's algos run on");
+                assert_eq!(account.holders.lock().unwrap().signing, Some(7));
+                let current = registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .get(&("u".into(), "acct".into()))
+                    .cloned();
+                assert!(current.is_some_and(|current| Arc::ptr_eq(&current, &account)));
+
+                // Once that client is gone (parked only), the new settings rebuild as before.
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                assert!(registry.rebuild_refusal("u", &other, false, 8).is_none());
+            })
+            .await;
+    }
+
+    #[test]
+    fn differing_fields_name_only_the_fields_that_changed() {
+        let a = InitPayload {
+            account_name: "a".into(),
+            exchange_name: "bybit".into(),
+            ..InitPayload::default()
+        };
+        let b = InitPayload {
+            enable_spot_markets: Some(true),
+            testnet: Some(true),
+            ..a.clone()
+        };
+        assert_eq!(
+            differing_fields(&a.fingerprint(), &b.fingerprint()),
+            ["enableSpotMarkets", "testnet"]
+        );
+        assert!(differing_fields(&a.fingerprint(), &a.fingerprint()).is_empty());
     }
 
     #[test]
