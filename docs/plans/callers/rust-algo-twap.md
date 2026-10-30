@@ -14,7 +14,8 @@ native exchange server. Nothing calls it yet.
   `account_name` is the `accountName` the account's clients and `activeTWAPs` use. Register both factories
   in that account's `Registry`. Pass the account's `AlgoCx`, never a
   socket's: TWAPs keep running when the socket that started them closes.
-  `TwapFactory` emits `twap:stateUpdate` and `log` (`[message, "error"]`) and
+  `TwapFactory` emits `twap:stateUpdate` and `error` (the message string,
+  which the web toasts; TS used `log`, which reaches only the exchange log) and
   exposes `active_twaps` and `order_owner` for the store's `activeTWAPs` and
   `extra.isFromTwap`.
 - Account disposal: run, in order,
@@ -47,12 +48,12 @@ native exchange server. Nothing calls it yet.
   `duration > 0`, `1 <= ordersCount <= 1000` (the web's `TWAP_MAX_ORDERS`),
   `randomnessPercentage` and `timeoutPct` in `[0, 100]`, and
   `chaserDelay >= 0`. Restored entries must also keep `ordersSizes` within
-  `ordersCount`, with finite values. A refusal sends a `log` error and builds
+  `ordersCount`, with finite values. A refusal sends an `error` and builds
   nothing; a bad restore entry is skipped. An account runs at most 20 TWAPs
   (`MAX_TWAPS_PER_ACCOUNT`): further starts are refused and further restored
   entries are skipped, until one completes or stops.
 - A `twap:start` or restored row whose `accountName` is not the book's
-  account is refused with a `log` error: it would trade on this account yet
+  account is refused with an `error`: it would trade on this account yet
   never be listed in its `activeTWAPs`.
 - `twap:state` replays one tab's `sessionStorage` (web `TwapWorker`), which
   can be stale, copied into a duplicated tab, or re-sent on every account
