@@ -40,10 +40,14 @@ struct NukeVenue {
     commands: Arc<Mutex<Vec<String>>>,
     /// Never settles a command, as a venue that stops answering.
     stall: bool,
+    cancel_all: safe_cex_engine::CancelAll,
 }
 impl Venue for NukeVenue {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        safe_cex_engine::Capabilities::BASE
+        safe_cex_engine::Capabilities {
+            cancel_all: self.cancel_all,
+            ..safe_cex_engine::Capabilities::BASE
+        }
     }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
@@ -157,15 +161,20 @@ impl Venue for NukeVenue {
 }
 
 async fn nuke(mode: &'static str) -> (Value, Vec<String>) {
-    run_nuke(mode, false).await
+    run_nuke(mode, false, safe_cex_engine::CancelAll::EachOpenSymbol).await
 }
 
-async fn run_nuke(mode: &'static str, stall: bool) -> (Value, Vec<String>) {
+async fn run_nuke(
+    mode: &'static str,
+    stall: bool,
+    cancel_all: safe_cex_engine::CancelAll,
+) -> (Value, Vec<String>) {
     let commands = Arc::new(Mutex::new(Vec::new()));
     let engine = safe_cex_engine::test_support::seeded_engine(NukeVenue {
         book: Book::default(),
         commands: commands.clone(),
         stall,
+        cancel_all,
     });
     let config = ServerConfig {
         flush_every: Duration::from_millis(1),
@@ -229,7 +238,7 @@ async fn nuke_cancels_each_order_symbol_closes_each_position_and_answers_once() 
             let (done, commands) = nuke("all").await;
             assert_eq!(
                 done,
-                json!({"requestId":"r-nuke","success":true,"result":null})
+                json!({"requestId":"r-nuke","success":true,"result":{"stoppedChasers":[],"stoppedTwaps":[]}})
             );
             assert_eq!(commands.len(), 2, "{commands:?}");
             assert_eq!(commands[0], "cancel BTCUSDT");
@@ -261,7 +270,8 @@ async fn nuke_positions_and_nuke_orders_run_one_half() {
 async fn a_nuke_interrupted_by_disposal_still_answers_with_an_unknown_outcome() {
     LocalSet::new()
         .run_until(async {
-            let (done, commands) = run_nuke("all", true).await;
+            let (done, commands) =
+                run_nuke("all", true, safe_cex_engine::CancelAll::EachOpenSymbol).await;
             assert_eq!(commands, vec!["cancel BTCUSDT".to_owned()]);
             assert_eq!(done["requestId"], "r-nuke");
             assert_eq!(done["success"], false);
@@ -273,6 +283,21 @@ async fn a_nuke_interrupted_by_disposal_still_answers_with_an_unknown_outcome() 
                     .starts_with("Nuke interrupted"),
                 "{done}"
             );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_nuke_on_a_native_cancel_all_venue_ends_with_the_venue_wide_cancel() {
+    LocalSet::new()
+        .run_until(async {
+            let (done, commands) = run_nuke("all", false, safe_cex_engine::CancelAll::Native).await;
+            assert_eq!(done["success"], true, "{done}");
+            assert_eq!(commands.len(), 3, "{commands:?}");
+            assert_eq!(commands[0], "cancel BTCUSDT");
+            assert!(commands[1].starts_with("place "), "{commands:?}");
+            // The venue-wide cancel-all (an empty symbol) reaches untracked orders.
+            assert_eq!(commands[2], "cancel ");
         })
         .await;
 }

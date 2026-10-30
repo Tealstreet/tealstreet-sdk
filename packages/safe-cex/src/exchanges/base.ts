@@ -37,6 +37,7 @@ import {
   IncomeRecord,
   LogSeverity,
   Market,
+  NukeResult,
   OHLCVOptions,
   OHLCVSOptions,
   OptionChainQuery,
@@ -469,9 +470,10 @@ export interface Exchange {
   fetchOrders: (symbols?: string[]) => Promise<Order[]>;
   syncAccountState: () => void;
   start: () => Promise<void>;
-  nuke: (tries?: number) => Promise<void>;
-  nukePositions: (tries?: number) => Promise<void>;
-  nukeOrders: () => Promise<void>;
+  // Rust accounts resolve with the algos the nuke stopped first.
+  nuke: (tries?: number) => Promise<void | NukeResult>;
+  nukePositions: (tries?: number) => Promise<void | NukeResult>;
+  nukeOrders: () => Promise<void | NukeResult>;
   changePositionMode: (hedged: boolean, symbol?: string) => Promise<void>;
   changeMarginType: (isolated: boolean, symbol?: string) => Promise<void>;
   setLeverage: (symbol: string, leverage: number, side?: PositionSide) => Promise<void>;
@@ -1435,7 +1437,7 @@ export class BaseExchange implements Exchange {
     return result;
   };
 
-  nuke = async (tries = 0) => {
+  nuke = async (tries = 0): Promise<void | NukeResult> => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
 
@@ -1473,7 +1475,7 @@ export class BaseExchange implements Exchange {
     }
   };
 
-  nukePositions = async (tries = 0) => {
+  nukePositions = async (tries = 0): Promise<void | NukeResult> => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
 
@@ -1508,7 +1510,7 @@ export class BaseExchange implements Exchange {
     }
   };
 
-  nukeOrders = async () => {
+  nukeOrders = async (): Promise<void | NukeResult> => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
       try {

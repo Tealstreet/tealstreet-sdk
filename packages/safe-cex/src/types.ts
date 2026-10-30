@@ -286,6 +286,12 @@ export type ExchangeOptions = {
 // the validation call fetched in the same request (read `.total` for the USD value),
 // so callers get key-validity AND balance from one round-trip. Undefined for venues
 // whose validation doesn't fetch balance.
+/** What a nuke stopped before cancelling and closing: chaser and TWAP ids. */
+export interface NukeResult {
+  stoppedChasers: string[];
+  stoppedTwaps: string[];
+}
+
 export interface ValidateAccountResult {
   error: string;
   balance?: Balance;

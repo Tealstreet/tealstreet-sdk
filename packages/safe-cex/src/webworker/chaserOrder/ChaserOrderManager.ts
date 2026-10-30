@@ -982,6 +982,24 @@ export class ChaserOrderManager {
     }
   }
 
+  /**
+   * A nuke's first step: stop every running chase on `exchange` and wait until
+   * each has cancelled its resting order, so none places again behind the nuke.
+   * Returns the ids it stopped. The exchange stays up, so no disposal warning.
+   */
+  async stopForNuke(exchange: Exchange, reason = 'Stopped by nuke'): Promise<string[]> {
+    const instances = this._chaserOrderInstances.filter((instance) => instance.exchange === exchange);
+    const stopped: string[] = [];
+    for (const instance of instances) {
+      if (!instance.isStopped) {
+        instance.markComplete(reason);
+        stopped.push(instance.id);
+      }
+    }
+    for (const instance of instances) await this.cleanupInstance(instance);
+    return stopped;
+  }
+
   remove(id: string) {
     const instance = this._chaserOrderInstances.find((instance) => instance.id === id);
     if (instance) {

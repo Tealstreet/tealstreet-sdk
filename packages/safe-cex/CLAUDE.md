@@ -294,6 +294,12 @@ native-unit sizing helper, preserving each hedge leg. It submits one reduce-only
 market batch and propagates partial or unknown outcomes without automatic retry.
 `nuke` also attempts the venue's cancel-all operation after a close failure;
 the original close failure remains the result. Concurrent nukes are rejected.
+Every nuke (`nuke`, `nukePositions`, `nukeOrders`) first stops the account's
+running TWAPs, then its chasers, waiting for each chase's cancel
+(`webworker/stopAccountAlgos.ts`, matched by exchange identity); otherwise a
+live chase re-places behind the nuke. It resolves with
+`{ stoppedChasers, stoppedTwaps }`. The hosted server's exec nuke does the same
+and ends with the venue's cancel-all sweep.
 
 ## Rust account construction
 

@@ -750,6 +750,9 @@ async fn nuke_cancel_attempts_every_symbol_after_an_unknown_second_cancel() {
         assert_eq!(port.commands.borrow().len(),3,"third symbol must be attempted after second Unknown");
         assert!(matches!(&port.commands.borrow()[2],Command::CancelSymbolOrders{symbol,..} if symbol=="CCC"));
         port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
+        // The closing cancel-all sweep reaches the symbol whose cancel was lost.
+        assert!(matches!(&port.commands.borrow()[3],Command::CancelSymbolOrders{symbol,..} if symbol=="BBB"));
+        port.replies.borrow_mut().remove(0).send(Ok("null".into())).unwrap();settle_exec().await;
         let events=port.events.borrow();let result=&events.iter().find(|(op,e)|op=="exec-result"&&e["reqId"]=="r").unwrap().1;
         assert_eq!(result["errorDetails"]["outcome"],"unknown");assert_eq!(result["errorDetails"]["cancelledSymbolCount"],2);assert_eq!(result["errorDetails"]["failedLegs"][0]["symbol"],"BBB");assert!(result["error"].as_str().unwrap().contains("BBB cancel: lost cancel"));cx.scope.dispose();
     }).await;
@@ -813,6 +816,133 @@ async fn chart_disposal_never_releases_the_following_trade_or_retries_the_read()
                     .iter()
                     .any(|(op, e)| op == "exec-result" && e["reqId"] == "gone")
             );
+        })
+        .await;
+}
+
+/// Answers every command the port has sent and not yet answered: placements with
+/// an id, everything else with `null`, until `run` settles.
+async fn answering<T>(port: &Port, run: impl std::future::Future<Output = T>) -> T {
+    let answered = Cell::new(0usize);
+    tokio::pin!(run);
+    loop {
+        tokio::select! {
+            out = &mut run => return out,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(1)) => {
+                let replies: Vec<_> = port.replies.borrow_mut().drain(..).collect();
+                for reply in replies {
+                    let at = answered.get();
+                    answered.set(at + 1);
+                    let placed = matches!(port.commands.borrow()[at], Command::PlaceOrders { .. });
+                    let _ = reply.send(Ok(if placed { format!(r#"["order-{at}"]"#) } else { "null".into() }));
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_stops_every_chaser_and_twap_first_and_reports_their_ids() {
+    use safe_cex_algo_twap::factory::TwapFactory;
+    use safe_cex_chaser::ChaserBook;
+    use safe_cex_exec::native::CancelAllScope;
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            wait_market(&port);
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let book = ChaserBook::new(cx.clone());
+            let twap = TwapFactory::new("a", cx.clone(), Rc::new(book.clone()));
+            let factory = ExecFactory::with_algos("a".into(), book.clone(), twap.clone())
+                .with_cancel_all(Rc::new(|| CancelAllScope::Symbols(vec!["ETHUSDT".into()])));
+            for command in ["chase buy $100", "twap buy $1000 into 4 over 4"] {
+                factory
+                    .handle(
+                        "exec",
+                        &json!({"symbol":"BTCUSDT","command":command,"reqId":command}).to_string(),
+                        &cx,
+                    )
+                    .unwrap();
+            }
+            answering(&port, tokio::time::sleep(std::time::Duration::from_millis(50))).await;
+            let chasers: Vec<String> = book.active_chasers().iter().map(|c| c.id.clone()).collect();
+            let twaps: Vec<Value> = twap.active_twaps("a").iter().map(|t| t["id"].clone()).collect();
+            assert!(!chasers.is_empty() && twaps.len() == 1, "{chasers:?} {twaps:?}");
+
+            let nuke = factory.nuke("orders", &cx).unwrap();
+            let before = port.commands.borrow().len();
+            let result = answering(&port, nuke).await.unwrap();
+            let mut stopped: Vec<String> = serde_json::from_value(result["stoppedChasers"].clone()).unwrap();
+            stopped.sort();
+            let mut expected = chasers.clone();
+            expected.sort();
+            assert_eq!(stopped, expected);
+            assert_eq!(result["stoppedTwaps"], Value::Array(twaps));
+            assert!(book.active_chasers().iter().all(|c| c.is_stopped));
+            assert!(twap.active_twaps("a").is_empty());
+            // Nothing is placed once the nuke has started, and the TWAP never slices again.
+            tokio::time::advance(std::time::Duration::from_secs(600)).await;
+            answering(&port, tokio::time::sleep(std::time::Duration::from_millis(50))).await;
+            let commands = port.commands.borrow().clone();
+            assert!(
+                commands[before..].iter().all(|c| !matches!(c, Command::PlaceOrders { .. })),
+                "{:?}",
+                &commands[before..]
+            );
+            // It ends with the cancel-all sweep, reaching the attempted-placement symbol.
+            assert!(
+                commands[before..].iter().any(|c| matches!(c, Command::CancelSymbolOrders { symbol, .. } if symbol == "ETHUSDT")),
+                "{:?}",
+                &commands[before..]
+            );
+            book.shutdown("test cleanup").await;
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_ends_with_the_venue_cancel_all_on_a_native_venue() {
+    use safe_cex_exec::native::CancelAllScope;
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            wait_market(&port);
+            port.store.borrow_mut().orders = vec![native_order("BTCUSDT")];
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default().with_cancel_all(Rc::new(|| CancelAllScope::Native));
+            let result = answering(&port, factory.nuke("all", &cx).unwrap()).await.unwrap();
+            let commands = port.commands.borrow();
+            assert!(matches!(&commands[0], Command::CancelSymbolOrders { symbol, .. } if symbol == "BTCUSDT"));
+            assert!(
+                matches!(commands.last().unwrap(), Command::CancelSymbolOrders { symbol, .. } if symbol.is_empty()),
+                "the last command is the venue-wide cancel-all: {commands:?}"
+            );
+            assert_eq!(result["stoppedChasers"], json!([]));
+            drop(commands);
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_symbol_scoped_sweep_skips_symbols_the_nuke_already_cancelled() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            port.store.borrow_mut().orders = vec![native_order("AAA")];
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            answering(&port, factory.nuke("orders", &cx).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                port.commands.borrow().len(),
+                1,
+                "{:?}",
+                port.commands.borrow()
+            );
+            cx.scope.dispose();
         })
         .await;
 }

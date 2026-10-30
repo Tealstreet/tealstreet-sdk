@@ -17,7 +17,7 @@ export class TwapInstance {
   public options: TwapOptions;
   private timerId: NodeJS.Timeout | undefined;
   private readonly updateStateCallback: (state: TwapState) => void;
-  private exchange: Exchange;
+  readonly exchange: Exchange;
   private ctx: Worker;
   private trackedChaserOrderIds: string[] = [];
   private trackedLimitOrderIds: string[] = [];

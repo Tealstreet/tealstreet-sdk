@@ -28,6 +28,7 @@ import type {
   IncomeHistoryOptions,
   IncomeRecord,
   Market,
+  NukeResult,
   OHLCVOptions,
   OptionChainQuery,
   OptionChainRow,
@@ -65,6 +66,7 @@ import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
+import { stopAccountAlgos } from '../../webworker/stopAccountAlgos';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { isAsterDEXStpMode, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
@@ -1792,13 +1794,39 @@ export class RustEngineExchange extends BaseExchange {
 
   nukePositions = async (_tries = 0) => this.runNativeNuke(false);
 
-  private runNativeNuke = async (cancelOrders: boolean): Promise<void> => {
+  override nukeOrders = async (): Promise<NukeResult> => {
+    this.assertEngineAlive();
+    if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
+    this.isNuking = true;
+    try {
+      const stopped = await this.stopAlgosForNuke();
+      await this.cancelAllOrders();
+      return stopped;
+    } finally {
+      this.isNuking = false;
+    }
+  };
+
+  /** Running chasers and TWAPs would place again behind the nuke: stop them first. */
+  private stopAlgosForNuke = async (): Promise<NukeResult> => {
+    const stopped = await stopAccountAlgos(this);
+    const count = stopped.stoppedChasers.length + stopped.stoppedTwaps.length;
+    if (count)
+      this.log(
+        `Nuke stopped ${count} algo(s) first: chasers [${stopped.stoppedChasers.join(', ')}], TWAPs [${stopped.stoppedTwaps.join(', ')}]`,
+        LogSeverity.Warning,
+      );
+    return stopped;
+  };
+
+  private runNativeNuke = async (cancelOrders: boolean): Promise<NukeResult> => {
     this.assertEngineAlive();
     if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
     this.isNuking = true;
     let failed = false;
     let failure: unknown;
     try {
+      const stopped = await this.stopAlgosForNuke();
       try {
         const orders: PlaceOrderOpts[] = [];
         // One unusable position (an unlisted market, a missing inverse notional)
@@ -1853,6 +1881,7 @@ export class RustEngineExchange extends BaseExchange {
         }
       }
       if (failed) throw failure;
+      return stopped;
     } finally {
       this.isNuking = false;
     }

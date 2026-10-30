@@ -215,6 +215,14 @@ impl TwapBook {
         Ok(id)
     }
 
+    /// The managed TWAPs that have not completed.
+    pub fn running_ids(&self) -> Vec<String> {
+        self.managed_entries()
+            .filter(|entry| entry.instance.state.status != TwapStatus::Completed)
+            .map(|entry| entry.instance.id.clone())
+            .collect()
+    }
+
     /// `twap:stop` for every TWAP, as on account disposal.
     pub fn terminate_all(&mut self) -> Vec<TwapEffect> {
         let mut effects = Vec::new();
