@@ -21,7 +21,8 @@ export const twapRestoreRefusal = (
   if (state.status === TwapStatus.Completed) return 'it already completed';
   if (state.status === TwapStatus.Idle) return 'it never started';
   const sizes = state.ordersSizes;
-  if (!Array.isArray(sizes) || sizes.length === 0) return 'no slices remain';
+  // A last slice still being placed is settled on restore, not refused.
+  if (!Array.isArray(sizes) || (sizes.length === 0 && !state.inFlight)) return 'no slices remain';
   if (!sizes.every((size) => Number.isFinite(size) && size >= 0)) return 'its slice sizes are invalid';
   if (!(Number.isFinite(options.size) && options.size > 0)) return 'its size is invalid';
   const remaining = sizes.reduce((sum, size) => sum + size, 0);

@@ -1,3 +1,5 @@
+import type { PlaceOrderOpts } from '../../types';
+
 import random from 'lodash/random';
 import { nanoid } from 'nanoid';
 
@@ -105,7 +107,32 @@ export class TwapInstance {
     };
   }
 
-  placeOrder = async (orderSize: number) => {
+  /** The order a market or limit slice sends; chaser slices mint their own ids. */
+  private sliceOrder(orderSize: number): PlaceOrderOpts | undefined {
+    if (this.options.useChaserOrders) return undefined;
+    if (this.options.useLimitOrders) {
+      const ticker = this.exchange.store.tickers.find((ticker) => ticker.symbol === this.options.activeMarket.symbol);
+      const price =
+        this.options.side === OrderSide.Buy ? ticker?.bid || ticker?.last || 0 : ticker?.ask || ticker?.last || 0;
+      return {
+        symbol: this.options.activeMarket.symbol,
+        side: this.options.side,
+        type: price ? OrderType.Limit : OrderType.Market,
+        ...(price ? { price } : {}),
+        amount: orderSize,
+        reduceOnly: Boolean(this.options.reduceOnly),
+      };
+    }
+    return {
+      symbol: this.options.activeMarket.symbol,
+      side: this.options.side,
+      type: OrderType.Market,
+      amount: orderSize,
+      reduceOnly: Boolean(this.options.reduceOnly),
+    };
+  }
+
+  placeOrder = async (orderSize: number, order: PlaceOrderOpts | undefined = this.sliceOrder(orderSize)) => {
     if (this.options.useChaserOrders) {
       const chaserInstance = new ChaserOrderInstance(this.exchange, {
         symbol: this.options.activeMarket.symbol,
@@ -129,29 +156,11 @@ export class TwapInstance {
       if (this.options.timeoutPct !== undefined) {
         this.scheduleSliceTimeout(chaserInstance.id, orderSize);
       }
-    } else if (this.options.useLimitOrders) {
-      const ticker = this.exchange.store.tickers.find((ticker) => ticker.symbol === this.options.activeMarket.symbol);
-      const price =
-        this.options.side === OrderSide.Buy ? ticker?.bid || ticker?.last || 0 : ticker?.ask || ticker?.last || 0;
-      const orderIds = await this.exchange.placeOrder({
-        symbol: this.options.activeMarket.symbol,
-        side: this.options.side,
-        type: price ? OrderType.Limit : OrderType.Market,
-        ...(price ? { price } : {}),
-        amount: orderSize,
-        reduceOnly: Boolean(this.options.reduceOnly),
-      });
-      if (price && orderIds.length > 0) {
+    } else if (order) {
+      const orderIds = await this.exchange.placeOrder(order);
+      if (order.type === OrderType.Limit && orderIds.length > 0) {
         this.trackedLimitOrderIds.push(...orderIds);
       }
-    } else {
-      await this.exchange.placeOrder({
-        symbol: this.options.activeMarket.symbol,
-        side: this.options.side,
-        type: OrderType.Market,
-        amount: orderSize,
-        reduceOnly: Boolean(this.options.reduceOnly),
-      });
     }
   };
 
@@ -230,8 +239,13 @@ export class TwapInstance {
     let ordersExecuted = this.state.ordersExecuted;
 
     if (orderSize) {
+      // Persisted before the order goes out: a worker that dies before the slice
+      // is counted leaves a restore something to look up instead of re-placing.
+      const order = this.sliceOrder(orderSize);
+      const clientOrderId = order && this.exchange.mintClientOrderId?.(order);
+      this.updateState({ inFlight: { size: orderSize, ...(clientOrderId ? { clientOrderId } : {}) } });
       try {
-        await this.placeOrder(orderSize);
+        await this.placeOrder(orderSize, order && clientOrderId ? { ...order, clientOrderId } : order);
       } catch (error) {
         // Surface the failed slice instead of swallowing it — bridged
         // to the web toast / CLI log via the exchange `log` event. The
@@ -249,16 +263,52 @@ export class TwapInstance {
     }
 
     if (this.state.ordersSizes.length === 0) {
-      this.updateState({ status: TwapStatus.Completed, ordersExecuted });
+      this.updateState({ status: TwapStatus.Completed, ordersExecuted, inFlight: undefined });
       twapManager.remove(this.id);
       return false;
     }
 
-    this.updateState({ ordersExecuted, nextOrderAt });
+    this.updateState({ ordersExecuted, nextOrderAt, inFlight: undefined });
     this.timerId = setTimeout(() => this.start(), waitWithRandom);
 
     return true;
   };
+
+  /**
+   * Settles a slice a previous worker was placing when it died, before this
+   * restore resumes: placed (found by client id) counts as executed; a
+   * definitive miss puts the size back to be placed again; anything else is
+   * counted too, with a warning, because placing it again could double it.
+   */
+  reconcileInFlight = async () => {
+    const inFlight = this.state.inFlight;
+    if (!inFlight) return;
+    const symbol = this.options.activeMarket.symbol;
+    let placed = true;
+    if (inFlight.clientOrderId) {
+      try {
+        const lookup = await this.exchange.findOrderByClientOrderId(symbol, inFlight.clientOrderId);
+        placed = lookup.found || !lookup.definitive;
+        if (!lookup.found && !lookup.definitive) this.warnUncertainSlice(inFlight.size);
+      } catch {
+        this.warnUncertainSlice(inFlight.size);
+      }
+    } else {
+      this.warnUncertainSlice(inFlight.size);
+    }
+    if (placed) {
+      this.updateState({ ordersExecuted: this.state.ordersExecuted + 1, inFlight: undefined });
+    } else {
+      this.updateState({ ordersSizes: [inFlight.size, ...this.state.ordersSizes], inFlight: undefined });
+    }
+  };
+
+  private warnUncertainSlice(size: number) {
+    this.exchange.emitter.emit(
+      'error',
+      `TWAP ${this.options.activeMarket.symbol}: a ${size} slice was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.`,
+    );
+  }
 
   pause = async () => {
     if (this.state.status === TwapStatus.Running) {
