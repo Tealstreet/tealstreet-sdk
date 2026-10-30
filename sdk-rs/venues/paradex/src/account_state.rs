@@ -59,7 +59,10 @@ mod tests {
         let mut ids = page.native.keys().cloned().collect::<Vec<_>>();
         ids.sort();
         assert_eq!(ids, ["a", "b"]);
-        assert_eq!(format!("{:?}", page.native_order("a")), format!("{:?}", Some(&row("a"))));
+        assert_eq!(
+            format!("{:?}", page.native_order("a")),
+            format!("{:?}", Some(&row("a")))
+        );
 
         assert!(page.apply_venue_state(&state[..state.len() - 1]).is_err());
         assert_eq!(page.native.len(), 2);
