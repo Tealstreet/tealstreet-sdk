@@ -1429,6 +1429,70 @@ mod tests {
             .await;
     }
 
+    /// A running chase's signs settle as a resume attaches, so a new error can land
+    /// between the attach and the Joined: it must not cost the one from the gap.
+    #[tokio::test]
+    async fn an_error_between_the_attach_and_the_join_keeps_the_one_from_the_gap() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account = crate::accounts::tests::held_account_running_algos(
+                    link.clone(),
+                    init.fingerprint(),
+                );
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                let algos = account.algos.as_ref().unwrap();
+                let refuse = || {
+                    algos
+                        .send(crate::algos::AlgoInput::Op {
+                            op: "chaser:start".into(),
+                            data: "not a chase".into(),
+                            origin: "test".into(),
+                        })
+                        .unwrap();
+                };
+                refuse();
+                settle().await;
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                let frames = Arc::new(Mutex::new(Vec::<String>::new()));
+                let record = frames.clone();
+                let outbox: Outbox = Arc::new(move |frame| {
+                    record.lock().unwrap().push(frame);
+                    true
+                });
+                let resumed = registry.resume("r1", "u", 8, ("t".into(), u64::MAX), &outbox);
+                assert_eq!(resumed.len(), 1);
+                refuse();
+                settle().await;
+                let errors = || {
+                    frames
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|frame| frame.contains(r#""op":"error""#))
+                        .count()
+                };
+                assert_eq!(errors(), 1, "the new error went straight to the new socket");
+                algos.send(crate::algos::AlgoInput::Joined).unwrap();
+                settle().await;
+                assert_eq!(
+                    errors(),
+                    2,
+                    "the gap's error too, and the new one not twice"
+                );
+            })
+            .await;
+    }
+
     /// A flapping link: the replay goes into a socket that dies too, before any
     /// frame from it, so the next resume repeats it.
     #[tokio::test]

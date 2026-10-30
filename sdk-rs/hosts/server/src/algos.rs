@@ -158,10 +158,7 @@ impl Port {
     fn keep_unheard(&self, data: &str) {
         let mut unheard = self.unheard.borrow_mut();
         match &self.signer {
-            Some(signer) => {
-                let heard = signer.heard_at();
-                unheard.retain(|(sent, _)| *sent > heard);
-            }
+            Some(signer) => unheard.retain(|(sent, _)| signer.unheard_since(*sent)),
             None if self.held.load(Ordering::Relaxed) => return,
             None => {}
         }
@@ -183,6 +180,21 @@ impl Port {
             })
             .map(|(_, data)| data)
             .collect()
+    }
+
+    /// For a joining socket: the unheard errors sent to an earlier socket. Those
+    /// this socket was already sent stay kept until a frame follows them.
+    fn take_for_join(&self) -> Vec<String> {
+        let Some(signer) = &self.signer else {
+            return self.take_unheard();
+        };
+        let mut unheard = self.unheard.borrow_mut();
+        unheard.retain(|(sent, _)| signer.unheard_since(*sent));
+        let (current, earlier): (VecDeque<_>, VecDeque<_>) = unheard
+            .drain(..)
+            .partition(|(sent, _)| signer.sent_on_current_socket(*sent));
+        *unheard = current;
+        earlier.into_iter().map(|(_, data)| data).collect()
     }
 
     fn apply(&self, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
@@ -580,7 +592,7 @@ pub async fn run(
                     published.clear();
                     publish(&mut published);
                     // What it stopped for while the browser was gone, once.
-                    for data in port.take_unheard() {
+                    for data in port.take_for_join() {
                         // Kept again: this socket may be dying too.
                         port.keep_unheard(&data);
                         (port.emit)(algo_msg(&name, "error", data));
