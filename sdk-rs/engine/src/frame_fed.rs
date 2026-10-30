@@ -15,6 +15,9 @@ pub const DATA_SOURCE_ONLY: &str = "a frameFed engine executes only writes";
 /// How long after a fence was raised a source frame must have been written to
 /// lift it: the venue's own propagation to the source's private stream.
 pub const FENCE_GRACE_MS: f64 = 3_000.0;
+/// The same grace when the host has not measured the source's clock offset:
+/// it also absorbs that much clock skew between the source and this engine.
+pub const UNSYNCED_FENCE_GRACE_MS: f64 = 30_000.0;
 
 /// The commands a frame-fed engine executes itself.
 pub fn is_write(command: &Command) -> bool {
