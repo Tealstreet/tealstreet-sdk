@@ -169,3 +169,60 @@ it('redacts token-shaped keys, query auth, any JWT, and secrets nested in a body
   expect(logged).toContain('account_index=1');
   expect(logged).toContain('truncated');
 });
+
+it('never changes a request or frame when logging throws', async () => {
+  setWsDiagnosticsEnabled(true);
+  const answer = () => new TextEncoder().encode('{"orderId":7}');
+  let streamed = false;
+  const inner = harness(() =>
+    streamed
+      ? {
+          status: 200,
+          body: (async function* () {
+            yield answer();
+          })(),
+        }
+      : { status: 200, body: answer() },
+  ).inner;
+  const transport = withRequestsLog(inner, 'binance', () => {
+    throw new Error('log sink down');
+  });
+  const placed = await transport.request(signedRequest());
+  expect(new TextDecoder().decode(placed.body as Uint8Array)).toBe('{"orderId":7}');
+  streamed = true;
+  const read = await transport.request(signedRequest());
+  let body = '';
+  for await (const chunk of read.body as AsyncIterable<Uint8Array>) body += new TextDecoder().decode(chunk);
+  expect(body).toBe('{"orderId":7}');
+
+  const sent: string[] = [];
+  const delivered: string[] = [];
+  let handlers: Parameters<Transport['connect']>[1] | undefined;
+  const socket = withRequestsLog(
+    { ...inner, connect: (_url, h) => ((handlers = h), { send: (text) => sent.push(text), close: () => {} }) },
+    'binance',
+    () => {
+      throw new Error('log sink down');
+    },
+  ).connect('wss://private', { channel: 'private', onOpen() {}, onMessage: (t) => delivered.push(t), onClose() {} });
+  socket.send('{"op":"subscribe"}');
+  handlers!.onMessage('{"e":"ORDER_TRADE_UPDATE"}');
+  expect(sent).toEqual(['{"op":"subscribe"}']);
+  expect(delivered).toEqual(['{"e":"ORDER_TRADE_UPDATE"}']);
+});
+
+it('passes a response through untouched on a runtime without TextDecoder', async () => {
+  setWsDiagnosticsEnabled(true);
+  const body = new TextEncoder().encode('{"orderId":7}');
+  const { transport, events } = harness(() => ({ status: 200, body }));
+  const decoder = globalThis.TextDecoder;
+  Reflect.deleteProperty(globalThis, 'TextDecoder');
+  try {
+    const response = await transport.request(signedRequest());
+    expect(response.status).toBe(200);
+    expect(response.body).toBe(body);
+  } finally {
+    globalThis.TextDecoder = decoder;
+  }
+  expect(events.map(([event]) => event)).toEqual(['grafana-http-request']);
+});
