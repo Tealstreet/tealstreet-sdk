@@ -3501,6 +3501,11 @@ pub trait Venue {
     fn export_venue_state(&self) -> Option<Vec<u8>> {
         None
     }
+    /// [`Venue::export_venue_state`] for a venue that exports only the rows
+    /// the source's store still needs, such as those of open orders.
+    fn export_venue_state_for(&self, _store: &crate::store::Store) -> Option<Vec<u8>> {
+        self.export_venue_state()
+    }
     /// Frame-fed: apply a data source's VENUE_STATE section.
     fn apply_venue_state(&mut self, _cx: &mut Cx<'_, Self::Pending>, _state: &[u8]) {}
     /// Frame-fed: after each ingested frame, derive or prune venue state from
@@ -6225,7 +6230,7 @@ impl<V: Venue> Engine<V> {
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
         self.store.write(&everything, &mut w);
-        if let Some(state) = self.venue.export_venue_state() {
+        if let Some(state) = self.venue.export_venue_state_for(&self.store) {
             w.venue_state(&state);
         }
         self.venue.capabilities().write(&mut w);
@@ -6331,7 +6336,7 @@ impl<V: Venue> Engine<V> {
         let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
-            if let Some(state) = self.venue.export_venue_state()
+            if let Some(state) = self.venue.export_venue_state_for(&self.store)
                 && self.venue_state_sent.as_deref() != Some(state.as_slice())
             {
                 w.venue_state(&state);

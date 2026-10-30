@@ -133,6 +133,9 @@ fn hedged_engine() -> Harness {
 #[test]
 fn a_confirmed_position_mode_outlasts_a_stale_source_frame() {
     let mut h = hedged_engine();
+    // A quiet frame (no STATUS) first: it must not count as the source agreeing.
+    let quiet = safe_cex_engine::wire::FrameWriter::new(Vec::new(), h.now).finish();
+    h.e.apply_frame(h.now, &quiet, false).unwrap();
     h.e.apply_frame(h.now, &source_frame("net_mode"), false)
         .unwrap();
     h.collect();
