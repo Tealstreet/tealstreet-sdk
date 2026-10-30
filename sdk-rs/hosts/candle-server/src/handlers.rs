@@ -280,6 +280,9 @@ pub async fn symbols(app: &App, query: &Query) -> Reply {
             return unavailable();
         }
     };
+    if !resident.markets_loaded() {
+        return metadata_unavailable();
+    }
     let markets = resident.markets();
     let mut matches: Vec<(u8, &Market)> = markets
         .iter()
