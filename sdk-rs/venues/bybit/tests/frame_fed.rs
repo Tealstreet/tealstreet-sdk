@@ -409,3 +409,68 @@ fn a_frame_without_status_does_not_release_the_hedge_hold() {
     assert!(h.engine.store().hedged());
     assert_eq!(placed_index(&mut h, 2), "1");
 }
+
+/// A real keyed source: public startup answered, account info loaded.
+fn source() -> Harness {
+    let mut h = Harness::started(Options {
+        key: Some("fixture-public".into()),
+        secret: Some("fixture-provider".into()),
+        ..Default::default()
+    });
+    if h.has_request("/v5/account/info") {
+        h.respond("/v5/account/info", 200, support::ACCOUNT_INFO);
+    }
+    if h.has_request("/v5/account/fee-rate") {
+        h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    }
+    h.respond("status=PreLaunch", 200, support::PRELAUNCH);
+    h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
+    if h.has_request("/v5/market/tickers") {
+        h.respond("/v5/market/tickers", 200, support::TICKERS);
+    }
+    h
+}
+
+#[test]
+fn a_real_sources_snapshot_carries_its_hedge_mode_to_a_one_request_place() {
+    // The source learns BTCUSDT is hedged from its own placement's mode read;
+    // its orders reach its store only from its private stream, not modelled here.
+    let mut source = source();
+    source.requests.clear();
+    source.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![support::order()],
+    });
+    source.respond(
+        "/v5/position/list",
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":1},{"symbol":"BTCUSDT","positionIdx":2}]}}"#,
+    );
+    let create = source.take("/v5/order/create");
+    assert!(
+        create
+            .body
+            .as_deref()
+            .unwrap()
+            .contains(r#""positionIdx":1"#),
+        "the source itself places hedged"
+    );
+    source.reply(
+        create.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"source-order"}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+    );
+    let snapshot = source.engine.snapshot_frame(source.now).to_vec();
+
+    let mut h = frame_fed();
+    load(&mut h);
+    h.engine.apply_frame(h.now, &snapshot, true).unwrap();
+    h.collect();
+    h.command(Command::PlaceOrders {
+        command: 2,
+        orders: vec![support::order()],
+    });
+    assert_eq!(h.requests.len(), 1, "no mode read: {:?}", h.paths());
+    let body = h.take("/v5/order/create").body.clone().unwrap();
+    assert!(body.contains(r#""positionIdx":1"#), "{body}");
+}
