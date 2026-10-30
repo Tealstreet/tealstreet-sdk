@@ -1270,6 +1270,9 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      # Offline revalidation re-reads every public tape, including this generated one.
+      - name: Generate Binance Options public CPU input
+        run: corepack yarn rust:private-tape-binanceoptions --public
       - name: Authenticate complete first evidence and select eligible cases
         id: plan
         env:
@@ -1344,6 +1347,9 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      # Offline revalidation re-reads every public tape, including this generated one.
+      - name: Generate Binance Options public CPU input
+        run: corepack yarn rust:private-tape-binanceoptions --public
       - name: Verify strict first results or complete two-run means
         id: certify
         env:
