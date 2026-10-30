@@ -1328,6 +1328,93 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 mod tests {
     use super::*;
 
+    /// On the wire: an algo error raised during a drop, then the resume. The op is
+    /// a chase the book refuses; every algo error takes this one `Port::emit` path.
+    #[tokio::test]
+    async fn an_algo_error_during_a_drop_reaches_the_resuming_socket_once() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let refuse = |account: &Account| {
+                    let algos = account.algos.as_ref().unwrap();
+                    algos
+                        .send(crate::algos::AlgoInput::Op {
+                            op: "chaser:start".into(),
+                            data: "not a chase".into(),
+                            origin: "test".into(),
+                        })
+                        .unwrap();
+                };
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account = crate::accounts::tests::held_account_running_algos(
+                    link.clone(),
+                    init.fingerprint(),
+                );
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                // Delivered and answered by a later frame: nothing to replay.
+                refuse(&account);
+                settle().await;
+                link.heard(7);
+                // Into a dead socket that still looks live, then parked: both unheard.
+                refuse(&account);
+                settle().await;
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                refuse(&account);
+                settle().await;
+
+                let (out, mut sent, _) = Out::channel(64);
+                let identity = Identity {
+                    user: Some("u".into()),
+                    token: Some(("t".into(), u64::MAX)),
+                    resume_from: Some("r1".into()),
+                    resumable: true,
+                };
+                let mut session =
+                    Session::new(registry, Arc::new(Metrics::default()), identity, out);
+                session.open().await;
+                settle().await;
+                let mut errors = Vec::new();
+                let mut resumed = false;
+                while let Ok(frame) = sent.try_recv() {
+                    assert!(frame.starts_with(r#"{"t":"#), "t-first: {frame}");
+                    let message: Value = serde_json::from_str(&frame).unwrap();
+                    resumed |= message["t"] == "session" && message["d"]["resumed"] == true;
+                    if message["d"]["op"] == "error" {
+                        assert_eq!(message["d"]["accountName"], "acct");
+                        errors.push(message["d"]["data"].clone());
+                    }
+                }
+                assert!(resumed);
+                assert_eq!(
+                    errors.len(),
+                    2,
+                    "the two unheard errors, once each: {errors:?}"
+                );
+                assert!(errors.iter().all(Value::is_string), "{errors:?}");
+
+                // A second join has nothing left to say.
+                account
+                    .algos
+                    .as_ref()
+                    .unwrap()
+                    .send(crate::algos::AlgoInput::Joined)
+                    .unwrap();
+                settle().await;
+                while let Ok(frame) = sent.try_recv() {
+                    assert!(!frame.contains(r#""op":"error""#), "{frame}");
+                }
+            })
+            .await;
+    }
+
     /// On the wire: a second client's init with other engine settings, as the
     /// browser sends it, against an account another live socket holds.
     #[tokio::test(start_paused = true)]

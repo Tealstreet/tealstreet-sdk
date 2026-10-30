@@ -7,9 +7,11 @@ use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_native::{AccountHandle, Outgoing};
 use serde_json::Value;
 use std::cell::{Cell, Ref, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 
 /// What a session asks of an account's algos.
@@ -41,7 +43,10 @@ pub enum AlgoInput {
 pub type Emit = Box<dyn Fn(String) + Send>;
 
 /// Keeps a stop notice for a client that is not there to see it.
-pub type StopNotice = Box<dyn FnOnce(String) + Send>;
+pub type StopNotice = Box<dyn Fn(String) + Send>;
+
+/// Errors kept for a browser that may not have seen them, oldest dropped first.
+const UNHEARD_ERRORS: usize = 32;
 
 /// Bound on settling chaser cancels before the engine is disposed anyway.
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
@@ -71,6 +76,11 @@ struct Port {
     who: crate::audit::Who,
     emit: Emit,
     placed: crate::accounts::PlacedSymbols,
+    signer: Option<Arc<safe_cex_remote_signer::SignerLink>>,
+    held: Arc<AtomicBool>,
+    /// Errors sent since the browser was last heard from, with when: a dropped
+    /// socket can look live for 30s, so a send proves nothing until a frame follows.
+    unheard: RefCell<VecDeque<(Instant, String)>>,
 }
 
 impl AccountPort for Port {
@@ -124,6 +134,10 @@ impl AccountPort for Port {
         })
     }
     fn emit(&self, op: &str, data: String) {
+        if op == "error" {
+            crate::state::Log::warn(&format!("algo error {}: {data}", self.name));
+            self.keep_unheard(&data);
+        }
         (self.emit)(algo_msg(&self.name, op, data));
     }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -141,6 +155,32 @@ fn algo_msg(account_name: &str, op: &str, data: String) -> String {
 }
 
 impl Port {
+    fn keep_unheard(&self, data: &str) {
+        let mut unheard = self.unheard.borrow_mut();
+        match &self.signer {
+            Some(signer) => {
+                let heard = signer.heard_at();
+                unheard.retain(|(sent, _)| *sent > heard);
+            }
+            None if self.held.load(Ordering::Relaxed) => return,
+            None => {}
+        }
+        if unheard.len() == UNHEARD_ERRORS {
+            unheard.pop_front();
+        }
+        unheard.push_back((Instant::now(), data.to_owned()));
+    }
+
+    /// The errors no frame followed, once: `heard` is the browser's last frame.
+    fn take_unheard(&self, heard: Option<Instant>) -> Vec<String> {
+        self.unheard
+            .borrow_mut()
+            .drain(..)
+            .filter(|(sent, _)| heard.is_none_or(|heard| *sent > heard))
+            .map(|(_, data)| data)
+            .collect()
+    }
+
     fn apply(&self, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
         let change = projection::apply(&mut self.store.borrow_mut(), snapshot, fills, rejoined);
         self.placed.sync_markets(self.store.borrow().markets.keys());
@@ -372,9 +412,9 @@ pub async fn run(
     client: u64,
     who: crate::audit::Who,
     emit: Emit,
-    link_signer: Option<std::sync::Arc<safe_cex_remote_signer::SignerLink>>,
+    link_signer: Option<Arc<safe_cex_remote_signer::SignerLink>>,
     placed: crate::accounts::PlacedSymbols,
-    held: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    held: Arc<AtomicBool>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     // An algo host that cannot run never takes the account with it: the account's
@@ -401,6 +441,9 @@ pub async fn run(
         who: who.clone(),
         emit,
         placed: placed.clone(),
+        signer: link_signer.clone(),
+        held: held.clone(),
+        unheard: RefCell::default(),
     });
     let scope = Scope::new();
     let cx = AlgoCx::new(port.clone(), scope.clone());
@@ -532,6 +575,11 @@ pub async fn run(
                 Some(AlgoInput::Joined) => {
                     published.clear();
                     publish(&mut published);
+                    // What it stopped for while the browser was gone, once.
+                    let heard = link_signer.as_ref().map(|signer| signer.heard_before_attach());
+                    for data in port.take_unheard(heard) {
+                        (port.emit)(algo_msg(&name, "error", data));
+                    }
                 }
                 Some(AlgoInput::Dispose { reason, stopped }) => break Some((reason, stopped)),
                 None => break Some(("account disposed".to_owned(), None)),
@@ -550,11 +598,29 @@ pub async fn run(
         &crate::audit::algo_op("terminateAll", "{}"),
         "ok".into(),
     );
-    if !book.active_chasers().is_empty() || !twap.active_twaps(&name).is_empty() {
-        let notice = format!("Chases and TWAPs stopped: {reason}");
-        match stopped {
-            Some(stopped) => stopped(notice),
-            None => (port.emit)(crate::envelope::msg(&name, "error", Value::String(notice))),
+    let stop_notice = (!book.active_chasers().is_empty() || !twap.active_twaps(&name).is_empty())
+        .then(|| format!("Chases and TWAPs stopped: {reason}"));
+    // Kept for the next init only when no browser is there to be sent them.
+    let unheard_notices = || -> Vec<String> {
+        let heard = link_signer.as_ref().map(|signer| signer.heard_at());
+        port.take_unheard(heard)
+            .into_iter()
+            .map(|data| serde_json::from_str(&data).unwrap_or(data))
+            .collect()
+    };
+    let mut notices = Vec::new();
+    match &stopped {
+        Some(stopped) => {
+            notices = unheard_notices();
+            notices.extend(stop_notice);
+            if !notices.is_empty() {
+                stopped(notices.join("\n"));
+            }
+        }
+        None => {
+            if let Some(notice) = stop_notice {
+                (port.emit)(crate::envelope::msg(&name, "error", Value::String(notice)));
+            }
         }
     }
     twap.terminate_all();
@@ -565,6 +631,14 @@ pub async fn run(
         crate::state::Log::warn(&format!(
             "{name}: chaser shutdown passed its deadline; cancels may be unsettled and orders may rest"
         ));
+    }
+    // Its cancels can fail too, with no browser to tell: a fuller notice replaces the first.
+    if let Some(stopped) = &stopped {
+        let raised = unheard_notices();
+        if !raised.is_empty() {
+            notices.extend(raised);
+            stopped(notices.join("\n"));
+        }
     }
     scope.dispose();
     handle.leave(feed.client());
