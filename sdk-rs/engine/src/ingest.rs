@@ -253,21 +253,205 @@ fn ticker_deltas(
     Ok(())
 }
 
+/// The `index`th variant of a fieldless enum in declaration order, as
+/// `variant as u32` wrote it; `None` for an out-of-range wire value.
+fn nth<T: Copy>(variants: &[T], index: u32) -> Result<T, IngestError> {
+    variants
+        .get(index as usize)
+        .copied()
+        .ok_or(IngestError("enum value out of range"))
+}
+
+/// `nth` for an optional enum written as `variant + 1`, zero when absent.
+fn optional<T: Copy>(variants: &[T], value: u32) -> Result<Option<T>, IngestError> {
+    match value {
+        0 => Ok(None),
+        value => nth(variants, value - 1).map(Some),
+    }
+}
+
+/// A column of `count` f64s, `None` where the writer stored NaN for absent.
+fn present(value: f64) -> Option<f64> {
+    (!value.is_nan()).then_some(value)
+}
+
+/// `ORDERS` (revision 1, `Store::write_orders`): replaces the order list.
 fn orders(
-    _: &mut Store,
+    store: &mut Store,
     _: &IngestState,
-    _: &Frame<'_>,
-    _: &Section<'_>,
+    frame: &Frame<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    use crate::model::{
+        Order, OrderExtra, OrderSide, OrderStatus, OrderType, RejectReason, StopTriggerType,
+        TimeInForce,
+    };
+    use OrderStatus as S;
+    use OrderType as K;
+    const STATUS: [S; 6] = [
+        S::Open,
+        S::Closed,
+        S::Canceled,
+        S::Creating,
+        S::Updating,
+        S::Canceling,
+    ];
+    const KIND: [K; 6] = [
+        K::Market,
+        K::Limit,
+        K::Conditional,
+        K::StopLoss,
+        K::TakeProfit,
+        K::TrailingStopLoss,
+    ];
+    const SIDE: [OrderSide; 2] = [OrderSide::Buy, OrderSide::Sell];
+    const TIF: [TimeInForce; 4] = [
+        TimeInForce::GoodTillCancel,
+        TimeInForce::ImmediateOrCancel,
+        TimeInForce::FillOrKill,
+        TimeInForce::PostOnly,
+    ];
+    const TRIGGER: [StopTriggerType; 3] = [
+        StopTriggerType::MarkPrice,
+        StopTriggerType::LastPrice,
+        StopTriggerType::IndexPrice,
+    ];
+    const REJECT: [RejectReason; 3] = [
+        RejectReason::PostOnly,
+        RejectReason::InsufficientBalance,
+        RejectReason::ReduceOnly,
+    ];
+    if section.revision != 1 {
+        return Err(IngestError("unsupported ORDERS revision"));
+    }
+    let strings = &frame.strings;
+    let mut c = Cursor::new(section.payload);
+    let count = c.u32()? as usize;
+    let mut refs = Vec::with_capacity(count);
+    for _ in 0..count {
+        refs.push((c.u32()?, c.u32()?, c.u32()?));
+    }
+    for _ in 0..count {
+        c.u32()?; // market index: rows carry their own symbol string
+    }
+    let mut enums = Vec::with_capacity(count);
+    for _ in 0..count {
+        enums.push(c.u32()?);
+    }
+    c.align8();
+    let mut columns = [(); 11].map(|_| Vec::with_capacity(count));
+    for column in &mut columns {
+        for _ in 0..count {
+            column.push(c.f64()?);
+        }
+    }
+    let mut extra_triggers = Vec::with_capacity(count);
+    for _ in 0..count {
+        extra_triggers.push(c.u32()?);
+    }
+    let mut orders = Vec::with_capacity(count);
+    for i in 0..count {
+        let symbol = strings.required(c.u32()?)?.to_owned();
+        let (id, client_order_id, parent_id) = refs[i];
+        let packed = enums[i];
+        let flags = (packed >> 16) & 0xff;
+        let tif_trigger = packed >> 24;
+        let column = |n: usize| columns[n][i];
+        let tp_sl = extra_triggers[i];
+        let extra = OrderExtra {
+            take_profit_known: false,
+            stop_loss_known: false,
+            tp_trigger_type: optional(&TRIGGER, tp_sl & 0xff)?,
+            sl_trigger_type: optional(&TRIGGER, (tp_sl >> 8) & 0xff)?,
+            remaining_native: present(column(7)),
+            filled_in_placement_units: present(column(8)),
+            remaining_notional: present(column(9)),
+            conditional_order_price: present(column(10)),
+            reject_reason: optional(&REJECT, flags >> 4)?,
+        };
+        orders.push(Order {
+            id: strings.required(id)?.to_owned(),
+            parent_id: strings.get(parent_id)?.map(str::to_owned),
+            status: nth(&STATUS, packed & 0xff)?,
+            symbol,
+            kind: nth(&KIND, (packed >> 8) & 0xff)?,
+            side: nth(&SIDE, flags & 1)?,
+            price: column(0),
+            amount: column(1),
+            filled: column(2),
+            remaining: column(3),
+            reduce_only: flags & 2 != 0,
+            close: (flags & 8 != 0).then_some(flags & 4 != 0),
+            client_order_id: strings.get(client_order_id)?.map(str::to_owned),
+            time_in_force: optional(&TIF, tif_trigger & 0xf)?,
+            last_update: column(4),
+            trigger_type: optional(&TRIGGER, tif_trigger >> 4)?,
+            take_profit: present(column(5)),
+            stop_loss: present(column(6)),
+            extra: (extra != OrderExtra::default()).then_some(extra),
+        });
+    }
+    store.set_orders(orders);
     Ok(())
 }
 
+/// `POSITIONS` (revision 1, `Store::write_positions`): replaces the positions.
 fn positions(
-    _: &mut Store,
+    store: &mut Store,
     _: &IngestState,
-    _: &Frame<'_>,
-    _: &Section<'_>,
+    frame: &Frame<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    use crate::model::{MarginType, Position, PositionMode, PositionSide};
+    const SIDE: [PositionSide; 2] = [PositionSide::Long, PositionSide::Short];
+    const MARGIN: [MarginType; 2] = [MarginType::Isolated, MarginType::Cross];
+    const MODE: [PositionMode; 2] = [PositionMode::Hedged, PositionMode::Oneway];
+    if section.revision != 1 {
+        return Err(IngestError("unsupported POSITIONS revision"));
+    }
+    let strings = &frame.strings;
+    let mut c = Cursor::new(section.payload);
+    let count = c.u32()? as usize;
+    for _ in 0..count {
+        c.u32()?; // market index: rows carry their own symbol string
+    }
+    let mut enums = Vec::with_capacity(count);
+    for _ in 0..count {
+        enums.push(c.u32()?);
+    }
+    c.align8();
+    let mut columns = [(); 9].map(|_| Vec::with_capacity(count));
+    for column in &mut columns {
+        for _ in 0..count {
+            column.push(c.f64()?);
+        }
+    }
+    let mut ids = Vec::with_capacity(count);
+    for _ in 0..count {
+        ids.push(strings.required(c.u32()?)?.to_owned());
+    }
+    let mut positions = Vec::with_capacity(count);
+    for (i, id) in ids.into_iter().enumerate() {
+        let packed = enums[i];
+        let column = |n: usize| columns[n][i];
+        positions.push(Position {
+            id,
+            symbol: strings.required(c.u32()?)?.to_owned(),
+            side: nth(&SIDE, packed & 0xff)?,
+            entry_price: column(0),
+            notional: column(1),
+            leverage: column(2),
+            margin_type: optional(&MARGIN, (packed >> 8) & 0xff)?,
+            position_mode: optional(&MODE, (packed >> 16) & 0xff)?,
+            unrealized_pnl: column(3),
+            realized_pnl: present(column(4)),
+            contracts: column(5),
+            liquidation_price: column(6),
+            margin_size: present(column(7)),
+            last_update: present(column(8)),
+        });
+    }
+    store.set_positions(positions);
     Ok(())
 }
 
@@ -333,6 +517,89 @@ pub(crate) mod tests {
         let applied = apply(&mut store, &mut IngestState::default(), &parsed, false).unwrap();
         assert_eq!(applied.venue_state.as_deref(), Some(&b"abc"[..]));
         assert!(parse(&frame[..12]).is_err());
+    }
+
+    #[test]
+    fn orders_and_positions_round_trip_every_field() {
+        use crate::model::*;
+        let order = |id: &str, status, kind, side, close, tif, trigger, extra| Order {
+            id: id.into(),
+            parent_id: Some("parent".into()),
+            status,
+            symbol: "BTCUSDT".into(),
+            kind,
+            side,
+            price: 100.5,
+            amount: 2.0,
+            filled: 0.5,
+            remaining: 1.5,
+            reduce_only: true,
+            close,
+            client_order_id: Some(format!("c-{id}")),
+            time_in_force: tif,
+            last_update: 1_700_000_000_000.0,
+            trigger_type: trigger,
+            take_profit: Some(110.0),
+            stop_loss: None,
+            extra,
+        };
+        let mut source = Store::default();
+        source.set_orders(vec![
+            order(
+                "a",
+                OrderStatus::Canceling,
+                OrderType::TrailingStopLoss,
+                OrderSide::Sell,
+                Some(false),
+                Some(TimeInForce::PostOnly),
+                Some(StopTriggerType::IndexPrice),
+                Some(OrderExtra {
+                    tp_trigger_type: Some(StopTriggerType::LastPrice),
+                    sl_trigger_type: Some(StopTriggerType::MarkPrice),
+                    remaining_native: Some(3.0),
+                    filled_in_placement_units: None,
+                    remaining_notional: Some(150.0),
+                    conditional_order_price: Some(99.0),
+                    reject_reason: Some(RejectReason::ReduceOnly),
+                    ..OrderExtra::default()
+                }),
+            ),
+            Order {
+                parent_id: None,
+                client_order_id: None,
+                take_profit: None,
+                ..order(
+                    "b",
+                    OrderStatus::Open,
+                    OrderType::Limit,
+                    OrderSide::Buy,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            },
+        ]);
+        source.set_positions(vec![Position {
+            id: "BTCUSDT-long".into(),
+            symbol: "BTCUSDT".into(),
+            side: PositionSide::Short,
+            entry_price: 101.0,
+            notional: 202.0,
+            leverage: 5.0,
+            margin_type: Some(MarginType::Cross),
+            position_mode: Some(PositionMode::Hedged),
+            unrealized_pnl: -1.25,
+            realized_pnl: None,
+            contracts: 2.0,
+            liquidation_price: 80.0,
+            margin_size: Some(40.0),
+            last_update: None,
+        }]);
+        let (store, applied) = round_trip(&source);
+        assert!(applied.orders && applied.positions);
+        assert_eq!(store.orders(), source.orders());
+        assert_eq!(store.positions(), source.positions());
     }
 
     #[test]
