@@ -251,12 +251,12 @@ Sessions and resume (same semantics as today):
 - **On close, `resumable=1` sockets:**
   - private accounts are parked under `resumeId` for 60s, bound to `userId`;
   - other accounts are disposed;
-  - chases die with the socket, as today; TWAPs live with the account, through the park, until it is disposed (see Multi-node for holding them while parked).
+  - chases and TWAPs live with the account and keep running through the park (Sam, the COSIGNED blip window); a socket close no longer ends chases. A joining socket gets the algo store rows again.
 - **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts the parked accounts. It then receives `session {resumed:true}`.
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
   - A different fingerprint disposes the account and rebuilds it.
 - **Resume alias:** a used `resumeId` stays valid as an alias for 120s, which is `RESUME_ALIAS_MS`.
-- **Grace expiry:** parked accounts are disposed.
+- **Grace expiry:** parked accounts are disposed with the reason `no browser for 60s`, recorded in the order audit log. The `error` the algo host emits then reaches no one (no browser is attached), so a client returning later sees its algos gone with no notice; delivering it on the next session is not built.
 
 ## Remote signer (claude-4yjlw0)
 
@@ -272,7 +272,7 @@ This has landed as the crate `safe-cex-remote-signer` (`sdk-rs/hosts/remote-sign
 - **Input:** `engine_options_json` holds the options the server would otherwise build. That includes the public `key` and an optional `passphrase`, with no secret.
 - **Output:** `options_json` has those fields stripped and carries `signing` (opaque refs), `remoteSigning: true`, `payloadSigner: false` and `publicMode`.
 - **`sign-res`:** call `link.resolve(socket_id, d)` only on links of accounts this socket joined. A request resolves only from the socket it was sent on, and only once. An oversized field settles as an error.
-- **Resume:** on park, call `link.suspend()`, which aborts in-flight signs as unavailable without counting them toward the fatal streak. On resume, call `link.attach(new_socket_id, new_outbox)`, which aborts anything still pending on another socket. On dispose, call `link.mark_unavailable()`.
+- **Resume:** on park, call `link.suspend()`, which aborts in-flight signs as unavailable without counting them toward the fatal streak. A sign requested while suspended (an algo order during the gap) waits for `attach` within the one 15s `SIGN_TIMEOUT`, then fails as unavailable; it is never queued past it, and the chase or TWAP reports the failed placement. On resume, call `link.attach(new_socket_id, new_outbox)`, which aborts anything still pending on another socket. On dispose, call `link.mark_unavailable()`.
 - **Echo:** `link.send_echo()` alternates bare and padded-to-last-sign-req probes, one outstanding at a time. Feed `echo-res` `d` to `link.echo_res(d)`, which returns `(rtt, EchoSize)`.
 - **Wire coverage:** the wire is the existing browser responder's ws-auth wire. That covers:
   - the HMAC families, with hex, base64 and hex-base64 encodings, a passphrase Present, and the extraData codecs `secondsTimestamp`, `bybitExpiry` and `binanceSpot`;
@@ -335,7 +335,7 @@ a socket uses, as one more in-process client:
 - **Commands:** `command(client, Command)` gives a completion through the same done notice. The no-retry and orphan rules apply.
 - **Timers:** a tokio `LocalSet` on the account thread, so algos may hold `!Send` state beside the engine.
 - **Lifecycle:**
-  - Algos are owned by the account entry in `accounts.rs` and die on dispose. Any socket close ends the account's chases (today's rule); TWAPs keep running while the account is parked.
+  - Algos are owned by the account entry in `accounts.rs` and die on dispose. Chases and TWAPs keep running while the account is parked.
 - **Wire:** algo ops (`chaser:*`, `twap:*`, `exec`) reach the algo through a registry in `accounts.rs`: `fn algo(op) -> Option<&dyn AlgoFactory>`. Replies use the existing op names.
 
 ## Multi-node (fe7lgm; post-cutover design, not implemented)
@@ -380,7 +380,7 @@ without letting one account run on both.
   - Resting venue orders stay on the venue.
   - The client's fresh `init` on the survivor rebuilds the account from the venue, so open orders and positions reappear in the snapshot.
 - **When a node is alive but unreachable** (a tunnel or network partition): its parked accounts would otherwise live out the 60s grace while the client re-inits elsewhere. Two measures cover this:
-  - **Parked algos hold.** On park, the account's TWAP schedules pause and place nothing new until a resume adopts the account. Chases already end at socket close. Grace expiry terminates the held TWAPs and disposes the account as today. This is a change: today a parked account's TWAPs keep placing for up to 60s.
+  - **Parked algos keep running (Sam's decision, superseding an earlier "parked algos hold").** Chases and TWAPs keep placing for up to the 60s grace; their orders need the browser's signature, so during the gap each waits up to the 15s signing timeout and then fails visibly. Grace expiry stops them and disposes the account.
   - **Evict on init.** Before building a private account, a node sends `POST /internal/evict {userId, accountName}` to each peer (`TEALSTREET_PEERS`, a node to private-address list).
     - The request is authenticated with an HMAC under `EXCHANGE_SERVER_PEER_SECRET` and is served only on the private interface, never through the tunnel.
     - The peer disposes any parked holder of that account, running algo shutdown first.

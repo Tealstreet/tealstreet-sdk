@@ -847,6 +847,12 @@ impl Hyperliquid {
                     );
                 }
                 let market = cx.store.market(&symbol).ok_or("Market not found")?;
+                // Frame-fed defaults come from the source's settings, never a local seed.
+                if cx.frame_fed() && self.has_setting(market) && cx.store.setting(&symbol).is_none() {
+                    return Err(
+                        "Hyperliquid settings have not arrived from the data source yet".into(),
+                    );
+                }
                 let isolated_only = self.isolated_only.contains(&symbol);
                 // HIP-3 assets have no activeAssetData feed, so a flat one has no setting.
                 let setting = cx.store.setting(&symbol).filter(|s| s.leverage > 0.0);
@@ -1185,7 +1191,10 @@ impl Hyperliquid {
         }
     }
     fn mark_settings_uncertain(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
-        if let Effect::Leverage { symbol, .. } = effect {
+        // Frame-fed settings come from the data source, which reconciles them.
+        if let Effect::Leverage { symbol, .. } = effect
+            && !cx.frame_fed()
+        {
             self.trading.uncertain_settings.insert(symbol.clone());
             self.refresh_uncertain_settings(cx, symbol);
         }

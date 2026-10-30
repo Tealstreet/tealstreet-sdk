@@ -213,7 +213,11 @@ async fn run_nuke(
     if stall {
         // The cancel never settles; the account is disposed with the nuke mid-leg.
         tokio::time::sleep(Duration::from_millis(100)).await;
-        inbox.send(AlgoInput::Dispose).unwrap();
+        inbox
+            .send(AlgoInput::Dispose {
+                reason: "account disposed".into(),
+            })
+            .unwrap();
     }
     let done = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -227,7 +231,9 @@ async fn run_nuke(
     })
     .await
     .expect("nuke answers");
-    let _ = inbox.send(AlgoInput::Dispose);
+    let _ = inbox.send(AlgoInput::Dispose {
+        reason: "account disposed".into(),
+    });
     let commands = commands.lock().unwrap().clone();
     (done, commands)
 }

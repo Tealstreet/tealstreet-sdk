@@ -587,6 +587,18 @@ export class EngineHost {
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
 
+  /** Apply one data-source frame (its exact SCXF bytes) to a `frameFed` engine.
+   * A snapshot resets the account state first. Runs whatever the ingest releases,
+   * such as writes held for a placement ack; an ingest refusal throws. */
+  applyFrame(frame, snapshot) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (typeof this.engine.applyFrame !== 'function') throw new TypeError('This engine has no frame ingest');
+    const bytes = frame instanceof Uint8Array ? frame : new Uint8Array(frame);
+    this.run(this.invoke(this.engine.applyFrame, bytes, snapshot === true, this.transport.now()));
+    if (this.deadError) throw this.deadError;
+  }
+
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {

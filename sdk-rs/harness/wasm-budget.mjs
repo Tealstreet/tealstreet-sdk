@@ -64,7 +64,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // Cutover 10-29: asterdex raised to 1403 KiB (release run 40863850081 measured 1,434,289 B).
 // Frame-fed engine core (frameFed mode, ingest skeleton, VENUE_STATE): local optimized
 // Bybit 1,455,883 B; ddi ruled ceil KiB + 2 KiB for the frame-fed work (1424 KiB).
-export const WASM_VENUE_OVERRIDES = Object.freeze({ binance: 1_463_296, hyperliquid: 1_376_256, hyperliquidspot: 1_376_256, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_458_176, asterdex: 1_436_672, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_486_848 });
+// Bybit frame-fed (VENUE_STATE) with the merged ingest decoders: 1,468,570 B (1437 KiB).
+// Hyperliquid frame-fed with the merged ingest decoders: 1,377,242 B (1347 KiB).
+export const WASM_VENUE_OVERRIDES = Object.freeze({ binance: 1_463_296, hyperliquid: 1_379_328, hyperliquidspot: 1_379_328, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_471_488, asterdex: 1_436_672, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_486_848 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
