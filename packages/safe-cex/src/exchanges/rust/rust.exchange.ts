@@ -919,6 +919,7 @@ export class RustEngineExchange extends BaseExchange {
       this.options,
       (transportFactory ?? synchronizedEngineTransport)(),
       this.signerSetup,
+      (message) => this.emitAndLogError(message),
     );
     const engine = constructEngine(
       WasmEngine,

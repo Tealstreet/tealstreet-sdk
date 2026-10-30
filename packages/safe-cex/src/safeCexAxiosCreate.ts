@@ -6,6 +6,7 @@ import axios, { AxiosInstance, CreateAxiosDefaults } from 'axios';
 import { BaseExchange } from './exchanges/base';
 import { createRemoteSigningAdapter } from './remoteSigningAdapter';
 import { getTransport } from './transport/registry';
+import { isTealstreetProxyAuthFailureBody } from './transport/tealstreet/tealstreetTransport';
 import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
 import { isDevelopment } from './utils/isDevelopment';
 import { isSigningCaptureRequest } from './utils/signingCapture';
@@ -165,17 +166,6 @@ export const LAST_LOG_PERIODICY = 30 * 1_000;
 
 const stringifyResponseBody = (body: unknown): string =>
   typeof body === 'string' ? body : (JSON.stringify(body) ?? String(body));
-
-const isTealstreetProxyAuthFailureBody = (body: unknown): boolean => {
-  const message =
-    typeof body === 'string'
-      ? body
-      : body && typeof body === 'object' && 'message' in body && typeof body.message === 'string'
-        ? body.message
-        : '';
-
-  return message === 'Authorization header is missing' || message === 'Invalid JWT';
-};
 
 /**
  * Classify a REST outcome from the HTTP status alone, then record it on the
