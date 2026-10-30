@@ -1111,11 +1111,6 @@ impl BybitLinear {
             .market(&order.symbol)
             .ok_or_else(|| format!("Market {} not found", order.symbol))?;
         let stop = matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit);
-        if stop && cx.writes_only() && !self.writer_bound_known.contains(id) {
-            return Err(format!(
-                "Amending stop {id} needs its positionBound in the writer context"
-            ));
-        }
         if stop
             && !is_virtual(id)
             && self.category_for(&order.symbol) != Category::Spot

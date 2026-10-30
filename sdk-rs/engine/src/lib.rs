@@ -46,6 +46,8 @@ pub mod signing_policy;
 mod signing_release;
 pub use signing_dispatch::{DispatchContext, SignStep};
 pub use signing_release::{SigningRelease, StampFloor};
+pub mod frame_fed;
+pub mod ingest;
 pub mod socket;
 #[cfg(feature = "managed-sockets")]
 mod socket_driver;
@@ -58,7 +60,6 @@ pub mod test_support;
 pub mod time;
 pub mod url;
 pub mod wire;
-pub mod writer;
 
 pub use capabilities::{
     AccountLookup, CancelAll, Capabilities, ClosedPositionFormat, FillHistoryTime, LeverageQuery,

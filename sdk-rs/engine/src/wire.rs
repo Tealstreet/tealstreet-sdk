@@ -48,6 +48,9 @@ pub mod section {
     pub const UNDERLYING_TOKENS: u16 = 20;
     /// Current account read, not a new streaming observation.
     pub const ACCOUNT_READ: u16 = 21;
+    /// A venue's private state for frame-fed engines (`Venue::export_venue_state`):
+    /// a u32 length, then the venue's own bytes, padded.
+    pub const VENUE_STATE: u16 = 22;
 }
 
 pub mod status_flag {
@@ -206,6 +209,14 @@ impl<'a> FrameWriter<'a> {
         while !self.buf.len().is_multiple_of(8) {
             self.buf.push(0);
         }
+    }
+
+    /// A `VENUE_STATE` section: the venue's own bytes behind a u32 length.
+    pub fn venue_state(&mut self, state: &[u8]) {
+        self.begin(section::VENUE_STATE);
+        self.u32(state.len() as u32);
+        self.buf.extend_from_slice(state);
+        self.end();
     }
 
     pub fn f64(&mut self, value: f64) {

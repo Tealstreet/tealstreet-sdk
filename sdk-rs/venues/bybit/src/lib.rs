@@ -254,8 +254,6 @@ pub struct BybitLinear {
     /// A Bybit Brazil (`BRA_BTL`) account: REST writes publish their own order
     /// rows, as on Demo, until its proxied private WS is venue-validated.
     brazil_site: bool,
-    /// Writer mode: stop ids whose `positionBound` the host's context named.
-    writer_bound_known: HashSet<String>,
     signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     recv_window: Option<u32>,
     category: Category,
@@ -524,7 +522,6 @@ impl BybitLinear {
             credentials_rejected: false,
             environment_probe_origin,
             brazil_site: options.bybit_site_id.as_deref() == Some("BRA_BTL"),
-            writer_bound_known: HashSet::new(),
             environment_probe_attempted: false,
             environment_probe: None,
             public: Connection::new(),
@@ -1140,7 +1137,7 @@ impl BybitLinear {
             self.startup.prelaunch_in_flight = true;
             self.request_markets(cx, true, None);
         }
-        if cx.writes_only() {
+        if cx.frame_fed() {
             return;
         }
         if self.category == Category::Option && self.startup.markets_loaded {
@@ -1418,7 +1415,7 @@ impl BybitLinear {
 
     fn try_load_markets(&mut self, cx: &mut Cx<'_, Pending>) {
         let startup = &mut self.startup;
-        let fees_ready = self.credentials.is_none() || startup.fees.is_some() || cx.writes_only();
+        let fees_ready = self.credentials.is_none() || startup.fees.is_some() || cx.frame_fed();
         if startup.markets_loaded
             || startup.trading.is_none()
             || startup.prelaunch.is_none()
@@ -1455,7 +1452,7 @@ impl BybitLinear {
             format!("Loaded {} Bybit markets", markets.len()),
         );
         self.catalogs.insert(self.category, markets);
-        if self.category == Category::Option && !cx.writes_only() {
+        if self.category == Category::Option && !cx.frame_fed() {
             self.request_option_seeds(cx);
         }
         self.try_publish_catalogs(cx);
@@ -1493,7 +1490,7 @@ impl BybitLinear {
             cx.store.set_markets(markets);
             publish_product_metadata(cx.store, &self.classification, &self.derivatives);
             self.catalog_ready = true;
-            if cx.writes_only() {
+            if cx.frame_fed() {
                 return;
             }
             let category = self.category;
@@ -2550,45 +2547,9 @@ impl Venue for BybitLinear {
             self.request_startup(cx);
         }
         self.select_category(self.primary_category);
-        // A writer loads public instrument metadata only.
-        if self.credentials.is_some() && !cx.writes_only() {
+        // A frame-fed engine loads public instrument metadata only.
+        if self.credentials.is_some() && !cx.frame_fed() {
             self.request_account_info(cx);
-        }
-    }
-
-    fn apply_writer_context(&mut self, context: &safe_cex_engine::writer::WriterContext) {
-        self.account.position_modes.clear();
-        for product in &mut self.products {
-            product.account.position_modes.clear();
-        }
-        self.account.position_bound = context
-            .orders
-            .iter()
-            .filter(|order| order.position_bound == Some(true))
-            .map(|order| order.id.clone())
-            .collect();
-        self.writer_bound_known = context
-            .orders
-            .iter()
-            .filter(|order| order.position_bound.is_some())
-            .map(|order| order.id.clone())
-            .collect();
-        for (symbol, settings) in &context.settings {
-            let Some(hedged) = settings.hedged else {
-                continue;
-            };
-            let category = self.category_for(symbol);
-            let account = if category == self.category {
-                Some(&mut self.account)
-            } else {
-                self.products
-                    .iter_mut()
-                    .find(|state| state.category == category)
-                    .map(|state| &mut state.account)
-            };
-            if let Some(account) = account {
-                account.position_modes.insert(symbol.clone(), hedged);
-            }
         }
     }
 

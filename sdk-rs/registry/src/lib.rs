@@ -139,6 +139,9 @@ pub struct Construction {
     pub public_data_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asterdex_api_version: Option<&'static str>,
+    /// Requested frame-fed (`EngineOptions::frame_fed`); omitted when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub frame_fed: bool,
 }
 
 impl EngineOptions {
@@ -179,6 +182,7 @@ impl EngineOptions {
             asterdex_api_version,
             can_sign: mode.as_ref().map(|mode| mode.can_sign),
             public_data_only: mode.map(|mode| mode.public_data_only),
+            frame_fed: self.frame_fed,
         }
     }
 
@@ -221,7 +225,7 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
 #[derive(Clone, Copy)]
 struct Startup {
     account: bool,
-    writes_only: bool,
+    frame_fed: bool,
     log_level: Level,
     private_feed: safe_cex_engine::signing_policy::PrivateFeedPolicy,
 }
@@ -235,8 +239,8 @@ fn finish<T: Visit, V: Venue + 'static>(
     engine.set_public_feed_policy(policy).map_err(invalid)?;
     engine.set_private_feed_policy(startup.private_feed)?;
     engine.set_account_startup(startup.account);
-    if startup.writes_only {
-        engine.set_writes_only().map_err(invalid)?;
+    if startup.frame_fed {
+        engine.set_frame_fed().map_err(invalid)?;
     }
     engine.set_log_level(startup.log_level);
     Ok(visitor.visit(engine))
@@ -1287,11 +1291,16 @@ fn read_key_options(
     Ok(())
 }
 
-/// Generic options contain opaque references; provider owns all credentials.
-/// Venues whose startup honours `Cx::writes_only` (public metadata only) and
-/// whose write paths read only the writer context.
-pub const WRITER_VENUES: &[&str] = &["bybit"];
+/// Venues converted for frame-fed engines (`safe_cex_engine::frame_fed`): their
+/// startup honours `Cx::frame_fed` and their write paths read only the store
+/// and the VENUE_STATE they export. Others are refused at construction.
+pub const FRAME_FED_VENUES: &[&str] = &[];
 
+pub fn frame_fed_supported(venue: &str) -> bool {
+    FRAME_FED_VENUES.contains(&venue)
+}
+
+/// Generic options contain opaque references; provider owns all credentials.
 pub fn build_with_signer<T: Visit>(
     venue: &str,
     mut options: EngineOptions,
@@ -1383,17 +1392,17 @@ pub fn build_with_signer<T: Visit>(
     if options.private_only && policy == PublicFeedPolicy::Direct {
         return Err(invalid("privateOnly cannot use direct public feeds"));
     }
-    if options.writes_only {
-        if !WRITER_VENUES.contains(&venue) {
-            return Err(invalid(format!("writesOnly is not supported for {venue}")));
+    if options.frame_fed {
+        if !frame_fed_supported(venue) {
+            return Err(invalid(format!("frameFed is not supported for {venue}")));
         }
         if options.public_data_only {
-            return Err(invalid("writesOnly needs an account that can sign"));
+            return Err(invalid("frameFed needs an account that can sign"));
         }
     }
     let startup = Startup {
-        account: options.account_startup && !options.writes_only,
-        writes_only: options.writes_only,
+        account: options.account_startup && !options.frame_fed,
+        frame_fed: options.frame_fed,
         private_feed: remote_signing_policy(venue).private_feed(options.payload_signer),
         log_level: match options.log_level.as_deref() {
             None => Level::Info,
@@ -2339,10 +2348,10 @@ pub struct EngineOptions {
     pub signing: Option<safe_cex_engine::signing::Identities>,
     #[serde(default)]
     pub private_only: bool,
-    /// A stateless order writer (`safe_cex_engine::writer`), for the venues in
-    /// [`WRITER_VENUES`].
+    /// The browser's main-thread engine, fed by a data source's frames
+    /// (`safe_cex_engine::frame_fed`), for the venues in [`FRAME_FED_VENUES`].
     #[serde(default)]
-    pub writes_only: bool,
+    pub frame_fed: bool,
     /// The SDK sets this when the account can sign (not public-data-only).
     #[serde(default)]
     pub account_startup: bool,

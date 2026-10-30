@@ -159,6 +159,10 @@ trait AnyEngine {
     ) -> Result<(), &'static str>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
+    /// A data source's frame into a frame-fed engine (`Engine::apply_frame`).
+    fn apply_frame(&mut self, _now: f64, _frame: &[u8], _snapshot: bool) -> Result<(), String> {
+        Err("frame ingest requires a frameFed engine".into())
+    }
     /// A host command with the caller's wait (see `Engine::handle_command`).
     fn handle_command(
         &mut self,
@@ -313,6 +317,10 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
     fn start(&mut self, now: f64) {
         Engine::start(self, now);
+    }
+
+    fn apply_frame(&mut self, now: f64, frame: &[u8], snapshot: bool) -> Result<(), String> {
+        Engine::apply_frame(self, now, frame, snapshot).map_err(|error| error.0.to_owned())
     }
 
     fn handle(&mut self, now: f64, event: Event<'_>) {
@@ -1221,6 +1229,28 @@ impl WasmEngine {
     /// Resolved account choices; contains no credentials.
     pub fn construction(&self) -> String {
         self.construction.clone()
+    }
+
+    /// Whether `venue` can be built with `frameFed: true`; check before
+    /// construction so an unconverted family keeps its existing path.
+    #[wasm_bindgen(js_name = frameFedSupported)]
+    pub fn frame_fed_supported(venue: &str) -> bool {
+        safe_cex_venues::frame_fed_supported(venue)
+    }
+
+    /// Apply a data source's SCXF frame to a frame-fed engine; `snapshot`
+    /// replaces the account sections. Returns the flushed actions, like `command`.
+    #[wasm_bindgen(js_name = applyFrame)]
+    pub fn apply_frame(
+        &mut self,
+        frame: &[u8],
+        snapshot: bool,
+        now: f64,
+    ) -> Result<String, JsError> {
+        self.inner
+            .apply_frame(now, frame, snapshot)
+            .map_err(|error| JsError::new(&error))?;
+        Ok(self.flush())
     }
 
     fn flush(&mut self) -> String {
