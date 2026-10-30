@@ -28,7 +28,10 @@ export class TwapHandler extends BaseHandler {
         // A fresh id, so the lock is free; it stops a duplicated tab restoring this TWAP.
         void acquireTwapLock(twapLockName(options.accountName, instance.id)).then((release) => {
           if (release) instance.holdOwnerLock(release);
-          else console.warn(`[TWAP] ${instance.id} started without its cross-tab lock`);
+          else
+            this.refuse(
+              `TWAP ${options.activeMarket?.symbol ?? instance.id} started without its cross-tab lock; a duplicated tab could also run it`,
+            );
         });
         break;
       case 'twap:resume':
@@ -80,6 +83,7 @@ export class TwapHandler extends BaseHandler {
         state,
         id,
       );
+      instance.awaitOwnerLock();
       twapManager.add(instance);
       void acquireTwapLockWithin(twapLockName(options!.accountName, id), TWAP_RESTORE_LOCK_WAIT_MS).then((release) => {
         if (!release) {
@@ -88,10 +92,12 @@ export class TwapHandler extends BaseHandler {
           return;
         }
         instance.holdOwnerLock(release);
-        if (instance.state.status === 'running') {
-          instance.pause();
-          instance.resume();
-        }
+        void instance.reconcileInFlight().then(() => {
+          if (instance.state.status === 'running') {
+            instance.pause();
+            instance.resume();
+          }
+        });
       });
     }
     // Rewrites this tab's rows, so a refused row is not restored and refused on every load.
