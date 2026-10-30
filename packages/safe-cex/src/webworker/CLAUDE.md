@@ -387,8 +387,10 @@ Every TWAP holds the Web Locks owner lock `tealstreet-twap:<account>:<id>`
 (`twap/twapLock.ts`) until it completes or stops. A restore builds the instance
 synchronously (the worker tracks the TWAPs a dispatch creates), runs it only
 once it holds the lock, and otherwise stops it and toasts "running in another
-tab". The browser releases a dead worker's locks, so another tab can then
-restore it. `twapRestoreRefusal.ts` refuses finished, empty, inflated or
+tab". It keeps asking for `TWAP_RESTORE_LOCK_WAIT_MS` (5 s) first: a reloaded
+tab's previous worker holds its locks until the browser tears it down, and a
+refusal on the first try would end a TWAP that no tab then runs. The browser
+releases a dead worker's locks, so another tab can then restore it. `twapRestoreRefusal.ts` refuses finished, empty, inflated or
 foreign-account rows and running rows whose schedule lapsed, mirroring the
 exchange server. A runtime without Web Locks gets a no-op lock.
 
