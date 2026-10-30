@@ -75,6 +75,7 @@ struct Port {
     name: String,
     who: crate::audit::Who,
     emit: Emit,
+    placed: crate::accounts::PlacedSymbols,
 }
 
 impl AccountPort for Port {
@@ -92,6 +93,10 @@ impl AccountPort for Port {
         id
     }
     fn command(&self, command: Command) -> CommandFuture {
+        if let Command::PlaceOrders { orders, .. } = &command {
+            self.placed
+                .record(orders.iter().map(|order| order.symbol.as_str()));
+        }
         let audit = crate::audit::typed(&command).map(|fields| (self.who.clone(), fields));
         let id = command.completion_id();
         let (tx, rx) = oneshot::channel();
@@ -201,7 +206,9 @@ fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>, rejoined: 
 
 impl Port {
     fn apply(&self, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
-        apply(&mut self.store.borrow_mut(), snapshot, fills, rejoined)
+        let change = apply(&mut self.store.borrow_mut(), snapshot, fills, rejoined);
+        self.placed.sync_markets(self.store.borrow().markets.keys());
+        change
     }
 
     fn settle(&self, notice: &Value) {
@@ -346,6 +353,7 @@ pub async fn run(
     who: crate::audit::Who,
     emit: Emit,
     link_signer: Option<std::sync::Arc<safe_cex_remote_signer::SignerLink>>,
+    placed: crate::accounts::PlacedSymbols,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     let Ok(mut feed) = Feed::join(handle.clone(), client).await else {
@@ -369,12 +377,14 @@ pub async fn run(
         name: name.clone(),
         who: who.clone(),
         emit,
+        placed,
     });
     let scope = Scope::new();
     let cx = AlgoCx::new(port.clone(), scope.clone());
     let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
     let book = chasers.book();
     let twap = Rc::new(safe_cex_algo_twap::factory::TwapFactory::new(
+        &name,
         cx.clone(),
         Rc::new(book.clone()),
     ));

@@ -67,6 +67,74 @@ pub struct Account {
     pub algos: Option<mpsc::UnboundedSender<crate::algos::AlgoInput>>,
     /// Lets algo replies reach the account's signing socket without a cycle.
     algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>>,
+    /// Every symbol a placement was attempted on, by a client or an algo.
+    pub placed: PlacedSymbols,
+}
+
+/// Symbols a placement was attempted on, kept for the account's lifetime, as
+/// `rust.exchange.ts` `attemptedPlacementSymbols`: on `eachPlacedSymbol` venues a
+/// cancel-all also cancels them, since frames can lag a placement's ACK.
+/// Only the account's own markets are kept, and at most `MAX_PLACED_SYMBOLS`:
+/// client text must never widen a cancel-all fan-out through the shared egress.
+#[derive(Clone, Default)]
+pub struct PlacedSymbols(Arc<Mutex<Placed>>);
+
+pub const MAX_PLACED_SYMBOLS: usize = 256;
+
+#[derive(Default)]
+struct Placed {
+    symbols: std::collections::BTreeSet<String>,
+    markets: std::collections::HashSet<String>,
+    warned: bool,
+}
+
+impl PlacedSymbols {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Placed> {
+        self.0.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// The account's engine markets; recorded symbols outside them are dropped.
+    pub fn sync_markets<'a>(&self, markets: impl ExactSizeIterator<Item = &'a String>) {
+        let mut placed = self.lock();
+        if placed.markets.len() == markets.len() {
+            return;
+        }
+        placed.markets = markets.cloned().collect();
+        let Placed {
+            symbols, markets, ..
+        } = &mut *placed;
+        symbols.retain(|symbol| markets.contains(symbol));
+    }
+
+    pub fn record<'a>(&self, symbols: impl IntoIterator<Item = &'a str>) {
+        let mut placed = self.lock();
+        for symbol in symbols {
+            if placed.symbols.contains(symbol) || !placed.markets.contains(symbol) {
+                continue;
+            }
+            if placed.symbols.len() >= MAX_PLACED_SYMBOLS {
+                if !placed.warned {
+                    placed.warned = true;
+                    Log::warn("placed-symbol scopes full; later placements are not recorded");
+                }
+                continue;
+            }
+            placed.symbols.insert(symbol.to_owned());
+        }
+    }
+
+    /// The symbols of an engine `placeOrders` command, if it is one.
+    pub fn record_command(&self, command: &Value) {
+        if command["op"] == "placeOrders"
+            && let Some(orders) = command["orders"].as_array()
+        {
+            self.record(orders.iter().filter_map(|order| order["symbol"].as_str()));
+        }
+    }
+
+    pub fn symbols(&self) -> Vec<String> {
+        self.lock().symbols.iter().cloned().collect()
+    }
 }
 
 /// A live socket holding an account: where its signing and proxy token go.
@@ -431,6 +499,8 @@ impl Registry {
         let tokens = proxy_token.provider();
         let config = self.engine_config.clone();
         let algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>> = Arc::default();
+        let placed_symbols = PlacedSymbols::default();
+        let algo_placed = placed_symbols.clone();
         let (algos, algo_inbox) = if public_only {
             (None, None)
         } else {
@@ -472,6 +542,7 @@ impl Registry {
                                 algo_who,
                                 emit,
                                 algo_signer,
+                                algo_placed,
                                 inbox,
                             ));
                         }
@@ -496,6 +567,7 @@ impl Registry {
             holders: Mutex::default(),
             algos,
             algo_owner,
+            placed: placed_symbols,
         };
         Ok((account, remote))
     }
@@ -845,6 +917,37 @@ mod tests {
             resolve::resolve_routing_plan(venue, &inputs, base, Provider::Tealstreet).unwrap();
         let text = serde_json::to_string(&plan).unwrap();
         assert!(text.contains("BRA_BTL"), "{text}");
+    }
+
+    #[test]
+    fn placed_symbols_keep_only_the_accounts_markets_and_are_capped() {
+        let placed = PlacedSymbols::default();
+        placed.record(["BTC-USDT-SWAP"]);
+        assert!(
+            placed.symbols().is_empty(),
+            "nothing before markets are known"
+        );
+        let markets: Vec<String> = (0..MAX_PLACED_SYMBOLS + 10)
+            .map(|index| format!("M{index}"))
+            .chain(["BTC-USDT-SWAP".into(), "ETH-USDT-SWAP".into()])
+            .collect();
+        placed.sync_markets(markets.iter());
+        placed.record_command(&json!({"op":"placeOrders","orders":[
+            {"symbol":"BTC-USDT-SWAP","side":"buy"},
+            {"symbol":"JUNK-1","side":"buy"},
+            {"symbol":"ETH-USDT-SWAP","side":"sell"},
+        ]}));
+        placed.record_command(&json!({"op":"cancelSymbolOrders","symbol":"M1"}));
+        assert_eq!(placed.symbols(), ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
+        placed.record(markets.iter().map(String::as_str));
+        assert_eq!(placed.symbols().len(), MAX_PLACED_SYMBOLS);
+        placed.sync_markets(markets[..3].iter());
+        assert!(
+            placed
+                .symbols()
+                .iter()
+                .all(|symbol| markets[..3].contains(symbol))
+        );
     }
 
     #[tokio::test]
