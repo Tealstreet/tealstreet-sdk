@@ -17,6 +17,8 @@ fn frame_fed() -> Engine<Okx> {
         ..FixtureOptions::default()
     });
     engine.set_frame_fed().unwrap();
+    // The source runs in this process: its frame stamps are on this clock.
+    engine.set_source_clock_offset(Some(0.0));
     engine.start(0.0);
     let start = prepared(&mut engine, 0.0);
     let instruments = start

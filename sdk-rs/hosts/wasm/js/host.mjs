@@ -599,6 +599,14 @@ export class EngineHost {
     if (this.deadError) throw this.deadError;
   }
 
+  /** A frame-fed engine's data-source clock minus this host's, in ms, so its
+   * fences compare frame times on one clock; until set they wait 30 s. */
+  setSourceClockOffset(offsetMs) {
+    this.assertHttpHandoffIdle();
+    if (this.disposed || typeof this.engine.setSourceClockOffset !== 'function') return;
+    this.invoke(this.engine.setSourceClockOffset, Number.isFinite(offsetMs) ? offsetMs : undefined);
+  }
+
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {

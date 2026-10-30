@@ -1,4 +1,6 @@
 //! JWT singleflight, private socket recovery and fenced account snapshots.
+#[path = "account_state.rs"]
+mod state;
 use crate::{
     Options, Pending,
     sign::{Credentials, SystemConfig},
