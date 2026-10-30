@@ -925,8 +925,8 @@ impl Venue for Okx {
 
     // Frame-fed: the data source reads the config before its orders and
     // positions, so once both have arrived the hedged flag is the account's.
-    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
-        self.account_refresh_settings(cx);
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        self.account_refresh_settings(cx, symbol);
     }
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
         let loaded = cx.store.loaded();
@@ -1300,6 +1300,13 @@ impl Venue for Okx {
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
         }
+        if let Pending::Account(account::Request::LeverageRefresh { context, .. }) = &pending {
+            let delivered = cx.validate_background_read_http_delivery(context).is_ok();
+            let _ = cx.finish_http_context(context);
+            if !delivered {
+                return;
+            }
+        }
         // An account-cycle page passes custody and generation before any codec,
         // publishes, then retires; a stale or unauthorized one only retires.
         let page = match &pending {
@@ -1668,6 +1675,9 @@ impl Venue for Okx {
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
             self.config_unanswered();
+        }
+        if let Pending::Account(account::Request::LeverageRefresh { context, .. }) = &pending {
+            let _ = cx.finish_http_context(context);
         }
         self.request_failed(cx, pending, error);
     }
