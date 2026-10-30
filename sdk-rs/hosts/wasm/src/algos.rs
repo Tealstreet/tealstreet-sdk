@@ -229,32 +229,34 @@ impl Algos {
         let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
         let book = chasers.book();
         let twap = Rc::new(TwapFactory::new(&name, cx.clone(), Rc::new(book.clone())));
+        #[cfg_attr(not(feature = "algos-exec"), allow(unused_mut))]
+        let mut factories: Vec<Box<dyn safe_cex_algos::AlgoFactory>> =
+            vec![Box::new(chasers), Box::new(twap.clone())];
         // Exec's chase/TWAP handoff shares this account's book and TWAP
         // schedule, under the host's account name, never one from the payload.
-        let sweep = port.clone();
-        let exec = Rc::new(
-            safe_cex_exec::native::ExecFactory::with_algos(
-                name.clone(),
-                book.clone(),
-                (*twap).clone(),
-            )
-            .with_cancel_all(Rc::new(move || {
-                use safe_cex_engine::CancelAll;
-                use safe_cex_exec::native::CancelAllScope;
-                match sweep.capabilities.cancel_all {
-                    CancelAll::Native => CancelAllScope::Native,
-                    CancelAll::EachOpenSymbol => CancelAllScope::Symbols(Vec::new()),
-                    CancelAll::EachPlacedSymbol => {
-                        CancelAllScope::Symbols(sweep.placed.borrow().iter().cloned().collect())
+        #[cfg(feature = "algos-exec")]
+        {
+            let sweep = port.clone();
+            factories.push(Box::new(Rc::new(
+                safe_cex_exec::native::ExecFactory::with_algos(
+                    name.clone(),
+                    book.clone(),
+                    (*twap).clone(),
+                )
+                .with_cancel_all(Rc::new(move || {
+                    use safe_cex_engine::CancelAll;
+                    use safe_cex_exec::native::CancelAllScope;
+                    match sweep.capabilities.cancel_all {
+                        CancelAll::Native => CancelAllScope::Native,
+                        CancelAll::EachOpenSymbol => CancelAllScope::Symbols(Vec::new()),
+                        CancelAll::EachPlacedSymbol => CancelAllScope::Symbols(
+                            sweep.placed.borrow().iter().cloned().collect(),
+                        ),
                     }
-                }
-            })),
-        );
-        let registry = Registry::new(vec![
-            Box::new(chasers),
-            Box::new(twap.clone()),
-            Box::new(exec),
-        ]);
+                })),
+            )));
+        }
+        let registry = Registry::new(factories);
         let mut algos = Self {
             executor,
             port,
@@ -530,10 +532,7 @@ impl WasmEngine {
     #[wasm_bindgen(js_name = algoEmits)]
     pub fn algo_emits(&mut self) -> String {
         let emits = std::mem::take(&mut *self.algos.emits.borrow_mut());
-        let out: Vec<Value> = emits
-            .iter()
-            .map(|(op, data)| emit_json(op, data))
-            .collect();
+        let out: Vec<Value> = emits.iter().map(|(op, data)| emit_json(op, data)).collect();
         Value::Array(out).to_string()
     }
 

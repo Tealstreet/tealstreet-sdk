@@ -9,7 +9,8 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 # The Rust algos (chaser, TWAP, exec) on this engine, host-driven; off by default.
-algos = ["dep:safe-cex-algos", "dep:safe-cex-chaser", "dep:safe-cex-algo-twap", "dep:safe-cex-exec"]
+algos = ["dep:safe-cex-algos", "dep:safe-cex-chaser", "dep:safe-cex-algo-twap"]
+algos-exec = ["algos", "dep:safe-cex-exec"]
 hosted-operation-proof = ["kraken", "safe-cex-engine/test-support"]
 address-nonce = ["safe-cex-engine/address-nonce", "safe-cex-venues/address-nonce", "sign-meta"]
 http-mutation-barriers = ["safe-cex-engine/http-mutation-barriers"]
