@@ -6,6 +6,7 @@ use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
 use crate::out::Out;
 use crate::state::{Log, Metrics};
+use safe_cex_engine::capabilities::CancelAll;
 use safe_cex_native::{AccountHandle, ClientLink, Outgoing, SocketSummary};
 use safe_cex_remote_signer::Outbox;
 use serde_json::{Value, json};
@@ -503,7 +504,7 @@ impl Session {
         };
         let account = self.joined[name].account.clone();
         let symbols = if method == "cancelAllOrders" {
-            account
+            let mut symbols: Vec<String> = account
                 .handle
                 .read(|store| {
                     store
@@ -513,7 +514,12 @@ impl Session {
                         .collect()
                 })
                 .await
-                .unwrap_or_default()
+                .unwrap_or_default();
+            // As `cancelEachPlacedSymbol`: frames can lag a placement's ACK.
+            if account.handle.capabilities().cancel_all == CancelAll::EachPlacedSymbol {
+                symbols.extend(account.placed.symbols());
+            }
+            symbols
         } else {
             Vec::new()
         };
@@ -577,6 +583,7 @@ impl Session {
                     }
                 }
                 Plan::Command { mut command, reply } => {
+                    account.placed.record_command(&command);
                     let joined = self.joined.get_mut(name).unwrap();
                     let Some(id) = joined.next_command.checked_add(1) else {
                         self.reply_failure(

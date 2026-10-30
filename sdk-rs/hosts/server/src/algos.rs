@@ -69,6 +69,7 @@ struct Port {
     name: String,
     who: crate::audit::Who,
     emit: Emit,
+    placed: crate::accounts::PlacedSymbols,
 }
 
 impl AccountPort for Port {
@@ -86,6 +87,10 @@ impl AccountPort for Port {
         id
     }
     fn command(&self, command: Command) -> CommandFuture {
+        if let Command::PlaceOrders { orders, .. } = &command {
+            self.placed
+                .record(orders.iter().map(|order| order.symbol.as_str()));
+        }
         let audit = crate::audit::typed(&command).map(|fields| (self.who.clone(), fields));
         let id = command.completion_id();
         let (tx, rx) = oneshot::channel();
@@ -340,6 +345,7 @@ pub async fn run(
     who: crate::audit::Who,
     emit: Emit,
     link_signer: Option<std::sync::Arc<safe_cex_remote_signer::SignerLink>>,
+    placed: crate::accounts::PlacedSymbols,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     let Ok(mut feed) = Feed::join(handle.clone(), client).await else {
@@ -363,6 +369,7 @@ pub async fn run(
         name: name.clone(),
         who: who.clone(),
         emit,
+        placed,
     });
     let scope = Scope::new();
     let cx = AlgoCx::new(port.clone(), scope.clone());
