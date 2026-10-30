@@ -283,6 +283,12 @@ fn symbols(value: &Value) -> Result<Option<Vec<String>>, Refused> {
     }
 }
 
+fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_millis() as f64)
+}
+
 fn command(op: &str, fields: Map<String, Value>, returns_unit: bool) -> Plan {
     let mut command = Map::new();
     command.insert("op".into(), op.into());
@@ -627,6 +633,41 @@ pub fn translate(
         "fetchAndSetPrivateSnapshot" => one(Plan::Resnapshot(Value::Null)),
         // TS answers whether every socket recovered.
         "recoverAfterOffline" => one(Plan::Resnapshot(Value::Bool(true))),
+        // Hyperliquid's dead-man switch, validated as rust.exchange.ts does: a safe
+        // integer UTC ms at least 5s ahead, or null/absent to clear it.
+        "scheduleCancel" => {
+            let mut out = Map::new();
+            if let Some(time) = args.first().filter(|time| !time.is_null()) {
+                let time = time
+                    .as_f64()
+                    .filter(|time| time.fract() == 0.0 && time.abs() <= 9_007_199_254_740_991.0)
+                    .ok_or_else(|| {
+                        refused(
+                            "Error",
+                            "Hyperliquid scheduleCancel time must be a safe integer UTC timestamp in milliseconds",
+                        )
+                    })?;
+                if !capabilities.schedule_cancel {
+                    return Err(refused(
+                        "Error",
+                        "scheduleCancel is unavailable for this venue",
+                    ));
+                }
+                if time < now_ms() + 5_000.0 {
+                    return Err(refused(
+                        "Error",
+                        "Hyperliquid scheduleCancel time must be at least 5 seconds in the future",
+                    ));
+                }
+                out.insert("time".into(), (time as i64).into());
+            } else if !capabilities.schedule_cancel {
+                return Err(refused(
+                    "Error",
+                    "scheduleCancel is unavailable for this venue",
+                ));
+            }
+            one(command("scheduleCancel", out, true))
+        }
         // The close-all button: exec's nuke, which awaits and reports every leg.
         "nuke" | "nukePositions" | "nukeOrders" if public_only => {
             Err(refused("Error", "A public account has nothing to nuke"))
@@ -1216,6 +1257,32 @@ mod tests {
             translate("recoverAfterOffline", &[], &caps(), &[], false).unwrap(),
             vec![Plan::Resnapshot(Value::Bool(true))]
         );
+    }
+
+    // Hyperliquid dead-man switch: scheduleCancel(time) / scheduleCancel(null).
+    #[test]
+    fn web_schedule_cancel_decodes_and_validates_like_rust_exchange_ts() {
+        let hyperliquid = Capabilities {
+            schedule_cancel: true,
+            ..caps()
+        };
+        let at = (now_ms() + 60_000.0).floor();
+        let (command, reply) = web("scheduleCancel", json!([at]), &hyperliquid);
+        assert_eq!(command, json!({"op":"scheduleCancel","time":at as i64}));
+        assert_eq!(reply, Reply::Unit);
+        let (command, _) = web("scheduleCancel", json!([null]), &hyperliquid);
+        assert_eq!(command, json!({"op":"scheduleCancel"}));
+        let soon = now_ms() + 1_000.0;
+        for (args, capabilities, message) in [
+            (json!([soon.floor()]), &hyperliquid, "at least 5 seconds"),
+            (json!([at + 0.5]), &hyperliquid, "safe integer"),
+            (json!([at]), &caps(), "unavailable"),
+            (json!([]), &caps(), "unavailable"),
+        ] {
+            let Value::Array(args) = args else { panic!() };
+            let refusal = translate("scheduleCancel", &args, capabilities, &[], false).unwrap_err();
+            assert!(refusal.message.contains(message), "{}", refusal.message);
+        }
     }
 
     #[test]
