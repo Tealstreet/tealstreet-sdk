@@ -69,6 +69,7 @@ import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
+import { withRequestsLog } from '../../transport/requestsLog';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
@@ -1113,12 +1114,16 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = options;
     const publicDataOnly = this.isPublicDataOnly;
-    const transport = createEngineTransport(
+    const transport = withRequestsLog(
+      createEngineTransport(
+        this.name,
+        options,
+        (transportFactory ?? synchronizedEngineTransport)(),
+        this.signerSetup,
+        (message) => this.emitAndLogError(message),
+      ),
       this.name,
-      options,
-      (transportFactory ?? synchronizedEngineTransport)(),
-      this.signerSetup,
-      (message) => this.emitAndLogError(message),
+      (event, message) => this.emitter.emit(event, message),
     );
     const engine = constructEngine(
       WasmEngine,
