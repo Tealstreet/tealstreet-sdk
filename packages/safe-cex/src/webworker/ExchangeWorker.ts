@@ -353,9 +353,9 @@ export class ExchangeWorker {
       }
       this._exchange = new Exchange(this._exchangeName, this._options, this._store);
       if (this._recoveryAttempted) this._exchange.setActiveTickerSymbols(this._activeTickerSymbols);
-      if (mainAcceptsFrames()) this._mainDecodesFrames = this.forwardFrames(generation);
+      if (mainAcceptsFrames()) this._mainDecodesFrames = this.forwardFrames(generation, true);
       // A recovered exchange keeps forwarding where main asked for this account's frames.
-      else if (this._forwardsFrames) this.forwardFrames(generation);
+      else if (this._forwardsFrames) this.forwardFrames(generation, false);
 
       // When privateOnly, disable public websocket connections before start().
       // Public data (tickers, orderbook, OHLCV) is provided by a shared public exchange.
@@ -780,10 +780,13 @@ export class ExchangeWorker {
    * carry the rest. Per account: a main-thread engine that is frame-fed asks for
    * it (`forwardFrames`), and one that is not keeps full store payloads.
    */
-  private forwardFrames(generation = this._generation) {
+  private forwardFrames(generation: number, mainDecodesMarketData: boolean) {
     const exchange = this._exchange;
     if (!(exchange instanceof RustEngineExchange)) return false;
     this._forwardsFrames = true;
+    // A frame-fed page engine takes account sections only; books and candles
+    // still go out as this worker's own listenOrderBook/listenOHLCV ops.
+    exchange.framesCarryMarketData = mainDecodesMarketData;
     exchange.onFrame = (frame, snapshot) => {
       if (generation === this._generation && !this._stopped) {
         this._ctx.postMessage({ op: 'frame', data: frame, snapshot: snapshot === true }, [frame]);
@@ -912,7 +915,8 @@ export class ExchangeWorker {
         break;
       case 'forwardFrames':
         // Started engines get a baseline at once; one still starting sends its own first.
-        if (this.forwardFrames() && (this._exchange as RustEngineExchange).hasStarted) this.sendSnapshot();
+        if (this.forwardFrames(this._generation, false) && (this._exchange as RustEngineExchange).hasStarted)
+          this.sendSnapshot();
         break;
       default:
         // TWAP construction is synchronous. Track the actual instances made by

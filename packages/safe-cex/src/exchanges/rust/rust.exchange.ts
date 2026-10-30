@@ -464,6 +464,17 @@ export class RustEngineExchange extends BaseExchange {
    */
   /** `snapshot`: the frame is a full baseline, so a frame-fed consumer resets before applying it. */
   onFrame?: (frame: ArrayBuffer, snapshot?: boolean) => void;
+  /**
+   * Whether the `onFrame` consumer decodes books and candles from the frames
+   * itself (a main thread applying worker frames), so listeners here stay quiet.
+   * A frame-fed page engine ingests only account sections: forwarding to it
+   * keeps books and candles flowing to this exchange's own listeners.
+   */
+  framesCarryMarketData = true;
+
+  private get frameConsumerDecodesMarketData(): boolean {
+    return Boolean(this.onFrame) && this.framesCarryMarketData;
+  }
 
   /**
    * A main-thread mirror whose family supports it runs its own engine fed by the
@@ -1600,7 +1611,7 @@ export class RustEngineExchange extends BaseExchange {
     const previousMarkets = this.store.markets;
     let needsSnapshot = false;
     try {
-      this.applier.apply(frame, !this.onFrame || this.feedBookListeners.size > 0);
+      this.applier.apply(frame, !this.frameConsumerDecodesMarketData || this.feedBookListeners.size > 0);
     } catch (error) {
       needsSnapshot = error instanceof FrameApplyError;
       console.error('Engine frame apply failed', error);
@@ -1662,17 +1673,17 @@ export class RustEngineExchange extends BaseExchange {
     }
     for (const fill of read(() => this.applier.fills(frame)))
       this.dispatchFrameEvent(() => this.emitter.emit('fill', fill));
-    if (!this.onFrame || this.feedBookListeners.size) {
+    if (!this.frameConsumerDecodesMarketData || this.feedBookListeners.size) {
       for (const { symbol, orderbook } of read(() => this.applier.books(frame))) {
         const listeners = this.bookListeners.get(symbol);
         if (!this.capabilityRecord?.isolatedBookSubscriptions)
           listeners?.forEach((listener) => {
-            if (!this.onFrame || this.feedBookListeners.has(listener))
+            if (!this.frameConsumerDecodesMarketData || this.feedBookListeners.has(listener))
               this.dispatchFrameEvent(() => listener(orderbook));
           });
         else if (listeners)
           for (const [id, listener] of [...listeners]) {
-            if (listeners.has(id) && (!this.onFrame || this.feedBookListeners.has(listener)))
+            if (listeners.has(id) && (!this.frameConsumerDecodesMarketData || this.feedBookListeners.has(listener)))
               this.dispatchFrameEvent(() =>
                 listener({
                   bids: orderbook.bids.map((level) => ({ ...level })),
@@ -1682,10 +1693,10 @@ export class RustEngineExchange extends BaseExchange {
           }
       }
     }
-    if (!this.onFrame || this.feedCandleListeners.size) {
+    if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.size) {
       for (const { symbol, interval, candle } of read(() => this.applier.candles(frame))) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
-          if (!this.onFrame || this.feedCandleListeners.has(listener)) this.dispatchFrameEvent(() => listener(candle));
+          if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.has(listener)) this.dispatchFrameEvent(() => listener(candle));
         });
       }
     }
