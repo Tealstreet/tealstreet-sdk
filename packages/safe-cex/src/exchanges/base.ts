@@ -330,6 +330,15 @@ export const WORKER_FORWARDED_METHODS = [
   'fetchHistoricalOrders',
   'fetchIncomeHistory',
   'fetchIncomeHistoryRange',
+  // Account settings and engine reads: a keyless mirror has neither the engine nor the key.
+  'setLeverage',
+  'setAllLeverage',
+  'changeMarginType',
+  'changePositionMode',
+  'updateSymbolMetadata',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ] as const;
 
 export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
@@ -350,6 +359,13 @@ export const WORKER_OPTIONAL_METHODS = [
   'fetchPositions',
   'fetchBalance',
   'fetchPositionMode',
+  // Rust-only engine methods a mirror forwards whole.
+  'fetchStpMode',
+  'changeStpMode',
+  'fetchOrderBook',
+  // A mirror answers these from its frame-fed rails and asks the worker only for a venue read.
+  'fetchSymbolMaxLeverage',
+  'fetchLeverageForSymbol',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
@@ -369,14 +385,20 @@ const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'fetchAccountTier',
   'fetchEngineCapabilities',
   'getAccount',
+  'fetchStpMode',
+  'fetchLeverageForSymbol',
+  'fetchSymbolMaxLeverage',
+  'updateSymbolMetadata',
+  'fetchOrderBook',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ]);
 
 /** Worker RPCs that dispatch venue writes: an interrupted one has an unknown outcome. */
 export const WORKER_WRITE_METHODS: ReadonlySet<string> = new Set<string>([
-  'setLeverage',
+  // Routed by its own method after validating the time; see RustEngineExchange.scheduleCancel.
   'scheduleCancel',
-  'changePositionMode',
-  'changeMarginType',
   ...[...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].filter((method) => !WORKER_READ_METHODS.has(method)),
 ]);
 
@@ -394,10 +416,7 @@ export const workerCallClientOrderIds = (method: unknown, args: unknown): string
 
 export type CallableMethodsInWorker =
   | WorkerForwardedMethod
-  | 'setLeverage'
   | 'scheduleCancel'
-  | 'changePositionMode'
-  | 'changeMarginType'
   | 'fetchAndSetPrivateSnapshot'
   | 'fetchEngineSnapshot'
   | 'reconnect'
@@ -406,7 +425,6 @@ export type CallableMethodsInWorker =
   | 'fetchHistoricalFills'
   | 'fetchOrders'
   | 'fetchAndSetOrders'
-  | 'updateSymbolMetadata'
   | 'fetchLastLogsFromWebsockets'
   | 'removeOrders'
   | 'fetchIncomeHistory'
