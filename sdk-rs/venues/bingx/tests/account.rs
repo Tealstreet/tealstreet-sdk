@@ -1710,6 +1710,7 @@ fn position_events_faster_than_the_mode_read_cannot_starve_mode_and_positions() 
 }
 
 const LEVERAGE: &str = "/openApi/swap/v2/trade/leverage";
+const MARGIN: &str = "/openApi/swap/v2/trade/marginType";
 const FRESH_RAILS: &str = r#"{"code":0,"msg":"","data":{"longLeverage":8,"shortLeverage":"12","maxLongLeverage":125,"maxShortLeverage":125}}"#;
 
 fn assert_fresh_rails(h: &Harness, command: u32, buy: f64, sell: f64) {
@@ -3050,4 +3051,59 @@ fn refresh_settings_re_reads_the_position_mode_and_positions_and_writes_nothing(
         "{:?}",
         h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn refresh_settings_for_a_flat_symbol_re_reads_its_leverage_and_margin_type() {
+    let mut h = Harness::ready();
+    h.requests.clear();
+    h.event(Event::Command(Command::Venue {
+        command: 61,
+        action: safe_cex_engine::VenueAction::RefreshSettings {
+            symbol: Some("BTCUSDT".into()),
+        },
+    }));
+    assert!(
+        h.done
+            .iter()
+            .any(|(command, result)| *command == 61 && result.is_ok())
+    );
+    let urls = h.requests.iter().map(|r| r.url.clone()).collect::<Vec<_>>();
+    assert_eq!(urls.len(), 3, "{urls:?}");
+    assert!(urls[0].contains(MODE), "{urls:?}");
+    assert!(urls[1].contains(LEVERAGE) && urls[1].contains("symbol=BTC-USDT"), "{urls:?}");
+    assert!(urls[2].contains(MARGIN) && urls[2].contains("symbol=BTC-USDT"), "{urls:?}");
+    assert!(h.requests.iter().all(|r| r.method == Method::Get));
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(POSITIONS, 200, r#"{"code":0,"data":[]}"#);
+    assert!(h.engine.store().positions().is_empty());
+    h.respond(MARGIN, 200, ISOLATED);
+    h.respond(LEVERAGE, 200, RAILS);
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.leverage, 12.0);
+    assert_eq!(setting.buy_leverage, Some(12.0));
+    assert_eq!(setting.sell_leverage, Some(34.0));
+    assert_eq!(setting.margin_type, Some(MarginType::Isolated));
+    assert!(
+        h.requests.is_empty(),
+        "{:?}",
+        h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_failed_settings_refresh_leg_keeps_the_other_field() {
+    let mut h = Harness::ready();
+    h.requests.clear();
+    h.event(Event::Command(Command::Venue {
+        command: 62,
+        action: safe_cex_engine::VenueAction::RefreshSettings {
+            symbol: Some("BTCUSDT".into()),
+        },
+    }));
+    h.respond(LEVERAGE, 200, r#"{"code":0,"data":{"longLeverage":"bad"}}"#);
+    h.respond(MARGIN, 200, ISOLATED);
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.leverage, 20.0);
+    assert_eq!(setting.margin_type, Some(MarginType::Isolated));
 }
