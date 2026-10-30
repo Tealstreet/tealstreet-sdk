@@ -107,6 +107,7 @@ vi.mock('../twap/TwapInstance', () => ({
       mockCalls.cleanup.push(this);
     }
     async reconcileInFlight() {}
+    awaitOwnerLock() {}
     holdOwnerLock(release: () => void) {
       mockCalls.locks.push({ instance: this, release });
     }
