@@ -295,7 +295,7 @@ export type WorkerMirrorUnsupportedMethod = (typeof WORKER_MIRROR_UNSUPPORTED_ME
 export type WorkerMirrorExchange = Omit<RustEngineExchange, WorkerMirrorUnsupportedMethod | 'fetchFillsForOrderIds'>;
 
 /** Rust-only engine methods (not on BaseExchange) a mirror forwards whole. */
-const RUST_FORWARDED_METHODS = ['fetchStpMode', 'fetchOrderBook'] as const;
+const RUST_FORWARDED_METHODS = ['fetchStpMode', 'changeStpMode', 'fetchOrderBook'] as const;
 
 /**
  * The hosted server answers `fetchOrders`/`fetchPositions` with its engine's

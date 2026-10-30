@@ -61,21 +61,8 @@ export class CallMethodHandler extends BaseHandler {
         return;
       }
       switch (method) {
-        case 'setLeverage':
-          result = await this._exchange.setLeverage(...(args as Parameters<typeof this._exchange.setLeverage>));
-          break;
         case 'scheduleCancel':
           result = await this._exchange.scheduleCancel(...(args as Parameters<typeof this._exchange.scheduleCancel>));
-          break;
-        case 'changeMarginType':
-          result = await this._exchange.changeMarginType(
-            ...(args as Parameters<typeof this._exchange.changeMarginType>),
-          );
-          break;
-        case 'changePositionMode':
-          result = await this._exchange.changePositionMode(
-            ...(args as Parameters<typeof this._exchange.changePositionMode>),
-          );
           break;
         case 'fetchLastLogsFromWebsockets':
           result = this._exchange.fetchLastLogsFromWebsockets();
