@@ -50,6 +50,8 @@ struct State {
     unavailable_since: Option<Instant>,
     /// The last frame of any kind from the signing socket.
     heard_at: Instant,
+    /// `heard_at` of the socket the last `attach` replaced.
+    heard_before_attach: Instant,
     /// id → (token, socket it was sent on, its sign-req frame, waiter).
     pending: HashMap<String, (u64, SocketId, String, Waiter)>,
     next_token: u64,
@@ -74,6 +76,7 @@ impl SignerLink {
                 suspended: false,
                 unavailable_since: None,
                 heard_at: Instant::now(),
+                heard_before_attach: Instant::now(),
                 pending: HashMap::new(),
                 next_token: 0,
                 last_sign_req_bytes: 0,
@@ -101,6 +104,17 @@ impl SignerLink {
         if state.socket == socket {
             state.heard_at = Instant::now();
         }
+    }
+
+    /// The last frame from the signing socket.
+    pub fn heard_at(&self) -> Instant {
+        self.state().heard_at
+    }
+
+    /// The last frame from the socket the latest `attach` replaced: what was
+    /// sent after this may never have arrived.
+    pub fn heard_before_attach(&self) -> Instant {
+        self.state().heard_before_attach
     }
 
     /// How long the client has been gone, if it is.
@@ -236,6 +250,9 @@ impl SignerLink {
                 *sent = socket;
                 moved.push((id.clone(), frame.clone()));
             }
+        }
+        if state.socket != socket {
+            state.heard_before_attach = state.heard_at;
         }
         state.socket = socket;
         state.out = out.clone();

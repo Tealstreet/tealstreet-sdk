@@ -766,7 +766,7 @@ impl Registry {
         Box::new(move |notice| {
             let mut notices = notices.lock().unwrap();
             notices.retain(|_, (_, at)| at.elapsed() < NOTICE_TTL);
-            notices.insert(key, (notice, tokio::time::Instant::now()));
+            notices.insert(key.clone(), (notice, tokio::time::Instant::now()));
         })
     }
 
@@ -1098,6 +1098,41 @@ pub(crate) mod tests {
             },
         );
         (account, inbox)
+    }
+
+    /// `held_account_with` plus its real algo host, emitting as `build` wires it.
+    pub(crate) fn held_account_running_algos(
+        link: Arc<SignerLink>,
+        fingerprint: String,
+    ) -> Arc<Account> {
+        let (account, inbox) = held_account_with(Some(link.clone()), fingerprint);
+        *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
+        let owner = account.algo_owner.clone();
+        let emit: crate::algos::Emit = Box::new(move |text| {
+            let account = owner
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(std::sync::Weak::upgrade);
+            if let Some(account) = account {
+                account.notify(text);
+            }
+        });
+        tokio::task::spawn_local(crate::algos::run(
+            account.handle.clone(),
+            1_000_000,
+            crate::audit::Who {
+                user: account.user.clone(),
+                account: account.name.clone(),
+                venue: account.venue.clone(),
+            },
+            emit,
+            Some(link),
+            account.placed.clone(),
+            account.held.clone(),
+            inbox,
+        ));
+        account
     }
 
     /// The socket `account` signs through.

@@ -604,12 +604,15 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
                 .next("store", |data| !active_chasers(data).is_empty())
                 .await;
             let (kept, notice) = tokio::sync::oneshot::channel();
+            let kept = Mutex::new(Some(kept));
             algos
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "no browser for 60s".into(),
                     stopped: Some(Box::new(move |text| {
-                        let _ = kept.send(text);
+                        if let Some(kept) = kept.lock().unwrap().take() {
+                            let _ = kept.send(text);
+                        }
                     })),
                 })
                 .unwrap();
