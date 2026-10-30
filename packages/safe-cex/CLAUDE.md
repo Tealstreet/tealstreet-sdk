@@ -374,6 +374,20 @@ alone do not establish it. Callers must handle typed readiness failures.
 
 ## Rust main-thread trading
 
+**Frame-fed main engine.** A keyed mirror whose family the wasm module reports
+`frameFedSupported` builds its own engine with `frameFed: true`, the account's
+key and route, and starts it only when `construction().frameFed` is true (no
+venue streams, no account reads). `frameFedReady` resolves whether it did;
+otherwise the mirror path below continues for that account. The host feeds it
+the data source's SCXF frames with `ingestSourceFrame(bytes, snapshot)` (a
+delta before the first snapshot is dropped, so it asks the source for one) and
+the engine's own frames fill the UI store. Books, candles and fills still come
+from the source's ops. It signs and sends `FRAME_FED_WRITES` (manual writes,
+settings, nuke, scheduleCancel) itself, including writes the web sends through
+`callMethodInWorker`; a nuke first asks the source for `stopAccountAlgos`. A
+LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
+snapshot}`, after the `forwardFrames` op, and keeps posting fill ops.
+
 The web builds a second `RustEngineExchange` on the main thread; the worker's
 instance owns the engine. An instance with a `callMethod` listener (the host's
 worker bridge) forwards the `WORKER_FORWARDED_METHODS` in `exchanges/base.ts`

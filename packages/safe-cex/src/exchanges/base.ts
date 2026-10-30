@@ -366,6 +366,8 @@ export const WORKER_OPTIONAL_METHODS = [
   // A mirror answers these from its frame-fed rails and asks the worker only for a venue read.
   'fetchSymbolMaxLeverage',
   'fetchLeverageForSymbol',
+  // A frame-fed main engine runs a nuke's legs itself, after the data source stops its algos.
+  'stopAccountAlgos',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([

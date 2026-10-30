@@ -136,6 +136,9 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   adaptExternalMarkets: 'mirror',
   noteHttpResponse: 'mirror',
   onWSPublicClose: 'mirror',
+  // Main's own (none on a mirror); a frame-fed nuke asks the data source's.
+  stopAccountAlgos: 'mirror',
+  ingestSourceFrame: 'mirror',
 };
 
 /** Each must reach the worker by name here (a swallowed local failure would otherwise pass). */
