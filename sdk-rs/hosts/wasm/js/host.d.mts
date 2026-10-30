@@ -120,6 +120,16 @@ export interface EngineHandlers {
   onEvent?(event: EngineEvent): void;
   /** A socket opened, received its first frame, or closed; never per frame. */
   onSocketChange?(): void;
+  /** One Rust algo reply, as the worker posts it: `error`, `warning`, `log`,
+   * `chaser:complete`, `twap:stateUpdate`, `exec-log`, `exec-result`, or `store`
+   * (`{ activeChasers, activeTWAPs }` rows). */
+  onAlgoEmit?(op: string, data: unknown): void;
+}
+
+export interface AlgoStopAllResult {
+  stoppedChasers: string[];
+  stoppedTwaps: string[];
+  settled: boolean;
 }
 
 export interface AccountAuthResult {
@@ -425,6 +435,15 @@ export interface WasmEngineLike {
   capabilities(): string;
   start(now: number): string;
   command(json: string, now: number): string;
+  /** `algos` builds: `now` is the engine clock, `wall` epoch ms. */
+  algoStart?(accountName: string, now: number, wall: number): void;
+  algoOp?(op: string, dataJson: string, now: number, wall: number): string;
+  algoAdvance?(now: number, wall: number): string;
+  algoDeadline?(): number | undefined;
+  algoEmits?(): string;
+  algoDispose?(now: number, wall: number, reason?: string): string;
+  algoStopAll?(now: number, wall: number, reason?: string): string;
+  algoRunning?(): boolean;
   /** A `frameFed` engine's ingest of one data-source frame; returns actions JSON. */
   applyFrame?(frame: Uint8Array, snapshot: boolean, now: number): string;
   /** A `frameFed` engine's data-source clock minus the host's, in ms. */
@@ -508,6 +527,20 @@ export class EngineHost {
   reconnectSockets(channel?: EngineSocketChannel): number;
   /** Undefined for an engine without `health()`. */
   health(): EngineHealth | undefined;
+  /** Start this account's Rust algos on an `algos` engine build; the host then
+   * keeps their timer armed and delivers replies to `onAlgoEmit`. */
+  algoStart(accountName: string): void;
+  /** Started and not yet stopped or disposed. */
+  readonly algosRunning: boolean;
+  /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if refused. */
+  algoOp(op: string, data: unknown): void;
+  /** Stop every algo (chases once their cancels settle, bounded); resolves when
+   * they are gone. Dispose the host after that. */
+  algoDispose(reason?: string): Promise<void>;
+  /** A nuke's first step: stop every TWAP and chase, the algos staying up.
+   * Resolves once chase cancels settle (bounded by the engine at 10 s);
+   * `settled` is false when they did not or the algos ended first. */
+  algoStopAll(reason?: string): Promise<AlgoStopAllResult>;
   dispose(): void;
 }
 

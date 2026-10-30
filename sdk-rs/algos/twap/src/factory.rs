@@ -6,7 +6,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use safe_cex_algos::{AlgoCx, AlgoFactory};
-use safe_cex_chaser::{ChaserBook, ChaserOptions};
+use safe_cex_chaser::{ChaserBook, ChaserOptions, ClientIdMinter};
 use safe_cex_engine::engine::Command;
 use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_engine::model::{OrderSide as EngineSide, PlaceOrderOpts};
@@ -55,6 +55,7 @@ struct Inner {
     env: RefCell<CxEnv>,
     rescheduled: Notify,
     driver_started: Cell<bool>,
+    client_ids: ClientIdMinter,
 }
 
 impl TwapFactory {
@@ -68,6 +69,7 @@ impl TwapFactory {
                 env: RefCell::new(CxEnv::seeded()),
                 rescheduled: Notify::new(),
                 driver_started: Cell::new(false),
+                client_ids: ClientIdMinter::default(),
             }),
         }
     }
@@ -100,6 +102,7 @@ impl TwapFactory {
             let view = CxView {
                 cx,
                 chasers: &*self.inner.chasers,
+                client_ids: &self.inner.client_ids,
             };
             self.inner
                 .book
@@ -150,6 +153,7 @@ impl AlgoFactory for TwapFactory {
             let view = CxView {
                 cx,
                 chasers: &*self.inner.chasers,
+                client_ids: &self.inner.client_ids,
             };
             self.inner
                 .book
@@ -198,6 +202,7 @@ impl Inner {
             let view = CxView {
                 cx,
                 chasers: &*inner.chasers,
+                client_ids: &inner.client_ids,
             };
             inner.book.borrow_mut().wake(&mut *env, &view)
         };
@@ -291,7 +296,7 @@ pub fn placement_outcome(result: Result<String, VenueError>) -> Result<Vec<Strin
 }
 
 fn place_command(cx: &AlgoCx, request: &TwapOrderRequest) -> Result<Command, String> {
-    let opts: PlaceOrderOpts = serde_json::from_value(json!({
+    let mut opts = json!({
         "symbol": request.symbol,
         "type": match request.kind {
             OrderKind::Limit => "limit",
@@ -301,8 +306,12 @@ fn place_command(cx: &AlgoCx, request: &TwapOrderRequest) -> Result<Command, Str
         "amount": request.amount,
         "price": request.price,
         "reduceOnly": request.reduce_only,
-    }))
-    .map_err(|error| error.to_string())?;
+    });
+    // The engine refuses a null caller id; an absent one mints its own.
+    if let Some(id) = &request.client_order_id {
+        opts["clientOrderId"] = json!(id);
+    }
+    let opts: PlaceOrderOpts = serde_json::from_value(opts).map_err(|error| error.to_string())?;
     Ok(Command::PlaceOrders {
         command: cx.port.next_command_id(),
         orders: vec![opts],
@@ -312,6 +321,7 @@ fn place_command(cx: &AlgoCx, request: &TwapOrderRequest) -> Result<Command, Str
 struct CxView<'a> {
     cx: &'a AlgoCx,
     chasers: &'a dyn TwapChasers,
+    client_ids: &'a ClientIdMinter,
 }
 
 impl TwapMarketView for CxView<'_> {
@@ -330,6 +340,17 @@ impl TwapMarketView for CxView<'_> {
 
     fn chaser(&self, chaser_id: &str) -> Option<ChaserProgress> {
         self.chasers.progress(chaser_id)
+    }
+
+    /// As the chaser's: only the account's markets, never an order the venue would split.
+    fn client_order_id(&self, request: &TwapOrderRequest) -> Option<String> {
+        let store = self.cx.port.store();
+        let market = store.markets.get(&request.symbol)?;
+        let max = market.limits.amount.max;
+        if max > 0.0 && request.amount > max {
+            return None;
+        }
+        self.client_ids.mint(&store.venue)
     }
 }
 

@@ -1,5 +1,6 @@
 import type {
   AccountAuthResult,
+  AlgoStopAllResult,
   CommandProgress,
   EngineBridgeConstruction,
   EngineCapabilities,
@@ -15,6 +16,8 @@ import type { ExchangeErrorKind } from '../../commandOutcome';
 import type { Store } from '../../store/store.interface';
 import type {
   AccountGreeks,
+  ActiveChaser,
+  ActiveTWAP,
   Candle,
   ClosedPnlEntry,
   ExchangeAccount,
@@ -356,6 +359,15 @@ const LOADED_SECTIONS = [
 /** Frames whose clock samples estimate the data source's offset, and the change worth resetting it for. */
 const SOURCE_CLOCK_SAMPLES = 20;
 const SOURCE_CLOCK_STEP_MS = 25;
+
+/** A nuke waits this long for stopped Rust chases to settle their cancels (the engine's bound). */
+const NUKE_ALGO_STOP_MS = 10_000;
+/** Past the engine's bound, a host that stopped advancing no longer holds the nuke. */
+const NUKE_ALGO_STOP_GRACE_MS = 1_000;
+/** Algo ops held while the engine host starts; past this they are refused. */
+const MAX_QUEUED_ALGO_OPS = 100;
+
+type AlgoRows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -1016,7 +1028,114 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere. */
-  stopAccountAlgos = (): Promise<NukeResult> => stopLocalAccountAlgos(this);
+  stopAccountAlgos = (): Promise<NukeResult> =>
+    this.runsRustAlgos ? this.stopRustAlgos() : stopLocalAccountAlgos(this);
+
+  /** Where this account's algo ops run, once its engine host exists to say. */
+  private algoRoute: 'rust' | 'ts' | undefined;
+  /** Algo ops that arrived before the engine host, replayed in order once it decides. */
+  private queuedAlgoOps: { op: string; rust: () => void; ts: () => void }[] = [];
+
+  /** Chaser, TWAP and exec ops run in this account's engine (an `algos` build). */
+  get runsRustAlgos(): boolean {
+    return this.host?.algosRunning === true;
+  }
+
+  /** Start the engine's algos under the worker's account name; false on a build
+   * without them, or before the engine host exists (nothing is decided then). */
+  startAlgos = (accountName: string): boolean => {
+    const host = this.host;
+    if (!host || this.isDisposed || this.engineFailure) return false;
+    if (this.algoRoute) return this.algoRoute === 'rust' && this.runsRustAlgos;
+    try {
+      host.algoStart(accountName);
+      this.algoRoute = 'rust';
+    } catch (error) {
+      if (!(error instanceof ExchangeError && error.kind === 'unsupported')) throw error;
+      this.algoRoute = 'ts';
+    }
+    this.replayQueuedAlgoOps();
+    return this.algoRoute === 'rust';
+  };
+
+  /**
+   * Route one worker algo op: `rust` runs it in the engine, `ts` in the TS algos.
+   * True when it ran in Rust or waits for the engine host; false means run `ts`
+   * now. An op that waits is replayed in arrival order once the host decides.
+   */
+  routeAlgoOp = (accountName: string, op: string, rust: () => void, ts: () => void): boolean => {
+    if (!this.algoRoute) this.startAlgos(accountName);
+    if (this.algoRoute === 'rust') {
+      rust();
+      return true;
+    }
+    if (this.algoRoute === 'ts') return false;
+    if (this.isDisposed || this.engineFailure) {
+      this.emitter.emit('error', `${op} was not run: the ${this.name} engine stopped before it could run algos`);
+      return true;
+    }
+    if (this.queuedAlgoOps.length >= MAX_QUEUED_ALGO_OPS) {
+      this.emitter.emit('error', `${op} was not run: too many algo requests are waiting for the ${this.name} engine to start`);
+      return true;
+    }
+    this.queuedAlgoOps.push({ op, rust, ts });
+    return true;
+  };
+
+  private replayQueuedAlgoOps() {
+    const queued = this.queuedAlgoOps.splice(0);
+    for (const { op, rust, ts } of queued) {
+      try {
+        if (this.algoRoute === 'rust') rust();
+        else if (this.algoRoute === 'ts') ts();
+        else this.emitter.emit('error', `${op} was not run: the ${this.name} engine never started`);
+      } catch (error) {
+        this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  /** One worker algo op; a refusal reaches the user as the TS handlers' did. */
+  algoOp = (op: string, data: unknown): void => {
+    try {
+      if (!this.host) throw new Error(`${this.name} engine is not started`);
+      this.host.algoOp(op, data);
+    } catch (error) {
+      this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  /** Rust algo replies, under the op names the TS algos emit. `store` carries the rows
+   * frames do not; the worker's TWAP handler persists `twap:stateUpdate`. */
+  private receiveAlgoEmit = (op: string, data: unknown) => {
+    if (op === 'store') {
+      if (!this.isDisposed) this.store.update(data as Partial<AlgoRows>);
+      return;
+    }
+    this.emitter.emit(op, data);
+  };
+
+  /** As `stopAccountAlgos.ts`, in the engine: TWAPs first, then every chase, waiting
+   * (bounded) for their cancels. */
+  private stopRustAlgos = async (): Promise<NukeResult> => {
+    const host = this.host!;
+    let backstop: ReturnType<typeof setTimeout> | undefined;
+    const unanswered = new Promise<AlgoStopAllResult>((resolve) => {
+      backstop = setTimeout(
+        () => resolve({ stoppedChasers: [], stoppedTwaps: [], settled: false }),
+        NUKE_ALGO_STOP_MS + NUKE_ALGO_STOP_GRACE_MS,
+      );
+    });
+    let result: AlgoStopAllResult;
+    try {
+      result = await Promise.race([host.algoStopAll('Stopped by nuke'), unanswered]);
+    } finally {
+      clearTimeout(backstop);
+    }
+    if (!result.settled)
+      this.log('Stopped chases did not confirm their cancels before the nuke; orders may rest', LogSeverity.Warning);
+    return { stoppedChasers: result.stoppedChasers, stoppedTwaps: result.stoppedTwaps };
+  };
 
   // Startup is single-use, including failures; a retry needs a new account instance.
   start = (): Promise<void> => {
@@ -1244,6 +1363,7 @@ export class RustEngineExchange extends BaseExchange {
           onDead: this.receiveEngineFailure,
           onCommandProgress: this.receiveCommandProgress,
           onAccountAuth: this.receiveAccountAuth,
+          onAlgoEmit: this.receiveAlgoEmit,
           onDeactivate: () => {
             this.noteAuthFailure();
             this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
@@ -2039,7 +2159,7 @@ export class RustEngineExchange extends BaseExchange {
   private stopAlgosForNuke = async (): Promise<NukeResult> => {
     const stopped = this.isWorkerMirror
       ? ((await this.callWorker('stopAccountAlgos')) as NukeResult)
-      : await stopLocalAccountAlgos(this);
+      : await this.stopAccountAlgos();
     const count = stopped.stoppedChasers.length + stopped.stoppedTwaps.length;
     if (count)
       this.log(
@@ -2781,8 +2901,20 @@ export class RustEngineExchange extends BaseExchange {
     this.stopPollingConfig = undefined;
     this.flushTimers.forEach(clearInterval);
     this.flushTimers = [];
-    this.host?.dispose();
+    const host = this.host;
     this.host = undefined;
+    // Running chases cancel their resting orders first (bounded by the engine).
+    if (host?.algosRunning) {
+      let stopping: Promise<void>;
+      try {
+        stopping = host.algoDispose('account disposed');
+      } catch {
+        stopping = Promise.resolve();
+      }
+      void stopping.finally(() => host.dispose());
+    } else host?.dispose();
+    // Ops still waiting for the engine report it before the error listeners go.
+    this.replayQueuedAlgoOps();
     super.dispose();
     for (const wake of this.startupWaiters) wake();
   }

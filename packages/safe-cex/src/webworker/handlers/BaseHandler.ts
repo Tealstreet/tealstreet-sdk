@@ -4,6 +4,18 @@ import { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 
+export type RustAlgoExchange = {
+  runsRustAlgos: boolean;
+  routeAlgoOp(accountName: string, op: string, rust: () => void, ts: () => void): boolean;
+  algoOp(op: string, data: unknown): void;
+};
+
+/** An exchange whose engine may run this account's algos (`RustEngineExchange`). */
+export const rustAlgoExchange = (exchange: unknown): RustAlgoExchange | undefined =>
+  typeof (exchange as Partial<RustAlgoExchange> | undefined)?.routeAlgoOp === 'function'
+    ? (exchange as RustAlgoExchange)
+    : undefined;
+
 const PENDING_TIMEOUT_MS = 30_000;
 const PENDING_POLL_MS = 500;
 const PENDING_TIMEOUT_REPORT_COOLDOWN_MS = 5 * 60_000;
@@ -41,6 +53,23 @@ export abstract class BaseHandler {
   }
 
   abstract handle(payload: StoreWorkerPayload): void;
+
+  /**
+   * A Rust-engine account built with algos runs chaser, TWAP and exec ops in its
+   * engine (`rust`, by default `RustEngineExchange.algoOp`), never in the TS
+   * algos. True when sent there, or held until the engine host starts: the
+   * exchange then replays it here, in Rust or through this handler's TS path.
+   */
+  protected runInRustAlgos(payload: StoreWorkerPayload, rust?: () => void): boolean {
+    const exchange = rustAlgoExchange(this._exchange);
+    if (!exchange) return false;
+    return exchange.routeAlgoOp(
+      this._accountName,
+      payload.op,
+      rust ?? (() => exchange.algoOp(payload.op, payload.data)),
+      () => this.handle(payload),
+    );
+  }
 
   /**
    * Buffer a payload until markets are loaded. Returns true if buffered,

@@ -2,7 +2,9 @@
 //! host wakes on, and engine work leaves as [`TwapEffect`]s.
 
 use crate::math::{add, lodash_random, multiply, subtract};
-use crate::types::{OrderSide, SliceAction, TwapOptions, TwapOrigin, TwapState, TwapStatus};
+use crate::types::{
+    InFlightSlice, OrderSide, SliceAction, TwapOptions, TwapOrigin, TwapState, TwapStatus,
+};
 use crate::{ChaserRequest, OrderKind, TwapEffect, TwapEnv, TwapMarketView, TwapOrderRequest};
 use serde_json::Map;
 
@@ -84,6 +86,10 @@ impl TwapInstance {
         !self.pending.is_empty() || self.wake_at().is_some()
     }
 
+    pub(crate) fn mark_state_changed(&mut self) {
+        self.state_changed = true;
+    }
+
     pub(crate) fn take_state_changed(&mut self) -> bool {
         std::mem::take(&mut self.state_changed)
     }
@@ -161,21 +167,49 @@ impl TwapInstance {
             next_order_at,
             wait_ms,
         });
+        let mut request = TwapOrderRequest {
+            symbol,
+            side: self.options.side,
+            kind: if priced {
+                OrderKind::Limit
+            } else {
+                OrderKind::Market
+            },
+            price: priced.then_some(price),
+            amount: order_size,
+            reduce_only: self.options.reduce_only,
+            client_order_id: None,
+        };
+        request.client_order_id = view.client_order_id(&request);
+        // Persisted before the order goes out: a host that dies before the slice
+        // is counted leaves a restore something to look up instead of re-placing.
+        self.state.in_flight = Some(InFlightSlice {
+            size: order_size,
+            client_order_id: request.client_order_id.clone(),
+        });
+        self.state_changed = true;
         effects.push(TwapEffect::PlaceOrder {
             twap_id: self.id.clone(),
             settle_token: Some(token),
-            request: TwapOrderRequest {
-                symbol,
-                side: self.options.side,
-                kind: if priced {
-                    OrderKind::Limit
-                } else {
-                    OrderKind::Market
-                },
-                price: priced.then_some(price),
-                amount: order_size,
-                reduce_only: self.options.reduce_only,
-            },
+            request,
+        });
+    }
+
+    /// A restored slice a previous host was placing when it died that the
+    /// restoring host did not reconcile: counted, never placed again (TS
+    /// `reconcileInFlight` when the order cannot be confirmed).
+    pub(crate) fn count_unconfirmed_in_flight(&mut self, effects: &mut Vec<TwapEffect>) {
+        let Some(in_flight) = self.state.in_flight.take() else {
+            return;
+        };
+        self.state.orders_executed += 1;
+        self.state_changed = true;
+        effects.push(TwapEffect::Log {
+            message: format!(
+                "TWAP {}: a {} slice was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.",
+                self.options.symbol(),
+                in_flight.size
+            ),
         });
     }
 
@@ -196,6 +230,10 @@ impl TwapInstance {
             return;
         };
         let pending = self.pending.remove(index);
+        // `finish_slice` reports the cleared marker; a stopped TWAP is no longer persisted.
+        if self.pending.is_empty() {
+            self.state.in_flight = None;
+        }
         match outcome {
             Ok(order_ids) => {
                 if pending.priced_limit && !order_ids.is_empty() {
@@ -294,6 +332,7 @@ impl TwapInstance {
                     price: None,
                     amount: chaser.remaining_size,
                     reduce_only: self.options.reduce_only,
+                    client_order_id: None,
                 },
             });
         }
@@ -400,6 +439,7 @@ fn new_state(options: &TwapOptions, env: &mut dyn TwapEnv) -> TwapState {
         origin: Some(options.origin.unwrap_or(TwapOrigin::Web)),
         created_at: Some(env.now_ms()),
         started_at: None,
+        in_flight: None,
         extra: Map::new(),
     }
 }

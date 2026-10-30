@@ -9,15 +9,15 @@ import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Generated or local-only trees: build outputs, installed packages, harness runs.
-// Server-side crates never link into the browser wasm (the wasm host depends only on
-// the engine and registry), so their changes must not invalidate the web pin.
+// Server-side crates never link into the browser wasm, so their changes must not
+// invalidate the web pin. The algos (sdk-rs/algos) DO link into every family, so
+// an algos change forces a new release and pin.
 const EXCLUDED = new Set([
   'target',
   'node_modules',
   '.git',
   'sdk-rs/hosts/wasm/pkg',
   'sdk-rs/harness/out',
-  'sdk-rs/algos',
   'sdk-rs/hosts/server',
   'sdk-rs/hosts/candle-server',
   'sdk-rs/hosts/remote-signer',

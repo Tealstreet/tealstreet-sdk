@@ -8,6 +8,7 @@ import { LogSeverity, OrderSide, OrderType } from '../../types';
 import { add, multiply, subtract } from '../../utils/safe-math';
 import { ChaserOrderInstance } from '../chaserOrder/ChaserOrderInstance';
 import { chaserOrderManagerInstance } from '../chaserOrder/ChaserOrderManager';
+import { inFlightSlicePlaced } from './inFlightSlice';
 import { twapManager } from './TwapManager';
 import { TwapFailAction, TwapOptions, TwapTimeoutAction } from './TwapOptions';
 import { TwapState } from './TwapState';
@@ -291,32 +292,12 @@ export class TwapInstance {
   reconcileInFlight = async () => {
     const inFlight = this.state.inFlight;
     if (!inFlight) return;
-    const symbol = this.options.activeMarket.symbol;
-    let placed = true;
-    if (inFlight.clientOrderId) {
-      try {
-        const lookup = await this.exchange.findOrderByClientOrderId(symbol, inFlight.clientOrderId);
-        placed = lookup.found || !lookup.definitive;
-        if (!lookup.found && !lookup.definitive) this.warnUncertainSlice(inFlight.size);
-      } catch {
-        this.warnUncertainSlice(inFlight.size);
-      }
-    } else {
-      this.warnUncertainSlice(inFlight.size);
-    }
-    if (placed) {
+    if (await inFlightSlicePlaced(this.exchange, this.options.activeMarket.symbol, inFlight)) {
       this.updateState({ ordersExecuted: this.state.ordersExecuted + 1, inFlight: undefined });
     } else {
       this.updateState({ ordersSizes: [inFlight.size, ...this.state.ordersSizes], inFlight: undefined });
     }
   };
-
-  private warnUncertainSlice(size: number) {
-    this.exchange.emitter.emit(
-      'error',
-      `TWAP ${this.options.activeMarket.symbol}: a ${size} slice was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.`,
-    );
-  }
 
   pause = async () => {
     if (this.state.status === TwapStatus.Running) {

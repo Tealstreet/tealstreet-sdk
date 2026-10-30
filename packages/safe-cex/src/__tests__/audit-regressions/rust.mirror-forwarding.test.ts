@@ -138,6 +138,10 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   onWSPublicClose: 'mirror',
   // Main's own (none on a mirror); a frame-fed nuke asks the data source's.
   stopAccountAlgos: 'mirror',
+  // The worker's own handlers call these on the engine they own; a mirror has none.
+  startAlgos: 'mirror',
+  algoOp: 'mirror',
+  routeAlgoOp: 'mirror',
   refreshAccountSettings: 'worker',
   ingestSourceFrame: 'mirror',
 };

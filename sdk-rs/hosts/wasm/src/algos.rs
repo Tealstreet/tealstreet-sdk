@@ -229,32 +229,34 @@ impl Algos {
         let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
         let book = chasers.book();
         let twap = Rc::new(TwapFactory::new(&name, cx.clone(), Rc::new(book.clone())));
+        #[cfg_attr(not(feature = "algos-exec"), allow(unused_mut))]
+        let mut factories: Vec<Box<dyn safe_cex_algos::AlgoFactory>> =
+            vec![Box::new(chasers), Box::new(twap.clone())];
         // Exec's chase/TWAP handoff shares this account's book and TWAP
         // schedule, under the host's account name, never one from the payload.
-        let sweep = port.clone();
-        let exec = Rc::new(
-            safe_cex_exec::native::ExecFactory::with_algos(
-                name.clone(),
-                book.clone(),
-                (*twap).clone(),
-            )
-            .with_cancel_all(Rc::new(move || {
-                use safe_cex_engine::CancelAll;
-                use safe_cex_exec::native::CancelAllScope;
-                match sweep.capabilities.cancel_all {
-                    CancelAll::Native => CancelAllScope::Native,
-                    CancelAll::EachOpenSymbol => CancelAllScope::Symbols(Vec::new()),
-                    CancelAll::EachPlacedSymbol => {
-                        CancelAllScope::Symbols(sweep.placed.borrow().iter().cloned().collect())
+        #[cfg(feature = "algos-exec")]
+        {
+            let sweep = port.clone();
+            factories.push(Box::new(Rc::new(
+                safe_cex_exec::native::ExecFactory::with_algos(
+                    name.clone(),
+                    book.clone(),
+                    (*twap).clone(),
+                )
+                .with_cancel_all(Rc::new(move || {
+                    use safe_cex_engine::CancelAll;
+                    use safe_cex_exec::native::CancelAllScope;
+                    match sweep.capabilities.cancel_all {
+                        CancelAll::Native => CancelAllScope::Native,
+                        CancelAll::EachOpenSymbol => CancelAllScope::Symbols(Vec::new()),
+                        CancelAll::EachPlacedSymbol => {
+                            CancelAllScope::Symbols(sweep.placed.borrow().iter().cloned().collect())
+                        }
                     }
-                }
-            })),
-        );
-        let registry = Registry::new(vec![
-            Box::new(chasers),
-            Box::new(twap.clone()),
-            Box::new(exec),
-        ]);
+                })),
+            )));
+        }
+        let registry = Registry::new(factories);
         let mut algos = Self {
             executor,
             port,
@@ -359,6 +361,39 @@ impl Algos {
             self.publish();
         }
         out
+    }
+
+    /// A nuke's first step, the account staying up: stop every TWAP so it starts
+    /// no slice, then every chase, and once their cancels settle (bounded as
+    /// disposal is) emit `algos:stopped` `{stoppedChasers, stoppedTwaps, settled}`.
+    fn stop_all(&mut self, reason: String) {
+        let _installed = self.install();
+        let stopped_twaps = self.twap.stop_for_nuke();
+        let running: Vec<String> = self
+            .book
+            .active_chasers()
+            .into_iter()
+            .filter(|chase| !chase.is_stopped)
+            .map(|chase| chase.id)
+            .collect();
+        let (book, port) = (self.book.clone(), self.port.clone());
+        // In the scope: disposal aborts it, and the JS host then answers the wait.
+        self.cx.spawn(async move {
+            let (stopped_chasers, settled) =
+                match executor::timeout(SHUTDOWN_DEADLINE_MS, book.stop_for_nuke(&reason)).await {
+                    Ok(stopped) => (stopped, true),
+                    Err(_) => (running, false),
+                };
+            port.emit(
+                "algos:stopped",
+                serde_json::json!({
+                    "stoppedChasers": stopped_chasers,
+                    "stoppedTwaps": stopped_twaps,
+                    "settled": settled,
+                })
+                .to_string(),
+            );
+        });
     }
 
     /// The disposal contract: stop TWAPs, let chaser cancels settle (bounded),
@@ -545,6 +580,27 @@ impl WasmEngine {
         algos.advance(now_ms, wall_ms);
         algos.dispose(reason.unwrap_or_else(|| "account disposed".to_owned()));
         self.algos.run(&mut *self.inner, now_ms, wall_ms)
+    }
+
+    /// Stop every TWAP and chase, leaving the algos running for new ops (a
+    /// nuke's first step). Emits `algos:stopped` once chase cancels settle, at
+    /// most 10 s on the algo clock; keep advancing at `algoDeadline` until then.
+    #[wasm_bindgen(js_name = algoStopAll)]
+    pub fn algo_stop_all(
+        &mut self,
+        now_ms: f64,
+        wall_ms: f64,
+        reason: Option<String>,
+    ) -> Result<String, JsError> {
+        let Some(algos) = &mut self.algos.running else {
+            return Err(JsError::new("algos are not running"));
+        };
+        if algos.disposing {
+            return Err(JsError::new("algos are stopping"));
+        }
+        algos.advance(now_ms, wall_ms);
+        algos.stop_all(reason.unwrap_or_else(|| "Stopped by nuke".to_owned()));
+        Ok(self.algos.run(&mut *self.inner, now_ms, wall_ms))
     }
 
     /// Algos are running or still shutting down.

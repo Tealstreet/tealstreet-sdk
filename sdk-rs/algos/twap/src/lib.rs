@@ -17,7 +17,8 @@ pub use validate::{MAX_ORDERS_COUNT, MAX_TWAPS_PER_ACCOUNT, RETIRED_IDS_KEPT, SC
 
 pub use instance::TwapInstance;
 pub use types::{
-    OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin, TwapState, TwapStatus,
+    InFlightSlice, OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin, TwapState,
+    TwapStatus,
 };
 
 use std::collections::{HashSet, VecDeque};
@@ -53,6 +54,10 @@ pub trait TwapMarketView {
     fn ticker(&self, symbol: &str) -> Option<TickerQuote>;
     /// `None` once the chaser runtime has dropped the chaser.
     fn chaser(&self, chaser_id: &str) -> Option<ChaserProgress>;
+    /// A caller id the venue honors on `request` (`mintClientOrderId`), or `None`.
+    fn client_order_id(&self, _request: &TwapOrderRequest) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +74,8 @@ pub struct TwapOrderRequest {
     pub price: Option<f64>,
     pub amount: f64,
     pub reduce_only: bool,
+    /// The caller id a direct slice carries, so a restore can look it up.
+    pub client_order_id: Option<String>,
 }
 
 /// The chaser a `useChaserOrders` slice starts, with the id TWAP tracks it by.
@@ -449,9 +456,15 @@ impl TwapBook {
                 Some(entry.state),
                 env,
             ));
-            if running && let Some(instance) = self.managed_mut(&id) {
-                instance.pause();
-                instance.resume(env);
+            if let Some(instance) = self.managed_mut(&id) {
+                // Persisted at once, so the host sees which rows it adopted.
+                instance.mark_state_changed();
+                // A host that looks the slice up settles it before restoring.
+                instance.count_unconfirmed_in_flight(effects);
+                if running {
+                    instance.pause();
+                    instance.resume(env);
+                }
             }
         }
     }

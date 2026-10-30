@@ -73,7 +73,43 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // cap-sweep master: local optimized Binance 1,501,037 B; ceil KiB + 2 KiB (1468 KiB), frame-fed ruling.
 // Binance spot and PM frame-fed (VENUE_STATE v2 routing): local 1,505,790 B, +4,753 B;
 // ceil KiB + 2 KiB (1475 KiB), frame-fed ruling.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ binance: 1_517_568, hyperliquid: 1_405_952, hyperliquidspot: 1_405_952, bitget: 1_579_008, bitgetusdc: 1_579_008, bybit: 1_501_184, asterdex: 1_486_848, kraken: 1_469_440, krakenspot: 1_469_440, paradex: 1_546_240, phemex: 1_357_824, woo: 1_392_640 });
+// LOCAL Rust algos (chaser, TWAP, exec) link into every family (Sam, option a):
+// each cap is its CI algos-on size (run 41026674940) plus this branch's measured
+// growth since (about 8.5 KB, local) plus 20 KiB, until tightened from CI.
+export const WASM_VENUE_OVERRIDES = Object.freeze({
+  apexomni: 1_876_992,
+  asterdex: 2_010_112,
+  backpack: 1_790_976,
+  binance: 2_052_096,
+  bingx: 1_876_992,
+  bitget: 2_148_352,
+  bitgetusdc: 2_148_352,
+  bitrue: 1_729_536,
+  bitunix: 1_737_728,
+  blofin: 1_835_008,
+  breakoutprop: 1_430_528,
+  bybit: 2_042_880,
+  coinbase: 1_730_560,
+  cryptocom: 1_623_040,
+  grvt: 1_696_768,
+  hyperliquid: 1_974_272,
+  hyperliquidspot: 1_974_272,
+  kraken: 2_013_184,
+  krakenspot: 2_013_184,
+  kucoin: 1_504_256,
+  kucoinspot: 1_971_200,
+  lighter: 1_874_944,
+  'lighter-robinhood': 1_874_944,
+  mexc: 1_644_544,
+  okx: 1_807_360,
+  orderly: 1_642_496,
+  paradex: 2_112_512,
+  phemex: 1_911_808,
+  polymarket: 1_519_616,
+  txflow: 1_746_944,
+  weex: 1_835_008,
+  woo: 2_240_512,
+});
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
