@@ -21,6 +21,7 @@ use safe_cex_engine::request_context::{
     Policy, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData, ResendGrant,
     RetryEvidence, RetryPolicy, WriteResult,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use std::collections::VecDeque;
 
@@ -1203,6 +1204,7 @@ impl BybitLinear {
                 p.leverage = leverage;
             }
         });
+        cx.hold_setting(SettingKey::Leverage(symbol.to_owned()));
     }
 
     fn apply_position_mode(&mut self, cx: &mut Cx<'_, Pending>, hedged: bool) {
@@ -1540,6 +1542,22 @@ impl BybitLinear {
                     state.account.margin_type = Some(margin);
                 }
                 cx.store.update_positions(|p| p.margin_type = Some(margin));
+                if cx.frame_fed() {
+                    // Account-wide: every symbol the store has settings for, held
+                    // over the source's SETTINGS until it re-reads them.
+                    let symbols: Vec<String> = cx
+                        .store
+                        .markets()
+                        .iter()
+                        .filter(|market| cx.store.setting(&market.symbol).is_some())
+                        .map(|market| market.symbol.clone())
+                        .collect();
+                    for symbol in symbols {
+                        cx.store
+                            .update_setting(&symbol, |s| s.margin_type = Some(margin));
+                        cx.hold_setting(SettingKey::MarginType(symbol));
+                    }
+                }
                 self.fetch_positions(cx);
                 Decision::Next(Vec::new())
             }

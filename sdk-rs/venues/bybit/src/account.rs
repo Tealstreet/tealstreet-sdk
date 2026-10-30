@@ -1612,6 +1612,10 @@ impl BybitLinear {
     }
 
     pub(crate) fn fetch_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Frame-fed: positions arrive in the data source's frames, never read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.variant.is_spot() {
             cx.store.set_positions(Vec::new());
             return;

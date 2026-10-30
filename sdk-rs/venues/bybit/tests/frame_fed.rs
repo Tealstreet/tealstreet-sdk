@@ -474,3 +474,104 @@ fn a_real_sources_snapshot_carries_its_hedge_mode_to_a_one_request_place() {
     let body = h.take("/v5/order/create").body.clone().unwrap();
     assert!(body.contains(r#""positionIdx":1"#), "{body}");
 }
+
+/// A data source's frame carrying BTCUSDT's settings row (SETTINGS section).
+fn settings_frame(leverage: f64, margin: safe_cex_engine::model::MarginType) -> Vec<u8> {
+    let mut source = safe_cex_engine::Store::default();
+    source.set_markets(h_markets());
+    source.update_setting("BTCUSDT", |s| {
+        s.leverage = leverage;
+        s.margin_type = Some(margin);
+    });
+    let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.0);
+    source.write(&source.everything(), &mut writer);
+    writer.finish()
+}
+
+/// The page engine's own catalogue, so the source's settings rows index the same markets.
+fn h_markets() -> Vec<safe_cex_engine::model::Market> {
+    let mut h = frame_fed();
+    load(&mut h);
+    h.engine.store().markets().to_vec()
+}
+
+fn loaded_with_settings() -> Harness {
+    let mut h = frame_fed();
+    load(&mut h);
+    let cross = safe_cex_engine::model::MarginType::Cross;
+    h.engine
+        .apply_frame(h.now, &settings_frame(10.0, cross), true)
+        .unwrap();
+    h.collect();
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+    h
+}
+
+#[test]
+fn a_confirmed_leverage_outlasts_a_stale_source_until_it_agrees() {
+    use safe_cex_engine::model::MarginType::Cross;
+    let mut h = loaded_with_settings();
+    h.command(Command::SetLeverage {
+        command: 1,
+        symbol: "BTCUSDT".into(),
+        leverage: 20.0,
+        side: None,
+    });
+    let request = h.take("/v5/position/set-leverage");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{},"retExtInfo":{},"time":1672281607343}"#,
+    );
+    assert!(matches!(h.result(1), Some(Ok(_))), "{:?}", h.result(1));
+    assert!(
+        h.requests.is_empty(),
+        "no read after the write: {:?}",
+        h.paths()
+    );
+    // The source has not re-read: its stale row cannot put 10x back.
+    h.engine
+        .apply_frame(h.now, &settings_frame(10.0, Cross), false)
+        .unwrap();
+    h.collect();
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+    // It agrees: released, so its later rows apply again.
+    h.engine
+        .apply_frame(h.now, &settings_frame(20.0, Cross), false)
+        .unwrap();
+    h.engine
+        .apply_frame(h.now, &settings_frame(10.0, Cross), false)
+        .unwrap();
+    h.collect();
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+}
+
+#[test]
+fn a_confirmed_margin_switch_outlasts_a_stale_source_and_reads_nothing() {
+    use safe_cex_engine::model::MarginType::{Cross, Isolated};
+    let mut h = loaded_with_settings();
+    h.command(Command::SetMarginType {
+        command: 1,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{"reasons":[]}}"#);
+    assert!(matches!(h.result(1), Some(Ok(_))), "{:?}", h.result(1));
+    assert!(h.requests.is_empty(), "no positions read: {:?}", h.paths());
+    let margin = |h: &Harness| h.engine.store().setting("BTCUSDT").unwrap().margin_type;
+    assert_eq!(margin(&h), Some(Isolated));
+    h.engine
+        .apply_frame(h.now, &settings_frame(10.0, Cross), false)
+        .unwrap();
+    h.collect();
+    assert_eq!(margin(&h), Some(Isolated));
+    h.engine
+        .apply_frame(h.now, &settings_frame(10.0, Isolated), false)
+        .unwrap();
+    h.engine
+        .apply_frame(h.now, &settings_frame(10.0, Cross), false)
+        .unwrap();
+    h.collect();
+    assert_eq!(margin(&h), Some(Cross));
+}
