@@ -1,5 +1,6 @@
-use super::{Adapter, serialize_error, translate};
+use super::{Adapter, CancelAllScope, serialize_error, translate};
 use crate::{Host, protection, rows};
+use safe_cex_engine::command::decode_command;
 use serde_json::{Value, json};
 use std::{cell::Cell, rc::Rc};
 pub(super) struct NukeGuard(pub Rc<Cell<bool>>);
@@ -15,6 +16,20 @@ impl Adapter {
         let mut completed = 0;
         let mut closed = 0;
         let mut cancelled = 0;
+        let mut swept = 0;
+        let mut cancelled_symbols = Vec::new();
+        // Running chasers and TWAPs would place again after the cancels below, so a
+        // close-all would not close all: stop them first, waiting for their cancels.
+        let stopped_twaps = self
+            .twap
+            .as_ref()
+            .map(|twap| twap.stop_for_nuke())
+            .unwrap_or_default();
+        let stopped_chasers = match &self.chasers {
+            Some(book) => book.stop_for_nuke(NUKE_STOP_REASON).await,
+            None => Vec::new(),
+        };
+        let stopped = json!({"stoppedChasers": stopped_chasers, "stoppedTwaps": stopped_twaps});
         if !matches!(mode, "positions" | "pos") {
             let store = self.snapshot();
             let mut symbols = Vec::new();
@@ -38,6 +53,7 @@ impl Adapter {
                     Ok(_) => {
                         completed += 1;
                         cancelled += 1;
+                        cancelled_symbols.push(symbol.clone());
                     }
                     Err(error) => {
                         failures.push(named(error, "cancel", &symbol));
@@ -91,10 +107,26 @@ impl Adapter {
                 }
             }
         }
+        // The venue's cancel-all reaches orders the store does not track, as in the browser.
+        if !matches!(mode, "positions" | "pos") {
+            for (target, command) in self.sweep_commands(&cancelled_symbols) {
+                if self.cx.scope.is_disposed() {
+                    return Err(
+                        json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
+                    );
+                }
+                match self.run_command(command).await {
+                    Ok(_) => swept += 1,
+                    Err(error) => failures.push(named(error, "cancel-all", &target)),
+                }
+            }
+        }
+        let stopped_count = stopped_chasers.len() + stopped_twaps.len();
         if failures.is_empty() {
-            Ok(
-                json!({"summary":format!("Nuke completed: {closed} position close(s) accepted, {cancelled} symbol cancel(s) accepted")}),
-            )
+            let mut result = json!({"summary":format!("Nuke completed: {stopped_count} algo(s) stopped, {closed} position close(s) accepted, {cancelled} symbol cancel(s) and {swept} cancel-all sweep(s) accepted")});
+            result["stoppedChasers"] = stopped["stoppedChasers"].clone();
+            result["stoppedTwaps"] = stopped["stoppedTwaps"].clone();
+            Ok(result)
         } else {
             let unknown = failures.iter().any(|e| e["outcome"] == "unknown");
             let mut error = failures
@@ -116,6 +148,8 @@ impl Adapter {
             error["failedLegs"] = json!(failures);
             error["acceptedCloseCount"] = json!(closed);
             error["cancelledSymbolCount"] = json!(cancelled);
+            error["stoppedChasers"] = stopped["stoppedChasers"].clone();
+            error["stoppedTwaps"] = stopped["stoppedTwaps"].clone();
             if unknown {
                 error["outcome"] = json!("unknown");
             } else if completed > 0
@@ -126,9 +160,49 @@ impl Adapter {
             Err(error)
         }
     }
+    /// The final cancel-all: one venue-wide cancel, or each symbol with an open
+    /// order now plus the host's attempted-placement symbols, less those this nuke
+    /// has already cancelled.
+    fn sweep_commands(
+        &self,
+        cancelled: &[String],
+    ) -> Vec<(String, safe_cex_engine::engine::Command)> {
+        let scope = self
+            .cancel_all
+            .as_ref()
+            .map_or(CancelAllScope::Symbols(Vec::new()), |scopes| scopes());
+        let symbols = match scope {
+            CancelAllScope::Native => vec![String::new()],
+            CancelAllScope::Symbols(placed) => {
+                let store = self.snapshot();
+                let mut symbols: Vec<String> = rows(&store, "orders")
+                    .iter()
+                    .filter_map(|order| order["symbol"].as_str().filter(|s| !s.is_empty()))
+                    .map(str::to_owned)
+                    .chain(placed)
+                    .collect();
+                symbols.sort();
+                symbols.dedup();
+                symbols.retain(|symbol| !cancelled.contains(symbol));
+                symbols
+            }
+        };
+        symbols
+            .into_iter()
+            .filter_map(|symbol| {
+                let command = json!({"op":"cancelSymbolOrders","command":self.cx.port.next_command_id(),"symbol":symbol});
+                let command = decode_command(&command.to_string()).ok()?;
+                let target = if symbol.is_empty() { "all symbols".into() } else { symbol };
+                Some((target, command))
+            })
+            .collect()
+    }
     async fn nuke_command(&self, method: &str, args: Value) -> Result<Value, Value> {
         let command = translate(method, &args, self.cx.port.next_command_id())
             .map_err(|message| json!({"message":message,"outcome":"notSent"}))?;
+        self.run_command(command).await
+    }
+    async fn run_command(&self, command: safe_cex_engine::engine::Command) -> Result<Value, Value> {
         self.cx
             .port
             .command(command)
@@ -137,6 +211,8 @@ impl Adapter {
             .map(|s| serde_json::from_str(&s).unwrap_or(Value::Null))
     }
 }
+
+const NUKE_STOP_REASON: &str = "Stopped by nuke";
 
 fn named(mut error: Value, phase: &str, symbol: &str) -> Value {
     error["message"] = json!(format!(

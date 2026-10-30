@@ -678,6 +678,24 @@ impl Session {
         reply: methods::Reply,
         after_load: bool,
     ) {
+        // An after-load wait polls the account like a waiting read, under the same cap.
+        let permit = if after_load {
+            match self.joined[name].account.reads.clone().try_acquire_owned() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    self.reply_failure(
+                        name,
+                        request_id,
+                        "Error",
+                        "too many account reads in flight; retry shortly",
+                        None,
+                    );
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
@@ -732,6 +750,7 @@ impl Session {
             return send();
         };
         tokio::spawn(async move {
+            let _permit = permit;
             match methods::until_account_loaded(&handle, methods::READ_WAIT).await {
                 Ok(()) => send(),
                 Err(refused) => {

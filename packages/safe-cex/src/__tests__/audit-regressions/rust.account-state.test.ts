@@ -16,7 +16,10 @@ import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
 import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInstance';
-import { ChaserOrderManager } from '../../webworker/chaserOrder/ChaserOrderManager';
+import { ChaserOrderManager, chaserOrderManagerInstance } from '../../webworker/chaserOrder/ChaserOrderManager';
+import { TwapInstance } from '../../webworker/twap/TwapInstance';
+import { twapManager } from '../../webworker/twap/TwapManager';
+import type { TwapOptions } from '../../webworker/twap/TwapOptions';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
 
@@ -539,6 +542,87 @@ describe('Rust native current-account reads', () => {
     expect(error).toHaveBeenCalledOnce();
     expect(r.commands.filter((c) => c.op === 'cancelSymbolOrders')).toHaveLength(1);
     expect(r.exchange.isNuking).toBe(false);
+  });
+
+  // Ruling 2026-10-30: a running chaser or TWAP would place again behind the nuke.
+  it('stops every running chaser and TWAP on the account first, then cancels and closes, and reports them', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position()], orders: [order()] });
+    await vi.advanceTimersByTimeAsync(250);
+    const chaser = new ChaserOrderInstance(r.exchange, {
+      symbol: 'BTCUSDT',
+      size: 2,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+    chaserOrderManagerInstance.add(chaser);
+    const twap = new TwapInstance(
+      r.exchange,
+      { postMessage: vi.fn() } as unknown as Worker,
+      { accountName: 'a', activeMarket: markets[0], size: 1, duration: 60, ordersCount: 2 } as TwapOptions,
+      () => {},
+    );
+    twapManager.add(twap);
+    // Another account's chaser is not this nuke's to stop.
+    const other = fixture();
+    await other.start();
+    const foreign = new ChaserOrderInstance(other.exchange, {
+      symbol: 'BTCUSDT',
+      size: 2,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+    chaserOrderManagerInstance.add(foreign);
+    try {
+      await vi.advanceTimersByTimeAsync(1000);
+      const start = r.commands.length;
+      const nuking = r.exchange.nuke(3);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await nuking).toEqual({ stoppedChasers: [chaser.id], stoppedTwaps: [twap.id] });
+      expect(chaser.isStopped).toBe(true);
+      expect(foreign.isStopped).toBe(false);
+      expect(twapManager.getById(twap.id)).toBeUndefined();
+      const ops = r.commands.slice(start).map((c) => c.op);
+      // The chaser's own cancel lands before the nuke closes anything.
+      expect(ops.indexOf('placeOrders')).toBeGreaterThan(-1);
+      expect(ops.slice(0, ops.indexOf('placeOrders'))).toContain('cancelOrders');
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(r.commands.slice(start).filter((c) => c.op === 'placeOrders')).toHaveLength(1);
+    } finally {
+      chaserOrderManagerInstance.cleanupExchange(r.exchange);
+      chaserOrderManagerInstance.cleanupExchange(other.exchange);
+    }
+  });
+
+  it('nukeOrders also stops the account algos before its cancel-all', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ orders: [order()] });
+    await vi.advanceTimersByTimeAsync(250);
+    const chaser = new ChaserOrderInstance(r.exchange, {
+      symbol: 'BTCUSDT',
+      size: 2,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      reduceOnly: false,
+      delay: 5000,
+    });
+    chaserOrderManagerInstance.add(chaser);
+    try {
+      await vi.advanceTimersByTimeAsync(1000);
+      const nuking = r.exchange.nukeOrders();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await nuking).toEqual({ stoppedChasers: [chaser.id], stoppedTwaps: [] });
+      expect(chaser.isStopped).toBe(true);
+      expect(r.exchange.isNuking).toBe(false);
+    } finally {
+      chaserOrderManagerInstance.cleanupExchange(r.exchange);
+    }
   });
 
   it('keeps the first nuke lock when a concurrent caller is rejected', async () => {

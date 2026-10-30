@@ -23,6 +23,27 @@ pub struct ExecFactory {
     account_name: Option<String>,
     chasers: Option<Rc<ChaserBook>>,
     twap: Option<TwapFactory>,
+    cancel_all: Option<CancelAllScopes>,
+}
+
+/// How the venue's cancel-all reaches every order, decided by the host that
+/// knows the venue's capabilities; read when a nuke's final sweep runs.
+pub enum CancelAllScope {
+    /// One venue-wide cancel-all.
+    Native,
+    /// Each symbol with an open order in the store, plus these (symbols a
+    /// placement was attempted on, whose order the store may not show yet).
+    Symbols(Vec<String>),
+}
+pub type CancelAllScopes = Rc<dyn Fn() -> CancelAllScope>;
+
+impl ExecFactory {
+    /// The cancel-all a nuke ends with. Without it the sweep cancels each
+    /// symbol with an open order in the store.
+    pub fn with_cancel_all(mut self, scopes: CancelAllScopes) -> Self {
+        self.cancel_all = Some(scopes);
+        self
+    }
 }
 
 impl ExecFactory {
@@ -62,6 +83,7 @@ impl ExecFactory {
             account_name: self.account_name.clone(),
             chasers: self.chasers.clone(),
             twap: self.twap.clone(),
+            cancel_all: self.cancel_all.clone(),
         };
         let mode = mode.to_owned();
         Ok(async move {
@@ -102,6 +124,7 @@ impl AlgoFactory for ExecFactory {
             account_name: self.account_name.clone(),
             chasers: self.chasers.clone(),
             twap: self.twap.clone(),
+            cancel_all: self.cancel_all.clone(),
         };
         exec.borrow_mut().handle(&payload, &mut host);
         Ok(())
@@ -117,6 +140,7 @@ struct Adapter {
     account_name: Option<String>,
     chasers: Option<Rc<ChaserBook>>,
     twap: Option<TwapFactory>,
+    cancel_all: Option<CancelAllScopes>,
 }
 struct ParallelReservation(Rc<Cell<usize>>);
 impl Drop for ParallelReservation {

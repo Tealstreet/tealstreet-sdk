@@ -161,6 +161,24 @@ impl ChaserBook {
         }
     }
 
+    /// A nuke's first step: stop every running chase, wait until each has cancelled
+    /// its resting order, and return the ids it stopped. Unlike `shutdown`, the
+    /// account stays up, so no disposal warning is emitted.
+    pub async fn stop_for_nuke(self: &Rc<Self>, reason: &str) -> Vec<String> {
+        let chases = self.chases.borrow().clone();
+        let mut stopped = Vec::new();
+        for chase in &chases {
+            if !chase.is_stopped() {
+                chase.mark_complete(reason);
+                stopped.push(chase.id.clone());
+            }
+        }
+        for chase in chases {
+            self.cleanup(chase).await;
+        }
+        stopped
+    }
+
     fn stop_all(&self, reason: &str) -> Vec<Rc<Chase>> {
         let chases = self.chases.borrow().clone();
         for chase in &chases {

@@ -82,6 +82,15 @@ impl TwapFactory {
         self.inner.rescheduled.notify_one();
     }
 
+    /// A nuke's first step: stop every running TWAP so it places no further
+    /// slice, and return the ids it stopped. Its chase slices stop with the
+    /// chaser book's `stop_for_nuke`.
+    pub fn stop_for_nuke(&self) -> Vec<String> {
+        let stopped = self.inner.book.borrow().running_ids();
+        self.terminate_all();
+        stopped
+    }
+
     /// Start a TWAP for a typed caller such as the exec `twap` command, with
     /// the same validation and effects as `twap:start`. Returns the new id.
     pub fn start(&self, options: TwapOptions) -> Result<String, String> {
