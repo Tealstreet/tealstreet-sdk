@@ -17,7 +17,8 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'binance', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex']);
   // Cap sweep 10-30: measured 1,461,044 B; ceil KiB + 2 KiB.
   // CI master d60d25a7153 measured 1,471,321 B (frame-fed core); ceil 8 KiB + 2 KiB.
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_439 * 1_024);
+  // m26ps4 measured master 1,475,983 B (shared export_venue_state_for); ceil KiB + 2 KiB.
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_444 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_952, 'venue', 'asterdex'), undefined);
@@ -43,7 +44,9 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_463_296, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_471_321, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_473_536, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_473_537, 'venue', 'asterdex'), /exceeds 1473536/);
+  assert.equal(wasmBudgetError(1_475_983, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_478_656, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(1_478_657, 'venue', 'asterdex'), /exceeds 1478656/);
   for (const venue of ['bitget', 'bitgetusdc']) {
     // Frame-fed Bitget (COSIGNED writer): 1,522,315 -> 1,549,604 B (+27,289); cap +27 KiB +2 KiB.
     // Settings holds: core 1,549,604 -> 1,558,459, Bitget -> 1,568,357 (+18,753); cap +19 KiB +2 KiB.
