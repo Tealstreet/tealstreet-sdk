@@ -3,7 +3,7 @@
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::{Command, Cx, HttpRequest, Response, SocketId, TimerId, Venue};
-use safe_cex_exchange_server::methods::{StoreRead, read_when_loaded};
+use safe_cex_exchange_server::methods::{StoreRead, read_when_loaded, until_account_loaded};
 use safe_cex_native::{Events, Host, HostEvent, ServerConfig, Transport};
 use serde_json::json;
 use std::cell::RefCell;
@@ -146,6 +146,30 @@ async fn a_read_that_never_loads_refuses_after_the_wait() {
                 .unwrap_err();
             assert_eq!(refused.message, "balances did not load within 0s");
             handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn get_account_on_an_after_load_venue_waits_for_the_start_then_refuses_visibly() {
+    LocalSet::new()
+        .run_until(async {
+            let (handle, tape) = account();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            tape.message("load");
+            // Orders load, but balance and positions never do: the start never completes.
+            let refused = until_account_loaded(&handle, Duration::from_millis(200))
+                .await
+                .unwrap_err();
+            assert_eq!(refused.message, "the account did not load within 0s");
+            handle.dispose();
+            assert_eq!(
+                until_account_loaded(&handle, Duration::from_secs(1))
+                    .await
+                    .unwrap_err()
+                    .message,
+                "account is closed"
+            );
         })
         .await;
 }
