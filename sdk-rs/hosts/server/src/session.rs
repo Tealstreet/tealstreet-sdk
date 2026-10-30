@@ -80,7 +80,15 @@ pub struct Session {
     pub resume_id: String,
     out: Out,
     joined: HashMap<String, Joined>,
+    /// A held client's account has loaded: `(account name, client id)`.
+    loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
+    loaded_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
 }
+
+/// A private account's first snapshot waits for its orders and positions, so a
+/// fresh build never shows the client an empty account; past this it goes anyway.
+pub const SNAPSHOT_HOLD_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
+const SNAPSHOT_HOLD_CHECK: std::time::Duration = std::time::Duration::from_millis(250);
 
 const PUBLIC_OPS: [&str; 5] = [
     "sendSnapshot",
@@ -101,6 +109,7 @@ impl Session {
         out: Out,
     ) -> Self {
         let socket = registry.next_id();
+        let (loaded, loaded_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             registry,
             metrics,
@@ -109,6 +118,25 @@ impl Session {
             resume_id: crate::accounts::resume_id(),
             out,
             joined: HashMap::new(),
+            loaded,
+            loaded_rx: Some(loaded_rx),
+        }
+    }
+
+    /// The socket loop's receiver of held clients whose accounts have loaded;
+    /// each goes to [`Session::account_loaded`].
+    pub fn take_loaded(&mut self) -> tokio::sync::mpsc::UnboundedReceiver<(String, u64)> {
+        self.loaded_rx.take().expect("taken once")
+    }
+
+    /// A held client's account loaded: its client gets a full snapshot now.
+    pub async fn account_loaded(&mut self, name: &str, client: u64) {
+        if self
+            .joined
+            .get(name)
+            .is_some_and(|joined| joined.client.id == client)
+        {
+            self.resnapshot(name).await;
         }
     }
 
@@ -302,6 +330,10 @@ impl Session {
         let link = account.handle.join(id, true).await?;
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let draining = Arc::new(AtomicBool::new(false));
+        let hold = (!account.is_public()).then(|| Hold {
+            client: id,
+            loaded: self.loaded.clone(),
+        });
         let pump = tokio::spawn(pump(
             link,
             account.handle.clone(),
@@ -309,6 +341,7 @@ impl Session {
             self.out.clone(),
             pending.clone(),
             draining.clone(),
+            hold,
         ));
         Ok(Client {
             id,
@@ -943,6 +976,36 @@ pub fn socket_health(summary: SocketSummary) -> Value {
 /// Forwards one client's account output: frames as base64 SCXF with a per-client
 /// seq (the first frame is the snapshot), notices as the existing msg ops, and
 /// `store.socketHealth`, which frames do not carry, once the snapshot is out.
+/// Where a private account's pump reports that its held snapshot may go.
+struct Hold {
+    client: u64,
+    loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
+}
+
+async fn account_loaded(handle: &AccountHandle) -> bool {
+    handle
+        .read(|store| {
+            let loaded = store.loaded();
+            loaded.orders && loaded.positions
+        })
+        .await
+        .unwrap_or(false)
+}
+
+/// Asks the session for a full snapshot once the account loads or the hold
+/// limit passes; frames stay withheld until it replaces this client.
+async fn release_hold(
+    handle: &AccountHandle,
+    name: &str,
+    hold: &mut Option<Hold>,
+    since: std::time::Instant,
+) {
+    if hold.is_some() && (since.elapsed() >= SNAPSHOT_HOLD_LIMIT || account_loaded(handle).await) {
+        let hold = hold.take().expect("holding");
+        let _ = hold.loaded.send((name.to_owned(), hold.client));
+    }
+}
+
 async fn pump(
     mut link: ClientLink,
     handle: AccountHandle,
@@ -950,9 +1013,13 @@ async fn pump(
     out: Out,
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
     draining: Arc<AtomicBool>,
+    mut hold: Option<Hold>,
 ) {
+    // Set while frames are withheld: when holding began.
+    let mut held: Option<std::time::Instant> = None;
     let mut seq = 0u64;
     let mut health_tick = tokio::time::interval(SOCKET_HEALTH_EVERY);
+    let mut hold_tick = tokio::time::interval(SNAPSHOT_HOLD_CHECK);
     let mut sent_health = (Value::Null, std::time::Instant::now());
     let report_health = |sent: &mut (Value, std::time::Instant)| {
         let sockets = handle.socket_health();
@@ -986,6 +1053,10 @@ async fn pump(
                 Some(item) => item,
                 None => break,
             },
+            _ = hold_tick.tick(), if held.is_some() && hold.is_some() => {
+                release_hold(&handle, &name, &mut hold, held.expect("holding")).await;
+                continue;
+            }
             _ = health_tick.tick() => {
                 if seq > 0 && !draining.load(Ordering::Relaxed) && !report_health(&mut sent_health) {
                     break;
@@ -996,6 +1067,19 @@ async fn pump(
         match item {
             Outgoing::Frame(bytes) => {
                 if draining.load(Ordering::Relaxed) {
+                    continue;
+                }
+                // An unloaded private account sends nothing yet: the client keeps
+                // what it shows until a re-snapshot carries the loaded account.
+                if seq == 0 && hold.is_some() && held.is_none() {
+                    if account_loaded(&handle).await {
+                        hold = None;
+                    } else {
+                        held = Some(std::time::Instant::now());
+                    }
+                }
+                if let Some(since) = held {
+                    release_hold(&handle, &name, &mut hold, since).await;
                     continue;
                 }
                 seq += 1;
@@ -1159,6 +1243,177 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod hold {
+        use super::super::*;
+        use safe_cex_engine::model::{
+            Limits, Market, MinMax, OrderSide, OrderStatus, OrderType, Position, PositionSide,
+            Precision,
+        };
+        use safe_cex_engine::{Command, Cx, HttpRequest, Response, SocketId, TimerId, Venue};
+        use safe_cex_native::{Events, Host, HostEvent, ServerConfig, Transport};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        #[derive(Clone, Default)]
+        struct Tape(Rc<RefCell<Option<Events>>>);
+        impl Transport for Tape {
+            fn connect(
+                &self,
+                socket: SocketId,
+                _: String,
+                events: Events,
+            ) -> tokio::sync::mpsc::UnboundedSender<String> {
+                *self.0.borrow_mut() = Some(events.clone());
+                let _ = events.send(HostEvent::WsOpened(socket));
+                tokio::sync::mpsc::unbounded_channel().0
+            }
+            fn request(&self, _: HttpRequest, _: Events) {}
+        }
+
+        /// Markets at start; orders and positions only when a message arrives.
+        struct LateAccount;
+        impl Venue for LateAccount {
+            type Pending = ();
+            fn capabilities(&self) -> safe_cex_engine::Capabilities {
+                safe_cex_engine::Capabilities::BASE
+            }
+            fn start(&mut self, cx: &mut Cx<'_, ()>) {
+                cx.store.set_markets(vec![Market {
+                    id: "BTCUSDT".into(),
+                    symbol: "BTCUSDT".into(),
+                    pretty_symbol: None,
+                    base: "BTC".into(),
+                    quote: "USDT".into(),
+                    active: true,
+                    precision: Precision {
+                        amount: 0.001,
+                        price: 0.1,
+                    },
+                    limits: Limits {
+                        amount: MinMax {
+                            min: 0.001,
+                            max: 1000.,
+                        },
+                        leverage: MinMax { min: 1., max: 100. },
+                        price: None,
+                    },
+                    contract_size: None,
+                    is_expiring: None,
+                    is_inverse: None,
+                    is_spot: None,
+                    is_perpetual: Some(true),
+                    is_read_only: None,
+                    taker_fee: None,
+                    maker_fee: None,
+                }]);
+                cx.connect("test");
+            }
+            fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+            fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, _: &str) {
+                cx.store.set_orders(vec![safe_cex_engine::model::Order {
+                    id: "o1".into(),
+                    parent_id: None,
+                    status: OrderStatus::Open,
+                    symbol: "BTCUSDT".into(),
+                    kind: OrderType::Limit,
+                    side: OrderSide::Buy,
+                    price: 100.,
+                    amount: 1.,
+                    filled: 0.,
+                    remaining: 1.,
+                    reduce_only: false,
+                    close: None,
+                    client_order_id: None,
+                    time_in_force: None,
+                    last_update: 0.,
+                    trigger_type: None,
+                    take_profit: None,
+                    stop_loss: None,
+                    extra: None,
+                }]);
+                cx.store.set_positions(vec![Position {
+                    id: "p1".into(),
+                    symbol: "BTCUSDT".into(),
+                    side: PositionSide::Long,
+                    entry_price: 100.,
+                    notional: 100.,
+                    leverage: 1.,
+                    margin_type: None,
+                    position_mode: None,
+                    unrealized_pnl: 0.,
+                    realized_pnl: None,
+                    contracts: 1.,
+                    liquidation_price: 0.,
+                    margin_size: None,
+                    last_update: None,
+                }]);
+            }
+            fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+            fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+            fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+            fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+            fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+            fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+                None
+            }
+            fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+                Box::new(std::iter::empty())
+            }
+        }
+
+        #[tokio::test]
+        async fn an_unloaded_private_account_sends_no_snapshot_until_it_loads() {
+            tokio::task::LocalSet::new()
+                .run_until(async {
+                    let tape = Tape::default();
+                    let engine = safe_cex_engine::test_support::seeded_engine(LateAccount);
+                    let config = ServerConfig {
+                        flush_every: std::time::Duration::from_millis(1),
+                        ..ServerConfig::default()
+                    };
+                    let (handle, _task) =
+                        safe_cex_native::spawn_account(Host::new(engine, tape.clone()), config)
+                            .unwrap();
+                    let link = handle.join(1, true).await.unwrap();
+                    let (out, mut sent, _) = Out::channel(64);
+                    let (loaded, mut loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+                    let pump = tokio::task::spawn_local(pump(
+                        link,
+                        handle.clone(),
+                        "acct".into(),
+                        out,
+                        Arc::default(),
+                        Arc::default(),
+                        Some(Hold { client: 1, loaded }),
+                    ));
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    while let Ok(text) = sent.try_recv() {
+                        assert!(
+                            !text.contains("\"op\":\"frame\""),
+                            "no frame while orders and positions are unloaded: {text}"
+                        );
+                    }
+                    assert!(loaded_rx.try_recv().is_err(), "not loaded yet");
+                    let events = tape.0.borrow().clone().unwrap();
+                    events
+                        .send(HostEvent::WsMessage(SocketId(1), "load".into()))
+                        .unwrap();
+                    let ready =
+                        tokio::time::timeout(std::time::Duration::from_secs(3), loaded_rx.recv())
+                            .await;
+                    assert_eq!(ready.unwrap(), Some(("acct".to_owned(), 1)));
+                    while let Ok(text) = sent.try_recv() {
+                        assert!(
+                            !text.contains("\"op\":\"frame\""),
+                            "the re-snapshot carries it"
+                        );
+                    }
+                    pump.abort();
+                })
+                .await;
+        }
+    }
 
     fn public_init() -> InitPayload {
         InitPayload {
