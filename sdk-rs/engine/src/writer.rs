@@ -8,7 +8,8 @@
 //! carries a [`WriterContext`] built from the host's own store; the writer
 //! replaces its scratch rows with it and keeps nothing between commands.
 use crate::model::{
-    MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode, PositionSide,
+    MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position, PositionMode,
+    PositionSide, StopTriggerType, TimeInForce,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -45,6 +46,18 @@ pub struct ContextOrder {
     /// amend of a Bybit stop is refused when this is absent.
     #[serde(default)]
     pub position_bound: Option<bool>,
+    /// Absent is open; amends refuse anything but open orders on some venues.
+    #[serde(default)]
+    pub status: Option<OrderStatus>,
+    #[serde(default)]
+    pub trigger_type: Option<StopTriggerType>,
+    #[serde(default)]
+    pub time_in_force: Option<TimeInForce>,
+    #[serde(default)]
+    pub close: Option<bool>,
+    /// A conditional or OCO order's limit price behind its trigger.
+    #[serde(default)]
+    pub conditional_order_price: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -74,7 +87,7 @@ impl WriterContext {
             .map(|order| Order {
                 id: order.id.clone(),
                 parent_id: None,
-                status: OrderStatus::Open,
+                status: order.status.unwrap_or(OrderStatus::Open),
                 symbol: order.symbol.clone(),
                 kind: order.kind,
                 side: order.side,
@@ -84,14 +97,17 @@ impl WriterContext {
                 filled: (order.amount - order.remaining).max(0.0),
                 remaining: order.remaining,
                 reduce_only: order.reduce_only,
-                close: None,
+                close: order.close,
                 client_order_id: order.client_order_id.clone(),
-                time_in_force: None,
+                time_in_force: order.time_in_force,
                 last_update: 0.0,
-                trigger_type: None,
+                trigger_type: order.trigger_type,
                 take_profit: None,
                 stop_loss: None,
-                extra: None,
+                extra: order.conditional_order_price.map(|price| OrderExtra {
+                    conditional_order_price: Some(price),
+                    ..OrderExtra::default()
+                }),
             })
             .collect()
     }

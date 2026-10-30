@@ -4715,7 +4715,10 @@ impl<V: Venue> Engine<V> {
                 let message = crate::writer::refusal(&command, cx.store.loaded().markets)
                     .expect("checked by the guard");
                 if let Some(id) = command.completion_id() {
-                    cx.refuse_before_entry(id, VenueError::new(message).outcome(crate::Outcome::NotSent));
+                    cx.refuse_before_entry(
+                        id,
+                        VenueError::new(message).outcome(crate::Outcome::NotSent),
+                    );
                 }
             }
             Event::PollScaleChanged { scale } => {
@@ -6133,8 +6136,17 @@ impl<V: Venue> Engine<V> {
         // A writer's rows are the host's own context: it never sends them back.
         if self.io.core.writes_only {
             self.io.core.fills.clear();
+            let ready = self.store.markets_pending() && self.store.loaded().markets;
             let pending = self.store.take_pending();
             self.store.recycle_pending(pending);
+            if ready {
+                let mut cx = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                };
+                cx.notice(Level::Info, log_code::WRITER_READY, "writer markets loaded");
+            }
             return None;
         }
         // A fill must not reach a consumer before its order: a book-cadence

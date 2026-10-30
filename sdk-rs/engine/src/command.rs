@@ -1273,8 +1273,6 @@ pub enum HostInput {
     Command {
         command: Command,
         timeout_ms: Option<u32>,
-        /// A writesOnly engine's view of the account for this write (`crate::writer`).
-        context: Option<Box<crate::writer::WriterContext>>,
     },
     PublicFeedUpdate(crate::PublicFeedUpdate),
     /// Factor on each venue poll's own cadence; infinity pauses polling. The
@@ -1339,8 +1337,6 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
         op: std::borrow::Cow<'a, str>,
         #[serde(default, rename = "timeoutMs", deserialize_with = "present")]
         timeout_ms: Option<u64>,
-        #[serde(default)]
-        context: Option<Box<crate::writer::WriterContext>>,
     }
     let header: Header<'_> = serde_json::from_str(json)?;
     if header.op == "publicFeedUpdate" {
@@ -1414,7 +1410,6 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
     decode_command(json).map(|command| HostInput::Command {
         command,
         timeout_ms,
-        context: header.context,
     })
 }
 
@@ -1589,8 +1584,7 @@ mod tests {
             decode_host_input(json).unwrap(),
             HostInput::Command {
                 command: expected,
-                timeout_ms: None,
-                context: None,
+                timeout_ms: None
             }
         );
         assert!(decode_command(r#"{"op":"fetchMaxLeverage","command":82}"#).is_err());

@@ -170,19 +170,6 @@ trait AnyEngine {
         self.handle(now, Event::Command(command));
         Ok(())
     }
-    /// A host command with its writer context (see `Engine::handle_writer_command`).
-    fn handle_writer_command(
-        &mut self,
-        now: f64,
-        command: safe_cex_engine::Command,
-        wait_ms: Option<u32>,
-        context: Option<safe_cex_engine::writer::WriterContext>,
-    ) -> Result<(), safe_cex_engine::request_context::Error> {
-        if context.is_some() {
-            return Err(safe_cex_engine::request_context::Error::Invalid);
-        }
-        self.handle_command(now, command, wait_ms)
-    }
     fn drain(&mut self) -> Vec<Action>;
     fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
     fn snapshot(&mut self, now: f64) -> &[u8];
@@ -339,16 +326,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
         wait_ms: Option<u32>,
     ) -> Result<(), safe_cex_engine::request_context::Error> {
         Engine::handle_command(self, now, command, wait_ms)
-    }
-
-    fn handle_writer_command(
-        &mut self,
-        now: f64,
-        command: safe_cex_engine::Command,
-        wait_ms: Option<u32>,
-        context: Option<safe_cex_engine::writer::WriterContext>,
-    ) -> Result<(), safe_cex_engine::request_context::Error> {
-        Engine::handle_writer_command(self, now, command, wait_ms, context)
     }
 
     fn drain(&mut self) -> Vec<Action> {
@@ -1451,10 +1428,9 @@ impl WasmEngine {
                 safe_cex_engine::command::HostInput::Command {
                     command,
                     timeout_ms,
-                    context,
                 } => {
                     self.inner
-                        .handle_writer_command(now, command, timeout_ms, context.map(|context| *context))
+                        .handle_command(now, command, timeout_ms)
                         .map_err(|error| JsError::new(&format!("{error:?}")))?;
                     return Ok(self.flush());
                 }
@@ -1484,10 +1460,9 @@ impl WasmEngine {
             safe_cex_engine::command::HostInput::Command {
                 command,
                 timeout_ms,
-                context,
             } => {
                 self.inner
-                    .handle_writer_command(now, command, timeout_ms, context.map(|context| *context))
+                    .handle_command(now, command, timeout_ms)
                     .map_err(|error| JsError::new(&format!("{error:?}")))?;
                 return Ok(self.flush());
             }

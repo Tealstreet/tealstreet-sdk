@@ -183,6 +183,8 @@ pub mod code {
     pub const SETTING_CAUTION: &str = "setting.caution";
     /// Startup progress, such as markets loaded.
     pub const STARTUP_PROGRESS: &str = "startup.progress";
+    /// A writesOnly engine's markets loaded (again, after a refresh): writes are admitted.
+    pub const WRITER_READY: &str = "writer.ready";
     /// A routine account summary, logged at Debug.
     pub const BALANCE_SUMMARY: &str = "balance.summary";
 
