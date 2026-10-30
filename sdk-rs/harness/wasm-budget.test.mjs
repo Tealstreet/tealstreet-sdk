@@ -220,9 +220,9 @@ test('Phemex carries the release-floor budget', () => {
 
 test('Woo carries its own budget', () => {
   // #2523's ORDERS/POSITIONS ingest grew woo (built at opt-level 3, no size profile) to
-  // 1,381,932 B in CI (c19ffdcfbef) against the default venue budget; ceil KiB + 2 KiB.
-  assert.equal(WASM_VENUE_OVERRIDES.woo, 1352 * 1024);
-  assert.equal(wasmBudgetError(1_381_932, 'venue', 'woo'), undefined);
-  assert.equal(wasmBudgetError(1_384_448, 'venue', 'woo'), undefined);
-  assert.match(wasmBudgetError(1_384_449, 'venue', 'woo'), /exceeds 1384448/);
+  // 1,382,216 B in CI (362122a5c86) against the default venue budget; CI + 10 KiB, as #2587.
+  assert.equal(WASM_VENUE_OVERRIDES.woo, 1360 * 1024);
+  assert.equal(wasmBudgetError(1_382_216, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(1_392_640, 'venue', 'woo'), undefined);
+  assert.match(wasmBudgetError(1_392_641, 'venue', 'woo'), /exceeds 1392640/);
 });
