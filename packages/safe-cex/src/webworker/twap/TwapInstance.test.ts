@@ -371,4 +371,39 @@ describe('TwapInstance', () => {
       expect(instance.currentOrderIds).toEqual(['twap-order-1']);
     });
   });
+
+  describe('Cross-tab owner lock', () => {
+    const options = (): TwapOptions => ({
+      accountName: 'test-account',
+      activeMarket: mockMarket,
+      size: 1,
+      duration: 10,
+      ordersCount: 2,
+      side: OrderSide.Buy,
+      chaserDelay: 0,
+      reduceOnly: false,
+      randomnessPercentage: 0,
+      useLimitOrders: false,
+      useChaserOrders: false,
+    });
+
+    it('releases the lock when the TWAP stops, and only once', async () => {
+      const instance = new TwapInstance(mockExchange, mockWorkerContext, options(), vi.fn());
+      const release = vi.fn();
+      instance.holdOwnerLock(release);
+      instance.pause();
+      expect(release).not.toHaveBeenCalled();
+      await instance.terminate();
+      await instance.terminate();
+      expect(release).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases a lock handed to an already completed TWAP at once', () => {
+      const state = { ...new TwapInstance(mockExchange, mockWorkerContext, options(), vi.fn()).state, status: TwapStatus.Completed };
+      const instance = new TwapInstance(mockExchange, mockWorkerContext, options(), vi.fn(), state, 'done');
+      const release = vi.fn();
+      instance.holdOwnerLock(release);
+      expect(release).toHaveBeenCalledTimes(1);
+    });
+  });
 });
