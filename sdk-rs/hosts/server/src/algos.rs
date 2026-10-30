@@ -22,6 +22,12 @@ pub enum AlgoInput {
         /// The socket that sent it, for the order audit line.
         origin: String,
     },
+    /// A hosted `nuke`/`nukePositions`/`nukeOrders` call: exec's nuke, answered
+    /// with `callMethod:done` once every leg has settled.
+    Nuke {
+        mode: &'static str,
+        request_id: Value,
+    },
     /// A socket of this account closed: its chases end, as today.
     SocketClosed,
     /// The account is going away: settle algos, then dispose the engine.
@@ -372,16 +378,17 @@ pub async fn run(
         cx.clone(),
         Rc::new(book.clone()),
     ));
+    // Exec's chase/TWAP handoff shares this account's book and TWAP schedule,
+    // under the server's trusted account name, never one from the payload.
+    let exec = Rc::new(safe_cex_exec::native::ExecFactory::with_algos(
+        name.clone(),
+        book.clone(),
+        (*twap).clone(),
+    ));
     let registry = Registry::new(vec![
         Box::new(chasers),
         Box::new(SharedTwap(twap.clone())),
-        // Exec's chase/TWAP handoff shares this account's book and TWAP schedule,
-        // under the server's trusted account name, never one from the payload.
-        Box::new(safe_cex_exec::native::ExecFactory::with_algos(
-            name.clone(),
-            book.clone(),
-            (*twap).clone(),
-        )),
+        Box::new(SharedExec(exec.clone())),
     ]);
     let mut published = String::new();
     // `store` rows the frames do not carry (`activeChasers`, `activeTWAPs`).
@@ -438,6 +445,32 @@ pub async fn run(
                     }
                     publish(&mut published);
                 }
+                Some(AlgoInput::Nuke { mode, request_id }) => {
+                    let started = exec.nuke(mode, &cx);
+                    let (port, name, who) = (port.clone(), name.clone(), who.clone());
+                    let settle = move |outcome: Result<Value, Value>| {
+                        let audit = match &outcome {
+                            Ok(_) => Value::from("ok"),
+                            Err(error) => error["message"].clone(),
+                        };
+                        crate::audit::log(&who, "callMethod", &crate::audit::algo_op("nuke", &Value::from(mode).to_string()), audit);
+                        let data = match outcome {
+                            // TS `nuke()` resolves undefined once every leg is accepted.
+                            Ok(_) => serde_json::json!({"requestId": request_id, "success": true, "result": null}),
+                            Err(mut error) => {
+                                if error.get("name").is_none() {
+                                    error["name"] = "Error".into();
+                                }
+                                serde_json::json!({"requestId": request_id, "success": false, "result": error})
+                            }
+                        };
+                        (port.emit)(crate::envelope::msg(&name, "callMethod:done", data));
+                    };
+                    match started {
+                        Ok(nuke) => cx.spawn(async move { settle(nuke.await) }),
+                        Err(error) => settle(Err(error)),
+                    }
+                }
                 Some(AlgoInput::SocketClosed) => {
                     let _ = registry.dispatch("chaser:terminateAll", "{}", &cx);
                     crate::audit::log(&who, "socket closed", &crate::audit::algo_op("chaser:terminateAll", "{}"), "ok".into());
@@ -467,6 +500,16 @@ pub async fn run(
     handle.dispose();
     if let Some(signer) = &link_signer {
         signer.mark_unavailable();
+    }
+}
+
+struct SharedExec(Rc<safe_cex_exec::native::ExecFactory>);
+impl safe_cex_algos::AlgoFactory for SharedExec {
+    fn ops(&self) -> &'static [&'static str] {
+        self.0.ops()
+    }
+    fn handle(&self, op: &str, data: &str, cx: &AlgoCx) -> Result<(), String> {
+        self.0.handle(op, data, cx)
     }
 }
 

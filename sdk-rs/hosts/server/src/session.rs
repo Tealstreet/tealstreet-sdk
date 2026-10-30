@@ -550,6 +550,26 @@ impl Session {
                     "callMethod:done",
                     json!({"requestId": request_id, "success": true, "result": result}),
                 )),
+                Plan::Nuke(mode) => {
+                    let algos = self.joined[name].account.algos.clone();
+                    let sent = algos.is_some_and(|algos| {
+                        algos
+                            .send(crate::algos::AlgoInput::Nuke {
+                                mode,
+                                request_id: request_id.clone(),
+                            })
+                            .is_ok()
+                    });
+                    if !sent {
+                        self.reply_failure(
+                            name,
+                            &request_id,
+                            "Error",
+                            "nuke is unavailable for this account",
+                            Some("notSent"),
+                        );
+                    }
+                }
                 Plan::Read(read) => {
                     let answer = account
                         .handle
