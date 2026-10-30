@@ -152,7 +152,7 @@ enum Node {
     Map(Vec<(String, Node)>),
 }
 
-// serde_json's arbitrary_precision presents numbers as this single-entry map.
+// serde_json's exact-number feature presents numbers as this single-entry map.
 const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
 impl Node {

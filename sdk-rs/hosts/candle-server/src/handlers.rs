@@ -58,10 +58,6 @@ fn js_upper(text: &str) -> String {
     text.to_uppercase()
 }
 
-fn utf16_len(text: &str) -> usize {
-    text.encode_utf16().count()
-}
-
 fn parse_exchange(query: &Query) -> Result<String, String> {
     match query.get("exchange") {
         Some(exchange) if !exchange.is_empty() && safe_cex_venues::supported(exchange) => {
@@ -349,7 +345,7 @@ pub async fn markets(app: &App, query: &Query) -> Reply {
                 let needle = js_upper(raw.trim());
                 if needle.is_empty() {
                     None
-                } else if utf16_len(&needle) > 64 {
+                } else if needle.chars().count() > 64 {
                     return Err("query must be 64 characters or fewer".to_owned());
                 } else {
                     Some(needle)
@@ -436,7 +432,7 @@ pub async fn market(app: &App, query: &Query) -> Reply {
         Err(message) => return bad_request(message),
     };
     let symbol = query.get("symbol").map(str::trim).unwrap_or("");
-    if symbol.is_empty() || utf16_len(symbol) > 96 {
+    if symbol.is_empty() || symbol.chars().count() > 96 {
         return bad_request("symbol is required and must be 96 characters or fewer");
     }
     let resident = match app.pool.hold(&exchange).await {
