@@ -284,6 +284,9 @@ pub fn refuse_unhosted(venue: &str) -> Result<(), String> {
 
 /// As NX `BYBIT_SITE_ID_EXCHANGES`: only these venues have a regional site.
 const BYBIT_SITE_VENUES: [&str; 3] = ["bybit", "bybitinverse", "bybitspot"];
+/// Venues that read the Hyperliquid builder and vault; the browser sends the
+/// builder with every account's init, whatever its venue.
+const HYPERLIQUID_VENUES: [&str; 2] = ["hyperliquid", "hyperliquidspot"];
 
 /// A Bybit site on another venue would change nothing the browser engine does,
 /// so the init is refused rather than trusted to route.
@@ -326,8 +329,10 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
     }
+    let hyperliquid = HYPERLIQUID_VENUES.contains(&init.exchange_name.as_str());
     if let Some(vault) = init.vault.as_ref().filter(|vault| !vault.is_empty())
         && !public_only
+        && hyperliquid
     {
         options.insert("vault".into(), vault.clone().into());
     }
@@ -349,7 +354,7 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     if let Some(builder) = init
         .hyperliquid_builder
         .as_ref()
-        .filter(|builder| usable_builder(builder))
+        .filter(|builder| hyperliquid && usable_builder(builder))
     {
         options.insert(
             "hyperliquidBuilder".into(),
@@ -370,11 +375,8 @@ pub struct Prepared {
     pub remote: Option<safe_cex_remote_signer::RemoteAccount>,
 }
 
-pub fn prepare(
-    init: &InitPayload,
-    public_only: bool,
-    link: Option<Arc<SignerLink>>,
-) -> Result<Prepared, String> {
+/// The account's resolved routing, as its engine thread receives it.
+fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, String> {
     let venue = &init.exchange_name;
     let transport_flags = AccountTransport {
         tealstreet_proxy: init.tealstreet_proxy,
@@ -395,8 +397,43 @@ pub fn prepare(
     }
     let base_url = resolve::rest_base_url(venue, init.testnet.unwrap_or(false))
         .map_err(|error| error.to_string())?;
-    let plan = resolve::resolve_routing_plan(venue, &inputs, base_url, Provider::Tealstreet)
-        .map_err(|error| error.to_string())?;
+    resolve::resolve_routing_plan(venue, &inputs, base_url, Provider::Tealstreet)
+        .map_err(|error| error.to_string())
+}
+
+/// What an account's engine is built from: its venue, its venue-scoped engine
+/// options and its resolved routing, as one flat JSON object (so the names of
+/// differing fields stay readable). Two inits that would build the same engine
+/// share it, whatever else differs between the clients that sent them: a field
+/// another venue reads, a default sent explicitly, flags resolving alike.
+pub fn build_fingerprint(init: &InitPayload) -> String {
+    let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
+    let mut fields = match engine_options(init, public_only) {
+        Value::Object(options) => options,
+        _ => Map::new(),
+    };
+    fields.insert("venue".into(), init.exchange_name.clone().into());
+    // An init that cannot route is refused at build; its raw flags still tell inits apart.
+    let routing = match routing_plan(init, public_only) {
+        Ok(plan) => serde_json::to_value(plan).unwrap_or(Value::Null),
+        Err(_) => json!([
+            init.tealstreet_proxy,
+            init.tealstreet_tunnel,
+            init.tealstreet_ws_route,
+            init.proxy_region
+        ]),
+    };
+    fields.insert("routing".into(), routing);
+    Value::Object(fields).to_string()
+}
+
+pub fn prepare(
+    init: &InitPayload,
+    public_only: bool,
+    link: Option<Arc<SignerLink>>,
+) -> Result<Prepared, String> {
+    let venue = &init.exchange_name;
+    let plan = routing_plan(init, public_only)?;
     let options = engine_options(init, public_only).to_string();
     let Some(link) = link else {
         return Ok(Prepared {
@@ -1270,12 +1307,11 @@ mod tests {
         };
         let b = InitPayload {
             enable_spot_markets: Some(true),
-            testnet: Some(true),
             ..a.clone()
         };
         assert_eq!(
             differing_fields(&a.fingerprint(), &b.fingerprint()),
-            ["enableSpotMarkets", "testnet"]
+            ["enableSpotMarkets"]
         );
         assert!(differing_fields(&a.fingerprint(), &a.fingerprint()).is_empty());
     }
@@ -1428,6 +1464,118 @@ mod tests {
         let main = init_frame("");
         let vault = init_frame(r#","vault":"0x3333333333333333333333333333333333333333""#);
         assert_ne!(main.fingerprint(), vault.fingerprint());
+    }
+
+    #[test]
+    fn only_what_builds_the_engine_makes_two_inits_differ() {
+        let bybit = InitPayload {
+            account_name: "bear5".into(),
+            exchange_name: "bybit".into(),
+            key: "k".into(),
+            ..InitPayload::default()
+        };
+        let builder = || {
+            Some(crate::envelope::HyperliquidBuilder {
+                address: format!("0x{}", "4".repeat(40)),
+                fee_tenths_bps: 10.0,
+            })
+        };
+        // A Hyperliquid-only setting, a default sent explicitly, diagnostics: same engine.
+        for same in [
+            InitPayload {
+                hyperliquid_builder: builder(),
+                ..bybit.clone()
+            },
+            InitPayload {
+                enable_spot_markets: Some(false),
+                testnet: Some(false),
+                ..bybit.clone()
+            },
+            InitPayload {
+                vault: Some("0x33".into()),
+                ..bybit.clone()
+            },
+            InitPayload {
+                verbose: Some(true),
+                ..bybit.clone()
+            },
+        ] {
+            assert_eq!(same.fingerprint(), bybit.fingerprint(), "{same:?}");
+        }
+        // What the Bybit engine reads still tells them apart.
+        for other in [
+            InitPayload {
+                key: "k2".into(),
+                ..bybit.clone()
+            },
+            InitPayload {
+                enable_spot_markets: Some(true),
+                ..bybit.clone()
+            },
+            InitPayload {
+                bybit_site_id: Some("BRA_BTL".into()),
+                ..bybit.clone()
+            },
+        ] {
+            assert_ne!(other.fingerprint(), bybit.fingerprint(), "{other:?}");
+        }
+        // On Hyperliquid the builder is part of the engine.
+        let hyperliquid = InitPayload {
+            exchange_name: "hyperliquid".into(),
+            key: "0xabc".into(),
+            ..bybit.clone()
+        };
+        assert_ne!(
+            InitPayload {
+                hyperliquid_builder: builder(),
+                ..hyperliquid.clone()
+            }
+            .fingerprint(),
+            hyperliquid.fingerprint()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn two_clients_differing_only_in_the_hyperliquid_builder_share_a_bybit_account() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = SignerLink::new(1, Arc::new(|_| true));
+                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .insert(("u".into(), "acct".into()), account.clone());
+                let other_device = InitPayload {
+                    hyperliquid_builder: Some(crate::envelope::HyperliquidBuilder {
+                        address: format!("0x{}", "4".repeat(40)),
+                        fee_tenths_bps: 10.0,
+                    }),
+                    ..init.clone()
+                };
+                assert!(
+                    registry
+                        .rebuild_refusal("u", &other_device, false, 5)
+                        .is_none()
+                );
+                let shared = registry
+                    .obtain("u", &other_device, false, 5, None, Arc::new(|_| true))
+                    .await
+                    .unwrap();
+                assert!(
+                    Arc::ptr_eq(&shared, &account),
+                    "one account for both clients"
+                );
+                assert!(algos.try_recv().is_err(), "never disposed");
+            })
+            .await;
     }
 
     #[test]
