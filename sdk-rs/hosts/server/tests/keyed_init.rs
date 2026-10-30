@@ -116,6 +116,51 @@ async fn build_private(init: &InitPayload) -> Result<(), String> {
     signed
 }
 
+/// `accountToExchangeOptions` forwards `vault` (supportsVault) and the normalized
+/// `bybitSiteId`; `buildInitPayload` copies them as they are (NX #8340).
+#[tokio::test(flavor = "current_thread")]
+async fn vault_and_bybit_site_reach_the_engine_options() {
+    let vault = "0x3333333333333333333333333333333333333333";
+    let cases = [
+        (
+            "hyperliquid",
+            json!({ "key": WALLET, "vault": vault }),
+            "vault",
+            vault,
+        ),
+        (
+            "bybit",
+            json!({ "bybitSiteId": "BRA_BTL" }),
+            "bybitSiteId",
+            "BRA_BTL",
+        ),
+    ];
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            for (venue, fields, field, expected) in cases {
+                let mut frame: Value = serde_json::from_str(&browser_init(venue, true)).unwrap();
+                for (name, value) in fields.as_object().unwrap() {
+                    frame["d"][name] = value.clone();
+                }
+                let init = parse(&frame.to_string());
+                let (sender, _frames) = mpsc::unbounded_channel::<String>();
+                let link = SignerLink::new(1, Arc::new(move |frame| sender.send(frame).is_ok()));
+                let Prepared { options, plan, .. } = prepare(&init, false, Some(link)).unwrap();
+                let built: Value = serde_json::from_str(&options).unwrap();
+                assert_eq!(built[field], expected, "{venue}: {built}");
+                if field == "bybitSiteId" {
+                    let plan = serde_json::to_string(&plan).unwrap();
+                    assert!(plan.contains("BRA_BTL"), "{plan}");
+                }
+                build_private(&init)
+                    .await
+                    .unwrap_or_else(|error| panic!("{venue}: {error}"));
+            }
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn every_core_venue_keyed_init_builds_a_private_engine() {
     const VENUES: [&str; 13] = [
