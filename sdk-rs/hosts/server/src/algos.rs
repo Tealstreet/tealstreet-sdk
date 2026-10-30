@@ -129,13 +129,17 @@ impl AccountPort for Port {
         })
     }
     fn emit(&self, op: &str, data: String) {
-        let data: Value = serde_json::from_str(&data).unwrap_or(Value::String(data));
-        (self.emit)(crate::envelope::msg(
-            &self.name,
-            op,
-            Value::Array(vec![data]),
-        ));
+        (self.emit)(algo_msg(&self.name, op, data));
     }
+}
+
+/// An algo's reply as the worker posted it: `{op, data}` with `data` verbatim.
+/// The web spreads an array `data` into listener arguments and wraps a lone
+/// value, so wrapping here nested arrays and turned `twap:stateUpdate`'s
+/// object into an array its handler discards.
+fn algo_msg(account_name: &str, op: &str, data: String) -> String {
+    let data: Value = serde_json::from_str(&data).unwrap_or(Value::String(data));
+    crate::envelope::msg(account_name, op, data)
 }
 
 fn project(store: &safe_cex_engine::Store) -> Snapshot {
@@ -536,6 +540,85 @@ impl safe_cex_algos::AlgoFactory for SharedTwap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    /// What `exchangeAccountController` hands its listeners for an algo op.
+    fn web_listener_args(frame: &str) -> (String, Vec<Value>) {
+        let frame: Value = serde_json::from_str(frame).unwrap();
+        let op = frame["d"]["op"].as_str().unwrap().to_owned();
+        let data = frame["d"]["data"].clone();
+        let args = match op.as_str() {
+            // `emit(op, ...(Array.isArray(data) ? data : [data]))`
+            "error" | "warning" | "log" | "exec-log" | "exec-result" => match data {
+                Value::Array(items) => items,
+                other => vec![other],
+            },
+            // `const [event] = Array.isArray(data) ? data : [data]`
+            "chaser:complete" => match data {
+                Value::Array(items) => items.into_iter().take(1).collect(),
+                other => vec![other],
+            },
+            // Persisted only when `data` is a non-array object.
+            "twap:stateUpdate" => match data {
+                Value::Object(_) => vec![data],
+                _ => vec![json!({})],
+            },
+            other => panic!("unexpected algo op {other}"),
+        };
+        (op, args)
+    }
+
+    fn emitted(op: &str, data: Value) -> Vec<Value> {
+        let (seen, args) = web_listener_args(&algo_msg("acct", op, data.to_string()));
+        assert_eq!(seen, op);
+        args
+    }
+
+    #[test]
+    fn algo_messages_carry_data_verbatim() {
+        let frame: Value = serde_json::from_str(&algo_msg(
+            "acct",
+            "twap:stateUpdate",
+            json!({"t": 1}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(
+            frame["d"],
+            json!({"op": "twap:stateUpdate", "accountName": "acct", "data": {"t": 1}})
+        );
+    }
+
+    #[test]
+    fn every_algo_op_reaches_web_listeners_in_the_worker_shape() {
+        // TWAP: the state object clients persist, and errors as one message.
+        let state =
+            json!({"twap-1": {"options": {"accountName": "acct"}, "state": {"status": "running"}}});
+        assert_eq!(emitted("twap:stateUpdate", state.clone()), [state]);
+        assert_eq!(
+            emitted("error", json!("TWAP BTCUSDT rejected: x")),
+            [json!("TWAP BTCUSDT rejected: x")]
+        );
+        // Chaser: warning, error and log messages, and the completion event.
+        for op in ["warning", "error", "log"] {
+            assert_eq!(
+                emitted(op, json!("[CHASERc1] m")),
+                [json!("[CHASERc1] m")],
+                "{op}"
+            );
+        }
+        let complete = json!({"id": "c1", "symbol": "BTCUSDT", "filled": 1.0});
+        assert_eq!(emitted("chaser:complete", complete.clone()), [complete]);
+        // Exec: the result and log objects.
+        let result = json!({"reqId": "r1", "handled": true, "success": true});
+        assert_eq!(emitted("exec-result", result.clone()), [result]);
+        let log = json!({"message": "m", "reqId": "r1"});
+        assert_eq!(emitted("exec-log", log.clone()), [log]);
+        // The server's own refusal of an algo op.
+        assert_eq!(
+            emitted("error", Value::String("unhandled op".into())),
+            [json!("unhandled op")]
+        );
+    }
     use safe_cex_engine::model::{Limits, MinMax, Precision};
 
     fn market(symbol: &str) -> Market {
