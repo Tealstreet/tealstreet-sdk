@@ -174,6 +174,25 @@ pub fn refuse_unhosted(venue: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// As NX `BYBIT_SITE_ID_EXCHANGES`: only these venues have a regional site.
+const BYBIT_SITE_VENUES: [&str; 3] = ["bybit", "bybitinverse", "bybitspot"];
+
+/// A Bybit site on another venue would change nothing the browser engine does,
+/// so the init is refused rather than trusted to route.
+pub fn refuse_misplaced_site(init: &InitPayload) -> Result<(), String> {
+    let has_site = init
+        .bybit_site_id
+        .as_ref()
+        .is_some_and(|site| !site.is_empty());
+    if has_site && !BYBIT_SITE_VENUES.contains(&init.exchange_name.as_str()) {
+        return Err(format!(
+            "bybitSiteId applies only to Bybit accounts, not {}",
+            init.exchange_name
+        ));
+    }
+    Ok(())
+}
+
 pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     let mut options = Map::new();
     if !public_only {
@@ -257,6 +276,7 @@ pub fn prepare(
         testnet: init.testnet,
     };
     refuse_unhosted(venue)?;
+    refuse_misplaced_site(init)?;
     let mut inputs =
         resolve::account_transport(venue, &transport_flags).map_err(|error| error.to_string())?;
     // The Brazil site has its own host and `x-site-id` header.
@@ -789,6 +809,28 @@ mod tests {
             Err(HYROTRADER_UNHOSTED.to_owned())
         );
         assert_eq!(refuse_unhosted("bybit"), Ok(()));
+    }
+
+    #[test]
+    fn a_bybit_site_is_refused_outside_the_bybit_family() {
+        let site = |venue: &str, site: &str| InitPayload {
+            account_name: "a".into(),
+            exchange_name: venue.into(),
+            key: "k".into(),
+            bybit_site_id: Some(site.into()),
+            ..InitPayload::default()
+        };
+        for venue in BYBIT_SITE_VENUES {
+            assert_eq!(refuse_misplaced_site(&site(venue, "BRA_BTL")), Ok(()));
+        }
+        for venue in ["binance", "hyperliquid", "okx"] {
+            let refused = prepare(&site(venue, "BRA_BTL"), true, None).err();
+            assert_eq!(
+                refused.as_deref(),
+                Some(format!("bybitSiteId applies only to Bybit accounts, not {venue}").as_str())
+            );
+            assert_eq!(refuse_misplaced_site(&site(venue, "")), Ok(()));
+        }
     }
 
     #[test]
