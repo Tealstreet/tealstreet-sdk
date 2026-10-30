@@ -246,6 +246,10 @@ impl AccountState {
 
 impl Okx {
     pub(crate) fn account_after_uncertain_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        // A frame-fed engine's data source reports the outcome in its frames.
+        if cx.frame_fed() {
+            return;
+        }
         // A backoff re-ask joins any running read: the seal's own ask already
         // restarted reads, so a running one postdates the write.
         if cx.reconcile_reask() && self.account.orders_in_flight {
@@ -259,6 +263,9 @@ impl Okx {
     }
 
     pub(crate) fn account_after_settings(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.frame_fed() {
+            return;
+        }
         self.account.join = None;
         self.account.generation += 1;
         self.account.revision += 1;
@@ -266,7 +273,8 @@ impl Okx {
     }
 
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none()
+        if cx.frame_fed()
+            || self.credentials.is_none()
             || self.account.config_in_flight
             || self.account.startup_rejected
         {
