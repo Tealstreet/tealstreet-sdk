@@ -1302,6 +1302,10 @@ pub const FRAME_FED_VENUES: &[&str] = &[
     "bybitdemo",
     "hyperliquid",
     "hyperliquidspot",
+    "okx",
+    "okxeu",
+    "okxdemo",
+    "okxeudemo",
 ];
 
 pub fn frame_fed_supported(venue: &str) -> bool {
