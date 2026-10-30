@@ -337,7 +337,7 @@ impl Session {
                 .rebuild_refusal(self.user(), &init, public_only, self.socket)
         {
             if first_refusal(&mut self.refused, &init.account_name, &refusal) {
-                self.send(envelope::error(Some(&init.account_name), &refusal));
+                self.send(envelope::init_refused(&init.account_name, &refusal));
             }
             return Ok(());
         }
@@ -1327,6 +1327,50 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// On the wire: a second client's init with other engine settings, as the
+    /// browser sends it, against an account another live socket holds.
+    #[tokio::test(start_paused = true)]
+    async fn a_refused_init_answers_one_t_first_actionable_error_frame() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let (account, _algos) =
+                    crate::accounts::tests::held_account_with(Some(link), init.fingerprint());
+                crate::accounts::tests::register(&registry, &account);
+                let (out, mut sent, _) = Out::channel(64);
+                let identity = Identity {
+                    user: Some("u".into()),
+                    token: Some(("t".into(), u64::MAX)),
+                    resume_from: None,
+                    resumable: false,
+                };
+                let mut session = Session::new(registry, Arc::new(Metrics::default()), identity, out);
+                let other = InitPayload {
+                    enable_spot_markets: Some(true),
+                    ..init
+                };
+                let wire = format!(r#"{{"t":"init","d":{}}}"#, serde_json::to_string(&other).unwrap());
+                for _ in 0..3 {
+                    assert!(session.handle(&wire).await.is_ok());
+                }
+                let frame = sent.try_recv().expect("the refusal frame");
+                assert_eq!(
+                    frame,
+                    r#"{"t":"msg","d":{"accountName":"acct","data":["acct is open in another window or on another device with different settings (enableSpotMarkets). The change was not applied and that copy keeps running: close it there, or reload both, and this one will load with the new settings.",{"forceToast":true,"initRefused":true}],"op":"error"}}"#
+                );
+                assert!(sent.try_recv().is_err(), "retries are quiet");
+                assert_eq!(crate::accounts::tests::signing(&account), Some(7));
+            })
+            .await;
+    }
 
     #[test]
     fn a_settings_refusal_is_sent_once_until_its_fields_change_or_it_resolves() {

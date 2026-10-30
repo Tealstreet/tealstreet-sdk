@@ -149,6 +149,19 @@ pub fn error(account_name: Option<&str>, message: &str) -> String {
     )
 }
 
+/// An init the server will not build: shown to the user at once (`forceToast`),
+/// and marked `initRefused` so the client can stop waiting for that account to load.
+pub fn init_refused(account_name: &str, message: &str) -> String {
+    envelope(
+        "msg",
+        json!({
+            "op": "error",
+            "accountName": account_name,
+            "data": [message, {"forceToast": true, "initRefused": true}],
+        }),
+    )
+}
+
 pub fn session(resume_id: &str, resumed: bool) -> String {
     envelope(
         "session",

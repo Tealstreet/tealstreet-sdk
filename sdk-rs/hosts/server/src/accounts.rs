@@ -971,7 +971,7 @@ pub fn resume_id() -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A venue that does nothing: the registry tests need only its handle.
@@ -1036,7 +1036,7 @@ mod tests {
     }
 
     /// `held_account` with a signer link and the fingerprint it was built from.
-    fn held_account_with(
+    pub(crate) fn held_account_with(
         link: Option<Arc<SignerLink>>,
         fingerprint: String,
     ) -> (
@@ -1076,7 +1076,20 @@ mod tests {
         (account, inbox)
     }
 
-    fn registry() -> Arc<Registry> {
+    /// The socket `account` signs through.
+    pub(crate) fn signing(account: &Account) -> Option<u64> {
+        account.holders.lock().unwrap().signing
+    }
+
+    /// `account` as the registry's account for its (user, name).
+    pub(crate) fn register(registry: &Registry, account: &Arc<Account>) {
+        registry.accounts.lock().unwrap().insert(
+            (account.user.clone(), account.name.clone()),
+            account.clone(),
+        );
+    }
+
+    pub(crate) fn registry() -> Arc<Registry> {
         Arc::new(Registry::new(
             EngineThreads::start(1).unwrap(),
             Duration::from_millis(1),
