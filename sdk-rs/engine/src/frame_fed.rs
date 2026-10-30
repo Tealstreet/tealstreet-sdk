@@ -12,6 +12,10 @@ pub const MARKETS_NOT_LOADED: &str = "markets not loaded";
 /// Refusal for a command a frame-fed engine leaves to its data source.
 pub const DATA_SOURCE_ONLY: &str = "a frameFed engine executes only writes";
 
+/// How long after a fence was raised a source frame must have been written to
+/// lift it: the venue's own propagation to the source's private stream.
+pub const FENCE_GRACE_MS: f64 = 3_000.0;
+
 /// The commands a frame-fed engine executes itself.
 pub fn is_write(command: &Command) -> bool {
     matches!(

@@ -596,6 +596,14 @@ impl Lighter {
             return;
         }
         self.account.started = true;
+        if cx.frame_fed() {
+            // The data source owns the account rows, settings and lookup; the
+            // account index arrives in VENUE_STATE. Only the own credential loads.
+            if !self.options.public_data_only {
+                self.load_credential();
+            }
+            return;
+        }
         cx.store.set_hedged(false);
         for m in cx.store.markets().to_vec() {
             let mode = self.metadata.get(&m.symbol).map_or(0, |v| v.margin_mode);
@@ -621,6 +629,10 @@ impl Lighter {
             cx.store.set_balance(Balance::default());
             return;
         }
+        self.load_credential();
+        self.next_lookup(cx, self.lookup_candidates());
+    }
+    fn load_credential(&mut self) {
         self.account.identity = self
             .options
             .identity
@@ -631,7 +643,21 @@ impl Lighter {
             .api_key_index
             .as_deref()
             .and_then(|s| s.parse::<u8>().ok());
-        self.next_lookup(cx, self.lookup_candidates());
+    }
+    /// Frame-fed: the data source's resolved account index, refused when it
+    /// names another account than the configured Application ID.
+    pub(crate) fn apply_account_index(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
+        if let Some(expected) = self.options.application_id.as_deref().and_then(index)
+            && expected != account
+        {
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "Lighter data source names a different account index",
+            );
+            return;
+        }
+        self.account.account_index = Some(account);
     }
     pub(crate) fn lookup_candidates(&self) -> VecDeque<Lookup> {
         self.candidates(true)
@@ -838,7 +864,8 @@ impl Lighter {
             .then_some(self.account.snapshot_serial)
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.snapshot_inflight {
+        // Frame-fed account rows and their reconcile arrive from the data source.
+        if cx.frame_fed() || self.account.snapshot_inflight {
             return;
         }
         let Some(account) = self.account.account_index else {
@@ -860,7 +887,7 @@ impl Lighter {
         );
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.orders_inflight || self.account.identity.is_none() {
+        if cx.frame_fed() || self.account.orders_inflight || self.account.identity.is_none() {
             return;
         }
         if self.account.account_index.is_none() {

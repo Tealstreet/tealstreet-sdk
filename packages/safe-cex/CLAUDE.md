@@ -1371,6 +1371,16 @@ Is requiresCors true?
   relay sockets read the token after awaits or on open, so they bind the lookup
   at request/socket start through `HOWConfig.bindProxyToken`
   (`bindProxyTokenLookup`); the engine creates relays inside the scope.
+- **A proxied REST request never leaves without proxy authorization.** The
+  browser SharedWorker and the CLI answer `''` while their token warms; the
+  provider's `authorize` polls for up to `PROXY_TOKEN_WAIT_MS` (15 s), then
+  throws `ProxyTokenUnavailableError` ("Tealstreet proxy authorization
+  missing"). The edge's plain-text 401 (`Authorization header is missing` /
+  `Invalid JWT`) reaches a Rust engine as a transport failure, after a token
+  refresh, never as a 401: venues classify a 401 as a refused key
+  (`auth.rejected`). The engine transport reports either failure once per
+  outage through `createEngineTransport`'s `onProxyAuthorizationFailure`, which
+  `RustEngineExchange` sends to `emitAndLogError`. A venue's own 401 passes through.
 - **Static validation**: `exchangeMetadata.test.ts` has invariant tests that catch impossible configurations (e.g., `requiresCors + forbidCors`). Run `yarn test-ci` after changing metadata.
 - **Unknown metadata fails closed**: `getExchangeMetadata` throws for runtime
   names outside the exhaustive registry. Never restore a venue-shaped fallback;

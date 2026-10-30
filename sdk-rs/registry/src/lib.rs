@@ -1297,6 +1297,10 @@ fn read_key_options(
 pub const FRAME_FED_VENUES: &[&str] = &[
     "binance",
     "binanceinverse",
+    "bingx",
+    "bitget",
+    "bitgetinverse",
+    "bitgetusdc",
     "blofin",
     "bybit",
     "bybitinverse",
@@ -1304,6 +1308,13 @@ pub const FRAME_FED_VENUES: &[&str] = &[
     "bybitdemo",
     "hyperliquid",
     "hyperliquidspot",
+    "lighter",
+    "lighter-robinhood",
+    "okx",
+    "okxeu",
+    "okxdemo",
+    "okxeudemo",
+    "phemex",
 ];
 
 pub fn frame_fed_supported(venue: &str) -> bool {

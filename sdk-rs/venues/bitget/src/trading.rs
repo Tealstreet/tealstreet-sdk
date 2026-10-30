@@ -556,8 +556,10 @@ impl BitgetFutures {
     }
 
     fn start_job(&mut self, cx: &mut Cx<'_, Pending>, preflight: Preflight, intent: Command) {
+        // Frame-fed: settings and hedge mode arrive as frames, never read here.
         let metadata = symbols(cx, &intent)
             .into_iter()
+            .filter(|_| !cx.frame_fed())
             .filter(|symbol| {
                 cx.store.setting(symbol).is_none()
                     || (!cx
@@ -2420,6 +2422,7 @@ impl BitgetFutures {
                     answer = Answer::Accepted(vec![next.clone()]);
                     job.ids.push(next);
                 } else {
+                    // Frame-fed too: this read is part of the amend's own sequence, as LOCAL.
                     job.calls.push_front(Planned {
                         path: paths::ORDER_DETAIL,
                         payload: Payload {

@@ -77,6 +77,8 @@ struct Bound {
     request: RequestId,
     deadline: Instant,
     packet: Packet,
+    /// Sent through the Tealstreet REST proxy, whose own 401 is not the venue's.
+    proxied: bool,
 }
 impl fmt::Debug for Bound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -135,12 +137,17 @@ pub(super) fn prepare(
                     let token = (state.tokens)().await.map_err(|_| {
                         HttpPrepareError::Transport("Proxy authorization failed".into())
                     })?;
-                    if !token.is_empty() {
-                        proxy_header = Some((
-                            route.authorization_header.clone(),
-                            format!("Bearer {token}"),
+                    // Without a token the edge answers a plain 401 that venues read as a
+                    // refused key; the request is refused here instead, as our own failure.
+                    if token.is_empty() {
+                        return Err(HttpPrepareError::Transport(
+                            PROXY_AUTHORIZATION_MISSING.into(),
                         ));
                     }
+                    proxy_header = Some((
+                        route.authorization_header.clone(),
+                        format!("Bearer {token}"),
+                    ));
                 }
                 if route.mode == HttpRouteMode::How {
                     let state = routing.as_ref().expect("route has a routing state");
@@ -253,6 +260,8 @@ impl PreparedHttp for Prepared {
             }
             insert_header(&mut headers, name, value);
         }
+        let proxied =
+            self.socket.is_none() && self.route.as_ref().is_some_and(|route| route.authorize);
         let packet = if let Some(socket) = self.socket.take() {
             let packet = http_packet(&packet, &headers)
                 .map_err(|_| HttpPrepareError::Invalid("Invalid HTTP tunnel packet"))?;
@@ -288,6 +297,7 @@ impl PreparedHttp for Prepared {
             request: self.request,
             deadline: self.deadline,
             packet,
+            proxied,
         }))
     }
 }
@@ -302,13 +312,14 @@ impl BoundHttp for Bound {
             request,
             deadline,
             packet,
+            proxied,
         } = *self;
         // These are the last controllable transport API calls. Route/token/HOW
         // preparation and packet validation have all finished before this point.
         let response: Pin<Box<dyn Future<Output = Result<(), String>> + Send>> = match packet {
             Packet::Direct(http, packet) => {
                 let response = http.execute(*packet);
-                Box::pin(direct_response(response, request, events.clone()))
+                Box::pin(direct_response(response, request, events.clone(), proxied))
             }
             Packet::How(mut socket, packet) => {
                 let sent = socket.start_send_unpin(Message::Text(packet.into()));
@@ -342,14 +353,59 @@ impl BoundHttp for Bound {
     }
 }
 
+const PROXY_AUTHORIZATION_MISSING: &str =
+    "Tealstreet proxy authorization missing: no proxy token, so the private request was not sent";
+
+/// The edge's own refusal of our proxy authorization, as opposed to a venue's 401.
+fn is_proxy_auth_refusal(body: &str) -> bool {
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value["message"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| body.trim().to_owned());
+    message == "Authorization header is missing" || message == "Invalid JWT"
+}
+
 async fn direct_response(
     response: impl Future<Output = Result<reqwest::Response, reqwest::Error>>,
     request: RequestId,
     events: Events,
+    proxied: bool,
 ) -> Result<(), String> {
     let response = response
         .await
         .map_err(|error| error.without_url().to_string())?;
+    // The edge's 401 fails as a transport error (retried by the venue's read
+    // policy), never as a 401 the venue would classify as a refused key.
+    if proxied && response.status().as_u16() == 401 {
+        let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| Some(format!("{name}: {}", value.to_str().ok()?)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let body = response
+            .bytes()
+            .await
+            .map_err(|error| error.without_url().to_string())?;
+        let text = String::from_utf8_lossy(&body);
+        if is_proxy_auth_refusal(&text) {
+            return Err(format!(
+                "Tealstreet proxy refused our proxy authorization (HTTP 401: {})",
+                text.trim()
+            ));
+        }
+        let _ = events.send(HostEvent::HttpStart {
+            request,
+            status,
+            headers,
+        });
+        for piece in body.chunks(16 * 1024) {
+            let _ = events.send(HostEvent::HttpChunk(request, piece.to_vec()));
+        }
+        let _ = events.send(HostEvent::HttpEnd(request));
+        return Ok(());
+    }
     let headers = response
         .headers()
         .iter()
@@ -532,6 +588,122 @@ mod tests {
         assert!(bound.ready());
         tokio::time::advance(Duration::from_millis(21)).await;
         assert!(!bound.ready()); // neither signing/binding nor claim resets it
+    }
+
+    fn proxied(tokens: ProxyTokenProvider) -> NetworkTransport {
+        NetworkTransport::with_routing(
+            RoutingPlan {
+                http: HttpRoute {
+                    authorize: true,
+                    ..HttpRoute::default()
+                },
+                ..RoutingPlan::default()
+            },
+            tokens,
+        )
+    }
+
+    /// One HTTP exchange: answers `status` with `body`, returning the request head.
+    async fn answer_once(
+        status: &str,
+        body: &'static str,
+    ) -> (String, tokio::task::JoinHandle<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/private/order", listener.local_addr().unwrap());
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            while !bytes.windows(4).any(|b| b == b"\r\n\r\n") {
+                let mut next = [0; 1024];
+                let n = socket.read(&mut next).await.unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&next[..n]);
+            }
+            socket.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8(bytes).unwrap()
+        });
+        (url, server)
+    }
+
+    #[tokio::test]
+    async fn a_proxied_request_with_no_token_is_refused_not_sent_bare() {
+        let transport = proxied(Arc::new(|| Box::pin(async { Ok(String::new()) })));
+        let result = transport
+            .prepare_http(
+                request("https://venue.invalid/private"),
+                RoutingIntent::Primary,
+            )
+            .await;
+        let Err(HttpPrepareError::Transport(message)) = result else {
+            panic!("{result:?}")
+        };
+        assert!(
+            message.starts_with("Tealstreet proxy authorization missing"),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_edges_own_401_fails_as_transport_not_as_a_venue_401() {
+        for body in [
+            "Authorization header is missing",
+            r#"{"message":"Invalid JWT"}"#,
+        ] {
+            let (url, server) = answer_once("401 Unauthorized", body).await;
+            let transport = proxied(Arc::new(|| Box::pin(async { Ok("edge-token".to_owned()) })));
+            let packet = request(&url);
+            let prepared = transport
+                .prepare_http(packet.clone(), RoutingIntent::Primary)
+                .await
+                .unwrap();
+            let (events, mut inbox) = mpsc::unbounded_channel();
+            let _task = prepared.bind(packet).unwrap().dispatch(events);
+            match inbox.recv().await.unwrap() {
+                HostEvent::HttpFailed(request, error) => {
+                    assert_eq!(request, RequestId(17));
+                    assert!(
+                        error.starts_with(
+                            "Tealstreet proxy refused our proxy authorization (HTTP 401"
+                        ),
+                        "{error}"
+                    );
+                }
+                other => panic!("{body}: {other:?}"),
+            }
+            let head = server.await.unwrap().to_lowercase();
+            assert!(
+                head.contains("authorization: bearer edge-token\r\n"),
+                "{head}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_venues_own_401_through_the_proxy_reaches_the_engine_unchanged() {
+        let venue = r#"{"retCode":10003,"retMsg":"API key is invalid."}"#;
+        let (url, _server) = answer_once("401 Unauthorized", venue).await;
+        let transport = proxied(Arc::new(|| Box::pin(async { Ok("edge-token".to_owned()) })));
+        let packet = request(&url);
+        let prepared = transport
+            .prepare_http(packet.clone(), RoutingIntent::Primary)
+            .await
+            .unwrap();
+        let (events, mut inbox) = mpsc::unbounded_channel();
+        let _task = prepared.bind(packet).unwrap().dispatch(events);
+        let mut body = Vec::new();
+        loop {
+            match inbox.recv().await.unwrap() {
+                HostEvent::HttpStart { status, .. } => assert_eq!(status, 401),
+                HostEvent::HttpChunk(_, chunk) => body.extend(chunk),
+                HostEvent::HttpEnd(_) => break,
+                other => panic!("unexpected request event: {other:?}"),
+            }
+        }
+        assert_eq!(body, venue.as_bytes());
     }
 
     #[tokio::test(start_paused = true)]

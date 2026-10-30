@@ -79,6 +79,11 @@ fn a_frame_fed_engine_ingests_frames_and_a_normal_engine_refuses_them() {
 /// A data source's snapshot: one resting order and Bybit's VENUE_STATE
 /// (version 1: BTCUSDT linear hedged, no position-bound stops).
 fn source_frame() -> Vec<u8> {
+    source_frame_at(0.0)
+}
+
+/// `source_frame`, written by the source at `written` (the frame header stamp).
+fn source_frame_at(written: f64) -> Vec<u8> {
     use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
     let mut source = safe_cex_engine::Store::default();
     source.set_orders(vec![Order {
@@ -108,7 +113,7 @@ fn source_frame() -> Vec<u8> {
     state.extend_from_slice(&7u16.to_le_bytes());
     state.extend_from_slice(b"BTCUSDT");
     state.extend_from_slice(&0u32.to_le_bytes());
-    let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.0);
+    let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), written);
     source.write(&source.account_snapshot(), &mut writer);
     writer.venue_state(&state);
     writer.finish()
@@ -182,4 +187,50 @@ fn an_unknown_placement_is_never_re_sent() {
         "no reconcile read, no re-send: {:?}",
         h.paths()
     );
+}
+
+#[test]
+fn a_frame_written_right_after_an_unknown_placement_keeps_its_fence() {
+    let mut h = frame_fed();
+    load(&mut h);
+    h.engine.apply_frame(h.now, &source_frame(), true).unwrap();
+    h.collect();
+    h.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![support::order()],
+    });
+    let request = h.take("/v5/order/create");
+    h.event(safe_cex_engine::Event::HttpFailed {
+        request: request.id,
+        error: "connection reset",
+    });
+    assert_eq!(h.unknown, vec![1]);
+    // The source wrote this before the venue showed the lost order: a retry
+    // must not go out, or it could place twice.
+    h.advance(250.0);
+    h.engine
+        .apply_frame(h.now, &source_frame_at(h.now), false)
+        .unwrap();
+    h.collect();
+    h.command(Command::PlaceOrders {
+        command: 2,
+        orders: vec![support::order()],
+    });
+    assert!(h.requests.is_empty(), "fenced: {:?}", h.paths());
+    assert!(
+        matches!(h.result(2), Some(Err(message)) if message.contains("uncertain")),
+        "{:?}",
+        h.result(2)
+    );
+    // A frame the source wrote well after the loss is the reconcile.
+    h.advance(3_000.0);
+    h.engine
+        .apply_frame(h.now, &source_frame_at(h.now), false)
+        .unwrap();
+    h.collect();
+    h.command(Command::PlaceOrders {
+        command: 3,
+        orders: vec![support::order()],
+    });
+    assert_eq!(h.requests.len(), 1, "{:?}", h.paths());
 }

@@ -1243,6 +1243,320 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 mod tests {
     use super::*;
 
+    /// The COSIGNED data-source path end to end: a source account on the native
+    /// actor, frames through this session's pump (base64, seq, snapshot,
+    /// re-snapshot), ingested by a frame-fed engine that then writes with no reads.
+    mod cosigned_path {
+        use super::super::*;
+        use base64::Engine as _;
+        use safe_cex_engine::model::{
+            Limits, Market, MinMax, Order, OrderSide, OrderStatus, OrderType, Position,
+            PositionSide, Precision,
+        };
+        use safe_cex_engine::{
+            Command, Cx, Engine, HttpRequest, Method, Response, SocketId, TimerId, Venue,
+        };
+        use safe_cex_native::{Events, Host, HostEvent, ServerConfig, Transport};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        #[derive(Clone, Default)]
+        struct Tape(Rc<RefCell<Option<Events>>>);
+        impl Transport for Tape {
+            fn connect(
+                &self,
+                socket: SocketId,
+                _: String,
+                events: Events,
+            ) -> tokio::sync::mpsc::UnboundedSender<String> {
+                *self.0.borrow_mut() = Some(events.clone());
+                let _ = events.send(HostEvent::WsOpened(socket));
+                tokio::sync::mpsc::unbounded_channel().0
+            }
+            fn request(&self, _: HttpRequest, _: Events) {}
+        }
+
+        fn order(id: &str) -> Order {
+            Order {
+                id: id.into(),
+                parent_id: None,
+                status: OrderStatus::Open,
+                symbol: "BTCUSDT".into(),
+                kind: OrderType::Limit,
+                side: OrderSide::Buy,
+                price: 100.,
+                amount: 1.,
+                filled: 0.,
+                remaining: 1.,
+                reduce_only: false,
+                close: None,
+                client_order_id: None,
+                time_in_force: None,
+                last_update: 0.,
+                trigger_type: None,
+                take_profit: None,
+                stop_loss: None,
+                extra: None,
+            }
+        }
+
+        /// The source loads an account and streams changes; the frame-fed side
+        /// loads markets only and writes from what it ingested.
+        struct Mirror {
+            state: Vec<u8>,
+            applied: Rc<RefCell<Vec<Vec<u8>>>>,
+        }
+        impl Venue for Mirror {
+            type Pending = ();
+            fn capabilities(&self) -> safe_cex_engine::Capabilities {
+                safe_cex_engine::Capabilities::BASE
+            }
+            fn start(&mut self, cx: &mut Cx<'_, ()>) {
+                cx.store.set_markets(vec![Market {
+                    id: "BTCUSDT".into(),
+                    symbol: "BTCUSDT".into(),
+                    pretty_symbol: None,
+                    base: "BTC".into(),
+                    quote: "USDT".into(),
+                    active: true,
+                    precision: Precision {
+                        amount: 0.001,
+                        price: 0.1,
+                    },
+                    limits: Limits {
+                        amount: MinMax {
+                            min: 0.001,
+                            max: 1000.,
+                        },
+                        leverage: MinMax { min: 1., max: 100. },
+                        price: None,
+                    },
+                    contract_size: None,
+                    is_expiring: None,
+                    is_inverse: None,
+                    is_spot: None,
+                    is_perpetual: Some(true),
+                    is_read_only: None,
+                    taker_fee: None,
+                    maker_fee: None,
+                }]);
+                if cx.frame_fed() {
+                    return;
+                }
+                cx.store.set_orders(vec![order("o1")]);
+                cx.store.set_positions(vec![Position {
+                    id: "p1".into(),
+                    symbol: "BTCUSDT".into(),
+                    side: PositionSide::Long,
+                    entry_price: 100.,
+                    notional: 100.,
+                    leverage: 1.,
+                    margin_type: None,
+                    position_mode: None,
+                    unrealized_pnl: 0.,
+                    realized_pnl: None,
+                    contracts: 1.,
+                    liquidation_price: 0.,
+                    margin_size: None,
+                    last_update: None,
+                }]);
+                cx.connect("test");
+            }
+            fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+            /// A private update: a new order and changed venue state.
+            fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+                self.state = text.as_bytes().to_vec();
+                cx.store.upsert_order(order("o2"));
+            }
+            fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+            fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+            fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+            fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+            fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+                let (id, path) = match &command {
+                    Command::PlaceOrders { command, .. } => (*command, "place".to_owned()),
+                    Command::CancelOrders { command, ids } => {
+                        (*command, format!("cancel/{}", ids[0]))
+                    }
+                    Command::AmendOrder { command, id, .. } => (*command, format!("amend/{id}")),
+                    _ => return,
+                };
+                // Cancels and amends route through the stored (ingested) order.
+                if let Some(order) = path.split('/').nth(1)
+                    && cx.store.order(order).is_none()
+                {
+                    cx.fail(id, "order not ingested");
+                    return;
+                }
+                cx.request(
+                    Method::Post,
+                    format!("https://venue.test/{path}"),
+                    vec![],
+                    None,
+                    (),
+                );
+            }
+            fn export_venue_state(&self) -> Option<Vec<u8>> {
+                Some(self.state.clone())
+            }
+            fn apply_venue_state(&mut self, _: &mut Cx<'_, ()>, state: &[u8]) {
+                self.applied.borrow_mut().push(state.to_vec());
+            }
+            fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+                None
+            }
+            fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+                Box::new(std::iter::empty())
+            }
+        }
+
+        /// The next `op:'frame'` envelope the pump sent: (seq, snapshot, bytes).
+        async fn next_frame(
+            sent: &mut tokio::sync::mpsc::Receiver<String>,
+        ) -> (u64, bool, Vec<u8>) {
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                loop {
+                    let text = sent.recv().await.expect("pump alive");
+                    let envelope: Value = serde_json::from_str(&text).unwrap();
+                    if envelope["d"]["op"] == "frame" {
+                        let bytes = base64::engine::general_purpose::STANDARD
+                            .decode(envelope["d"]["data"].as_str().unwrap())
+                            .unwrap();
+                        return (
+                            envelope["d"]["seq"].as_u64().unwrap(),
+                            envelope["d"]["snapshot"].as_bool().unwrap(),
+                            bytes,
+                        );
+                    }
+                }
+            })
+            .await
+            .expect("a frame")
+        }
+
+        fn spawn_pump(
+            handle: &safe_cex_native::AccountHandle,
+            link: safe_cex_native::ClientLink,
+            client: u64,
+        ) -> (
+            tokio::sync::mpsc::Receiver<String>,
+            tokio::task::JoinHandle<()>,
+        ) {
+            let (out, sent, _) = Out::channel(256);
+            let (loaded, _loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+            let task = tokio::task::spawn_local(pump(
+                link,
+                handle.clone(),
+                "acct".into(),
+                out,
+                Arc::default(),
+                Arc::default(),
+                Some(Hold { client, loaded }),
+            ));
+            (sent, task)
+        }
+
+        #[tokio::test]
+        async fn a_frame_fed_engine_writes_from_the_servers_frames_with_no_reads() {
+            tokio::task::LocalSet::new()
+                .run_until(async {
+                    let tape = Tape::default();
+                    let source = safe_cex_engine::test_support::seeded_engine(Mirror {
+                        state: b"v1".to_vec(),
+                        applied: Rc::default(),
+                    });
+                    let config = ServerConfig {
+                        flush_every: std::time::Duration::from_millis(1),
+                        ..ServerConfig::default()
+                    };
+                    let (handle, _task) =
+                        safe_cex_native::spawn_account(Host::new(source, tape.clone()), config)
+                            .unwrap();
+                    let applied = Rc::new(RefCell::new(Vec::new()));
+                    let mut main: Engine<Mirror> =
+                        safe_cex_engine::test_support::seeded_engine(Mirror {
+                            state: Vec::new(),
+                            applied: applied.clone(),
+                        });
+                    main.set_frame_fed().unwrap();
+                    main.start(0.);
+                    assert!(safe_cex_engine::test_support::http_requests(&mut main).is_empty());
+
+                    // Join: the snapshot (seq 1) carries the account and VENUE_STATE.
+                    let link = handle.join(1, true).await.unwrap();
+                    let (mut sent, first) = spawn_pump(&handle, link, 1);
+                    let (seq, snapshot, bytes) = next_frame(&mut sent).await;
+                    assert_eq!((seq, snapshot), (1, true));
+                    main.apply_frame(1., &bytes, snapshot).unwrap();
+                    assert_eq!(applied.borrow().last().map(Vec::as_slice), Some(&b"v1"[..]));
+                    assert!(main.store().order("o1").is_some());
+                    assert_eq!(main.store().positions().len(), 1);
+
+                    // A private update: a delta (seq 2+) carries the order and the new state.
+                    let events = tape.0.borrow().clone().unwrap();
+                    events
+                        .send(HostEvent::WsMessage(SocketId(1), "v2".into()))
+                        .unwrap();
+                    loop {
+                        let (seq, snapshot, bytes) = next_frame(&mut sent).await;
+                        assert!(seq >= 2 && !snapshot);
+                        main.apply_frame(2., &bytes, snapshot).unwrap();
+                        if main.store().order("o2").is_some() {
+                            break;
+                        }
+                    }
+                    assert_eq!(applied.borrow().last().map(Vec::as_slice), Some(&b"v2"[..]));
+
+                    // Writes from ingested state: one request each, no reads.
+                    for (command, order) in [
+                        (
+                            Command::PlaceOrders {
+                                command: 1,
+                                orders: vec![],
+                            },
+                            None,
+                        ),
+                        (
+                            Command::CancelOrders {
+                                command: 2,
+                                ids: vec!["o1".into()],
+                            },
+                            Some("o1"),
+                        ),
+                        (
+                            Command::AmendOrder {
+                                command: 3,
+                                id: "o2".into(),
+                                price: Some(101.),
+                                amount: None,
+                            },
+                            Some("o2"),
+                        ),
+                    ] {
+                        main.handle_command(3., command, None).unwrap();
+                        let requests = safe_cex_engine::test_support::http_requests(&mut main);
+                        assert_eq!(requests.len(), 1, "{order:?}: {requests:?}");
+                        assert_eq!(requests[0].method, Method::Post);
+                    }
+
+                    // A re-snapshot (a new client, seq restarts at 1) resets and re-applies.
+                    first.abort();
+                    handle.leave(1);
+                    let link = handle.join(2, true).await.unwrap();
+                    let (mut sent, _second) = spawn_pump(&handle, link, 2);
+                    let (seq, snapshot, bytes) = next_frame(&mut sent).await;
+                    assert_eq!((seq, snapshot), (1, true));
+                    main.apply_frame(4., &bytes, snapshot).unwrap();
+                    assert!(
+                        main.store().order("o1").is_some() && main.store().order("o2").is_some()
+                    );
+                    assert_eq!(applied.borrow().last().map(Vec::as_slice), Some(&b"v2"[..]));
+                    assert!(safe_cex_engine::test_support::http_requests(&mut main).is_empty());
+                })
+                .await;
+        }
+    }
+
     mod hold {
         use super::super::*;
         use safe_cex_engine::model::{

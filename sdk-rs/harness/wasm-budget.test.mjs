@@ -40,8 +40,9 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_456_128, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(1_456_129, 'venue', 'asterdex'), /exceeds 1456128/);
   for (const venue of ['bitget', 'bitgetusdc']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1489 * 1024);
-    assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1489 * 1024);
+    // Frame-fed Bitget (COSIGNED writer): 1,522,315 -> 1,549,604 B (+27,289); cap +27 KiB +2 KiB.
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1518 * 1024);
+    assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1518 * 1024);
     assert.equal(wasmBudgetError(1_481_804, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_482_752, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_482_944, 'venue', venue), undefined);
@@ -54,8 +55,8 @@ test('only the declared venue families carry overrides, and only for the venue p
     assert.equal(wasmBudgetError(1_488_071, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_488_896, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_522_283, 'venue', venue), undefined);
-    assert.equal(wasmBudgetError(1_524_736, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_524_737, 'venue', venue), /exceeds 1524736/);
+    assert.equal(wasmBudgetError(1_554_432, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_554_433, 'venue', venue), /exceeds 1554432/);
   }
   for (const venue of ['kraken', 'krakenspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], 1417 * 1024);
