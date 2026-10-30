@@ -2,8 +2,10 @@
 //! (safe-cex `rust.exchange.ts`) sends to `WasmEngine.command`. Every produced
 //! command still passes the engine's typed decoder; an unknown method never
 //! gets a guessed command.
-use safe_cex_engine::Capabilities;
-use safe_cex_engine::capabilities::{CancelAll, FillHistoryTime, LeverageQuery, MaxLeverage};
+use safe_cex_engine::capabilities::{
+    AccountLookup, CancelAll, FillHistoryTime, LeverageQuery, MaxLeverage,
+};
+use safe_cex_engine::{Capabilities, Store};
 use serde_json::{Map, Value, json};
 
 /// Client `args` larger than this are refused before translation.
@@ -18,6 +20,21 @@ pub enum Plan {
     },
     /// Answered without the engine (`cancelAllOrders` with nothing to cancel).
     Reply(Value),
+    /// Answered from the account's engine store, as `rust.exchange.ts` reads its own.
+    Read(StoreRead),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum StoreRead {
+    Orders(Option<Vec<String>>),
+    Positions(Option<Vec<String>>),
+    Balance,
+    PositionMode,
+    /// `findOrderByClientOrderId` where the venue has no lookup: open orders only.
+    ClientOrder {
+        symbol: String,
+        client_order_id: String,
+    },
 }
 
 /// What the method returns once its command is done.
@@ -29,6 +46,81 @@ pub enum Reply {
     Unit,
     /// `placeOrderWithClientOrderId`: `{orderIds, clientOrderId}`, as base.ts.
     Placed { client_order_id: String },
+    /// `updateOrder`: the worker bridge's `WorkerOrderIds`, which the main-thread
+    /// mirror decodes (`decodeWorkerOrderIds`); a bare array would throw there.
+    OrderIds,
+}
+
+/// The engine's amend result (`string[]` or `{orderIds, clientOrderId}`) as `WorkerOrderIds`.
+pub fn worker_order_ids(result: Value) -> Value {
+    match result {
+        Value::Array(ids) => json!({"orderIds": ids}),
+        Value::Object(mut fields) => {
+            if fields.get("clientOrderId").is_some_and(Value::is_null) {
+                fields.remove("clientOrderId");
+            }
+            Value::Object(fields)
+        }
+        other => json!({"orderIds": other}),
+    }
+}
+
+/// Answers a store read; reads wait for nothing, so an unloaded section refuses.
+pub fn read_store(read: &StoreRead, store: &Store) -> Result<Value, Refused> {
+    let loaded = store.loaded();
+    let ready = |section: bool, what: &str| {
+        if loaded.markets && section {
+            Ok(())
+        } else {
+            Err(refused("Error", format!("{what} are not loaded yet")))
+        }
+    };
+    let only = |symbols: &Option<Vec<String>>, symbol: &str| {
+        symbols
+            .as_ref()
+            .is_none_or(|symbols| symbols.iter().any(|wanted| wanted == symbol))
+    };
+    let value = match read {
+        StoreRead::Orders(symbols) => {
+            ready(loaded.orders, "orders")?;
+            let orders: Vec<_> = store
+                .orders()
+                .iter()
+                .filter(|order| only(symbols, &order.symbol))
+                .collect();
+            serde_json::to_value(orders)
+        }
+        StoreRead::Positions(symbols) => {
+            ready(loaded.positions, "positions")?;
+            let positions: Vec<_> = store
+                .positions()
+                .iter()
+                .filter(|position| only(symbols, &position.symbol))
+                .collect();
+            serde_json::to_value(positions)
+        }
+        StoreRead::Balance => {
+            ready(loaded.balance, "balances")?;
+            serde_json::to_value(store.balance())
+        }
+        StoreRead::PositionMode => {
+            ready(loaded.positions, "positions")?;
+            Ok(store.hedged().into())
+        }
+        StoreRead::ClientOrder {
+            symbol,
+            client_order_id,
+        } => {
+            let order = store.orders().iter().find(|order| {
+                &order.symbol == symbol && order.client_order_id.as_ref() == Some(client_order_id)
+            });
+            Ok(match order {
+                Some(order) => json!({"found": true, "order": order}),
+                None => json!({"found": false, "definitive": false}),
+            })
+        }
+    };
+    value.map_err(|error| refused("Error", error.to_string()))
 }
 
 #[derive(Debug, PartialEq)]
@@ -94,6 +186,18 @@ fn order(value: &Value) -> Result<Value, Refused> {
         }
     }
     Ok(Value::Object(fields.clone()))
+}
+
+fn symbols(value: &Value) -> Result<Option<Vec<String>>, Refused> {
+    match value {
+        Value::Null => Ok(None),
+        Value::Array(symbols) => symbols
+            .iter()
+            .map(|symbol| text(symbol, "symbol"))
+            .collect::<Result<_, _>>()
+            .map(Some),
+        _ => Err(refused("TypeError", "symbols must be an array")),
+    }
 }
 
 fn command(op: &str, fields: Map<String, Value>, returns_unit: bool) -> Plan {
@@ -233,7 +337,11 @@ pub fn translate(
             } else {
                 "amendOrder"
             };
-            one(command(op, out, false))
+            out.insert("op".into(), op.into());
+            one(Plan::Command {
+                command: Value::Object(out),
+                reply: Reply::OrderIds,
+            })
         }
         "cancelOrders" => {
             let Value::Array(orders) = arg(args, 0) else {
@@ -300,9 +408,15 @@ pub fn translate(
                     .collect())
             }
         },
-        "findOrderByClientOrderId" if capabilities.client_order_lookup => {
+        "findOrderByClientOrderId" => {
             let symbol = text(arg(args, 0), "symbol")?;
             let id = text(arg(args, 1), "clientOrderId")?;
+            if !capabilities.client_order_lookup {
+                return one(Plan::Read(StoreRead::ClientOrder {
+                    symbol,
+                    client_order_id: id,
+                }));
+            }
             one(command(
                 "findOrderByClientOrderId",
                 fields([("symbol", symbol.into()), ("clientOrderId", id.into())]),
@@ -330,15 +444,14 @@ pub fn translate(
             let isolated = arg(args, 0)
                 .as_bool()
                 .ok_or_else(|| refused("TypeError", "isolated must be a boolean"))?;
+            // As `!symbol` in rust.exchange.ts: an empty symbol is no symbol.
             let symbol = match arg(args, 1) {
-                Value::Null => {
-                    if !capabilities.account_margin_type {
-                        return Err(refused("Error", "Symbol is required"));
-                    }
-                    String::new()
-                }
+                Value::Null => String::new(),
                 symbol => text(symbol, "symbol")?,
             };
+            if symbol.is_empty() && !capabilities.account_margin_type {
+                return Err(refused("Error", "Symbol is required"));
+            }
             one(command(
                 "setMarginType",
                 fields([("symbol", symbol.into()), ("isolated", isolated.into())]),
@@ -426,10 +539,73 @@ pub fn translate(
             }
             one(command("fetchOrderHistory", out, false))
         }
-        // A main-thread mirror loads the record its capability-defined methods follow.
+        // A main-thread mirror learns the record here (`loadWorkerCapabilities`).
         "fetchEngineCapabilities" => one(Plan::Reply(
-            serde_json::to_value(capabilities).expect("capabilities serialize"),
+            serde_json::to_value(capabilities)
+                .map_err(|error| refused("Error", error.to_string()))?,
         )),
+        "getAccount" => match capabilities.account {
+            AccountLookup::Unsupported => Err(refused("Error", "Not implemented")),
+            AccountLookup::Query | AccountLookup::AfterLoad => {
+                one(command("fetchAccount", Map::new(), false))
+            }
+        },
+        // Native account reads, answered from the engine store as rust.exchange.ts does.
+        "fetchOrders" => one(Plan::Read(StoreRead::Orders(symbols(arg(args, 0))?))),
+        "fetchPositions" => one(Plan::Read(StoreRead::Positions(symbols(arg(args, 0))?))),
+        "fetchBalance" => one(Plan::Read(StoreRead::Balance)),
+        "fetchPositionMode" => one(Plan::Read(StoreRead::PositionMode)),
+        "fetchOHLCV" => {
+            let options = arg(args, 0);
+            let mut out = fields([
+                ("symbol", text(&options["symbol"], "symbol")?.into()),
+                ("interval", text(&options["interval"], "interval")?.into()),
+            ]);
+            for field in ["from", "to"] {
+                if let Some(bound) = optional(options, field) {
+                    out.insert(field.into(), finite(&bound, field)?.into());
+                }
+            }
+            if let Some(limit) = limit(options.get("limit"))? {
+                out.insert("limit".into(), limit);
+            }
+            one(command("fetchCandles", out, false))
+        }
+        "fetchPublicTrades" => {
+            let mut out = fields([("symbol", text(arg(args, 0), "symbol")?.into())]);
+            if let Some(limit) = limit(args.get(1))? {
+                out.insert("limit".into(), limit);
+            }
+            one(command("fetchPublicTrades", out, false))
+        }
+        "fetchIncomeHistory" => {
+            let options = arg(args, 0);
+            let mut out = Map::new();
+            for (from, to) in [("symbol", "symbol"), ("incomeType", "incomeType")] {
+                if let Some(value) = optional(options, from) {
+                    out.insert(to.into(), text(&value, from)?.into());
+                }
+            }
+            for (from, to) in [("startTime", "from"), ("endTime", "to")] {
+                if let Some(bound) = optional(options, from) {
+                    out.insert(to.into(), finite(&bound, from)?.into());
+                }
+            }
+            if let Some(limit) = limit(options.get("limit"))? {
+                out.insert("limit".into(), limit);
+            }
+            one(command("fetchIncome", out, false))
+        }
+        "fetchIncomeHistoryRange" => {
+            let mut out = fields([
+                ("from", finite(arg(args, 0), "startTime")?.into()),
+                ("to", finite(arg(args, 1), "endTime")?.into()),
+            ]);
+            if let Some(kind) = args.get(2).filter(|kind| !kind.is_null()) {
+                out.insert("incomeType".into(), text(kind, "incomeType")?.into());
+            }
+            one(command("fetchIncome", out, false))
+        }
         // The raw rows a mirror's journal maps; it folds the journal itself.
         "fetchClosedPositions" if capabilities.closed_positions => {
             let options = arg(args, 0);
@@ -443,34 +619,6 @@ pub fn translate(
                 }
             }
             one(command("fetchClosedPositions", out, false))
-        }
-        "fetchIncomeHistory" if capabilities.income_history => {
-            let options = arg(args, 0);
-            let mut out = Map::new();
-            for field in ["symbol", "incomeType"] {
-                if let Some(value) = optional(options, field) {
-                    out.insert(field.into(), text(&value, field)?.into());
-                }
-            }
-            for (field, from) in [("from", "startTime"), ("to", "endTime")] {
-                if let Some(bound) = optional(options, from) {
-                    out.insert(field.into(), finite(&bound, from)?.into());
-                }
-            }
-            if let Some(limit) = limit(options.get("limit"))? {
-                out.insert("limit".into(), limit);
-            }
-            one(command("fetchIncome", out, false))
-        }
-        "fetchIncomeHistoryRange" if capabilities.income_history => {
-            let mut out = fields([
-                ("from", finite(arg(args, 0), "startTime")?.into()),
-                ("to", finite(arg(args, 1), "endTime")?.into()),
-            ]);
-            if let Some(income_type) = args.get(2).filter(|value| !value.is_null()) {
-                out.insert("incomeType".into(), text(income_type, "incomeType")?.into());
-            }
-            one(command("fetchIncome", out, false))
         }
         _ => Err(refused(
             "UnsupportedMethod",
@@ -604,6 +752,328 @@ mod tests {
         assert_eq!(
             translate("cancelAllOrders", &[], &each, &[], false).unwrap(),
             vec![Plan::Reply(Value::Null)]
+        );
+    }
+
+    /// Translates the web's real `args` and proves the engine's typed decoder takes the command.
+    fn web(method: &str, args: Value, capabilities: &Capabilities) -> (Value, Reply) {
+        let Value::Array(args) = args else { panic!() };
+        let plans = translate(method, &args, capabilities, &[], false).unwrap();
+        let [Plan::Command { command, reply }] = plans.as_slice() else {
+            panic!("{method}: {plans:?}")
+        };
+        let mut wire = command.clone();
+        wire["command"] = 1.into();
+        safe_cex_engine::command::decode_host_input(&wire.to_string())
+            .unwrap_or_else(|error| panic!("{method}: {wire} -> {error}"));
+        (command.clone(), reply.clone())
+    }
+
+    fn read(method: &str, args: Value, capabilities: &Capabilities) -> StoreRead {
+        let Value::Array(args) = args else { panic!() };
+        match translate(method, &args, capabilities, &[], false)
+            .unwrap()
+            .pop()
+        {
+            Some(Plan::Read(read)) => read,
+            other => panic!("{method}: {other:?}"),
+        }
+    }
+
+    // Web: order form / ladder / hotkeys `sendOrder` -> placeOrderWithClientOrderId({...order, clientOrderId}).
+    #[test]
+    fn web_place_order_with_client_order_id_decodes() {
+        let order = json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":0.001,"price":60000,
+            "reduceOnly":false,"timeInForce":"PostOnly","clientOrderId":"ts-1730250000000-abc"});
+        let (command, reply) = web(
+            "placeOrderWithClientOrderId",
+            json!([order.clone()]),
+            &caps(),
+        );
+        assert_eq!(command, json!({"op":"placeOrders","orders":[order]}));
+        assert_eq!(
+            reply,
+            Reply::Placed {
+                client_order_id: "ts-1730250000000-abc".into()
+            }
+        );
+    }
+
+    // Web: createScaledOrder / TP-SL protective orders -> placeOrders(orders).
+    #[test]
+    fn web_place_orders_with_tp_sl_decodes() {
+        let orders = json!([
+            {"symbol":"BTCUSDT","side":"buy","type":"limit","amount":0.001,"price":60000,"reduceOnly":false},
+            {"symbol":"BTCUSDT","side":"sell","type":"stop_market","amount":0.001,"price":55000,"reduceOnly":true},
+            {"symbol":"BTCUSDT","side":"sell","type":"take_profit_market","amount":0.001,"price":70000,"reduceOnly":true},
+        ]);
+        let (command, reply) = web("placeOrders", json!([orders.clone()]), &caps());
+        assert_eq!(command, json!({"op":"placeOrders","orders":orders}));
+        assert_eq!(reply, Reply::Result);
+        let market = json!({"symbol":"BTCUSDT","side":"sell","type":"market","amount":0.001,"reduceOnly":true});
+        let (command, _) = web("placeOrder", json!([market.clone()]), &caps());
+        assert_eq!(command, json!({"op":"placeOrders","orders":[market]}));
+    }
+
+    // Web: updateOrder.ts sends the whole order (with info) and a price or amount update.
+    #[test]
+    fn web_update_order_decodes_and_replies_worker_order_ids() {
+        let request = json!([{"order":{"id":"o-1","symbol":"BTCUSDT","type":"limit","side":"buy","price":60000,
+            "amount":0.001,"remaining":0.001,"filled":0,"status":"open","reduceOnly":false,"info":{"x":1}},
+            "update":{"price":59000}}]);
+        let (command, reply) = web("updateOrder", request.clone(), &caps());
+        assert_eq!(
+            command,
+            json!({"op":"amendOrder","id":"o-1","price":59000.0})
+        );
+        assert_eq!(reply, Reply::OrderIds);
+        let with_symbol = Capabilities {
+            amend_with_symbol: true,
+            ..caps()
+        };
+        let (command, _) = web("updateOrder", request, &with_symbol);
+        assert_eq!(command["symbol"], "BTCUSDT");
+        assert_eq!(
+            worker_order_ids(json!(["o-2"])),
+            json!({"orderIds":["o-2"]})
+        );
+        assert_eq!(
+            worker_order_ids(json!({"orderIds":["o-2"],"clientOrderId":"c"})),
+            json!({"orderIds":["o-2"],"clientOrderId":"c"})
+        );
+        assert_eq!(
+            worker_order_ids(json!({"orderIds":["o-2"],"clientOrderId":null})),
+            json!({"orderIds":["o-2"]})
+        );
+    }
+
+    // Web: cancelOrders.ts / cancel hotkeys pass store orders, some without a type.
+    #[test]
+    fn web_cancel_orders_decodes_with_and_without_type() {
+        let orders = json!([[{"id":"o-1","symbol":"BTCUSDT","type":"limit","side":"buy","price":1,"amount":1},
+            {"id":"o-2","symbol":"ETHUSDT","side":"sell","price":1,"amount":1}]]);
+        let (command, reply) = web("cancelOrders", orders.clone(), &caps());
+        assert_eq!(command["ids"], json!(["o-1", "o-2"]));
+        assert_eq!(reply, Reply::Unit);
+        let with_symbols = Capabilities {
+            cancel_with_symbols: true,
+            ..caps()
+        };
+        web("cancelOrders", orders, &with_symbols);
+        web("cancelSymbolOrders", json!(["BTCUSDT"]), &caps());
+    }
+
+    #[test]
+    fn web_cancel_all_orders_decodes() {
+        let native = Capabilities {
+            cancel_all: CancelAll::Native,
+            ..caps()
+        };
+        web("cancelAllOrders", json!([]), &native);
+    }
+
+    // Web: lostSendResolver -> findOrderByClientOrderId(symbol, clientOrderId).
+    #[test]
+    fn web_find_order_by_client_order_id_asks_the_venue_or_the_store() {
+        let lookup = Capabilities {
+            client_order_lookup: true,
+            ..caps()
+        };
+        let (command, _) = web(
+            "findOrderByClientOrderId",
+            json!(["BTCUSDT", "c-1"]),
+            &lookup,
+        );
+        assert_eq!(command["clientOrderId"], "c-1");
+        assert_eq!(
+            read(
+                "findOrderByClientOrderId",
+                json!(["BTCUSDT", "c-1"]),
+                &caps()
+            ),
+            StoreRead::ClientOrder {
+                symbol: "BTCUSDT".into(),
+                client_order_id: "c-1".into()
+            }
+        );
+    }
+
+    // Web: setLeverage.ts -> setLeverage(symbol, leverage, side); `side` undefined arrives as null.
+    #[test]
+    fn web_set_leverage_decodes_with_and_without_side() {
+        let (command, reply) = web("setLeverage", json!(["BTCUSDT", 10, null]), &caps());
+        assert_eq!(
+            command,
+            json!({"op":"setLeverage","symbol":"BTCUSDT","leverage":10.0})
+        );
+        assert_eq!(reply, Reply::Unit);
+        let (command, _) = web("setLeverage", json!(["BTCUSDT", 10, "long"]), &caps());
+        assert_eq!(command["side"], "long");
+        let account = Capabilities {
+            account_leverage: true,
+            ..caps()
+        };
+        web("setAllLeverage", json!([5]), &account);
+    }
+
+    // Web: useMarginType -> changeMarginType(isolated, symbol).
+    #[test]
+    fn web_change_margin_type_decodes_and_an_empty_symbol_needs_account_scope() {
+        let (command, _) = web("changeMarginType", json!([true, "BTCUSDT"]), &caps());
+        assert_eq!(
+            command,
+            json!({"op":"setMarginType","symbol":"BTCUSDT","isolated":true})
+        );
+        for symbol in [json!(null), json!("")] {
+            let refusal = translate(
+                "changeMarginType",
+                &[json!(false), symbol.clone()],
+                &caps(),
+                &[],
+                false,
+            )
+            .unwrap_err();
+            assert_eq!(refusal.message, "Symbol is required");
+            let account = Capabilities {
+                account_margin_type: true,
+                ..caps()
+            };
+            web("changeMarginType", json!([false, symbol]), &account);
+        }
+    }
+
+    // Web: usePositionMode -> changePositionMode(hedged, symbol).
+    #[test]
+    fn web_change_position_mode_decodes() {
+        let (command, _) = web("changePositionMode", json!([true, "BTCUSDT"]), &caps());
+        assert_eq!(
+            command,
+            json!({"op":"setPositionMode","hedged":true,"symbol":"BTCUSDT"})
+        );
+        let (command, _) = web("changePositionMode", json!([false, null]), &caps());
+        assert_eq!(command, json!({"op":"setPositionMode","hedged":false}));
+    }
+
+    // Mirror `loadCapabilities` and `getAccount`.
+    #[test]
+    fn web_capabilities_and_account_reads() {
+        let Plan::Reply(record) = translate("fetchEngineCapabilities", &[], &caps(), &[], false)
+            .unwrap()
+            .remove(0)
+        else {
+            panic!()
+        };
+        assert_eq!(record, serde_json::to_value(caps()).unwrap());
+        let query = Capabilities {
+            account: AccountLookup::Query,
+            ..caps()
+        };
+        web("getAccount", json!([]), &query);
+        let none = Capabilities {
+            account: AccountLookup::Unsupported,
+            ..caps()
+        };
+        assert!(translate("getAccount", &[], &none, &[], false).is_err());
+    }
+
+    // eagerExchangeWarmStart -> fetchOrders() / fetchPositions(); nuke and the mirror read the rest.
+    #[test]
+    fn web_account_reads_answer_from_the_store() {
+        assert_eq!(
+            read("fetchOrders", json!([]), &caps()),
+            StoreRead::Orders(None)
+        );
+        assert_eq!(
+            read("fetchPositions", json!([["BTCUSDT"]]), &caps()),
+            StoreRead::Positions(Some(vec!["BTCUSDT".into()]))
+        );
+        assert_eq!(read("fetchBalance", json!([]), &caps()), StoreRead::Balance);
+        assert_eq!(
+            read("fetchPositionMode", json!([]), &caps()),
+            StoreRead::PositionMode
+        );
+        let store = Store::default();
+        let refusal = read_store(&StoreRead::Orders(None), &store).unwrap_err();
+        assert!(refusal.message.contains("not loaded"));
+        assert_eq!(
+            read_store(
+                &StoreRead::ClientOrder {
+                    symbol: "BTCUSDT".into(),
+                    client_order_id: "c".into()
+                },
+                &store
+            )
+            .unwrap(),
+            json!({"found":false,"definitive":false})
+        );
+    }
+
+    // Web: Dom.tsx / SafeCexKLinesChart -> fetchOHLCV({symbol, interval, limit?, from?, to?}).
+    #[test]
+    fn web_fetch_ohlcv_and_public_trades_decode() {
+        let (command, _) = web(
+            "fetchOHLCV",
+            json!([{"symbol":"BTCUSDT","interval":"1m","limit":200}]),
+            &caps(),
+        );
+        assert_eq!(
+            command,
+            json!({"op":"fetchCandles","symbol":"BTCUSDT","interval":"1m","limit":200})
+        );
+        web(
+            "fetchOHLCV",
+            json!([{"symbol":"BTCUSDT","interval":"1h","from":1_700_000_000_000u64,"to":1_700_003_600_000u64}]),
+            &caps(),
+        );
+        let (command, _) = web("fetchPublicTrades", json!(["BTCUSDT", null]), &caps());
+        assert_eq!(
+            command,
+            json!({"op":"fetchPublicTrades","symbol":"BTCUSDT"})
+        );
+        web("fetchPublicTrades", json!(["BTCUSDT", 50]), &caps());
+    }
+
+    // Web: collectAccountAxes -> fetchHistoricalFills({symbol?, from, to}) / fetchHistoricalOrders({from, to});
+    // income reads from the PnL views.
+    #[test]
+    fn web_history_reads_decode() {
+        let history = Capabilities {
+            fill_history: true,
+            order_history: true,
+            ..caps()
+        };
+        let (command, _) = web(
+            "fetchHistoricalFills",
+            json!([{"symbol":"BTCUSDT","from":1_700_000_000_000u64,"to":1_700_000_100_000u64}]),
+            &history,
+        );
+        assert_eq!(command["from"], json!(1_700_000_000_000.0));
+        web("fetchHistoricalFills", json!([null]), &history);
+        let (command, _) = web(
+            "fetchHistoricalOrders",
+            json!([{"from":1,"to":2}]),
+            &history,
+        );
+        assert_eq!(
+            command,
+            json!({"op":"fetchOrderHistory","from":1.0,"to":2.0})
+        );
+        web("fetchHistoricalOrders", json!([]), &history);
+        let (command, _) = web(
+            "fetchIncomeHistory",
+            json!([{"symbol":"BTCUSDT","startTime":1,"endTime":2,"limit":100.0}]),
+            &caps(),
+        );
+        assert_eq!(
+            command,
+            json!({"op":"fetchIncome","symbol":"BTCUSDT","from":1.0,"to":2.0,"limit":100})
+        );
+        let (command, _) = web("fetchIncomeHistoryRange", json!([1, 2, null]), &caps());
+        assert_eq!(command, json!({"op":"fetchIncome","from":1.0,"to":2.0}));
+        web(
+            "fetchIncomeHistoryRange",
+            json!([1, 2, "FUNDING_FEE"]),
+            &caps(),
         );
     }
 
