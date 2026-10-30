@@ -1298,8 +1298,17 @@ pub const FRAME_FED_VENUES: &[&str] = &[
     "bitget",
     "bitgetinverse",
     "bitgetusdc",
+    "blofin",
+    "bybit",
+    "bybitinverse",
+    "bybitspot",
+    "bybitdemo",
     "hyperliquid",
     "hyperliquidspot",
+    "okx",
+    "okxeu",
+    "okxdemo",
+    "okxeudemo",
 ];
 
 pub fn frame_fed_supported(venue: &str) -> bool {

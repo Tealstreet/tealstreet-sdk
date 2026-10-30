@@ -730,6 +730,25 @@ impl Store {
         }
     }
 
+    /// Replace every market's settings, keyed by symbol.
+    pub fn replace_settings<'a>(
+        &mut self,
+        settings: impl IntoIterator<Item = (&'a str, MarketSetting)>,
+    ) {
+        let settings: HashMap<Box<str>, MarketSetting> = settings
+            .into_iter()
+            .map(|(symbol, setting)| (symbol.into(), setting))
+            .collect();
+        if settings != self.settings {
+            self.settings = settings;
+            self.changes.settings = true;
+            #[cfg(feature = "metadata-freshness")]
+            if let Some(metadata) = &mut self.metadata {
+                metadata.changed(None);
+            }
+        }
+    }
+
     pub fn update_setting(&mut self, symbol: &str, update: impl FnOnce(&mut MarketSetting)) {
         let setting = self.settings.entry(symbol.into()).or_default();
         let before = *setting;
