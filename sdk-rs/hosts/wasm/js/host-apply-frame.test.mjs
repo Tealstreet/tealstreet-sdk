@@ -51,3 +51,13 @@ test('an ingest refusal reaches the caller; a disposed or ingest-less host refus
   disposed.host.dispose();
   assert.throws(() => disposed.host.applyFrame(new Uint8Array([0]), true), EngineDisposedError);
 });
+
+test('setSourceClockOffset reaches the engine, and an older engine without it is left alone', () => {
+  const offsets = [];
+  const r = rig(() => '[]');
+  r.host.engine.setSourceClockOffset = (offset) => offsets.push(offset);
+  r.host.setSourceClockOffset(1_250);
+  r.host.setSourceClockOffset(NaN);
+  assert.deepEqual(offsets, [1_250, undefined]);
+  assert.doesNotThrow(() => rig(() => '[]').host.setSourceClockOffset(0));
+});
