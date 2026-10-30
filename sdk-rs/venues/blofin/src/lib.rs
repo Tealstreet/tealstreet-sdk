@@ -596,13 +596,28 @@ impl Venue for Blofin {
         Some(self.account.export_venue_state())
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
-        if !self.account.apply_venue_state(state) {
+        let ours = self.account.margin;
+        if self.account.apply_venue_state(state) {
+            self.hold_margin_over_source(cx, ours);
+        } else {
             cx.notice(
                 Level::Warn,
                 code::STREAM_MALFORMED,
                 "Unreadable BloFin venue state from the data source",
             );
         }
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.reapply_held_margin(cx);
+    }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        // The existing reads: margin and position mode, and positions (leverage).
+        if cx.frame_fed() || !self.signed() {
+            return;
+        }
+        self.read_setting(cx, account::StartupRead::Margin);
+        self.read_setting(cx, account::StartupRead::Mode);
+        self.refresh_account(cx);
     }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {

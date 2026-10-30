@@ -272,6 +272,16 @@ impl Okx {
         self.reconcile(cx, false);
     }
 
+    /// Data source: re-read the position mode (config) and the positions'
+    /// leverage after a frame-fed engine changed them.
+    pub(crate) fn account_refresh_settings(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.frame_fed() || !self.account.configured {
+            return;
+        }
+        self.account_start(cx);
+        self.account_after_settings(cx);
+    }
+
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if cx.frame_fed()
             || self.credentials.is_none()
