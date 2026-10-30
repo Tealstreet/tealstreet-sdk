@@ -234,7 +234,10 @@ fn a_source_snapshot_with_venue_state_lets_an_amend_go_out_in_one_request() {
         price: Some(101.),
         amount: None,
     });
-    assert!(h.result(2).is_err(), "no native row before the source's state");
+    assert!(
+        h.result(2).is_err(),
+        "no native row before the source's state"
+    );
     assert!(h.pending.is_empty());
 
     h.e.apply_frame(NOW, &frame, true).unwrap();
@@ -251,6 +254,104 @@ fn a_source_snapshot_with_venue_state_lets_an_amend_go_out_in_one_request() {
     assert_eq!(request.method, safe_cex_engine::Method::Put);
     h.respond(request, 200, r#"{"id":"123"}"#);
     assert_eq!(h.result(3), Ok("[\"123\"]"));
-    assert!(h.pending.is_empty(), "no read after the amend: {:?}", h.pending);
+    assert!(
+        h.pending.is_empty(),
+        "no read after the amend: {:?}",
+        h.pending
+    );
     no_socket(&h);
+}
+
+const SYMBOL: &str = "BTC-USD-PERP";
+
+fn leverage(h: &Harness) -> f64 {
+    h.e.store().setting(SYMBOL).expect("a setting row").leverage
+}
+
+fn set_source_leverage(source: &mut Harness, value: f64) {
+    source
+        .e
+        .store_mut()
+        .update_setting(SYMBOL, |s| s.leverage = value);
+}
+
+fn apply_source(h: &mut Harness, source: &mut Harness) {
+    let frame = source.e.snapshot_frame(NOW).to_vec();
+    h.e.apply_frame(NOW, &frame, true).unwrap();
+    h.collect();
+}
+
+/// A page fed a 10x source that set 20x itself.
+fn page_set_to_20x(source: &mut Harness) -> Harness {
+    set_source_leverage(source, 10.);
+    let mut h = frame_fed();
+    apply_source(&mut h, source);
+    assert_eq!(leverage(&h), 10.);
+    h.command(Command::SetLeverage {
+        command: 9,
+        symbol: SYMBOL.into(),
+        leverage: 20.,
+        side: None,
+    });
+    only(&h, "/account/margin/");
+    let write = h.take("/account/margin/");
+    assert_eq!(write.method, safe_cex_engine::Method::Post);
+    h.respond(write, 200, r#"{"leverage":20,"margin_type":"CROSS"}"#);
+    assert_eq!(leverage(&h), 20.);
+    h
+}
+
+#[test]
+fn a_stale_source_frame_keeps_the_new_leverage_and_an_order_is_still_one_request() {
+    let mut source = source_with_open_order();
+    let mut h = page_set_to_20x(&mut source);
+    apply_source(&mut h, &mut source);
+    assert_eq!(leverage(&h), 20., "held against the stale 10x frame");
+    h.command(Command::PlaceOrders {
+        command: 10,
+        orders: vec![limit()],
+    });
+    only(&h, "/orders");
+    assert_eq!(leverage(&h), 20.);
+}
+
+#[test]
+fn a_source_frame_with_the_new_leverage_releases_the_hold() {
+    let mut source = source_with_open_order();
+    let mut h = page_set_to_20x(&mut source);
+    set_source_leverage(&mut source, 20.);
+    apply_source(&mut h, &mut source);
+    assert_eq!(leverage(&h), 20.);
+    // Released: the source's later value is taken again.
+    set_source_leverage(&mut source, 5.);
+    apply_source(&mut h, &mut source);
+    assert_eq!(leverage(&h), 5.);
+}
+
+#[test]
+fn refresh_settings_re_reads_the_margin_configs_and_writes_nothing() {
+    use safe_cex_engine::VenueAction;
+    let mut source = source_with_open_order();
+    source.pending.clear();
+    source.command(Command::Venue {
+        command: 11,
+        action: VenueAction::RefreshSettings {
+            symbol: Some(SYMBOL.into()),
+        },
+    });
+    only(&source, "/account/margin");
+    assert_eq!(source.pending[0].method, safe_cex_engine::Method::Get);
+    source.reply(
+        "/account/margin",
+        r#"{"configs":[{"market":"BTC-USD-PERP","leverage":7,"margin_type":"CROSS"}]}"#,
+    );
+    assert_eq!(leverage(&source), 7.);
+    assert!(
+        source
+            .pending
+            .iter()
+            .all(|r| r.method == safe_cex_engine::Method::Get),
+        "{:?}",
+        source.pending
+    );
 }
