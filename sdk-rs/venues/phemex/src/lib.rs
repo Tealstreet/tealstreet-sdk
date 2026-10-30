@@ -548,9 +548,11 @@ impl Venue for PhemexPerpetuals {
         Some(self.account.export_venue_state().encode())
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
-        if let Some(state) = venue_state::VenueState::decode(bytes)
-            && self.account.apply_venue_state(cx, state)
-        {
+        let Some(state) = venue_state::VenueState::decode(bytes) else {
+            cx.venue_state_unreadable("Unreadable Phemex venue state from the data source");
+            return;
+        };
+        if self.account.apply_venue_state(cx, state) {
             // The source's STATUS hedge flag predates the held mode.
             cx.store.set_hedged(self.account.any_hedged());
         }

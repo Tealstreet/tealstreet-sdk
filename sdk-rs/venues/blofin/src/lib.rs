@@ -600,11 +600,7 @@ impl Venue for Blofin {
         if self.account.apply_venue_state(state) {
             self.hold_margin_over_source(cx, ours);
         } else {
-            cx.notice(
-                Level::Warn,
-                code::STREAM_MALFORMED,
-                "Unreadable BloFin venue state from the data source",
-            );
+            cx.venue_state_unreadable("Unreadable BloFin venue state from the data source");
         }
     }
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {

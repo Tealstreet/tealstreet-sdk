@@ -148,11 +148,7 @@ impl Venue for Paradex {
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
         if let Err(error) = self.account.apply_venue_state(state) {
-            cx.notice(
-                safe_cex_engine::Level::Warn,
-                safe_cex_engine::log::code::STREAM_MALFORMED,
-                error,
-            );
+            cx.venue_state_unreadable(error);
         }
     }
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {

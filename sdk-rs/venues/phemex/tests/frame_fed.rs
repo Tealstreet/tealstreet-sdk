@@ -490,3 +490,32 @@ fn a_late_placement_that_filled_is_canceled_and_reported() {
         "{a:?}"
     );
 }
+
+#[test]
+fn an_unreadable_venue_state_warns_once_per_outage_and_keeps_the_last_state() {
+    let malformed = |e: &mut Engine<PhemexPerpetuals>, at: f64| {
+        let mut w = safe_cex_engine::wire::FrameWriter::new(Vec::new(), at);
+        w.venue_state(&[0xff]);
+        let frame = w.finish();
+        e.apply_frame(at, &frame, false).unwrap();
+        e.drain_actions()
+            .filter(|a| {
+                matches!(a, Action::Notice(Notice::Event(e))
+                    if e.code == safe_cex_engine::log::code::STREAM_MALFORMED)
+            })
+            .count()
+    };
+    let mut e = frame_fed();
+    e.apply_frame(1001., &source_snapshot(), true).unwrap();
+    e.drain_actions().for_each(drop);
+    assert_eq!(malformed(&mut e, 1002.), 1, "the first unreadable state warns");
+    assert_eq!(malformed(&mut e, 1003.), 0, "not again for the same outage");
+    assert_eq!(
+        placed_pos_side(&mut e, "caller-1").as_deref(),
+        Some("Long"),
+        "the last readable state stays"
+    );
+    e.apply_frame(1004., &source_snapshot(), true).unwrap();
+    e.drain_actions().for_each(drop);
+    assert_eq!(malformed(&mut e, 1005.), 1, "a new outage warns again");
+}

@@ -642,6 +642,7 @@ impl Venue for BitgetFutures {
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
         let Some(state) = venue_state::decode(state) else {
+            cx.venue_state_unreadable("Unreadable Bitget venue state from the data source");
             return;
         };
         self.account.detected = state.detected;
