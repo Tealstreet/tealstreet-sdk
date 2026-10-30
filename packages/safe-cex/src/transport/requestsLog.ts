@@ -15,6 +15,15 @@ const BODY_CHARS = 4096;
 /** Enough of a body to redact as whole JSON before the log entry is capped. */
 const OBSERVED_CHARS = BODY_CHARS * 4;
 
+/** A diagnostic must never change a request or frame: a failure loses only its log entry. */
+const quietly = (log: () => void) => {
+  try {
+    log();
+  } catch {
+    // The entry is dropped; the traffic is untouched.
+  }
+};
+
 const capped = (value: string) =>
   value.length <= BODY_CHARS ? value : `${value.slice(0, BODY_CHARS)}...truncated (${value.length} chars)`;
 
@@ -41,7 +50,7 @@ const observed = (response: HttpResponse, done: (body: string) => void): HttpRes
       let seen = '';
       try {
         for await (const chunk of chunks) {
-          if (seen.length < OBSERVED_CHARS) seen += text.decode(chunk, { stream: true });
+          if (seen.length < OBSERVED_CHARS) quietly(() => (seen += text.decode(chunk, { stream: true })));
           yield chunk;
         }
       } finally {
@@ -63,20 +72,33 @@ export const withRequestsLog = (
 ): Transport => {
   const logged = (request: HttpPacket, send: () => Promise<HttpResponse>): Promise<HttpResponse> => {
     if (!isWsDiagnosticsEnabled()) return send();
-    const { method, url, body } = describe(request);
-    emit('grafana-http-request', `Request ${method} ${url} ${JSON.stringify({ method, url, body })}`);
+    let line: { method: string; url: string } | undefined;
+    quietly(() => {
+      const { method, url, body } = describe(request);
+      emit('grafana-http-request', `Request ${method} ${url} ${JSON.stringify({ method, url, body })}`);
+      line = { method, url };
+    });
+    if (!line) return send();
+    const { method, url } = line;
     const started = Date.now();
-    return send().then((response) =>
-      observed(response, (raw) => {
-        const summary = {
-          status: response.status,
-          ms: Date.now() - started,
-          // Redact the whole body first: a capped one is no longer JSON.
-          body: capped(redactWsDiagnosticPayload(raw)),
-        };
-        emit('grafana-http-response', `Response ${method} ${url} ${response.status} ${JSON.stringify(summary)}`);
-      }),
-    );
+    return send().then((response) => {
+      try {
+        return observed(response, (raw) =>
+          quietly(() => {
+            const summary = {
+              status: response.status,
+              ms: Date.now() - started,
+              // Redact the whole body first: a capped one is no longer JSON.
+              body: capped(redactWsDiagnosticPayload(raw)),
+            };
+            emit('grafana-http-response', `Response ${method} ${url} ${response.status} ${JSON.stringify(summary)}`);
+          }),
+        );
+      } catch {
+        // No decoder on this runtime, say: the venue's answer still goes through.
+        return response;
+      }
+    });
   };
   // Members are forwarded explicitly: a class instance's methods do not spread.
   const prepared = (inner: PreparedHttp): PreparedHttp => ({
@@ -106,13 +128,15 @@ export const withRequestsLog = (
       // Market data is not the private stream the log is for.
       if ((handlers.channel ?? 'public') === 'public') return transport.connect(url, handlers);
       const sampler = new WsDiagnosticSampler();
-      const frame = (event: RequestsLogEvent, data: string | Uint8Array) => {
-        if (!isWsDiagnosticsEnabled() || (typeof data === 'string' && isHeartbeatFrame(data)) || sampler.drop()) {
-          return;
-        }
-        const message = typeof data === 'string' ? redactWsDiagnosticPayload(data) : `binary ${data.byteLength} bytes`;
-        sampler.emit((entry) => emit(event, entry), label, message);
-      };
+      const frame = (event: RequestsLogEvent, data: string | Uint8Array) =>
+        quietly(() => {
+          if (!isWsDiagnosticsEnabled() || (typeof data === 'string' && isHeartbeatFrame(data)) || sampler.drop()) {
+            return;
+          }
+          const message =
+            typeof data === 'string' ? redactWsDiagnosticPayload(data) : `binary ${data.byteLength} bytes`;
+          sampler.emit((entry) => emit(event, entry), label, message);
+        });
       const socket = transport.connect(url, {
         ...handlers,
         onMessage: (message) => {
@@ -130,7 +154,7 @@ export const withRequestsLog = (
       });
       return {
         send: (message: string) => {
-          frame('grafana-pws-sub', stringifyWsDiagnosticPayload(message));
+          quietly(() => frame('grafana-pws-sub', stringifyWsDiagnosticPayload(message)));
           socket.send(message);
         },
         close: () => socket.close(),
