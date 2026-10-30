@@ -925,6 +925,9 @@ impl Venue for Okx {
 
     // Frame-fed: the data source reads the config before its orders and
     // positions, so once both have arrived the hedged flag is the account's.
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        self.account_refresh_settings(cx);
+    }
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
         let loaded = cx.store.loaded();
         self.account.ready = loaded.orders && loaded.positions;

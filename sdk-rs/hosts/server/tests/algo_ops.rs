@@ -559,6 +559,7 @@ async fn disposing_for_no_browser_stops_the_chases_and_says_why() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "no browser for 60s".into(),
+                    stopped: None,
                 })
                 .unwrap();
             let mut ops = Vec::new();
@@ -581,6 +582,43 @@ async fn disposing_for_no_browser_stops_the_chases_and_says_why() {
                         .is_some_and(|text| text.contains("was stopped"))),
                 "the chase reports its stop: {ops:?}"
             );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("chaser:start", web_chase(None));
+            algos
+                .next("store", |data| !active_chasers(data).is_empty())
+                .await;
+            let (kept, notice) = tokio::sync::oneshot::channel();
+            algos
+                .inbox
+                .send(AlgoInput::Dispose {
+                    reason: "no browser for 60s".into(),
+                    stopped: Some(Box::new(move |text| {
+                        let _ = kept.send(text);
+                    })),
+                })
+                .unwrap();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(5), notice)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                "Chases and TWAPs stopped: no browser for 60s"
+            );
+            while let Ok(text) = algos.out.try_recv() {
+                let message: Value = serde_json::from_str(&text).unwrap();
+                assert_ne!(
+                    message["d"]["op"], "error",
+                    "nothing is sent to an absent socket"
+                );
+            }
         })
         .await;
 }

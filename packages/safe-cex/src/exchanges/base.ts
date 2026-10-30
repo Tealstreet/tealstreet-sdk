@@ -368,6 +368,8 @@ export const WORKER_OPTIONAL_METHODS = [
   'fetchLeverageForSymbol',
   // A frame-fed main engine runs a nuke's legs itself, after the data source stops its algos.
   'stopAccountAlgos',
+  // ...and asks it to re-read the settings that engine just changed.
+  'refreshAccountSettings',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([

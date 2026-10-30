@@ -1314,6 +1314,7 @@ pub const FRAME_FED_VENUES: &[&str] = &[
     "okxeu",
     "okxdemo",
     "okxeudemo",
+    "paradex",
     "phemex",
 ];
 

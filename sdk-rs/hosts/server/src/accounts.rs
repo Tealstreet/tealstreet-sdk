@@ -246,7 +246,16 @@ pub struct Registry {
     pub resume_grace: Duration,
     /// 5-10 account starts per second per egress IP, with jitter (DESIGN sizing).
     pacer: crate::pacing::Pacer,
+    /// Why algos stopped while no browser was there to see it, one per
+    /// (user, account), for that account's next init.
+    notices: Notices,
 }
+
+/// Stop notices by (user, account), each with when it was kept.
+type Notices = Arc<Mutex<HashMap<(String, String), (String, tokio::time::Instant)>>>;
+
+/// How long an undelivered stop notice waits for the account's next init.
+pub const NOTICE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Engine options for a hosted account: non-secret init fields only.
 /// HyroTrader's origins are browser build configuration the server does not have;
@@ -416,6 +425,7 @@ impl Registry {
             },
             resume_grace,
             pacer: crate::pacing::Pacer::new(7, Duration::from_millis(60)),
+            notices: Arc::default(),
         }
     }
 
@@ -481,7 +491,7 @@ impl Registry {
         let replaced = self.accounts.lock().unwrap().insert(key, account.clone());
         if let Some(replaced) = replaced {
             // A concurrent init of the same name won the race; the later build stands.
-            Self::stop(&replaced, "account replaced by a newer init");
+            Self::stop(&replaced, "account replaced by a newer init", None);
         }
         Ok(account)
     }
@@ -611,11 +621,6 @@ impl Registry {
 
     /// Lets go of one holder; the last one disposes the account.
     pub fn release(&self, account: &Arc<Account>, holder: u64) {
-        self.release_for(account, holder, "account disposed");
-    }
-
-    /// `release`, recording why the account goes if this was its last holder.
-    fn release_for(&self, account: &Arc<Account>, holder: u64, reason: &str) {
         let empty = {
             let mut holders = account.holders.lock().unwrap();
             holders.by_id.remove(&holder);
@@ -623,16 +628,38 @@ impl Registry {
             holders.by_id.is_empty()
         };
         if empty {
-            self.dispose_for(account, reason);
+            self.dispose_for(account, "account disposed", None);
         }
     }
 
+    /// The stop notice kept for `user`'s account `name`, once, if still fresh.
+    pub fn take_notice(&self, user: &str, name: &str) -> Option<String> {
+        let (notice, at) = self
+            .notices
+            .lock()
+            .unwrap()
+            .remove(&(user.to_owned(), name.to_owned()))?;
+        (at.elapsed() < NOTICE_TTL).then_some(notice)
+    }
+
+    /// Where the algo host leaves a notice for a browser that is gone.
+    fn keep_notice(&self, account: &Account) -> crate::algos::StopNotice {
+        let notices = self.notices.clone();
+        let key = (account.user.clone(), account.name.clone());
+        Box::new(move |notice| {
+            let mut notices = notices.lock().unwrap();
+            notices.retain(|_, (_, at)| at.elapsed() < NOTICE_TTL);
+            notices.insert(key, (notice, tokio::time::Instant::now()));
+        })
+    }
+
     /// With algos, their host settles chases first, then disposes the engine and signer.
-    fn stop(account: &Account, reason: &str) {
+    fn stop(account: &Account, reason: &str, stopped: Option<crate::algos::StopNotice>) {
         let handed = account.algos.as_ref().is_some_and(|algos| {
             algos
                 .send(crate::algos::AlgoInput::Dispose {
                     reason: reason.to_owned(),
+                    stopped,
                 })
                 .is_ok()
         });
@@ -646,10 +673,15 @@ impl Registry {
 
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
     pub fn dispose(&self, account: &Arc<Account>) {
-        self.dispose_for(account, "account disposed");
+        self.dispose_for(account, "account disposed", None);
     }
 
-    fn dispose_for(&self, account: &Arc<Account>, reason: &str) {
+    fn dispose_for(
+        &self,
+        account: &Arc<Account>,
+        reason: &str,
+        stopped: Option<crate::algos::StopNotice>,
+    ) {
         let mut accounts = self.accounts.lock().unwrap();
         let key = (account.user.clone(), account.name.clone());
         if accounts
@@ -660,7 +692,7 @@ impl Registry {
         }
         drop(accounts);
         *account.holders.lock().unwrap() = Holders::default();
-        Self::stop(account, reason);
+        Self::stop(account, reason, stopped);
     }
 
     /// Moves a closing socket's private accounts under `resume_id` for the grace
@@ -701,7 +733,17 @@ impl Registry {
             if let Some(expired) = expired {
                 let reason = format!("no browser for {}s", grace.as_secs());
                 for (account, park_holder) in expired.accounts {
-                    registry.release_for(&account, park_holder, &reason);
+                    // No browser to tell: the next init of the account is told.
+                    let last = {
+                        let mut holders = account.holders.lock().unwrap();
+                        holders.by_id.remove(&park_holder);
+                        account.hand_over(&mut holders, park_holder);
+                        holders.by_id.is_empty()
+                    };
+                    if last {
+                        let stopped = registry.keep_notice(&account);
+                        registry.dispose_for(&account, &reason, Some(stopped));
+                    }
                 }
             }
             // A resumed id stays an alias for one more grace window.
@@ -864,6 +906,39 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_stop_notice_reaches_the_next_init_once_and_expires_after_a_day() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, _algos) = held_account();
+                (registry.keep_notice(&account))(
+                    "Chases and TWAPs stopped: no browser for 60s".into(),
+                );
+                assert_eq!(
+                    registry.take_notice("other", "acct"),
+                    None,
+                    "never another user's"
+                );
+                assert_eq!(
+                    registry.take_notice("u", "acct").as_deref(),
+                    Some("Chases and TWAPs stopped: no browser for 60s")
+                );
+                assert_eq!(registry.take_notice("u", "acct"), None, "delivered once");
+                (registry.keep_notice(&account))("first".into());
+                (registry.keep_notice(&account))("second".into());
+                assert_eq!(
+                    registry.take_notice("u", "acct").as_deref(),
+                    Some("second"),
+                    "one per account"
+                );
+                (registry.keep_notice(&account))("stale".into());
+                tokio::time::sleep(NOTICE_TTL).await;
+                assert_eq!(registry.take_notice("u", "acct"), None, "dropped after 24h");
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_parked_account_keeps_its_algos_then_stops_them_for_no_browser() {
         tokio::task::LocalSet::new()
             .run_until(async {
@@ -877,7 +952,8 @@ mod tests {
                 );
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 match algos.try_recv() {
-                    Ok(crate::algos::AlgoInput::Dispose { reason }) => {
+                    Ok(crate::algos::AlgoInput::Dispose { reason, stopped }) => {
+                        assert!(stopped.is_some(), "expiry keeps a notice for the next init");
                         assert_eq!(reason, "no browser for 60s")
                     }
                     _ => panic!("the window expired without disposing the algos"),

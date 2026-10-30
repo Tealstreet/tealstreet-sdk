@@ -569,6 +569,9 @@ pub enum VenueAction {
     ScheduleCancel { time_ms: Option<f64> },
     /// Atomically refresh public instrument discovery without restarting the account.
     RefreshMarkets,
+    /// Data source: re-read the account settings a frame-fed engine changed
+    /// (position mode, margin, leverage, venue keys), for `symbol` or the account.
+    RefreshSettings { symbol: Option<String> },
     /// Lighter: the cached account tier as a JSON string, or `null`.
     FetchAccountTier,
     /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
@@ -1676,6 +1679,8 @@ struct IoCore {
     /// A frame-fed engine (`crate::frame_fed`): its account state arrives as
     /// frames from a data source; it opens no socket and makes no account read.
     frame_fed: bool,
+    /// Frame-fed: settings this engine confirmed, kept over the source's frames.
+    setting_holds: crate::setting_holds::SettingHolds,
     /// Attempts a Session resume selected with no delivery in this event: the
     /// resume is their issue custody until the outer Plan flush. Reserved at
     /// park, so a resume never allocates.
@@ -1850,6 +1855,7 @@ impl Default for IoCore {
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
             frame_fed: false,
+            setting_holds: Default::default(),
             #[cfg(feature = "http-plans")]
             session_resumed: Vec::new(),
             signing: Default::default(),
@@ -2233,6 +2239,35 @@ impl<P> Cx<'_, P> {
     /// polls, no post-write reads (account state arrives as frames).
     pub fn frame_fed(&self) -> bool {
         self.io.core.frame_fed
+    }
+
+    /// Frame-fed: keep a settings write this engine confirmed over the data
+    /// source's frames until the source agrees (`crate::setting_holds`). The
+    /// host asks the source to re-read on the `settings.held` event. A no-op on
+    /// an engine that is not frame-fed.
+    pub fn hold_setting(&mut self, key: crate::setting_holds::SettingKey) {
+        if !self.io.core.frame_fed {
+            return;
+        }
+        let symbol = key.symbol().map(str::to_owned);
+        self.io.core.setting_holds.hold(key, self.now);
+        self.event(
+            Level::Info,
+            crate::log::code::SETTINGS_HELD,
+            "Holding a confirmed setting until the data source re-reads it",
+            symbol
+                .map(|symbol| ("symbol", Value::Str(symbol)))
+                .into_iter()
+                .collect(),
+        );
+    }
+
+    pub fn setting_held(&self, key: &crate::setting_holds::SettingKey) -> bool {
+        self.io.core.setting_holds.held(key)
+    }
+
+    pub fn release_setting(&mut self, key: &crate::setting_holds::SettingKey) {
+        self.io.core.setting_holds.release(key);
     }
 
     /// `SocketId(0)` stands for a connect the engine suppressed.
@@ -3461,6 +3496,9 @@ pub trait Venue {
     /// Frame-fed: after each ingested frame, derive or prune venue state from
     /// the store (orders, positions, loaded flags).
     fn on_frame_ingested(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
+    /// Data source: re-read the settings a frame-fed engine changed, for
+    /// `symbol` or (`None`) the account, through the venue's own config reads.
+    fn refresh_settings(&mut self, _cx: &mut Cx<'_, Self::Pending>, _symbol: Option<&str>) {}
     /// Cancel and amend route only through stored orders: hold one naming an
     /// acknowledged placement until the store has it (`placement_acks`).
     fn cancel_needs_stored_order(&self) -> bool {
@@ -3748,6 +3786,9 @@ pub struct Engine<V: Venue> {
     /// host time); a source frame lifts it only once written well after.
     #[cfg(feature = "order-locks")]
     fence_marks: Vec<(u64, f64)>,
+    /// Frame-fed: the data source's clock minus this host's, in ms, as the
+    /// host measured it (`None` until it has).
+    source_clock_offset: Option<f64>,
     /// Data source: the VENUE_STATE bytes last sent, so unchanged state is not resent.
     venue_state_sent: Option<Vec<u8>>,
     shared_books: HashMap<String, Book>,
@@ -3841,6 +3882,7 @@ impl<V: Venue> Engine<V> {
             ingest: Default::default(),
             #[cfg(feature = "order-locks")]
             fence_marks: Vec::new(),
+            source_clock_offset: None,
             venue_state_sent: None,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
@@ -4024,6 +4066,14 @@ impl<V: Venue> Engine<V> {
         self.io.core.frame_fed
     }
 
+    /// Frame-fed: the data source's clock minus this host's clock, in ms (0 for
+    /// a same-machine worker; the measured server offset for an exchange
+    /// server). Fences then lift on one clock; until it is set they wait
+    /// `frame_fed::UNSYNCED_FENCE_GRACE_MS`.
+    pub fn set_source_clock_offset(&mut self, offset_ms: Option<f64>) {
+        self.source_clock_offset = offset_ms.filter(|offset| offset.is_finite());
+    }
+
     /// Frame-fed: apply a data source's SCXF frame (`crate::ingest`). A
     /// snapshot replaces the account sections. On `Err` the store may be
     /// partly applied: the host asks its source for a re-snapshot.
@@ -4041,7 +4091,10 @@ impl<V: Venue> Engine<V> {
         }
         self.expire_read_roots(now);
         let parsed = crate::ingest::parse(frame)?;
+        let expired = self.io.core.setting_holds.expire(now);
+        let kept = self.io.core.setting_holds.keep(&self.store);
         let applied = crate::ingest::apply(&mut self.store, &mut self.ingest, &parsed, snapshot)?;
+        self.io.core.setting_holds.restore(&mut self.store, kept);
         self.io.core.dispatch_now = now;
         self.begin_event_scope();
         let mut cx = Cx {
@@ -4049,6 +4102,13 @@ impl<V: Venue> Engine<V> {
             store: &mut self.store,
             io: &mut self.io,
         };
+        for key in expired {
+            cx.notice(
+                Level::Warn,
+                crate::log::code::SETTINGS_HOLD_EXPIRED,
+                format!("The data source never confirmed {key:?}; its value now applies"),
+            );
+        }
         if let Some(state) = &applied.venue_state {
             self.venue.apply_venue_state(&mut cx, state);
         }
@@ -4060,11 +4120,17 @@ impl<V: Venue> Engine<V> {
             // would let a retry place twice.
             #[cfg(feature = "order-locks")]
             {
-                let written = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
+                let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
+                // On this host's clock when the offset is known; otherwise a
+                // grace long enough to absorb the unmeasured skew.
+                let (written, grace) = match self.source_clock_offset {
+                    Some(offset) => (stamp - offset, crate::frame_fed::FENCE_GRACE_MS),
+                    None => (stamp, crate::frame_fed::UNSYNCED_FENCE_GRACE_MS),
+                };
                 let lifted = self
                     .fence_marks
                     .iter()
-                    .filter(|(_, at)| *at + crate::frame_fed::FENCE_GRACE_MS <= written)
+                    .filter(|(_, at)| *at + grace <= written)
                     .map(|(token, _)| *token)
                     .max();
                 if let Some(token) = lifted {
@@ -4878,6 +4944,14 @@ impl<V: Venue> Engine<V> {
                     let logical = cx.io.core.polls.fired(timer).unwrap_or(timer);
                     self.venue.on_timer(&mut cx, logical);
                 }
+            }
+            Event::Command(Command::Venue {
+                command,
+                action: VenueAction::RefreshSettings { symbol },
+            }) => {
+                // A data source re-reads what a frame-fed engine just changed.
+                self.venue.refresh_settings(&mut cx, symbol.as_deref());
+                cx.done(command, "null".into());
             }
             Event::Command(Command::Venue { command, action }) => {
                 cx.io.begin_command_entry(Some(command));

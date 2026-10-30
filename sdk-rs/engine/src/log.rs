@@ -138,6 +138,10 @@ pub mod code {
     pub const SNAPSHOT_DISCARDED: &str = "snapshot.discarded";
     /// Counted once per report: one skipped row, or one summary of several.
     pub const ROW_SKIPPED: &str = "row.skipped";
+    /// Frame-fed: a confirmed settings write now outlasts the data source until it agrees.
+    pub const SETTINGS_HELD: &str = "settings.held";
+    /// Frame-fed: the data source never agreed with a held setting; its value now applies.
+    pub const SETTINGS_HOLD_EXPIRED: &str = "settings.hold_expired";
 
     /// A replyless command diagnostic; attributed commands use CommandError.
     pub const COMMAND_FAILED: &str = "command.failed";

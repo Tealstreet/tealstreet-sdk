@@ -12,6 +12,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Context as ReadContext, Error as ReadError};
 use safe_cex_engine::selected_read::{ReadRequest, ReadRole};
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
@@ -244,8 +245,80 @@ impl State {
             unreconciled_fills: self.has_unreconciled_fills(),
         }
     }
-    /// Frame-fed: the source's state replaces what this engine would have read.
-    pub(crate) fn apply_venue_state(&mut self, state: crate::venue_state::VenueState) {
+    /// Frame-fed: the source's state replaces what this engine would have read,
+    /// except a setting this engine confirmed that the source has not re-read.
+    /// Returns whether a held position mode was kept over the source's.
+    pub(crate) fn apply_venue_state(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut state: crate::venue_state::VenueState,
+    ) -> bool {
+        let symbols: HashSet<String> = self
+            .contexts
+            .keys()
+            .chain(self.confirmed_modes.keys())
+            .cloned()
+            .collect();
+        let mut kept_mode = false;
+        for symbol in &symbols {
+            kept_mode |= self.keep_held(cx, &mut state, symbol);
+        }
+        self.replace_venue_state(state);
+        kept_mode
+    }
+    /// A held key the source now reports is released; one it contradicts keeps
+    /// this engine's value in `state`.
+    fn keep_held(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        state: &mut crate::venue_state::VenueState,
+        symbol: &str,
+    ) -> bool {
+        let mut kept_mode = false;
+        let key = SettingKey::PositionMode(symbol.into());
+        if cx.setting_held(&key)
+            && let Some(mine) = self.mode(symbol)
+        {
+            let source = (state.confirmed.get(symbol).copied())
+                .or_else(|| state.contexts.get(symbol).map(|c| c.mode));
+            if source == Some(mine) {
+                cx.release_setting(&key);
+            } else {
+                state.confirmed.insert(symbol.into(), mine);
+                if let Some(context) = state.contexts.get_mut(symbol) {
+                    context.mode = mine;
+                }
+                kept_mode = true;
+            }
+        }
+        let Some(mine) = self.context(symbol) else {
+            return kept_mode;
+        };
+        let margin = SettingKey::MarginType(symbol.into());
+        let leverage = SettingKey::Leverage(symbol.into());
+        if !cx.setting_held(&margin) && !cx.setting_held(&leverage) {
+            return kept_mode;
+        }
+        let source = state.contexts.entry(symbol.into()).or_insert(mine);
+        if cx.setting_held(&margin) {
+            if source.margin_type == mine.margin_type {
+                cx.release_setting(&margin);
+            }
+            source.margin_type = mine.margin_type;
+        }
+        if cx.setting_held(&leverage) {
+            let same = |a: f64, b: f64| a.to_bits() == b.to_bits();
+            if same(source.long_leverage, mine.long_leverage)
+                && same(source.short_leverage, mine.short_leverage)
+            {
+                cx.release_setting(&leverage);
+            }
+            source.long_leverage = mine.long_leverage;
+            source.short_leverage = mine.short_leverage;
+        }
+        kept_mode
+    }
+    fn replace_venue_state(&mut self, state: crate::venue_state::VenueState) {
         self.contexts = state.contexts.into_iter().collect();
         self.confirmed_modes = state.confirmed.into_iter().collect();
         self.order_sides = state.sides.into_iter().collect();

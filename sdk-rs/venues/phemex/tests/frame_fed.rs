@@ -119,6 +119,11 @@ fn frame_fed() -> Engine<PhemexPerpetuals> {
 
 /// A normal (data-source) engine's snapshot once its account read says BTCUSDT is hedged.
 fn source_snapshot() -> Vec<u8> {
+    source("Hedged").snapshot_frame(1001.).to_vec()
+}
+
+/// A normal (data-source) engine whose account read gives BTCUSDT `mode`.
+fn source(mode: &str) -> Engine<PhemexPerpetuals> {
     let mut e = support::prepared_engine(keyed());
     e.start(0.);
     let a: Vec<_> = e.drain_actions().collect();
@@ -139,7 +144,7 @@ fn source_snapshot() -> Vec<u8> {
         };
         let rows = if currency == "USDT" {
             vec![
-                json!({"symbol":"BTCUSDT","currency":"USDT","posMode":"Hedged","posSide":"Long","size":"0","leverageRr":"-10","crossMargin":true}),
+                json!({"symbol":"BTCUSDT","currency":"USDT","posMode":mode,"posSide":if mode == "Hedged" { "Long" } else { "Merged" },"size":"0","leverageRr":"-10","crossMargin":true}),
             ]
         } else {
             vec![]
@@ -151,7 +156,7 @@ fn source_snapshot() -> Vec<u8> {
         );
     }
     e.drain_actions().for_each(drop);
-    e.snapshot_frame(1001.).to_vec()
+    e
 }
 
 #[test]
@@ -250,4 +255,93 @@ fn an_unknown_placement_is_never_re_sent_or_read() {
         },
     );
     assert!(requests(&a).is_empty(), "never re-sent: {:?}", requests(&a));
+}
+
+/// The page switches BTCUSDT to hedge mode; the venue accepts.
+fn switch_to_hedged(e: &mut Engine<PhemexPerpetuals>) {
+    let a = command(
+        e,
+        Command::SetPositionMode {
+            command: 7,
+            hedged: true,
+            symbol: Some("BTCUSDT".into()),
+        },
+    );
+    let sent = requests(&a);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(sent[0].url.contains("/g-positions/switch-pos-mode-sync"));
+    let a = respond(e, &sent[0], r#"{"code":0,"data":null}"#);
+    assert!(requests(&a).is_empty(), "no read after the switch");
+}
+
+fn placed_pos_side(e: &mut Engine<PhemexPerpetuals>, id: &str) -> Option<String> {
+    let a = command(
+        e,
+        Command::PlaceOrders {
+            command: 8,
+            orders: vec![order(id)],
+        },
+    );
+    let sent = requests(&a);
+    assert_eq!(sent.len(), 1, "one request: {sent:?}");
+    param(&sent[0], "posSide")
+}
+
+#[test]
+fn a_confirmed_position_mode_outlasts_a_stale_source_frame() {
+    let mut e = frame_fed();
+    let mut oneway = source("OneWay");
+    e.apply_frame(1001., &oneway.snapshot_frame(1001.).to_vec(), true)
+        .unwrap();
+    assert!(!e.store().hedged());
+    switch_to_hedged(&mut e);
+    // The source has not re-read: its snapshot still says one-way.
+    e.apply_frame(1002., &oneway.snapshot_frame(1002.).to_vec(), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    assert!(e.store().hedged(), "the held mode keeps the hedge flag");
+    assert_eq!(
+        placed_pos_side(&mut e, "caller-1").as_deref(),
+        Some("Long"),
+        "the next order uses the new mode"
+    );
+}
+
+#[test]
+fn a_source_frame_with_the_new_mode_releases_the_hold() {
+    let mut e = frame_fed();
+    let mut oneway = source("OneWay");
+    e.apply_frame(1001., &oneway.snapshot_frame(1001.).to_vec(), true)
+        .unwrap();
+    switch_to_hedged(&mut e);
+    e.apply_frame(1002., &source_snapshot(), true).unwrap();
+    // Released: the source's later one-way read applies at once.
+    e.apply_frame(1003., &oneway.snapshot_frame(1003.).to_vec(), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    assert_eq!(
+        placed_pos_side(&mut e, "caller-1").as_deref(),
+        Some("Merged")
+    );
+}
+
+#[test]
+fn refresh_settings_on_a_source_re_reads_the_account_and_writes_nothing() {
+    let mut e = source("OneWay");
+    let a = command(
+        &mut e,
+        Command::Venue {
+            command: 9,
+            action: safe_cex_engine::VenueAction::RefreshSettings {
+                symbol: Some("BTCUSDT".into()),
+            },
+        },
+    );
+    let sent = requests(&a);
+    assert!(!sent.is_empty(), "the account cycle re-reads");
+    assert!(
+        sent.iter()
+            .all(|r| r.method == safe_cex_engine::Method::Get),
+        "{sent:?}"
+    );
 }

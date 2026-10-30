@@ -5,7 +5,7 @@ mod support;
 use safe_cex_engine::model::{
     Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, Position, PositionSide,
 };
-use safe_cex_engine::{Action, Command, Engine, Event, Method};
+use safe_cex_engine::{Action, Command, Engine, Event, Method, VenueAction};
 use safe_cex_venue_okx::Okx;
 use support::{FixtureOptions, MARKET, envelope, prepared, reply, trading_engine};
 
@@ -17,6 +17,8 @@ fn frame_fed() -> Engine<Okx> {
         ..FixtureOptions::default()
     });
     engine.set_frame_fed().unwrap();
+    // The source runs in this process: its frame stamps are on this clock.
+    engine.set_source_clock_offset(Some(0.0));
     engine.start(0.0);
     let start = prepared(&mut engine, 0.0);
     let instruments = start
@@ -229,7 +231,10 @@ fn the_page_engine_writes_from_the_sources_frames_and_its_next_frame_settles_the
         "refused: the ingested long is open"
     );
     source.store_mut().set_positions(vec![]);
-    let flat = source.take_frame(3_110.0).expect("positions changed").to_vec();
+    let flat = source
+        .take_frame(3_110.0)
+        .expect("positions changed")
+        .to_vec();
     page.apply_frame(3_110.0, &flat, false).unwrap();
     let mode = send(
         &mut page,
@@ -288,4 +293,159 @@ fn the_source_frames_are_well_formed_for_the_page_today() {
     source.store_mut().set_orders(vec![]);
     let delta = source.take_frame(3.0).expect("orders changed").to_vec();
     page.apply_frame(3.0, &delta, false).unwrap();
+}
+
+/// A flat source, so the page may change position mode.
+fn flat_source() -> Engine<Okx> {
+    let mut source = source();
+    source.store_mut().set_positions(vec![]);
+    source
+}
+
+fn set_mode(page: &mut Engine<Okx>, command: u32, hedged: bool, now: f64) {
+    let sent = send(
+        page,
+        Command::SetPositionMode {
+            command,
+            hedged,
+            symbol: None,
+        },
+        now,
+    );
+    let sent = requests(&sent);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    reply(
+        page,
+        sent[0],
+        &envelope(r#"{"posMode":"long_short_mode"}"#),
+        now + 0.1,
+    );
+    let _ = prepared(page, now + 0.1);
+}
+
+fn placed_pos_side(page: &mut Engine<Okx>, command: u32, now: f64) -> bool {
+    let placed = send(
+        page,
+        Command::PlaceOrders {
+            command,
+            orders: vec![place(39500.)],
+        },
+        now,
+    );
+    let sent = requests(&placed);
+    assert_eq!(sent.len(), 1, "one request: {sent:?}");
+    let Action::Http(request) = sent[0] else {
+        unreachable!()
+    };
+    request
+        .body
+        .as_deref()
+        .unwrap_or_default()
+        .contains(r#""posSide":"long""#)
+}
+
+#[test]
+fn a_confirmed_position_mode_outlasts_a_stale_source_frame() {
+    let mut source = flat_source();
+    let mut page = frame_fed();
+    page.apply_frame(2.0, &source.snapshot_frame(2.0).to_vec(), true)
+        .unwrap();
+    assert!(!page.store().hedged());
+    set_mode(&mut page, 1, true, 3.0);
+    assert!(page.store().hedged());
+
+    // The source has not re-read its config: its snapshot still says net mode.
+    let stale = source.snapshot_frame(4.0).to_vec();
+    page.apply_frame(4.0, &stale, true).unwrap();
+    assert!(
+        page.store().hedged(),
+        "the held mode survives the stale frame"
+    );
+    assert!(
+        placed_pos_side(&mut page, 2, 5.0),
+        "the next order uses the new mode"
+    );
+}
+
+#[test]
+fn a_source_frame_with_the_new_mode_releases_the_hold() {
+    let mut source = flat_source();
+    let mut page = frame_fed();
+    page.apply_frame(2.0, &source.snapshot_frame(2.0).to_vec(), true)
+        .unwrap();
+    set_mode(&mut page, 1, true, 3.0);
+    source.store_mut().set_hedged(true);
+    page.apply_frame(4.0, &source.snapshot_frame(4.0).to_vec(), true)
+        .unwrap();
+    assert!(page.store().hedged());
+    // Released: a later change on the source now applies at once.
+    source.store_mut().set_hedged(false);
+    page.apply_frame(5.0, &source.snapshot_frame(5.0).to_vec(), true)
+        .unwrap();
+    assert!(!page.store().hedged());
+}
+
+#[test]
+fn a_confirmed_leverage_outlasts_a_stale_source_frame_until_the_hold_expires() {
+    let mut source = flat_source();
+    source
+        .store_mut()
+        .update_setting("BTCUSDT", |s| s.leverage = 5.);
+    let mut page = frame_fed();
+    page.apply_frame(2.0, &source.snapshot_frame(2.0).to_vec(), true)
+        .unwrap();
+    let sent = send(
+        &mut page,
+        Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 10.,
+            side: None,
+        },
+        3.0,
+    );
+    reply(
+        &mut page,
+        requests(&sent)[0],
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"10","mgnMode":"cross","posSide":""}"#),
+        3.1,
+    );
+    let _ = prepared(&mut page, 3.1);
+    page.apply_frame(4.0, &source.snapshot_frame(4.0).to_vec(), true)
+        .unwrap();
+    assert_eq!(page.store().setting("BTCUSDT").unwrap().leverage, 10.);
+    // The source never confirms it: after the hold the source's value applies.
+    let late = 3.1 + safe_cex_engine::setting_holds::HOLD_MS;
+    page.apply_frame(late, &source.snapshot_frame(late).to_vec(), true)
+        .unwrap();
+    assert_eq!(page.store().setting("BTCUSDT").unwrap().leverage, 5.);
+}
+
+#[test]
+fn refresh_settings_on_a_source_re_reads_config_and_positions_and_writes_nothing() {
+    let mut source = trading_engine();
+    let _ = prepared(&mut source, 10.0);
+    let actions = send(
+        &mut source,
+        Command::Venue {
+            command: 9,
+            action: VenueAction::RefreshSettings { symbol: None },
+        },
+        10.0,
+    );
+    let sent: Vec<_> = requests(&actions).into_iter().map(path).collect();
+    assert!(
+        sent.iter().all(|(method, _)| *method == Method::Get),
+        "{sent:?}"
+    );
+    assert!(
+        sent.iter()
+            .any(|(_, url)| url.contains("/api/v5/account/config")),
+        "{sent:?}"
+    );
+    assert!(
+        sent.iter()
+            .any(|(_, url)| url.contains("/api/v5/account/positions")),
+        "{sent:?}"
+    );
 }
