@@ -85,6 +85,9 @@ pub struct Session {
     loaded_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
     /// Told when a resume of this session's id takes it over.
     taken_over: Arc<tokio::sync::Notify>,
+    /// The settings refusal last sent per account, so the client's backoff
+    /// retries show it once; cleared when that account's init succeeds.
+    refused: HashMap<String, String>,
 }
 
 /// How long a resume waits for the session it takes over to park, as long as
@@ -127,6 +130,7 @@ impl Session {
             loaded,
             loaded_rx: Some(loaded_rx),
             taken_over: Arc::new(tokio::sync::Notify::new()),
+            refused: HashMap::new(),
         }
     }
 
@@ -332,9 +336,12 @@ impl Session {
             self.registry
                 .rebuild_refusal(self.user(), &init, public_only, self.socket)
         {
-            self.send(envelope::error(Some(&init.account_name), &refusal));
+            if first_refusal(&mut self.refused, &init.account_name, &refusal) {
+                self.send(envelope::error(Some(&init.account_name), &refusal));
+            }
             return Ok(());
         }
+        self.refused.remove(&init.account_name);
         if let Some(joined) = self.joined.remove(&init.account_name) {
             self.leave(joined);
         }
@@ -915,6 +922,15 @@ impl Session {
     }
 }
 
+/// True the first time `refusal` is the one for `account`; a changed refusal counts again.
+fn first_refusal(refused: &mut HashMap<String, String>, account: &str, refusal: &str) -> bool {
+    if refused.get(account).is_some_and(|sent| sent == refusal) {
+        return false;
+    }
+    refused.insert(account.to_owned(), refusal.to_owned());
+    true
+}
+
 fn failure_detail(kind: &str, message: &str, unknown: bool) -> Value {
     let mut detail = json!({"name": kind, "message": message});
     if unknown {
@@ -1311,6 +1327,28 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_settings_refusal_is_sent_once_until_its_fields_change_or_it_resolves() {
+        let mut refused = HashMap::new();
+        let spot = "bear5 is open elsewhere with different settings (enableSpotMarkets)";
+        assert!(first_refusal(&mut refused, "bear5", spot));
+        for _ in 0..4 {
+            assert!(
+                !first_refusal(&mut refused, "bear5", spot),
+                "a backoff retry is quiet"
+            );
+        }
+        assert!(first_refusal(&mut refused, "other", spot), "per account");
+        let both = "bear5 is open elsewhere with different settings (enableSpotMarkets, testnet)";
+        assert!(
+            first_refusal(&mut refused, "bear5", both),
+            "changed fields show again"
+        );
+        // A successful init clears it (Session::init), so a later refusal shows again.
+        refused.remove("bear5");
+        assert!(first_refusal(&mut refused, "bear5", both));
+    }
 
     /// The COSIGNED data-source path end to end: a source account on the native
     /// actor, frames through this session's pump (base64, seq, snapshot,
