@@ -559,9 +559,10 @@ pub async fn run(
                         };
                         (port.emit)(crate::envelope::msg(&name, "callMethod:done", data));
                     };
+                    let reply = NukeReply(Some(Box::new(settle)));
                     match started {
-                        Ok(nuke) => cx.spawn(async move { settle(nuke.await) }),
-                        Err(error) => settle(Err(error)),
+                        Ok(nuke) => cx.spawn(async move { reply.settle(nuke.await) }),
+                        Err(error) => reply.settle(Err(error)),
                     }
                 }
                 Some(AlgoInput::SocketClosed) => {
@@ -593,6 +594,29 @@ pub async fn run(
     handle.dispose();
     if let Some(signer) = &link_signer {
         signer.mark_unavailable();
+    }
+}
+
+/// Answers a hosted nuke exactly once. Disposing the account aborts the nuke's
+/// task mid-leg; the client is then told the outcome is unknown instead of
+/// waiting out its deadline with no answer.
+type NukeSettle = Box<dyn FnOnce(Result<Value, Value>)>;
+struct NukeReply(Option<NukeSettle>);
+impl NukeReply {
+    fn settle(mut self, outcome: Result<Value, Value>) {
+        if let Some(settle) = self.0.take() {
+            settle(outcome);
+        }
+    }
+}
+impl Drop for NukeReply {
+    fn drop(&mut self) {
+        if let Some(settle) = self.0.take() {
+            settle(Err(serde_json::json!({
+                "message": "Nuke interrupted: the account closed before every leg settled; check positions and open orders",
+                "outcome": "unknown",
+            })));
+        }
     }
 }
 
