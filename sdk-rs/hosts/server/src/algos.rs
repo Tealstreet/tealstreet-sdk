@@ -425,16 +425,14 @@ pub async fn run(
             input = inbox.recv() => match input {
                 Some(AlgoInput::Op { op, data, origin }) => {
                     let dispatched = registry.dispatch(&op, &data, &cx);
-                    if op != "twap:state" {
-                        let result = match &dispatched {
-                            Some(Ok(())) => Value::from("ok"),
-                            Some(Err(error)) => {
-                                serde_json::json!({"message": error.chars().take(160).collect::<String>()})
-                            }
-                            None => serde_json::json!({"message": "unhandled op"}),
-                        };
-                        crate::audit::log(&who, &origin, &crate::audit::algo_op(&op, &data), result);
-                    }
+                    let result = match &dispatched {
+                        Some(Ok(())) => Value::from("ok"),
+                        Some(Err(error)) => {
+                            serde_json::json!({"message": error.chars().take(160).collect::<String>()})
+                        }
+                        None => serde_json::json!({"message": "unhandled op"}),
+                    };
+                    crate::audit::log(&who, &origin, &crate::audit::algo_op(&op, &data), result);
                     if let Some(Err(error)) = dispatched {
                         port.emit("error", Value::String(error).to_string());
                     }
