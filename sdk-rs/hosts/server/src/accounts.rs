@@ -4,7 +4,9 @@ use crate::envelope::InitPayload;
 use crate::state::Log;
 use crate::threads::EngineThreads;
 use safe_cex_native::resolve::{self, AccountTransport, Provider};
-use safe_cex_native::{AccountHandle, NetworkTransport, ProxyTokenProvider, ServerConfig};
+use safe_cex_native::{
+    AccountHandle, NetworkTransport, ProxyTokenProvider, RoutingPlan, ServerConfig,
+};
 use safe_cex_remote_signer::{Outbox, SignerLink, remote_account};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
@@ -233,6 +235,57 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     Value::Object(options)
 }
 
+/// What an init resolves to before its engine thread: the routing plan and the
+/// keyless engine options, rewritten for remote signing when `link` is given.
+pub struct Prepared {
+    pub plan: RoutingPlan,
+    pub options: String,
+    pub remote: Option<safe_cex_remote_signer::RemoteAccount>,
+}
+
+pub fn prepare(
+    init: &InitPayload,
+    public_only: bool,
+    link: Option<Arc<SignerLink>>,
+) -> Result<Prepared, String> {
+    let venue = &init.exchange_name;
+    let transport_flags = AccountTransport {
+        tealstreet_proxy: init.tealstreet_proxy,
+        tealstreet_tunnel: init.tealstreet_tunnel,
+        tealstreet_ws_route: init.tealstreet_ws_route,
+        proxy_region: init.proxy_region.clone(),
+        testnet: init.testnet,
+    };
+    refuse_unhosted(venue)?;
+    let mut inputs =
+        resolve::account_transport(venue, &transport_flags).map_err(|error| error.to_string())?;
+    // The Brazil site has its own host and `x-site-id` header.
+    inputs.bybit_site_id = init.bybit_site_id.clone().filter(|site| !site.is_empty());
+    if public_only {
+        inputs.public_data_only = Some(true);
+        inputs.has_key = false;
+    }
+    let base_url = resolve::rest_base_url(venue, init.testnet.unwrap_or(false))
+        .map_err(|error| error.to_string())?;
+    let plan = resolve::resolve_routing_plan(venue, &inputs, base_url, Provider::Tealstreet)
+        .map_err(|error| error.to_string())?;
+    let options = engine_options(init, public_only).to_string();
+    let Some(link) = link else {
+        return Ok(Prepared {
+            plan,
+            options,
+            remote: None,
+        });
+    };
+    let remote = remote_account(link, venue, Some(init.account_name.clone()), &options)
+        .map_err(|error| error.to_string())?;
+    Ok(Prepared {
+        plan,
+        options: remote.options_json.clone(),
+        remote: Some(remote),
+    })
+}
+
 fn usable_builder(builder: &crate::envelope::HyperliquidBuilder) -> bool {
     let address = builder.address.as_bytes();
     address.len() == 42
@@ -339,47 +392,14 @@ impl Registry {
     ) -> Result<(Account, Option<safe_cex_remote_signer::RemoteAccount>), String> {
         self.pacer.admit().await;
         let venue = init.exchange_name.clone();
-        let transport_flags = AccountTransport {
-            tealstreet_proxy: init.tealstreet_proxy,
-            tealstreet_tunnel: init.tealstreet_tunnel,
-            tealstreet_ws_route: init.tealstreet_ws_route,
-            proxy_region: init.proxy_region.clone(),
-            testnet: init.testnet,
-        };
-        refuse_unhosted(&venue)?;
-        let mut inputs = resolve::account_transport(&venue, &transport_flags)
-            .map_err(|error| error.to_string())?;
-        // The Brazil site has its own host and `x-site-id` header.
-        inputs.bybit_site_id = init.bybit_site_id.clone().filter(|site| !site.is_empty());
-        if public_only {
-            inputs.public_data_only = Some(true);
-            inputs.has_key = false;
-        }
-        let base_url = resolve::rest_base_url(&venue, init.testnet.unwrap_or(false))
-            .map_err(|error| error.to_string())?;
-        let plan = resolve::resolve_routing_plan(&venue, &inputs, base_url, Provider::Tealstreet)
-            .map_err(|error| error.to_string())?;
-        let options = engine_options(init, public_only).to_string();
+        let link = (!public_only).then(|| SignerLink::new(socket, outbox));
+        let Prepared {
+            plan,
+            options,
+            remote,
+        } = prepare(init, public_only, link.clone())?;
+        let signer = remote.as_ref().map(|remote| remote.provider.clone());
         let proxy_token = ProxyToken::new();
-        let (link, signer, options, remote) = if public_only {
-            (None, None, options, None)
-        } else {
-            let link = SignerLink::new(socket, outbox);
-            let remote = remote_account(
-                link.clone(),
-                &venue,
-                Some(init.account_name.clone()),
-                &options,
-            )
-            .map_err(|error| error.to_string())?;
-            let options = remote.options_json.clone();
-            (
-                Some(link),
-                Some(remote.provider.clone()),
-                options,
-                Some(remote),
-            )
-        };
         // Signer and public-only are one decision: a private account never builds
         // from options without the remote provider (keyed construction).
         assert_eq!(
