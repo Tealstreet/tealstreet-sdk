@@ -29,6 +29,13 @@ Private REST requests use headers:
 - `Recv-Window`
 - `Content-Type: application/json`
 
+Broker attribution is still pending the post-freeze implementation. MEXC has
+assigned Tealstreet broker code `TEAL`; attach it to MEXC REST request headers
+before finalizing/releasing the integration. The support thread did not include
+the exact header key in the chat handoff, so confirm the canonical MEXC broker
+header name with their docs/support before wiring it, then add regression
+coverage that private writes/authenticated REST calls carry the broker header.
+
 The signature is:
 
 ```text
