@@ -497,7 +497,7 @@ fn lost_and_canceled() -> (Engine<PhemexPerpetuals>, Engine<PhemexPerpetuals>) {
     let mut e = frame_fed();
     let mut source = source("Hedged");
     source.store_mut().set_orders(vec![]);
-    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., source.snapshot_frame(1001.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let sent = requests(&command(
@@ -535,7 +535,7 @@ fn warned_about(actions: &[Action], text: &str) -> bool {
 fn a_lost_placement_ends_once_a_source_frame_covers_its_signed_expiry() {
     let (mut e, mut source) = lost_and_canceled();
     // A frame written before the signed expiry proves nothing: still refused.
-    e.apply_frame(1003., &source.snapshot_frame(1003.).to_vec(), true)
+    e.apply_frame(1003., source.snapshot_frame(1003.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let a = command(
@@ -549,7 +549,7 @@ fn a_lost_placement_ends_once_a_source_frame_covers_its_signed_expiry() {
 
     // One written well past it, without the order: it never landed.
     let late = 10_000_000.;
-    e.apply_frame(late, &source.snapshot_frame(late).to_vec(), true)
+    e.apply_frame(late, source.snapshot_frame(late), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let a = command(
@@ -578,7 +578,7 @@ fn a_create_ack_does_not_reopen_an_order_an_orders_frame_showed_closed() {
     let mut e = frame_fed();
     let mut source = source("Hedged");
     source.store_mut().set_orders(vec![]);
-    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., source.snapshot_frame(1001.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let sent = requests(&command(
@@ -593,7 +593,7 @@ fn a_create_ack_does_not_reopen_an_order_an_orders_frame_showed_closed() {
     filled.id = "real-1".into();
     filled.status = OrderStatus::Closed;
     source.store_mut().set_orders(vec![filled]);
-    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., source.snapshot_frame(1001.), true)
         .unwrap();
     respond(&mut e, &sent[0], &ack(&sent[0], "real-1").to_string());
     assert_eq!(
