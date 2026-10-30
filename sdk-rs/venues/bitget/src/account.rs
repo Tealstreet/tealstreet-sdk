@@ -30,6 +30,9 @@ pub enum OrderSource {
 
 pub enum Request {
     Probe,
+    /// The settings re-read a frame-fed page asks of its data source: UTA
+    /// settings, or a Classic symbol's account config. Never a write.
+    Settings(Option<String>),
     Positions {
         rows: Vec<Position>,
         skipped: RowAdmission<PositionKey>,
@@ -698,6 +701,10 @@ impl BitgetFutures {
             self.account_refused(cx, request, read_error(&response, error));
             return;
         }
+        if let Request::Settings(symbol) = &request {
+            self.settings_response(cx, symbol.as_deref(), response.body);
+            return;
+        }
         if response.status != 200 {
             let error = read_error(&response, format!("Bitget HTTP {}", response.status));
             self.account_refused(cx, request, error);
@@ -1158,6 +1165,73 @@ impl BitgetFutures {
                 "Bitget private WS login rejected: {detail} — the API key's IP whitelist allows none of Tealstreet's WebSocket egress IPs"
             ),
         );
+    }
+
+    /// `Venue::refresh_settings`: re-read the account's mode, margin and
+    /// leverage as startup and pre-write metadata do; never a write.
+    pub(crate) fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        if !self.account.detected {
+            return;
+        }
+        if self.account.uta {
+            self.account_request(
+                cx,
+                paths::SETTINGS.to_owned(),
+                None,
+                Request::Settings(None),
+            );
+            return;
+        }
+        // Classic keeps mode, margin and leverage per symbol: the given one, or
+        // every symbol with a position or order.
+        let mut symbols: Vec<String> = match symbol {
+            Some(symbol) => vec![symbol.to_owned()],
+            None => cx
+                .store
+                .positions()
+                .iter()
+                .map(|p| p.symbol.clone())
+                .chain(cx.store.orders().iter().map(|o| o.symbol.clone()))
+                .collect(),
+        };
+        symbols.sort_unstable();
+        symbols.dedup();
+        for symbol in symbols {
+            let Ok(coin) = self.margin_coin(cx, &symbol) else {
+                continue;
+            };
+            let path = format!(
+                "{}?symbol={symbol}&productType={}&marginCoin={coin}",
+                paths::ACCOUNT,
+                self.product()
+            );
+            self.account_request(cx, path, None, Request::Settings(Some(symbol)));
+        }
+    }
+
+    fn settings_response(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>, body: &str) {
+        match symbol {
+            None => match serde_json::from_str::<Envelope<UtaSettings>>(body)
+                .map_err(|e| e.to_string())
+                .and_then(Envelope::checked)
+            {
+                Ok(settings) => self.apply_settings(cx, &settings),
+                Err(error) => self.account_failed(cx, Request::Settings(None), &error),
+            },
+            Some(symbol) => match serde_json::from_str::<Envelope<crate::wire::SymbolConfig>>(body)
+                .map_err(|e| e.to_string())
+                .and_then(Envelope::checked)
+            {
+                Ok(row) if !row.pos_mode.is_empty() && !row.margin_mode.is_empty() => {
+                    self.apply_symbol_config(cx, symbol, &row)
+                }
+                _ => self.account_failed(
+                    cx,
+                    Request::Settings(Some(symbol.to_owned())),
+                    "Bitget position mode or margin type could not be resolved",
+                ),
+            },
+        }
     }
 
     pub(crate) fn promote_uta(&mut self, cx: &mut Cx<'_, Pending>) -> bool {

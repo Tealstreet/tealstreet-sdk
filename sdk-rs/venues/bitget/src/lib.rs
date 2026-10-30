@@ -629,6 +629,9 @@ impl Venue for BitgetFutures {
     fn guard_pending_placements(&self) -> bool {
         true
     }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        self.refresh_settings(cx, symbol);
+    }
     fn export_venue_state(&self) -> Option<Vec<u8>> {
         Some(venue_state::encode(
             self.account.detected,
