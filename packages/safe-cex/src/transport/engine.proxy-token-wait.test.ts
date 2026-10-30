@@ -2,7 +2,7 @@ import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { setProxyToken, setTokenRefreshFunction } from '../accessToken';
+import { setContextualProxyTokenProvider, setProxyToken, setTokenRefreshFunction } from '../accessToken';
 import { createEngineTransport } from './engine';
 import { PROXY_TOKEN_WAIT_MS, tealstreetTransport } from './tealstreet/tealstreetTransport';
 
@@ -26,6 +26,7 @@ const text = (body: string) => new TextEncoder().encode(body);
 afterEach(() => {
   vi.useRealTimers();
   setTokenRefreshFunction(null);
+  setContextualProxyTokenProvider(null);
   setProxyToken('');
 });
 
@@ -111,6 +112,18 @@ describe('engine proxy authorization', () => {
     status = 401;
     await expect(send()).rejects.toThrow('Tealstreet proxy refused our proxy authorization');
     expect(reports).toHaveLength(2);
+  });
+
+  // Hosted (exchange-server): a per-account provider throws instead of warming,
+  // so the request fails at once, never after the browser's bounded wait.
+  it('fails at once, unsent, when a hosted account context has no token', async () => {
+    setContextualProxyTokenProvider(() => () => '');
+    const { raw, reports, send } = proxied();
+    const started = Date.now();
+    await expect(send()).rejects.toMatchObject({ name: 'ProxyTokenUnavailableError' });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(raw.request).not.toHaveBeenCalled();
+    expect(reports).toEqual([expect.stringContaining('[bybit] Tealstreet proxy authorization missing')]);
   });
 
   it("passes the venue's own 401 through to the engine with its body", async () => {
