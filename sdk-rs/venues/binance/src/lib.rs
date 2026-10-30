@@ -1328,11 +1328,11 @@ impl Venue for BinanceFutures {
     }
     // An Unknown placement fences its symbol until a fresh, clean open-orders
     // snapshot (`reconcile_orders`) proves what landed.
-    fn export_venue_state(&self) -> Option<Vec<u8>> {
-        Some(self.export_limit_stops())
+    fn export_venue_state_for(&self, store: &safe_cex_engine::Store) -> Option<Vec<u8>> {
+        Some(self.export_venue_state(store))
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
-        if !self.apply_limit_stops(state) {
+        if !BinanceFutures::apply_venue_state(self, state) {
             cx.notice(
                 Level::Warn,
                 code::STREAM_MALFORMED,
