@@ -1032,11 +1032,14 @@ jobs:
           corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
           corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP --runs 9
           corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT --runs 9
-      - name: Binance European Options retained-reference REST parity
+      # CPU cohort authentication binds each public case to one step named "public".
+      - name: Binance European Options public data (correctness, CPU and memory)
+        if: matrix.venue == 'binance'
+        run: corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions.jsonl --books '' --runs 9
+      - name: Binance European Options account and trading (correctness)
         if: matrix.venue == 'binance'
         run: |
           corepack yarn rust:private-tape-binanceoptions
-          corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions.jsonl --books '' --runs 9
           corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions-private.jsonl --books '' --runs "$PRIVATE_REPLAY_RUNS"
       - name: Binance Spot, COIN-M and portfolio margin private variants
         if: matrix.venue == 'binance'
