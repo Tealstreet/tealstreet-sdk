@@ -1,6 +1,6 @@
 //! The candle cache, run as the `candle-cache-owner` child over its JSON-lines
-//! protocol (`safe-cex-candle-cache/src/owner.rs`). A separate process keeps that
-//! crate's `arbitrary_precision`/`preserve_order` serde_json features out of the
+//! protocol (the candle-cache crate's `src/owner.rs`). A separate process keeps
+//! that crate's exact-number and ordered-map serde_json features out of the
 //! engine build. The owner asks for each cache miss with an `upstream` line; the
 //! request's own fetcher answers it.
 
