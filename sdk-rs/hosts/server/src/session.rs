@@ -83,7 +83,13 @@ pub struct Session {
     /// A held client's account has loaded: `(account name, client id)`.
     loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     loaded_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
+    /// Told when a resume of this session's id takes it over.
+    taken_over: Arc<tokio::sync::Notify>,
 }
+
+/// How long a resume waits for the session it takes over to park, as long as
+/// that socket loop can be stuck in one send.
+const TAKEOVER_WAIT: std::time::Duration = std::time::Duration::from_secs(12);
 
 /// A private account's first snapshot waits for its orders and positions, so a
 /// fresh build never shows the client an empty account; past this it goes anyway.
@@ -120,6 +126,21 @@ impl Session {
             joined: HashMap::new(),
             loaded,
             loaded_rx: Some(loaded_rx),
+            taken_over: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    /// Fires when a resume of this session's id takes it over: close and park now.
+    pub fn taken_over(&self) -> Arc<tokio::sync::Notify> {
+        self.taken_over.clone()
+    }
+
+    /// Any frame from the browser: its sockets' signs are still being heard.
+    pub fn heard(&self) {
+        for joined in self.joined.values() {
+            if let Some(link) = &joined.account.link {
+                link.heard(self.socket);
+            }
         }
     }
 
@@ -165,9 +186,18 @@ impl Session {
             self.identity.user.clone(),
             self.identity.token.clone(),
         ) {
-            let accounts = self
-                .registry
-                .resume(&from, &user, self.socket, token, &self.outbox());
+            let mut accounts =
+                self.registry
+                    .resume(&from, &user, self.socket, token.clone(), &self.outbox());
+            // Not parked yet: the old socket dropped without a close frame. Close it now.
+            if accounts.is_empty()
+                && let Some(parked) = self.registry.take_over(&from, &user)
+            {
+                let _ = tokio::time::timeout(TAKEOVER_WAIT, parked).await;
+                accounts = self
+                    .registry
+                    .resume(&from, &user, self.socket, token, &self.outbox());
+            }
             resumed = !accounts.is_empty();
             // `init` is logged either way; this tells a resume from a rebuild.
             Log::info(&format!(
@@ -179,6 +209,9 @@ impl Session {
             for account in accounts {
                 self.join(account).await;
             }
+        }
+        if let Some(user) = &self.identity.user {
+            self.taken_over = self.registry.open_session(&self.resume_id, user);
         }
         self.send(envelope::session(&self.resume_id, resumed));
     }
@@ -856,6 +889,7 @@ impl Session {
         }
         if let Some(user) = &self.identity.user {
             self.registry.park(self.resume_id.clone(), user, parked);
+            self.registry.session_closed(&self.resume_id);
         }
     }
 }

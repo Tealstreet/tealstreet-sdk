@@ -240,6 +240,9 @@ struct Parked {
 pub struct Registry {
     accounts: Mutex<HashMap<(String, String), Arc<Account>>>,
     parked: Mutex<HashMap<String, Parked>>,
+    /// Resumable sessions still open, by resume id: a resume of one whose drop
+    /// the server has not seen yet (no close frame) takes it over.
+    open: Mutex<HashMap<String, OpenSession>>,
     threads: EngineThreads,
     ids: AtomicU64,
     engine_config: ServerConfig,
@@ -249,6 +252,15 @@ pub struct Registry {
     /// Why algos stopped while no browser was there to see it, one per
     /// (user, account), for that account's next init.
     notices: Notices,
+}
+
+/// A still-open resumable session, as a resume of its id reaches it.
+struct OpenSession {
+    user: String,
+    /// Tells its socket loop to close now, as though the drop had been seen.
+    close: Arc<tokio::sync::Notify>,
+    /// Told once its accounts are parked.
+    parked: Vec<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// Stop notices by (user, account), each with when it was kept.
@@ -417,6 +429,7 @@ impl Registry {
         Self {
             accounts: Mutex::default(),
             parked: Mutex::default(),
+            open: Mutex::default(),
             threads,
             ids: AtomicU64::new(1),
             engine_config: ServerConfig {
@@ -758,6 +771,46 @@ impl Registry {
         });
     }
 
+    /// A resumable session opened under `resume_id`; it closes when told.
+    pub fn open_session(&self, resume_id: &str, user: &str) -> Arc<tokio::sync::Notify> {
+        let close = Arc::new(tokio::sync::Notify::new());
+        self.open.lock().unwrap().insert(
+            resume_id.to_owned(),
+            OpenSession {
+                user: user.to_owned(),
+                close: close.clone(),
+                parked: Vec::new(),
+            },
+        );
+        close
+    }
+
+    /// The session under `resume_id` has closed and parked its accounts.
+    pub fn session_closed(&self, resume_id: &str) {
+        if let Some(open) = self.open.lock().unwrap().remove(resume_id) {
+            for parked in open.parked {
+                let _ = parked.send(());
+            }
+        }
+    }
+
+    /// A resume naming a session still open for the same user: the old socket
+    /// dropped without a close frame. Tells it to close; resolves once parked.
+    pub fn take_over(
+        &self,
+        resume_id: &str,
+        user: &str,
+    ) -> Option<tokio::sync::oneshot::Receiver<()>> {
+        let mut open = self.open.lock().unwrap();
+        let session = open
+            .get_mut(resume_id)
+            .filter(|session| session.user == user)?;
+        let (parked, wait) = tokio::sync::oneshot::channel();
+        session.parked.push(parked);
+        session.close.notify_one();
+        Some(wait)
+    }
+
     /// Takes back a parked session for the same user; the new socket becomes
     /// the holder and signer owner. False for unknown, expired or foreign ids.
     pub fn resume(
@@ -864,6 +917,17 @@ mod tests {
         Arc<Account>,
         mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
     ) {
+        held_account_with(None, String::new())
+    }
+
+    /// `held_account` with a signer link and the fingerprint it was built from.
+    fn held_account_with(
+        link: Option<Arc<SignerLink>>,
+        fingerprint: String,
+    ) -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
         let engine = safe_cex_engine::test_support::seeded_engine(Idle);
         let (handle, _task) = safe_cex_native::spawn_account(
             safe_cex_native::Host::new(engine, NoIo),
@@ -876,9 +940,9 @@ mod tests {
             name: "acct".into(),
             venue: "bitget".into(),
             handle,
-            link: None,
+            link,
             token: ProxyToken::new(),
-            fingerprint: String::new(),
+            fingerprint,
             holders: Mutex::default(),
             algos: Some(algos),
             algo_owner: Arc::default(),
@@ -978,6 +1042,84 @@ mod tests {
                     algos.try_recv().is_err(),
                     "a resumed account is never disposed by the old window"
                 );
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_abrupt_drop_resumed_at_8s_takes_over_the_open_session() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, mut algos) = held_account();
+                let taken_over = registry.open_session("r1", "u");
+                // The old socket loop as http.rs runs it: it never saw the drop,
+                // and closes and parks only when the resume tells it to.
+                let old = {
+                    let (registry, account) = (registry.clone(), account.clone());
+                    tokio::task::spawn_local(async move {
+                        taken_over.notified().await;
+                        registry.park("r1".into(), "u", vec![(account, 7)]);
+                        registry.session_closed("r1");
+                    })
+                };
+                tokio::time::sleep(Duration::from_secs(8)).await;
+                let outbox: Outbox = Arc::new(|_| true);
+                let token = ("t".to_owned(), u64::MAX);
+                assert!(
+                    registry
+                        .resume("r1", "u", 8, token.clone(), &outbox)
+                        .is_empty(),
+                    "nothing is parked while the old socket looks open"
+                );
+                assert!(
+                    registry.take_over("r1", "other").is_none(),
+                    "never another user's"
+                );
+                registry
+                    .take_over("r1", "u")
+                    .expect("the open session")
+                    .await
+                    .unwrap();
+                old.await.unwrap();
+                let resumed = registry.resume("r1", "u", 8, token, &outbox);
+                assert_eq!(resumed.len(), 1, "resumed, not re-inited");
+                assert!(Arc::ptr_eq(&resumed[0], &account));
+                assert_eq!(account.holders.lock().unwrap().signing, Some(8));
+                tokio::time::sleep(Duration::from_secs(200)).await;
+                assert!(algos.try_recv().is_err(), "algos alive: never disposed");
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_identical_reinit_on_a_new_socket_never_disposes_or_stops_algos() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bitget".into(),
+                    ..InitPayload::default()
+                };
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .insert(("u".into(), "acct".into()), account.clone());
+                let again = registry
+                    .obtain("u", &init, false, 8, None, Arc::new(|_| true))
+                    .await
+                    .unwrap();
+                assert!(Arc::ptr_eq(&again, &account), "reused, not rebuilt");
+                // The old socket's drop is seen later: it parks, and its window expires.
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                tokio::time::sleep(Duration::from_secs(200)).await;
+                assert!(algos.try_recv().is_err(), "algos alive: never disposed");
+                assert_eq!(registry.account_count(), 1);
+                assert_eq!(account.holders.lock().unwrap().signing, Some(8));
             })
             .await;
     }

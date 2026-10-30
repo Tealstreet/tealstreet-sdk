@@ -550,6 +550,15 @@ async fn setup_refuses_secrets_secondaries_missing_passphrases_and_undeclared_ve
 #[tokio::test(start_paused = true)]
 async fn timeouts_count_toward_the_fatal_streak_and_suspension_does_not() {
     let link = SignerLink::new(1, Arc::new(|_| true));
+    // A browser still sending frames on socket 1 that never answers a sign.
+    let alive = Arc::downgrade(&link);
+    tokio::spawn(async move {
+        while let Some(link) = alive.upgrade() {
+            link.heard(1);
+            drop(link);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
     let (account, options) = account(link.clone(), "bybit", json!({ "key": "k" }));
     let fired = Arc::new(Mutex::new(0));
     let count = fired.clone();
@@ -916,4 +925,38 @@ async fn a_sign_in_flight_when_the_session_ends_fails_at_once() {
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     link.mark_unavailable();
     assert_eq!(waiting.await.unwrap(), Err(crate::link::Failure::Aborted));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_timeout_on_a_socket_silent_since_the_send_is_a_suspension() {
+    // An abrupt drop the server has not seen: no close, no frames, not parked.
+    let link = SignerLink::new(1, Arc::new(|_| true));
+    assert_eq!(
+        link.round_trip("silent", &json!({ "id": "silent" })).await,
+        Err(crate::link::Failure::Suspended)
+    );
+    let (account, options) = account(link.clone(), "bybit", json!({ "key": "k" }));
+    let fired = Arc::new(Mutex::new(0));
+    let count = fired.clone();
+    account.on_fatal(move || *count.lock().unwrap() += 1);
+    let (_, signing, _) = refs(&options);
+    for _ in 0..MAX_CONSECUTIVE_FAILURES + 2 {
+        let work = request(
+            vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing.clone(),
+                payload: vec![bytes("x")],
+            }],
+            Default::default(),
+        );
+        assert_eq!(
+            account.provider.sign(work).await.map(|_| ()),
+            Err(SignError::Unavailable)
+        );
+    }
+    assert_eq!(
+        *fired.lock().unwrap(),
+        0,
+        "a silent socket never trips the fatal streak"
+    );
 }
