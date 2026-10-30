@@ -664,12 +664,13 @@ pub fn translate(
             one(command("scheduleCancel", out, true))
         }
         // The close-all button: exec's nuke, which awaits and reports every leg.
-        "nuke" | "nukePositions" | "nukeOrders" if public_only => {
+        "nuke" | "nukePositions" | "nukeOrders" | "stopAccountAlgos" if public_only => {
             Err(refused("Error", "A public account has nothing to nuke"))
         }
         "nuke" => one(Plan::Nuke("all")),
         "nukePositions" => one(Plan::Nuke("positions")),
         "nukeOrders" => one(Plan::Nuke("orders")),
+        "stopAccountAlgos" => one(Plan::Nuke("algos")),
         // A main-thread mirror learns the record here (`loadWorkerCapabilities`).
         "fetchEngineCapabilities" => one(Plan::Reply(
             serde_json::to_value(capabilities)
@@ -1261,6 +1262,7 @@ mod tests {
             ("nuke", "all"),
             ("nukePositions", "positions"),
             ("nukeOrders", "orders"),
+            ("stopAccountAlgos", "algos"),
         ] {
             assert_eq!(
                 translate(method, &[json!(0)], &caps(), &[], false).unwrap(),

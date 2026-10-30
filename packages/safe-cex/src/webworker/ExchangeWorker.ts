@@ -146,6 +146,8 @@ export class ExchangeWorker {
   private _lastPayloadHadActiveChasers = false;
   /** Venue data reaches main as engine frames, not in store payloads. */
   private _forwardsFrames = false;
+  /** Main decodes books, candles and fills from the frames itself, so their ops go quiet. */
+  private _mainDecodesFrames = false;
   private _sentryReportCooldowns = new Map<string, { lastReportedAt: number; suppressedCount: number }>();
 
   constructor(
@@ -351,15 +353,9 @@ export class ExchangeWorker {
       }
       this._exchange = new Exchange(this._exchangeName, this._options, this._store);
       if (this._recoveryAttempted) this._exchange.setActiveTickerSymbols(this._activeTickerSymbols);
-      if (this._exchange instanceof RustEngineExchange && mainAcceptsFrames()) {
-        // Main reads venue data straight from the frames; store payloads carry the rest.
-        this._forwardsFrames = true;
-        this._exchange.onFrame = (frame) => {
-          if (generation === this._generation && !this._stopped) {
-            this._ctx.postMessage({ op: 'frame', data: frame }, [frame]);
-          }
-        };
-      }
+      if (mainAcceptsFrames()) this._mainDecodesFrames = this.forwardFrames(generation);
+      // A recovered exchange keeps forwarding where main asked for this account's frames.
+      else if (this._forwardsFrames) this.forwardFrames(generation);
 
       // When privateOnly, disable public websocket connections before start().
       // Public data (tickers, orderbook, OHLCV) is provided by a shared public exchange.
@@ -774,9 +770,26 @@ export class ExchangeWorker {
     }
     if (this._forwardsFrames && this._exchange instanceof RustEngineExchange) {
       const frame = this._exchange.snapshotFrame();
-      if (frame) this._ctx.postMessage({ op: 'frame', data: frame }, [frame]);
+      if (frame) this._ctx.postMessage({ op: 'frame', data: frame, snapshot: true }, [frame]);
     }
     this._storeUpdate(this._store.serialize(), { forceFullStore: true });
+  }
+
+  /**
+   * Main reads venue data straight from this account's frames; store payloads
+   * carry the rest. Per account: a main-thread engine that is frame-fed asks for
+   * it (`forwardFrames`), and one that is not keeps full store payloads.
+   */
+  private forwardFrames(generation = this._generation) {
+    const exchange = this._exchange;
+    if (!(exchange instanceof RustEngineExchange)) return false;
+    this._forwardsFrames = true;
+    exchange.onFrame = (frame, snapshot) => {
+      if (generation === this._generation && !this._stopped) {
+        this._ctx.postMessage({ op: 'frame', data: frame, snapshot: snapshot === true }, [frame]);
+      }
+    };
+    return true;
   }
 
   dispose() {
@@ -896,6 +909,10 @@ export class ExchangeWorker {
         }
         break;
       case 'sayHi':
+        break;
+      case 'forwardFrames':
+        // Started engines get a baseline at once; one still starting sends its own first.
+        if (this.forwardFrames() && (this._exchange as RustEngineExchange).hasStarted) this.sendSnapshot();
         break;
       default:
         // TWAP construction is synchronous. Track the actual instances made by
@@ -1240,7 +1257,7 @@ export class ExchangeWorker {
     }
 
     this._exchange!.on('fill', (event: OrderFillEvent) => {
-      if (isCurrent() && !this._forwardsFrames) this._ctx.postMessage({ op: 'fill', data: event });
+      if (isCurrent() && !this._mainDecodesFrames) this._ctx.postMessage({ op: 'fill', data: event });
     });
 
     const logEvents = [

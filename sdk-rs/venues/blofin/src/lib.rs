@@ -284,7 +284,8 @@ impl Blofin {
                 } else {
                     self.startup.succeeded(cx, DiscoveryRead::Markets);
                 }
-                if refresh {
+                // Frame-fed: tickers and the account arrive as frames.
+                if refresh || cx.frame_fed() {
                     return;
                 }
                 if let Err(error) = self.connect_feed(cx, false) {
@@ -591,6 +592,18 @@ impl Venue for Blofin {
     }
 
     type Pending = Pending;
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.account.export_venue_state())
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        if !self.account.apply_venue_state(state) {
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                "Unreadable BloFin venue state from the data source",
+            );
+        }
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::Blofin,

@@ -226,6 +226,11 @@ impl Hyperliquid {
         request: Request,
         streamed: bool,
     ) {
+        // Frame-fed: account state arrives as frames; only an unknown builder
+        // approval is read, once, before the first placement.
+        if cx.frame_fed() && !matches!(request, Request::Builder) {
+            return;
+        }
         let weight = match &request {
             Request::Role => 60,
             Request::State { .. } | Request::Spot { .. } => 2,
@@ -394,6 +399,14 @@ impl Hyperliquid {
                     "Hyperliquid invalid credentials: private key does not match API wallet",
                 );
             }
+        }
+        if cx.frame_fed() {
+            // The data source owns the account rows, settings and polls.
+            if self.spot {
+                self.account.mode_resolved = true;
+                self.account.builder_approved = Some(false);
+            }
+            return;
         }
         // Partial discovery may start real account reads, not an empty snapshot.
         if self.spot || !self.core_discovery_incomplete || self.options.public_data_only {

@@ -12,6 +12,7 @@ mod policy;
 mod refresh;
 mod sign;
 mod trading;
+mod venue_state;
 mod wire;
 
 use paths::Paths;
@@ -1137,6 +1138,9 @@ impl BybitLinear {
             self.startup.prelaunch_in_flight = true;
             self.request_markets(cx, true, None);
         }
+        if cx.frame_fed() {
+            return;
+        }
         if self.category == Category::Option && self.startup.markets_loaded {
             self.request_option_seeds(cx);
         }
@@ -1412,7 +1416,7 @@ impl BybitLinear {
 
     fn try_load_markets(&mut self, cx: &mut Cx<'_, Pending>) {
         let startup = &mut self.startup;
-        let fees_ready = self.credentials.is_none() || startup.fees.is_some();
+        let fees_ready = self.credentials.is_none() || startup.fees.is_some() || cx.frame_fed();
         if startup.markets_loaded
             || startup.trading.is_none()
             || startup.prelaunch.is_none()
@@ -1449,7 +1453,7 @@ impl BybitLinear {
             format!("Loaded {} Bybit markets", markets.len()),
         );
         self.catalogs.insert(self.category, markets);
-        if self.category == Category::Option {
+        if self.category == Category::Option && !cx.frame_fed() {
             self.request_option_seeds(cx);
         }
         self.try_publish_catalogs(cx);
@@ -1487,6 +1491,9 @@ impl BybitLinear {
             cx.store.set_markets(markets);
             publish_product_metadata(cx.store, &self.classification, &self.derivatives);
             self.catalog_ready = true;
+            if cx.frame_fed() {
+                return;
+            }
             let category = self.category;
             for other in self.categories() {
                 self.select_category(other);
@@ -2541,8 +2548,47 @@ impl Venue for BybitLinear {
             self.request_startup(cx);
         }
         self.select_category(self.primary_category);
-        if self.credentials.is_some() {
+        // A frame-fed engine loads public instrument metadata only.
+        if self.credentials.is_some() && !cx.frame_fed() {
             self.request_account_info(cx);
+        }
+    }
+
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        let mut state = venue_state::VenueState::default();
+        let accounts = std::iter::once((self.category, &self.account)).chain(
+            self.products
+                .iter()
+                .map(|product| (product.category, &product.account)),
+        );
+        for (category, account) in accounts {
+            let category = venue_state::category_code(category);
+            for (symbol, hedged) in &account.position_modes {
+                state.modes.insert((category, symbol.clone()), *hedged);
+            }
+            state.bound.extend(account.position_bound.iter().cloned());
+        }
+        Some(state.encode())
+    }
+
+    fn apply_venue_state(&mut self, _cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
+        let Some(state) = venue_state::VenueState::decode(bytes) else {
+            return;
+        };
+        let accounts = std::iter::once((self.category, &mut self.account)).chain(
+            self.products
+                .iter_mut()
+                .map(|product| (product.category, &mut product.account)),
+        );
+        for (category, account) in accounts {
+            let category = venue_state::category_code(category);
+            // The source's modes win; a mode only this engine knows stays.
+            for ((code, symbol), hedged) in &state.modes {
+                if *code == category {
+                    account.position_modes.insert(symbol.clone(), *hedged);
+                }
+            }
+            account.position_bound = state.bound.iter().cloned().collect();
         }
     }
 

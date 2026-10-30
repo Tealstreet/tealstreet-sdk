@@ -62,7 +62,14 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // hosted-wallet): local optimized Paradex 1,482,511 B; ddi ruled ceil KiB + 4 KiB
 // (1452 KiB) for local/CI drift, without waiting on CI. Split the device build later.
 // Cutover 10-29: asterdex raised to 1403 KiB (release run 40863850081 measured 1,434,289 B).
-export const WASM_VENUE_OVERRIDES = Object.freeze({ binance: 1_463_296, hyperliquid: 1_376_256, hyperliquidspot: 1_376_256, bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_436_672, kraken: 1_411_072, krakenspot: 1_411_072, paradex: 1_486_848 });
+// Frame-fed engine core (frameFed mode, ingest skeleton, VENUE_STATE): local optimized
+// Bybit 1,455,883 B; ddi ruled ceil KiB + 2 KiB for the frame-fed work (1424 KiB).
+// Bybit frame-fed (VENUE_STATE) with the merged ingest decoders: 1,468,570 B (1437 KiB).
+// Hyperliquid frame-fed with the merged ingest decoders: 1,377,242 B (1347 KiB).
+// Frame-fed ingest on master efe84b645c5 (every beta family measured locally): Binance
+// 1,484,450, Bitget 1,522,283, Bybit 1,479,891, AsterDEX 1,453,174, Kraken 1,448,429 and
+// Paradex 1,515,321 B; ddi ruled ceil KiB + 2 KiB for frame-fed core growth.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ binance: 1_486_848, hyperliquid: 1_379_328, hyperliquidspot: 1_379_328, bitget: 1_554_432, bitgetusdc: 1_554_432, bybit: 1_482_752, asterdex: 1_456_128, kraken: 1_451_008, krakenspot: 1_451_008, paradex: 1_517_568 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {

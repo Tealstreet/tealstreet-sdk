@@ -425,6 +425,8 @@ export interface WasmEngineLike {
   capabilities(): string;
   start(now: number): string;
   command(json: string, now: number): string;
+  /** A `frameFed` engine's ingest of one data-source frame; returns actions JSON. */
+  applyFrame?(frame: Uint8Array, snapshot: boolean, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   /** Full private sections and unflushed catalog; absence is unsupported. */
@@ -492,6 +494,8 @@ export class EngineHost {
   command(command: { op: string; [field: string]: unknown }, options?: CommandOptions): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
+  /** Apply one data-source frame to a `frameFed` engine; a snapshot resets its account state first. */
+  applyFrame(frame: ArrayBuffer | Uint8Array, snapshot: boolean): void;
   snapshot(): ArrayBuffer;
   accountSnapshot(): ArrayBuffer;
   socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;

@@ -989,8 +989,11 @@ impl Paradex {
                         false,
                     );
                 }
-                self.public_connect(cx);
-                self.public_seed(cx, false);
+                // Frame-fed: the catalogue only; tickers and streams come from the data source.
+                if !cx.frame_fed() {
+                    self.public_connect(cx);
+                    self.public_seed(cx, false);
+                }
             }
             Request::Tickers {
                 mut rows,

@@ -213,7 +213,11 @@ async fn run_nuke(
     if stall {
         // The cancel never settles; the account is disposed with the nuke mid-leg.
         tokio::time::sleep(Duration::from_millis(100)).await;
-        inbox.send(AlgoInput::Dispose).unwrap();
+        inbox
+            .send(AlgoInput::Dispose {
+                reason: "account disposed".into(),
+            })
+            .unwrap();
     }
     let done = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -227,7 +231,9 @@ async fn run_nuke(
     })
     .await
     .expect("nuke answers");
-    let _ = inbox.send(AlgoInput::Dispose);
+    let _ = inbox.send(AlgoInput::Dispose {
+        reason: "account disposed".into(),
+    });
     let commands = commands.lock().unwrap().clone();
     (done, commands)
 }
@@ -299,6 +305,21 @@ async fn a_nuke_on_a_native_cancel_all_venue_ends_with_the_venue_wide_cancel() {
             assert!(commands[1].starts_with("place "), "{commands:?}");
             // The venue-wide cancel-all (an empty symbol) reaches untracked orders.
             assert_eq!(commands[2], "cancel ");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn stop_account_algos_runs_no_leg() {
+    LocalSet::new()
+        .run_until(async {
+            let (done, commands) = nuke("algos").await;
+            assert_eq!(done["success"], true);
+            assert_eq!(
+                done["result"],
+                json!({"stoppedChasers": [], "stoppedTwaps": []})
+            );
+            assert!(commands.is_empty(), "{commands:?}");
         })
         .await;
 }

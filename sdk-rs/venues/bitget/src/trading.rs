@@ -556,8 +556,10 @@ impl BitgetFutures {
     }
 
     fn start_job(&mut self, cx: &mut Cx<'_, Pending>, preflight: Preflight, intent: Command) {
+        // Frame-fed: settings and hedge mode arrive as frames, never read here.
         let metadata = symbols(cx, &intent)
             .into_iter()
+            .filter(|_| !cx.frame_fed())
             .filter(|symbol| {
                 cx.store.setting(symbol).is_none()
                     || (!cx
@@ -2419,6 +2421,14 @@ impl BitgetFutures {
                     );
                     answer = Answer::Accepted(vec![next.clone()]);
                     job.ids.push(next);
+                } else if cx.frame_fed() {
+                    // No read here: the amend went through, its new order arrives as frames.
+                    let error = VenueError::new(
+                        "Bitget amended the order; its new identity arrives with the account stream",
+                    )
+                    .outcome(Outcome::Unknown);
+                    self.end(cx, job, current, error);
+                    return;
                 } else {
                     job.calls.push_front(Planned {
                         path: paths::ORDER_DETAIL,

@@ -2005,25 +2005,16 @@ fn balance_info_is_the_last_rest_wallet_account_verbatim_like_ts() {
     assert_eq!(info["coin"][0]["marginCollateral"], true);
     assert_eq!(info["coin"][0]["collateralSwitch"], true);
 
-    // REST re-reads the wallet only as a 60 s safety reconcile while the stream is
-    // live (TS re-read it every tick), so pushes merge into `info`: account fields
-    // replace, coins merge field by field, and fields a push omits are kept.
+    // While the private topics are live, REST re-reads the wallet only as the 60 s
+    // safety reconcile. Pushes stream the typed wallet; `info` is not merged from
+    // them (the bybit wasm budget), so it stays the last REST account until then.
     let socket = h.socket("/v5/private").unwrap();
     h.event(Event::WsOpened { socket });
     h.message(
         "/v5/private",
         r#"{"topic":"wallet","id":"w","creationTime":1,"data":[{"accountType":"UNIFIED","totalEquity":"2000","totalWalletBalance":"2000","totalMarginBalance":"2000","totalAvailableBalance":"2000","totalInitialMargin":"0","totalMaintenanceMargin":"0","coin":[{"coin":"USDT","equity":"2000","walletBalance":"2000","usdValue":"2000"}]}]}"#,
     );
-    let pushed = balance_info(&mut h, 92);
-    assert_eq!(pushed["totalEquity"], "2000");
-    assert_eq!(pushed["coin"][0]["equity"], "2000");
-    assert_eq!(pushed["coin"][0]["marginCollateral"], true);
-    assert_eq!(pushed["coin"][0]["collateralSwitch"], true);
-    assert_eq!(
-        pushed["coin"].as_array().unwrap().len(),
-        expected["coin"].as_array().unwrap().len()
-    );
-    let expected = pushed;
+    assert_eq!(balance_info(&mut h, 92), expected);
 
     // A failed read keeps the last good payload.
     h.advance(60_000.0);

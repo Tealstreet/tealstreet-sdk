@@ -30,6 +30,10 @@ impl Adapter {
             None => Vec::new(),
         };
         let stopped = json!({"stoppedChasers": stopped_chasers, "stoppedTwaps": stopped_twaps});
+        // A browser writer runs the legs itself; the host only stops its algos.
+        if mode == "algos" {
+            return Ok(stopped);
+        }
         if !matches!(mode, "positions" | "pos") {
             let store = self.snapshot();
             let mut symbols = Vec::new();

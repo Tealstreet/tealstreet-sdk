@@ -1673,6 +1673,9 @@ struct IoCore {
     read_root_sweep_capacity: Option<usize>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
+    /// A frame-fed engine (`crate::frame_fed`): its account state arrives as
+    /// frames from a data source; it opens no socket and makes no account read.
+    frame_fed: bool,
     /// Attempts a Session resume selected with no delivery in this event: the
     /// resume is their issue custody until the outer Plan flush. Reserved at
     /// park, so a resume never allocates.
@@ -1846,6 +1849,7 @@ impl Default for IoCore {
             read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
+            frame_fed: false,
             #[cfg(feature = "http-plans")]
             session_resumed: Vec::new(),
             signing: Default::default(),
@@ -2225,16 +2229,24 @@ impl<P> Cx<'_, P> {
         self.io.core.private_feed_policy
     }
 
+    /// Frame-fed: load only public instrument metadata; no account reads, no
+    /// polls, no post-write reads (account state arrives as frames).
+    pub fn frame_fed(&self) -> bool {
+        self.io.core.frame_fed
+    }
+
     /// `SocketId(0)` stands for a connect the engine suppressed.
     fn inert_socket(&self, socket: SocketId) -> bool {
         socket.0 == 0
             && (self.io.core.public_feed_policy != PublicFeedPolicy::Direct
-                || self.io.core.signing_latch.roles != 0)
+                || self.io.core.signing_latch.roles != 0
+                || self.io.core.frame_fed)
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
         let spec = spec.into();
         if self.io.managed_socket_active()
+            || self.io.core.frame_fed
             || spec.channel == Some(SocketChannel::Public)
                 && self.io.core.public_feed_policy != PublicFeedPolicy::Direct
             || self.io.core.signing_latch.blocks(spec.channel.as_ref())
@@ -3438,6 +3450,17 @@ pub trait Venue {
     fn guard_order_mutations(&self) -> bool {
         false
     }
+    /// Data source: the venue-private state a frame-fed engine's writes need and
+    /// the store does not hold (the VENUE_STATE frame section), in the venue's
+    /// own compact encoding. `None` when the venue needs none.
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        None
+    }
+    /// Frame-fed: apply a data source's VENUE_STATE section.
+    fn apply_venue_state(&mut self, _cx: &mut Cx<'_, Self::Pending>, _state: &[u8]) {}
+    /// Frame-fed: after each ingested frame, derive or prune venue state from
+    /// the store (orders, positions, loaded flags).
+    fn on_frame_ingested(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
     /// Cancel and amend route only through stored orders: hold one naming an
     /// acknowledged placement until the store has it (`placement_acks`).
     fn cancel_needs_stored_order(&self) -> bool {
@@ -3719,6 +3742,10 @@ pub struct Engine<V: Venue> {
     releasing: bool,
     /// Hosts opt in when the account can sign; public-only engines have no account sections.
     account_startup: bool,
+    /// Frame-fed: the data source's market table, between ingested frames.
+    ingest: crate::ingest::IngestState,
+    /// Data source: the VENUE_STATE bytes last sent, so unchanged state is not resent.
+    venue_state_sent: Option<Vec<u8>>,
     shared_books: HashMap<String, Book>,
     shared_tickers: HashMap<String, crate::public_feed::PublicTicker>,
     shared_ticker_revision: u64,
@@ -3807,6 +3834,8 @@ impl<V: Venue> Engine<V> {
             reconcile_timer: None,
             releasing: false,
             account_startup: false,
+            ingest: Default::default(),
+            venue_state_sent: None,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
             shared_ticker_revision: 0,
@@ -3970,6 +3999,65 @@ impl<V: Venue> Engine<V> {
             return Err("public feed policy must be configured before startup");
         }
         self.io.core.public_feed_policy = policy;
+        Ok(())
+    }
+
+    /// A frame-fed engine (`crate::frame_fed`); fixed before startup. It implies
+    /// no public feed and no account startup.
+    pub fn set_frame_fed(&mut self) -> Result<(), &'static str> {
+        if self.started {
+            return Err("frameFed must be configured before startup");
+        }
+        self.io.core.frame_fed = true;
+        self.io.core.public_feed_policy = PublicFeedPolicy::Disabled;
+        self.account_startup = false;
+        Ok(())
+    }
+
+    pub fn frame_fed(&self) -> bool {
+        self.io.core.frame_fed
+    }
+
+    /// Frame-fed: apply a data source's SCXF frame (`crate::ingest`). A
+    /// snapshot replaces the account sections. On `Err` the store may be
+    /// partly applied: the host asks its source for a re-snapshot.
+    pub fn apply_frame(
+        &mut self,
+        now: f64,
+        frame: &[u8],
+        snapshot: bool,
+    ) -> Result<(), crate::ingest::IngestError> {
+        self.assert_live();
+        if !self.io.core.frame_fed {
+            return Err(crate::ingest::IngestError(
+                "frame ingest requires a frameFed engine",
+            ));
+        }
+        self.expire_read_roots(now);
+        let parsed = crate::ingest::parse(frame)?;
+        let applied = crate::ingest::apply(&mut self.store, &mut self.ingest, &parsed, snapshot)?;
+        self.io.core.dispatch_now = now;
+        self.begin_event_scope();
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        if let Some(state) = &applied.venue_state {
+            self.venue.apply_venue_state(&mut cx, state);
+        }
+        self.venue.on_frame_ingested(&mut cx);
+        if applied.orders {
+            // The source's orders are the reconcile: no fence outlives them,
+            // and holds waiting for an acknowledged order may now release.
+            #[cfg(feature = "order-locks")]
+            {
+                let token = self.io.core.order_locks.token();
+                self.io.core.order_locks.reconciled(None, token);
+            }
+            self.release_held(now);
+        }
+        self.finish_event_scope(now);
         Ok(())
     }
 
@@ -4643,6 +4731,19 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
+            Event::Command(command)
+                if cx.io.core.frame_fed
+                    && crate::frame_fed::refusal(&command, cx.store.loaded().markets).is_some() =>
+            {
+                let message = crate::frame_fed::refusal(&command, cx.store.loaded().markets)
+                    .expect("checked by the guard");
+                if let Some(id) = command.completion_id() {
+                    cx.refuse_before_entry(
+                        id,
+                        VenueError::new(message).outcome(crate::Outcome::NotSent),
+                    );
+                }
+            }
             Event::PollScaleChanged { scale } => {
                 if scale.is_nan() || scale <= 0. {
                     return;
@@ -4997,6 +5098,17 @@ impl<V: Venue> Engine<V> {
         // Never inside a command entry; the hook runs with no HTTP delivery
         // or order-read authority of its own.
         if self.io.core.command_entry.is_some() {
+            return;
+        }
+        // A frame-fed engine never re-reads: its data source's frames carry the
+        // outcome, so no fence may outlive the command that raised it.
+        if self.io.core.frame_fed {
+            self.io.core.reconcile_due.clear();
+            let token = self.io.core.order_locks.token();
+            self.io.core.order_locks.reconciled(None, token);
+            if let Some((timer, _)) = self.reconcile_timer.take() {
+                self.io.core.actions.push(Action::ClearTimer { timer });
+            }
             return;
         }
         let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
@@ -5995,6 +6107,9 @@ impl<V: Venue> Engine<V> {
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
         self.store.write(&everything, &mut w);
+        if let Some(state) = self.venue.export_venue_state() {
+            w.venue_state(&state);
+        }
         self.venue.capabilities().write(&mut w);
         for (symbol, book) in self.books() {
             if let Some(market) = self.store.market_index(symbol) {
@@ -6098,6 +6213,12 @@ impl<V: Venue> Engine<V> {
         let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
+            if let Some(state) = self.venue.export_venue_state()
+                && self.venue_state_sent.as_deref() != Some(state.as_slice())
+            {
+                w.venue_state(&state);
+                self.venue_state_sent = Some(state);
+            }
         }
         let books = self.io.core.changed_books[..self.io.core.changed_books_active].iter();
         #[cfg(feature = "book-deltas")]

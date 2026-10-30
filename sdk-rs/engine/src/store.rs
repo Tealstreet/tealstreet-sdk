@@ -540,6 +540,27 @@ impl Store {
     }
 
     /// Replace every order with a venue snapshot.
+    /// Frame ingest: a data source's snapshot replaces every account section,
+    /// so they start empty and unloaded (markets and tickers stay).
+    pub fn reset_account(&mut self) {
+        self.orders.clear();
+        self.orders_revision = self.orders_revision.saturating_add(1);
+        self.positions.clear();
+        self.balance = Balance::default();
+        self.coin_balances = None;
+        self.currency_balances = None;
+        self.settings.clear();
+        self.hedged = false;
+        self.loaded.balance = false;
+        self.loaded.orders = false;
+        self.loaded.positions = false;
+        self.changes.orders = true;
+        self.changes.positions = true;
+        self.changes.balance = true;
+        self.changes.settings = true;
+        self.changes.status = true;
+    }
+
     pub fn set_orders(&mut self, orders: Vec<Order>) {
         self.orders_revision = self.orders_revision.saturating_add(1);
         self.orders = orders;
@@ -706,6 +727,25 @@ impl Store {
         #[cfg(feature = "metadata-freshness")]
         if let Some(metadata) = &mut self.metadata {
             metadata.changed(None);
+        }
+    }
+
+    /// Replace every market's settings, keyed by symbol.
+    pub fn replace_settings<'a>(
+        &mut self,
+        settings: impl IntoIterator<Item = (&'a str, MarketSetting)>,
+    ) {
+        let settings: HashMap<Box<str>, MarketSetting> = settings
+            .into_iter()
+            .map(|(symbol, setting)| (symbol.into(), setting))
+            .collect();
+        if settings != self.settings {
+            self.settings = settings;
+            self.changes.settings = true;
+            #[cfg(feature = "metadata-freshness")]
+            if let Some(metadata) = &mut self.metadata {
+                metadata.changed(None);
+            }
         }
     }
 
@@ -877,6 +917,10 @@ impl Store {
 
     pub fn loaded(&self) -> Loaded {
         self.loaded
+    }
+
+    pub fn latency(&self) -> f64 {
+        self.latency
     }
 
     pub fn set_latency(&mut self, latency: f64) {
