@@ -14,12 +14,14 @@ mod math;
 mod types;
 mod validate;
 
-pub use validate::{MAX_ORDERS_COUNT, MAX_TWAPS_PER_ACCOUNT};
+pub use validate::{MAX_ORDERS_COUNT, MAX_TWAPS_PER_ACCOUNT, RETIRED_IDS_KEPT, SCHEDULE_GRACE_MS};
 
 pub use instance::TwapInstance;
 pub use types::{
     OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin, TwapState, TwapStatus,
 };
+
+use std::collections::{HashSet, VecDeque};
 
 use serde_json::{Map, Value};
 
@@ -109,6 +111,9 @@ pub enum TwapEffect {
 #[derive(Debug, Default)]
 pub struct TwapBook {
     entries: Vec<Entry>,
+    /// Completed or stopped ids, oldest first, that a restore must not revive.
+    retired: VecDeque<String>,
+    retired_set: HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -324,6 +329,18 @@ impl TwapBook {
         Ok(())
     }
 
+    fn retire(&mut self, id: String) {
+        if !self.retired_set.insert(id.clone()) {
+            return;
+        }
+        self.retired.push_back(id);
+        if self.retired.len() > validate::RETIRED_IDS_KEPT
+            && let Some(oldest) = self.retired.pop_front()
+        {
+            self.retired_set.remove(&oldest);
+        }
+    }
+
     fn managed_entries(&self) -> impl Iterator<Item = &Entry> {
         self.entries.iter().filter(|entry| entry.managed)
     }
@@ -375,11 +392,22 @@ impl TwapBook {
                     return;
                 }
             };
-            if self.get(&entry.id).is_some() {
+            // Another holder already restored or started it: one TWAP per id.
+            if self
+                .entries
+                .iter()
+                .any(|known| known.instance.id == entry.id)
+            {
                 continue;
             }
-            if let Err(reason) =
-                validate::restored(&entry.options, &entry.state).and_then(|()| self.has_capacity())
+            if self.retired_set.contains(&entry.id) {
+                effects.push(TwapEffect::Diagnostic {
+                    message: format!("TWAP {} not restored: it already finished", entry.id),
+                });
+                continue;
+            }
+            if let Err(reason) = validate::restored(&entry.options, &entry.state, env.now_ms())
+                .and_then(|()| self.has_capacity())
             {
                 effects.push(TwapEffect::Log {
                     message: format!("TWAP {} not restored: {reason}", entry.options.symbol()),
@@ -405,11 +433,16 @@ impl TwapBook {
     /// one state update when any state changed.
     fn settle(&mut self, effects: &mut Vec<TwapEffect>) {
         let mut changed = false;
+        let mut finished = Vec::new();
         for entry in &mut self.entries {
             changed |= entry.instance.take_state_changed();
-            if entry.instance.state.status == TwapStatus::Completed {
+            if entry.managed && entry.instance.state.status == TwapStatus::Completed {
                 entry.managed = false;
+                finished.push(entry.instance.id.clone());
             }
+        }
+        for id in finished {
+            self.retire(id);
         }
         self.entries
             .retain(|entry| entry.managed || entry.instance.has_outstanding_work());

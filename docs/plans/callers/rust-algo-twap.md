@@ -50,6 +50,18 @@ native exchange server. Nothing calls it yet.
   nothing; a bad restore entry is skipped. An account runs at most 20 TWAPs
   (`MAX_TWAPS_PER_ACCOUNT`): further starts are refused and further restored
   entries are skipped, until one completes or stops.
+- `twap:state` replays one tab's `sessionStorage` (web `TwapWorker`), which
+  can be stale, copied into a duplicated tab, or re-sent on every account
+  load. Unlike TS, a restore is refused when the entry is completed, idle or
+  out of slices; when its remaining slices exceed `size` or, with executed
+  ones, `ordersCount`; or when it is running and its schedule lapsed (now is
+  past `nextOrderAt` plus one slice interval with randomness, plus
+  `SCHEDULE_GRACE_MS`). An id the book holds, including one still settling
+  its last placement, is skipped, and an id that completed or stopped on
+  this account (the last `RETIRED_IDS_KEPT`) is never revived. These guards
+  live in the account's book: they do not survive the book's disposal or
+  span servers. A restored running TWAP places at most one overdue slice,
+  then paces at its interval. A paused one places nothing until resumed.
 - A slice whose placement outcome is unknown, or whose order ids cannot be
   read, still advances the TWAP, as in TS. Its log says the order may be live,
   and no later slice assumes it failed.
