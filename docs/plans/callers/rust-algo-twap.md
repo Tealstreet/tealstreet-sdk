@@ -10,7 +10,8 @@ native exchange server. Nothing calls it yet.
 - Native server: per account, build one
   `safe_cex_chaser::ChaserFactory::new(account_cx.clone())`, take
   `let chasers = chaser_factory.book()`, and build
-  `TwapFactory::new(account_cx, Rc::new(chasers))`. Register both factories
+  `TwapFactory::new(&account_name, account_cx, Rc::new(chasers))`, where
+  `account_name` is the `accountName` the account's clients and `activeTWAPs` use. Register both factories
   in that account's `Registry`. Pass the account's `AlgoCx`, never a
   socket's: TWAPs keep running when the socket that started them closes.
   `TwapFactory` emits `twap:stateUpdate` and `log` (`[message, "error"]`) and
@@ -50,6 +51,9 @@ native exchange server. Nothing calls it yet.
   nothing; a bad restore entry is skipped. An account runs at most 20 TWAPs
   (`MAX_TWAPS_PER_ACCOUNT`): further starts are refused and further restored
   entries are skipped, until one completes or stops.
+- A `twap:start` or restored row whose `accountName` is not the book's
+  account is refused with a `log` error: it would trade on this account yet
+  never be listed in its `activeTWAPs`.
 - `twap:state` replays one tab's `sessionStorage` (web `TwapWorker`), which
   can be stale, copied into a duplicated tab, or re-sent on every account
   load. Unlike TS, a restore is refused when the entry is completed, idle or

@@ -108,8 +108,10 @@ pub enum TwapEffect {
 }
 
 /// One account's TWAPs, in insertion order like the TS `Map`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TwapBook {
+    /// The `accountName` every TWAP here must carry; `activeTWAPs` lists by it.
+    account_name: String,
     entries: Vec<Entry>,
     /// Completed or stopped ids, oldest first, that a restore must not revive.
     retired: VecDeque<String>,
@@ -125,8 +127,13 @@ struct Entry {
 }
 
 impl TwapBook {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(account_name: impl Into<String>) -> Self {
+        Self {
+            account_name: account_name.into(),
+            entries: Vec::new(),
+            retired: VecDeque::new(),
+            retired_set: HashSet::new(),
+        }
     }
 
     /// Apply one `twap:*` op from the hosted protocol.
@@ -196,6 +203,7 @@ impl TwapBook {
         effects: &mut Vec<TwapEffect>,
     ) -> Result<String, String> {
         validate::options(&options)
+            .and_then(|()| self.owns(&options))
             .and_then(|()| self.has_capacity())
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
@@ -315,6 +323,17 @@ impl TwapBook {
             .map(|instance| instance.id.as_str())
     }
 
+    /// A TWAP naming another account would trade here yet never be listed.
+    fn owns(&self, options: &TwapOptions) -> Result<(), String> {
+        if options.account_name != self.account_name {
+            return Err(format!(
+                "it names account {:?}, not {:?}",
+                options.account_name, self.account_name
+            ));
+        }
+        Ok(())
+    }
+
     fn has_capacity(&self) -> Result<(), String> {
         let running = self
             .managed_entries()
@@ -407,6 +426,7 @@ impl TwapBook {
                 continue;
             }
             if let Err(reason) = validate::restored(&entry.options, &entry.state, env.now_ms())
+                .and_then(|()| self.owns(&entry.options))
                 .and_then(|()| self.has_capacity())
             {
                 effects.push(TwapEffect::Log {

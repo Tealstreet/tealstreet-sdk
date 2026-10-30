@@ -169,7 +169,7 @@ fn settle_all(
 #[test]
 fn origin_defaults_to_web_and_keeps_provided_values() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, _) = start(&mut book, &mut env, &view, json!({}));
     assert_eq!(book.serialize_state()[&id]["state"]["origin"], "web");
     for origin in ["web", "cli", "webhook", "automation"] {
@@ -210,7 +210,7 @@ fn randomness_skews_pairs_in_opposite_directions() {
 #[test]
 fn restored_state_keeps_status_counts_and_id() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let state = json!({
         "accountName": "test-account", "activeMarket": { "symbol": "BTCUSDT" }, "size": 1.0,
         "ordersSizes": [0.2, 0.2, 0.2], "side": "buy", "status": "paused", "ordersCount": 5,
@@ -234,7 +234,7 @@ fn restored_state_keeps_status_counts_and_id() {
 #[test]
 fn restored_state_without_origin_stays_without_origin() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let state = json!({
         "accountName": "test-account", "activeMarket": { "symbol": "BTCUSDT" }, "size": 1.0,
         "ordersSizes": [0.2], "side": "buy", "status": "running", "ordersCount": 5,
@@ -257,7 +257,7 @@ fn restored_state_without_origin_stays_without_origin() {
 #[test]
 fn start_from_idle_sets_started_at_and_running() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(
         &mut book,
         &mut env,
@@ -278,7 +278,7 @@ fn direct_limit_slices_track_returned_order_ids() {
         ask: Some(50_100.0),
         last: Some(50_000.0),
     });
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(
         &mut book,
         &mut env,
@@ -309,7 +309,7 @@ fn direct_limit_slices_track_returned_order_ids() {
 #[test]
 fn limit_slices_without_a_price_fall_back_to_market_and_are_untracked() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(
         &mut book,
         &mut env,
@@ -330,7 +330,7 @@ fn limit_slices_without_a_price_fall_back_to_market_and_are_untracked() {
 #[test]
 fn slices_run_on_the_interval_and_complete() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     // 10 minutes / 5 slices → 120 s.
     let (id, mut effects) = start(&mut book, &mut env, &view, json!({}));
     let mut placed = 0;
@@ -356,7 +356,7 @@ fn slices_run_on_the_interval_and_complete() {
 #[test]
 fn failed_slice_logs_and_advances() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
     let settled = settle_all(
         &mut book,
@@ -375,7 +375,7 @@ fn failed_slice_logs_and_advances() {
 #[test]
 fn pause_stops_the_schedule_and_resume_keeps_next_order_at() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({}));
     settle_all(&mut book, &mut env, &id, &effects, Ok(vec![]));
     let next = book.get(&id).unwrap().state.next_order_at;
@@ -397,7 +397,7 @@ fn pause_stops_the_schedule_and_resume_keeps_next_order_at() {
 #[test]
 fn in_flight_placement_settling_after_terminate_does_not_resurrect() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(
         &mut book,
         &mut env,
@@ -417,7 +417,7 @@ fn in_flight_placement_settling_after_terminate_does_not_resurrect() {
 #[test]
 fn in_flight_failure_after_terminate_still_logs() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
     book.handle("twap:stop", &json!(id), &mut env, &view);
     let settled = settle_all(&mut book, &mut env, &id, &effects, Err("boom".into()));
@@ -441,7 +441,7 @@ fn chase(overrides: Value) -> Value {
 
 fn start_chase(overrides: Value) -> (TwapBook, Env, View, String, String) {
     let (mut env, mut view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, chase(overrides));
     let chasers = chaser_ids(&effects);
     assert_eq!(chasers.len(), 1);
@@ -459,7 +459,7 @@ fn start_chase(overrides: Value) -> (TwapBook, Env, View, String, String) {
 #[test]
 fn chaser_slice_request_matches_ts() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (_, effects) = start(
         &mut book,
         &mut env,
@@ -600,7 +600,7 @@ fn reduce_only_reaches_the_fallback_market() {
 #[test]
 fn last_slice_timeout_still_fires_after_completion() {
     let (mut env, mut view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(
         &mut book,
         &mut env,
@@ -628,7 +628,7 @@ fn last_slice_timeout_still_fires_after_completion() {
 #[test]
 fn serialize_state_skips_completed_twaps() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     assert_eq!(book.serialize_state(), json!({}));
     let (running, effects) = start(&mut book, &mut env, &view, json!({}));
     settle_all(&mut book, &mut env, &running, &effects, Ok(vec![]));
@@ -650,7 +650,7 @@ fn serialize_state_skips_completed_twaps() {
 #[test]
 fn start_emits_state_update_with_the_new_twap() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({}));
     let updates = state_updates(&effects);
     assert_eq!(updates.len(), 1);
@@ -664,7 +664,7 @@ fn start_emits_state_update_with_the_new_twap() {
 #[test]
 fn ops_on_unknown_ids_are_ignored() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     for op in [
         "twap:resume",
         "twap:pause",
@@ -682,7 +682,7 @@ fn ops_on_unknown_ids_are_ignored() {
 #[test]
 fn cleanup_marks_the_twap() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, _) = start(&mut book, &mut env, &view, json!({}));
     let effects = book.handle("twap:cleanup", &json!(id), &mut env, &view);
     assert_eq!(
@@ -706,7 +706,7 @@ fn persisted(id: &str, status: &str, next_order_at: f64) -> Value {
 #[test]
 fn restore_resumes_running_twaps_and_skips_known_ids() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (existing, _) = start(&mut book, &mut env, &view, json!({}));
     let due = env.now + 5_000.0;
     let restore = json!([
@@ -733,7 +733,7 @@ fn restore_resumes_running_twaps_and_skips_known_ids() {
 #[test]
 fn restore_stops_at_the_first_malformed_entry() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let restore =
         json!([persisted("a", "paused", 0.0), { "id": "bad" }, persisted("b", "paused", 0.0)]);
     let effects = book.handle("twap:state", &restore, &mut env, &view);
@@ -749,7 +749,7 @@ fn restore_stops_at_the_first_malformed_entry() {
 #[test]
 fn active_twaps_matches_the_postprocessor_projection() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, _) = start(
         &mut book,
         &mut env,
@@ -775,7 +775,7 @@ fn active_twaps_matches_the_postprocessor_projection() {
 #[test]
 fn options_round_trip_unknown_fields() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, _) = start(&mut book, &mut env, &view, json!({ "clientTag": "x" }));
     assert_eq!(book.serialize_state()[&id]["options"]["clientTag"], "x");
 }
@@ -795,7 +795,7 @@ fn logs(effects: &[TwapEffect]) -> Vec<&str> {
 #[test]
 fn start_refuses_out_of_bounds_options_before_building_slices() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     for bad in [
         json!({ "ordersCount": 0 }),
         json!({ "ordersCount": 1001 }),
@@ -824,7 +824,7 @@ fn start_refuses_out_of_bounds_options_before_building_slices() {
 #[test]
 fn start_accepts_the_bounds_themselves() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     for good in [
         json!({ "ordersCount": 1 }),
         json!({ "ordersCount": safe_cex_algo_twap::MAX_ORDERS_COUNT }),
@@ -840,7 +840,7 @@ fn start_accepts_the_bounds_themselves() {
 #[test]
 fn restore_skips_entries_outside_the_bounds_and_keeps_going() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let mut oversized = persisted("big", "paused", 0.0);
     oversized["state"]["ordersSizes"] = json!(vec![0.1; 6]);
     let mut miscounted = persisted("count", "paused", 0.0);
@@ -863,7 +863,7 @@ fn an_unknown_placement_outcome_still_advances_the_slice() {
     // TS parity: the slice counts as executed and the next one is scheduled;
     // the failure log says the order may be live.
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
     let settled = settle_all(
         &mut book,
@@ -883,7 +883,7 @@ fn an_unknown_placement_outcome_still_advances_the_slice() {
 #[test]
 fn an_account_runs_at_most_twenty_twaps() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     for _ in 0..safe_cex_algo_twap::MAX_TWAPS_PER_ACCOUNT {
         let effects = book.handle("twap:start", &options(json!({})), &mut env, &view);
         assert!(logs(&effects).is_empty());
@@ -931,7 +931,7 @@ fn diagnostics(effects: &[TwapEffect]) -> Vec<&str> {
 #[test]
 fn restore_refuses_finished_unstarted_and_empty_twaps() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let due = env.now + 5_000.0;
     let mut empty = persisted("empty", "running", due);
     empty["state"]["ordersSizes"] = json!([]);
@@ -957,7 +957,7 @@ fn restore_refuses_finished_unstarted_and_empty_twaps() {
 #[test]
 fn restore_refuses_slices_beyond_the_remaining_size_or_count() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let due = env.now + 5_000.0;
     let mut inflated = persisted("inflated", "running", due);
     inflated["state"]["ordersSizes"] = json!([0.6, 0.6]);
@@ -996,7 +996,7 @@ fn restore_refuses_slices_beyond_the_remaining_size_or_count() {
 #[test]
 fn restore_refuses_a_running_twap_whose_schedule_lapsed() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let lapsed_at = env.now - SLICE_MS - safe_cex_algo_twap::SCHEDULE_GRACE_MS - 1.0;
     let within = env.now - SLICE_MS;
     let restore = json!([
@@ -1016,7 +1016,7 @@ fn restore_refuses_a_running_twap_whose_schedule_lapsed() {
 #[test]
 fn a_late_restore_resumes_pacing_without_a_catch_up_burst() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let restore = json!([persisted("late", "running", env.now - SLICE_MS)]);
     book.handle("twap:state", &restore, &mut env, &view);
     // One overdue slice now, then the normal interval, never a backlog.
@@ -1032,7 +1032,7 @@ fn a_late_restore_resumes_pacing_without_a_catch_up_burst() {
 #[test]
 fn a_resumed_paused_twap_paces_from_now() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let restore = json!([persisted("p", "paused", env.now - 3_600_000.0)]);
     let effects = book.handle("twap:state", &restore, &mut env, &view);
     assert!(placements(&effects).is_empty());
@@ -1052,7 +1052,7 @@ fn a_resumed_paused_twap_paces_from_now() {
 #[test]
 fn two_holders_restoring_the_same_twap_run_it_once() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let due = env.now + 5_000.0;
     // Two tabs (or a re-sent load) carry the same rows; one carries it twice.
     let rows = json!([
@@ -1069,7 +1069,7 @@ fn two_holders_restoring_the_same_twap_run_it_once() {
 #[test]
 fn restore_never_revives_a_stopped_or_finished_twap() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     // A TWAP the server started and the user stopped from another tab.
     let (stopped, first) = start(&mut book, &mut env, &view, json!({}));
     let stale = book.serialize_state()[&stopped].clone();
@@ -1105,7 +1105,7 @@ fn restore_never_revives_a_stopped_or_finished_twap() {
 #[test]
 fn restore_never_replaces_a_twap_finishing_its_last_placement() {
     let (mut env, view) = (Env::new(), View::default());
-    let mut book = TwapBook::new();
+    let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 1 }));
     let stale = json!({ "id": id, "options": options(json!({ "ordersCount": 1 })), "state": {
         "accountName": "test-account", "activeMarket": { "symbol": "BTCUSDT" }, "size": 1.0,
@@ -1120,4 +1120,33 @@ fn restore_never_replaces_a_twap_finishing_its_last_placement() {
     env.advance(SLICE_MS * 2.0);
     assert!(placements(&book.wake(&mut env, &view)).is_empty());
     assert!(book.get(&id).is_none());
+}
+
+#[test]
+fn a_twap_naming_another_account_is_refused_visibly() {
+    // It would trade on this account yet never appear in its activeTWAPs.
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let started = book.handle(
+        "twap:start",
+        &options(json!({ "accountName": "other-account" })),
+        &mut env,
+        &view,
+    );
+    assert_eq!(
+        logs(&started),
+        [r#"TWAP BTCUSDT rejected: it names account "other-account", not "test-account""#]
+    );
+    assert!(placements(&started).is_empty());
+
+    let mut foreign = persisted("foreign", "running", env.now + 1_000.0);
+    foreign["options"]["accountName"] = json!("other-account");
+    let restored = book.handle("twap:state", &json!([foreign]), &mut env, &view);
+    assert_eq!(
+        logs(&restored),
+        [r#"TWAP BTCUSDT not restored: it names account "other-account", not "test-account""#]
+    );
+    assert_eq!(book.ids().count(), 0);
+    env.advance(SLICE_MS * 10.0);
+    assert!(placements(&book.wake(&mut env, &view)).is_empty());
 }

@@ -382,6 +382,7 @@ pub async fn run(
     let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
     let book = chasers.book();
     let twap = Rc::new(safe_cex_algo_twap::factory::TwapFactory::new(
+        &name,
         cx.clone(),
         Rc::new(book.clone()),
     ));
