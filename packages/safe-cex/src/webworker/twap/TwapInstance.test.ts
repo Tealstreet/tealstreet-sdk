@@ -398,6 +398,27 @@ describe('TwapInstance', () => {
       expect(release).toHaveBeenCalledTimes(1);
     });
 
+    it('a restored TWAP ignores resume and places nothing until it holds its lock', async () => {
+      vi.useFakeTimers();
+      try {
+        const fresh = new TwapInstance(mockExchange, mockWorkerContext, options(), vi.fn()).state;
+        const state = { ...fresh, status: TwapStatus.Paused, nextOrderAt: Date.now() };
+        const instance = new TwapInstance(mockExchange, mockWorkerContext, options(), vi.fn(), state, 'restored');
+        instance.awaitOwnerLock();
+        await instance.resume();
+        await instance.start();
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(instance.state.status).toBe(TwapStatus.Paused);
+        expect(mockExchange.placeOrder).not.toHaveBeenCalled();
+
+        instance.holdOwnerLock(vi.fn());
+        await instance.resume();
+        expect(instance.state.status).toBe(TwapStatus.Running);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('releases a lock handed to an already completed TWAP at once', () => {
       const state = { ...new TwapInstance(mockExchange, mockWorkerContext, options(), vi.fn()).state, status: TwapStatus.Completed };
       const instance = new TwapInstance(mockExchange, mockWorkerContext, options(), vi.fn(), state, 'done');

@@ -80,6 +80,7 @@ export class TwapHandler extends BaseHandler {
         state,
         id,
       );
+      instance.awaitOwnerLock();
       twapManager.add(instance);
       void acquireTwapLockWithin(twapLockName(options!.accountName, id), TWAP_RESTORE_LOCK_WAIT_MS).then((release) => {
         if (!release) {
