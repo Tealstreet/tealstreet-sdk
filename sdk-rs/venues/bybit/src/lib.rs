@@ -34,11 +34,11 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::credential_selection::{CredentialRole, Selection, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
-use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::model::{
     Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
     Precision, ProductKind, Ticker,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::socket::{Config, Timeout};
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy, Interest,
