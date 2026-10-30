@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FrameApplier } from '../store/frameApplier';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
+import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { ExchangeWorker } from './ExchangeWorker';
 
 const createMarket = (overrides?: Partial<Market>): Market =>
@@ -170,6 +171,19 @@ describe('ExchangeWorker store payloads', () => {
     // payload harmless: the next one carries current values.
     expect(payload.tickers).toHaveLength(1);
     expect(payload.tickers[0].last).toBe(51000);
+  });
+
+  it('cleans up exchange-owned chasers before disposing the exchange', () => {
+    const { worker } = createWorker();
+    const exchange = { dispose: vi.fn() } as any;
+    (worker as any)._exchange = exchange;
+    const cleanupSpy = vi.spyOn(chaserOrderManagerInstance, 'cleanupExchange');
+
+    worker.dispose();
+
+    expect(cleanupSpy).toHaveBeenCalledWith(exchange);
+    expect(cleanupSpy.mock.invocationCallOrder[0]).toBeLessThan(exchange.dispose.mock.invocationCallOrder[0]);
+    cleanupSpy.mockRestore();
   });
 
   it('clears handler timers and runtime pipelines on dispose', () => {

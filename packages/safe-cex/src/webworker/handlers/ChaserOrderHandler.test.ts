@@ -1,48 +1,175 @@
+import type { Exchange } from '../../exchanges/base';
+import type { ExchangeName } from '../../types';
+import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
+import type { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { handlerArgs, NO_ALGOS, plainExchange, rustAlgoExchange } from '../../__tests__/fixtures/rustAlgoExchange';
+import { OrderSide, OrderStopTriggerType } from '../../types';
+import { ChaserOrderInstance } from '../chaserOrder/ChaserOrderInstance';
+import { chaserOrderManagerInstance } from '../chaserOrder/ChaserOrderManager';
 import { ChaserOrderHandler } from './ChaserOrderHandler';
 
-const start = { op: 'chaser:start', data: { symbol: 'BTCUSDT', size: 1, side: 'buy' } } as StoreWorkerPayload;
+// Mock ChaserOrderInstance and chaserOrderManagerInstance
+vi.mock('../chaserOrder/ChaserOrderInstance', () => ({
+  ChaserOrderInstance: vi.fn().mockImplementation((exchange, options) => ({
+    exchange,
+    options,
+  })),
+}));
+
+vi.mock('../chaserOrder/ChaserOrderManager', () => ({
+  chaserOrderManagerInstance: {
+    add: vi.fn(),
+    remove: vi.fn(),
+  },
+}));
 
 describe('ChaserOrderHandler', () => {
-  it.each([start, { op: 'chaser:terminate', data: 'chase-1' }, { op: 'chaser:terminateAll' }] as StoreWorkerPayload[])(
-    'sends $op to the account engine Rust algos',
-    (payload) => {
-      const exchange = rustAlgoExchange();
-      new ChaserOrderHandler(...handlerArgs(exchange)).handle(payload);
-      expect(exchange.routeAlgoOp).toHaveBeenCalledWith(
-        'test-account',
-        payload.op,
-        expect.any(Function),
-        expect.any(Function),
-      );
-      expect(exchange.algoOp).toHaveBeenCalledWith(payload.op, payload.data);
-      expect(exchange.emitter.emit).not.toHaveBeenCalled();
-    },
-  );
+  let handler: ChaserOrderHandler;
+  let mockExchange: Exchange;
+  let mockCtx: Worker;
+  let mockSettings: AppSettingsWorkerType;
+  let mockMetadata: ExchangeMetadataWorkerType;
 
-  it('refuses a chase visibly on an engine build without algos', () => {
-    const exchange = rustAlgoExchange('refuse');
-    new ChaserOrderHandler(...handlerArgs(exchange)).handle(start);
-    expect(exchange.algoOp).not.toHaveBeenCalled();
-    expect(exchange.emitter.emit).toHaveBeenCalledWith('error', `chaser:start ${NO_ALGOS}`);
-  });
+  beforeEach(() => {
+    vi.clearAllMocks();
 
-  it('refuses a chase visibly on an account that is not a Rust engine', () => {
-    const exchange = plainExchange();
-    new ChaserOrderHandler(...handlerArgs(exchange)).handle(start);
-    expect(exchange.emitter.emit).toHaveBeenCalledWith(
-      'error',
-      'chaser:start was not run: algos run only on a Rust engine account',
+    mockExchange = { name: 'bybit' } as Exchange;
+    mockCtx = {} as Worker;
+    mockSettings = {
+      placeOrder: {
+        tpTriggerType: OrderStopTriggerType.MarkPrice,
+        slTriggerType: OrderStopTriggerType.LastPrice,
+      },
+    };
+    mockMetadata = {
+      supportedTPSLTriggerTypes: [],
+      privateProxyIps: [],
+      defaultTPTriggerType: undefined,
+      defaultSLTriggerType: undefined,
+    };
+
+    handler = new ChaserOrderHandler(
+      'test-account',
+      'bybit' as ExchangeName,
+      mockExchange,
+      mockCtx,
+      mockSettings,
+      mockMetadata,
     );
   });
 
-  it('ignores other ops', () => {
-    const exchange = rustAlgoExchange();
-    new ChaserOrderHandler(...handlerArgs(exchange)).handle({ op: 'twap:start', data: {} } as StoreWorkerPayload);
-    expect(exchange.routeAlgoOp).not.toHaveBeenCalled();
+  describe('handle', () => {
+    describe('chaser:start', () => {
+      it('should create ChaserOrderInstance and add to manager', () => {
+        const payload: StoreWorkerPayload = {
+          op: 'chaser:start',
+          data: {
+            symbol: 'BTCUSDT',
+            side: OrderSide.Buy,
+            size: 1.0,
+            maxAttempts: 10,
+            reduceOnly: false,
+            origin: 'web',
+          },
+        };
+
+        handler.handle(payload);
+
+        expect(ChaserOrderInstance).toHaveBeenCalledWith(
+          mockExchange,
+          expect.objectContaining({
+            symbol: 'BTCUSDT',
+            side: OrderSide.Buy,
+            size: 1.0,
+            accountName: 'test-account',
+          }),
+        );
+        expect(chaserOrderManagerInstance.add).toHaveBeenCalled();
+      });
+
+      it('should use provided accountName if available', () => {
+        const payload: StoreWorkerPayload = {
+          op: 'chaser:start',
+          data: {
+            symbol: 'BTCUSDT',
+            side: OrderSide.Buy,
+            size: 1.0,
+            accountName: 'custom-account',
+          },
+        };
+
+        handler.handle(payload);
+
+        expect(ChaserOrderInstance).toHaveBeenCalledWith(
+          mockExchange,
+          expect.objectContaining({
+            accountName: 'custom-account',
+          }),
+        );
+      });
+
+      it('should fallback to handler accountName if not provided', () => {
+        const payload: StoreWorkerPayload = {
+          op: 'chaser:start',
+          data: {
+            symbol: 'BTCUSDT',
+            side: OrderSide.Sell,
+            size: 2.0,
+          },
+        };
+
+        handler.handle(payload);
+
+        expect(ChaserOrderInstance).toHaveBeenCalledWith(
+          mockExchange,
+          expect.objectContaining({
+            accountName: 'test-account',
+          }),
+        );
+      });
+    });
+
+    describe('chaser:terminate', () => {
+      it('should call remove on manager with id', () => {
+        const payload: StoreWorkerPayload = {
+          op: 'chaser:terminate',
+          data: 'chaser-123',
+        };
+
+        handler.handle(payload);
+
+        expect(chaserOrderManagerInstance.remove).toHaveBeenCalledWith('chaser-123');
+      });
+    });
+
+    describe('other ops', () => {
+      it('should not call manager methods for unknown ops', () => {
+        const payload: StoreWorkerPayload = {
+          op: 'some-other-op' as any,
+          data: {},
+        };
+
+        handler.handle(payload);
+
+        expect(chaserOrderManagerInstance.add).not.toHaveBeenCalled();
+        expect(chaserOrderManagerInstance.remove).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  it('refuses a chase visibly when native account state cannot be read', () => {
+    const emit = vi.fn();
+    (mockExchange as unknown as { emitter: { emit: typeof emit } }).emitter = { emit };
+    vi.mocked(ChaserOrderInstance).mockImplementationOnce(function () {
+      throw new Error('Native market catalog is not ready');
+    });
+    expect(() =>
+      handler.handle({ op: 'chaser:start', data: { symbol: 'BTCUSDT', side: OrderSide.Buy, size: 1 } } as StoreWorkerPayload),
+    ).not.toThrow();
+    expect(chaserOrderManagerInstance.add).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('error', 'Chase for BTCUSDT was not started: Native market catalog is not ready');
   });
 });

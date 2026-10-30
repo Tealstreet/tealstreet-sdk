@@ -8,6 +8,7 @@ import { LogSeverity, OrderSide, OrderType } from '../../types';
 import { add, multiply, subtract } from '../../utils/safe-math';
 import { ChaserOrderInstance } from '../chaserOrder/ChaserOrderInstance';
 import { chaserOrderManagerInstance } from '../chaserOrder/ChaserOrderManager';
+import { inFlightSlicePlaced } from './inFlightSlice';
 import { twapManager } from './TwapManager';
 import { TwapFailAction, TwapOptions, TwapTimeoutAction } from './TwapOptions';
 import { TwapState } from './TwapState';
@@ -26,6 +27,10 @@ export class TwapInstance {
   /** Per-slice timeout timers used by `twap chase` policy enforcement.
    *  Stored so terminate() can cancel them. */
   private sliceTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Releases the cross-tab owner lock (`twapLock.ts`) once the TWAP ends. */
+  private releaseOwnerLock: (() => void) | undefined;
+  /** A restored TWAP places nothing, even on a user resume, until it holds its lock. */
+  private awaitingOwnerLock = false;
 
   constructor(
     exchange: Exchange,
@@ -52,8 +57,23 @@ export class TwapInstance {
     return this.trackedLimitOrderIds;
   }
 
+  /** Hold the cross-tab owner lock until the TWAP completes or stops. */
+  awaitOwnerLock() {
+    this.awaitingOwnerLock = true;
+  }
+
+  holdOwnerLock(release: () => void) {
+    this.awaitingOwnerLock = false;
+    if (this.state.status === TwapStatus.Completed) release();
+    else this.releaseOwnerLock = release;
+  }
+
   private updateState(state: Partial<TwapState>) {
     this.state = { ...this.state, ...state };
+    if (this.state.status === TwapStatus.Completed && this.releaseOwnerLock) {
+      this.releaseOwnerLock();
+      this.releaseOwnerLock = undefined;
+    }
     this.updateStateCallback(this.state);
     this.ctx.postMessage({ op: 'twap:stateUpdate', data: twapManager.serializeState() });
   }
@@ -205,6 +225,7 @@ export class TwapInstance {
   }
 
   start = async () => {
+    if (this.awaitingOwnerLock) return;
     if (this.state.status === TwapStatus.Completed || this.state.status === TwapStatus.Paused) {
       return;
     }
@@ -227,8 +248,13 @@ export class TwapInstance {
     let ordersExecuted = this.state.ordersExecuted;
 
     if (orderSize) {
+      // Persisted before the order goes out: a worker that dies before the slice
+      // is counted leaves a restore something to look up instead of re-placing.
+      const order = this.sliceOrder(orderSize);
+      const clientOrderId = order && this.exchange.mintClientOrderId?.(order);
+      this.updateState({ inFlight: { size: orderSize, ...(clientOrderId ? { clientOrderId } : {}) } });
       try {
-        await this.placeOrder(orderSize);
+        await this.placeOrder(orderSize, order && clientOrderId ? { ...order, clientOrderId } : order);
       } catch (error) {
         // Surface the failed slice instead of swallowing it — bridged
         // to the web toast / CLI log via the exchange `log` event. The
@@ -246,15 +272,31 @@ export class TwapInstance {
     }
 
     if (this.state.ordersSizes.length === 0) {
-      this.updateState({ status: TwapStatus.Completed, ordersExecuted });
+      this.updateState({ status: TwapStatus.Completed, ordersExecuted, inFlight: undefined });
       twapManager.remove(this.id);
       return false;
     }
 
-    this.updateState({ ordersExecuted, nextOrderAt });
+    this.updateState({ ordersExecuted, nextOrderAt, inFlight: undefined });
     this.timerId = setTimeout(() => this.start(), waitWithRandom);
 
     return true;
+  };
+
+  /**
+   * Settles a slice a previous worker was placing when it died, before this
+   * restore resumes: placed (found by client id) counts as executed; a
+   * definitive miss puts the size back to be placed again; anything else is
+   * counted too, with a warning, because placing it again could double it.
+   */
+  reconcileInFlight = async () => {
+    const inFlight = this.state.inFlight;
+    if (!inFlight) return;
+    if (await inFlightSlicePlaced(this.exchange, this.options.activeMarket.symbol, inFlight)) {
+      this.updateState({ ordersExecuted: this.state.ordersExecuted + 1, inFlight: undefined });
+    } else {
+      this.updateState({ ordersSizes: [inFlight.size, ...this.state.ordersSizes], inFlight: undefined });
+    }
   };
 
   pause = async () => {
@@ -267,6 +309,7 @@ export class TwapInstance {
   };
 
   resume = async () => {
+    if (this.awaitingOwnerLock) return;
     if (this.state.status === TwapStatus.Paused) {
       let nextOrderAt: number;
 

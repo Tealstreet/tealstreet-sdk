@@ -1676,8 +1676,8 @@ updated) or retained deliberately when deleting the venue implementation:
 
 The worker's postprocessor registry also retains `DisplayedPositionsPostprocessor`,
 `DisplayedMarginPostprocessor`, `ChaserOrderEnrichmentPostprocessor`,
-`OrdersRiskProfilePostprocessor` and `MessageHandlerStatsPostprocessor`
-(`activeChasers`/`activeTWAPs` now come from the engine's Rust algos). None is replaced by deleting a venue:
+`OrdersRiskProfilePostprocessor`, `ChaserOrderPostprocessor`, `TwapPostprocessor`
+and `MessageHandlerStatsPostprocessor`. None is replaced by deleting a venue:
 keep derived display/store fields and sequencing while inputs become Rust frames.
 
 ## NX deep-import and method reachability recheck
@@ -2339,7 +2339,9 @@ These are all direct base/concrete-class/registry callers in test source at the 
 | `packages/safe-cex/src/webworker/handlers/TwapHandler.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/handlers/UiStateHandler.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/handlers/UpdatePositionsHandler.test.ts` | `base` |
+| `packages/safe-cex/src/webworker/postProcessors/ChaserOrderPostprocessor.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/postProcessors/MessageHandlerStatsPostprocessor.test.ts` | `base` |
+| `packages/safe-cex/src/webworker/postProcessors/TwapPostprocessor.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/twap/TwapInstance.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/twap/TwapInstance.timeout.test.ts` | `base` |
 

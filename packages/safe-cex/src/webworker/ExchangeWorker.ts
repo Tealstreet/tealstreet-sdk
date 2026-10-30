@@ -4,6 +4,7 @@ import type { Exchange } from '../exchanges/base';
 import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
 import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
+import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
 
@@ -15,6 +16,7 @@ import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
+import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
 import { mainAcceptsFrames } from './frameForwarding';
 import { BaseHandler } from './handlers/BaseHandler';
@@ -28,6 +30,7 @@ import { TwapHandler } from './handlers/TwapHandler';
 import { UiStateHandler } from './handlers/UiStateHandler';
 import { UpdatePositionsHandler } from './handlers/UpdatePositionsHandler';
 import { exchangeDependentPostprocessors, independentPostprocessors } from './postProcessors/registry';
+import { twapManager } from './twap/TwapManager';
 
 type WorkerSentryControl = {
   reportKey?: string;
@@ -113,6 +116,7 @@ export class ExchangeWorker {
   private _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private _recoveryUpdateIds: StoreData['updateIds'] | undefined;
   private _unsubscribeStore: (() => void) | null = null;
+  private readonly _ownedTwaps = new Set<TwapInstance>();
   private readonly _publicDemand = new Map<string, StoreWorkerPayload>();
   private readonly _pendingRequests = new Map<string, { payload: StoreWorkerPayload; generation: number }>();
   private _pendingFailureTimer: ReturnType<typeof setTimeout> | null = null;
@@ -378,7 +382,7 @@ export class ExchangeWorker {
         return false;
       }
 
-      // The engine's Rust algos run this account's chasers, TWAPs and CLI;
+      // An engine built with algos runs this account's chasers, TWAPs and CLI;
       // start them before the buffered ops that drive them.
       if (this._exchange instanceof RustEngineExchange) this._exchange.startAlgos(this._accountName);
       this._flushBufferedMessages();
@@ -818,11 +822,16 @@ export class ExchangeWorker {
     this._cancelStartup?.();
     this._cancelStartup = null;
     try {
-      // Native pending-command rejections (or acknowledgements already
-      // queued) reach their original caller before the task fallback.
-      this._exchange?.dispose();
+      this._stopOwnedTwaps();
+      if (this._exchange) chaserOrderManagerInstance.cleanupExchange(this._exchange);
     } finally {
-      this._clearRuntimePipeline();
+      try {
+        // Native pending-command rejections (or acknowledgements already
+        // queued) reach their original caller before the task fallback.
+        this._exchange?.dispose();
+      } finally {
+        this._clearRuntimePipeline();
+      }
     }
   }
 
@@ -913,8 +922,29 @@ export class ExchangeWorker {
           this.sendSnapshot();
         break;
       default:
+        // TWAP construction is synchronous. Track the actual instances made by
+        // this dispatch rather than using account names in the global manager.
+        const dispatchGeneration = this._generation;
+        const previousTwaps =
+          typeof payload.op === 'string' && payload.op.startsWith('twap:')
+            ? new Set(twapManager.runningTwaps.values())
+            : null;
         for (let i = 0; i < this._handlers.length; i++) {
           this._handlers[i].handle(payload);
+        }
+        if (previousTwaps) {
+          for (const twap of this._ownedTwaps) {
+            if (twapManager.getById(twap.id) !== twap) this._ownedTwaps.delete(twap);
+          }
+          for (const twap of twapManager.runningTwaps.values()) {
+            if (!previousTwaps.has(twap)) {
+              if (dispatchGeneration !== this._generation || this._recovering || this._stopped) {
+                void twap
+                  .terminate()
+                  .catch((error: unknown) => this.logError('Unable to stop interrupted TWAP.', error));
+              } else this._ownedTwaps.add(twap);
+            }
+          }
         }
     }
   };
@@ -1060,9 +1090,16 @@ export class ExchangeWorker {
     // error per routine message would toast on every symbol switch.
   }
 
-  /** TWAPs in the engine's Rust algos died with it: post their final state. */
+  /** TWAPs in the engine's Rust algos died with it: post their final state, as TS stops its own. */
   private _finishRustTwaps() {
     for (const handler of this._handlers) if (handler instanceof TwapHandler) handler.finishRustTwaps();
+  }
+
+  private _stopOwnedTwaps() {
+    for (const twap of this._ownedTwaps) {
+      void twap.terminate().catch((error: unknown) => this.logError('Unable to stop interrupted TWAP.', error));
+    }
+    this._ownedTwaps.clear();
   }
 
   private _invalidateReadiness() {
@@ -1101,12 +1138,16 @@ export class ExchangeWorker {
       code: 'ENGINE_DEAD',
       kind: 'internal',
     });
-    // Post the dead engine's TWAP state while the handler context is current,
-    // so the main thread that persists and resumes TWAPs does not restore them.
+    // Stop TWAPs while their handler context is still current, so the final
+    // completed state reaches the main thread that persists and resumes them.
     this._finishRustTwaps();
+    this._stopOwnedTwaps();
     this._generation++;
     this._clearRuntimePipeline();
-    this._exchange?.dispose();
+    if (this._exchange) {
+      chaserOrderManagerInstance.cleanupExchange(this._exchange);
+      this._exchange.dispose();
+    }
     this._dropMessageBuffer();
     this._invalidateReadiness();
     this.log('warn', 'Rust engine stopped; interrupted writes may have an unknown outcome and will not be replayed.', {
