@@ -526,3 +526,61 @@ async fn twap_state_restores_a_row_the_ts_worker_persisted() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn a_joining_socket_sees_the_running_chases_again() {
+    // A resume (or another tab) gets the algo rows even though they did not change.
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("chaser:start", web_chase(None));
+            algos
+                .next("store", |data| !active_chasers(data).is_empty())
+                .await;
+            algos.inbox.send(AlgoInput::Joined).unwrap();
+            let store = algos
+                .next("store", |data| !active_chasers(data).is_empty())
+                .await;
+            assert_eq!(active_chasers(&store["data"]).len(), 1);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn disposing_for_no_browser_stops_the_chases_and_says_why() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("chaser:start", web_chase(None));
+            algos
+                .next("store", |data| !active_chasers(data).is_empty())
+                .await;
+            algos
+                .inbox
+                .send(AlgoInput::Dispose {
+                    reason: "no browser for 60s".into(),
+                })
+                .unwrap();
+            let mut ops = Vec::new();
+            let _ = tokio::time::timeout(Duration::from_secs(5), async {
+                while let Some(text) = algos.out.recv().await {
+                    let message: Value = serde_json::from_str(&text).unwrap();
+                    ops.push(message["d"].clone());
+                }
+            })
+            .await;
+            assert!(
+                ops.iter().any(|d| d["op"] == "error"
+                    && d["data"] == "Chases and TWAPs stopped: no browser for 60s"),
+                "{ops:?}"
+            );
+            assert!(
+                ops.iter().any(|d| d["op"] == "warning"
+                    && d["data"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("was stopped"))),
+                "the chase reports its stop: {ops:?}"
+            );
+        })
+        .await;
+}

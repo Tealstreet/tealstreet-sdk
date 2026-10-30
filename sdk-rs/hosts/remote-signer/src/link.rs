@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 
 /// `SIGN_TIMEOUT_MS` in services/exchange-server/src/remote-signer.ts.
 pub const SIGN_TIMEOUT: Duration = Duration::from_millis(15_000);
@@ -57,6 +57,8 @@ struct State {
 
 pub struct SignerLink {
     state: Mutex<State>,
+    /// Wakes requests waiting out a suspension on `attach` or `mark_unavailable`.
+    reattached: Notify,
 }
 
 impl SignerLink {
@@ -74,6 +76,7 @@ impl SignerLink {
                 echo: None,
                 echo_seq: 0,
             }),
+            reattached: Notify::new(),
         })
     }
 
@@ -93,8 +96,23 @@ impl SignerLink {
         self.state().unavailable_since.map(|since| since.elapsed())
     }
 
-    /// Send `{t:'sign-req', d: request}` and wait for its `sign-res`.
+    /// Send `{t:'sign-req', d: request}` and wait for its `sign-res`. While the
+    /// session is parked it waits for the browser to come back, all within one
+    /// `SIGN_TIMEOUT`, then fails as Suspended: never queued past the timeout.
     pub(crate) async fn round_trip(&self, id: &str, request: &Value) -> Result<Value, Failure> {
+        let deadline = tokio::time::Instant::now() + SIGN_TIMEOUT;
+        loop {
+            let reattached = self.reattached.notified();
+            {
+                let state = self.state();
+                if !(state.available && state.suspended) {
+                    break;
+                }
+            }
+            if tokio::time::timeout_at(deadline, reattached).await.is_err() {
+                return Err(Failure::Suspended);
+            }
+        }
         let (sender, receiver) = oneshot::channel();
         let (out, frame, token) = {
             let mut state = self.state();
@@ -124,7 +142,7 @@ impl SignerLink {
         if !out(frame) {
             return Err(Failure::SendFailed);
         }
-        let result = match tokio::time::timeout(SIGN_TIMEOUT, receiver).await {
+        let result = match tokio::time::timeout_at(deadline, receiver).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(Failure::Aborted),
             Err(_) => Err(Failure::TimedOut),
@@ -169,7 +187,7 @@ impl SignerLink {
     }
 
     /// The socket dropped but the session is parked for a resume: abort what
-    /// waits; new requests fail as Suspended until `attach`.
+    /// waits on the old socket; new requests wait for `attach` (see `round_trip`).
     pub fn suspend(&self) {
         let mut state = self.state();
         if !state.available || state.suspended {
@@ -194,6 +212,8 @@ impl SignerLink {
         state.out = out;
         state.suspended = false;
         state.unavailable_since = None;
+        drop(state);
+        self.reattached.notify_waiters();
     }
 
     /// The session is over: abort everything; every later request fails.
@@ -204,6 +224,8 @@ impl SignerLink {
         }
         state.available = false;
         abort_all(&mut state);
+        drop(state);
+        self.reattached.notify_waiters();
     }
 
     /// Send one echo probe, alternating bare and padded to the last sign-req.
