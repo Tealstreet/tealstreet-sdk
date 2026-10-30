@@ -8,12 +8,14 @@ description = "Server-side chaser orders on the shared algo runtime, ported from
 [lints]
 workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-safe-cex-algos = { path = "../runtime" }
+[dependencies]
+safe-cex-algos = { path = "../runtime", default-features = false }
 safe-cex-engine.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.53.3", features = ["rt", "sync", "time"] }
+tokio = { version = "1.53.3", features = ["sync"] }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[dev-dependencies]
+# Native tests run on the tokio executor.
+safe-cex-algos = { path = "../runtime" }
 tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }

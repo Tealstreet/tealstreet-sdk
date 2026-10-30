@@ -5,17 +5,16 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-serde_json.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-safe-cex-algos = { path = "../runtime" }
+safe-cex-algos = { path = "../runtime", default-features = false }
 safe-cex-engine.workspace = true
 getrandom.workspace = true
 safe-cex-chaser = { path = "../chaser" }
 safe-cex-algo-twap = { path = "../twap" }
-tokio = { version = "1.53.3", features = ["time"] }
+serde_json.workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[dev-dependencies]
+# Native tests run on the tokio executor.
+safe-cex-algos = { path = "../runtime" }
 tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }
 
 [lints]
