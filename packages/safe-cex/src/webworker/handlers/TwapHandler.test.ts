@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { OrderSide, OrderStopTriggerType } from '../../types';
 import { TwapInstance } from '../twap/TwapInstance';
-import { setTwapLockManager } from '../twap/twapLock';
+import { setTwapLockManager, TWAP_LOCK_ATTEMPTS, TWAP_LOCK_RETRY_MS } from '../twap/twapLock';
 import { twapManager } from '../twap/TwapManager';
 import { TwapHandler } from './TwapHandler';
 
@@ -363,8 +363,13 @@ describe('TwapHandler', () => {
           mockSettings,
           mockMetadata,
         );
-        handlerB.handle({ op: 'twap:state', data: [row('twap-dup', 'running')] });
-        await settle();
+        vi.useFakeTimers();
+        try {
+          handlerB.handle({ op: 'twap:state', data: [row('twap-dup', 'running')] });
+          await vi.advanceTimersByTimeAsync(TWAP_LOCK_ATTEMPTS * TWAP_LOCK_RETRY_MS);
+        } finally {
+          vi.useRealTimers();
+        }
         // Built synchronously for the worker's ownership tracking, stopped before it ran.
         expect(mockCalls.instances.length).toBe(2);
         expect(mockCalls.terminate).toEqual([mockCalls.instances[1]]);
@@ -373,6 +378,37 @@ describe('TwapHandler', () => {
           'error',
           'TWAP BTCUSDT not restored: it is running in another tab',
         );
+      });
+
+      it('a worker recreated in the same tab waits for its predecessor to release the lock', async () => {
+        handler.handle({ op: 'twap:state', data: [row('twap-recreated', 'running')] });
+        await settle();
+        (twapManager.runningTwaps as Map<string, any>).clear();
+        setTwapLockManager(locks.forWorker('worker-a2'));
+        const exchangeB = { name: 'bybit', emitter: { emit: vi.fn() } } as unknown as Exchange;
+        const ctxB = { postMessage: vi.fn() } as unknown as Worker;
+        const recreated = new TwapHandler(
+          'test-account',
+          'bybit' as ExchangeName,
+          exchangeB,
+          ctxB,
+          mockSettings,
+          mockMetadata,
+        );
+        vi.useFakeTimers();
+        try {
+          recreated.handle({ op: 'twap:state', data: [row('twap-recreated', 'running')] });
+          await vi.advanceTimersByTimeAsync(1);
+          // The browser releases the terminated worker's lock asynchronously.
+          locks.crash('worker-a');
+          await vi.advanceTimersByTimeAsync(TWAP_LOCK_ATTEMPTS * TWAP_LOCK_RETRY_MS);
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(mockCalls.instances.length).toBe(2);
+        expect(mockCalls.terminate).toEqual([]);
+        expect(mockCalls.resume.length).toBe(2);
+        expect(vi.mocked(exchangeB.emitter.emit)).not.toHaveBeenCalled();
       });
 
       it('a TWAP whose owner worker died can be restored by another tab', async () => {

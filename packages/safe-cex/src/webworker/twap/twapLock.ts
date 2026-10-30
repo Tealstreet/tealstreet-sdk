@@ -49,3 +49,20 @@ export const acquireTwapLock = (name: string): Promise<(() => void) | null> => {
       .catch(() => resolve(null));
   });
 };
+
+/** Lock attempts a restore makes before it decides another tab owns the TWAP. */
+export const TWAP_LOCK_ATTEMPTS = 4;
+export const TWAP_LOCK_RETRY_MS = 500;
+
+/**
+ * A worker recreated in the same tab can ask before the browser has released
+ * its predecessor's locks (release on termination is asynchronous), so a
+ * restore retries briefly before reporting the TWAP as another tab's.
+ */
+export const acquireTwapLockForRestore = async (name: string): Promise<(() => void) | null> => {
+  for (let attempt = 1; ; attempt++) {
+    const release = await acquireTwapLock(name);
+    if (release || attempt >= TWAP_LOCK_ATTEMPTS) return release;
+    await new Promise((resolve) => setTimeout(resolve, TWAP_LOCK_RETRY_MS));
+  }
+};

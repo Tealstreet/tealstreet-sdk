@@ -1,6 +1,6 @@
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { TwapInstance } from '../twap/TwapInstance';
-import { acquireTwapLock, twapLockName } from '../twap/twapLock';
+import { acquireTwapLock, acquireTwapLockForRestore, twapLockName } from '../twap/twapLock';
 import { twapManager } from '../twap/TwapManager';
 import { TwapOptions } from '../twap/TwapOptions';
 import { twapRestoreRefusal } from '../twap/twapRestoreRefusal';
@@ -81,7 +81,7 @@ export class TwapHandler extends BaseHandler {
         id,
       );
       twapManager.add(instance);
-      void acquireTwapLock(twapLockName(options!.accountName, id)).then((release) => {
+      void acquireTwapLockForRestore(twapLockName(options!.accountName, id)).then((release) => {
         if (!release) {
           this.refuse(`TWAP ${symbol} not restored: it is running in another tab`);
           void instance.terminate();
