@@ -25,6 +25,7 @@ struct FakePort {
     responder: RefCell<Responder>,
     next_id: Cell<CommandId>,
     next_order: Cell<u32>,
+    capabilities: Cell<safe_cex_engine::Capabilities>,
 }
 
 impl AccountPort for FakePort {
@@ -48,6 +49,9 @@ impl AccountPort for FakePort {
     fn emit(&self, op: &str, data: String) {
         self.emitted.borrow_mut().push((op.into(), data));
     }
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        self.capabilities.get()
+    }
 }
 
 impl FakePort {
@@ -66,6 +70,10 @@ impl FakePort {
             responder: RefCell::new(Box::new(|_| Ok("[]".into()))),
             next_id: Cell::new(0),
             next_order: Cell::new(0),
+            capabilities: Cell::new(safe_cex_engine::Capabilities {
+                cancel_with_symbols: true,
+                ..safe_cex_engine::Capabilities::BASE
+            }),
         })
     }
 
@@ -156,8 +164,37 @@ impl FakePort {
             .iter()
             .filter_map(|command| match command {
                 Command::CancelOrdersWithSymbols { orders, .. } => Some(orders[0].id.clone()),
+                Command::CancelOrders { ids, .. } => Some(ids[0].clone()),
                 _ => None,
             })
+            .collect()
+    }
+
+    /// The venue's cancel forms: Bybit has no symbol-qualified cancel.
+    fn without_symbol_cancel(&self) {
+        self.capabilities.set(safe_cex_engine::Capabilities::BASE);
+    }
+
+    /// Every cancel is refused before it is sent; other commands answer as before.
+    fn refuse_cancels(&self) {
+        let mut inner = std::mem::replace(
+            &mut *self.responder.borrow_mut(),
+            Box::new(|_| Ok("[]".into())),
+        );
+        *self.responder.borrow_mut() = Box::new(move |command| match command {
+            Command::CancelOrders { .. } | Command::CancelOrdersWithSymbols { .. } => {
+                Err(VenueError::new("cancel refused").outcome(Outcome::NotSent))
+            }
+            other => inner(other),
+        });
+    }
+
+    fn errors(&self) -> Vec<String> {
+        self.emitted
+            .borrow()
+            .iter()
+            .filter(|(op, _)| op == "error")
+            .map(|(_, data)| data.clone())
             .collect()
     }
 
@@ -319,6 +356,92 @@ async fn an_adverse_move_cancels_and_replaces_at_the_new_bid() {
         assert_eq!(port.cancels(), vec!["o1".to_string()]);
         assert_eq!(port.placements(), vec![(100.0, 1.0), (101.0, 1.0)]);
         assert_eq!(factory.book().active_chasers()[0].attempts, 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_venue_without_symbol_cancel_requotes_by_id() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.without_symbol_cancel();
+        port.accept_placements();
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.set_ticker(101.0, 101.5);
+        settle(100).await;
+        let commands = port.commands.borrow();
+        assert!(
+            commands.iter().any(
+                |c| matches!(c, Command::CancelOrders { ids, .. } if ids == &["o1".to_string()])
+            ),
+            "{commands:?}"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|c| matches!(c, Command::CancelOrdersWithSymbols { .. }))
+        );
+        drop(commands);
+        assert_eq!(port.placements(), vec![(100.0, 1.0), (101.0, 1.0)]);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_requote_cancel_stops_the_chase_visibly_and_places_nothing_more() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.refuse_cancels();
+        port.set_ticker(101.0, 101.5);
+        settle(200).await;
+        assert_eq!(
+            port.placements().len(),
+            1,
+            "no replacement over a live order"
+        );
+        assert!(!port.errors().is_empty());
+        let completes = port.completes();
+        assert_eq!(completes.len(), 1);
+        assert_eq!(completes[0]["stopReason"], "Failed to cancel orders");
+        assert!(
+            factory
+                .book()
+                .active_chasers()
+                .iter()
+                .all(|chaser| chaser.is_stopped)
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_cancel_on_stop_says_the_order_may_still_be_open() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.refuse_cancels();
+        let id = factory.book().active_chasers()[0].id.clone();
+        factory
+            .handle(
+                "chaser:terminate",
+                &serde_json::to_string(&id).unwrap(),
+                &cx,
+            )
+            .unwrap();
+        settle(10).await;
+        assert!(
+            port.errors()
+                .iter()
+                .any(|e| e.contains("o1") && e.contains("may still be open")),
+            "{:?}",
+            port.errors()
+        );
     })
     .await;
 }

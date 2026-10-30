@@ -198,7 +198,8 @@ impl Adapter {
             .collect()
     }
     async fn nuke_command(&self, method: &str, args: Value) -> Result<Value, Value> {
-        let command = translate(method, &args, self.cx.port.next_command_id())
+        let capabilities = self.cx.port.capabilities();
+        let command = translate(method, &args, self.cx.port.next_command_id(), &capabilities)
             .map_err(|message| json!({"message":message,"outcome":"notSent"}))?;
         self.run_command(command).await
     }
