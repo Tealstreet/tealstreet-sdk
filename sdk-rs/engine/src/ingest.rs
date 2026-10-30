@@ -9,9 +9,9 @@
 //! symbols through it, never to this engine's own indexes.
 //!
 //! Each section has its own decoder below; one not yet implemented is skipped.
-use crate::model::{Balance, CoinBalance, CurrencyBalance, MarginType};
+use crate::model::{Balance, CoinBalance, CurrencyBalance, MarginType, Ticker};
 use crate::store::{MarketSetting, Store};
-use crate::wire::{FORMAT, MAGIC, NONE, section};
+use crate::wire::{FORMAT, MAGIC, NONE, TICKER_COLUMNS, section};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IngestError(pub &'static str);
@@ -160,6 +160,8 @@ pub struct IngestState {
     pub source_markets: Vec<String>,
     /// The source's native market ids, by its market index.
     pub source_market_ids: Vec<String>,
+    /// The source's ticker symbols, by its ticker row (`TICKER_DELTAS` indexes these).
+    pub source_tickers: Vec<String>,
 }
 
 impl IngestState {
@@ -199,7 +201,7 @@ pub fn apply(
     for section in &frame.sections {
         match section.kind {
             section::MARKETS => {}
-            section::TICKERS => tickers(store, state, frame, section)?,
+            section::TICKERS => tickers(store, &mut *state, frame, section)?,
             section::TICKER_DELTAS => ticker_deltas(store, state, frame, section)?,
             section::ORDERS => {
                 orders(store, state, frame, section)?;
@@ -241,6 +243,9 @@ fn markets(
     frame: &Frame<'_>,
     section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    if section.revision > 1 {
+        return Err(IngestError("unknown MARKETS revision"));
+    }
     let mut cursor = Cursor::new(section.payload);
     let count = cursor.u32()? as usize;
     let (mut symbols, mut ids) = (Vec::with_capacity(count), Vec::with_capacity(count));
@@ -262,39 +267,318 @@ fn markets(
     Ok(())
 }
 
+/// A ticker's numeric fields in `store::TICKER_FIELDS` order; midpoint `NaN` is absent.
+fn set_ticker_field(ticker: &mut Ticker, field: usize, value: f64) {
+    match field {
+        0 => ticker.bid = value,
+        1 => ticker.ask = value,
+        2 => ticker.last = value,
+        3 => ticker.mark = value,
+        4 => ticker.index = value,
+        5 => ticker.percentage = value,
+        6 => ticker.open_interest = value,
+        7 => ticker.funding_rate = value,
+        8 => ticker.funding_time = value,
+        9 => ticker.volume = value,
+        10 => ticker.quote_volume = value,
+        _ => ticker.mid_price = (!value.is_nan()).then_some(value),
+    }
+}
+
+/// `TICKERS` (`Store::write_tickers`): the source's full ticker table. Rows name
+/// a source market, or carry their own symbol and id in the identity tail.
 fn tickers(
-    _: &mut Store,
-    _: &IngestState,
-    _: &Frame<'_>,
-    _: &Section<'_>,
+    store: &mut Store,
+    state: &mut IngestState,
+    frame: &Frame<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    if section.revision > 1 {
+        return Err(IngestError("unknown TICKERS revision"));
+    }
+    let mut cursor = Cursor::new(section.payload);
+    let count = cursor.u32()? as usize;
+    let markets = (0..count)
+        .map(|_| cursor.u32())
+        .collect::<Result<Vec<_>, _>>()?;
+    cursor.align8();
+    let columns = if section.revision >= 1 {
+        TICKER_COLUMNS
+    } else {
+        11
+    };
+    let mut rows = vec![Ticker::default(); count];
+    for column in 0..columns {
+        for row in &mut rows {
+            set_ticker_field(row, column, cursor.f64()?);
+        }
+    }
+    // The identity tail is present exactly when its 8 bytes per row follow.
+    let tail = count > 0 && section.payload.len() - cursor.at >= 8 * count;
+    if tail {
+        for row in &mut rows {
+            row.symbol = frame.strings.required(cursor.u32()?)?.to_owned();
+        }
+        for row in &mut rows {
+            row.id = frame.strings.required(cursor.u32()?)?.to_owned();
+        }
+    } else {
+        for (row, &market) in rows.iter_mut().zip(&markets) {
+            row.symbol = state.symbol(market)?.to_owned();
+            row.id = state
+                .source_market_ids
+                .get(market as usize)
+                .ok_or(IngestError("market index outside the source's table"))?
+                .clone();
+        }
+    }
+    state.source_tickers = rows.iter().map(|row| row.symbol.clone()).collect();
+    store.set_tickers(rows);
     Ok(())
 }
 
+/// `TICKER_DELTAS`: per changed ticker, its source row, a field mask and the
+/// masked values in field order.
 fn ticker_deltas(
-    _: &mut Store,
-    _: &IngestState,
+    store: &mut Store,
+    state: &IngestState,
     _: &Frame<'_>,
-    _: &Section<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    let mut cursor = Cursor::new(section.payload);
+    while cursor.at < section.payload.len() {
+        let (row, mask) = (cursor.f64()?, cursor.f64()?);
+        let whole = |value: f64, limit: f64| value.fract() == 0.0 && (0.0..limit).contains(&value);
+        if !whole(row, u32::MAX as f64) || !whole(mask, (1u32 << TICKER_COLUMNS) as f64) {
+            return Err(IngestError("ticker delta row or mask is malformed"));
+        }
+        let (row, mask) = (row as usize, mask as u16);
+        let mut values = [None; TICKER_COLUMNS];
+        for (field, value) in values.iter_mut().enumerate() {
+            if mask & (1 << field) != 0 {
+                *value = Some(cursor.f64()?);
+            }
+        }
+        // By row, not symbol: a duplicate symbol must not redirect an earlier row.
+        let symbol = state
+            .source_tickers
+            .get(row)
+            .ok_or(IngestError("ticker row outside the source's table"))?;
+        if store.tickers().get(row).map(|ticker| &ticker.symbol) != Some(symbol) {
+            return Err(IngestError(
+                "ticker row no longer matches the source's table",
+            ));
+        }
+        store.update_ticker_at(row as u32, |ticker| {
+            for (field, value) in values.iter().enumerate() {
+                if let Some(value) = value {
+                    set_ticker_field(ticker, field, *value);
+                }
+            }
+        });
+    }
     Ok(())
 }
 
+/// The `index`th variant of a fieldless enum in declaration order, as
+/// `variant as u32` wrote it; `None` for an out-of-range wire value.
+fn nth<T: Copy>(variants: &[T], index: u32) -> Result<T, IngestError> {
+    variants
+        .get(index as usize)
+        .copied()
+        .ok_or(IngestError("enum value out of range"))
+}
+
+/// `nth` for an optional enum written as `variant + 1`, zero when absent.
+fn optional<T: Copy>(variants: &[T], value: u32) -> Result<Option<T>, IngestError> {
+    match value {
+        0 => Ok(None),
+        value => nth(variants, value - 1).map(Some),
+    }
+}
+
+/// A column of `count` f64s, `None` where the writer stored NaN for absent.
+fn present(value: f64) -> Option<f64> {
+    (!value.is_nan()).then_some(value)
+}
+
+/// `ORDERS` (revision 1, `Store::write_orders`): replaces the order list.
 fn orders(
-    _: &mut Store,
+    store: &mut Store,
     _: &IngestState,
-    _: &Frame<'_>,
-    _: &Section<'_>,
+    frame: &Frame<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    use crate::model::{
+        Order, OrderExtra, OrderSide, OrderStatus, OrderType, RejectReason, StopTriggerType,
+        TimeInForce,
+    };
+    use OrderStatus as S;
+    use OrderType as K;
+    const STATUS: [S; 6] = [
+        S::Open,
+        S::Closed,
+        S::Canceled,
+        S::Creating,
+        S::Updating,
+        S::Canceling,
+    ];
+    const KIND: [K; 6] = [
+        K::Market,
+        K::Limit,
+        K::Conditional,
+        K::StopLoss,
+        K::TakeProfit,
+        K::TrailingStopLoss,
+    ];
+    const SIDE: [OrderSide; 2] = [OrderSide::Buy, OrderSide::Sell];
+    const TIF: [TimeInForce; 4] = [
+        TimeInForce::GoodTillCancel,
+        TimeInForce::ImmediateOrCancel,
+        TimeInForce::FillOrKill,
+        TimeInForce::PostOnly,
+    ];
+    const TRIGGER: [StopTriggerType; 3] = [
+        StopTriggerType::MarkPrice,
+        StopTriggerType::LastPrice,
+        StopTriggerType::IndexPrice,
+    ];
+    const REJECT: [RejectReason; 3] = [
+        RejectReason::PostOnly,
+        RejectReason::InsufficientBalance,
+        RejectReason::ReduceOnly,
+    ];
+    if section.revision != 1 {
+        return Err(IngestError("unsupported ORDERS revision"));
+    }
+    let strings = &frame.strings;
+    let mut c = Cursor::new(section.payload);
+    let count = c.u32()? as usize;
+    let mut refs = Vec::with_capacity(count);
+    for _ in 0..count {
+        refs.push((c.u32()?, c.u32()?, c.u32()?));
+    }
+    for _ in 0..count {
+        c.u32()?; // market index: rows carry their own symbol string
+    }
+    let mut enums = Vec::with_capacity(count);
+    for _ in 0..count {
+        enums.push(c.u32()?);
+    }
+    c.align8();
+    let mut columns = [(); 11].map(|_| Vec::with_capacity(count));
+    for column in &mut columns {
+        for _ in 0..count {
+            column.push(c.f64()?);
+        }
+    }
+    let mut extra_triggers = Vec::with_capacity(count);
+    for _ in 0..count {
+        extra_triggers.push(c.u32()?);
+    }
+    let mut orders = Vec::with_capacity(count);
+    for i in 0..count {
+        let symbol = strings.required(c.u32()?)?.to_owned();
+        let (id, client_order_id, parent_id) = refs[i];
+        let packed = enums[i];
+        let flags = (packed >> 16) & 0xff;
+        let tif_trigger = packed >> 24;
+        let column = |n: usize| columns[n][i];
+        let tp_sl = extra_triggers[i];
+        let extra = OrderExtra {
+            take_profit_known: false,
+            stop_loss_known: false,
+            tp_trigger_type: optional(&TRIGGER, tp_sl & 0xff)?,
+            sl_trigger_type: optional(&TRIGGER, (tp_sl >> 8) & 0xff)?,
+            remaining_native: present(column(7)),
+            filled_in_placement_units: present(column(8)),
+            remaining_notional: present(column(9)),
+            conditional_order_price: present(column(10)),
+            reject_reason: optional(&REJECT, flags >> 4)?,
+        };
+        orders.push(Order {
+            id: strings.required(id)?.to_owned(),
+            parent_id: strings.get(parent_id)?.map(str::to_owned),
+            status: nth(&STATUS, packed & 0xff)?,
+            symbol,
+            kind: nth(&KIND, (packed >> 8) & 0xff)?,
+            side: nth(&SIDE, flags & 1)?,
+            price: column(0),
+            amount: column(1),
+            filled: column(2),
+            remaining: column(3),
+            reduce_only: flags & 2 != 0,
+            close: (flags & 8 != 0).then_some(flags & 4 != 0),
+            client_order_id: strings.get(client_order_id)?.map(str::to_owned),
+            time_in_force: optional(&TIF, tif_trigger & 0xf)?,
+            last_update: column(4),
+            trigger_type: optional(&TRIGGER, tif_trigger >> 4)?,
+            take_profit: present(column(5)),
+            stop_loss: present(column(6)),
+            extra: (extra != OrderExtra::default()).then_some(extra),
+        });
+    }
+    store.set_orders(orders);
     Ok(())
 }
 
+/// `POSITIONS` (revision 1, `Store::write_positions`): replaces the positions.
 fn positions(
-    _: &mut Store,
+    store: &mut Store,
     _: &IngestState,
-    _: &Frame<'_>,
-    _: &Section<'_>,
+    frame: &Frame<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    use crate::model::{MarginType, Position, PositionMode, PositionSide};
+    const SIDE: [PositionSide; 2] = [PositionSide::Long, PositionSide::Short];
+    const MARGIN: [MarginType; 2] = [MarginType::Isolated, MarginType::Cross];
+    const MODE: [PositionMode; 2] = [PositionMode::Hedged, PositionMode::Oneway];
+    if section.revision != 1 {
+        return Err(IngestError("unsupported POSITIONS revision"));
+    }
+    let strings = &frame.strings;
+    let mut c = Cursor::new(section.payload);
+    let count = c.u32()? as usize;
+    for _ in 0..count {
+        c.u32()?; // market index: rows carry their own symbol string
+    }
+    let mut enums = Vec::with_capacity(count);
+    for _ in 0..count {
+        enums.push(c.u32()?);
+    }
+    c.align8();
+    let mut columns = [(); 9].map(|_| Vec::with_capacity(count));
+    for column in &mut columns {
+        for _ in 0..count {
+            column.push(c.f64()?);
+        }
+    }
+    let mut ids = Vec::with_capacity(count);
+    for _ in 0..count {
+        ids.push(strings.required(c.u32()?)?.to_owned());
+    }
+    let mut positions = Vec::with_capacity(count);
+    for (i, id) in ids.into_iter().enumerate() {
+        let packed = enums[i];
+        let column = |n: usize| columns[n][i];
+        positions.push(Position {
+            id,
+            symbol: strings.required(c.u32()?)?.to_owned(),
+            side: nth(&SIDE, packed & 0xff)?,
+            entry_price: column(0),
+            notional: column(1),
+            leverage: column(2),
+            margin_type: optional(&MARGIN, (packed >> 8) & 0xff)?,
+            position_mode: optional(&MODE, (packed >> 16) & 0xff)?,
+            unrealized_pnl: column(3),
+            realized_pnl: present(column(4)),
+            contracts: column(5),
+            liquidation_price: column(6),
+            margin_size: present(column(7)),
+            last_update: present(column(8)),
+        });
+    }
+    store.set_positions(positions);
     Ok(())
 }
 
@@ -430,12 +714,26 @@ fn settings(
     Ok(())
 }
 
+/// `STATUS`: the source's loaded bits, hedged flag and latency. This engine's
+/// own instrument read owns its markets bit; the source's account bits rule.
 fn status(
-    _: &mut Store,
+    store: &mut Store,
     _: &IngestState,
     _: &Frame<'_>,
-    _: &Section<'_>,
+    section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    use crate::wire::{loaded_flag, status_flag};
+    let mut cursor = Cursor::new(section.payload);
+    let (loaded, flags, latency) = (cursor.u32()?, cursor.u32()?, cursor.f64()?);
+    let has = |flag: u32| loaded & flag != 0;
+    store.set_loaded(|bits| {
+        bits.balance = has(loaded_flag::BALANCE);
+        bits.orders = has(loaded_flag::ORDERS);
+        bits.tickers = has(loaded_flag::TICKERS);
+        bits.positions = has(loaded_flag::POSITIONS);
+    });
+    store.set_hedged(flags & status_flag::HEDGED != 0);
+    store.set_latency(latency);
     Ok(())
 }
 
@@ -738,6 +1036,233 @@ pub(crate) mod tests {
         );
         assert!(refused.is_err());
         assert_eq!(state.source_markets, ["BTCUSDT", "ETHUSDT"]);
+    }
+
+    fn ticker(symbol: &str, last: f64, mid: Option<f64>) -> Ticker {
+        Ticker {
+            id: format!("native-{symbol}"),
+            symbol: symbol.into(),
+            bid: last - 1.,
+            ask: last + 1.,
+            last,
+            mark: last + 0.5,
+            index: last - 0.5,
+            mid_price: mid,
+            percentage: 1.5,
+            open_interest: 7.,
+            funding_rate: 0.0001,
+            funding_time: 1_700_000_000_000.,
+            volume: 10.,
+            quote_volume: last * 10.,
+        }
+    }
+
+    #[test]
+    fn tickers_round_trip_with_and_without_midpoints_and_identity_tails() {
+        for mid in [None, Some(100.25)] {
+            let mut source = Store::default();
+            source.set_markets(vec![market("BTCUSDT"), market("ETHUSDT")]);
+            let rows = vec![ticker("ETHUSDT", 10., None), ticker("BTCUSDT", 100., mid)];
+            source.set_tickers(rows.clone());
+            let (mut state, mut store) = (IngestState::default(), Store::default());
+            ingest(&mut source, &mut state, &mut store, true);
+            assert_eq!(store.tickers(), rows.as_slice());
+            assert!(store.loaded().tickers);
+            assert_eq!(state.source_tickers, ["ETHUSDT", "BTCUSDT"]);
+        }
+        // A delisted symbol (no market row) keeps its identity through the tail.
+        let mut source = Store::default();
+        source.set_markets(vec![market("BTCUSDT")]);
+        let rows = vec![ticker("OLDUSDT", 1., None)];
+        source.set_tickers(rows.clone());
+        let mut store = Store::default();
+        ingest(&mut source, &mut IngestState::default(), &mut store, true);
+        assert_eq!(store.tickers(), rows.as_slice());
+    }
+
+    #[test]
+    fn ticker_deltas_apply_only_the_masked_fields_by_source_row() {
+        let mut source = Store::default();
+        source.set_markets(vec![market("BTCUSDT"), market("ETHUSDT")]);
+        source.set_tickers(vec![
+            ticker("BTCUSDT", 100., None),
+            ticker("ETHUSDT", 10., Some(10.)),
+        ]);
+        let (mut state, mut store) = (IngestState::default(), Store::default());
+        ingest(&mut source, &mut state, &mut store, true);
+
+        source.update_ticker("ETHUSDT", |t| {
+            t.last = 11.;
+            t.mid_price = None;
+        });
+        source.update_ticker("BTCUSDT", |t| t.funding_rate = -0.0002);
+        ingest(&mut source, &mut state, &mut store, false);
+        assert_eq!(store.tickers(), source.tickers());
+        assert_eq!(store.ticker("ETHUSDT").unwrap().mid_price, None);
+        assert_eq!(store.ticker("ETHUSDT").unwrap().bid, 9.);
+
+        // A row the source never listed, a fractional or NaN row, and a mask bit
+        // past the columns all refuse rather than desynchronizing the section.
+        for entry in [
+            [5., 4., 1.],
+            [0.5, 4., 1.],
+            [f64::NAN, 4., 1.],
+            [0., 4096., 1.],
+        ] {
+            let mut writer = FrameWriter::new(Vec::new(), 0.0);
+            writer.begin(section::TICKER_DELTAS);
+            writer.f64s(entry);
+            writer.end();
+            let frame = writer.finish();
+            assert!(apply(&mut store, &mut state, &parse(&frame).unwrap(), false).is_err());
+        }
+        // An unknown TICKERS or MARKETS revision refuses.
+        for kind in [section::TICKERS, section::MARKETS] {
+            let mut writer = FrameWriter::new(Vec::new(), 0.0);
+            writer.begin_revision(kind, 2);
+            writer.u32(0);
+            writer.end();
+            let frame = writer.finish();
+            assert!(apply(&mut store, &mut state, &parse(&frame).unwrap(), false).is_err());
+        }
+    }
+
+    #[test]
+    fn orders_and_positions_round_trip_every_field() {
+        use crate::model::*;
+        let order = |id: &str, status, kind, side, close, tif, trigger, extra| Order {
+            id: id.into(),
+            parent_id: Some("parent".into()),
+            status,
+            symbol: "BTCUSDT".into(),
+            kind,
+            side,
+            price: 100.5,
+            amount: 2.0,
+            filled: 0.5,
+            remaining: 1.5,
+            reduce_only: true,
+            close,
+            client_order_id: Some(format!("c-{id}")),
+            time_in_force: tif,
+            last_update: 1_700_000_000_000.0,
+            trigger_type: trigger,
+            take_profit: Some(110.0),
+            stop_loss: None,
+            extra,
+        };
+        let mut source = Store::default();
+        source.set_orders(vec![
+            order(
+                "a",
+                OrderStatus::Canceling,
+                OrderType::TrailingStopLoss,
+                OrderSide::Sell,
+                Some(false),
+                Some(TimeInForce::PostOnly),
+                Some(StopTriggerType::IndexPrice),
+                Some(OrderExtra {
+                    tp_trigger_type: Some(StopTriggerType::LastPrice),
+                    sl_trigger_type: Some(StopTriggerType::MarkPrice),
+                    remaining_native: Some(3.0),
+                    filled_in_placement_units: None,
+                    remaining_notional: Some(150.0),
+                    conditional_order_price: Some(99.0),
+                    reject_reason: Some(RejectReason::ReduceOnly),
+                    ..OrderExtra::default()
+                }),
+            ),
+            Order {
+                parent_id: None,
+                client_order_id: None,
+                take_profit: None,
+                ..order(
+                    "b",
+                    OrderStatus::Open,
+                    OrderType::Limit,
+                    OrderSide::Buy,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            },
+        ]);
+        source.set_positions(vec![Position {
+            id: "BTCUSDT-long".into(),
+            symbol: "BTCUSDT".into(),
+            side: PositionSide::Short,
+            entry_price: 101.0,
+            notional: 202.0,
+            leverage: 5.0,
+            margin_type: Some(MarginType::Cross),
+            position_mode: Some(PositionMode::Hedged),
+            unrealized_pnl: -1.25,
+            realized_pnl: None,
+            contracts: 2.0,
+            liquidation_price: 80.0,
+            margin_size: Some(40.0),
+            last_update: None,
+        }]);
+        let (store, applied) = round_trip(&source);
+        assert!(applied.orders && applied.positions);
+        assert_eq!(store.orders(), source.orders());
+        assert_eq!(store.positions(), source.positions());
+    }
+
+    #[test]
+    fn deltas_follow_the_source_row_even_when_a_symbol_repeats() {
+        let mut source = Store::default();
+        source.set_markets(vec![market("BTCUSDT")]);
+        source.set_tickers(vec![
+            ticker("BTCUSDT", 100., None),
+            ticker("BTCUSDT", 200., None),
+        ]);
+        let (mut state, mut store) = (IngestState::default(), Store::default());
+        ingest(&mut source, &mut state, &mut store, true);
+        source.update_ticker_at(0, |t| t.last = 101.);
+        ingest(&mut source, &mut state, &mut store, false);
+        assert_eq!(store.tickers()[0].last, 101.);
+        assert_eq!(store.tickers()[1].last, 200.);
+    }
+
+    #[test]
+    fn status_carries_account_loaded_bits_hedged_and_latency_but_not_markets() {
+        let mut source = Store::default();
+        source.set_hedged(true);
+        source.set_latency(42.5);
+        source.set_loaded(|bits| {
+            bits.balance = true;
+            bits.positions = true;
+            bits.markets = true;
+        });
+        let mut store = Store::default();
+        ingest(&mut source, &mut IngestState::default(), &mut store, true);
+        assert!(store.hedged());
+        assert_eq!(store.latency(), 42.5);
+        let loaded = store.loaded();
+        assert!(loaded.balance && loaded.positions);
+        assert!(!loaded.orders && !loaded.tickers && !loaded.markets);
+
+        // A later status turns bits off again, and a truncated one refuses.
+        source.set_hedged(false);
+        source.set_loaded(|bits| bits.balance = false);
+        ingest(&mut source, &mut IngestState::default(), &mut store, false);
+        assert!(!store.hedged() && !store.loaded().balance && store.loaded().positions);
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin(section::STATUS);
+        writer.u32(1);
+        writer.end();
+        let frame = writer.finish();
+        assert!(
+            apply(
+                &mut store,
+                &mut IngestState::default(),
+                &parse(&frame).unwrap(),
+                false
+            )
+            .is_err()
+        );
     }
 
     #[test]

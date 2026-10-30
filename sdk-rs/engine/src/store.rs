@@ -919,6 +919,10 @@ impl Store {
         self.loaded
     }
 
+    pub fn latency(&self) -> f64 {
+        self.latency
+    }
+
     pub fn set_latency(&mut self, latency: f64) {
         if latency != self.latency {
             self.latency = latency;
