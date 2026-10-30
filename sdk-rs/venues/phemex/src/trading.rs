@@ -15,6 +15,7 @@ use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     Context, Operation, Plan, Preflight, PreflightPolicy, PreflightPurpose,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Response, VenueError, num};
 use serde::Deserialize;
@@ -1801,6 +1802,15 @@ impl PhemexPerpetuals {
                     }
                     self.account
                         .apply_settings(symbol, *leverage, *side, *margin, *mode);
+                    // Frame-fed: kept over the source's frames until it re-reads.
+                    let held = [
+                        leverage.map(|_| SettingKey::Leverage(symbol.clone())),
+                        margin.map(|_| SettingKey::MarginType(symbol.clone())),
+                        mode.map(|_| SettingKey::PositionMode(symbol.clone())),
+                    ];
+                    for key in held.into_iter().flatten() {
+                        cx.hold_setting(key);
+                    }
                     if let Some(mode) = mode {
                         cx.store.update_positions(|p| {
                             if p.symbol == *symbol {

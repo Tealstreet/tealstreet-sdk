@@ -547,10 +547,17 @@ impl Venue for PhemexPerpetuals {
     fn export_venue_state(&self) -> Option<Vec<u8>> {
         Some(self.account.export_venue_state().encode())
     }
-    fn apply_venue_state(&mut self, _cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
-        if let Some(state) = venue_state::VenueState::decode(bytes) {
-            self.account.apply_venue_state(state);
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
+        if let Some(state) = venue_state::VenueState::decode(bytes)
+            && self.account.apply_venue_state(cx, state)
+        {
+            // The source's STATUS hedge flag predates the held mode.
+            cx.store.set_hedged(self.account.any_hedged());
         }
+    }
+    /// The account cycle re-reads every symbol's mode, margin and leverage.
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        self.account_refresh(cx);
     }
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
         let client_ids = cx

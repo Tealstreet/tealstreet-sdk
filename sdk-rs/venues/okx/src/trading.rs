@@ -10,6 +10,7 @@ use safe_cex_engine::request_context::{
     Context, Credential, HttpOwnerRetirement, Operation, Plan, Policy, Preflight, PreflightPolicy,
     PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -1037,12 +1038,14 @@ impl Okx {
                     s.leverage = leverage;
                     s.margin_type = Some(MarginType::Cross);
                 });
+                cx.hold_setting(SettingKey::Leverage(symbol.clone()));
                 self.account_after_settings(cx);
                 Ok("[]".into())
             }
             Finish::Mode(hedged) => {
                 self.account.mode_version += 1;
                 cx.store.set_hedged(*hedged);
+                cx.hold_setting(SettingKey::Hedged);
                 self.account_after_settings(cx);
                 Ok("[]".into())
             }
