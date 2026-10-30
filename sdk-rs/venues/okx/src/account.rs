@@ -103,6 +103,14 @@ pub enum Request {
         inst_id: String,
         version: u64,
     },
+    /// A data source's background re-read of a symbol's leverage after a
+    /// frame-fed engine changed it (`refresh_settings`); it answers no command.
+    LeverageRefresh {
+        context: Context,
+        symbol: String,
+        inst_id: String,
+        version: u64,
+    },
     Balance {
         /// This physical page's Background Read, set once admitted.
         context: Option<Context>,
@@ -145,7 +153,7 @@ impl Request {
             Self::Balance { context, .. }
             | Self::Positions { context, .. }
             | Self::Orders { context, .. } => context.as_ref(),
-            Self::Config { .. } | Self::Leverage { .. } => None,
+            Self::Config { .. } | Self::Leverage { .. } | Self::LeverageRefresh { .. } => None,
         }
     }
 
@@ -158,7 +166,7 @@ impl Request {
             | Self::Orders { context, .. } => context
                 .as_ref()
                 .is_some_and(|context| cx.validate_background_read_http_delivery(context).is_ok()),
-            Self::Config { .. } | Self::Leverage { .. } => true,
+            Self::Config { .. } | Self::Leverage { .. } | Self::LeverageRefresh { .. } => true,
         }
     }
 
@@ -274,12 +282,51 @@ impl Okx {
 
     /// Data source: re-read the position mode (config) and the positions'
     /// leverage after a frame-fed engine changed them.
-    pub(crate) fn account_refresh_settings(&mut self, cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn account_refresh_settings(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: Option<&str>,
+    ) {
         if cx.frame_fed() || !self.account.configured {
             return;
         }
         self.account_start(cx);
         self.account_after_settings(cx);
+        // A flat symbol's leverage is in no position row: read it directly.
+        if let Some(symbol) = symbol {
+            self.refresh_leverage(cx, symbol);
+        }
+    }
+
+    fn refresh_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        let Some(inst_id) = cx.store.market(symbol).map(|m| m.id.clone()) else {
+            return;
+        };
+        let context = match cx.http_context(Scope::Background, read_policy(self.read_credential()))
+        {
+            Ok(context) => context,
+            Err(error) => {
+                cx.notice_error(Level::Warn, code::REQUEST_FAILED, &error.venue_error());
+                return;
+            }
+        };
+        let version = self
+            .account
+            .leverage_versions
+            .get(symbol)
+            .copied()
+            .unwrap_or(0);
+        self.managed_get(
+            cx,
+            context.clone(),
+            &format!("/api/v5/account/leverage-info?instId={inst_id}&mgnMode=cross"),
+            Pending::Account(Request::LeverageRefresh {
+                context,
+                symbol: symbol.into(),
+                inst_id,
+                version,
+            }),
+        );
     }
 
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -517,7 +564,9 @@ impl Okx {
                 .as_ref()
                 .is_some_and(|join| join.generation == *generation),
             Request::Orders { generation, .. } => self.account.orders_generation == *generation,
-            Request::Config { .. } | Request::Leverage { .. } => true,
+            Request::Config { .. } | Request::Leverage { .. } | Request::LeverageRefresh { .. } => {
+                true
+            }
         }
     }
 
@@ -551,7 +600,8 @@ impl Okx {
             return;
         }
         match request {
-            Request::Config { .. } | Request::Leverage { .. } => {}
+            Request::Config { .. } | Request::Leverage { .. } | Request::LeverageRefresh { .. } => {
+            }
             Request::Balance {
                 equity,
                 risk_rows,
@@ -829,6 +879,16 @@ impl Okx {
                     Ok(data) => cx.done_context(&context, data),
                     Err(error) => cx.fail_context(&context, error),
                 };
+            }
+            Request::LeverageRefresh {
+                symbol,
+                inst_id,
+                version,
+                ..
+            } => {
+                if let Err(error) = self.leverage_result(cx, data, &symbol, &inst_id, version) {
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+                }
             }
             Request::Config { mode_version, .. } => {
                 self.account.config_in_flight = false;
@@ -1168,6 +1228,11 @@ impl Okx {
             }
             Request::Leverage { context, .. } => {
                 let _ = cx.fail_context(&context, error);
+                return;
+            }
+            // The hold expires with a warning if the source never confirms.
+            Request::LeverageRefresh { .. } => {
+                cx.notice_error(Level::Warn, code::REQUEST_FAILED, &error);
                 return;
             }
         }
