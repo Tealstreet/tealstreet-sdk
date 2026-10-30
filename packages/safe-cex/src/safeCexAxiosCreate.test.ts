@@ -9,7 +9,7 @@ import './transport/registerTealstreetTransport';
 import { getProxyToken } from './accessToken';
 // Import after mocking
 import { httpStats, LAST_LOG_PERIODICY, safeCexAxiosCreate, safeCexAxiosCreateNoProxy } from './safeCexAxiosCreate';
-import { getProxyForAxios } from './transport/tealstreet/tealstreetTransport';
+import { getProxyForAxios, PROXY_TOKEN_WAIT_MS } from './transport/tealstreet/tealstreetTransport';
 
 // Mock dependencies
 vi.mock('axios', () => ({
@@ -27,12 +27,17 @@ vi.mock('axios', () => ({
   },
 }));
 
-vi.mock('./accessToken', () => ({
-  getProxyToken: vi.fn(() => Promise.resolve('mock-token')),
-  // Read by configureHOW, which the Tealstreet transport pulls in at import.
-  isTokenExpired: vi.fn(() => false),
-  bindProxyTokenLookup: () => () => Promise.resolve('mock-token'),
-}));
+vi.mock('./accessToken', async (importOriginal) => {
+  const getProxyToken = vi.fn(() => Promise.resolve('mock-token'));
+  return {
+    ...(await importOriginal<typeof import('./accessToken')>()),
+    getProxyToken,
+    // Read by configureHOW, which the Tealstreet transport pulls in at import.
+    isTokenExpired: vi.fn(() => false),
+    // The real binder looks the token up through getProxyToken.
+    bindProxyTokenLookup: () => () => getProxyToken(),
+  };
+});
 
 vi.mock('./utils/axiosErrorEnhancer', () => ({
   enhanceAxiosError: vi.fn((error) => error),
@@ -323,25 +328,53 @@ describe('safeCexAxiosCreate', () => {
       expect(requestConfig.headers.Authorization).toBeUndefined();
     });
 
-    // `Bearer ` with nothing after it is a malformed credential, not an absent
-    // one. The proxy's viewer-request Lambda 403s "Invalid JWT" for that shape
-    // where an absent header gets a 401 naming the real problem — so an empty
-    // token must send NO header, and the diagnostic stamp is what records that
-    // we tried.
-    it('sends no Authorization header at all when the proxy token is empty', async () => {
-      vi.mocked(getProxyToken).mockResolvedValueOnce('');
+    // A warming token ('' from the SharedWorker or CLI) must never reach the
+    // edge: no header is a 401 that reads as a refused venue key, and an empty
+    // `Bearer ` is a malformed credential. The request waits for a token instead.
+    it('waits for a warming proxy token and sends it, never an absent or empty credential', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(getProxyToken).mockResolvedValueOnce('').mockResolvedValueOnce('');
 
-      const bybitExchange = { ...mockExchange, name: 'bybit' } as unknown as BaseExchange;
-      const config = { baseURL: 'https://api.bybit.com' };
-      const options: ExchangeOptions = { key: 'k', secret: 's', tealstreetProxy: true };
+        const bybitExchange = { ...mockExchange, name: 'bybit' } as unknown as BaseExchange;
+        const config = { baseURL: 'https://api.bybit.com' };
+        const options: ExchangeOptions = { key: 'k', secret: 's', tealstreetProxy: true };
 
-      const instance = safeCexAxiosCreate(config, options, bybitExchange);
-      const proxyAuthInterceptor = vi.mocked(instance.interceptors.request.use).mock.calls[1][0];
-      const requestConfig = await proxyAuthInterceptor!({ headers: {} } as any);
+        const instance = safeCexAxiosCreate(config, options, bybitExchange);
+        const proxyAuthInterceptor = vi.mocked(instance.interceptors.request.use).mock.calls[1][0];
+        const pending = proxyAuthInterceptor!({ headers: {} } as any);
+        await vi.advanceTimersByTimeAsync(1_000);
+        const requestConfig = await pending;
 
-      expect(requestConfig.headers.Authorization).toBeUndefined();
-      expect(requestConfig.headers['Tealstreet-Authorization']).toBeUndefined();
-      expect((requestConfig as unknown as Record<string, unknown>).safeCexRestDiagProxyHeader).toBe('empty');
+        expect(requestConfig.headers.Authorization).toBe('Bearer mock-token');
+        expect((requestConfig as unknown as Record<string, unknown>).safeCexRestDiagProxyHeader).toBe('present');
+        expect(getProxyToken).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('refuses once the bounded wait is over, naming the missing Tealstreet proxy authorization', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(getProxyToken).mockResolvedValue('');
+
+        const bybitExchange = { ...mockExchange, name: 'bybit' } as unknown as BaseExchange;
+        const config = { baseURL: 'https://api.bybit.com' };
+        const options: ExchangeOptions = { key: 'k', secret: 's', tealstreetProxy: true };
+
+        const instance = safeCexAxiosCreate(config, options, bybitExchange);
+        const proxyAuthInterceptor = vi.mocked(instance.interceptors.request.use).mock.calls[1][0];
+        const refused = expect(proxyAuthInterceptor!({ headers: {} } as any)).rejects.toMatchObject({
+          name: 'ProxyTokenUnavailableError',
+          message: expect.stringContaining('[bybit] Tealstreet proxy authorization missing'),
+        });
+        await vi.advanceTimersByTimeAsync(PROXY_TOKEN_WAIT_MS + 1_000);
+        await refused;
+      } finally {
+        vi.mocked(getProxyToken).mockResolvedValue('mock-token');
+        vi.useRealTimers();
+      }
     });
 
     it('stamps the request as carrying proxy auth when the token is present', async () => {
