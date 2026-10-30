@@ -67,6 +67,39 @@ pub struct Account {
     pub algos: Option<mpsc::UnboundedSender<crate::algos::AlgoInput>>,
     /// Lets algo replies reach the account's signing socket without a cycle.
     algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>>,
+    /// Every symbol a placement was attempted on, by a client or an algo.
+    pub placed: PlacedSymbols,
+}
+
+/// Symbols a placement was attempted on, kept for the account's lifetime, as
+/// `rust.exchange.ts` `attemptedPlacementSymbols`: on `eachPlacedSymbol` venues a
+/// cancel-all also cancels them, since frames can lag a placement's ACK.
+#[derive(Clone, Default)]
+pub struct PlacedSymbols(Arc<Mutex<std::collections::BTreeSet<String>>>);
+
+impl PlacedSymbols {
+    pub fn record<'a>(&self, symbols: impl IntoIterator<Item = &'a str>) {
+        let mut placed = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        for symbol in symbols {
+            if !placed.contains(symbol) {
+                placed.insert(symbol.to_owned());
+            }
+        }
+    }
+
+    /// The symbols of an engine `placeOrders` command, if it is one.
+    pub fn record_command(&self, command: &Value) {
+        if command["op"] == "placeOrders"
+            && let Some(orders) = command["orders"].as_array()
+        {
+            self.record(orders.iter().filter_map(|order| order["symbol"].as_str()));
+        }
+    }
+
+    pub fn symbols(&self) -> Vec<String> {
+        let placed = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        placed.iter().cloned().collect()
+    }
 }
 
 /// A live socket holding an account: where its signing and proxy token go.
@@ -431,6 +464,8 @@ impl Registry {
         let tokens = proxy_token.provider();
         let config = self.engine_config.clone();
         let algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>> = Arc::default();
+        let placed_symbols = PlacedSymbols::default();
+        let algo_placed = placed_symbols.clone();
         let (algos, algo_inbox) = if public_only {
             (None, None)
         } else {
@@ -472,6 +507,7 @@ impl Registry {
                                 algo_who,
                                 emit,
                                 algo_signer,
+                                algo_placed,
                                 inbox,
                             ));
                         }
@@ -496,6 +532,7 @@ impl Registry {
             holders: Mutex::default(),
             algos,
             algo_owner,
+            placed: placed_symbols,
         };
         Ok((account, remote))
     }
@@ -845,6 +882,21 @@ mod tests {
             resolve::resolve_routing_plan(venue, &inputs, base, Provider::Tealstreet).unwrap();
         let text = serde_json::to_string(&plan).unwrap();
         assert!(text.contains("BRA_BTL"), "{text}");
+    }
+
+    #[test]
+    fn placed_symbols_keep_every_attempted_placement_scope() {
+        let placed = PlacedSymbols::default();
+        placed.record_command(&json!({"op":"placeOrders","orders":[
+            {"symbol":"BTC-USDT-SWAP","side":"buy"},
+            {"symbol":"ETH-USDT-SWAP","side":"sell"},
+        ]}));
+        placed.record_command(&json!({"op":"cancelSymbolOrders","symbol":"SOL-USDT-SWAP"}));
+        placed.record(["BTC-USDT-SWAP", "XRP-USDT-SWAP"]);
+        assert_eq!(
+            placed.symbols(),
+            ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "XRP-USDT-SWAP"]
+        );
     }
 
     #[tokio::test]
