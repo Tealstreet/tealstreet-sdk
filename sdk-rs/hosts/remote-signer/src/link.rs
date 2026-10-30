@@ -28,7 +28,7 @@ pub enum Failure {
     Suspended,
     SendFailed,
     TimedOut,
-    /// The socket went away while this request waited.
+    /// The session ended, or the reattached socket could not take the request.
     Aborted,
     /// Another request with the same id is still waiting.
     Duplicate,
@@ -48,7 +48,8 @@ struct State {
     available: bool,
     suspended: bool,
     unavailable_since: Option<Instant>,
-    pending: HashMap<String, (u64, SocketId, Waiter)>,
+    /// id → (token, socket it was sent on, its sign-req frame, waiter).
+    pending: HashMap<String, (u64, SocketId, String, Waiter)>,
     next_token: u64,
     last_sign_req_bytes: usize,
     echo: Option<(u64, Instant, EchoSize)>,
@@ -128,10 +129,12 @@ impl SignerLink {
             state.next_token += 1;
             let token = state.next_token;
             let socket = state.socket;
-            state.pending.insert(id.to_owned(), (token, socket, sender));
             // `t` first: the browser recognises frames by prefix.
             let frame = format!(r#"{{"t":"sign-req","d":{request}}}"#);
             state.last_sign_req_bytes = frame.len();
+            state
+                .pending
+                .insert(id.to_owned(), (token, socket, frame.clone(), sender));
             (state.out.clone(), frame, token)
         };
         let guard = Pending {
@@ -145,6 +148,8 @@ impl SignerLink {
         let result = match tokio::time::timeout_at(deadline, receiver).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(Failure::Aborted),
+            // No browser to answer is a suspension, not a slow signer.
+            Err(_) if self.state().suspended => Err(Failure::Suspended),
             Err(_) => Err(Failure::TimedOut),
         };
         drop(guard);
@@ -167,11 +172,11 @@ impl SignerLink {
             if !state
                 .pending
                 .get(&id)
-                .is_some_and(|(_, sent, _)| *sent == socket)
+                .is_some_and(|(_, sent, _, _)| *sent == socket)
             {
                 return false;
             }
-            state.pending.remove(&id).map(|(_, _, sender)| sender)
+            state.pending.remove(&id).map(|(_, _, _, sender)| sender)
         };
         let oversized = ["wsAuthSignature", "error"].iter().any(|field| {
             response.get(*field).is_some_and(|value| {
@@ -186,8 +191,9 @@ impl SignerLink {
         sender.is_some_and(|sender| sender.send(Ok(response)).is_ok())
     }
 
-    /// The socket dropped but the session is parked for a resume: abort what
-    /// waits on the old socket; new requests wait for `attach` (see `round_trip`).
+    /// The socket dropped but the session is parked for a resume. Requests
+    /// already sent keep waiting within their own `SIGN_TIMEOUT`, and `attach`
+    /// re-sends them; new requests wait for `attach` (see `round_trip`).
     pub fn suspend(&self) {
         let mut state = self.state();
         if !state.available || state.suspended {
@@ -195,24 +201,36 @@ impl SignerLink {
         }
         state.suspended = true;
         state.unavailable_since = Some(Instant::now());
-        abort_all(&mut state);
     }
 
     /// The client came back within the grace window: sign over its new socket.
-    /// Requests still waiting on another socket abort; none moves silently.
+    /// Requests sent on another socket are re-sent here and only this socket
+    /// answers them; one that cannot be re-sent aborts.
     pub fn attach(&self, socket: SocketId, out: Outbox) {
         let mut state = self.state();
         if !state.available {
             return;
         }
+        let mut moved = Vec::new();
         if state.socket != socket {
-            abort_all(&mut state);
+            for (id, (_, sent, frame, _)) in state.pending.iter_mut() {
+                *sent = socket;
+                moved.push((id.clone(), frame.clone()));
+            }
         }
         state.socket = socket;
-        state.out = out;
+        state.out = out.clone();
         state.suspended = false;
         state.unavailable_since = None;
         drop(state);
+        for (id, frame) in moved {
+            if !out(frame) {
+                let sender = self.state().pending.remove(&id);
+                if let Some((_, _, _, sender)) = sender {
+                    let _ = sender.send(Err(Failure::Aborted));
+                }
+            }
+        }
         self.reattached.notify_waiters();
     }
 
@@ -270,7 +288,7 @@ impl SignerLink {
 }
 
 fn abort_all(state: &mut State) {
-    for (_, (_, _, sender)) in state.pending.drain() {
+    for (_, (_, _, _, sender)) in state.pending.drain() {
         let _ = sender.send(Err(Failure::Aborted));
     }
 }
@@ -287,7 +305,7 @@ impl Drop for Pending<'_> {
         if state
             .pending
             .get(self.id)
-            .is_some_and(|(token, _, _)| *token == self.token)
+            .is_some_and(|(token, _, _, _)| *token == self.token)
         {
             state.pending.remove(self.id);
         }
