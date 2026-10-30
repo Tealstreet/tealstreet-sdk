@@ -162,6 +162,9 @@ pub struct State {
     reconcile_timer: Option<TimerId>,
     /// `{currency}:{symbol}` (or `{currency}:` for an unreadable row) of skips already logged.
     skip_logged: RowReports<String>,
+    /// Frame-fed: the data source's unknown-outcome clOrdIDs and fill uncertainty.
+    source_lost: HashSet<String>,
+    source_unreconciled_fills: bool,
 }
 impl State {
     pub fn new() -> Self {
@@ -218,6 +221,50 @@ impl State {
             .copied()
             .or_else(|| self.context(symbol).map(|c| c.mode))
     }
+    /// Data source: the write-path state a frame-fed engine needs (VENUE_STATE).
+    pub(crate) fn export_venue_state(&self) -> crate::venue_state::VenueState {
+        crate::venue_state::VenueState {
+            contexts: self.contexts.iter().map(|(s, c)| (s.clone(), *c)).collect(),
+            confirmed: self
+                .confirmed_modes
+                .iter()
+                .map(|(s, m)| (s.clone(), *m))
+                .collect(),
+            sides: self
+                .order_sides
+                .iter()
+                .map(|(i, s)| (i.clone(), s.clone()))
+                .collect(),
+            lost: self
+                .reconcile
+                .values()
+                .flat_map(|entry| entry.lost.iter().chain(&entry.cancel))
+                .map(|(id, _)| id.clone())
+                .collect(),
+            unreconciled_fills: self.has_unreconciled_fills(),
+        }
+    }
+    /// Frame-fed: the source's state replaces what this engine would have read.
+    pub(crate) fn apply_venue_state(&mut self, state: crate::venue_state::VenueState) {
+        self.contexts = state.contexts.into_iter().collect();
+        self.confirmed_modes = state.confirmed.into_iter().collect();
+        self.order_sides = state.sides.into_iter().collect();
+        self.source_lost = state.lost.into_iter().collect();
+        self.source_unreconciled_fills = state.unreconciled_fills;
+    }
+    /// Frame-fed: the source's order snapshot is this engine's, once it has loaded;
+    /// a lost placement the source's orders now show is no longer lost.
+    pub(crate) fn frame_ingested(&mut self, orders_loaded: bool, client_ids: &HashSet<String>) {
+        self.authenticated = orders_loaded;
+        self.snapshot = orders_loaded;
+        self.open = orders_loaded;
+        for entry in self.reconcile.values_mut() {
+            entry.lost.retain(|(id, _)| !client_ids.contains(id));
+            entry.cancel.retain(|(id, _)| !client_ids.contains(id));
+        }
+        self.reconcile
+            .retain(|_, entry| !entry.lost.is_empty() || !entry.cancel.is_empty());
+    }
     pub fn orders_ready(&self) -> bool {
         self.authenticated && self.snapshot && self.open && !self.uncertainty_overflow
     }
@@ -226,16 +273,19 @@ impl State {
     }
     /// Whether `id` is the clOrdID of a placement whose outcome is still unknown.
     pub fn lost_client(&self, id: &str) -> bool {
-        self.reconcile.values().any(|entry| {
-            entry
-                .lost
-                .iter()
-                .chain(&entry.cancel)
-                .any(|(lost, _)| lost == id)
-        })
+        self.source_lost.contains(id)
+            || self.reconcile.values().any(|entry| {
+                entry
+                    .lost
+                    .iter()
+                    .chain(&entry.cancel)
+                    .any(|(lost, _)| lost == id)
+            })
     }
     pub fn has_unreconciled_fills(&self) -> bool {
-        self.uncertainty_overflow || !self.uncertain_fills.is_empty()
+        self.uncertainty_overflow
+            || !self.uncertain_fills.is_empty()
+            || self.source_unreconciled_fills
     }
     pub fn order_pos_side(&self, id: &str) -> Option<&str> {
         self.order_sides
@@ -307,7 +357,7 @@ fn optional_integer<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64
 }
 impl PhemexPerpetuals {
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.started {
+        if self.account.started || cx.frame_fed() {
             return;
         }
         self.account.started = true;
@@ -326,6 +376,10 @@ impl PhemexPerpetuals {
         self.account.order_revision += 1;
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Frame-fed: the data source's frames carry every account change; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if !self.account.started {
             self.start_account(cx);
             return;
@@ -340,7 +394,7 @@ impl PhemexPerpetuals {
         self.account_cycle(cx);
     }
     fn account_cycle(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.pending != 0 {
+        if self.account.pending != 0 || cx.frame_fed() {
             return;
         }
         if cx.now < self.paused_until {
@@ -1547,7 +1601,8 @@ impl PhemexPerpetuals {
 
     /// Starts each owed read once it is due and no placement on that symbol is in flight.
     pub(crate) fn orders_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() {
+        // Frame-fed: the source's orders settle an unknown outcome; nothing is read here.
+        if self.credentials.is_none() || cx.frame_fed() {
             return;
         }
         if let Some(timer) = self.account.reconcile_timer.take() {

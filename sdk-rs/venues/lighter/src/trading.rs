@@ -245,6 +245,12 @@ impl Lighter {
     /// After every step: park in a settle-only wait until the stream proves
     /// each acknowledged leg, or fail Unknown with every id.
     fn trade_settle_group(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Frame-fed: no private stream, and ingested orders carry native ids,
+        // not the client order indexes that prove legs. Unknown now, never resent.
+        if cx.frame_fed() {
+            self.trade_group_unconfirmed(cx);
+            return;
+        }
         let job = self.trading.active.as_mut().unwrap();
         let (Some(plan), Some(slot), Some(context)) =
             (job.plan.clone(), job.slot.take(), job.live.take())
@@ -279,10 +285,12 @@ impl Lighter {
         }
         self.trading.next_nonce.invalidate();
         self.refresh_orders(cx);
-        self.trade_finish(
-            cx,
-            uncertain("Lighter accepted the grouped order but the account stream did not confirm every leg; check open orders before retrying"),
-        );
+        let message = if cx.frame_fed() {
+            "Lighter accepted the grouped order but this session cannot confirm its legs; check open orders before retrying"
+        } else {
+            "Lighter accepted the grouped order but the account stream did not confirm every leg; check open orders before retrying"
+        };
+        self.trade_finish(cx, uncertain(message));
     }
 
     pub(crate) fn trade_execution_observed(&mut self, id: &str, timestamp: f64) {
@@ -631,7 +639,8 @@ impl Lighter {
             if present {
                 self.trading.active.as_mut().unwrap().steps.pop_front();
                 self.trade_kick(cx);
-            } else if *requested {
+            } else if *requested || cx.frame_fed() {
+                // Frame-fed positions are the data source's; there is no read to wait for.
                 self.trade_finish(
                     cx,
                     not_sent("No open position available for this Lighter reduce-only limit order"),
@@ -706,6 +715,10 @@ impl Lighter {
             );
             return;
         }
+        if self.account.account_index.is_none() || self.account.api_key_index.is_none() {
+            self.trade_finish(cx, not_sent("Lighter account is not loaded yet"));
+            return;
+        }
         if self.builder().is_some()
             && job
                 .steps
@@ -726,7 +739,10 @@ impl Lighter {
                     self.trade_finish(cx, not_sent(TIER_MESSAGE));
                     return;
                 }
-                self.trading.active.as_mut().unwrap().builder_stage = 1;
+                // Frame-fed: no approval read; the venue refuses an unapproved
+                // integrator (21149), mapped to APPROVAL_MESSAGE.
+                self.trading.active.as_mut().unwrap().builder_stage =
+                    if cx.frame_fed() { 2 } else { 1 };
                 self.trade_kick(cx);
                 return;
             }
@@ -1291,7 +1307,10 @@ impl Lighter {
 
     fn submission_uncertain(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
         self.trading.next_nonce.invalidate();
-        if let Effect::Setting { symbol, .. } = effect {
+        // Frame-fed settings come from the data source, which reconciles them.
+        if let Effect::Setting { symbol, .. } = effect
+            && !cx.frame_fed()
+        {
             self.account_setting_write(symbol);
             self.trading
                 .uncertain_settings
@@ -2102,12 +2121,15 @@ impl Lighter {
         }
         None
     }
-    pub(crate) fn restore_retired_trades(&mut self) -> bool {
+    pub(crate) fn restore_retired_trades(&mut self, frame_fed: bool) -> bool {
         let effects = std::mem::take(&mut self.trading.retired_effects);
         let refresh = !effects.is_empty();
         for effect in effects {
             self.trading.next_nonce.invalidate();
-            if let Effect::Setting { symbol, .. } = effect {
+            // Frame-fed settings come from the data source, which reconciles them.
+            if let Effect::Setting { symbol, .. } = effect
+                && !frame_fed
+            {
                 self.account_setting_write(&symbol);
                 self.trading
                     .uncertain_settings
@@ -2117,7 +2139,7 @@ impl Lighter {
         refresh
     }
     pub(crate) fn settle_retired_trades(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.restore_retired_trades() {
+        if self.restore_retired_trades(cx.frame_fed()) {
             self.refresh_account(cx);
             self.refresh_orders(cx);
         }
