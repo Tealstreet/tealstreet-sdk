@@ -55,6 +55,9 @@ impl AccountPort for Port {
             .borrow_mut()
             .push((op.to_owned(), serde_json::from_str(&data).unwrap()));
     }
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities::BASE
+    }
 }
 
 #[derive(Default)]

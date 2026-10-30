@@ -302,3 +302,15 @@ async fn a_nuke_on_a_native_cancel_all_venue_ends_with_the_venue_wide_cancel() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn stop_account_algos_runs_no_leg() {
+    LocalSet::new()
+        .run_until(async {
+            let (done, commands) = nuke("algos").await;
+            assert_eq!(done["success"], true);
+            assert_eq!(done["result"], json!({"stoppedChasers": [], "stoppedTwaps": []}));
+            assert!(commands.is_empty(), "{commands:?}");
+        })
+        .await;
+}

@@ -29,7 +29,7 @@ const ENGINE_OPS: [&str; 11] = [
 ];
 
 /// Hosted `callMethod`s that change orders or account settings.
-pub const ORDER_METHODS: [&str; 15] = [
+pub const ORDER_METHODS: [&str; 16] = [
     "placeOrders",
     "placeOrder",
     "placeOrderWithClientOrderId",
@@ -45,6 +45,7 @@ pub const ORDER_METHODS: [&str; 15] = [
     "nuke",
     "nukePositions",
     "nukeOrders",
+    "stopAccountAlgos",
 ];
 
 const COMMAND_FIELDS: [&str; 14] = [

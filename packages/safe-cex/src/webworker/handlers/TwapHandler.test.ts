@@ -3,13 +3,66 @@ import type { ExchangeName } from '../../types';
 import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
+import type { TwapLockManager } from '../twap/twapLock';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { OrderSide, OrderStopTriggerType } from '../../types';
 import { TwapInstance } from '../twap/TwapInstance';
+import { setTwapLockManager, TWAP_RESTORE_LOCK_WAIT_MS } from '../twap/twapLock';
 import { twapManager } from '../twap/TwapManager';
 import { TwapHandler } from './TwapHandler';
+
+/** Web Locks shared by every worker of one origin; a dead worker's locks are released. */
+const locks = (() => {
+  const held = new Map<string, string>();
+  return {
+    reset: () => held.clear(),
+    crash: (worker: string) => {
+      for (const [name, owner] of held) if (owner === worker) held.delete(name);
+    },
+    isHeld: (name: string) => held.has(name),
+    forWorker: (worker: string): TwapLockManager => ({
+      async request(name, _options, callback) {
+        if (held.has(name)) return callback(null);
+        held.set(name, worker);
+        try {
+          await callback({ name });
+        } finally {
+          if (held.get(name) === worker) held.delete(name);
+        }
+      },
+    }),
+  };
+})();
+
+const settle = async () => {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+};
+
+const row = (id: string, status: string, nextOrderAt = Date.now() + 5_000) => ({
+  id,
+  options: {
+    accountName: 'test-account',
+    activeMarket: { symbol: 'BTCUSDT' },
+    size: 1,
+    duration: 10,
+    ordersCount: 5,
+    side: OrderSide.Buy,
+    randomnessPercentage: 0,
+  },
+  state: {
+    accountName: 'test-account',
+    activeMarket: { symbol: 'BTCUSDT' },
+    size: 1,
+    ordersSizes: [0.5, 0.5],
+    side: OrderSide.Buy,
+    status,
+    ordersCount: 5,
+    ordersExecuted: 3,
+    nextOrderAt,
+  },
+});
 
 // Track mock function calls and instance creation globally
 const mockCalls = {
@@ -19,6 +72,7 @@ const mockCalls = {
   terminate: [] as any[],
   cleanup: [] as any[],
   instances: [] as any[],
+  locks: [] as any[],
 };
 
 // Mock TwapInstance as a class
@@ -52,13 +106,20 @@ vi.mock('../twap/TwapInstance', () => ({
     cleanup() {
       mockCalls.cleanup.push(this);
     }
+    async reconcileInFlight() {}
+    awaitOwnerLock() {}
+    holdOwnerLock(release: () => void) {
+      mockCalls.locks.push({ instance: this, release });
+    }
   },
 }));
 
 // Mock TwapManager
 vi.mock('../twap/TwapManager', () => ({
   twapManager: {
-    add: vi.fn(),
+    add: vi.fn(function (this: { runningTwaps: Map<string, unknown> }, twap: { id: string }) {
+      this.runningTwaps.set(twap.id, twap);
+    }),
     getById: vi.fn(),
     runningTwaps: new Map(),
     serializeState: vi.fn(() => ({})),
@@ -83,9 +144,12 @@ describe('TwapHandler', () => {
     mockCalls.terminate.length = 0;
     mockCalls.cleanup.length = 0;
     mockCalls.instances.length = 0;
+    mockCalls.locks.length = 0;
+    locks.reset();
+    setTwapLockManager(locks.forWorker('worker-a'));
 
-    mockExchange = { name: 'bybit' } as Exchange;
-    mockCtx = {} as Worker;
+    mockExchange = { name: 'bybit', emitter: { emit: vi.fn() } } as unknown as Exchange;
+    mockCtx = { postMessage: vi.fn() } as unknown as Worker;
     mockSettings = {
       placeOrder: {
         tpTriggerType: OrderStopTriggerType.MarkPrice,
@@ -244,126 +308,180 @@ describe('TwapHandler', () => {
     });
 
     describe('twap:state', () => {
-      it('should restore persisted twap states', () => {
-        const persistedStates = [
-          {
-            id: 'twap-restored-1',
-            options: {
-              symbol: 'BTCUSDT',
-              side: OrderSide.Buy,
-              totalSize: 5,
-            },
-            state: {
-              status: 'paused',
-              filledSize: 2,
-            },
-          },
-        ];
-
-        const payload: StoreWorkerPayload = {
-          op: 'twap:state',
-          data: persistedStates,
-        };
-
-        handler.handle(payload);
-
-        // Check TwapInstance was created with correct args
+      it('restores a valid row, holding its cross-tab lock', async () => {
+        const persisted = [row('twap-restored-1', 'paused')];
+        handler.handle({ op: 'twap:state', data: persisted });
+        await settle();
         expect(mockCalls.instances.length).toBe(1);
         const instance = mockCalls.instances[0];
         expect(instance.constructorArgs[0]).toBe(mockExchange);
         expect(instance.constructorArgs[1]).toBe(mockCtx);
-        expect(instance.constructorArgs[2]).toBe(persistedStates[0].options);
-        expect(typeof instance.constructorArgs[3]).toBe('function');
-        expect(instance.constructorArgs[4]).toBe(persistedStates[0].state);
+        expect(instance.constructorArgs[2]).toBe(persisted[0].options);
+        expect(instance.constructorArgs[4]).toBe(persisted[0].state);
         expect(instance.constructorArgs[5]).toBe('twap-restored-1');
-
         expect(vi.mocked(twapManager).add).toHaveBeenCalled();
+        expect(mockCalls.locks.map((lock) => lock.instance)).toEqual([instance]);
+        expect(locks.isHeld('tealstreet-twap:test-account:twap-restored-1')).toBe(true);
       });
 
-      it('should resume running twaps after restore', () => {
-        const persistedStates = [
-          {
-            id: 'twap-running',
-            options: { symbol: 'ETHUSDT' },
-            state: { status: 'running' },
-          },
-        ];
-
-        const payload: StoreWorkerPayload = {
-          op: 'twap:state',
-          data: persistedStates,
-        };
-
-        handler.handle(payload);
-
-        // Should pause then resume running twaps
-        expect(mockCalls.pause.length).toBeGreaterThan(0);
-        expect(mockCalls.resume.length).toBeGreaterThan(0);
+      it('resumes running twaps after restore', async () => {
+        handler.handle({ op: 'twap:state', data: [row('twap-running', 'running')] });
+        await settle();
+        expect(mockCalls.pause.length).toBe(1);
+        expect(mockCalls.resume.length).toBe(1);
       });
 
-      it('should not restore already existing twaps', () => {
-        // Setup existing twap in manager
-        const existingTwap = { id: 'existing-twap' };
-        (twapManager.runningTwaps as Map<string, any>).set('existing-twap', existingTwap);
-
-        const persistedStates = [
-          {
-            id: 'existing-twap',
-            options: { symbol: 'BTCUSDT' },
-            state: { status: 'paused' },
-          },
-        ];
-
-        const payload: StoreWorkerPayload = {
-          op: 'twap:state',
-          data: persistedStates,
-        };
-
-        handler.handle(payload);
-
-        // TwapInstance should not be called because twap already exists
-        expect(mockCalls.instances.length).toBe(0);
+      it('does not restore ids this worker already runs, and keeps going', async () => {
+        (twapManager.runningTwaps as Map<string, any>).set('existing-twap', { id: 'existing-twap' });
+        handler.handle({ op: 'twap:state', data: [row('existing-twap', 'paused'), row('new-twap', 'paused')] });
+        await settle();
+        expect(mockCalls.instances.map((instance) => instance.constructorArgs[5])).toEqual(['new-twap']);
       });
 
-      it('should continue restoring non-existing twaps after existing ids', () => {
-        const existingTwap = { id: 'existing-twap' };
-        (twapManager.runningTwaps as Map<string, any>).set('existing-twap', existingTwap);
-
-        const persistedStates = [
-          {
-            id: 'existing-twap',
-            options: { symbol: 'BTCUSDT' },
-            state: { status: 'paused' },
-          },
-          {
-            id: 'new-twap',
-            options: { symbol: 'ETHUSDT' },
-            state: { status: 'paused' },
-          },
-        ];
-
-        const payload: StoreWorkerPayload = {
-          op: 'twap:state',
-          data: persistedStates,
-        };
-
-        handler.handle(payload);
-
+      it('a re-sent restore in the same tab is not reported as another tab', async () => {
+        const data = [row('twap-once', 'running')];
+        handler.handle({ op: 'twap:state', data });
+        handler.handle({ op: 'twap:state', data });
+        await settle();
         expect(mockCalls.instances.length).toBe(1);
-        expect(mockCalls.instances[0].constructorArgs[5]).toBe('new-twap');
+        expect(vi.mocked(mockExchange.emitter.emit)).not.toHaveBeenCalled();
       });
 
-      it('should handle errors gracefully', () => {
+      it('a duplicated tab skips a TWAP another tab runs, with a toast', async () => {
+        handler.handle({ op: 'twap:state', data: [row('twap-dup', 'running')] });
+        await settle();
+        expect(mockCalls.instances.length).toBe(1);
+
+        // The duplicate tab: its own worker and manager, the copied sessionStorage row.
+        (twapManager.runningTwaps as Map<string, any>).clear();
+        setTwapLockManager(locks.forWorker('worker-b'));
+        const exchangeB = { name: 'bybit', emitter: { emit: vi.fn() } } as unknown as Exchange;
+        const ctxB = { postMessage: vi.fn() } as unknown as Worker;
+        const handlerB = new TwapHandler(
+          'test-account',
+          'bybit' as ExchangeName,
+          exchangeB,
+          ctxB,
+          mockSettings,
+          mockMetadata,
+        );
+        vi.useFakeTimers();
+        try {
+          handlerB.handle({ op: 'twap:state', data: [row('twap-dup', 'running')] });
+          await settle();
+          // Still asking: a reloading tab's old worker may not have let go yet.
+          expect(mockCalls.terminate).toEqual([]);
+          await vi.advanceTimersByTimeAsync(TWAP_RESTORE_LOCK_WAIT_MS + 500);
+        } finally {
+          vi.useRealTimers();
+        }
+        // Built synchronously for the worker's ownership tracking, stopped before it ran.
+        expect(mockCalls.instances.length).toBe(2);
+        expect(mockCalls.terminate).toEqual([mockCalls.instances[1]]);
+        expect(mockCalls.resume.length).toBe(1);
+        expect(vi.mocked(exchangeB.emitter.emit)).toHaveBeenCalledWith(
+          'error',
+          'TWAP BTCUSDT not restored: it is running in another tab',
+        );
+      });
+
+      it('a reloaded tab takes over once its old worker lets go of the lock', async () => {
+        handler.handle({ op: 'twap:state', data: [row('twap-reload', 'running')] });
+        await settle();
+        (twapManager.runningTwaps as Map<string, any>).clear();
+        setTwapLockManager(locks.forWorker('worker-b'));
+        const exchangeB = { name: 'bybit', emitter: { emit: vi.fn() } } as unknown as Exchange;
+        const ctxB = { postMessage: vi.fn() } as unknown as Worker;
+        const handlerB = new TwapHandler(
+          'test-account',
+          'bybit' as ExchangeName,
+          exchangeB,
+          ctxB,
+          mockSettings,
+          mockMetadata,
+        );
+        vi.useFakeTimers();
+        try {
+          handlerB.handle({ op: 'twap:state', data: [row('twap-reload', 'running')] });
+          await settle();
+          // The old page's worker is torn down a second into the new one's restore.
+          await vi.advanceTimersByTimeAsync(1_000);
+          locks.crash('worker-a');
+          await vi.advanceTimersByTimeAsync(500);
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(mockCalls.terminate).toEqual([]);
+        expect(mockCalls.resume.length).toBe(2);
+        expect(vi.mocked(exchangeB.emitter.emit)).not.toHaveBeenCalled();
+        expect(locks.isHeld('tealstreet-twap:test-account:twap-reload')).toBe(true);
+      });
+
+      it('a TWAP whose owner worker died can be restored by another tab', async () => {
+        handler.handle({ op: 'twap:state', data: [row('twap-orphan', 'running')] });
+        await settle();
+        locks.crash('worker-a');
+        (twapManager.runningTwaps as Map<string, any>).clear();
+
+        setTwapLockManager(locks.forWorker('worker-b'));
+        const exchangeB = { name: 'bybit', emitter: { emit: vi.fn() } } as unknown as Exchange;
+        const ctxB = { postMessage: vi.fn() } as unknown as Worker;
+        const handlerB = new TwapHandler(
+          'test-account',
+          'bybit' as ExchangeName,
+          exchangeB,
+          ctxB,
+          mockSettings,
+          mockMetadata,
+        );
+        handlerB.handle({ op: 'twap:state', data: [row('twap-orphan', 'running')] });
+        await settle();
+        expect(mockCalls.instances.length).toBe(2);
+        expect(vi.mocked(exchangeB.emitter.emit)).not.toHaveBeenCalled();
+        expect(locks.isHeld('tealstreet-twap:test-account:twap-orphan')).toBe(true);
+      });
+
+      it('refuses a running TWAP whose schedule lapsed, with a toast', async () => {
+        handler.handle({ op: 'twap:state', data: [row('twap-lapsed', 'running', Date.now() - 2 * 3_600_000)] });
+        await settle();
+        expect(mockCalls.instances.length).toBe(0);
+        expect(vi.mocked(mockExchange.emitter.emit)).toHaveBeenCalledWith(
+          'error',
+          'TWAP BTCUSDT not restored: its schedule lapsed, so no tab was running it',
+        );
+        expect(locks.isHeld('tealstreet-twap:test-account:twap-lapsed')).toBe(false);
+      });
+
+      it('restores a TWAP whose last slice was in flight, to settle it', async () => {
+        const last = row('twap-last', 'running');
+        last.state.ordersSizes = [];
+        (last.state as Record<string, unknown>).inFlight = { size: 0.5, clientOrderId: 'cid-last' };
+        handler.handle({ op: 'twap:state', data: [last] });
+        await settle();
+        expect(mockCalls.instances.length).toBe(1);
+        expect(vi.mocked(mockExchange.emitter.emit)).not.toHaveBeenCalled();
+      });
+
+      it('refuses finished, empty and inflated rows', async () => {
+        const empty = row('twap-empty', 'paused');
+        empty.state.ordersSizes = [];
+        const inflated = row('twap-inflated', 'paused');
+        inflated.state.ordersSizes = [0.8, 0.8];
+        handler.handle({ op: 'twap:state', data: [row('twap-done', 'completed'), empty, inflated] });
+        await settle();
+        expect(mockCalls.instances.length).toBe(0);
+        expect(vi.mocked(mockExchange.emitter.emit).mock.calls.map((call) => call[1])).toEqual([
+          'TWAP BTCUSDT not restored: it already completed',
+          'TWAP BTCUSDT not restored: no slices remain',
+          'TWAP BTCUSDT not restored: its remaining slices exceed the TWAP size',
+        ]);
+      });
+
+      it('handles malformed data without throwing', async () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-        const payload: StoreWorkerPayload = {
-          op: 'twap:state',
-          data: null, // Invalid data
-        };
-
-        // Should not throw
-        expect(() => handler.handle(payload)).not.toThrow();
-
+        expect(() => handler.handle({ op: 'twap:state', data: null })).not.toThrow();
+        await settle();
+        expect(mockCalls.instances.length).toBe(0);
         consoleSpy.mockRestore();
       });
     });
