@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashMap, HashSet};
 
 /// Private REST pause after a 418/429 that carries no usable `Retry-After`.
+/// While the private stream is live, REST re-reads the account only this often.
+const SAFETY_RECONCILE_MS: f64 = 60_000.0;
 const REST_PAUSE_MS: f64 = 30_000.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -147,6 +149,8 @@ pub struct Account {
     last_payload: f64,
     write_check: Option<(TimerId, f64)>,
     degraded: bool,
+    /// When positions, balance and orders were last read over REST while live.
+    last_account_read_at: f64,
 }
 
 impl Account {
@@ -171,6 +175,11 @@ impl BitgetFutures {
                 .credentials
                 .as_ref()
                 .is_some_and(|id| id.validate().is_ok())
+    }
+
+    /// The private stream is logged in and has not been found silent or unreachable.
+    pub(crate) fn stream_live(&self) -> bool {
+        self.account.authenticated && !self.account.degraded
     }
 
     pub(crate) fn primary_balance_read(&self, path: &str) -> bool {
@@ -2173,17 +2182,32 @@ impl BitgetFutures {
                         || m.rejected_at.is_some_and(|at| cx.now - at < 10_000.0)
                 });
             }
-            if self.account.degraded {
-                self.refresh_balance(cx);
-                self.refresh_orders(cx, false);
-            }
-            self.refresh_positions(cx);
             self.account.tick += 1;
-            if self.account.tick.is_multiple_of(2) {
-                self.refresh_balance(cx);
-            }
-            if self.account.tick.is_multiple_of(4) {
-                self.refresh_orders(cx, !self.account.uta);
+            if self.stream_live() {
+                // Positions, balance and orders stream on the private topics; REST is the
+                // 60 s safety reconcile, plus positions while one is open (the margin
+                // uPnL is the venue's position PnL, and topics may push only on changes).
+                let reconcile = cx.now - self.account.last_account_read_at >= SAFETY_RECONCILE_MS;
+                if reconcile || cx.store.positions().iter().any(|p| p.contracts > 0.0) {
+                    self.refresh_positions(cx);
+                }
+                if reconcile {
+                    self.account.last_account_read_at = cx.now;
+                    self.refresh_balance(cx);
+                    self.refresh_orders(cx, !self.account.uta);
+                }
+            } else {
+                if self.account.degraded {
+                    self.refresh_balance(cx);
+                    self.refresh_orders(cx, false);
+                }
+                self.refresh_positions(cx);
+                if self.account.tick.is_multiple_of(2) {
+                    self.refresh_balance(cx);
+                }
+                if self.account.tick.is_multiple_of(4) {
+                    self.refresh_orders(cx, !self.account.uta);
+                }
             }
             self.account.poll = Some(cx.set_poll_timer(2_000.0));
             self.account
