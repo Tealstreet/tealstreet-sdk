@@ -481,7 +481,7 @@ impl Registry {
         let replaced = self.accounts.lock().unwrap().insert(key, account.clone());
         if let Some(replaced) = replaced {
             // A concurrent init of the same name won the race; the later build stands.
-            Self::stop(&replaced);
+            Self::stop(&replaced, "account replaced by a newer init");
         }
         Ok(account)
     }
@@ -611,6 +611,11 @@ impl Registry {
 
     /// Lets go of one holder; the last one disposes the account.
     pub fn release(&self, account: &Arc<Account>, holder: u64) {
+        self.release_for(account, holder, "account disposed");
+    }
+
+    /// `release`, recording why the account goes if this was its last holder.
+    fn release_for(&self, account: &Arc<Account>, holder: u64, reason: &str) {
         let empty = {
             let mut holders = account.holders.lock().unwrap();
             holders.by_id.remove(&holder);
@@ -618,16 +623,19 @@ impl Registry {
             holders.by_id.is_empty()
         };
         if empty {
-            self.dispose(account);
+            self.dispose_for(account, reason);
         }
     }
 
     /// With algos, their host settles chases first, then disposes the engine and signer.
-    fn stop(account: &Account) {
-        let handed = account
-            .algos
-            .as_ref()
-            .is_some_and(|algos| algos.send(crate::algos::AlgoInput::Dispose).is_ok());
+    fn stop(account: &Account, reason: &str) {
+        let handed = account.algos.as_ref().is_some_and(|algos| {
+            algos
+                .send(crate::algos::AlgoInput::Dispose {
+                    reason: reason.to_owned(),
+                })
+                .is_ok()
+        });
         if !handed {
             if let Some(link) = &account.link {
                 link.mark_unavailable();
@@ -638,6 +646,10 @@ impl Registry {
 
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
     pub fn dispose(&self, account: &Arc<Account>) {
+        self.dispose_for(account, "account disposed");
+    }
+
+    fn dispose_for(&self, account: &Arc<Account>, reason: &str) {
         let mut accounts = self.accounts.lock().unwrap();
         let key = (account.user.clone(), account.name.clone());
         if accounts
@@ -648,7 +660,7 @@ impl Registry {
         }
         drop(accounts);
         *account.holders.lock().unwrap() = Holders::default();
-        Self::stop(account);
+        Self::stop(account, reason);
     }
 
     /// Moves a closing socket's private accounts under `resume_id` for the grace
@@ -687,8 +699,9 @@ impl Registry {
             tokio::time::sleep(grace).await;
             let expired = registry.parked.lock().unwrap().remove(&resume_id);
             if let Some(expired) = expired {
+                let reason = format!("no browser for {}s", grace.as_secs());
                 for (account, park_holder) in expired.accounts {
-                    registry.release(&account, park_holder);
+                    registry.release_for(&account, park_holder, &reason);
                 }
             }
             // A resumed id stays an alias for one more grace window.
@@ -750,6 +763,148 @@ pub fn resume_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A venue that does nothing: the registry tests need only its handle.
+    struct Idle;
+    impl safe_cex_engine::Venue for Idle {
+        type Pending = ();
+        fn start(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>) {}
+        fn on_open(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::SocketId) {}
+        fn on_message(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: &str,
+        ) {
+        }
+        fn on_close(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: u16,
+        ) {
+        }
+        fn on_response(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: (),
+            _: safe_cex_engine::Response<'_>,
+        ) {
+        }
+        fn on_request_failed(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::TimerId) {}
+        fn on_command(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::Command) {
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[derive(Clone)]
+    struct NoIo;
+    impl safe_cex_native::Transport for NoIo {
+        fn connect(
+            &self,
+            _: safe_cex_engine::SocketId,
+            _: String,
+            _: safe_cex_native::Events,
+        ) -> mpsc::UnboundedSender<String> {
+            mpsc::unbounded_channel().0
+        }
+        fn request(&self, _: safe_cex_engine::HttpRequest, _: safe_cex_native::Events) {}
+    }
+
+    /// A private account held by socket 7, and the inbox its algo host would read.
+    fn held_account() -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        let engine = safe_cex_engine::test_support::seeded_engine(Idle);
+        let (handle, _task) = safe_cex_native::spawn_account(
+            safe_cex_native::Host::new(engine, NoIo),
+            ServerConfig::default(),
+        )
+        .unwrap();
+        let (algos, inbox) = mpsc::unbounded_channel();
+        let account = Arc::new(Account {
+            user: "u".into(),
+            name: "acct".into(),
+            venue: "bitget".into(),
+            handle,
+            link: None,
+            token: ProxyToken::new(),
+            fingerprint: String::new(),
+            holders: Mutex::default(),
+            algos: Some(algos),
+            algo_owner: Arc::default(),
+            placed: PlacedSymbols::default(),
+            held: Arc::default(),
+            frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
+            reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
+        });
+        account.hold(
+            7,
+            Live {
+                outbox: Arc::new(|_| true),
+                token: None,
+            },
+        );
+        (account, inbox)
+    }
+
+    fn registry() -> Arc<Registry> {
+        Arc::new(Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        ))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_parked_account_keeps_its_algos_then_stops_them_for_no_browser() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, mut algos) = held_account();
+                registry.park("r1".into(), "u", vec![(account, 7)]);
+                tokio::time::sleep(Duration::from_secs(59)).await;
+                assert!(
+                    algos.try_recv().is_err(),
+                    "chases and TWAPs run on through the window"
+                );
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                match algos.try_recv() {
+                    Ok(crate::algos::AlgoInput::Dispose { reason }) => {
+                        assert_eq!(reason, "no browser for 60s")
+                    }
+                    _ => panic!("the window expired without disposing the algos"),
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_resume_within_the_window_keeps_the_account_and_its_algos() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, mut algos) = held_account();
+                registry.park("r1".into(), "u", vec![(account, 7)]);
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let outbox: Outbox = Arc::new(|_| true);
+                let resumed = registry.resume("r1", "u", 8, ("t".into(), u64::MAX), &outbox);
+                assert_eq!(resumed.len(), 1);
+                tokio::time::sleep(Duration::from_secs(150)).await;
+                assert!(
+                    algos.try_recv().is_err(),
+                    "a resumed account is never disposed by the old window"
+                );
+            })
+            .await;
+    }
 
     #[test]
     fn signing_hands_over_to_the_newest_live_holder_then_suspends() {

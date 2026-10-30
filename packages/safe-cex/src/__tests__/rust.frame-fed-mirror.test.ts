@@ -79,10 +79,9 @@ const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
     fake.constructed += 1;
     return engine;
   };
-  setWasmEngineLoader(async () => ({
-    WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'],
-    frameFedSupported: () => supported,
-  }));
+  // A static on the class, as the wasm exports it.
+  const WasmEngine = Object.assign(construct, { frameFedSupported: () => supported });
+  setWasmEngineLoader(async () => ({ WasmEngine: WasmEngine as unknown as WasmEngineModule['WasmEngine'] }));
   return fake;
 };
 
@@ -181,7 +180,7 @@ describe('frame-fed main-thread mirror', () => {
     expect(fake.commands.map((command) => command.op)).not.toContain('placeOrders');
   });
 
-  it('builds nothing on main with a wasm that has no frameFedSupported export', async () => {
+  it('builds nothing on main with a wasm whose WasmEngine has no frameFedSupported', async () => {
     const fake = fakeEngine();
     const construct = vi.fn();
     setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
