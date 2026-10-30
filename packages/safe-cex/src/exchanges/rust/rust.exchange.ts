@@ -333,7 +333,7 @@ export class RustEngineExchange extends BaseExchange {
         await this.ensureSigningHost();
         return await signHostedHttp(
           this.name,
-          this.options,
+          this.engineOptions,
           Boolean(this.signerSetup?.primaryComplete),
           this.host!,
           request,
@@ -543,6 +543,7 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     assertBetaAccount(exchangeName, options);
+    const accountOptions = options;
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
     const lighterL1Address = deriveSignerSetupMapping(exchangeName) === 'lighter'
       && typeof options.key === 'string' ? options.key.match(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/)?.[0] : undefined;
@@ -645,7 +646,10 @@ export class RustEngineExchange extends BaseExchange {
       signerSetup?.dispose();
       throw new Error('rustCommandTimeoutMs must be a positive integer no greater than 2147482647');
     }
-    super(exchangeName, options, store);
+    // The web forwards a mirror's options to the worker that owns the engine, so a
+    // mirror keeps the account's own; its signing host uses the stripped copy.
+    super(exchangeName, options.workerMirror === true ? accountOptions : options, store);
+    this.engineOptions = options;
     this.bridgeConstruction = bridgeConstruction;
     this.signerSetup = signerSetup;
     this.asterPublicSetup = aster?.publicSetup;
@@ -716,6 +720,8 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private constructionRecord?: EngineConstruction;
+  /** Options with signing material removed: everything that builds an engine reads these. */
+  private readonly engineOptions: ExchangeOptions;
   private signerSetup?: SignerSetup;
   private delegatedIntent?: Readonly<{ remoteSigner: boolean; payloadSigner: boolean }>;
   private delegatedUsesPayloadSigner?: boolean;
@@ -846,6 +852,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
+    const options = this.engineOptions;
     if (this.setupError) throw this.setupError;
     if (this.warnIgnoredCoinbaseReadOptions) {
       this.warnIgnoredCoinbaseReadOptions = false;
@@ -854,22 +861,22 @@ export class RustEngineExchange extends BaseExchange {
         LogSeverity.Warning,
       );
     }
-    if (this.options.externalPublicData?.type === 'websocket') {
+    if (options.externalPublicData?.type === 'websocket') {
       throw new Error(
         'Rust externalPublicData websocket gateways are unsupported; use publicFeed: { mode: "shared", port } or an in-process source',
       );
     }
-    if (this.options.externalPublicData && this.options.publicFeed) {
+    if (options.externalPublicData && options.publicFeed) {
       throw new Error('externalPublicData conflicts with publicFeed policy');
     }
-    if (this.options.privateOnly && this.options.publicFeed?.mode === 'direct') {
+    if (options.privateOnly && options.publicFeed?.mode === 'direct') {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
     }
-    assertEngineAccountRouting(this.options, this.name);
+    assertEngineAccountRouting(options, this.name);
     if (
       !this.isPublicDataOnly &&
       !this.signerSetup?.primaryComplete &&
-      isKeylessRemoteSigned(this.name, this.options)
+      isKeylessRemoteSigned(this.name, options)
     ) {
       throw new ExchangeError('Delegated signing is unsupported in this build', {
         message: 'Delegated signing is unsupported in this build',
@@ -912,11 +919,11 @@ export class RustEngineExchange extends BaseExchange {
       vault,
       hyperliquidBuilder,
       enableSpotMarkets,
-    } = this.options;
+    } = options;
     const publicDataOnly = this.isPublicDataOnly;
     const transport = createEngineTransport(
       this.name,
-      this.options,
+      options,
       (transportFactory ?? synchronizedEngineTransport)(),
       this.signerSetup,
     );
@@ -930,34 +937,34 @@ export class RustEngineExchange extends BaseExchange {
         // A ValidateOnly family receives only the result, never the read key.
         ...(this.bridgeConstruction.readCredentials === 'validateOnly'
           ? (() => {
-              const valid = readCredentialsValidity(this.options);
+              const valid = readCredentialsValidity(options);
               return valid === undefined ? {} : { readCredentialsValid: valid };
             })()
-          : this.options.secondary_key
+          : options.secondary_key
             ? {
                 readCredentials: {
-                  key: this.options.secondary_key,
-                  secret: this.options.secondary_secret,
-                  passphrase: this.options.secondary_passphrase ?? passphrase,
+                  key: options.secondary_key,
+                  secret: options.secondary_secret,
+                  passphrase: options.secondary_passphrase ?? passphrase,
                 },
               }
             : {}),
         omniKeySeed,
         testnet: Boolean(testnet),
-        bybitSiteId: this.options.bybitSiteId,
-        brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy),
+        bybitSiteId: options.bybitSiteId,
+        brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(options.tealstreetProxy),
         publicDataOnly: Boolean(publicDataOnly),
         publicMode: {
-          requested: this.options.publicDataOnly ?? null,
-          remoteSigner: this.delegatedIntent?.remoteSigner ?? Boolean(this.options.remoteSigner),
-          payloadSigner: this.delegatedIntent?.payloadSigner ?? Boolean(this.options.payloadSigner),
-          apiKeyIndexPresent: Boolean(this.options.apiKeyIndex),
+          requested: options.publicDataOnly ?? null,
+          remoteSigner: this.delegatedIntent?.remoteSigner ?? Boolean(options.remoteSigner),
+          payloadSigner: this.delegatedIntent?.payloadSigner ?? Boolean(options.payloadSigner),
+          apiKeyIndexPresent: Boolean(options.apiKeyIndex),
         },
         remoteSigning:
-          this.delegatedIntent !== undefined || Boolean(this.options.remoteSigner || this.options.payloadSigner),
-        extra: { kucoinBroker: this.options.extra?.kucoinBroker },
+          this.delegatedIntent !== undefined || Boolean(options.remoteSigner || options.payloadSigner),
+        extra: { kucoinBroker: options.extra?.kucoinBroker },
         hyrotrader: {
-          mode: this.options.extra?.hyrotraderMode,
+          mode: options.extra?.hyrotraderMode,
           production: {
             rest: HYROTRADER_PROD_URL,
             publicWs: HYROTRADER_PROD_WS_URL.public.linear,
@@ -969,40 +976,40 @@ export class RustEngineExchange extends BaseExchange {
             privateWs: HYROTRADER_SIMULATOR_WS_URL.private,
           },
         },
-        recvWindow: this.options.extra?.recvWindow,
+        recvWindow: options.extra?.recvWindow,
         applicationId,
-        subaccount: this.options.subaccount,
-        apiKeyIndex: parseLighterApiKeyIndex(this.options.apiKeyIndex)?.toString() ?? this.options.apiKeyIndex,
+        subaccount: options.subaccount,
+        apiKeyIndex: parseLighterApiKeyIndex(options.apiKeyIndex)?.toString() ?? options.apiKeyIndex,
         lighterL1Address: this.lighterL1Address,
-        lighterRemoteSigner: Boolean(this.options.remoteSigner),
-        lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)
+        lighterRemoteSigner: Boolean(options.remoteSigner),
+        lighterSignerProvider: (options.extra as { lighterSignerProvider?: string } | undefined)
           ?.lighterSignerProvider,
-        lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
-        lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
+        lighterIntegratorAccountIndex: options.extra?.lighterIntegratorAccountIndex,
+        lighterStopSlippagePct: options.extra?.lighterStopSlippagePct,
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
-        enableInverseMarkets: Boolean(this.options.enableInverseMarkets && !this.options.externalPublicData),
-        enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
-        grvtTradingAccountId: this.options.grvtTradingAccountId,
-        grvtSignerAddress: this.options.grvtSignerAddress,
-        polymarket: this.options.polymarket,
+        enableInverseMarkets: Boolean(options.enableInverseMarkets && !options.externalPublicData),
+        enableOptionMarkets: Boolean(options.enableOptionMarkets),
+        grvtTradingAccountId: options.grvtTradingAccountId,
+        grvtSignerAddress: options.grvtSignerAddress,
+        polymarket: options.polymarket,
         paradexAddress,
         subkeyAddress,
-        payloadSigner: this.delegatedUsesPayloadSigner ?? Boolean(this.options.payloadSigner),
+        payloadSigner: this.delegatedUsesPayloadSigner ?? Boolean(options.payloadSigner),
         // Key material reaches the provider only through signer setup.
         asterdex: {
           apiVersion:
             this.asterPublicSetup?.apiVersion ??
-            (['v1', 'v3'].includes(this.options.extra?.asterdexApiVersion ?? '')
-              ? this.options.extra?.asterdexApiVersion
+            (['v1', 'v3'].includes(options.extra?.asterdexApiVersion ?? '')
+              ? options.extra?.asterdexApiVersion
               : undefined),
-          userAddress: this.options.auth?.userAddress,
-          signerAddress: this.asterPublicSetup?.signerAddress ?? this.options.auth?.signerAddress,
+          userAddress: options.auth?.userAddress,
+          signerAddress: this.asterPublicSetup?.signerAddress ?? options.auth?.signerAddress,
           readSignerAddress: this.asterPublicSetup?.readSignerAddress,
-          builderAddress: this.options.extra?.asterBuilderAddress,
-          builderFeeRateMaker: this.options.extra?.asterBuilderFeeRateMaker,
-          builderFeeRateTaker: this.options.extra?.asterBuilderFeeRateTaker,
+          builderAddress: options.extra?.asterBuilderAddress,
+          builderFeeRateMaker: options.extra?.asterBuilderFeeRateMaker,
+          builderFeeRateTaker: options.extra?.asterBuilderFeeRateTaker,
         },
         ...transport.engineOptions,
         publicFeed: { mode: this.publicFeedMode },

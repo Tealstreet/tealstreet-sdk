@@ -387,6 +387,12 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
 
+A `workerMirror` instance keeps the account's own options, credentials
+included, because the web starts the worker from
+`{ ...exchange.options, workerMirror: undefined }`; its signing host and any
+engine it builds read the stripped `engineOptions`. Stripping the mirror's
+options left the worker keyless: a public-only engine with no private event.
+
 A bridged mirror never builds an engine for capabilities. In frame mode it
 adopts the record a snapshot frame carries; in store-payload mode (and from
 `loadCapabilities`) it asks the worker (`fetchEngineCapabilities`) once the
