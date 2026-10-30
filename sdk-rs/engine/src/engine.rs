@@ -1681,6 +1681,8 @@ struct IoCore {
     frame_fed: bool,
     /// Frame-fed: settings this engine confirmed, kept over the source's frames.
     setting_holds: crate::setting_holds::SettingHolds,
+    /// Frame-fed, during `on_frame_ingested`: see `Cx::source_orders_cover`.
+    pub(crate) source_orders_cover: Option<f64>,
     /// Attempts a Session resume selected with no delivery in this event: the
     /// resume is their issue custody until the outer Plan flush. Reserved at
     /// park, so a resume never allocates.
@@ -1856,6 +1858,7 @@ impl Default for IoCore {
             private_feed_policy: Default::default(),
             frame_fed: false,
             setting_holds: Default::default(),
+            source_orders_cover: None,
             #[cfg(feature = "http-plans")]
             session_resumed: Vec::new(),
             signing: Default::default(),
@@ -2239,6 +2242,13 @@ impl<P> Cx<'_, P> {
     /// polls, no post-write reads (account state arrives as frames).
     pub fn frame_fed(&self) -> bool {
         self.io.core.frame_fed
+    }
+
+    /// Frame-fed, in `on_frame_ingested` for a frame carrying ORDERS: the host
+    /// time up to which those orders speak (written, less the fence grace). A
+    /// write sent before it that they do not show never landed.
+    pub fn source_orders_cover(&self) -> Option<f64> {
+        self.io.core.source_orders_cover
     }
 
     /// Frame-fed: keep a settings write this engine confirmed over the data
@@ -4124,25 +4134,28 @@ impl<V: Venue> Engine<V> {
             self.venue.apply_venue_state(&mut cx, state);
             cx.io.core.setting_holds.dispute_venue_keys();
         }
+        // The source's orders are the reconcile, but only for a write sent well
+        // before the source wrote them: a frame written right after a lost
+        // write can predate the venue showing it, and acting then would let a
+        // retry place twice. On this host's clock when the offset is known;
+        // otherwise a grace long enough to absorb the unmeasured skew.
+        let cover = applied.orders.then(|| {
+            let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
+            match self.source_clock_offset {
+                Some(offset) => stamp - offset - crate::frame_fed::FENCE_GRACE_MS,
+                None => stamp - crate::frame_fed::UNSYNCED_FENCE_GRACE_MS,
+            }
+        });
+        cx.io.core.source_orders_cover = cover;
         self.venue.on_frame_ingested(&mut cx);
-        if applied.orders {
-            // The source's orders are the reconcile, but only for a fence raised
-            // well before the source wrote them: a frame written right after a
-            // lost write can predate the venue showing it, and lifting then
-            // would let a retry place twice.
+        cx.io.core.source_orders_cover = None;
+        if let Some(_cover) = cover {
             #[cfg(feature = "order-locks")]
             {
-                let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
-                // On this host's clock when the offset is known; otherwise a
-                // grace long enough to absorb the unmeasured skew.
-                let (written, grace) = match self.source_clock_offset {
-                    Some(offset) => (stamp - offset, crate::frame_fed::FENCE_GRACE_MS),
-                    None => (stamp, crate::frame_fed::UNSYNCED_FENCE_GRACE_MS),
-                };
                 let lifted = self
                     .fence_marks
                     .iter()
-                    .filter(|(_, at)| *at + grace <= written)
+                    .filter(|(_, at)| *at <= _cover)
                     .map(|(token, _)| *token)
                     .max();
                 if let Some(token) = lifted {
