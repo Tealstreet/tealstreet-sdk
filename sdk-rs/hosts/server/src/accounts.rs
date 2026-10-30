@@ -190,6 +190,18 @@ impl Account {
         self.link.is_none()
     }
 
+    /// Live (not parked) sockets holding this account, other than `holder`.
+    fn live_holders_besides(&self, holder: u64) -> Vec<u64> {
+        self.holders
+            .lock()
+            .unwrap()
+            .by_id
+            .iter()
+            .filter(|(id, live)| **id != holder && live.is_some())
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     /// Signing and the proxy token follow `id` (the newest init or resume).
     fn sign_through(&self, holders: &mut Holders, id: u64, live: &Live) {
         holders.signing = Some(id);
@@ -512,16 +524,9 @@ impl Registry {
         if account.fingerprint == fingerprint && !account.is_public() {
             return None;
         }
-        let others: Vec<u64> = account
-            .holders
-            .lock()
-            .unwrap()
-            .by_id
-            .iter()
-            .filter(|(id, live)| **id != holder && live.is_some())
-            .map(|(id, _)| *id)
-            .collect();
-        if others.is_empty() {
+        let others = account.live_holders_besides(holder);
+        // Joins the live account instead (see `obtain`).
+        if others.is_empty() || same_but_builder(&account.fingerprint, &fingerprint) {
             return None;
         }
         let differs = differing_fields(&account.fingerprint, &fingerprint);
@@ -559,6 +564,19 @@ impl Registry {
             }
             if let Some(refusal) = self.rebuild_refusal(user, init, public_only, holder) {
                 return Err(refusal);
+            }
+            // The Hyperliquid builder is per device (browser storage): a second
+            // client differing only in it trades with the live holder's builder.
+            if !public_only
+                && !account.live_holders_besides(holder).is_empty()
+                && same_but_builder(&account.fingerprint, &fingerprint)
+            {
+                Log::info(&format!(
+                    "init {} from socket {holder} joins the live account; only its hyperliquidBuilder differs",
+                    init.account_name
+                ));
+                account.hold(holder, Live { outbox, token });
+                return Ok(account);
             }
             self.dispose(&account);
         }
@@ -944,6 +962,12 @@ impl Registry {
             })
             .collect()
     }
+}
+
+/// Two fingerprints that differ in nothing but the Hyperliquid builder.
+fn same_but_builder(old: &str, new: &str) -> bool {
+    let fields = differing_fields(old, new);
+    !fields.is_empty() && fields.iter().all(|field| field == "hyperliquidBuilder")
 }
 
 /// The top-level init fields (names only) on which two fingerprints differ.
@@ -1546,6 +1570,100 @@ pub(crate) mod tests {
             .fingerprint(),
             hyperliquid.fingerprint()
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_second_device_differing_only_in_the_builder_joins_a_live_hyperliquid_account() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let builder = |fee: f64| {
+                    Some(crate::envelope::HyperliquidBuilder {
+                        address: format!("0x{}", "4".repeat(40)),
+                        fee_tenths_bps: fee,
+                    })
+                };
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "hyperliquid".into(),
+                    key: "0xabc".into(),
+                    hyperliquid_builder: builder(10.0),
+                    ..InitPayload::default()
+                };
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
+                register(&registry, &account);
+                // Another device still on the default builder: joins, never refused or rebuilt.
+                let default_builder = InitPayload {
+                    hyperliquid_builder: None,
+                    ..init.clone()
+                };
+                assert_ne!(default_builder.fingerprint(), init.fingerprint());
+                assert!(
+                    registry
+                        .rebuild_refusal("u", &default_builder, false, 8)
+                        .is_none()
+                );
+                let joined = registry
+                    .obtain("u", &default_builder, false, 8, None, Arc::new(|_| true))
+                    .await
+                    .unwrap();
+                assert!(Arc::ptr_eq(&joined, &account), "the live account, shared");
+                assert!(algos.try_recv().is_err(), "never disposed");
+                assert_eq!(signing(&account), Some(8));
+                // Anything else that differs is still refused while a live holder exists.
+                let spot = InitPayload {
+                    enable_spot_markets: Some(true),
+                    ..default_builder.clone()
+                };
+                assert!(registry.rebuild_refusal("u", &spot, false, 9).is_some());
+                assert!(
+                    registry
+                        .rebuild_refusal(
+                            "u",
+                            &InitPayload {
+                                enable_spot_markets: Some(true),
+                                ..init.clone()
+                            },
+                            false,
+                            9
+                        )
+                        .is_some()
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_sole_holder_changing_its_builder_rebuilds() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "hyperliquid".into(),
+                    key: "0xabc".into(),
+                    ..InitPayload::default()
+                };
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let (account, _algos) = held_account_with(Some(link), init.fingerprint());
+                register(&registry, &account);
+                let assigned = InitPayload {
+                    hyperliquid_builder: Some(crate::envelope::HyperliquidBuilder {
+                        address: format!("0x{}", "4".repeat(40)),
+                        fee_tenths_bps: 10.0,
+                    }),
+                    ..init.clone()
+                };
+                // Holder 7 is the only live holder: nothing to join, so its own change is no join.
+                assert!(account.live_holders_besides(7).is_empty());
+                assert!(registry.rebuild_refusal("u", &assigned, false, 7).is_none());
+                assert!(same_but_builder(
+                    &account.fingerprint,
+                    &assigned.fingerprint()
+                ));
+            })
+            .await;
     }
 
     #[tokio::test(start_paused = true)]
