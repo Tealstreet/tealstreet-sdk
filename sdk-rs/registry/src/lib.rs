@@ -1295,6 +1295,7 @@ fn read_key_options(
 /// startup honours `Cx::frame_fed` and their write paths read only the store
 /// and the VENUE_STATE they export. Others are refused at construction.
 pub const FRAME_FED_VENUES: &[&str] = &[
+    "blofin",
     "bybit",
     "bybitinverse",
     "bybitspot",
