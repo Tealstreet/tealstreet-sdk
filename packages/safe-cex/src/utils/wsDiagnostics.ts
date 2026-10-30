@@ -34,10 +34,33 @@ const SECRET_KEYS = new Set([
   'proxy_token',
 ]);
 
-const JSON_SECRET_KEY_RE =
-  /("(?:apiKey|api_key|key|secret|passphrase|sign|signature|wsAuthSignature|jwt|token|sessionToken|session|authKey|listenKey|password|sig|apiSecret|api_secret|secretKey|secret_key|privateKey|private_key|accessKey|access_key|authorization|proxyToken|proxy_token)"\s*:\s*)("(?:\\.|[^"])*"|[^,}\]\s]+)/gi;
-const QUERY_SECRET_KEY_RE =
-  /((?:^|[?&\s])(?:apiKey|api_key|key|secret|passphrase|sign|signature|wsAuthSignature|jwt|token|sessionToken|session|authKey|listenKey|password|sig|apiSecret|api_secret|secretKey|secret_key|privateKey|private_key|accessKey|access_key|authorization|proxyToken|proxy_token)=)([^&\s]+)/gi;
+/** Any key naming one of these is a secret, so a venue's new spelling (`jwt_token`, `refreshToken`) is covered. */
+const SECRET_KEY_PARTS = [
+  'secret',
+  'token',
+  'jwt',
+  'signature',
+  'passphrase',
+  'password',
+  'apikey',
+  'privatekey',
+  'accesskey',
+  'listenkey',
+  'authkey',
+  'authorization',
+];
+
+const isSecretKey = (key: string): boolean => {
+  const normalized = key.replace(/[^a-z0-9_]/gi, '').toLowerCase();
+  if (SECRET_KEYS.has(normalized) || normalized === 'auth') return true;
+  const compact = normalized.replace(/_/g, '');
+  return SECRET_KEY_PARTS.some((part) => compact.includes(part));
+};
+
+const JSON_KEY_VALUE_RE = /("((?:\\.|[^"\\])*)"\s*:\s*)("(?:\\.|[^"])*"|[^,}\]\s]+)/g;
+const QUERY_KEY_VALUE_RE = /((?:^|[?&\s])([A-Za-z0-9_.-]+)=)([^&\s]+)/g;
+/** A JWT, whatever key or position carries it. */
+const JWT_RE = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 const AUTH_OPERATION_RE = /auth|login|signature|jwt/i;
 
 export const setWsDiagnosticsEnabled = (enabled: boolean): void => {
@@ -130,7 +153,7 @@ const redactJsonValue = (value: unknown, depth = 0, redactStrings = false): unkn
   const authScope = redactStrings || isAuthOperationObject(value as Record<string, unknown>);
   for (const [key, child] of Object.entries(value)) {
     const normalizedKey = normalizeSecretKey(key);
-    result[key] = SECRET_KEYS.has(normalizedKey)
+    result[key] = isSecretKey(key)
       ? REDACTED
       : redactJsonValue(child, depth + 1, authScope && (normalizedKey === 'args' || normalizedKey === 'params'));
   }
@@ -155,8 +178,8 @@ export const redactWsDiagnosticPayload = (message: string): string => {
   const source = structured ?? message;
 
   return source
-    .replace(JSON_SECRET_KEY_RE, (_match, prefix) => `${prefix}"${REDACTED}"`)
-    .replace(QUERY_SECRET_KEY_RE, (_match, prefix) => `${prefix}${REDACTED}`)
+    .replace(JSON_KEY_VALUE_RE, (match, prefix, key) => (isSecretKey(key) ? `${prefix}"${REDACTED}"` : match))
+    .replace(QUERY_KEY_VALUE_RE, (match, prefix, key) => (isSecretKey(key) ? `${prefix}${REDACTED}` : match))
+    .replace(JWT_RE, REDACTED)
     .replace(HEX_SECRET_RE, shortenHexSecret);
 };
-

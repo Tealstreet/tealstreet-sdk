@@ -12,6 +12,8 @@ import {
 export type RequestsLogEvent = 'grafana-http-request' | 'grafana-http-response' | 'grafana-pws' | 'grafana-pws-sub';
 
 const BODY_CHARS = 4096;
+/** Enough of a body to redact as whole JSON before the log entry is capped. */
+const OBSERVED_CHARS = BODY_CHARS * 4;
 const text = new TextDecoder();
 
 const capped = (value: string) =>
@@ -20,14 +22,14 @@ const capped = (value: string) =>
 /** Never headers: they carry keys, signatures, passphrases and proxy tokens. */
 const describe = (request: HttpPacket) => {
   const url = redactWsDiagnosticPayload(request.url);
-  const body = typeof request.body === 'string' ? redactWsDiagnosticPayload(capped(request.body)) : undefined;
+  const body = typeof request.body === 'string' ? capped(redactWsDiagnosticPayload(request.body)) : undefined;
   return { method: request.method.toUpperCase(), url, body };
 };
 
 /** The response with its body observed, so the log entry is written once the body completes. */
 const observed = (response: HttpResponse, done: (body: string) => void): HttpResponse => {
   if (response.body instanceof Uint8Array) {
-    done(text.decode(response.body.subarray(0, BODY_CHARS * 4)));
+    done(text.decode(response.body.subarray(0, OBSERVED_CHARS)));
     return response;
   }
   const chunks = response.body;
@@ -37,7 +39,7 @@ const observed = (response: HttpResponse, done: (body: string) => void): HttpRes
       let seen = '';
       try {
         for await (const chunk of chunks) {
-          if (seen.length < BODY_CHARS) seen += text.decode(chunk, { stream: true });
+          if (seen.length < OBSERVED_CHARS) seen += text.decode(chunk, { stream: true });
           yield chunk;
         }
       } finally {
@@ -67,7 +69,8 @@ export const withRequestsLog = (
         const summary = {
           status: response.status,
           ms: Date.now() - started,
-          body: redactWsDiagnosticPayload(capped(raw)),
+          // Redact the whole body first: a capped one is no longer JSON.
+          body: capped(redactWsDiagnosticPayload(raw)),
         };
         emit('grafana-http-response', `Response ${method} ${url} ${response.status} ${JSON.stringify(summary)}`);
       }),
