@@ -955,9 +955,23 @@ async fn pump(
     let mut health_tick = tokio::time::interval(SOCKET_HEALTH_EVERY);
     let mut sent_health = (Value::Null, std::time::Instant::now());
     let report_health = |sent: &mut (Value, std::time::Instant)| {
-        let health = socket_health(handle.socket_health().summary(now_ms()));
+        let sockets = handle.socket_health();
+        let health = socket_health(sockets.summary(now_ms()));
         if !socket_health_due(&sent.0, &health, sent.1.elapsed()) {
             return true;
+        }
+        // The host tracker's own view, on every state change: whether a private
+        // socket was ever seen opening and taking a frame.
+        if socket_health_due(&sent.0, &health, std::time::Duration::ZERO) {
+            Log::info(&format!(
+                "{name} socketHealth privateInitialized={} privateHealthy={} publicInitialized={} tracker public={:?} business={:?} private={:?}",
+                health["privateInitialized"],
+                health["privateHealthy"],
+                health["publicInitialized"],
+                sockets.public,
+                sockets.business,
+                sockets.private,
+            ));
         }
         *sent = (health.clone(), std::time::Instant::now());
         out.send(envelope::msg(
