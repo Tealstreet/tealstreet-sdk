@@ -128,7 +128,7 @@ export const tealstreetTransport: TransportProvider = {
         // semantics. Breakout DXtrade and MEXC WEB/APP sessions own Authorization; MEXC
         // OPEN-API auth rides on ApiKey/Request-Time/Signature headers.
         // The proxy will check Tealstreet-Authorization first, then fall back to Authorization
-        markRestProxyHeader(request, 'present');
+        markRestProxyHeader(request);
         request.headers[proxyAuthorizationHeader(exchange)] = `Bearer ${token}`;
 
         // Add browser-like headers for CLI requests to proxy
