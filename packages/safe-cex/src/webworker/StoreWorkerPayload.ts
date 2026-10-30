@@ -10,6 +10,7 @@ export type StoreWorkerIncomingOp =
   | 'reinit'
   | 'deactivate'
   | 'sayHi'
+  | 'forwardFrames'
   // Store
   | 'store'
   | 'merge-loaded'
