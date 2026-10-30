@@ -905,6 +905,9 @@ export class RustEngineExchange extends BaseExchange {
 
   private startFrameFed = async (): Promise<boolean> => {
     try {
+      // Asked before any engine exists: a family without it builds nothing on main.
+      const wasm = await loadWasmEngine(this.name);
+      if (wasm.frameFedSupported?.(this.name) !== true || this.isDisposed) return false;
       await this.ensureSigningHost();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
