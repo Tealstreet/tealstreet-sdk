@@ -225,10 +225,14 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
 
 export type WasmEngineModule = {
   resolveConstruction?: (venue: string, optionsJson: string) => string;
-  /** Whether `frameFed: true` construction is implemented for this venue's family. */
-  frameFedSupported?: (venue: string) => boolean;
-  WasmEngine: new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
+  WasmEngine: (new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike) & {
+    /** Whether `frameFed: true` construction is implemented for this venue's family. */
+    frameFedSupported?: (venue: string) => boolean;
+  };
 };
+
+const frameFedSupported = (wasm: WasmEngineModule, venue: string): boolean =>
+  wasm.WasmEngine.frameFedSupported?.(venue) === true;
 
 /** Preserve native constructor classification at the same boundary as command failures. */
 type SignerSetup = LocalSignerSetup | DelegatedSignerSetup;
@@ -907,7 +911,7 @@ export class RustEngineExchange extends BaseExchange {
     try {
       // Asked before any engine exists: a family without it builds nothing on main.
       const wasm = await loadWasmEngine(this.name);
-      if (wasm.frameFedSupported?.(this.name) !== true || this.isDisposed) return false;
+      if (!frameFedSupported(wasm, this.name) || this.isDisposed) return false;
       await this.ensureSigningHost();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -1038,7 +1042,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isDisposed) throw new Error('Exchange disposed during startup');
     const { WasmEngine } = wasm;
     // Decided with the build, so a signing host built first is the same frame-fed engine.
-    this.frameFedEngine = this.isWorkerMirror && !this.isPublicDataOnly && wasm.frameFedSupported?.(this.name) === true;
+    this.frameFedEngine = this.isWorkerMirror && !this.isPublicDataOnly && frameFedSupported(wasm, this.name);
     const {
       key,
       secret,

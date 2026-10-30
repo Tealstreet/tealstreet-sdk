@@ -501,7 +501,7 @@ describe('Rust frame recovery callers', () => {
     expect(fills.map((fill) => fill.orderId)).toEqual(['order-1', 'order-1']);
     expect(accountAtFill).toEqual(Array(2).fill({ total: 42, orderId: 'order-1' }));
     expect(store.positions[0].contracts).toBe(0.5);
-    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes);
+    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes, false);
     expect(bytes.byteLength).toBe(0);
     expect(new Frame(forwarded!).balance()?.total).toBe(42);
     expect(snapshot).not.toHaveBeenCalled();
@@ -521,7 +521,7 @@ describe('Rust frame recovery callers', () => {
     receive(exchange, bytes);
     expect(shared.validateMarkets).not.toHaveBeenCalled();
     expect(shared.send).not.toHaveBeenCalled();
-    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes);
+    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes, false);
     expect(exchange.isDisposed).toBe(false);
     exchange.dispose();
   });
@@ -567,7 +567,7 @@ describe('Rust frame recovery callers', () => {
     expect(() => receive(exchange, bytes)).not.toThrow();
     expect(fills.map((fill) => fill.orderId)).toEqual(['order-1', 'order-1']);
     expect(accountAtFill).toEqual(Array(2).fill({ disposed: false, total: 42, orderId: 'order-1', contracts: 0.5 }));
-    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes);
+    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes, false);
     expect(shared.validateMarkets).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ symbol: 'BTCUSDT' })]);
     expect(error).toHaveBeenCalledTimes(1);
     expect(errors).toEqual([{ message: failure.message, disposed: false }]);
