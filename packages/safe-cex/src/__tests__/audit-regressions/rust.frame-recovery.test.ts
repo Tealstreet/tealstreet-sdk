@@ -509,6 +509,23 @@ describe('Rust frame recovery callers', () => {
     exchange.dispose();
   });
 
+  it('keeps book listeners fed when the frame consumer is a frame-fed page engine', () => {
+    const store = new DefaultStore();
+    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
+    installHost(exchange, vi.fn());
+    const ordinary = vi.fn();
+    const internal = exchange as unknown as { bookListeners: Map<string, Map<number, () => void>> };
+    internal.bookListeners.set('BTCUSDT', new Map([[1, ordinary]]));
+    // forwardFrames: the page engine ingests account sections only.
+    exchange.framesCarryMarketData = false;
+    const forward = vi.fn();
+    exchange.onFrame = forward;
+    receive(exchange, fixture());
+    expect(ordinary).toHaveBeenCalledTimes(1);
+    expect(forward).toHaveBeenCalledTimes(1);
+    exchange.dispose();
+  });
+
   it('does not validate a shared catalog from JS loaded flags before native metadata is ready', () => {
     const store = new DefaultStore();
     store.update({ loaded: { ...store.loaded, markets: true } });
