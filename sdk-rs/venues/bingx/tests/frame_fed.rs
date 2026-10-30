@@ -314,3 +314,159 @@ fn a_source_frame_with_the_new_mode_releases_the_hold() {
     h.collect();
     assert!(!h.engine.store().hedged());
 }
+
+const SOURCE_REPLIES: [(&str, &str); 8] = [
+    ("/quote/contracts", MARKETS),
+    (
+        "/quote/ticker",
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#,
+    ),
+    (
+        "/quote/premiumIndex",
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#,
+    ),
+    ("/user/auth/userDataStream", r#"{"listenKey":"key-one"}"#),
+    (
+        "/positionSide/dual",
+        r#"{"code":0,"data":{"dualSidePosition":true}}"#,
+    ),
+    (
+        "/user/positions",
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"0.1","positionSide":"LONG","avgPrice":"60000","unrealizedProfit":"10","leverage":20,"isolated":false,"liquidationPrice":50000,"initialMargin":"300"}]}"#,
+    ),
+    (
+        "/user/balance",
+        r#"{"code":0,"data":[{"asset":"USDT","balance":"1000","availableMargin":"950","usedMargin":"50","unrealizedProfit":"10"}]}"#,
+    ),
+    (
+        "/trade/openOrders",
+        r#"{"code":0,"data":{"orders":[{"orderId":8389765519993909000,"symbol":"BTC-USDT","type":"LIMIT","side":"BUY","status":"NEW","origQty":"0.2","executedQty":"0","price":"59000","positionSide":"LONG","timeInForce":"GTC","clientOrderId":"client"}]}}"#,
+    ),
+];
+
+/// A real keyed, hedged BingX source, loaded through its own startup reads.
+fn loaded_source(now: f64) -> (Engine<Bingx>, safe_cex_engine::SocketId) {
+    let mut source = support::engine(support::Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Default::default()
+    });
+    source.start(now);
+    let mut private = None;
+    let mut opened = false;
+    loop {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut source, now);
+        let mut answered = false;
+        for action in actions {
+            match action {
+                Action::Http(request) => {
+                    let (_, body) = SOURCE_REPLIES
+                        .iter()
+                        .find(|(path, _)| request.url.contains(path))
+                        .unwrap_or_else(|| panic!("unscripted source read {}", request.url));
+                    source.handle(
+                        now,
+                        Event::HttpResponse {
+                            request: request.id,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                    answered = true;
+                }
+                Action::WsConnect { socket, url, .. } if url.contains("listenKey=") => {
+                    private = Some(socket)
+                }
+                _ => {}
+            }
+        }
+        if answered {
+            continue;
+        }
+        match private {
+            Some(socket) if !opened => {
+                source.handle(now, Event::WsOpened { socket });
+                opened = true;
+            }
+            _ => break,
+        }
+    }
+    assert!(source.store().hedged() && source.store().order(ORDER_ID).is_some());
+    (source, private.expect("private socket"))
+}
+
+#[test]
+fn a_real_sources_frames_drive_one_request_writes() {
+    let mut h = Harness::frame_fed();
+    h.load();
+    let (mut source, private) = loaded_source(h.now);
+    let snapshot = source.snapshot_frame(h.now).to_vec();
+    h.engine.apply_frame(h.now, &snapshot, true).unwrap();
+    h.collect();
+    assert!(
+        h.requests.is_empty(),
+        "ingest reads nothing: {:?}",
+        h.paths()
+    );
+    assert!(h.engine.store().hedged());
+
+    // A stream-only order reaches the frame-fed engine as a delta frame.
+    let _ = source.take_frame(h.now);
+    h.now += 1.;
+    source.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"e":"ORDER_TRADE_UPDATE","E":1001,"o":{"i":77,"s":"BTC-USDT","o":"LIMIT","S":"SELL","X":"NEW","q":"0.1","z":"0","p":"61000","ps":"SHORT","f":"GTC"}}"#,
+        },
+    );
+    let delta = source.take_frame(h.now).expect("delta").to_vec();
+    h.engine.apply_frame(h.now, &delta, false).unwrap();
+    h.collect();
+    assert!(h.engine.store().order("77").is_some());
+
+    let sent = placed_side(&mut h, 30);
+    assert!(sent.contains("LONG") && !sent.contains("BOTH"), "{sent}");
+
+    for (command, id) in [(31, ORDER_ID), (32, "77")] {
+        h.now += 1.;
+        h.event(Event::Command(Command::AmendOrder {
+            command,
+            id: id.into(),
+            price: None,
+            amount: Some(0.3),
+        }));
+        assert!(h.failed.is_empty(), "{:?}", h.failed);
+        assert_eq!(h.requests.len(), 1, "{:?}", h.paths());
+        let write = h.take("/trade/amend");
+        let sent = format!("{} {}", write.url, write.body.unwrap_or_default());
+        assert!(sent.contains(id), "{sent}");
+        let body = format!(
+            r#"{{"code":0,"data":{{"orderId":"{id}","symbol":"BTC-USDT","quantity":"0.3"}}}}"#
+        );
+        h.event(Event::HttpResponse {
+            request: write.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: &body,
+            },
+        });
+        assert!(
+            h.requests.is_empty(),
+            "no read after the amend: {:?}",
+            h.paths()
+        );
+    }
+
+    h.now += 1.;
+    h.event(Event::Command(Command::CancelOrders {
+        command: 33,
+        ids: vec![ORDER_ID.into()],
+    }));
+    assert_eq!(h.requests.len(), 1, "{:?}", h.paths());
+    assert!(h.requests[0].url.contains(ORDER_ID), "{:?}", h.paths());
+}
