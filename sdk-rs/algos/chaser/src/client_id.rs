@@ -23,9 +23,8 @@ impl ClientIdMinter {
     fn hex(&self) -> String {
         let sequence = self.sequence.get() + 1;
         self.sequence.set(sequence);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
+        // The executor's wall clock: `SystemTime` panics in the wasm worker.
+        let nanos = (safe_cex_algos::executor::now_ms() * 1e6) as u128;
         let high = self.seed.hash_one((sequence, nanos, 0u8));
         let low = self.seed.hash_one((sequence, nanos, 1u8));
         format!("{high:016x}{low:016x}")
