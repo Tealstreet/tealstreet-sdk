@@ -1,24 +1,91 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeName, ExchangeOptions, RemoteSignerRequest } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { createHmac } from 'node:crypto';
 import { ethers } from 'ethers';
-import { afterEach, beforeAll, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { BETA_VENUES } from '../../exchanges/rust/betaVenues';
+import rules from '../../exchanges/rust/construction-rules.json';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
-// The COSIGNED gate for page signing: the page engine the web controller builds
-// (a worker mirror that turns frame-fed) answers the server's sign-reqs itself.
+// The COSIGNED gate for page signing (NX `pageSigns`): every frame-fed family's
+// page engine, built as the web controller builds it, answers the sign-reqs its
+// native server sends. A family joining FRAME_FED_VENUES without a case here fails.
 const STAMP = 1_700_000_000_123;
-const BYBIT_KEY = 'page-primary-key';
-const BYBIT_SECRET = 'page-primary-secret';
-const HL_ACCOUNT = '0x1111111111111111111111111111111111111111';
-const HL_AGENT_KEY = '0x0123456789012345678901234567890123456789012345678901234567890123';
+const KEY = 'page-primary-key';
+const MAC_KEY = 'page-primary-mac-key';
+const PASSPHRASE = 'page-passphrase';
+const WALLET = '0x1111111111111111111111111111111111111111';
+const AGENT_KEY = '0x0123456789012345678901234567890123456789012345678901234567890123';
 const live: RustEngineExchange[] = [];
 
-beforeAll(() => setWasmEngineLoader(loadNodeEngine));
+type Rules = { venues: Record<string, { remoteSigning?: { signatureEncoding?: string }; signerSetup?: { primary?: { passphrase?: string } } }> };
+const venueRules = (name: string) => (rules as Rules).venues[name] ?? {};
+
+interface SigningCase {
+  options: Partial<ExchangeOptions>;
+  /** Sign-reqs as the native server's remote signer sends them, with the expected answer. */
+  requests: { outputFormat: string; toSign: string; expected: string }[];
+}
+
+/** HMAC families: every REST and socket signature is one ws-auth `toSign` in the venue's declared encoding. */
+const hmac = (name: string): SigningCase => {
+  const encoding = venueRules(name).remoteSigning?.signatureEncoding ?? 'hex';
+  const toSign = `${STAMP}GET/private/audit?symbol=BTCUSDT`;
+  const bytes = createHmac('sha256', MAC_KEY).update(toSign).digest();
+  const expected =
+    encoding === 'base64'
+      ? bytes.toString('base64')
+      : encoding === 'hex-base64'
+        ? Buffer.from(bytes.toString('hex')).toString('base64')
+        : bytes.toString('hex');
+  const passphrase = venueRules(name).signerSetup?.primary?.passphrase === 'requiredForPrivate';
+  return {
+    options: { key: KEY, secret: MAC_KEY, ...(passphrase ? { passphrase: PASSPHRASE } : {}) },
+    requests: [{ outputFormat: encoding, toSign, expected }],
+  };
+};
+
+/** Wallet families: startup binds the agent address before any L1 action is signed. */
+const wallet = (): SigningCase => ({
+  options: { key: WALLET, secret: AGENT_KEY },
+  requests: [
+    { outputFormat: 'hyperliquid-address', toSign: WALLET, expected: new ethers.Wallet(AGENT_KEY).address.toLowerCase() },
+  ],
+});
+
+const CASES: Partial<Record<ExchangeName, () => SigningCase>> = {
+  bybit: () => hmac('bybit'),
+  bybitinverse: () => hmac('bybitinverse'),
+  bybitspot: () => hmac('bybitspot'),
+  bybitdemo: () => hmac('bybitdemo'),
+  blofin: () => hmac('blofin'),
+  okx: () => hmac('okx'),
+  okxdemo: () => hmac('okxdemo'),
+  okxeu: () => hmac('okxeu'),
+  okxeudemo: () => hmac('okxeudemo'),
+  bitget: () => hmac('bitget'),
+  bitgetusdc: () => hmac('bitgetusdc'),
+  bitgetinverse: () => hmac('bitgetinverse'),
+  binance: () => hmac('binance'),
+  binancepm: () => hmac('binancepm'),
+  binancespot: () => hmac('binancespot'),
+  binanceinverse: () => hmac('binanceinverse'),
+  bingx: () => hmac('bingx'),
+  phemex: () => hmac('phemex'),
+  hyperliquid: wallet,
+  hyperliquidspot: wallet,
+};
+
+let frameFed: ExchangeName[] = [];
+beforeAll(async () => {
+  setWasmEngineLoader(loadNodeEngine);
+  const wasm = (await loadNodeEngine()) as { WasmEngine: { frameFedSupported?: (venue: string) => boolean } };
+  frameFed = BETA_VENUES.filter((name) => wasm.WasmEngine.frameFedSupported?.(name) === true);
+});
 afterEach(() => {
   live.splice(0).forEach((exchange) => exchange.dispose());
   setRustEngineTransport();
@@ -41,54 +108,32 @@ const pageEngine = async (name: ExchangeName, options: Partial<ExchangeOptions>)
   setRustEngineTransport(() => transport);
   const exchange = new RustEngineExchange(name, { ...options, workerMirror: true } as ExchangeOptions, new DefaultStore());
   live.push(exchange);
-  await expect(exchange.frameFedReady).resolves.toBe(true);
-  expect(exchange.isFrameFed).toBe(true);
   return { exchange, sockets };
 };
 
-const mac = (payload: string) => createHmac('sha256', BYBIT_SECRET).update(payload).digest('hex');
-
-it('a frame-fed Bybit page engine signs the server HTTP and ws-auth sign-reqs with its setup-held key', async () => {
-  const { exchange, sockets } = await pageEngine('bybit', {
-    key: BYBIT_KEY,
-    secret: BYBIT_SECRET,
-    extra: { recvWindow: 8_765 },
-  });
-  const body = '{"symbol":"BTCUSDT","qty":"0.0100"}';
-  const post: RemoteSignerRequest = {
-    id: 'page-http',
-    type: 'http',
-    exchangeName: 'bybit',
-    config: { method: 'POST', baseURL: 'https://api.bybit.com', url: '/v5/order/create', data: body, headers: {} },
-  };
-  const signed = await exchange.signHttpRequest(post);
-  expect(signed.error).toBeUndefined();
-  expect(signed.config?.data).toBe(body);
-  expect(signed.config?.headers).toMatchObject({
-    'X-BAPI-API-KEY': BYBIT_KEY,
-    'X-BAPI-TIMESTAMP': `${STAMP}`,
-    'X-BAPI-SIGN': mac(`${STAMP}${BYBIT_KEY}8765${body}`),
+describe('every frame-fed family signs its COSIGNED sign-reqs on the page engine', () => {
+  it('the registry lists frame-fed families, and each has a signing case', () => {
+    expect(frameFed).toContain('hyperliquid');
+    expect(frameFed.filter((name) => !CASES[name])).toEqual([]);
   });
 
-  const toSign = 'GET/realtime1700999999999';
-  await expect(
-    exchange.signWsAuth({ id: 'page-ws', type: 'ws-auth', exchangeName: 'bybit', wsAuth: { toSign, outputFormat: 'hex' } }),
-  ).resolves.toEqual({ id: 'page-ws', wsAuthSignature: mac(toSign) });
-  expect(sockets).toEqual([]);
-});
-
-it.each(['hyperliquid', 'hyperliquidspot'] as const)(
-  'a frame-fed %s page engine binds its agent address for the server',
-  async (name) => {
-    const { exchange, sockets } = await pageEngine(name, { key: HL_ACCOUNT, secret: HL_AGENT_KEY });
-    const answer = await exchange.signWsAuth({
-      id: 'page-address',
-      type: 'ws-auth',
-      exchangeName: name,
-      wsAuth: { toSign: HL_ACCOUNT, outputFormat: 'hyperliquid-address' },
-    });
-    expect(answer.error).toBeUndefined();
-    expect(answer.wsAuthSignature?.toLowerCase()).toBe(new ethers.Wallet(HL_AGENT_KEY).address.toLowerCase());
+  it.each(BETA_VENUES)('%s', async (name) => {
+    if (!frameFed.includes(name)) return;
+    const { options, requests } = CASES[name]!();
+    const { exchange, sockets } = await pageEngine(name, options);
+    await expect(exchange.frameFedReady).resolves.toBe(true);
+    expect(exchange.isFrameFed).toBe(true);
+    for (const { outputFormat, toSign, expected } of requests) {
+      const answer = await exchange.signWsAuth({
+        id: `${name}-${outputFormat}`,
+        type: 'ws-auth',
+        exchangeName: name,
+        wsAuth: { toSign, outputFormat: outputFormat as never },
+      });
+      expect(answer.error, `${name} ${outputFormat}`).toBeUndefined();
+      const signature = outputFormat === 'hyperliquid-address' ? answer.wsAuthSignature?.toLowerCase() : answer.wsAuthSignature;
+      expect(signature, `${name} ${outputFormat}`).toBe(expected);
+    }
     expect(sockets).toEqual([]);
-  },
-);
+  });
+});
