@@ -1137,6 +1137,9 @@ impl BybitLinear {
             self.startup.prelaunch_in_flight = true;
             self.request_markets(cx, true, None);
         }
+        if cx.frame_fed() {
+            return;
+        }
         if self.category == Category::Option && self.startup.markets_loaded {
             self.request_option_seeds(cx);
         }
@@ -1412,7 +1415,7 @@ impl BybitLinear {
 
     fn try_load_markets(&mut self, cx: &mut Cx<'_, Pending>) {
         let startup = &mut self.startup;
-        let fees_ready = self.credentials.is_none() || startup.fees.is_some();
+        let fees_ready = self.credentials.is_none() || startup.fees.is_some() || cx.frame_fed();
         if startup.markets_loaded
             || startup.trading.is_none()
             || startup.prelaunch.is_none()
@@ -1449,7 +1452,7 @@ impl BybitLinear {
             format!("Loaded {} Bybit markets", markets.len()),
         );
         self.catalogs.insert(self.category, markets);
-        if self.category == Category::Option {
+        if self.category == Category::Option && !cx.frame_fed() {
             self.request_option_seeds(cx);
         }
         self.try_publish_catalogs(cx);
@@ -1487,6 +1490,9 @@ impl BybitLinear {
             cx.store.set_markets(markets);
             publish_product_metadata(cx.store, &self.classification, &self.derivatives);
             self.catalog_ready = true;
+            if cx.frame_fed() {
+                return;
+            }
             let category = self.category;
             for other in self.categories() {
                 self.select_category(other);
@@ -2541,7 +2547,8 @@ impl Venue for BybitLinear {
             self.request_startup(cx);
         }
         self.select_category(self.primary_category);
-        if self.credentials.is_some() {
+        // A frame-fed engine loads public instrument metadata only.
+        if self.credentials.is_some() && !cx.frame_fed() {
             self.request_account_info(cx);
         }
     }
