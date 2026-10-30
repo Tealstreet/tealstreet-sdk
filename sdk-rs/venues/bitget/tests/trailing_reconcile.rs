@@ -492,9 +492,16 @@ fn delayed_absence_cannot_drop_newer_common_frame_after_grace_is_pruned() {
     let old = snapshot_delayed_past_common_frame_grace(&mut h, id);
     h.reply(old, 200, r#"{"code":"00000","data":[]}"#);
     assert_eq!(h.engine.store().order(id).unwrap().price, 96.0);
-    // A subsequent snapshot begun after the update is authoritative again.
-    for _ in 0..4 {
+    // A subsequent snapshot begun after the update is authoritative again: the
+    // next orders read (the 60 s reconcile while the stream is live).
+    for _ in 0..31 {
         poll(&mut h);
+        if h.requests
+            .iter()
+            .any(|r| r.url.contains("/unfilled-orders"))
+        {
+            break;
+        }
     }
     respond_orders(&mut h, &[], &[]);
     assert!(h.engine.store().order(id).is_none());
