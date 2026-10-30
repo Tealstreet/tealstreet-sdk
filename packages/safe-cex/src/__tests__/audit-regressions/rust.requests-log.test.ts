@@ -143,3 +143,29 @@ it('logs private socket frames redacted, skips heartbeats, and leaves public soc
   transport.connect('wss://public', handlers);
   expect(sockets[1].handlers).toBe(handlers);
 });
+
+it('redacts token-shaped keys, query auth, any JWT, and secrets nested in a body longer than the log cap', async () => {
+  setWsDiagnosticsEnabled(true);
+  const jwt = 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJwYXJhZGV4In0.c2lnbmF0dXJlLXZhbHVl';
+  const long = JSON.stringify({
+    rows: Array.from({ length: 200 }, (_, index) => ({ index, note: 'x'.repeat(20) })),
+    nested: { deeper: { refreshToken: 'REFRESHVALUE' } },
+  });
+  const { transport, events } = harness(() => ({
+    status: 200,
+    body: new TextEncoder().encode(JSON.stringify({ jwt_token: jwt, access_token: 'ACCESSVALUE' })),
+  }));
+  await transport.request({
+    method: 'get',
+    url: `https://mainnet.zklighter.elliot.ai/api/v1/accountActiveOrders?account_index=1&auth=LIGHTERAUTHVALUE`,
+    headers: {},
+    body: long,
+  });
+  const logged = events.map(([, message]) => message).join('\n');
+  for (const secret of [jwt, 'ACCESSVALUE', 'LIGHTERAUTHVALUE', 'REFRESHVALUE']) {
+    expect(logged).not.toContain(secret);
+  }
+  expect(long.length).toBeGreaterThan(4096);
+  expect(logged).toContain('account_index=1');
+  expect(logged).toContain('truncated');
+});
