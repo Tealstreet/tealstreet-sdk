@@ -139,6 +139,8 @@ pub struct Trading {
     /// Retired settings writes whose metadata custody finishes at the next callback.
     retired_settings: Vec<CommandId>,
     observed: HashMap<String, Observation>,
+    /// Frame-fed: source observations whose order has not been ingested yet.
+    pending_observed: HashMap<String, (String, String, bool, String)>,
     /// Frame-fed: the data source knows the position mode (VENUE_STATE).
     mode_known: bool,
 }

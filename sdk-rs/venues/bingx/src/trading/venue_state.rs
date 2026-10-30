@@ -86,8 +86,28 @@ impl Trading {
         };
         self.mode_known = mode_known;
         self.observed.clear();
-        for (id, native_kind, position_side, attached, native_status) in rows {
-            if let Some(order) = store.order(&id) {
+        // Held until their order is ingested: unchanged state is never resent.
+        self.pending_observed = rows
+            .into_iter()
+            .map(|(id, kind, side, attached, status)| (id, (kind, side, attached, status)))
+            .collect();
+        self.refresh_observed(store);
+        true
+    }
+
+    /// Frame-fed: the ingested orders are the reconcile, so observations follow
+    /// them and close with them.
+    pub(crate) fn refresh_observed(&mut self, store: &safe_cex_engine::Store) {
+        let ready: Vec<String> = self
+            .pending_observed
+            .keys()
+            .filter(|id| store.order(id).is_some())
+            .cloned()
+            .collect();
+        for id in ready {
+            if let (Some((native_kind, position_side, attached, native_status)), Some(order)) =
+                (self.pending_observed.remove(&id), store.order(&id))
+            {
                 self.observed.insert(
                     id,
                     Observation {
@@ -100,13 +120,6 @@ impl Trading {
                 );
             }
         }
-        self.refresh_observed(store);
-        true
-    }
-
-    /// Frame-fed: the ingested orders are the reconcile, so observations follow
-    /// them and close with them.
-    pub(crate) fn refresh_observed(&mut self, store: &safe_cex_engine::Store) {
         self.observed.retain(|id, seen| match store.order(id) {
             Some(order) if order.status == OrderStatus::Open => {
                 seen.order = order.clone();
@@ -159,8 +172,9 @@ mod tests {
         let mut copy = Trading::default();
         assert!(copy.apply_venue_state(&bytes, &store));
         assert!(copy.mode_known);
-        // Only orders the store holds open are observed.
+        // Only orders the store holds open are observed; the other waits.
         assert_eq!(copy.observed.len(), 1);
+        assert_eq!(copy.pending_observed.len(), 1);
         let seen = &copy.observed["1"];
         assert_eq!(
             (
@@ -186,7 +200,14 @@ mod tests {
             "a refused state leaves the applied one"
         );
 
-        // A frame that closes the order drops its observation.
+        // A later frame carrying the order completes its waiting observation.
+        store.set_orders(vec![order.clone(), closed.clone()]);
+        copy.refresh_observed(&store);
+        assert_eq!(copy.observed.len(), 2);
+        assert!(copy.pending_observed.is_empty());
+        assert_eq!(copy.observed["2"].native_kind, "STOP_MARKET");
+
+        // A frame that closes the orders drops their observations.
         store.set_orders(vec![]);
         copy.refresh_observed(&store);
         assert!(copy.observed.is_empty());
