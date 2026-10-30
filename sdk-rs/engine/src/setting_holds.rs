@@ -41,9 +41,18 @@ impl SettingKey {
     }
 }
 
+struct Hold {
+    key: SettingKey,
+    at: f64,
+    /// The source reported a different value while held. Only such a hold
+    /// warns when it expires; one the source never spoke about lapses quietly,
+    /// since the source may already have held the same value.
+    disputed: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct SettingHolds {
-    held: Vec<(SettingKey, f64)>,
+    held: Vec<Hold>,
 }
 
 /// The store values a frame may overwrite, taken before it is applied.
@@ -61,29 +70,53 @@ fn same_leverage(a: &MarketSetting, b: &MarketSetting) -> bool {
 
 impl SettingHolds {
     pub fn hold(&mut self, key: SettingKey, now: f64) {
-        self.held.retain(|(held, _)| *held != key);
-        self.held.push((key, now));
+        self.held.retain(|hold| hold.key != key);
+        self.held.push(Hold {
+            key,
+            at: now,
+            disputed: false,
+        });
     }
 
     pub fn held(&self, key: &SettingKey) -> bool {
-        self.held.iter().any(|(held, _)| held == key)
+        self.held.iter().any(|hold| hold.key == *key)
     }
 
     pub fn release(&mut self, key: &SettingKey) {
-        self.held.retain(|(held, _)| held != key);
+        self.held.retain(|hold| hold.key != *key);
+    }
+
+    fn dispute(&mut self, key: &SettingKey) {
+        for hold in self.held.iter_mut().filter(|hold| hold.key == *key) {
+            hold.disputed = true;
+        }
+    }
+
+    /// A VENUE_STATE was applied and a venue key is still held: the venue kept
+    /// its value over the source's (agreement would have released it).
+    pub fn dispute_venue_keys(&mut self) {
+        for hold in &mut self.held {
+            if matches!(
+                hold.key,
+                SettingKey::Venue(..) | SettingKey::PositionMode(_)
+            ) {
+                hold.disputed = true;
+            }
+        }
     }
 
     /// Drops holds older than [`HOLD_MS`]; the source's value then applies.
+    /// Returns those the source had contradicted: only they are worth a warning.
     pub fn expire(&mut self, now: f64) -> Vec<SettingKey> {
-        let mut expired = Vec::new();
-        self.held.retain(|(key, at)| {
-            let keep = now - at < HOLD_MS;
-            if !keep {
-                expired.push(key.clone());
+        let mut disputed = Vec::new();
+        self.held.retain(|hold| {
+            let keep = now - hold.at < HOLD_MS;
+            if !keep && hold.disputed {
+                disputed.push(hold.key.clone());
             }
             keep
         });
-        expired
+        disputed
     }
 
     pub fn keep(&self, store: &Store) -> Kept {
@@ -91,7 +124,7 @@ impl SettingHolds {
             hedged: None,
             settings: Vec::new(),
         };
-        for (key, _) in &self.held {
+        for Hold { key, .. } in &self.held {
             match key {
                 SettingKey::Hedged => kept.hedged = Some(store.hedged()),
                 SettingKey::MarginType(symbol) | SettingKey::Leverage(symbol) => {
@@ -114,6 +147,7 @@ impl SettingHolds {
                 self.release(&SettingKey::Hedged);
             } else {
                 store.set_hedged(mine);
+                self.dispute(&SettingKey::Hedged);
             }
         }
         for (key, mine) in kept.settings.into_iter().filter(|_| settings) {
@@ -132,6 +166,7 @@ impl SettingHolds {
                 self.release(&key);
                 continue;
             }
+            self.dispute(&key);
             store.update_setting(symbol, |setting| match key {
                 SettingKey::MarginType(_) => setting.margin_type = mine.margin_type,
                 _ => {
@@ -148,6 +183,32 @@ impl SettingHolds {
 mod tests {
     use super::*;
     use crate::model::MarginType;
+
+    #[test]
+    fn only_a_hold_the_source_contradicted_warns_when_it_expires() {
+        let mut holds = SettingHolds::default();
+        let mut store = Store::default();
+        store.set_hedged(true);
+        holds.hold(SettingKey::Hedged, 0.);
+        holds.hold(SettingKey::Venue("builder", String::new()), 0.);
+        // The source never speaks about either: both lapse quietly.
+        assert!(holds.expire(HOLD_MS).is_empty());
+        assert!(!holds.held(&SettingKey::Hedged));
+        // A stale STATUS contradicts the hedge flag: that expiry is worth a warning.
+        holds.hold(SettingKey::Hedged, 0.);
+        let kept = holds.keep(&store);
+        store.set_hedged(false);
+        holds.restore(&mut store, kept, true, false);
+        holds.hold(SettingKey::Venue("builder", String::new()), 0.);
+        holds.dispute_venue_keys();
+        assert_eq!(
+            holds.expire(HOLD_MS),
+            vec![
+                SettingKey::Hedged,
+                SettingKey::Venue("builder", String::new())
+            ]
+        );
+    }
 
     #[test]
     fn a_frame_without_status_neither_releases_nor_restores_the_hedge_hold() {
