@@ -1486,7 +1486,7 @@ impl Store {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
 
     #[cfg(feature = "metadata-freshness")]
@@ -1857,7 +1857,7 @@ pub(crate) mod tests {
         assert!(store.take_rejected_empty_catalogue());
     }
 
-    pub(crate) fn market(symbol: &str) -> Market {
+    fn market(symbol: &str) -> Market {
         Market {
             id: symbol.into(),
             symbol: symbol.into(),

@@ -4050,8 +4050,11 @@ impl<V: Venue> Engine<V> {
         if applied.orders {
             // The source's orders are the reconcile: no fence outlives them,
             // and holds waiting for an acknowledged order may now release.
-            let token = self.io.core.order_locks.token();
-            self.io.core.order_locks.reconciled(None, token);
+            #[cfg(feature = "order-locks")]
+            {
+                let token = self.io.core.order_locks.token();
+                self.io.core.order_locks.reconciled(None, token);
+            }
             self.release_held(now);
         }
         self.finish_event_scope(now);

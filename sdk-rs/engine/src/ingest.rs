@@ -158,6 +158,8 @@ pub fn parse(frame: &[u8]) -> Result<Frame<'_>, IngestError> {
 pub struct IngestState {
     /// The source's market symbols, by its market index.
     pub source_markets: Vec<String>,
+    /// The source's native market ids, by its market index.
+    pub source_market_ids: Vec<String>,
 }
 
 impl IngestState {
@@ -232,7 +234,31 @@ fn venue_state<'a>(section: &Section<'a>) -> Result<&'a [u8], IngestError> {
 // BALANCE (+coins), SETTINGS tbz5hr; ORDERS, POSITIONS, VENUE_STATE fe7lgm.
 // Each mirrors its writer in `Store::write` and is round-trip tested there.
 
-fn markets(_: &mut IngestState, _: &Frame<'_>, _: &Section<'_>) -> Result<(), IngestError> {
+/// `MARKETS` (`Store::write_markets`): the source's table, which later sections
+/// index. This engine keeps its own market rows from its public instrument read.
+fn markets(
+    state: &mut IngestState,
+    frame: &Frame<'_>,
+    section: &Section<'_>,
+) -> Result<(), IngestError> {
+    let mut cursor = Cursor::new(section.payload);
+    let count = cursor.u32()? as usize;
+    let (mut symbols, mut ids) = (Vec::with_capacity(count), Vec::with_capacity(count));
+    for _ in 0..count {
+        let [id, symbol, _base, _quote] =
+            [cursor.u32()?, cursor.u32()?, cursor.u32()?, cursor.u32()?];
+        ids.push(frame.strings.required(id)?.to_owned());
+        symbols.push(frame.strings.required(symbol)?.to_owned());
+    }
+    // Flags, then ten f64 columns (and revision 1's pretty-symbol refs).
+    cursor.bytes(4 * count)?;
+    cursor.align8();
+    cursor.bytes(8 * 10 * count)?;
+    if section.revision >= 1 {
+        cursor.bytes(4 * count)?;
+    }
+    state.source_markets = symbols;
+    state.source_market_ids = ids;
     Ok(())
 }
 
@@ -563,10 +589,7 @@ pub(crate) mod tests {
     #[test]
     fn settings_round_trip_by_symbol_including_unlisted_markets() {
         let mut source = Store::default();
-        source.set_markets(vec![
-            crate::store::tests::market("A"),
-            crate::store::tests::market("B"),
-        ]);
+        source.set_markets(vec![market("A"), market("B")]);
         source.update_setting("B", |s| {
             s.leverage = 20.;
             s.margin_type = Some(MarginType::Isolated);
@@ -605,6 +628,7 @@ pub(crate) mod tests {
         let frame = writer.finish();
         let mut state = IngestState {
             source_markets: vec!["A".into(), "B".into()],
+            ..IngestState::default()
         };
         let mut store = Store::default();
         apply(&mut store, &mut state, &parse(&frame).unwrap(), false).unwrap();
@@ -638,6 +662,82 @@ pub(crate) mod tests {
             )
             .is_err()
         );
+    }
+
+    pub(crate) fn market(symbol: &str) -> crate::model::Market {
+        use crate::model::{Limits, Market, MinMax, Precision};
+        Market {
+            id: format!("native-{symbol}"),
+            symbol: symbol.into(),
+            pretty_symbol: (symbol == "ETHUSDT").then(|| "ETH-PERP".into()),
+            base: symbol.trim_end_matches("USDT").into(),
+            quote: "USDT".into(),
+            active: true,
+            precision: Precision {
+                amount: 0.001,
+                price: 0.1,
+            },
+            limits: Limits {
+                amount: MinMax {
+                    min: 0.001,
+                    max: 100.,
+                },
+                leverage: MinMax { min: 1., max: 100. },
+                price: None,
+            },
+            contract_size: Some(1.),
+            is_expiring: None,
+            is_inverse: None,
+            is_spot: None,
+            is_perpetual: Some(true),
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        }
+    }
+
+    /// The source's next frame (everything changed since its last), ingested.
+    pub(crate) fn ingest(
+        source: &mut Store,
+        state: &mut IngestState,
+        store: &mut Store,
+        snapshot: bool,
+    ) -> Applied {
+        let pending = source.take_pending();
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        source.write(&pending, &mut writer);
+        let frame = writer.finish();
+        apply(store, state, &parse(&frame).unwrap(), snapshot).unwrap()
+    }
+
+    #[test]
+    fn markets_fill_the_source_table_in_its_order_with_pretty_symbols() {
+        let mut source = Store::default();
+        source.set_markets(vec![market("BTCUSDT"), market("ETHUSDT")]);
+        let mut state = IngestState::default();
+        ingest(&mut source, &mut state, &mut Store::default(), true);
+        assert_eq!(state.source_markets, ["BTCUSDT", "ETHUSDT"]);
+        assert_eq!(
+            state.source_market_ids,
+            ["native-BTCUSDT", "native-ETHUSDT"]
+        );
+        assert_eq!(state.symbol(1).unwrap(), "ETHUSDT");
+        assert!(state.symbol(2).is_err());
+
+        // A truncated section refuses rather than half-filling the table.
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin(section::MARKETS);
+        writer.u32(1);
+        writer.end();
+        let frame = writer.finish();
+        let refused = apply(
+            &mut Store::default(),
+            &mut state,
+            &parse(&frame).unwrap(),
+            false,
+        );
+        assert!(refused.is_err());
+        assert_eq!(state.source_markets, ["BTCUSDT", "ETHUSDT"]);
     }
 
     #[test]
