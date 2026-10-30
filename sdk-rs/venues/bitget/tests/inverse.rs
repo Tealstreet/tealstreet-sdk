@@ -534,3 +534,29 @@ fn inverse_position_zero_row_mark_falls_through_to_the_row_market_price() {
         .unwrap();
     assert_eq!(p.contracts, 0.02);
 }
+
+#[test]
+fn an_empty_coin_futures_catalogue_stalls_account_startup_and_keeps_retrying() {
+    let mut h = Harness::started(Options {
+        product: Product::Inverse,
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..Options::default()
+    });
+    h.respond("/contracts", 200, r#"{"code":"00000","data":[]}"#);
+    assert!(!h.engine.store().loaded().markets);
+    assert!(h.engine.store().markets().is_empty());
+    assert!(h.sockets.is_empty(), "{:?}", h.sockets);
+    assert!(h.requests.is_empty(), "no tickers or account read follows");
+
+    let (timer, at) = h.timers.pop().expect("a retry is scheduled");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    assert!(
+        h.take("/contracts")
+            .url
+            .contains("productType=coin-futures")
+    );
+    assert!(h.requests.is_empty());
+}

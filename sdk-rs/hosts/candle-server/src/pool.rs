@@ -8,7 +8,10 @@
 
 use safe_cex_engine::model::Market;
 use safe_cex_engine::wire::{section, sections};
-use safe_cex_engine::{Command, Engine, Notice, Venue, log::Level};
+use safe_cex_engine::{
+    Command, Engine, Notice, Venue,
+    log::{Level, code},
+};
 use safe_cex_native::{Host, HostEvent, NetworkTransport};
 use serde_json::Value;
 use std::{
@@ -17,7 +20,7 @@ use std::{
     rc::Rc,
     time::Duration,
 };
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 
 const STARTUP_WAIT: Duration = Duration::from_secs(30);
 const FLUSH_EVERY: Duration = Duration::from_millis(50);
@@ -47,6 +50,8 @@ struct Shared {
     markets: RefCell<Rc<Vec<Market>>>,
     markets_loaded: Cell<bool>,
     error_seq: Cell<u64>,
+    startup_read_failed: Cell<bool>,
+    startup_signal: Notify,
     last_error: RefCell<Option<String>>,
     pending: RefCell<HashMap<u32, oneshot::Sender<Result<String, String>>>>,
     frames: RefCell<Option<watch::Sender<u64>>>,
@@ -67,6 +72,22 @@ impl Shared {
         match notice {
             Notice::CommandDone { command, result } => self.settle(command, Ok(result)),
             Notice::CommandFailed { command, error } => self.settle(command, Err(error.message)),
+            // A failed or empty catalogue read keeps retrying inside the engine at
+            // Warn, so no error ends the startup wait; requests must not sit it out.
+            Notice::Event(event)
+                if matches!(event.code, code::REQUEST_FAILED | code::SNAPSHOT_DISCARDED) =>
+            {
+                eprintln!(
+                    "[candle-server] exchange startup read failed code={} message={}",
+                    event.code, event.message
+                );
+                self.startup_read_failed.set(true);
+                self.startup_signal.notify_one();
+            }
+            // Carries the cause (such as an empty catalogue) once retries add up.
+            Notice::Event(event) if event.code == code::STARTUP_DEGRADED => {
+                eprintln!("[candle-server] {}", event.message);
+            }
             // An error-level event is the venue's failure signal, like the TS
             // emitter 'error' channel the pool latches.
             Notice::Event(event) if event.level == Level::Error => {
@@ -76,13 +97,29 @@ impl Shared {
                     event.code, event.message
                 );
                 *self.last_error.borrow_mut() = Some(event.message);
+                self.startup_signal.notify_one();
             }
             Notice::StartupFailed { error } => {
                 self.error_seq.set(self.error_seq.get() + 1);
                 eprintln!("[candle-server] exchange startup failed: {}", error.message);
                 *self.last_error.borrow_mut() = Some(error.message);
+                self.startup_signal.notify_one();
             }
             _ => {}
+        }
+    }
+
+    /// Until the catalogue is in or a read of it has failed; the engine retries on.
+    async fn startup_settled(&self, frames: &mut watch::Receiver<u64>) {
+        let errors = self.error_seq.get();
+        while !self.markets_loaded.get()
+            && !self.startup_read_failed.get()
+            && self.error_seq.get() == errors
+        {
+            tokio::select! {
+                changed = frames.changed() => if changed.is_err() { return },
+                () = self.startup_signal.notified() => {}
+            }
         }
     }
 
@@ -320,15 +357,7 @@ impl Pool {
         let mut ready = frames.clone();
         let name = venue.to_owned();
         tokio::task::spawn_local(async move {
-            let errors = watcher.error_seq.get();
-            let _ = tokio::time::timeout(STARTUP_WAIT, async {
-                while !watcher.markets_loaded.get() && watcher.error_seq.get() == errors {
-                    if ready.changed().await.is_err() {
-                        return;
-                    }
-                }
-            })
-            .await;
+            let _ = tokio::time::timeout(STARTUP_WAIT, watcher.startup_settled(&mut ready)).await;
             if !watcher.markets_loaded.get() {
                 eprintln!(
                     "[candle-server] could not load markets, symbol precheck disabled for this venue exchange={name}"
@@ -384,6 +413,32 @@ impl Pool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn warning(code: &'static str) -> Notice {
+        Notice::Event(safe_cex_engine::log::LogEvent {
+            level: Level::Warn,
+            code,
+            message: "read failed".into(),
+            fields: Vec::new(),
+        })
+    }
+
+    async fn settles_on(notice: Notice) -> bool {
+        let shared = Rc::new(Shared::default());
+        let (_sender, mut frames) = watch::channel(0_u64);
+        let waiter = shared.clone();
+        let wait = tokio::time::timeout(Duration::from_secs(5), async move {
+            waiter.startup_settled(&mut frames).await;
+        });
+        shared.on_notice(notice);
+        wait.await.is_ok()
+    }
+
+    #[tokio::test]
+    async fn a_failed_catalogue_read_ends_the_startup_wait_with_no_frame() {
+        assert!(settles_on(warning(code::REQUEST_FAILED)).await);
+        assert!(settles_on(warning(code::SNAPSHOT_DISCARDED)).await);
+    }
 
     #[test]
     fn cold_starts_beyond_the_cap_are_refused_before_any_engine_is_built() {
