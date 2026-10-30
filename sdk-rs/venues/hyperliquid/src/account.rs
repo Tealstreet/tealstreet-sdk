@@ -846,6 +846,10 @@ impl Hyperliquid {
                 self.account.builder_approved = serde_json::from_str::<Num>(raw)
                     .ok()
                     .map(|n| n.0 >= f64::from(self.builder().f));
+                // Frame-fed: this engine's own read outlasts a source that has not re-read.
+                if self.account.builder_approved.is_some() {
+                    cx.hold_setting(crate::BUILDER_HOLD.clone());
+                }
             }
             Request::Fees => {
                 #[derive(serde::Deserialize)]
