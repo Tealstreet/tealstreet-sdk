@@ -169,6 +169,12 @@ impl Session {
                 .registry
                 .resume(&from, &user, self.socket, token, &self.outbox());
             resumed = !accounts.is_empty();
+            // `init` is logged either way; this tells a resume from a rebuild.
+            Log::info(&format!(
+                "resume {}: {} account(s)",
+                self.socket,
+                accounts.len()
+            ));
             // The client re-inits each one; an identical init then keeps it.
             for account in accounts {
                 self.join(account).await;

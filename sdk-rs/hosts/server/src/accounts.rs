@@ -696,7 +696,7 @@ impl Registry {
     }
 
     /// Moves a closing socket's private accounts under `resume_id` for the grace
-    /// window. Their signers suspend: what waited on the old socket fails.
+    /// window. Their signers suspend: signs already sent wait for a resume.
     pub fn park(
         self: &Arc<Self>,
         resume_id: String,

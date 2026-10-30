@@ -576,6 +576,7 @@ async fn timeouts_count_toward_the_fatal_streak_and_suspension_does_not() {
     account.provider.sign(work()).await.ok();
     assert_eq!(*fired.lock().unwrap(), 1, "fires once");
 
+    // Sent, then parked past its timeout with no browser: not a signer failure.
     let pending = tokio::spawn(account.provider.sign(work()));
     tokio::task::yield_now().await;
     link.suspend();
@@ -583,8 +584,16 @@ async fn timeouts_count_toward_the_fatal_streak_and_suspension_does_not() {
         pending.await.unwrap().map(|_| ()),
         Err(SignError::Unavailable)
     );
+    assert_eq!(*fired.lock().unwrap(), 1);
+    let pending = tokio::spawn(account.provider.sign(work()));
+    tokio::task::yield_now().await;
     assert!(!link.is_available());
-    link.attach(1, Arc::new(|_| false));
+    link.attach(2, Arc::new(|_| false));
+    assert_eq!(
+        pending.await.unwrap().map(|_| ()),
+        Err(SignError::Unavailable),
+        "a socket that cannot take it aborts the wait"
+    );
     assert!(link.is_available());
     assert_eq!(
         account.provider.sign(work()).await.map(|_| ()),
@@ -645,7 +654,7 @@ async fn echo_probes_alternate_sizes_and_match_by_id() {
 }
 
 #[tokio::test]
-async fn only_the_sending_socket_answers_and_a_new_socket_aborts_what_waits() {
+async fn only_the_sending_socket_answers_and_a_new_socket_takes_over_what_waits() {
     let frames = Arc::new(Mutex::new(Vec::<String>::new()));
     let record = frames.clone();
     let outbox: Outbox = Arc::new(move |frame| {
@@ -685,16 +694,22 @@ async fn only_the_sending_socket_answers_and_a_new_socket_aborts_what_waits() {
         tokio::task::yield_now().await;
     }
     link.attach(2, outbox.clone());
-    assert_eq!(
-        pending.await.unwrap().map(|_| ()),
-        Err(SignError::Unavailable)
+    let resent = frames.lock().unwrap().clone();
+    assert_eq!(resent.len(), 3, "re-sent over the new socket");
+    assert_eq!(resent[2], resent[1]);
+    let id = serde_json::from_str::<Value>(&resent[2]).unwrap()["d"]["id"].clone();
+    assert!(
+        !link.resolve(1, answer(&id)),
+        "the old socket no longer answers"
     );
+    assert!(link.resolve(2, answer(&id)));
+    assert_eq!(pending.await.unwrap().unwrap().values, vec![MAC.to_vec()]);
 
     let pending = tokio::spawn(account.provider.sign(work()));
-    while frames.lock().unwrap().len() < 3 {
+    while frames.lock().unwrap().len() < 4 {
         tokio::task::yield_now().await;
     }
-    let id = serde_json::from_str::<Value>(&frames.lock().unwrap()[2]).unwrap()["d"]["id"].clone();
+    let id = serde_json::from_str::<Value>(&frames.lock().unwrap()[3]).unwrap()["d"]["id"].clone();
     assert!(link.resolve(
         2,
         json!({ "id": id, "wsAuthSignature": "0".repeat(MAX_RESPONSE_FIELD + 1) })
@@ -857,4 +872,48 @@ async fn a_sign_waiting_out_a_gap_fails_at_once_when_the_session_ends() {
         waiting.await.unwrap(),
         Err(crate::link::Failure::Unavailable)
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sign_in_flight_when_the_socket_drops_is_re_sent_on_resume_and_answered() {
+    let link = SignerLink::new(1, Arc::new(|_| true));
+    let waiting = {
+        let link = link.clone();
+        tokio::spawn(async move { link.round_trip("blip", &json!({ "id": "blip" })).await })
+    };
+    tokio::task::yield_now().await;
+    link.suspend();
+    // An 8s blip, inside the 15s timeout.
+    tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+    assert!(!waiting.is_finished(), "still waiting through the blip");
+    let sent = Arc::new(Mutex::new(Vec::<String>::new()));
+    let record = sent.clone();
+    link.attach(
+        2,
+        Arc::new(move |frame| {
+            record.lock().unwrap().push(frame);
+            true
+        }),
+    );
+    assert_eq!(
+        sent.lock().unwrap().as_slice(),
+        [r#"{"t":"sign-req","d":{"id":"blip"}}"#.to_owned()]
+    );
+    assert!(!link.resolve(1, json!({ "id": "blip", "wsAuthSignature": "00" })));
+    assert!(link.resolve(2, json!({ "id": "blip", "wsAuthSignature": "01" })));
+    assert_eq!(waiting.await.unwrap().unwrap()["wsAuthSignature"], "01");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sign_in_flight_when_the_session_ends_fails_at_once() {
+    let link = SignerLink::new(1, Arc::new(|_| true));
+    let waiting = {
+        let link = link.clone();
+        tokio::spawn(async move { link.round_trip("end", &json!({ "id": "end" })).await })
+    };
+    tokio::task::yield_now().await;
+    link.suspend();
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    link.mark_unavailable();
+    assert_eq!(waiting.await.unwrap(), Err(crate::link::Failure::Aborted));
 }
