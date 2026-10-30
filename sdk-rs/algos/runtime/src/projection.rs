@@ -41,7 +41,12 @@ pub fn project(store: &safe_cex_engine::Store) -> Snapshot {
 /// Applies one engine read to the algo store; returns what changed.
 /// `rejoined`: fills sent while the feed was dropped are gone, so algos
 /// re-read orders and positions and reconcile before acting.
-pub fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
+pub fn apply(
+    store: &mut AlgoStore,
+    snapshot: Snapshot,
+    fills: Vec<Fill>,
+    rejoined: bool,
+) -> Change {
     let orders = store.orders != snapshot.orders;
     let positions = store.positions != snapshot.positions;
     let tickers: HashMap<String, Ticker> = snapshot
