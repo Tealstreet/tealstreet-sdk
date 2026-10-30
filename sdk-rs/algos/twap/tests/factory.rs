@@ -146,8 +146,8 @@ async fn a_failed_slice_logs_an_error_and_continues() {
                 .unwrap();
             settle().await;
             assert!(port.emits.borrow().contains(&(
-                "log".to_owned(),
-                json!(["TWAP BTCUSDT slice failed: rejected", "error"])
+                "error".to_owned(),
+                json!("TWAP BTCUSDT slice failed: rejected")
             )));
             assert_eq!(factory.active_twaps("a")[0]["ordersExecuted"], 1);
         })
@@ -417,6 +417,34 @@ async fn clones_share_one_book() {
                 .to_owned();
             assert!(exec_handle.stop(&id));
             assert!(registered.active_twaps("a").is_empty());
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn refusals_reach_the_user_as_errors() {
+    // The web toasts `error`; `log` reaches only its exchange log.
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            factory
+                .handle(
+                    "twap:start",
+                    &twap_options(json!({ "accountName": "b" })),
+                    &cx,
+                )
+                .unwrap();
+            settle().await;
+            assert_eq!(
+                *port.emits.borrow(),
+                [(
+                    "error".to_owned(),
+                    json!(r#"TWAP BTCUSDT rejected: it names account "b", not "a""#)
+                )]
+            );
+            assert!(placed_amounts(&port).is_empty());
         })
         .await;
 }
