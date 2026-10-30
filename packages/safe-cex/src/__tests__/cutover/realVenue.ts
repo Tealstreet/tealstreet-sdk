@@ -4,6 +4,7 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
+import { buildBinanceOptionsTape } from '../../../../../sdk-rs/harness/private-tape-binanceoptions.mjs';
 import { buildBitgetUtaTape } from '../../../../../sdk-rs/harness/private-tape-bitget-uta.mjs';
 import { buildBitgetInverseTape } from '../../../../../sdk-rs/harness/private-tape-bitgetinverse.mjs';
 import { coinbasePrivateTape } from '../../../../../sdk-rs/harness/private-tape-coinbase.mjs';
@@ -85,6 +86,10 @@ export const realVenue = (name: ExchangeName) => {
       name === 'bitgetinverse'
         ? 'private-tape-bitgetinverse.mjs public records'
         : 'private-tape-bitget-uta.mjs USDC public records';
+  } else if (name === 'binanceoptions') {
+    // Options has no captured public tape; its replay input is the retained TS mapper fixtures.
+    records = buildBinanceOptionsTape({ isPublic: true }) as RecordRow[];
+    source = 'private-tape-binanceoptions.mjs public records';
   } else if (name === 'coinbase') {
     // Main Coinbase keyless mode is legacy INTX. The captured public tape is
     // spot-only, so use the documented INTX instruments input, with no keys.
