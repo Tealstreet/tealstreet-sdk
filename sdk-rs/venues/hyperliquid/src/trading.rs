@@ -1185,7 +1185,10 @@ impl Hyperliquid {
         }
     }
     fn mark_settings_uncertain(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
-        if let Effect::Leverage { symbol, .. } = effect {
+        // Frame-fed settings come from the data source, which reconciles them.
+        if let Effect::Leverage { symbol, .. } = effect
+            && !cx.frame_fed()
+        {
             self.trading.uncertain_settings.insert(symbol.clone());
             self.refresh_uncertain_settings(cx, symbol);
         }
