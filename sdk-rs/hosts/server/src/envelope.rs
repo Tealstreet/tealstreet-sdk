@@ -113,38 +113,73 @@ pub struct PingData {
     pub accounts: Vec<String>,
 }
 
+/// `t` first, whatever the map order: the client routes `session`, `pong`,
+/// `echo` and `sign-req` by their exact `{"t":"<type>"` prefix, and this crate's
+/// serde_json has no `preserve_order`, so a `json!` envelope sorted `d` ahead.
+fn envelope(t: &str, d: Value) -> String {
+    format!(r#"{{"t":"{t}","d":{d}}}"#)
+}
+
 pub fn msg(account_name: &str, op: &str, data: Value) -> String {
-    json!({"t": "msg", "d": {"op": op, "accountName": account_name, "data": data}}).to_string()
+    envelope(
+        "msg",
+        json!({"op": op, "accountName": account_name, "data": data}),
+    )
 }
 
 pub fn frame(account_name: &str, seq: u64, snapshot: bool, scxf: &[u8]) -> String {
     use base64::Engine as _;
-    json!({"t": "msg", "d": {
-        "op": "frame",
-        "accountName": account_name,
-        "seq": seq,
-        "snapshot": snapshot,
-        "data": base64::engine::general_purpose::STANDARD.encode(scxf),
-    }})
-    .to_string()
+    envelope(
+        "msg",
+        json!({
+            "op": "frame",
+            "accountName": account_name,
+            "seq": seq,
+            "snapshot": snapshot,
+            "data": base64::engine::general_purpose::STANDARD.encode(scxf),
+        }),
+    )
 }
 
 pub fn error(account_name: Option<&str>, message: &str) -> String {
-    json!({"t": "msg", "d": {"op": "error", "accountName": account_name, "data": [message]}})
-        .to_string()
+    envelope(
+        "msg",
+        json!({"op": "error", "accountName": account_name, "data": [message]}),
+    )
 }
 
 pub fn session(resume_id: &str, resumed: bool) -> String {
-    json!({"t": "session", "d": {"resumeId": resume_id, "resumed": resumed}}).to_string()
+    envelope(
+        "session",
+        json!({"resumeId": resume_id, "resumed": resumed}),
+    )
 }
 
 pub fn pong(accounts: &[String]) -> String {
-    json!({"t": "pong", "d": {"accounts": accounts}}).to_string()
+    envelope("pong", json!({"accounts": accounts}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_envelope_leads_with_its_type() {
+        let session = session("r-1", true);
+        assert_eq!(
+            session,
+            r#"{"t":"session","d":{"resumeId":"r-1","resumed":true}}"#
+        );
+        assert_eq!(
+            pong(&["a".into()]),
+            r#"{"t":"pong","d":{"accounts":["a"]}}"#
+        );
+        assert!(msg("a", "x", json!(1)).starts_with(r#"{"t":"msg","d":"#));
+        assert!(frame("a", 1, true, b"x").starts_with(r#"{"t":"msg","d":"#));
+        assert!(error(None, "e").starts_with(r#"{"t":"msg","d":"#));
+        let parsed: Value = serde_json::from_str(&session).unwrap();
+        assert_eq!(parsed["d"]["resumeId"], "r-1");
+    }
 
     #[test]
     fn init_text_fields_accept_js_numbers_and_null() {
