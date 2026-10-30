@@ -13,6 +13,7 @@ use safe_cex_engine::request_context::{
     Policy, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData, ResendGrant,
     RetryPolicy,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -2726,6 +2727,17 @@ impl BitgetFutures {
     /// A confirmed setting write, through one Store closure per table.
     fn apply_setting(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
         self.account.config_at = Some(cx.now);
+        // Frame-fed: keep this write's value until the source's frames agree.
+        match effect {
+            Effect::Mode(_) => cx.hold_setting(SettingKey::Hedged),
+            Effect::Leverage { symbol, .. } => {
+                cx.hold_setting(SettingKey::Leverage(symbol.clone()))
+            }
+            Effect::Margin { symbol, .. } => {
+                cx.hold_setting(SettingKey::MarginType(symbol.clone()))
+            }
+            _ => {}
+        }
         match effect {
             Effect::Mode(hedged) => cx.store.set_hedged(*hedged),
             Effect::Leverage { symbol, .. } | Effect::Margin { symbol, .. } => {
@@ -2768,7 +2780,12 @@ impl BitgetFutures {
         });
     }
 
-    fn apply_symbol_config(&self, cx: &mut Cx<'_, Pending>, symbol: &str, row: &SymbolConfig) {
+    pub(crate) fn apply_symbol_config(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        row: &SymbolConfig,
+    ) {
         cx.store.set_hedged(is_hedged(&row.pos_mode));
         let kind = margin(&row.margin_mode);
         let leverage = if kind == MarginType::Cross {

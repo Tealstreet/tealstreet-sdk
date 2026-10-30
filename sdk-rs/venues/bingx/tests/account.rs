@@ -3020,3 +3020,34 @@ fn retired_metadata_token_rejects_current_settings_fallback_once() {
 fn retired_metadata_token_rejects_final_margin_publication_once() {
     retired_metadata_token(true);
 }
+
+#[test]
+fn refresh_settings_re_reads_the_position_mode_and_positions_and_writes_nothing() {
+    let mut h = Harness::ready();
+    h.requests.clear();
+    h.event(Event::Command(Command::Venue {
+        command: 60,
+        action: safe_cex_engine::VenueAction::RefreshSettings { symbol: None },
+    }));
+    assert!(
+        h.done
+            .iter()
+            .any(|(command, result)| *command == 60 && result.is_ok())
+    );
+    assert_eq!(
+        h.requests.len(),
+        1,
+        "{:?}",
+        h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    assert_eq!(h.requests[0].method, Method::Get);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    assert_eq!(h.requests.len(), 1);
+    assert_eq!(h.requests[0].method, Method::Get);
+    h.respond(POSITIONS, 200, POSITION);
+    assert!(
+        h.requests.is_empty(),
+        "{:?}",
+        h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+}

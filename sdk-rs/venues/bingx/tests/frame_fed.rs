@@ -102,7 +102,13 @@ fn put_str(out: &mut Vec<u8>, value: &str) {
 /// A data source's snapshot: one open order and BingX's VENUE_STATE (version 1:
 /// mode known, that order observed as a NEW one-way LIMIT).
 fn source_frame() -> Vec<u8> {
+    source_frame_with(false, true)
+}
+
+/// A one-way or hedged source snapshot, with or without its open order.
+fn source_frame_with(hedged: bool, with_order: bool) -> Vec<u8> {
     let mut source = Store::default();
+    source.set_hedged(hedged);
     source.set_markets(vec![Market {
         id: "BTC-USDT".into(),
         symbol: "BTCUSDT".into(),
@@ -131,7 +137,7 @@ fn source_frame() -> Vec<u8> {
         taker_fee: None,
         maker_fee: None,
     }]);
-    source.set_orders(vec![Order {
+    let orders = vec![Order {
         id: ORDER_ID.into(),
         parent_id: None,
         status: OrderStatus::Open,
@@ -151,14 +157,17 @@ fn source_frame() -> Vec<u8> {
         take_profit: None,
         stop_loss: None,
         extra: None,
-    }]);
+    }];
+    source.set_orders(if with_order { orders } else { Vec::new() });
     let mut state = vec![1u8, 1];
-    state.extend_from_slice(&1u32.to_le_bytes());
-    for text in [ORDER_ID, "LIMIT", "BOTH"] {
-        put_str(&mut state, text);
+    state.extend_from_slice(&u32::from(with_order).to_le_bytes());
+    if with_order {
+        for text in [ORDER_ID, "LIMIT", "BOTH"] {
+            put_str(&mut state, text);
+        }
+        state.push(0);
+        put_str(&mut state, "NEW");
     }
-    state.push(0);
-    put_str(&mut state, "NEW");
     let pending = source.take_pending();
     let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.0);
     source.write(&pending, &mut writer);
@@ -232,4 +241,76 @@ fn an_ingested_order_cancels_in_exactly_one_request() {
     }));
     assert_eq!(h.requests.len(), 1, "{:?}", h.paths());
     assert!(h.requests[0].url.contains(ORDER_ID), "{:?}", h.paths());
+}
+
+fn switch_to_hedge(h: &mut Harness) {
+    h.now += 1.;
+    h.event(Event::Command(Command::SetPositionMode {
+        command: 20,
+        hedged: true,
+        symbol: None,
+    }));
+    let write = h.take("/positionSide/dual");
+    h.event(Event::HttpResponse {
+        request: write.id,
+        response: Response {
+            status: 200,
+            headers: "",
+            body: r#"{"code":0,"msg":"","data":{}}"#,
+        },
+    });
+    assert!(h.failed.is_empty(), "{:?}", h.failed);
+    assert!(h.engine.store().hedged());
+}
+
+fn placed_side(h: &mut Harness, command: u32) -> String {
+    h.place(command);
+    assert_eq!(h.requests.len(), 1, "{:?}", h.paths());
+    let write = h.take("/openApi/swap/v2/trade/order");
+    format!("{} {}", write.url, write.body.unwrap_or_default())
+}
+
+#[test]
+fn a_confirmed_position_mode_outlasts_a_stale_source_frame() {
+    let mut h = Harness::frame_fed();
+    h.load();
+    h.engine
+        .apply_frame(h.now, &source_frame_with(false, false), true)
+        .unwrap();
+    h.collect();
+    switch_to_hedge(&mut h);
+
+    h.now += 1.;
+    h.engine
+        .apply_frame(h.now, &source_frame_with(false, false), true)
+        .unwrap();
+    h.collect();
+    assert!(h.engine.store().hedged(), "the stale frame kept the hedge");
+    let sent = placed_side(&mut h, 21);
+    assert!(sent.contains("LONG") && !sent.contains("BOTH"), "{sent}");
+}
+
+#[test]
+fn a_source_frame_with_the_new_mode_releases_the_hold() {
+    let mut h = Harness::frame_fed();
+    h.load();
+    h.engine
+        .apply_frame(h.now, &source_frame_with(false, false), true)
+        .unwrap();
+    h.collect();
+    switch_to_hedge(&mut h);
+
+    h.now += 1.;
+    h.engine
+        .apply_frame(h.now, &source_frame_with(true, false), true)
+        .unwrap();
+    h.collect();
+    assert!(h.engine.store().hedged());
+    // Released: the source's next value applies again.
+    h.now += 1.;
+    h.engine
+        .apply_frame(h.now, &source_frame_with(false, false), true)
+        .unwrap();
+    h.collect();
+    assert!(!h.engine.store().hedged());
 }

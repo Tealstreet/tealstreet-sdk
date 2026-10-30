@@ -188,6 +188,10 @@ pub struct Applied {
     /// An ORDERS section was applied: the source's orders stand as reconciled.
     pub orders: bool,
     pub positions: bool,
+    /// A STATUS section (loaded bits and the hedge flag) was applied.
+    pub status: bool,
+    /// A SETTINGS section, the source's whole settings table, was applied.
+    pub settings: bool,
     /// The source's VENUE_STATE payload, for `Venue::apply_venue_state`.
     pub venue_state: Option<Vec<u8>>,
 }
@@ -225,8 +229,14 @@ pub fn apply(
                 applied.positions = true;
             }
             section::BALANCE => balance(store, state, frame, section)?,
-            section::SETTINGS => settings(store, state, frame, section)?,
-            section::STATUS => status(store, state, frame, section)?,
+            section::SETTINGS => {
+                settings(store, state, frame, section)?;
+                applied.settings = true;
+            }
+            section::STATUS => {
+                status(store, state, frame, section)?;
+                applied.status = true;
+            }
             section::VENUE_STATE => {
                 applied.venue_state = Some(venue_state(section)?.to_vec());
             }
