@@ -149,6 +149,17 @@ impl HostExecutor {
         self.0.timers.borrow().due.keys().next().map(|key| key.0.0)
     }
 
+    /// A task was woken (by a completion or a change, not a timer) and waits
+    /// for the host to run the executor.
+    pub fn has_ready_tasks(&self) -> bool {
+        !self
+            .0
+            .ready
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_empty()
+    }
+
     /// Poll woken tasks until none is ready.
     pub fn run_until_stalled(&self) {
         let inner = &self.0;

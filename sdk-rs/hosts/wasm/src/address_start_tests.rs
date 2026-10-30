@@ -30,6 +30,8 @@ fn wasm_start_initializes_real_local_provider_before_venue_start_once() {
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
             hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             inner: Box::new(inner),
         };
         let output = engine.start(100.);

@@ -15,6 +15,9 @@ default = ["tokio-executor"]
 tokio-executor = ["tokio/rt", "tokio/time"]
 # The LOCAL worker's host-driven executor (no runtime, host-advanced clock).
 host-executor = []
+# Native instrument labels (Binance, Bybit builds), projected for the TradFi
+# guard; without it the projection reports none.
+product-semantics = ["safe-cex-engine/product-semantics"]
 
 [dependencies]
 safe-cex-engine.workspace = true
