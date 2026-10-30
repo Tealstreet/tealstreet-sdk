@@ -43,6 +43,9 @@ impl AccountPort for Port {
             .borrow_mut()
             .push((op.into(), serde_json::from_str(&data).unwrap()));
     }
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities::BASE
+    }
 }
 
 #[tokio::test]
@@ -100,15 +103,29 @@ async fn closing_shared_scope_during_a_command_never_issues_the_successor() {
 
 #[test]
 fn cancellation_keeps_routing_symbols_and_partial_errors_keep_real_ids() {
+    let symbol_routed = safe_cex_engine::Capabilities {
+        cancel_with_symbols: true,
+        ..safe_cex_engine::Capabilities::BASE
+    };
     let command = translate(
         "cancelOrders",
         &json!([[{"id":"7","symbol":"BTC-PERP"}]]),
         1,
+        &symbol_routed,
     )
     .unwrap();
     assert!(
         matches!(command,Command::CancelOrdersWithSymbols{orders,..} if orders[0].symbol=="BTC-PERP" && orders[0].id=="7")
     );
+    // A venue without a symbol-qualified cancel (Bybit) refuses that form: cancel by id.
+    let command = translate(
+        "cancelOrders",
+        &json!([[{"id":"7","symbol":"BTC-PERP"}]]),
+        1,
+        &safe_cex_engine::Capabilities::BASE,
+    )
+    .unwrap();
+    assert!(matches!(command, Command::CancelOrders { ids, .. } if ids == ["7"]));
     let mut error = VenueError::new("lost").outcome(Outcome::Unknown);
     error.partial = Some(Box::new(Partial {
         order_ids: vec!["7".into()],
@@ -119,7 +136,15 @@ fn cancellation_keeps_routing_symbols_and_partial_errors_keep_real_ids() {
     assert_eq!(data["partialOrderIds"], json!(["7"]));
     assert_eq!(data["totalOrderCount"], 2);
     assert_eq!(data["outcome"], "unknown");
-    assert!(translate("invented", &json!([]), 2).is_err());
+    assert!(
+        translate(
+            "invented",
+            &json!([]),
+            2,
+            &safe_cex_engine::Capabilities::BASE
+        )
+        .is_err()
+    );
 }
 
 #[tokio::test]
@@ -332,9 +357,24 @@ async fn native_buy_uses_engine_store_and_returns_real_ids_without_replaying_unk
 
 #[test]
 fn native_amend_translation_changes_price_only_and_retains_the_real_order_id() {
-    let command=translate("updateOrder",&json!([{"order":{"id":"native-id","symbol":"BTCUSDT","side":"sell","amount":7,"reduceOnly":true},"update":{"price":123.5}}]),99).unwrap();
+    let command=translate("updateOrder",&json!([{"order":{"id":"native-id","symbol":"BTCUSDT","side":"sell","amount":7,"reduceOnly":true},"update":{"price":123.5}}]),99,&safe_cex_engine::Capabilities::BASE).unwrap();
     assert!(
         matches!(command,Command::AmendOrder{command:99,id,price:Some(123.5),amount:None} if id=="native-id")
+    );
+    // A venue whose amend needs the symbol (KuCoin Spot) gets the symbol-routed form.
+    let with_symbol = safe_cex_engine::Capabilities {
+        amend_with_symbol: true,
+        ..safe_cex_engine::Capabilities::BASE
+    };
+    let command = translate(
+        "updateOrder",
+        &json!([{"order":{"id":"native-id","symbol":"BTCUSDT"},"update":{"amount":2}}]),
+        99,
+        &with_symbol,
+    )
+    .unwrap();
+    assert!(
+        matches!(command,Command::AmendOrderWithSymbol{id,symbol,price:None,amount:Some(2.0),..} if id=="native-id" && symbol=="BTCUSDT")
     );
 }
 

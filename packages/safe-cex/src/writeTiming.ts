@@ -102,9 +102,9 @@ export const emitWriteTiming = (
   timing: WriteTiming,
   outcome: 'ok' | 'error',
 ) => {
-  timing.mark('resolved');
-  const event = timing.event(outcome);
   try {
+    timing.mark('resolved');
+    const event = timing.event(outcome);
     exchange.emitter.emit('engine-event', event);
     exchange.log(event.message, LogSeverity.Info, event);
   } catch {

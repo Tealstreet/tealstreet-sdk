@@ -10,7 +10,7 @@ mod registry;
 mod scope;
 mod store;
 
-pub use port::{AccountPort, Change, CommandFuture};
+pub use port::{AccountPort, Change, CommandFuture, amend_command, cancel_command};
 pub use registry::{AlgoFactory, Registry};
 pub use scope::{AlgoCx, Scope};
 pub use store::{AlgoStore, PrivateSocketHealth};
