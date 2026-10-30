@@ -570,31 +570,26 @@ impl Session {
                         );
                     }
                 }
+                // Off the socket loop: a read may wait for the account's first load.
                 Plan::Read(read) => {
-                    let answer = account
-                        .handle
-                        .read(move |store| methods::read_store(&read, store))
+                    let (handle, out) = (account.handle.clone(), self.out.clone());
+                    let (name, request_id) = (name.to_owned(), request_id.clone());
+                    tokio::spawn(async move {
+                        let data = match methods::read_when_loaded(
+                            &handle,
+                            read,
+                            methods::READ_WAIT,
+                        )
                         .await
-                        .unwrap_or_else(|| {
-                            Err(methods::Refused {
-                                name: "Error",
-                                message: "account is closed".into(),
-                            })
-                        });
-                    match answer {
-                        Ok(result) => self.send(envelope::msg(
-                            name,
-                            "callMethod:done",
-                            json!({"requestId": request_id, "success": true, "result": result}),
-                        )),
-                        Err(refused) => self.reply_failure(
-                            name,
-                            &request_id,
-                            refused.name,
-                            &refused.message,
-                            None,
-                        ),
-                    }
+                        {
+                            Ok(result) => {
+                                json!({"requestId": request_id, "success": true, "result": result})
+                            }
+                            Err(refused) => json!({"requestId": request_id, "success": false,
+                                "result": {"name": refused.name, "message": refused.message}}),
+                        };
+                        out.send(envelope::msg(&name, "callMethod:done", data));
+                    });
                 }
                 Plan::Command { mut command, reply } => {
                     let joined = self.joined.get_mut(name).unwrap();

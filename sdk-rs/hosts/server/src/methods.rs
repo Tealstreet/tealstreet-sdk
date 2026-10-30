@@ -26,7 +26,7 @@ pub enum Plan {
     Nuke(&'static str),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StoreRead {
     Orders(Option<Vec<String>>),
     Positions(Option<Vec<String>>),
@@ -67,7 +67,54 @@ pub fn worker_order_ids(result: Value) -> Value {
     }
 }
 
-/// Answers a store read; reads wait for nothing, so an unloaded section refuses.
+/// How long a store read waits for its sections, as `untilNativeData` in rust.exchange.ts.
+pub const READ_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+const READ_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Whether `read`'s sections have loaded (markets plus the section it reads).
+pub fn read_loaded(read: &StoreRead, store: &Store) -> bool {
+    let loaded = store.loaded();
+    loaded.markets
+        && match read {
+            StoreRead::Orders(_) | StoreRead::ClientOrder { .. } => loaded.orders,
+            StoreRead::Positions(_) | StoreRead::PositionMode => loaded.positions,
+            StoreRead::Balance => loaded.balance,
+        }
+}
+
+/// Answers `read` once its sections load, or refuses after `wait` (eager warm-start
+/// reads arrive before the first load).
+pub async fn read_when_loaded(
+    handle: &safe_cex_native::AccountHandle,
+    read: StoreRead,
+    wait: std::time::Duration,
+) -> Result<Value, Refused> {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        let attempt = read.clone();
+        let answer = handle
+            .read(move |store| read_loaded(&attempt, store).then(|| read_store(&attempt, store)))
+            .await;
+        match answer {
+            None => return Err(refused("Error", "account is closed")),
+            Some(Some(answer)) => return answer,
+            Some(None) if tokio::time::Instant::now() >= deadline => {
+                let what = match read {
+                    StoreRead::Orders(_) | StoreRead::ClientOrder { .. } => "orders",
+                    StoreRead::Positions(_) | StoreRead::PositionMode => "positions",
+                    StoreRead::Balance => "balances",
+                };
+                return Err(refused(
+                    "Error",
+                    format!("{what} did not load within {}s", wait.as_secs()),
+                ));
+            }
+            Some(None) => tokio::time::sleep(READ_POLL).await,
+        }
+    }
+}
+
+/// Answers a store read from loaded sections; an unloaded section refuses.
 pub fn read_store(read: &StoreRead, store: &Store) -> Result<Value, Refused> {
     let loaded = store.loaded();
     let ready = |section: bool, what: &str| {
