@@ -73,7 +73,7 @@ import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
-import { stopAccountAlgos } from '../../webworker/stopAccountAlgos';
+import { stopAccountAlgos as stopLocalAccountAlgos } from '../../webworker/stopAccountAlgos';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { isAsterDEXStpMode, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
@@ -225,6 +225,8 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
 
 export type WasmEngineModule = {
   resolveConstruction?: (venue: string, optionsJson: string) => string;
+  /** Whether `frameFed: true` construction is implemented for this venue's family. */
+  frameFedSupported?: (venue: string) => boolean;
   WasmEngine: new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
 };
 
@@ -296,6 +298,29 @@ export type WorkerMirrorExchange = Omit<RustEngineExchange, WorkerMirrorUnsuppor
 
 /** Rust-only engine methods (not on BaseExchange) a mirror forwards whole. */
 const RUST_FORWARDED_METHODS = ['fetchStpMode', 'changeStpMode', 'fetchOrderBook'] as const;
+
+/** A frame-fed mirror signs and sends these itself; everything else still goes to the account's data source. */
+const FRAME_FED_WRITES: ReadonlySet<string> = new Set([
+  'placeOrder',
+  'placeOrders',
+  'placeOrderWithClientOrderId',
+  'updateOrder',
+  'cancelOrders',
+  'cancelSymbolOrders',
+  'cancelAllOrders',
+  'nuke',
+  'nukePositions',
+  'nukeOrders',
+  'setLeverage',
+  'setAllLeverage',
+  'changeMarginType',
+  'changePositionMode',
+  'changeStpMode',
+  'changeAccountTier',
+  'scheduleCancel',
+]);
+
+type FrameFedHost = EngineHost & { applyFrame?: (frame: ArrayBuffer, snapshot: boolean) => void };
 
 /**
  * The hosted server answers `fetchOrders`/`fetchPositions` with its engine's
@@ -429,7 +454,21 @@ export class RustEngineExchange extends BaseExchange {
    * forwards frames to a main thread that reads them, book and candle
    * listeners here stay silent: main decodes those from the frame itself.
    */
-  onFrame?: (frame: ArrayBuffer) => void;
+  /** `snapshot`: the frame is a full baseline, so a frame-fed consumer resets before applying it. */
+  onFrame?: (frame: ArrayBuffer, snapshot?: boolean) => void;
+
+  /**
+   * A main-thread mirror whose family supports it runs its own engine fed by the
+   * account's data source (`ingestSourceFrame`): that engine's frames are the UI
+   * store, and it signs and sends manual writes itself. Others stay plain mirrors.
+   */
+  readonly frameFedReady: Promise<boolean>;
+  private frameFed = false;
+  private frameFedEngine = false;
+  private sourceBaseline = false;
+  get isFrameFed(): boolean {
+    return this.frameFed;
+  }
   private stopPollingConfig?: () => void;
   private pollingPolicy?: { scale: number | null; ceiling?: number; promise?: Promise<void> };
   private syncingAccountState = false;
@@ -549,7 +588,7 @@ export class RustEngineExchange extends BaseExchange {
     if (capabilities.fillsByOrderId && !this.isWorkerMirror) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
     if (capabilities.accountTier) {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
-        if (this.routesToWorker) {
+        if (this.routesToWorker && !this.frameFed) {
           await this.callWorker('changeAccountTier', tier);
           return;
         }
@@ -712,6 +751,14 @@ export class RustEngineExchange extends BaseExchange {
     this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
     this.forwardToWorker();
     if (this.isWorkerMirror) this.refuseOnMirror();
+    this.frameFedReady = this.isWorkerMirror && !this.isPublicDataOnly ? this.startFrameFed() : Promise.resolve(false);
+    // Hosts that write through `callMethodInWorker` reach the frame-fed engine too.
+    const viaWorker = this.callMethodInWorker;
+    const members = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+    this.callMethodInWorker = ((method: string, ...args: unknown[]) =>
+      this.frameFed && FRAME_FED_WRITES.has(method)
+        ? members[method](...args)
+        : (viaWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args)) as typeof viaWorker;
     this.stopWorkerCapabilitySync = this.store.subscribe(this.syncWorkerCapabilities);
   }
 
@@ -856,6 +903,46 @@ export class RustEngineExchange extends BaseExchange {
     return this.startup !== undefined;
   }
 
+  private startFrameFed = async (): Promise<boolean> => {
+    try {
+      await this.ensureSigningHost();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.log(`${this.name} manual writes stay on the account's data source: ${reason}`, LogSeverity.Warning);
+      return false;
+    }
+    const host = this.host as FrameFedHost | undefined;
+    const construction = this.constructionRecord as { frameFed?: boolean } | undefined;
+    // Never start an engine that would open the venue's own streams on main.
+    if (!host || this.isDisposed || !this.frameFedEngine || typeof host.applyFrame !== 'function') return false;
+    if (construction?.frameFed !== true) return false;
+    if (this.signerSetup instanceof DelegatedSignerSetup) await host.prepareAddressSetup();
+    if (this.isDisposed || this.host !== host) return false;
+    this.frameFed = true;
+    host.start();
+    const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
+    this.flushTimers.push(setInterval(() => this.host?.flush(), STORE_FLUSH_MS * multiplier));
+    return true;
+  };
+
+  /**
+   * One frame from the account's data source (its worker, or the hosted server),
+   * as its exact SCXF bytes. A snapshot resets the engine's account state; a delta
+   * before the first snapshot is dropped, so a host asks the source for one once
+   * `frameFedReady` resolves, and again after any gap or reconnect.
+   */
+  ingestSourceFrame = (frame: ArrayBuffer, snapshot: boolean): void => {
+    const host = this.host as FrameFedHost | undefined;
+    if (!this.frameFed || !host?.applyFrame || this.isDisposed || this.engineFailure) return;
+    if (!snapshot && !this.sourceBaseline) return;
+    this.sourceBaseline = true;
+    host.applyFrame(frame, snapshot);
+    host.flush();
+  };
+
+  /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere. */
+  stopAccountAlgos = (): Promise<NukeResult> => stopLocalAccountAlgos(this);
+
   // Startup is single-use, including failures; a retry needs a new account instance.
   start = (): Promise<void> => {
     if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
@@ -924,7 +1011,7 @@ export class RustEngineExchange extends BaseExchange {
       });
     }
     const transportFactory = engineTransport;
-    const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
+    const wasm = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
         if (!this.isDisposed) return;
         this.startupWaiters.delete(disposed);
@@ -946,6 +1033,9 @@ export class RustEngineExchange extends BaseExchange {
       }
     });
     if (this.isDisposed) throw new Error('Exchange disposed during startup');
+    const { WasmEngine } = wasm;
+    // Decided with the build, so a signing host built first is the same frame-fed engine.
+    this.frameFedEngine = this.isWorkerMirror && !this.isPublicDataOnly && wasm.frameFedSupported?.(this.name) === true;
     const {
       key,
       secret,
@@ -1054,6 +1144,7 @@ export class RustEngineExchange extends BaseExchange {
         publicFeed: { mode: this.publicFeedMode },
         // The engine reports account sections missing at startup only when untilLoaded waits for them.
         accountStartup: !this.isPublicDataOnly,
+        ...(this.frameFedEngine ? { frameFed: true } : {}),
         privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
       this.signerSetup,
@@ -1192,7 +1283,7 @@ export class RustEngineExchange extends BaseExchange {
       const local = members[method] as (...args: unknown[]) => Promise<unknown>;
       // An engine-owning instance calls straight through, keeping its own synchronous refusals.
       members[method] = (...args: unknown[]) => {
-        if (!this.routesToWorker) return local(...args);
+        if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
         return this.callWorker(method, ...args).then((result) =>
           // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
           method === 'updateOrder'
@@ -1287,7 +1378,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     // A fresh engine's full native snapshot clears the previous worker stream's
     // catalog/book baselines before any new deltas reach the main consumer.
-    if (this.onFrame) this.receiveFrame(this.host.snapshot());
+    if (this.onFrame) this.applyEngineFrame(this.host.snapshot(), true, true);
     try {
       let applied: Promise<void> | undefined;
       for (;;) {
@@ -1422,12 +1513,12 @@ export class RustEngineExchange extends BaseExchange {
   private frameRecoveryPending = false;
 
   private receiveFrame = (buffer: ArrayBuffer) => {
-    // Only the worker's frames, applied through `applyWorkerFrame`, own a mirror's store.
-    if (this.isWorkerMirror) return;
+    // Only the worker's frames, applied through `applyWorkerFrame`, own a plain mirror's store.
+    if (this.isWorkerMirror && !this.frameFed) return;
     this.applyEngineFrame(buffer, true);
   };
 
-  private applyEngineFrame(buffer: ArrayBuffer, recover: boolean) {
+  private applyEngineFrame(buffer: ArrayBuffer, recover: boolean, snapshot = false) {
     let frame: Frame;
     try {
       frame = new Frame(buffer);
@@ -1529,7 +1620,7 @@ export class RustEngineExchange extends BaseExchange {
         });
       }
     }
-    this.dispatchFrameEvent(() => this.onFrame?.(buffer));
+    this.dispatchFrameEvent(() => this.onFrame?.(buffer, snapshot));
     if (sharedFailure) {
       const failure = sharedFailure;
       this.dispatchFrameEvent(() => this.emitAndLogError(failure));
@@ -1559,7 +1650,7 @@ export class RustEngineExchange extends BaseExchange {
     this.frameRecoveryPending = true;
     try {
       const snapshot = this.captureEngineSnapshot();
-      this.applyEngineFrame(snapshot.frame, false);
+      this.applyEngineFrame(snapshot.frame, false, true);
       this.dispatchFrameEvent(() => this.applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
     } catch (error) {
       console.error('Engine frame recovery failed', error);
@@ -1865,7 +1956,9 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Running chasers and TWAPs would place again behind the nuke: stop them first. */
   private stopAlgosForNuke = async (): Promise<NukeResult> => {
-    const stopped = await stopAccountAlgos(this);
+    const stopped = this.isWorkerMirror
+      ? ((await this.callWorker('stopAccountAlgos')) as NukeResult)
+      : await stopLocalAccountAlgos(this);
     const count = stopped.stoppedChasers.length + stopped.stoppedTwaps.length;
     if (count)
       this.log(
@@ -2251,7 +2344,7 @@ export class RustEngineExchange extends BaseExchange {
       if (typeof time !== 'number' || !Number.isSafeInteger(time))
         throw new Error('Hyperliquid scheduleCancel time must be a safe integer UTC timestamp in milliseconds');
     }
-    if (this.routesToWorker) {
+    if (this.routesToWorker && !this.frameFed) {
       await this.callWorker('scheduleCancel', time);
       return;
     }
