@@ -61,6 +61,11 @@ it('takes the existing info engine-event route, never failing the write', () => 
     },
   };
   expect(() => emitWriteTiming({ emitter: throwing, log }, new WriteTiming('x'), 'ok')).not.toThrow();
+  const broken = new WriteTiming('x');
+  broken.event = () => {
+    throw new Error('event');
+  };
+  expect(() => emitWriteTiming({ emitter: { emit: vi.fn() }, log }, broken, 'ok')).not.toThrow();
 });
 
 it('carries one timing across the worker RPC: caller stamps, worker and engine stamp, caller emits once', async () => {
