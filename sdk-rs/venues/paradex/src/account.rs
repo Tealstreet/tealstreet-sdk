@@ -29,6 +29,8 @@ const MAX_QUEUED: usize = 256;
 const RETAINED: usize = 20_000;
 const POLL_MS: f64 = 10_000.;
 const AUTH_REFRESH_MS: f64 = 180_000.;
+/// Frame-fed: how long before `refresh_at` a held JWT is renewed.
+const JWT_RENEW_EARLY_MS: f64 = 15_000.;
 /// The Session bundle (`Authorization: Bearer`) goes first, as native requests sent it.
 const READ_HEADERS: &[(&str, &str)] = &[
     ("Content-Type", "application/json"),
@@ -191,6 +193,8 @@ pub struct Account {
     subscriptions_started: f64,
     supervisor: Supervisor,
     retry: Option<TimerId>,
+    /// Frame-fed: renews the held JWT before it expires.
+    renew: Option<TimerId>,
     poll: Option<TimerId>,
     repair_orders: Option<TimerId>,
     repair_positions: Option<TimerId>,
@@ -250,6 +254,7 @@ impl Account {
                 ..Config::default()
             }),
             retry: None,
+            renew: None,
             poll: None,
             repair_orders: None,
             repair_positions: None,
@@ -379,6 +384,7 @@ impl Account {
             self.poll,
             self.repair_orders,
             self.repair_positions,
+            self.renew,
         ]
         .contains(&Some(timer))
             || self.supervisor.owns_timer(timer)
@@ -1129,6 +1135,9 @@ impl Account {
                 }
                 _ => {}
             }
+        } else if self.renew == Some(timer) {
+            self.renew = None;
+            self.refresh(cx);
         } else if self.retry == Some(timer) {
             self.retry = None;
             if self.credentials.is_none() {
@@ -1149,6 +1158,10 @@ impl Account {
         }
     }
     fn margins(&mut self, cx: &mut Cx<'_, Pending>, boot: bool) {
+        // Frame-fed: the data source's frames carry the account; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.margins_busy {
             return;
         }
@@ -1171,6 +1184,10 @@ impl Account {
         );
     }
     fn positions(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
+        // Frame-fed: the data source's frames carry the account; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.positions_busy {
             if cycle && self.poll.is_none() {
                 self.poll = Some(cx.set_poll_timer(POLL_MS));
@@ -1198,6 +1215,10 @@ impl Account {
         );
     }
     fn balance(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
+        // Frame-fed: the data source's frames carry the account; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.balance_busy {
             return;
         }
@@ -1233,6 +1254,10 @@ impl Account {
         }
     }
     fn orders(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
+        // Frame-fed: the data source's frames carry the account; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.orders_busy {
             return;
         }
@@ -1477,6 +1502,12 @@ impl Account {
                 match credentials {
                     Ok(credentials) => {
                         self.credentials = Some(credentials);
+                        if cx.frame_fed() {
+                            // Writes ride the JWT Session: hold one ready so a first write is one leg.
+                            self.refresh(cx);
+                            let _ = cx.finish_http_context(&context);
+                            return;
+                        }
                         self.connect(cx);
                         let symbols: Vec<String> = cx
                             .store
@@ -1523,6 +1554,12 @@ impl Account {
                 }
                 while let Some(request) = self.queue.pop_front() {
                     self.dispatch(cx, request);
+                }
+                if cx.frame_fed() {
+                    // Renewed before it expires, so no write waits on `/auth`.
+                    let due = (self.refresh_at - cx.now - JWT_RENEW_EARLY_MS).max(0.);
+                    self.renew = Some(cx.set_timer(due));
+                    return;
                 }
                 self.send_auth(cx);
             }
