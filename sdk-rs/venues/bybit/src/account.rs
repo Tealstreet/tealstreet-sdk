@@ -20,6 +20,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// Positions and the wallet are re-read this often; the stream carries
 /// changes in between, so this only repairs what a dropped frame missed.
 const RECONCILE_INTERVAL_MS: f64 = 5_000.0;
+/// While the private topics are live, positions and the wallet come from them;
+/// REST re-reads them only this often as a safety reconcile (TS polled every tick).
+const SAFETY_RECONCILE_MS: f64 = 60_000.0;
 /// Consecutive Hyro reads the private stream may overtake before one is admitted.
 const HYRO_OVERTAKEN_READS: u8 = 2;
 const FILL_REPAIR_GRACE_MS: f64 = 8_000.0;
@@ -255,6 +258,10 @@ pub struct AccountState {
     wallet_in_flight: bool,
     wallet_follow_up: bool,
     wallet: Option<Wallet>,
+    /// The private topics are subscribed on an authenticated socket.
+    topics_live: bool,
+    /// When positions and the wallet were last read over REST.
+    last_account_read_at: f64,
     /// Bybit permits different position modes on different symbols.
     pub position_modes: HashMap<String, bool>,
     pub position_bound: HashSet<String>,
@@ -370,6 +377,64 @@ fn raw_wallet_account(body: &str) -> Option<String> {
     }
     let envelope: Envelope<'_> = serde_json::from_str(body).ok()?;
     Some(envelope.result?.list.first()?.get().to_owned())
+}
+
+/// The first account of a `wallet` topic frame, verbatim.
+fn raw_topic_wallet(text: &str) -> Option<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Frame {
+        data: Vec<serde_json::Value>,
+    }
+    serde_json::from_str::<Frame>(text)
+        .ok()?
+        .data
+        .into_iter()
+        .next()
+}
+
+/// `balance.info` kept current from wallet pushes between REST reads: the push's
+/// account fields replace the stored ones, and its coins merge into theirs by
+/// `coin`, since a push may list only the coins (and fields) that changed.
+pub(crate) fn merge_wallet_info(
+    stored: Option<String>,
+    pushed: &serde_json::Value,
+) -> Option<String> {
+    use serde_json::Value;
+    let Value::Object(pushed) = pushed else {
+        return stored;
+    };
+    let mut info = match stored.as_deref().map(serde_json::from_str::<Value>) {
+        Some(Ok(Value::Object(info))) => info,
+        _ => serde_json::Map::new(),
+    };
+    for (field, value) in pushed {
+        if field != "coin" {
+            info.insert(field.clone(), value.clone());
+        }
+    }
+    if let Some(Value::Array(pushed_coins)) = pushed.get("coin") {
+        let mut coins = match info.remove("coin") {
+            Some(Value::Array(coins)) => coins,
+            _ => Vec::new(),
+        };
+        for coin in pushed_coins {
+            match (
+                coins.iter_mut().find(|known| known["coin"] == coin["coin"]),
+                coin,
+            ) {
+                // Field by field: a push may omit fields REST carries (`marginCollateral`).
+                (Some(Value::Object(known)), Value::Object(pushed)) => {
+                    for (field, value) in pushed {
+                        known.insert(field.clone(), value.clone());
+                    }
+                }
+                (Some(known), _) => *known = coin.clone(),
+                (None, _) => coins.push(coin.clone()),
+            }
+        }
+        info.insert("coin".into(), Value::Array(coins));
+    }
+    serde_json::to_string(&Value::Object(info)).ok()
 }
 
 fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
@@ -1138,6 +1203,7 @@ impl BybitLinear {
             cx.clear_timer(timer);
         }
         self.account.authed = false;
+        self.account.topics_live = false;
         if !self.variant.is_hyro() {
             self.account.session_version += 1;
             self.account.orders_generation += 1;
@@ -1428,6 +1494,7 @@ impl BybitLinear {
         self.fetch_orders(cx);
         self.fetch_positions(cx);
         self.fetch_wallet(cx);
+        self.account.last_account_read_at = cx.now;
         self.account.tick_timer = Some(cx.set_poll_timer(RECONCILE_INTERVAL_MS));
     }
 
@@ -1818,8 +1885,18 @@ impl BybitLinear {
             self.account.last_orders_retry_at = now;
             self.fetch_orders(cx);
         }
+        if !self.account_reads_due(now) {
+            return;
+        }
+        self.account.last_account_read_at = now;
         self.fetch_positions(cx);
         self.fetch_wallet(cx);
+    }
+
+    /// Positions and the wallet stream on the private topics; REST re-reads them
+    /// every tick only while those topics are down, else as the safety reconcile.
+    pub(crate) fn account_reads_due(&self, now: f64) -> bool {
+        !self.account.topics_live || now - self.account.last_account_read_at >= SAFETY_RECONCILE_MS
     }
 
     pub(crate) fn on_private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -2036,6 +2113,9 @@ impl BybitLinear {
                         return;
                     }
                     self.account.wallet = Some(Wallet::from_wire(account));
+                    if let Some(raw) = raw_topic_wallet(text) {
+                        self.balance_info = merge_wallet_info(self.balance_info.take(), &raw);
+                    }
                     // A push may list only changed coins; merge, keeping explicit zeros.
                     let mut coins = self.account.coins.take().unwrap_or_default();
                     for coin in coin_balances(account) {
@@ -2075,6 +2155,8 @@ impl BybitLinear {
                 }
             }
             ("subscribe", Some(true)) if self.account.authed => {
+                self.account.topics_live = true;
+                self.account.last_account_read_at = cx.now;
                 // Cover the gap before topics became live, including the first connection.
                 self.account.orders_follow_up = self.account.orders.is_some();
                 self.account.positions_follow_up = self.account.positions.is_some();
