@@ -427,6 +427,8 @@ export interface WasmEngineLike {
   command(json: string, now: number): string;
   /** A `frameFed` engine's ingest of one data-source frame; returns actions JSON. */
   applyFrame?(frame: Uint8Array, snapshot: boolean, now: number): string;
+  /** A `frameFed` engine's data-source clock minus the host's, in ms. */
+  setSourceClockOffset?(offsetMs: number | undefined): void;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   /** Full private sections and unflushed catalog; absence is unsupported. */
@@ -496,6 +498,8 @@ export class EngineHost {
   flush(marketOnly?: boolean): void;
   /** Apply one data-source frame to a `frameFed` engine; a snapshot resets its account state first. */
   applyFrame(frame: ArrayBuffer | Uint8Array, snapshot: boolean): void;
+  /** A `frameFed` engine's data-source clock minus this host's, in ms. */
+  setSourceClockOffset(offsetMs: number | undefined): void;
   snapshot(): ArrayBuffer;
   accountSnapshot(): ArrayBuffer;
   socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;

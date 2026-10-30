@@ -17,10 +17,11 @@ type Fake = {
   started: number;
   constructed: number;
   refuseNext?: boolean;
+  offsets: Array<number | undefined>;
 };
 
 const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
-  const fake: Fake = { commands: [], applied: [], started: 0, constructed: 0 };
+  const fake: Fake = { commands: [], applied: [], started: 0, constructed: 0, offsets: [] };
   const idle = () => '[]';
   const frame = () =>
     new Uint8Array(
@@ -63,6 +64,9 @@ const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
       }
       fake.applied.push({ snapshot, bytes: bytes.byteLength });
       return '[]';
+    },
+    setSourceClockOffset: (offset: number | undefined) => {
+      fake.offsets.push(offset);
     },
     snapshotFrame: frame,
     takeFrame: frame,
@@ -166,6 +170,24 @@ describe('frame-fed main-thread mirror', () => {
     exchange.ingestSourceFrame(new ArrayBuffer(4), false);
     exchange.ingestSourceFrame(new ArrayBuffer(32), true);
     expect(fake.applied.map((frame) => frame.bytes)).toEqual([16, 32]);
+  });
+
+  it("measures its data source's clock from the frames it ingests", async () => {
+    const fake = fakeEngine();
+    exchange = mirrorWith(fake).exchange;
+    await exchange.frameFedReady;
+    const written = (offset: number) => {
+      const frame = new ArrayBuffer(16);
+      new DataView(frame).setFloat64(8, Date.now() + offset, true);
+      return frame;
+    };
+    // A hosted server 2 s ahead, its frames arriving after up to 300 ms in transit.
+    exchange.ingestSourceFrame(written(1_700), true);
+    exchange.ingestSourceFrame(written(2_000), false);
+    exchange.ingestSourceFrame(written(1_990), false);
+    expect(fake.offsets.length).toBe(2);
+    expect(fake.offsets[1]).toBeGreaterThanOrEqual(1_950);
+    expect(fake.offsets[1]).toBeLessThanOrEqual(2_000);
   });
 
   it('fills the UI store from its own engine frames', async () => {
