@@ -2005,14 +2005,25 @@ fn balance_info_is_the_last_rest_wallet_account_verbatim_like_ts() {
     assert_eq!(info["coin"][0]["marginCollateral"], true);
     assert_eq!(info["coin"][0]["collateralSwitch"], true);
 
-    // Stream pushes move the balance but not `info`, as TS reads it from REST only.
+    // REST re-reads the wallet only as a 60 s safety reconcile while the stream is
+    // live (TS re-read it every tick), so pushes merge into `info`: account fields
+    // replace, coins merge field by field, and fields a push omits are kept.
     let socket = h.socket("/v5/private").unwrap();
     h.event(Event::WsOpened { socket });
     h.message(
         "/v5/private",
         r#"{"topic":"wallet","id":"w","creationTime":1,"data":[{"accountType":"UNIFIED","totalEquity":"2000","totalWalletBalance":"2000","totalMarginBalance":"2000","totalAvailableBalance":"2000","totalInitialMargin":"0","totalMaintenanceMargin":"0","coin":[{"coin":"USDT","equity":"2000","walletBalance":"2000","usdValue":"2000"}]}]}"#,
     );
-    assert_eq!(balance_info(&mut h, 92), expected);
+    let pushed = balance_info(&mut h, 92);
+    assert_eq!(pushed["totalEquity"], "2000");
+    assert_eq!(pushed["coin"][0]["equity"], "2000");
+    assert_eq!(pushed["coin"][0]["marginCollateral"], true);
+    assert_eq!(pushed["coin"][0]["collateralSwitch"], true);
+    assert_eq!(
+        pushed["coin"].as_array().unwrap().len(),
+        expected["coin"].as_array().unwrap().len()
+    );
+    let expected = pushed;
 
     // A failed read keeps the last good payload.
     h.advance(60_000.0);
@@ -3406,4 +3417,107 @@ fn a_twice_refused_order_page_never_leaks_its_signed_origin() {
     );
     assert_private_notices_are_safe(&h);
     assert!(h.logs.iter().all(|line| !line.contains(LOG_SECRET)));
+}
+
+/// Answer every outstanding account read.
+fn drain_account_reads(h: &mut Harness) {
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY_LIST);
+    }
+    while h.has_request("/v5/position/list") {
+        h.respond("/v5/position/list", 200, EMPTY_LIST);
+    }
+    while h.has_request("/v5/account/wallet-balance") {
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
+    }
+}
+
+fn polls_account(h: &Harness) -> bool {
+    h.has_request("/v5/position/list") || h.has_request("/v5/account/wallet-balance")
+}
+
+#[test]
+fn live_private_topics_turn_position_and_wallet_polls_into_a_60s_safety_reconcile() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    respond_snapshot(&mut h);
+    // Before the topics are live, every tick re-reads positions and the wallet.
+    h.advance(POLL_MS);
+    assert!(polls_account(&h), "{:?}", h.paths());
+    drain_account_reads(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"c"}"#,
+    );
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe","conn_id":"c"}"#,
+    );
+    // The subscribe ack covers the gap with one read.
+    assert!(polls_account(&h));
+    drain_account_reads(&mut h);
+    // Live topics: no position or wallet reads for the next 55 s of ticks...
+    // (a live venue answers the private pings, so the socket stays up).
+    let pong = r#"{"success":true,"ret_msg":"pong","conn_id":"c","op":"pong"}"#;
+    for _ in 0..11 {
+        h.advance(POLL_MS);
+        h.message("/v5/private", pong);
+        assert!(!polls_account(&h), "{:?}", h.paths());
+    }
+    // ...then the 60 s safety reconcile, on the first tick past it.
+    for _ in 0..2 {
+        h.advance(POLL_MS);
+        h.message("/v5/private", pong);
+    }
+    assert!(h.has_request("/v5/position/list") && h.has_request("/v5/account/wallet-balance"));
+    drain_account_reads(&mut h);
+    // A dropped private socket falls back to every tick until the topics are live again.
+    h.event(Event::WsClosed { socket, code: 1006 });
+    drain_account_reads(&mut h);
+    h.advance(POLL_MS);
+    assert!(polls_account(&h), "{:?}", h.paths());
+}
+
+#[test]
+fn an_open_position_keeps_its_per_tick_position_read_while_the_wallet_waits() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    respond_snapshot(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"c"}"#,
+    );
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe","conn_id":"c"}"#,
+    );
+    // The gap read reports an open BTCUSDT long.
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY_LIST);
+    }
+    while h.has_request("/v5/position/list") {
+        h.respond("/v5/position/list", 200, POSITIONS);
+    }
+    while h.has_request("/v5/account/wallet-balance") {
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
+    }
+    let pong = r#"{"success":true,"ret_msg":"pong","conn_id":"c","op":"pong"}"#;
+    for _ in 0..11 {
+        h.advance(POLL_MS);
+        h.message("/v5/private", pong);
+        // Venue-reported unrealized PnL: positions every tick; the wallet waits.
+        assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
+        assert!(
+            !h.has_request("/v5/account/wallet-balance"),
+            "{:?}",
+            h.paths()
+        );
+        while h.has_request("/v5/position/list") {
+            h.respond("/v5/position/list", 200, POSITIONS);
+        }
+    }
 }
