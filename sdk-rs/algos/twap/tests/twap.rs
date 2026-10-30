@@ -1141,6 +1141,7 @@ fn a_twap_naming_another_account_is_refused_visibly() {
 
     let mut foreign = persisted("foreign", "running", env.now + 1_000.0);
     foreign["options"]["accountName"] = json!("other-account");
+    foreign["state"]["accountName"] = json!("other-account");
     let restored = book.handle("twap:state", &json!([foreign]), &mut env, &view);
     assert_eq!(
         logs(&restored),
@@ -1149,4 +1150,18 @@ fn a_twap_naming_another_account_is_refused_visibly() {
     assert_eq!(book.ids().count(), 0);
     env.advance(SLICE_MS * 10.0);
     assert!(placements(&book.wake(&mut env, &view)).is_empty());
+}
+
+#[test]
+fn restore_refuses_state_filed_under_another_account() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let mut row = persisted("moved", "running", env.now + 1_000.0);
+    row["state"]["accountName"] = json!("other-account");
+    let effects = book.handle("twap:state", &json!([row]), &mut env, &view);
+    assert_eq!(
+        logs(&effects),
+        ["TWAP BTCUSDT not restored: restored state names another account than its options"]
+    );
+    assert_eq!(book.ids().count(), 0);
 }
