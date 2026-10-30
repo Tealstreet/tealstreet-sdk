@@ -4094,7 +4094,13 @@ impl<V: Venue> Engine<V> {
         let expired = self.io.core.setting_holds.expire(now);
         let kept = self.io.core.setting_holds.keep(&self.store);
         let applied = crate::ingest::apply(&mut self.store, &mut self.ingest, &parsed, snapshot)?;
-        self.io.core.setting_holds.restore(&mut self.store, kept);
+        // A snapshot replaces both sections, so it speaks for them even if absent.
+        self.io.core.setting_holds.restore(
+            &mut self.store,
+            kept,
+            applied.status || snapshot,
+            applied.settings || snapshot,
+        );
         self.io.core.dispatch_now = now;
         self.begin_event_scope();
         let mut cx = Cx {

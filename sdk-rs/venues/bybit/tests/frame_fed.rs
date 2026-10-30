@@ -393,3 +393,19 @@ fn an_unconfirmed_hold_expires_and_the_source_wins() {
     assert!(!h.engine.store().hedged());
     assert_eq!(placed_index(&mut h, 2), "0");
 }
+
+#[test]
+fn a_frame_without_status_does_not_release_the_hedge_hold() {
+    let mut h = switched_to_hedge();
+    // A ticker- or orders-only delta carries no STATUS: no evidence either way.
+    let quiet = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.0).finish();
+    h.engine.apply_frame(h.now, &quiet, false).unwrap();
+    h.collect();
+    // The source's next, stale STATUS still cannot put one-way back.
+    h.engine
+        .apply_frame(h.now, &mode_frame(false), false)
+        .unwrap();
+    h.collect();
+    assert!(h.engine.store().hedged());
+    assert_eq!(placed_index(&mut h, 2), "1");
+}

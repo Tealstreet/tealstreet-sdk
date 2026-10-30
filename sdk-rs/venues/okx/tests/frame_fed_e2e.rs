@@ -449,3 +449,78 @@ fn refresh_settings_on_a_source_re_reads_config_and_positions_and_writes_nothing
         "{sent:?}"
     );
 }
+
+#[test]
+fn a_flat_symbols_leverage_is_confirmed_by_the_sources_refresh_read() {
+    // The page sets leverage on a symbol with no position.
+    let mut source = flat_source();
+    let _ = prepared(&mut source, 2.0);
+    source
+        .store_mut()
+        .update_setting("BTCUSDT", |s| s.leverage = 5.);
+    let mut page = frame_fed();
+    page.apply_frame(2.0, &source.snapshot_frame(2.0).to_vec(), true)
+        .unwrap();
+    let sent = send(
+        &mut page,
+        Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 10.,
+            side: None,
+        },
+        3.0,
+    );
+    reply(
+        &mut page,
+        requests(&sent)[0],
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"10","mgnMode":"cross","posSide":""}"#),
+        3.1,
+    );
+    let _ = prepared(&mut page, 3.1);
+
+    // The source's refresh reads that symbol's leverage-info in the background.
+    let actions = send(
+        &mut source,
+        Command::Venue {
+            command: 9,
+            action: VenueAction::RefreshSettings {
+                symbol: Some("BTCUSDT".into()),
+            },
+        },
+        4.0,
+    );
+    let sent = requests(&actions);
+    assert!(sent.iter().all(|a| path(a).0 == Method::Get), "{sent:?}");
+    let leverage = sent
+        .iter()
+        .find(|a| {
+            path(a)
+                .1
+                .contains("/api/v5/account/leverage-info?instId=BTC-USDT-SWAP")
+        })
+        .expect("a leverage-info read for the symbol");
+    reply(
+        &mut source,
+        leverage,
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"10","mgnMode":"cross","posSide":""}"#),
+        4.1,
+    );
+    let _ = prepared(&mut source, 4.1);
+    assert_eq!(source.store().setting("BTCUSDT").unwrap().leverage, 10.);
+
+    // Its next frame agrees, so the page's hold releases at once.
+    page.apply_frame(5.0, &source.snapshot_frame(5.0).to_vec(), true)
+        .unwrap();
+    assert_eq!(page.store().setting("BTCUSDT").unwrap().leverage, 10.);
+    source
+        .store_mut()
+        .update_setting("BTCUSDT", |s| s.leverage = 7.);
+    page.apply_frame(6.0, &source.snapshot_frame(6.0).to_vec(), true)
+        .unwrap();
+    assert_eq!(
+        page.store().setting("BTCUSDT").unwrap().leverage,
+        7.,
+        "released: a later source change applies before the hold would expire"
+    );
+}
