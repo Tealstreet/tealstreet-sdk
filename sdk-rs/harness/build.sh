@@ -37,7 +37,7 @@ family_args() {
     tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) family=orderly ;;
     *) echo "Unsupported venue: $1 (expected $venues)" >&2; exit 2 ;;
   esac
-  # PR4 measurement branch: every family build links the Rust algos.
+  # Every family links the Rust algos (chaser, TWAP, exec) for the LOCAL worker.
   build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features "$family,algos-exec")
   if [[ $mutation_barriers == true ]]; then
     build_args+=(--features http-mutation-barriers)

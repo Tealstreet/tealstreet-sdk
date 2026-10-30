@@ -8,7 +8,8 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# The Rust algos (chaser, TWAP, exec) on this engine, host-driven; off by default.
+# The Rust algos (chaser, TWAP, exec) on this engine, host-driven: every family and
+# the combined build link them (LOCAL worker algos run on Rust).
 algos = ["dep:safe-cex-algos", "dep:safe-cex-chaser", "dep:safe-cex-algo-twap"]
 algos-exec = ["algos", "dep:safe-cex-exec"]
 hosted-operation-proof = ["kraken", "safe-cex-engine/test-support"]
@@ -46,6 +47,7 @@ bingx = ["safe-cex-venues/bingx", "text-ingress", "dispatch-signing", "hosted-si
 weex = ["safe-cex-venues/weex", "text-ingress", "dispatch-signing"]
 phemex = ["safe-cex-venues/phemex", "text-ingress", "dispatch-signing", "hosted-signing"]
 default = [
+    "algos-exec",
     "bitunix",
     "breakoutprop",
     "grvt",

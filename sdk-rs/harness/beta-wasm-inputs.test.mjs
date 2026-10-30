@@ -65,11 +65,10 @@ test('symlinks and an incomplete toolchain record are refused', () => {
   assert.throws(() => betaWasmInputs(tree(), { ...TOOLCHAIN, profile: '' }), /lacks profile/);
 });
 
-test('server-side crates are ignored, but the wasm host is not', () => {
+test('server-side crates are ignored, but the wasm host and the algos are not', () => {
   const root = tree();
   const before = betaWasmInputs(root, TOOLCHAIN).fingerprint;
   for (const dir of [
-    'sdk-rs/algos/exec/src',
     'sdk-rs/hosts/server/src',
     'sdk-rs/hosts/candle-server/src',
     'sdk-rs/hosts/remote-signer/src',
@@ -81,5 +80,10 @@ test('server-side crates are ignored, but the wasm host is not', () => {
   assert.equal(betaWasmInputs(root, TOOLCHAIN).fingerprint, before);
   mkdirSync(join(root, 'sdk-rs/hosts/wasm/src'), { recursive: true });
   writeFileSync(join(root, 'sdk-rs/hosts/wasm/src/lib.rs'), 'pub fn host() {}');
-  assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, before);
+  const host = betaWasmInputs(root, TOOLCHAIN).fingerprint;
+  assert.notEqual(host, before);
+  // The algos link into every family wasm.
+  mkdirSync(join(root, 'sdk-rs/algos/exec/src'), { recursive: true });
+  writeFileSync(join(root, 'sdk-rs/algos/exec/src/lib.rs'), 'pub fn exec() {}');
+  assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, host);
 });
