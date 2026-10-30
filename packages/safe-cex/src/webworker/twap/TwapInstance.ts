@@ -26,6 +26,8 @@ export class TwapInstance {
   private sliceTimers: ReturnType<typeof setTimeout>[] = [];
   /** Releases the cross-tab owner lock (`twapLock.ts`) once the TWAP ends. */
   private releaseOwnerLock: (() => void) | undefined;
+  /** A restored TWAP places nothing, even on a user resume, until it holds its lock. */
+  private awaitingOwnerLock = false;
 
   constructor(
     exchange: Exchange,
@@ -53,7 +55,12 @@ export class TwapInstance {
   }
 
   /** Hold the cross-tab owner lock until the TWAP completes or stops. */
+  awaitOwnerLock() {
+    this.awaitingOwnerLock = true;
+  }
+
   holdOwnerLock(release: () => void) {
+    this.awaitingOwnerLock = false;
     if (this.state.status === TwapStatus.Completed) release();
     else this.releaseOwnerLock = release;
   }
@@ -208,6 +215,7 @@ export class TwapInstance {
   }
 
   start = async () => {
+    if (this.awaitingOwnerLock) return;
     if (this.state.status === TwapStatus.Completed || this.state.status === TwapStatus.Paused) {
       return;
     }
@@ -270,6 +278,7 @@ export class TwapInstance {
   };
 
   resume = async () => {
+    if (this.awaitingOwnerLock) return;
     if (this.state.status === TwapStatus.Paused) {
       let nextOrderAt: number;
 
