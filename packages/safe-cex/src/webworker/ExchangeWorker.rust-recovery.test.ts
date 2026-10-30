@@ -8,13 +8,10 @@ import { engineCapabilities } from '../__tests__/fixtures/engineCapabilities';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { OrderSide, OrderType } from '../types';
 import { virtualClock } from '../utils/virtualClock';
-import { registerCommandExecutor, resetCommandExecutor } from './commandExecutor';
 import { ExchangeWorker } from './ExchangeWorker';
 import { setMainAcceptsFrames } from './frameForwarding';
 import startWorkerContext, { exchangeWorkers } from './store.webworker';
 import { setTwapLockManager } from './twap/twapLock';
-import { twapManager } from './twap/TwapManager';
-import { TwapStatus } from './twap/TwapStatus';
 
 // A controllable ABI implementation, not a venue emulator. The real worker,
 // Rust adapter, EngineHost and binary frame decoder own every lifecycle below.
@@ -29,6 +26,8 @@ const market: Market = {
 };
 const sources: ControlledEngine[] = [];
 let trapStartup = false;
+/** Engines built next link the Rust algos; their `exec` is held, never answered. */
+let algosBuild = false;
 class ControlledEngine implements WasmEngineLike {
   pending = true;
   started = false;
@@ -50,9 +49,22 @@ class ControlledEngine implements WasmEngineLike {
     balance: { total: 10, free: 10, used: 0, upnl: 0 },
     loaded: { markets: true, tickers: true, orders: true, positions: true, balance: true },
   };
+  algoOps: Array<[string, unknown]> = [];
+  algoStart?: () => void;
+  algoOp?: (op: string, dataJson: string) => string;
   constructor(readonly venue = 'binance') {
     sources.push(this);
+    if (!algosBuild) return;
+    this.algoStart = () => {};
+    this.algoOp = (op, dataJson) => {
+      this.algoOps.push([op, JSON.parse(dataJson)]);
+      return '[]';
+    };
   }
+  algoRunning = () => true;
+  algoDeadline = () => undefined;
+  algoEmits = () => '[]';
+  algoDispose = () => '[]';
   capabilities = () => engineCapabilities(this.venue);
   start = () => {
     if (trapStartup) throw new WebAssembly.RuntimeError('startup panic');
@@ -167,12 +179,31 @@ const panic = async (source: ControlledEngine) => {
   source.trap = true;
   await vi.advanceTimersByTimeAsync(250);
 };
+const placeOrder = (requestId: string, clientOrderId?: string) => ({
+  op: 'callMethod' as const,
+  data: {
+    requestId,
+    method: 'placeOrder',
+    args: [
+      {
+        symbol: market.symbol,
+        side: OrderSide.Buy,
+        type: OrderType.Market,
+        amount: 1,
+        ...(clientOrderId && { clientOrderId }),
+      },
+    ],
+  },
+});
+const replies = (messages: Array<{ op: string; data?: any }>, requestId: string) =>
+  messages.filter((message) => message.op === 'callMethod:done' && message.data.requestId === requestId);
 
 beforeEach(() => {
   // Web Locks callbacks run outside fake timers; one worker needs no cross-tab lock here.
   setTwapLockManager(null);
   vi.useFakeTimers();
   trapStartup = false;
+  algosBuild = false;
   sources.length = 0;
   vi.spyOn(virtualClock, 'start').mockResolvedValue();
   setMainAcceptsFrames(true);
@@ -182,7 +213,6 @@ beforeEach(() => {
 afterEach(() => {
   workers.splice(0).forEach((worker) => worker.dispose());
   setMainAcceptsFrames(false);
-  resetCommandExecutor();
   vi.useRealTimers();
 });
 
@@ -373,59 +403,6 @@ describe('Rust worker engine ownership', () => {
     expect(sources[1].commands.some((command) => command.op === nativeOp)).toBe(false);
   });
 
-  it.each(['twap:start', 'twap:state'] as const)(
-    'stops %s when its first placement traps synchronously',
-    async (op) => {
-      const { worker } = createWorker();
-      await start(worker);
-      const added = vi.spyOn(twapManager, 'add');
-      const options = {
-        accountName: 'same-name',
-        activeMarket: market,
-        size: 2,
-        duration: 1,
-        ordersCount: 2,
-        side: OrderSide.Buy,
-        randomnessPercentage: 0,
-        useLimitOrders: false,
-        useChaserOrders: false,
-      };
-      sources[0].trapWrites = true;
-      worker.handlePayload({
-        op,
-        data:
-          op === 'twap:start'
-            ? options
-            : [
-                {
-                  id: 'restored',
-                  options,
-                  state: {
-                    accountName: options.accountName,
-                    activeMarket: market,
-                    size: 2,
-                    ordersSizes: [1, 1],
-                    ordersCount: 2,
-                    ordersExecuted: 0,
-                    nextOrderAt: Date.now(),
-                    side: OrderSide.Buy,
-                    status: TwapStatus.Running,
-                  },
-                },
-              ],
-      });
-      await vi.advanceTimersByTimeAsync(1000);
-      const instance = added.mock.calls[0][0];
-      expect(instance.state.status).toBe(TwapStatus.Completed);
-      expect(twapManager.runningTwaps.has(instance.id)).toBe(false);
-      expect(sources[0].commands.filter((command) => command.op === 'placeOrders')).toHaveLength(1);
-      expect(sources).toHaveLength(2);
-      expect(sources[1].commands.some((command) => command.op === 'placeOrders')).toBe(false);
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(sources[0].commands.filter((command) => command.op === 'placeOrders')).toHaveLength(1);
-    },
-  );
-
   it('does not announce recovered status when replaying safe demand traps the replacement', async () => {
     const { worker, messages } = createWorker();
     await start(worker);
@@ -480,19 +457,9 @@ describe('Rust worker engine ownership', () => {
   });
 
   it('preserves a native write acknowledgement that completed just before the engine trapped', async () => {
-    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
-      const orderIds = await exchange.placeOrder({
-        symbol: market.symbol,
-        side: OrderSide.Buy,
-        type: OrderType.Market,
-        amount: 1,
-        clientOrderId: 'client-accepted',
-      });
-      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true, data: { orderIds } });
-    });
     const { worker, messages } = createWorker();
     await start(worker);
-    worker.handlePayload({ op: 'exec', data: { reqId: 'accepted', command: 'fixture' } });
+    worker.handlePayload(placeOrder('accepted', 'client-accepted'));
     const original = worker.exchange as RustEngineExchange;
     sources[0].trap = true;
     // The pre-snapshot flush contains the trap and disposes the host before the read.
@@ -500,44 +467,48 @@ describe('Rust worker engine ownership', () => {
     expect(original.isEngineDead).toBe(true);
     expect(original.isDisposed).toBe(true);
     await vi.advanceTimersByTimeAsync(1000);
-    const replies = messages.filter((message) => message.op === 'exec-result' && message.data[0].reqId === 'accepted');
-    expect(replies).toHaveLength(1);
-    expect(replies[0].data[0]).toMatchObject({ success: true, data: { orderIds: ['accepted-id'] } });
+    const accepted = replies(messages, 'accepted');
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].data).toMatchObject({ success: true, result: ['accepted-id'] });
     expect(sources[1].commands.some((command) => command.op === 'placeOrders')).toBe(false);
   });
 
-  it('settles a non-reporting executor once and rejects its stale success after reconstruction', async () => {
-    let finish!: () => void;
-    const pending = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
-      await pending;
-      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true });
-    });
+  it('settles a held Rust exec once, as an unknown outcome, when the engine traps', async () => {
+    algosBuild = true;
     const { worker, messages } = createWorker();
     await start(worker);
-    worker.handlePayload({ op: 'exec', data: { reqId: 'pending', command: 'fixture' } });
+    expect((worker.exchange as RustEngineExchange).runsRustAlgos).toBe(true);
+    worker.handlePayload({ op: 'exec', data: { reqId: 'pending', symbol: market.symbol, command: 'buy 1' } });
+    expect(sources[0].algoOps).toEqual([['exec', { reqId: 'pending', symbol: market.symbol, command: 'buy 1' }]]);
     await panic(sources[0]);
     await vi.advanceTimersByTimeAsync(1000);
-    finish();
+    const execReplies = messages.filter(
+      (message) => message.op === 'exec-result' && message.data[0].reqId === 'pending',
+    );
+    expect(execReplies).toHaveLength(1);
+    expect(execReplies[0].data[0]).toMatchObject({
+      success: false,
+      error: expect.stringContaining('outcome is unknown'),
+    });
+    expect(sources[1].algoOps).toEqual([]);
+  });
+
+  it('refuses exec visibly on an engine build without algos', async () => {
+    const { worker, messages } = createWorker();
+    await start(worker);
+    worker.handlePayload({ op: 'exec', data: { reqId: 'no-algos', symbol: market.symbol, command: 'buy 1' } });
     await vi.advanceTimersByTimeAsync(0);
-    const replies = messages.filter((message) => message.op === 'exec-result' && message.data[0].reqId === 'pending');
-    expect(replies).toHaveLength(1);
-    expect(replies[0].data[0]).toMatchObject({ success: false, error: expect.stringContaining('outcome is unknown') });
+    const execReplies = messages.filter(
+      (message) => message.op === 'exec-result' && message.data[0].reqId === 'no-algos',
+    );
+    expect(execReplies).toHaveLength(1);
+    expect(execReplies[0].data[0]).toMatchObject({
+      success: false,
+      error: expect.stringContaining('engine build has no algos'),
+    });
   });
 
   it('settles pending native read/write on disposal before fallback and fences late state', async () => {
-    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
-      const orderIds = await exchange.placeOrder({
-        symbol: market.symbol,
-        side: OrderSide.Buy,
-        type: OrderType.Market,
-        amount: 1,
-        clientOrderId: 'caller-disposed',
-      });
-      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true, data: { orderIds } });
-    });
     const { worker, messages } = createWorker();
     const sibling = createWorker({}, 'sibling');
     await start(worker);
@@ -546,7 +517,7 @@ describe('Rust worker engine ownership', () => {
     const oldFrame = original.onFrame!;
     const oldStore = worker.store;
     sources[0].holdCommands = true;
-    worker.handlePayload({ op: 'exec', data: { reqId: 'write-dispose', command: 'fixture' } });
+    worker.handlePayload(placeOrder('write-dispose', 'caller-disposed'));
     worker.handlePayload({
       op: 'callMethod',
       data: { requestId: 'read-dispose', method: 'fetchOHLCV', args: [{ symbol: market.symbol, interval: '1m' }] },
@@ -557,11 +528,11 @@ describe('Rust worker engine ownership', () => {
     oldFrame(new ArrayBuffer(1));
     oldStore.update({ balance: { total: 999, free: 999, used: 0, upnl: 0 } });
     await vi.advanceTimersByTimeAsync(0);
-    const write = messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'write-dispose');
+    const write = replies(messages, 'write-dispose');
     expect(write).toHaveLength(1);
-    expect(write[0].data[0]).toMatchObject({
+    expect(write[0].data).toMatchObject({
       success: false,
-      errorDetails: {
+      result: {
         code: 'ENGINE_DISPOSED',
         command: 'placeOrders',
         outcome: 'unknown',
@@ -583,30 +554,18 @@ describe('Rust worker engine ownership', () => {
   });
 
   it('keeps a known acknowledgement queued before repeated normal dispose', async () => {
-    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
-      const orderIds = await exchange.placeOrder({
-        symbol: market.symbol,
-        side: OrderSide.Buy,
-        type: OrderType.Market,
-        amount: 1,
-      });
-      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true, data: { orderIds } });
-    });
     const { worker, messages } = createWorker();
     await start(worker);
-    worker.handlePayload({ op: 'exec', data: { reqId: 'known-dispose', command: 'fixture' } });
+    worker.handlePayload(placeOrder('known-dispose'));
     worker.dispose();
     worker.dispose();
     await vi.advanceTimersByTimeAsync(0);
-    const replies = messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'known-dispose');
-    expect(replies).toHaveLength(1);
-    expect(replies[0].data[0]).toMatchObject({ success: true, data: { orderIds: ['accepted-id'] } });
+    const known = replies(messages, 'known-dispose');
+    expect(known).toHaveLength(1);
+    expect(known[0].data).toMatchObject({ success: true, result: ['accepted-id'] });
   });
 
   it('retains native partial receipts queued before disposal without inventing unknown attribution', async () => {
-    registerCommandExecutor(async (exchange) => {
-      await exchange.placeOrder({ symbol: market.symbol, side: OrderSide.Buy, type: OrderType.Market, amount: 1 });
-    });
     const { worker, messages } = createWorker();
     await start(worker);
     sources[0].commandError = {
@@ -616,14 +575,14 @@ describe('Rust worker engine ownership', () => {
       totalOrderCount: 2,
       failedOrderIndex: 1,
     };
-    worker.handlePayload({ op: 'exec', data: { reqId: 'partial-dispose', command: 'fixture' } });
+    worker.handlePayload(placeOrder('partial-dispose'));
     worker.dispose();
     await vi.advanceTimersByTimeAsync(0);
-    const replies = messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'partial-dispose');
-    expect(replies).toHaveLength(1);
-    expect(replies[0].data[0]).toMatchObject({
+    const partial = replies(messages, 'partial-dispose');
+    expect(partial).toHaveLength(1);
+    expect(partial[0].data).toMatchObject({
       success: false,
-      errorDetails: {
+      result: {
         message: 'second leg refused',
         partialOrderIds: ['known-first'],
         partialOrderCount: 1,
@@ -631,31 +590,21 @@ describe('Rust worker engine ownership', () => {
         failedOrderIndex: 1,
       },
     });
-    expect(replies[0].data[0].errorDetails).not.toHaveProperty('outcome');
+    expect(partial[0].data.result).not.toHaveProperty('outcome');
   });
 
   it('bounds a live native command deadline, ignores late completion, and never replays the write', async () => {
-    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
-      const orderIds = await exchange.placeOrder({
-        symbol: market.symbol,
-        side: OrderSide.Buy,
-        type: OrderType.Market,
-        amount: 1,
-        clientOrderId: 'caller-timeout',
-      });
-      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true, data: { orderIds } });
-    });
     const { worker, messages } = createWorker({ extra: { rustCommandTimeoutMs: 20 } });
     await start(worker);
     expect((worker.exchange as unknown as { commandTimeoutMs: number }).commandTimeoutMs).toBe(20);
     sources[0].completeAfterMs = 40;
-    worker.handlePayload({ op: 'exec', data: { reqId: 'deadline', command: 'fixture' } });
+    worker.handlePayload(placeOrder('deadline', 'caller-timeout'));
     await vi.advanceTimersByTimeAsync(25);
-    const replies = () => messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'deadline');
-    expect(replies()).toHaveLength(1);
-    expect(replies()[0].data[0]).toMatchObject({
+    const deadline = () => replies(messages, 'deadline');
+    expect(deadline()).toHaveLength(1);
+    expect(deadline()[0].data).toMatchObject({
       success: false,
-      errorDetails: {
+      result: {
         code: 'COMMAND_TIMEOUT',
         command: 'placeOrders',
         timeoutMs: 20,
@@ -664,7 +613,7 @@ describe('Rust worker engine ownership', () => {
       },
     });
     await vi.advanceTimersByTimeAsync(100);
-    expect(replies()).toHaveLength(1);
+    expect(deadline()).toHaveLength(1);
     expect(worker.exchange?.isDisposed).toBe(false);
     expect(sources[0].commands.filter((c) => c.op === 'placeOrders')).toHaveLength(1);
     expect(sources).toHaveLength(1);
@@ -706,16 +655,6 @@ describe('Rust worker engine ownership', () => {
   );
 
   it('routes native receipts after RPC timeout to their original account without changing the settled error', async () => {
-    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
-      const orderIds = await exchange.placeOrder({
-        symbol: market.symbol,
-        side: OrderSide.Buy,
-        type: OrderType.Market,
-        amount: 1,
-        clientOrderId: 'caller-parent',
-      });
-      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true, data: { orderIds } });
-    });
     const { worker, messages } = createWorker({ extra: { rustCommandTimeoutMs: 20 } }, 'receipt-owner');
     const sibling = createWorker({}, 'other-owner');
     await start(worker);
@@ -726,11 +665,11 @@ describe('Rust worker engine ownership', () => {
       { symbol: market.symbol, kind: 'clientOrderIndex', identity: '9007199254740993' },
       { symbol: market.symbol, kind: 'orderCode', identity: '0000000017' },
     ];
-    worker.handlePayload({ op: 'exec', data: { reqId: 'late-identities', command: 'fixture' } });
+    worker.handlePayload(placeOrder('late-identities', 'caller-parent'));
     await vi.advanceTimersByTimeAsync(25);
-    const replies = () => messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'late-identities');
-    expect(replies()).toHaveLength(1);
-    const snapshot = structuredClone(replies()[0].data[0].errorDetails);
+    const late = () => replies(messages, 'late-identities');
+    expect(late()).toHaveLength(1);
+    const snapshot = structuredClone(late()[0].data.result);
     expect(snapshot).toMatchObject({
       code: 'COMMAND_TIMEOUT',
       outcome: 'unknown',
@@ -759,8 +698,8 @@ describe('Rust worker engine ownership', () => {
     expect(worker.store.updateIds.positions).toBe(positionsVersion);
     expect(worker.store.orders).toEqual([]);
     await vi.advanceTimersByTimeAsync(40);
-    expect(replies()).toHaveLength(1);
-    expect(replies()[0].data[0].errorDetails).toEqual(snapshot);
+    expect(late()).toHaveLength(1);
+    expect(late()[0].data.result).toEqual(snapshot);
     expect(messages.filter((m) => m.op === 'command-progress').at(-1)?.data).toMatchObject({
       account: 'receipt-owner',
       receiptKey: snapshot.receiptKey,
@@ -781,24 +720,15 @@ describe('Rust worker engine ownership', () => {
   });
 
   it('preserves actual pre-deadline receipts and fences the old host after reconstruction', async () => {
-    registerCommandExecutor(async (exchange) => {
-      await exchange.placeOrder({
-        symbol: market.symbol,
-        side: OrderSide.Buy,
-        type: OrderType.Market,
-        amount: 1,
-        clientOrderId: 'caller-request',
-      });
-    });
     const { worker, messages } = createWorker({ extra: { rustCommandTimeoutMs: 20 } });
     await start(worker);
     const staleProgress = progressListener(worker);
     sources[0].progressAfterMs = 0;
     sources[0].receipts = [{ symbol: market.symbol, kind: 'clientOrderId', identity: 'selected-native' }];
-    worker.handlePayload({ op: 'exec', data: { reqId: 'early-identities', command: 'fixture' } });
+    worker.handlePayload(placeOrder('early-identities', 'caller-request'));
     await vi.advanceTimersByTimeAsync(25);
-    const reply = messages.find((m) => m.op === 'exec-result' && m.data[0].reqId === 'early-identities');
-    expect(reply?.data[0].errorDetails).toMatchObject({
+    const [reply] = replies(messages, 'early-identities');
+    expect(reply?.data.result).toMatchObject({
       code: 'COMMAND_TIMEOUT',
       clientOrderIds: ['caller-request'],
       actualClientOrderIds: ['selected-native'],
@@ -875,43 +805,6 @@ describe('Rust worker engine ownership', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(sources).toHaveLength(1);
     expect(messages.some((m) => m.op === 'log' && m.data.context.worker_error_phase === 'startup')).toBe(true);
-  });
-
-  it("terminates only the failed worker\'s TWAPs and never restarts them on its new account", async () => {
-    const first = createWorker();
-    const second = createWorker();
-    await start(first.worker);
-    await start(second.worker);
-    const payload = {
-      op: 'twap:start' as const,
-      data: {
-        accountName: 'same-name',
-        activeMarket: market,
-        size: 2,
-        duration: 1,
-        ordersCount: 2,
-        side: OrderSide.Buy,
-        randomnessPercentage: 0,
-        useLimitOrders: false,
-        useChaserOrders: false,
-      },
-    };
-    first.worker.handlePayload(payload);
-    const firstTwap = [...twapManager.runningTwaps.values()][0];
-    second.worker.handlePayload(payload);
-    const secondTwap = [...twapManager.runningTwaps.values()].find((twap) => twap !== firstTwap)!;
-    await vi.advanceTimersByTimeAsync(0);
-    const beforePanic = first.messages.length;
-    await panic(sources[0]);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(firstTwap.state.status).toBe(TwapStatus.Completed);
-    // The main thread persists TWAP state; a dropped final update would show
-    // (and on reload resume) a TWAP that the trap already stopped.
-    const updates = first.messages.slice(beforePanic).filter((message) => message.op === 'twap:stateUpdate');
-    expect(updates.at(-1)?.data).not.toHaveProperty(firstTwap.id);
-    expect(secondTwap.state.status).toBe(TwapStatus.Running);
-    expect(twapManager.runningTwaps.get(secondTwap.id)).toBe(secondTwap);
-    expect(sources[2].commands.some((command) => command.op === 'placeOrders')).toBe(false);
   });
 
   it('leaves another account alive in the same module even when account names match', async () => {

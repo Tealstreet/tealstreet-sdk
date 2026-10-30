@@ -33,6 +33,18 @@ closed positions, leverage reads, capability record, `refreshAccountSettings`,
 Once chasers, TWAPs and CLI exec run in the Rust engine host, the worker no
 longer needs a TS store or the TS algo shell; it is a frame source only.
 
+**Done for the worker (LOCAL and the TS hosted server share it):** its chaser,
+TWAP, `exec` and Telegram `/cli` ops run only in the Rust algos, with no TS
+fallback. `ChaserOrderPostprocessor` and `TwapPostprocessor` are deleted; the
+handlers, `ExchangeWorker` and `TwapInstance` no longer carry the TS restore,
+owner-lock or TWAP-ownership paths. What remains of the rows below is held only
+by in-process CLI callers: cli-core `ChaseCommand`, `ChasersCommand`,
+`TwapCommand`, `KillCommand`, `TasksCommand` (SDK and NX), `apps/cli/repl.ts`,
+NX `apps/web` `useTwapColumns.tsx` (a `TwapInstance` type), `stopAccountAlgos.ts`
+(the CLI's nuke), and `commandExecutor.ts` (registered only by NX
+`StoreWorkerEntry.ts` and `services/exchange-server/register-command-executor.ts`;
+nothing calls it).
+
 | Code | LOC | Still referenced by | Breaks if deleted before B |
 | --- | --- | --- | --- |
 | `webworker/chaserOrder/`: Manager 1,043, Instance 281, Options 66, State 6 | 1,396 | `ExchangeWorker`, `ChaserOrderHandler`, `ChaserOrderPostprocessor`, `stopAccountAlgos`, `store/store.base.ts` (chaser state types). **cli-core** `ChaseCommand`, `ChasersCommand`, `KillCommand`, `TasksCommand` (SDK and NX) | Browser chasers, and **CLI chasers, which run in-process in Node**. The CLI needs the Rust algos too, or these classes stay. |

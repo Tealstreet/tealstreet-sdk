@@ -63,15 +63,18 @@ name, and don't assume `accountName` is globally unique here. See
   instantiates `ExchangeWorker`.
 - `StoreWorkerPayload.ts` — the wire-format union of every `op`
   the bridge speaks in either direction.
-- `commandExecutor.ts` — parses and dispatches worker CLI commands;
-  `handlers/CommandHandler.ts` owns the `exec` wire operation.
+- `commandExecutor.ts` — the cli-core executor port tealstreet-next still
+  registers; the worker no longer calls it (`exec` runs in the Rust algos).
+- `handlers/CommandHandler.ts` owns the `exec` wire operation.
 - `TelgramWorker.ts` — legacy Telegram worker bridge (filename spelling is
   load-bearing).
 - `handlers/` — worker-operation handlers; there is no directory-local
   `CLAUDE.md` and no `commands/` directory.
 - `chaserOrder/`, `postProcessors/` — documented subsystems with their own
-  `CLAUDE.md` files.
-- `twap/` — TWAP instance and manager lifecycle.
+  `CLAUDE.md` files. The TS chaser runs only for in-process CLI callers
+  (cli-core, `apps/cli`), never in the worker.
+- `twap/` — the worker's Rust TWAP ownership (`RustTwapOwnership`, its lock,
+  restore-refusal and in-flight helpers) and the TS TWAP the CLI still runs.
 
 The main-thread worker fallback is
 `apps/web/src/utils/shim/worker/WorkerShim.ts`; it is not part of this
@@ -83,9 +86,8 @@ directory.
 exchange-server sessions receive frames from browser workers across reconnects
 and version skew, and a missing `payload.data` used to throw while reading
 `payload.data.reqId`, surfacing as a process-level unhandled rejection. Treat a
-bad command payload as an `exec-log` failure instead of throwing; safe-cex does
-not own the CLI layer and should not make malformed command frames page the
-service.
+bad command payload as an `exec-log` failure (and a failed `exec-result` for a
+`reqId`) instead of throwing, before it reaches the Rust algos.
 
 ## Ticker delta packing is browser-worker-only
 
@@ -337,8 +339,9 @@ cost is one boolean per outbound message.
 
 `engine-dead` is terminal for one native account. The worker owns recovery only
 once startup has completed: it invalidates the old callback generation, detaches
-its store listener, clears the trailing throttle/handlers, stops its own chasers
-and exact TWAP instances, and makes one fresh account/store after a 500 ms delay.
+its store listener, clears the trailing throttle/handlers, posts the dead
+engine's Rust TWAP state (its chasers and TWAPs died with it), and makes one
+fresh account/store after a 500 ms delay.
 A second panic or failed replacement stops recovery and warns the consumer.
 Every fatal event invalidates loaded flags and derived active-algorithm lists,
 including terminal shared-feed failures, while preserving last known main-thread
@@ -352,7 +355,7 @@ adds startup context as a warning log instead of reporting a duplicate error.
 Every generation fences frame callbacks, store notifications, event forwarding
 and handler state messages. A request already in flight may receive its one
 correlated result from the old generation, preserving known write IDs or typed
-unknown outcomes. A task fallback fails any interrupted executor that does not
+unknown outcomes. A task fallback fails any interrupted request that does not
 report, and later duplicate replies stay fenced. Fresh state resets the object/delta baselines
 and advances order/position freshness IDs; the adapter sends its native empty
 full snapshot before starting the replacement, clearing the main decoder's
@@ -374,51 +377,50 @@ direct public feeds or reusing the closed port. Shared-worker attachments during
 an existing recovery retain that owner and receive a failed startup acknowledgement
 and warning on the attaching port, without interrupting existing clients.
 
-TWAP instances are tracked by actual handler-created instance identity, never
-account name, so terminating one worker cannot stop another same-name account.
-`TwapInstance.start()` checks termination again after its awaited placement;
-otherwise a reply arriving after terminate could schedule another old slice.
+## Chasers, TWAPs and exec run only in the Rust algos
 
-## Rust algos on Rust-engine accounts
-
-An engine built with the `algos` feature runs the account's chaser, TWAP and
-`exec` ops itself: `BaseHandler.runInRustAlgos` routes them through
-`RustEngineExchange.routeAlgoOp`, and the TS `ChaserOrderInstance`/`TwapInstance`/
-command executor never run for that account. An op that arrives before the
-engine host exists waits in the exchange (bounded) and is replayed in order once
-the host decides Rust or TS; disposal reports any still waiting as an error.
-Replies keep the TS op names: `chaser:complete`, `error`, `warning`, `log`,
+Every worker account is a `RustEngineExchange`, and every shipped engine build
+(each family and the combined Node build) links the `algos` feature. The
+account's chaser, TWAP and `exec` ops (and Telegram `/cli`) run in the engine:
+`BaseHandler.runInRustAlgos` routes them through `RustEngineExchange.routeAlgoOp`.
+There is no TS fallback in the worker: a build without algos, an engine that
+stopped, or an account that is not a Rust engine refuses the op visibly (an
+`error` event; for `exec`, an `exec-log` plus a failed `exec-result`). An op that
+arrives before the engine host exists waits in the exchange (bounded) and is
+replayed in order once it starts; disposal reports any still waiting.
+Replies keep the worker's op names: `chaser:complete`, `error`, `warning`, `log`,
 `exec-log` and `exec-result` go through the exchange emitter, and the
-`activeChasers`/`activeTWAPs` rows land in the store (their TS post-processors
-skip such accounts). Disposal lets chases cancel their orders before the engine
-goes; a nuke stops every TWAP and chase through the engine's `algoStopAll`.
+`activeChasers`/`activeTWAPs` rows land in the store from the engine. Disposal
+lets chases cancel their orders before the engine goes; a nuke stops every TWAP
+and chase through the engine's `algoStopAll`.
 
-These TWAPs keep the TS rules below through `twap/RustTwapOwnership.ts`, owned by
-`TwapHandler` so a separately loaded algos module gets them too: it takes each
-running TWAP's Web Lock, holds a restored row until it has the lock and has
-settled the row's `inFlight` slice (the Rust TWAP persists the marker, with the
-client order id it places under), and posts `twap:stateUpdate` as the algos'
-rows plus restores still waiting. On engine death the worker posts `{}` for
-them before teardown.
+The TS `ChaserOrderInstance`/`TwapInstance` and their managers remain only for
+in-process CLI callers (cli-core commands, `apps/cli`), whose nuke stops them
+through `stopAccountAlgos.ts`.
 
 ## TWAP restore and the cross-tab owner lock
+
+`twap/RustTwapOwnership.ts`, owned by `TwapHandler`, keeps these rules for the
+Rust TWAPs: it takes each running TWAP's Web Lock, holds a restored row until it
+has the lock and has settled the row's `inFlight` slice, and posts
+`twap:stateUpdate` as the algos' rows plus restores still waiting. On engine
+death the worker posts `{}` for them before teardown.
 
 `twap:state` replays one tab's `sessionStorage['twaps']`, and a duplicated tab
 copies it, so its own dedicated worker would run the same TWAP a second time.
 Every TWAP holds the Web Locks owner lock `tealstreet-twap:<account>:<id>`
-(`twap/twapLock.ts`) until it completes or stops. A restore builds the instance
-synchronously (the worker tracks the TWAPs a dispatch creates), runs it only
-once it holds the lock, and otherwise stops it and toasts "running in another
-tab". It keeps asking for `TWAP_RESTORE_LOCK_WAIT_MS` (5 s) first: a reloaded
+(`twap/twapLock.ts`) until it completes or stops. A restore sends a row to the
+algos only once it holds the lock, and otherwise drops it and toasts "running in
+another tab". It keeps asking for `TWAP_RESTORE_LOCK_WAIT_MS` (5 s) first: a reloaded
 tab's previous worker holds its locks until the browser tears it down, and a
 refusal on the first try would end a TWAP that no tab then runs. The browser
 releases a dead worker's locks, so another tab can then restore it. `twapRestoreRefusal.ts` refuses finished, empty, inflated or
 foreign-account rows and running rows whose schedule lapsed, mirroring the
 exchange server. A runtime without Web Locks gets a no-op lock.
 
-A slice is persisted as `state.inFlight` (its size and, for market and limit
-slices, a minted `clientOrderId` sent on the order) before its order goes out,
-and cleared when it is counted. A restore settles it before resuming: found by
+The Rust TWAP persists a slice as `state.inFlight` (its size and, for market and
+limit slices, the `clientOrderId` sent on the order) before its order goes out,
+and clears it when it is counted. A restore settles it before resuming: found by
 client id counts it; a definitive miss puts the size back; anything else (an
 uncertain lookup, a chaser slice, a venue without client ids) counts it with an
 error toast, because placing it again could double it.
@@ -440,7 +442,8 @@ The fallback knows only the RPC method and its arguments: dispatched
 `WORKER_WRITE_METHODS` (leverage/margin/mode, `scheduleCancel`, and the
 main-thread trading methods) are interrupted writes and carry the caller client
 IDs in their placement arguments, while reads receive no write-outcome marker.
-It must not parse CLI text or invent native IDs. `exec-result.error` and
+It must not parse CLI text or invent native IDs; an interrupted `exec` gets the
+unknown-outcome message only. `exec-result.error` and
 `updatePositions:done.reason` remain strings; optional `errorDetails` carries the
 original structured failure when it is still available.
 

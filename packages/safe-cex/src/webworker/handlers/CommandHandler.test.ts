@@ -1,198 +1,60 @@
-import type { Exchange } from '../../exchanges/base';
-import type { ExchangeName } from '../../types';
-import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
-import type { CommandExecutor } from '../commandExecutor';
-import type { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { OrderStopTriggerType } from '../../types';
-import { registerCommandExecutor, resetCommandExecutor } from '../commandExecutor';
+import { handlerArgs, NO_ALGOS, plainExchange, rustAlgoExchange } from '../../__tests__/fixtures/rustAlgoExchange';
 import { CommandHandler } from './CommandHandler';
 
+const exec = (data: unknown) => ({ op: 'exec', data }) as StoreWorkerPayload;
+
 describe('CommandHandler', () => {
-  let handler: CommandHandler;
-  let mockExchange: Exchange;
-  let mockEmit: ReturnType<typeof vi.fn>;
-  let mockExecutor: ReturnType<typeof vi.fn>;
-  let mockCtx: Worker;
-  let mockSettings: AppSettingsWorkerType;
-  let mockMetadata: ExchangeMetadataWorkerType;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-
-    mockEmit = vi.fn();
-    mockExchange = {
-      name: 'bybit',
-      emitter: { emit: mockEmit },
-    } as unknown as Exchange;
-    mockCtx = {} as Worker;
-    mockSettings = {
-      placeOrder: {
-        tpTriggerType: OrderStopTriggerType.MarkPrice,
-        slTriggerType: OrderStopTriggerType.LastPrice,
-      },
-    };
-    mockMetadata = {
-      supportedTPSLTriggerTypes: [],
-      privateProxyIps: [],
-      defaultTPTriggerType: undefined,
-      defaultSLTriggerType: undefined,
-    };
-
-    // Inject a stub executor (the role the web app's cli-core-backed
-    // workerCommandExecutor fills at runtime). Resolves by default — the real
-    // executor returns a Promise, which the handler attaches .catch to.
-    mockExecutor = vi.fn().mockResolvedValue(undefined);
-    registerCommandExecutor(mockExecutor as unknown as CommandExecutor);
-
-    handler = new CommandHandler(
+  it('sends exec to the account engine Rust algos', () => {
+    const exchange = rustAlgoExchange();
+    const data = { symbol: 'BTCUSDT', command: 'buy 0.01', reqId: 'r1' };
+    new CommandHandler(...handlerArgs(exchange)).handle(exec(data));
+    expect(exchange.routeAlgoOp).toHaveBeenCalledWith(
       'test-account',
-      'bybit' as ExchangeName,
-      mockExchange,
-      mockCtx,
-      mockSettings,
-      mockMetadata,
+      'exec',
+      expect.any(Function),
+      expect.any(Function),
     );
+    expect(exchange.algoOp).toHaveBeenCalledWith('exec', data);
   });
 
-  afterEach(() => {
-    resetCommandExecutor();
+  it('answers a malformed exec payload instead of throwing', () => {
+    const exchange = rustAlgoExchange();
+    expect(() => new CommandHandler(...handlerArgs(exchange)).handle(exec(undefined))).not.toThrow();
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-log', { message: 'Invalid command payload.' });
+    expect(exchange.routeAlgoOp).not.toHaveBeenCalled();
   });
 
-  describe('handle', () => {
-    it('should call the registered executor for exec op', () => {
-      const payload: StoreWorkerPayload = {
-        op: 'exec',
-        data: {
-          symbol: 'BTCUSDT',
-          command: 'buy 1',
-        },
-      };
-
-      handler.handle(payload);
-
-      // reqId is undefined when the CLI didn't request a result echo
-      // (the common fire-and-forget case). The executor takes it as the
-      // optional 4th arg.
-      expect(mockExecutor).toHaveBeenCalledWith(mockExchange, 'BTCUSDT', 'buy 1', undefined);
+  it('answers a refused reqId with a failed exec-result', () => {
+    const exchange = rustAlgoExchange('refuse');
+    new CommandHandler(...handlerArgs(exchange)).handle(exec({ symbol: 'BTCUSDT', command: 'buy 1', reqId: 'r2' }));
+    const message = `exec ${NO_ALGOS}`;
+    expect(exchange.algoOp).not.toHaveBeenCalled();
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-log', { message, reqId: 'r2' });
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-result', {
+      reqId: 'r2',
+      handled: false,
+      success: false,
+      error: message,
     });
+  });
 
-    it('should pass symbol and command correctly', () => {
-      const payload: StoreWorkerPayload = {
-        op: 'exec',
-        data: {
-          symbol: 'ETHUSDT',
-          command: 'sell 2.5; buy 1',
-        },
-      };
-
-      handler.handle(payload);
-
-      expect(mockExecutor).toHaveBeenCalledWith(mockExchange, 'ETHUSDT', 'sell 2.5; buy 1', undefined);
+  it('refuses exec on an account that is not a Rust engine', () => {
+    const exchange = plainExchange();
+    new CommandHandler(...handlerArgs(exchange)).handle(exec({ symbol: 'BTCUSDT', command: 'buy 1' }));
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-log', {
+      message: 'exec was not run: algos run only on a Rust engine account',
     });
+    expect(exchange.emitter.emit).toHaveBeenCalledTimes(1);
+  });
 
-    it('should forward reqId when the CLI requested a result echo', () => {
-      const payload: StoreWorkerPayload = {
-        op: 'exec',
-        data: {
-          symbol: 'BTCUSDT',
-          command: 'buy 1',
-          reqId: 'req-abc-123',
-        },
-      };
-
-      handler.handle(payload);
-
-      expect(mockExecutor).toHaveBeenCalledWith(mockExchange, 'BTCUSDT', 'buy 1', 'req-abc-123');
-    });
-
-    it('should not call the executor for other ops', () => {
-      const payload: StoreWorkerPayload = {
-        op: 'some-other-op' as any,
-        data: {
-          symbol: 'BTCUSDT',
-          command: 'buy 1',
-        },
-      };
-
-      handler.handle(payload);
-
-      expect(mockExecutor).not.toHaveBeenCalled();
-    });
-
-    it('logs and does not crash for malformed exec payloads', () => {
-      expect(() => handler.handle({ op: 'exec' } as StoreWorkerPayload)).not.toThrow();
-
-      expect(mockExecutor).not.toHaveBeenCalled();
-      expect(mockEmit).toHaveBeenCalledWith('exec-log', {
-        message: 'Invalid command payload.',
-      });
-    });
-
-    it('should handle multiple exec calls', () => {
-      const payload1: StoreWorkerPayload = {
-        op: 'exec',
-        data: { symbol: 'BTCUSDT', command: 'buy 1' },
-      };
-      const payload2: StoreWorkerPayload = {
-        op: 'exec',
-        data: { symbol: 'ETHUSDT', command: 'sell 2' },
-      };
-
-      handler.handle(payload1);
-      handler.handle(payload2);
-
-      expect(mockExecutor).toHaveBeenCalledTimes(2);
-    });
-
-    it('no-ops with a log when no executor is registered', () => {
-      resetCommandExecutor();
-
-      const payload: StoreWorkerPayload = {
-        op: 'exec',
-        data: { symbol: 'BTCUSDT', command: 'buy 1' },
-      };
-
-      expect(() => handler.handle(payload)).not.toThrow();
-      expect(mockExecutor).not.toHaveBeenCalled();
-      expect(mockEmit).toHaveBeenCalledWith('exec-log', {
-        message: 'Command execution is not available in this environment.',
-      });
-    });
-
-    it('logs and does not crash when the executor rejects', async () => {
-      mockExecutor.mockRejectedValueOnce(new Error('boom'));
-
-      const payload: StoreWorkerPayload = {
-        op: 'exec',
-        data: { symbol: 'BTCUSDT', command: 'buy 1' },
-      };
-
-      expect(() => handler.handle(payload)).not.toThrow();
-      // The rejection is handled asynchronously via .catch -> exec-log.
-      await vi.waitFor(() => {
-        expect(mockEmit).toHaveBeenCalledWith('exec-log', {
-          message: expect.stringContaining('boom'),
-        });
-      });
-    });
-
-    it('answers a reqId with a failed exec-result when the executor throws', async () => {
-      mockExecutor.mockRejectedValueOnce(new Error('boom'));
-      handler.handle({ op: 'exec', data: { symbol: 'BTCUSDT', command: 'buy 1', reqId: 'cb:9' } });
-      await vi.waitFor(() => {
-        expect(mockEmit).toHaveBeenCalledWith('exec-log', { message: expect.stringContaining('boom'), reqId: 'cb:9' });
-        expect(mockEmit).toHaveBeenCalledWith('exec-result', {
-          reqId: 'cb:9',
-          handled: true,
-          success: false,
-          error: expect.stringContaining('boom'),
-          errorDetails: { message: 'boom', name: 'Error', stack: expect.any(String) },
-        });
-      });
-    });
+  it('ignores other ops', () => {
+    const exchange = rustAlgoExchange();
+    new CommandHandler(...handlerArgs(exchange)).handle({ op: 'chaser:start', data: {} } as StoreWorkerPayload);
+    expect(exchange.routeAlgoOp).not.toHaveBeenCalled();
+    expect(exchange.emitter.emit).not.toHaveBeenCalled();
   });
 });

@@ -118,7 +118,7 @@ describe('RustTwapOwnership restore', () => {
     expect(errors).toEqual([]);
   });
 
-  it('refuses a stale row by the TS rules and rewrites the persisted rows', () => {
+  it('refuses a stale row by the restore rules and rewrites the persisted rows', () => {
     ownership.handle('twap:state', [row('done', { status: TwapStatus.Completed })]);
     expect(errors).toEqual(['TWAP BTCUSDT not restored: it already completed']);
     expect(posts).toEqual([{}]);
