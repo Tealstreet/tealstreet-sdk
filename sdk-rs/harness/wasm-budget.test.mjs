@@ -14,7 +14,7 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 });
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
-  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'binance', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex', 'phemex']);
+  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'binance', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex', 'phemex', 'woo']);
   // Cap sweep 10-30: measured 1,461,044 B; ceil KiB + 2 KiB.
   // CI master d60d25a7153 measured 1,471,321 B (frame-fed core); ceil 8 KiB + 2 KiB.
   // m26ps4 measured master 1,475,983 B (shared export_venue_state_for); ceil KiB + 2 KiB.
@@ -216,4 +216,13 @@ test('Phemex carries the release-floor budget', () => {
   assert.equal(wasmBudgetError(1_347_545, 'venue', 'phemex'), undefined);
   assert.equal(wasmBudgetError(1_357_824, 'venue', 'phemex'), undefined);
   assert.match(wasmBudgetError(1_357_825, 'venue', 'phemex'), /exceeds 1357824/);
+});
+
+test('Woo carries its own budget', () => {
+  // #2523's ORDERS/POSITIONS ingest grew woo (built at opt-level 3, no size profile) to
+  // 1,381,932 B in CI (c19ffdcfbef) against the default venue budget; ceil KiB + 2 KiB.
+  assert.equal(WASM_VENUE_OVERRIDES.woo, 1352 * 1024);
+  assert.equal(wasmBudgetError(1_381_932, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(1_384_448, 'venue', 'woo'), undefined);
+  assert.match(wasmBudgetError(1_384_449, 'venue', 'woo'), /exceeds 1384448/);
 });
