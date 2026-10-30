@@ -361,8 +361,16 @@ impl Session {
             Ok(account) => {
                 self.metrics.note_init();
                 self.join(account).await;
-                // Algos stopped while no browser was attached: say why, once.
-                if let Some(notice) = self.registry.take_notice(self.user(), &init.account_name) {
+                // Algos stopped while no browser was attached: say why.
+                if let Some(notice) = self.registry.take_notice(
+                    self.user(),
+                    &init.account_name,
+                    self.identity.resume_from.as_deref(),
+                ) {
+                    Log::info(&format!(
+                        "algo stop notice {} to socket {}: {notice}",
+                        init.account_name, self.socket
+                    ));
                     self.send(envelope::algo_error(
                         &init.account_name,
                         Value::String(notice),
@@ -1651,6 +1659,63 @@ mod tests {
                 second.open().await;
                 settle().await;
                 assert_eq!(errors(&mut sent), 1, "no frame came back: replayed again");
+            })
+            .await;
+    }
+
+    /// A second socket's init after the dispose must not cost the device that
+    /// owned the chase its notice, on the wire and on a fresh init after resume.
+    #[tokio::test(start_paused = true)]
+    async fn the_owner_is_told_of_stopped_algos_after_another_socket_inits() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let (account, _algos) =
+                    crate::accounts::tests::held_account_with(Some(link), init.fingerprint());
+                crate::accounts::tests::register(&registry, &account);
+                (registry.keep_notice(&account, "r1"))("Chase on BTCUSDT stopped".into());
+                let wire = format!(
+                    r#"{{"t":"init","d":{}}}"#,
+                    serde_json::to_string(&init).unwrap()
+                );
+                let told = async |from: Option<&str>| {
+                    let (out, mut sent, _) = Out::channel(64);
+                    let identity = Identity {
+                        user: Some("u".into()),
+                        token: Some(("t".into(), u64::MAX)),
+                        resume_from: from.map(str::to_owned),
+                        resumable: from.is_some(),
+                    };
+                    let mut session = Session::new(
+                        registry.clone(),
+                        Arc::new(Metrics::default()),
+                        identity,
+                        out,
+                    );
+                    session.open().await;
+                    assert!(session.handle(&wire).await.is_ok());
+                    let mut frames = Vec::new();
+                    while let Ok(frame) = sent.try_recv() {
+                        if frame.contains("Chase on BTCUSDT stopped") {
+                            frames.push(frame);
+                        }
+                    }
+                    frames
+                };
+                assert_eq!(told(None).await.len(), 1, "the other socket is told");
+                let owner = told(Some("r1")).await;
+                assert_eq!(owner.len(), 1, "and the owner still is");
+                let frame: Value = serde_json::from_str(&owner[0]).unwrap();
+                assert_eq!(frame["d"]["op"], "error");
+                assert_eq!(frame["d"]["data"][1]["forceToast"], true);
+                assert_eq!(told(Some("r1")).await.len(), 0, "once");
             })
             .await;
     }
