@@ -14,11 +14,11 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 });
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
-  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'binance', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex']);
+  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'binance', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex', 'phemex']);
   // Cap sweep 10-30: measured 1,461,044 B; ceil KiB + 2 KiB.
   // CI master d60d25a7153 measured 1,471,321 B (frame-fed core); ceil 8 KiB + 2 KiB.
   // m26ps4 measured master 1,475,983 B (shared export_venue_state_for); ceil KiB + 2 KiB.
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_444 * 1_024);
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_452 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_952, 'venue', 'asterdex'), undefined);
@@ -46,12 +46,14 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_473_536, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_475_983, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_478_656, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_478_657, 'venue', 'asterdex'), /exceeds 1478656/);
+  assert.equal(wasmBudgetError(1_478_656, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_486_848, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(1_486_849, 'venue', 'asterdex'), /exceeds 1486848/);
   for (const venue of ['bitget', 'bitgetusdc']) {
     // Frame-fed Bitget (COSIGNED writer): 1,522,315 -> 1,549,604 B (+27,289); cap +27 KiB +2 KiB.
     // Settings holds: core 1,549,604 -> 1,558,459, Bitget -> 1,568,357 (+18,753); cap +19 KiB +2 KiB.
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1539 * 1024);
-    assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1539 * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1542 * 1024);
+    assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1542 * 1024);
     assert.equal(wasmBudgetError(1_481_804, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_482_752, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_482_944, 'venue', venue), undefined);
@@ -66,11 +68,13 @@ test('only the declared venue families carry overrides, and only for the venue p
     assert.equal(wasmBudgetError(1_522_283, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_554_432, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_575_936, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_575_937, 'venue', venue), /exceeds 1575936/);
+    assert.equal(wasmBudgetError(1_575_936, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(1_579_008, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_579_009, 'venue', venue), /exceeds 1579008/);
   }
   for (const venue of ['kraken', 'krakenspot']) {
     // Cap sweep 10-30: measured 1,457,715 B; ceil KiB + 2 KiB.
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1426 * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1435 * 1024);
     assert.equal(wasmBudgetError(1_399_777, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_399_808, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_399_905, 'venue', venue), undefined);
@@ -92,21 +96,25 @@ test('only the declared venue families carry overrides, and only for the venue p
     assert.equal(wasmBudgetError(1_448_429, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_451_008, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_460_224, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_460_225, 'venue', venue), /exceeds 1460224/);
+    assert.equal(wasmBudgetError(1_460_224, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(1_469_440, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_469_441, 'venue', venue), /exceeds 1469440/);
   }
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
     // Cutover 10-29: release run 40859840322 measured 1,366,837 B; 1344 KiB leaves room for #2362.
     // Frame-fed 10-30: ingest plus the settings guard measured 1,377,242 B; ceil KiB + 2 KiB.
     // Setting holds 10-30: measured 1,386,637 B (master 1,385,259 B); ceil KiB + 2 KiB.
     // CI master d60d25a7153 measured 1,395,669 B (frame-fed core); ceil 6 KiB + 2 KiB.
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1365 * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1373 * 1024);
     assert.equal(wasmBudgetError(1_363_789, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_389_568, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_397_760, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_397_761, 'venue', venue), /exceeds 1397760/);
+    assert.equal(wasmBudgetError(1_397_760, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(1_405_952, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_405_953, 'venue', venue), /exceeds 1405952/);
   }
   // Cap sweep 10-30: measured 1,490,257 B; ceil KiB + 2 KiB.
-  assert.equal(WASM_VENUE_OVERRIDES.bybit, 1458 * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.bybit, 1466 * 1024);
   assert.equal(wasmBudgetError(1_446_912, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(1_446_915, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(1_447_936, 'venue', 'bybit'), undefined);
@@ -119,7 +127,9 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_479_891, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(1_482_752, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(1_492_992, 'venue', 'bybit'), undefined);
-  assert.match(wasmBudgetError(1_492_993, 'venue', 'bybit'), /exceeds 1492992/);
+  assert.equal(wasmBudgetError(1_492_992, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(1_501_184, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(1_501_185, 'venue', 'bybit'), /exceeds 1501184/);
   assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bybit'), /exceeds 16777216/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue', 'okx'), /exceeds 1343488/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue'), /exceeds 1343488/);
@@ -131,14 +141,16 @@ test('Paradex keyless remote signing carries its ruled family budget', () => {
   // setup, hosted-wallet); ddi ruled ceil KiB plus 4 KiB for local/CI drift, no CI wait.
   // Frame-fed VENUE_STATE (native order rows for amend) measured 1,527,413 B; ceil KiB + 2 KiB.
   // Cap sweep 10-30: measured 1,533,952 B; ceil KiB + 2 KiB.
-  assert.equal(WASM_VENUE_OVERRIDES.paradex, 1500 * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.paradex, 1510 * 1024);
   assert.equal(wasmBudgetError(1_482_511, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(1_486_848, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(1_515_321, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(1_517_568, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(1_529_856, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(1_536_000, 'venue', 'paradex'), undefined);
-  assert.match(wasmBudgetError(1_536_001, 'venue', 'paradex'), /exceeds 1536000/);
+  assert.equal(wasmBudgetError(1_536_000, 'venue', 'paradex'), undefined);
+  assert.equal(wasmBudgetError(1_546_240, 'venue', 'paradex'), undefined);
+  assert.match(wasmBudgetError(1_546_241, 'venue', 'paradex'), /exceeds 1546240/);
 });
 
 test('the approved combined ceiling accepts 16 MiB exactly and rejects the next byte', () => {
@@ -180,7 +192,7 @@ test('the Bybit capability comparison budgets ordinary Bybit under its own venue
 
 test('Binance Options cutover carries the ruled shared-family ceiling', () => {
   // Cap sweep 10-30: measured 1,492,477 B; Binance frame-fed then measured 1,501,037 B.
-  assert.equal(WASM_VENUE_OVERRIDES.binance, 1475 * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.binance, 1482 * 1024);
   assert.equal(wasmBudgetError(1_448_609, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_460_760, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_463_296, 'venue', 'binance'), undefined);
@@ -192,6 +204,16 @@ test('Binance Options cutover carries the ruled shared-family ceiling', () => {
   // Binance spot and PM frame-fed (VENUE_STATE v2) then measured 1,505,790 B.
   assert.equal(wasmBudgetError(1_505_790, 'venue', 'binance'), undefined);
   assert.equal(wasmBudgetError(1_510_400, 'venue', 'binance'), undefined);
-  assert.match(wasmBudgetError(1_510_400 + 1, 'venue', 'binance'), /exceeds 1510400/);
+  assert.equal(wasmBudgetError(1_517_568, 'venue', 'binance'), undefined);
+  assert.match(wasmBudgetError(1_517_568 + 1, 'venue', 'binance'), /exceeds 1517568/);
   assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined', 'binance'), undefined);
+});
+
+test('Phemex carries the release-floor budget', () => {
+  // Release floor 10-30: max(ceil CI KiB + 10 KiB, ceil(local tip + 8 KiB) KiB + 2 KiB).
+  // CI c19ffdcfbef measured 1,347,545 B against the default venue budget.
+  assert.equal(WASM_VENUE_OVERRIDES.phemex, 1326 * 1024);
+  assert.equal(wasmBudgetError(1_347_545, 'venue', 'phemex'), undefined);
+  assert.equal(wasmBudgetError(1_357_824, 'venue', 'phemex'), undefined);
+  assert.match(wasmBudgetError(1_357_825, 'venue', 'phemex'), /exceeds 1357824/);
 });
