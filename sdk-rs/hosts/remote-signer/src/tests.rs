@@ -804,7 +804,10 @@ async fn a_sign_during_a_parked_gap_waits_for_the_browser_within_the_timeout() {
     let record = sent.clone();
     link.attach(
         2,
-        Arc::new(move |frame| record.lock().unwrap().push(frame).eq(&())),
+        Arc::new(move |frame| {
+            record.lock().unwrap().push(frame);
+            true
+        }),
     );
     tokio::task::yield_now().await;
     assert_eq!(
@@ -850,5 +853,8 @@ async fn a_sign_waiting_out_a_gap_fails_at_once_when_the_session_ends() {
     };
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     link.mark_unavailable();
-    assert_eq!(waiting.await.unwrap(), Err(crate::link::Failure::Unavailable));
+    assert_eq!(
+        waiting.await.unwrap(),
+        Err(crate::link::Failure::Unavailable)
+    );
 }

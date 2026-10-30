@@ -764,6 +764,148 @@ pub fn resume_id() -> String {
 mod tests {
     use super::*;
 
+    /// A venue that does nothing: the registry tests need only its handle.
+    struct Idle;
+    impl safe_cex_engine::Venue for Idle {
+        type Pending = ();
+        fn start(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>) {}
+        fn on_open(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::SocketId) {}
+        fn on_message(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: &str,
+        ) {
+        }
+        fn on_close(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: u16,
+        ) {
+        }
+        fn on_response(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: (),
+            _: safe_cex_engine::Response<'_>,
+        ) {
+        }
+        fn on_request_failed(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::TimerId) {}
+        fn on_command(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::Command) {
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[derive(Clone)]
+    struct NoIo;
+    impl safe_cex_native::Transport for NoIo {
+        fn connect(
+            &self,
+            _: safe_cex_engine::SocketId,
+            _: String,
+            _: safe_cex_native::Events,
+        ) -> mpsc::UnboundedSender<String> {
+            mpsc::unbounded_channel().0
+        }
+        fn request(&self, _: safe_cex_engine::HttpRequest, _: safe_cex_native::Events) {}
+    }
+
+    /// A private account held by socket 7, and the inbox its algo host would read.
+    fn held_account() -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        let engine = safe_cex_engine::test_support::seeded_engine(Idle);
+        let (handle, _task) = safe_cex_native::spawn_account(
+            safe_cex_native::Host::new(engine, NoIo),
+            ServerConfig::default(),
+        )
+        .unwrap();
+        let (algos, inbox) = mpsc::unbounded_channel();
+        let account = Arc::new(Account {
+            user: "u".into(),
+            name: "acct".into(),
+            venue: "bitget".into(),
+            handle,
+            link: None,
+            token: ProxyToken::new(),
+            fingerprint: String::new(),
+            holders: Mutex::default(),
+            algos: Some(algos),
+            algo_owner: Arc::default(),
+            placed: PlacedSymbols::default(),
+            held: Arc::default(),
+            frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
+            reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
+        });
+        account.hold(
+            7,
+            Live {
+                outbox: Arc::new(|_| true),
+                token: None,
+            },
+        );
+        (account, inbox)
+    }
+
+    fn registry() -> Arc<Registry> {
+        Arc::new(Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        ))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_parked_account_keeps_its_algos_then_stops_them_for_no_browser() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, mut algos) = held_account();
+                registry.park("r1".into(), "u", vec![(account, 7)]);
+                tokio::time::sleep(Duration::from_secs(59)).await;
+                assert!(
+                    algos.try_recv().is_err(),
+                    "chases and TWAPs run on through the window"
+                );
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                match algos.try_recv() {
+                    Ok(crate::algos::AlgoInput::Dispose { reason }) => {
+                        assert_eq!(reason, "no browser for 60s")
+                    }
+                    _ => panic!("the window expired without disposing the algos"),
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_resume_within_the_window_keeps_the_account_and_its_algos() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, mut algos) = held_account();
+                registry.park("r1".into(), "u", vec![(account, 7)]);
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let outbox: Outbox = Arc::new(|_| true);
+                let resumed = registry.resume("r1", "u", 8, ("t".into(), u64::MAX), &outbox);
+                assert_eq!(resumed.len(), 1);
+                tokio::time::sleep(Duration::from_secs(150)).await;
+                assert!(
+                    algos.try_recv().is_err(),
+                    "a resumed account is never disposed by the old window"
+                );
+            })
+            .await;
+    }
+
     #[test]
     fn signing_hands_over_to_the_newest_live_holder_then_suspends() {
         let live = |token: &str| {
