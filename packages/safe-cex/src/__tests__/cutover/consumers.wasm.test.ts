@@ -420,13 +420,16 @@ describe.each(venues)('%s consumer conformance', (name) => {
         () => {},
       );
       await twap.start();
-      expect(place).toHaveBeenLastCalledWith({
+      // A slice carries the venue's minted client id where it mints one (#2514).
+      const placed = place.mock.lastCall![0] as { clientOrderId?: string };
+      expect(placed).toEqual({
         symbol: 'BTCUSDT',
         side,
         type: OrderType.Limit,
         price: side === OrderSide.Buy ? state(name).tickers![0].bid : state(name).tickers![0].ask,
         amount: size,
         reduceOnly: false,
+        ...(placed.clientOrderId === undefined ? {} : { clientOrderId: expect.stringMatching(/.+/) }),
       });
     }
     // The supervisor observes order updates immediately through BaseExchange's
