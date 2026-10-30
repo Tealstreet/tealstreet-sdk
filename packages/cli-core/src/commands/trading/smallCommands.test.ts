@@ -314,6 +314,31 @@ describe('NukeCommand', () => {
     expect(ex.nukeOrders).toHaveBeenCalled();
   });
 
+  it.each([
+    [['nuke'], 'nuke'],
+    [['nuke', 'pos'], 'nukePositions'],
+    [['nuke', 'ord'], 'nukeOrders'],
+  ] as const)('"%s" prints the running algos it stopped first', async (args, method) => {
+    const ex = makeExchange();
+    (ex[method] as ReturnType<typeof vi.fn>).mockResolvedValue({ stoppedChasers: ['c1'], stoppedTwaps: ['t1', 't2'] });
+    const adapter = makeAdapter();
+    await cmd.execute(ctx([...args], ex, adapter));
+    await vi.waitFor(() =>
+      expect(adapter.printWarning).toHaveBeenCalledWith(
+        'Nuke stopped 1 chaser(s) (c1) and 2 TWAP(s) (t1, t2) before closing',
+      ),
+    );
+  });
+
+  it('prints nothing more when the nuke stopped no algos', async () => {
+    const ex = makeExchange();
+    (ex.nuke as ReturnType<typeof vi.fn>).mockResolvedValue({ stoppedChasers: [], stoppedTwaps: [] });
+    const adapter = makeAdapter();
+    await cmd.execute(ctx(['nuke'], ex, adapter));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(adapter.printWarning).not.toHaveBeenCalled();
+  });
+
   it('errors on a malformed sub-command', async () => {
     const ex = makeExchange();
     const r = await cmd.execute(ctx(['nuke', 'nope'], ex));

@@ -27,6 +27,7 @@ export {
 export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
 export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
 export { historyCompletenessOf, withHistoryCompleteness, copyHistoryCompleteness } from './historyCompleteness';
+export { describeStoppedAlgos } from './nukeResult';
 export type { HistoryCompleteness, HistoricalRows } from './historyCompleteness';
 
 export { ExchangeError, builderAuthorizationOf } from '@tealstreet/safe-cex-wasm/host';
