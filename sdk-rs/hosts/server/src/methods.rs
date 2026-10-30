@@ -75,6 +75,14 @@ pub fn worker_order_ids(result: Value) -> Value {
     }
 }
 
+impl StoreRead {
+    /// Orders and positions answer as `{accountFrame}`: the engine's snapshot frame,
+    /// base64, so the mirror builds rows exactly as the browser worker's applier does.
+    pub fn from_frame(&self) -> bool {
+        matches!(self, StoreRead::Orders(_) | StoreRead::Positions(_))
+    }
+}
+
 /// How long a store read waits for its sections, as `untilNativeData` in rust.exchange.ts.
 pub const READ_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 const READ_POLL: std::time::Duration = std::time::Duration::from_millis(50);
@@ -158,29 +166,16 @@ pub fn read_store(read: &StoreRead, store: &Store) -> Result<Value, Refused> {
             Err(refused("Error", format!("{what} are not loaded yet")))
         }
     };
-    let only = |symbols: &Option<Vec<String>>, symbol: &str| {
-        symbols
-            .as_ref()
-            .is_none_or(|symbols| symbols.iter().any(|wanted| wanted == symbol))
-    };
     let value = match read {
-        StoreRead::Orders(symbols) => {
+        // Rows come from the account's snapshot frame (`account_frame`), which the
+        // mirror decodes with the browser's FrameApplier; here only readiness.
+        StoreRead::Orders(_) => {
             ready(loaded.orders, "orders")?;
-            let orders: Vec<_> = store
-                .orders()
-                .iter()
-                .filter(|order| only(symbols, &order.symbol))
-                .collect();
-            serde_json::to_value(orders)
+            Ok(Value::Null)
         }
-        StoreRead::Positions(symbols) => {
+        StoreRead::Positions(_) => {
             ready(loaded.positions, "positions")?;
-            let positions: Vec<_> = store
-                .positions()
-                .iter()
-                .filter(|position| only(symbols, &position.symbol))
-                .collect();
-            serde_json::to_value(positions)
+            Ok(Value::Null)
         }
         StoreRead::Balance => {
             ready(loaded.balance, "balances")?;
@@ -1148,6 +1143,9 @@ mod tests {
         let store = Store::default();
         let refusal = read_store(&StoreRead::Orders(None), &store).unwrap_err();
         assert!(refusal.message.contains("not loaded"));
+        // Rows come from the snapshot frame the mirror applies, never a second mapping.
+        assert!(StoreRead::Orders(None).from_frame() && StoreRead::Positions(None).from_frame());
+        assert!(!StoreRead::Balance.from_frame() && !StoreRead::PositionMode.from_frame());
         assert_eq!(
             read_store(
                 &StoreRead::ClientOrder {

@@ -94,9 +94,13 @@ impl PlacedSymbols {
     }
 
     /// The account's engine markets; recorded symbols outside them are dropped.
-    pub fn sync_markets<'a>(&self, markets: impl ExactSizeIterator<Item = &'a String>) {
+    pub fn sync_markets<'a>(&self, markets: impl ExactSizeIterator<Item = &'a String> + Clone) {
         let mut placed = self.lock();
-        if placed.markets.len() == markets.len() {
+        if placed.markets.len() == markets.len()
+            && markets
+                .clone()
+                .all(|market| placed.markets.contains(market))
+        {
             return;
         }
         placed.markets = markets.cloned().collect();
@@ -948,6 +952,18 @@ mod tests {
                 .iter()
                 .all(|symbol| markets[..3].contains(symbol))
         );
+        // A same-size swap: one delisted, one listed.
+        let swapped: Vec<String> = vec!["M0".into(), "M1".into(), "NEW-USDT-SWAP".into()];
+        placed.record(["M2"]);
+        assert!(placed.symbols().contains(&"M2".to_owned()));
+        placed.sync_markets(swapped.iter());
+        assert!(
+            !placed.symbols().contains(&"M2".to_owned()),
+            "the delisted symbol is pruned"
+        );
+        placed.record(["NEW-USDT-SWAP", "M2"]);
+        assert!(placed.symbols().contains(&"NEW-USDT-SWAP".to_owned()));
+        assert!(!placed.symbols().contains(&"M2".to_owned()));
     }
 
     #[tokio::test]

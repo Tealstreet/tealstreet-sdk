@@ -6,10 +6,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { aggregateBybitClosedPnl } from '../journal/bybit.position-adapter';
+import { FrameApplier } from '../store/frameApplier';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderType, PositionSide } from '../types';
 import { ExchangeWorker } from '../webworker/ExchangeWorker';
 import { engineCapabilities } from './fixtures/engineCapabilities';
+import { inverseUnitsFrame, inverseUnitsFrameBytes } from './fixtures/scxfFrame';
 
 const order = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 2 };
 
@@ -288,6 +290,27 @@ describe('main-thread Rust trading routing', () => {
     expect(methods[0]).toBe('fetchEngineCapabilities');
     expect(methods).toContain('fetchHistoricalFills');
     expect(methods).not.toContain('fetchHistoricalPositions');
+    expect(main!.hasStarted).toBe(false);
+  });
+
+  it('builds hosted account-read rows with the same FrameApplier as the worker', async () => {
+    const options = {
+      units: 3,
+      contractSize: 100,
+      native: true,
+      positions: true,
+      orders: [{ id: 'o1', amount: 3, filled: 1, remaining: 2, native: 2 }],
+    };
+    const bytes = new Uint8Array(inverseUnitsFrameBytes(options));
+    const accountFrame = btoa(String.fromCharCode(...bytes));
+    answering('bybit', { fetchOrders: { accountFrame }, fetchPositions: { accountFrame } });
+    const worker = new DefaultStore();
+    new FrameApplier(worker).apply(inverseUnitsFrame(options));
+    const positions = await main!.fetchPositions();
+    expect(positions).toEqual(worker.positions);
+    expect(positions[0].extra?.contractsNative).toBeDefined();
+    expect(await main!.fetchOrders(['BTCUSD'])).toEqual(worker.orders);
+    expect(await main!.fetchOrders(['ETHUSD'])).toEqual([]);
     expect(main!.hasStarted).toBe(false);
   });
 

@@ -5,7 +5,7 @@ use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::{Command, Cx, HttpRequest, Response, SocketId, TimerId, Venue};
 use safe_cex_exchange_server::methods::{StoreRead, read_when_loaded, until_account_loaded};
 use safe_cex_native::{Events, Host, HostEvent, ServerConfig, Transport};
-use serde_json::json;
+use serde_json::Value;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -130,7 +130,8 @@ async fn a_read_before_the_first_load_waits_and_then_answers() {
                 .await
                 .expect("answers once loaded")
                 .unwrap();
-            assert_eq!(answer.unwrap(), json!([]));
+            // Orders rows ride the snapshot frame the session sends; this is readiness.
+            assert_eq!(answer.unwrap(), Value::Null);
             handle.dispose();
         })
         .await;

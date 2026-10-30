@@ -605,13 +605,25 @@ impl Session {
                     let (handle, out) = (account.handle.clone(), self.out.clone());
                     let (name, request_id) = (name.to_owned(), request_id.clone());
                     tokio::spawn(async move {
-                        let data = match methods::read_when_loaded(
-                            &handle,
-                            read,
-                            methods::READ_WAIT,
-                        )
-                        .await
-                        {
+                        let from_frame = read.from_frame();
+                        let mut answer =
+                            methods::read_when_loaded(&handle, read, methods::READ_WAIT).await;
+                        if from_frame && answer.is_ok() {
+                            use base64::Engine as _;
+                            answer = handle
+                                .snapshot_frame()
+                                .await
+                                .map(|frame| {
+                                    let frame =
+                                        base64::engine::general_purpose::STANDARD.encode(frame);
+                                    json!({ "accountFrame": frame })
+                                })
+                                .ok_or_else(|| methods::Refused {
+                                    name: "Error",
+                                    message: "account is closed".into(),
+                                });
+                        }
+                        let data = match answer {
                             Ok(result) => {
                                 json!({"requestId": request_id, "success": true, "result": result})
                             }

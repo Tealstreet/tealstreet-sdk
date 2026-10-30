@@ -382,7 +382,10 @@ report there once. `fetchHistoricalPositions` is NOT forwarded: the mirror
 loads the worker's capability record and folds the journal itself with the TS
 mappers, from forwarded raw reads (fills, orders, income, and the raw
 `fetchClosedPositions` rows), because the hosted Rust server has no TS mappers
-and serves only those reads. This holds even if a
+and serves only those reads. The hosted server answers `fetchOrders` and
+`fetchPositions` with `{ accountFrame }`, its engine's base64 snapshot frame,
+which the mirror applies to a scratch store with `FrameApplier`, so hosted rows
+carry the same native-unit extras and NaN handling as a worker's. This holds even if a
 main-thread read (`fetchMarkets` during warm start) started a local engine; the
 worker never has that listener. Without a bridge, an instance runs locally.
 `updateOrder` crosses as `{ orderIds, clientOrderId }` because array properties
