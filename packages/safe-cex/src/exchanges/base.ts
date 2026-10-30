@@ -330,6 +330,11 @@ export const WORKER_FORWARDED_METHODS = [
   'fetchHistoricalOrders',
   'fetchIncomeHistory',
   'fetchIncomeHistoryRange',
+  // Engine reads: a keyless mirror has no engine. Writes move to the main-thread writer engine.
+  'updateSymbolMetadata',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ] as const;
 
 export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
@@ -350,6 +355,12 @@ export const WORKER_OPTIONAL_METHODS = [
   'fetchPositions',
   'fetchBalance',
   'fetchPositionMode',
+  // Rust-only engine methods a mirror forwards whole.
+  'fetchStpMode',
+  'fetchOrderBook',
+  // A mirror answers these from its frame-fed rails and asks the worker only for a venue read.
+  'fetchSymbolMaxLeverage',
+  'fetchLeverageForSymbol',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
@@ -369,6 +380,14 @@ const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'fetchAccountTier',
   'fetchEngineCapabilities',
   'getAccount',
+  'fetchStpMode',
+  'fetchLeverageForSymbol',
+  'fetchSymbolMaxLeverage',
+  'updateSymbolMetadata',
+  'fetchOrderBook',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ]);
 
 /** Worker RPCs that dispatch venue writes: an interrupted one has an unknown outcome. */
@@ -406,7 +425,6 @@ export type CallableMethodsInWorker =
   | 'fetchHistoricalFills'
   | 'fetchOrders'
   | 'fetchAndSetOrders'
-  | 'updateSymbolMetadata'
   | 'fetchLastLogsFromWebsockets'
   | 'removeOrders'
   | 'fetchIncomeHistory'
