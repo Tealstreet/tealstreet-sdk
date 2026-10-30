@@ -72,6 +72,32 @@ impl PhemexPerpetuals {
         }
         covered
     }
+    /// Frame-fed: an ORDERS frame that covers a symbol's signed expiries ends
+    /// its lost placements; one it does not show never landed, and its late
+    /// cancel authority retires.
+    pub(crate) fn expire_lost_from_frames(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(cover) = cx
+            .source_orders_cover()
+            .filter(|_| cx.store.loaded().orders)
+        else {
+            return;
+        };
+        for (symbol, since) in self.account.take_proven_lost(cover) {
+            for grant in &mut self.trading.repair.grants {
+                if grant.symbol == symbol {
+                    grant.subjects.retain(|subject| {
+                        let proof = Retire::SourceOrders { since };
+                        cx.retire_repair_subject(&grant.entitlement, &subject.key, proof)
+                            .is_err()
+                    });
+                }
+            }
+        }
+        self.trading
+            .repair
+            .grants
+            .retain(|grant| !grant.subjects.is_empty());
+    }
     pub(crate) fn has_late_subjects(&self, symbol: &str) -> bool {
         self.trading
             .repair
