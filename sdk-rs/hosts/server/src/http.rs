@@ -267,6 +267,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
         .as_ref()
         .map(|(_, expires_at_ms)| *expires_at_ms);
     let mut session = Session::new(app.registry.clone(), app.metrics.clone(), identity, out);
+    let mut loaded = session.take_loaded();
     session.open().await;
     let close_at = expires.map(|expires_at_ms| {
         let remaining = Duration::from_millis(expires_at_ms.saturating_sub(now_ms()));
@@ -300,6 +301,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
                 send(&mut sink, close(1008, "Tealstreet proxy token expired")).await;
                 break;
             }
+            Some((name, client)) = loaded.recv() => session.account_loaded(&name, client).await,
             text = outgoing.recv() => match text {
                 Some(text) => if !send(&mut sink, Message::Text(text.into())).await { break },
                 None => break,

@@ -131,6 +131,9 @@ impl AccountPort for Port {
     fn emit(&self, op: &str, data: String) {
         (self.emit)(algo_msg(&self.name, op, data));
     }
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        *self.handle.capabilities()
+    }
 }
 
 /// An algo's reply as the worker posted it: `{op, data}` with `data` verbatim.
@@ -445,11 +448,13 @@ pub async fn run(
     held: std::sync::Arc<std::sync::atomic::AtomicBool>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
+    // An algo host that cannot run never takes the account with it: the account's
+    // own stop disposes the engine directly once this host is gone.
     let Ok(mut feed) = Feed::join(handle.clone(), client).await else {
-        handle.dispose();
-        if let Some(signer) = &link_signer {
-            signer.mark_unavailable();
-        }
+        crate::state::Log::warn(&format!(
+            "{}: algo host could not join its account; algos are unavailable",
+            who.account
+        ));
         return;
     };
     let name = who.account.clone();
@@ -521,10 +526,12 @@ pub async fn run(
             capabilities.account_tier,
         ));
     }
-    loop {
+    // True only when the account itself is going away; a failed algo feed ends
+    // the algos and leaves the account running.
+    let disposing = loop {
         tokio::select! {
             batch = feed.next() => {
-                let Some(batch) = batch else { break };
+                let Some(batch) = batch else { break false };
                 for notice in &batch.notices {
                     port.settle(notice);
                 }
@@ -595,14 +602,18 @@ pub async fn run(
                     let _ = registry.dispatch("chaser:terminateAll", "{}", &cx);
                     crate::audit::log(&who, "socket closed", &crate::audit::algo_op("chaser:terminateAll", "{}"), "ok".into());
                 }
-                Some(AlgoInput::Dispose) | None => break,
+                Some(AlgoInput::Dispose) | None => break true,
             },
         }
-    }
+    };
     // Disposal contract: stop TWAPs, let chaser cancels settle, then the scope, then the engine.
     crate::audit::log(
         &who,
-        "account disposed",
+        if disposing {
+            "account disposed"
+        } else {
+            "algo feed ended"
+        },
         &crate::audit::algo_op("terminateAll", "{}"),
         "ok".into(),
     );
@@ -617,6 +628,12 @@ pub async fn run(
     }
     scope.dispose();
     handle.leave(feed.client());
+    if !disposing {
+        crate::state::Log::warn(&format!(
+            "{name}: algo feed ended; algos stopped, the account keeps running"
+        ));
+        return;
+    }
     handle.dispose();
     if let Some(signer) = &link_signer {
         signer.mark_unavailable();

@@ -36,6 +36,7 @@ export class ManagedHttp {
     const resource = this.resources.get(token);
     if (!resource) return;
     this.resources.delete(token);
+    this.host.stageCauses.delete(`prepare:${token}`);
     resource.controller.abort();
     if (resource.wake !== undefined) this.host.transport.clearTimeout(resource.wake);
     try { resource.bound?.cancel?.(); } catch { /* Keep releasing the preparation. */ }
@@ -72,11 +73,13 @@ export class ManagedHttp {
       }
       this.cancel(token); return;
     }
-    if (action.phase === 'prepare') { void this.prepare(action); return; }
+    if (action.phase === 'prepare') { this.host.ownStage(`prepare:${token}`); void this.prepare(action); return; }
     if (action.phase !== 'bind') throw new Error('Invalid managed HTTP phase');
     const resource = this.resources.get(token);
     if (!resource || resource.phase !== 'prepared') return;
     const { host } = this;
+    const cause = host.stageCauses.get(`prepare:${token}`) ?? host.stageCause;
+    if (cause !== undefined && host.commands.get(cause)?.onStage) host.stageCauses.set(`http:${action.packet.request}`, cause);
     try {
       if (typeof action.permit !== 'string') throw new Error('Invalid HTTP permit');
       resource.bound = resource.prepared.bind({ ...action.packet, headers: Object.fromEntries(action.packet.headers), signal: resource.controller.signal });
@@ -107,7 +110,7 @@ export class ManagedHttp {
       if (this.next === 0xffff_ffff_ffff_ffffn) { this.fail(token, resource, 'invalid'); return; }
       resource.phase = 'prepared';
       const id = String(++this.next);
-      host.run(host.invoke(host.engine.httpPrepared, token, id, prepared.expiresAt, host.transport.now()));
+      host.runFor(host.stageCauses.get(`prepare:${token}`), host.invoke(host.engine.httpPrepared, token, id, prepared.expiresAt, host.transport.now()));
     } catch (error) { this.fail(token, resource, preparationReason(error, 'network')); }
   }
 
@@ -135,6 +138,7 @@ export class ManagedHttp {
       }
       resource.phase = 'released';
       response = resource.bound.dispatch(); // Synchronous transport API handoff.
+      host.stage(host.stageCauses.get(`http:${request}`), 'sent');
     } catch (error) {
       if (resource.phase === 'released' && this.live(token, resource)) {
         this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));

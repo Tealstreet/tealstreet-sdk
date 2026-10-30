@@ -52,6 +52,13 @@ import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
+import {
+  claimWriteTiming,
+  emitWriteTiming,
+  runWithWriteTiming,
+  TIMED_WRITE_METHODS,
+  WriteTiming,
+} from '../../writeTiming';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
@@ -278,6 +285,17 @@ const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
   'nukeOrders',
 ]);
 const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode'] as const;
+/**
+ * Engine methods a main-thread worker mirror cannot answer and does not forward:
+ * they throw by name instead of failing later as "engine is not started".
+ */
+export const WORKER_MIRROR_UNSUPPORTED_METHODS = ['validateAccount', 'fetchEngineSnapshot', 'snapshotFrame'] as const;
+export type WorkerMirrorUnsupportedMethod = (typeof WORKER_MIRROR_UNSUPPORTED_METHODS)[number];
+/** The main-thread exchange's surface: everything else forwards or is correct locally. */
+export type WorkerMirrorExchange = Omit<RustEngineExchange, WorkerMirrorUnsupportedMethod | 'fetchFillsForOrderIds'>;
+
+/** Rust-only engine methods (not on BaseExchange) a mirror forwards whole. */
+const RUST_FORWARDED_METHODS = ['fetchStpMode', 'changeStpMode', 'fetchOrderBook'] as const;
 
 /**
  * The hosted server answers `fetchOrders`/`fetchPositions` with its engine's
@@ -527,7 +545,8 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (capabilities.fillsByOrderId) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
+    // Fill lookups serve the worker's chasers; a mirror has no engine to ask.
+    if (capabilities.fillsByOrderId && !this.isWorkerMirror) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
     if (capabilities.accountTier) {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
         if (this.routesToWorker) {
@@ -692,6 +711,7 @@ export class RustEngineExchange extends BaseExchange {
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
     this.forwardToWorker();
+    if (this.isWorkerMirror) this.refuseOnMirror();
     this.stopWorkerCapabilitySync = this.store.subscribe(this.syncWorkerCapabilities);
   }
 
@@ -1125,8 +1145,11 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
   private callWorker = async (method: string, ...args: unknown[]): Promise<unknown> => {
+    const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
+    timing?.mark('called');
     await this.untilWorkerBridge();
-    return (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+    const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+    return timing ? runWithWriteTiming(timing, call) : call();
   };
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
@@ -1139,9 +1162,20 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
+  private refuseOnMirror() {
+    const members = this as unknown as Record<string, unknown>;
+    for (const method of WORKER_MIRROR_UNSUPPORTED_METHODS) {
+      members[method] = () => {
+        const message = `${method} is not available on the main-thread exchange: it runs in the account's worker`;
+        throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+      };
+    }
+  }
+
   private forwardToWorker() {
     // A branded fallback answers locally; wrapping it would hide the brand `capabilities` reads.
-    const capabilities = this.capabilities;
+    // The brand alone decides: a mirror learns the record (options included) only later.
+    const capabilities = super.capabilities;
     const inert = new Set<string>(
       Object.entries(CAPABILITY_METHODS)
         .filter(([capability]) => !capabilities[capability as keyof ExchangeCapabilities])
@@ -1150,17 +1184,21 @@ export class RustEngineExchange extends BaseExchange {
     // Native account reads start an engine, so a mirror asks the worker's instead.
     // Journals are not forwarded: a mirror folds them itself from forwarded raw reads,
     // so the hosted server, which has no TS mappers, only serves those reads.
-    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS];
+    const methods = [...WORKER_FORWARDED_METHODS, ...NATIVE_ACCOUNT_READS, ...RUST_FORWARDED_METHODS];
+    const members = this as unknown as Record<string, unknown>;
     for (const method of methods) {
-      if (inert.has(method)) continue;
-      const local = this[method] as (...args: unknown[]) => Promise<unknown>;
-      (this as Record<WorkerForwardedMethod | NativeAccountRead, unknown>)[method] = async (...args: unknown[]) => {
+      // A capability-defined method this venue lacks stays absent, never a forwarder.
+      if (inert.has(method) || typeof members[method] !== 'function') continue;
+      const local = members[method] as (...args: unknown[]) => Promise<unknown>;
+      // An engine-owning instance calls straight through, keeping its own synchronous refusals.
+      members[method] = (...args: unknown[]) => {
         if (!this.routesToWorker) return local(...args);
-        const result = await this.callWorker(method, ...args);
-        // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-        return method === 'updateOrder'
-          ? decodeWorkerOrderIds(result as WorkerOrderIds)
-          : rowsFromAccountFrame(method, result, args[0]);
+        return this.callWorker(method, ...args).then((result) =>
+          // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+          method === 'updateOrder'
+            ? decodeWorkerOrderIds(result as WorkerOrderIds)
+            : rowsFromAccountFrame(method, result, args[0]),
+        );
       };
     }
   }
@@ -1667,7 +1705,7 @@ export class RustEngineExchange extends BaseExchange {
   /** `report: false` is for background reads whose caller owns the failure's visibility. */
   private command = async <T>(
     command: { op: string; [field: string]: unknown },
-    { report = true }: { report?: boolean } = {},
+    { report = true, timing }: { report?: boolean; timing?: WriteTiming } = {},
   ): Promise<T> => {
     try {
       if (this.engineFailure) throw this.engineFailure;
@@ -1680,9 +1718,24 @@ export class RustEngineExchange extends BaseExchange {
             : Boolean(value && typeof value === 'object' && Object.values(value).some(invalid));
         if (invalid(command)) throw new Error('Coinbase command numbers must be finite');
       }
-      return (await this.host.command(command)) as T;
+      return (await (timing ? this.host.command(command, { onStage: timing.mark }) : this.host.command(command))) as T;
     } catch (error) {
       if (report) this.reportCommandError(error);
+      throw error;
+    }
+  };
+
+  /** A user write: its stages are stamped, and emitted here unless a caller in another thread owns them. */
+  private writeCommand = async <T>(
+    claimed: ReturnType<typeof claimWriteTiming>,
+    command: { op: string; [field: string]: unknown },
+  ): Promise<T> => {
+    try {
+      const result = await this.command<T>(command, { timing: claimed.timing });
+      if (claimed.owned) emitWriteTiming(this, claimed.timing, 'ok');
+      return result;
+    } catch (error) {
+      if (claimed.owned) emitWriteTiming(this, claimed.timing, 'error');
       throw error;
     }
   };
@@ -1695,6 +1748,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
+    const timing = claimWriteTiming('placeOrders');
     const ready = this.capabilitiesFor('placeOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
     for (const order of orders) {
@@ -1753,7 +1807,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.capabilityRecord?.cancelAll === 'eachPlacedSymbol') {
       for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
     }
-    return this.command<string[]>({ op: 'placeOrders', orders });
+    return this.writeCommand<string[]>(timing, { op: 'placeOrders', orders });
   };
 
   placeOrder = async (opts: AsterDEXPlaceOrderOpts) => {
@@ -1762,6 +1816,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+    const timing = claimWriteTiming('amendOrder');
     const price = 'price' in update ? update.price : undefined;
     const amount = 'amount' in update ? update.amount : undefined;
     if (price === undefined && amount === undefined) throw new Error('Order amendment requires a price or amount');
@@ -1769,7 +1824,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Order amendment price and amount must be finite numbers');
     }
     const withSymbol = this.capabilityRecord?.amendWithSymbol;
-    const result = await this.command<string[] | { orderIds: string[]; clientOrderId: string }>({
+    const result = await this.writeCommand<string[] | { orderIds: string[]; clientOrderId: string }>(timing, {
       op: withSymbol ? 'amendOrderWithSymbol' : 'amendOrder',
       id: order.id,
       ...(withSymbol ? { symbol: order.symbol } : {}),
@@ -1780,14 +1835,15 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   cancelOrders = async (orders: Order[]) => {
+    const timing = claimWriteTiming('cancelOrders');
     const descriptors = orders.map(({ id, symbol, type }) => ({ id, symbol, type }));
     if (this.capabilityRecord?.cancelWithSymbols) {
-      await this.command({ op: 'cancelOrdersWithSymbols', orders: descriptors });
-    } else await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id), orders: descriptors });
+      await this.writeCommand(timing, { op: 'cancelOrdersWithSymbols', orders: descriptors });
+    } else await this.writeCommand(timing, { op: 'cancelOrders', ids: orders.map((order) => order.id), orders: descriptors });
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    await this.command({ op: 'cancelSymbolOrders', symbol });
+    await this.writeCommand(claimWriteTiming('cancelSymbolOrders'), { op: 'cancelSymbolOrders', symbol });
   };
 
   nuke = async (_tries = 0) => this.runNativeNuke(true);
@@ -2174,6 +2230,7 @@ export class RustEngineExchange extends BaseExchange {
     const source = capabilities.maxLeverage;
     if (source === 'unsupported') throw new Error('Not implemented');
     if (source === 'rails') {
+      if (this.routesToWorker) return (await this.callWorker('fetchSymbolMaxLeverage', symbol)) as number;
       const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       return Math.max(rails.buyLeverage, rails.sellLeverage);
     }
@@ -2264,6 +2321,9 @@ export class RustEngineExchange extends BaseExchange {
       // Metadata-refreshed rails answer from settings once loaded; before the
       // first refresh (a flat, freshly selected symbol) the venue is read.
       if (query === 'onMetadata' && usable) return cached;
+      // The venue read needs the engine; the worker's frames bring the result back.
+      if (this.routesToWorker)
+        return (await this.callWorker('fetchLeverageForSymbol', symbol)) as FetchedLeverage | null;
       const leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
       this.applier.applyLeverage(symbol, leverage);

@@ -704,6 +704,32 @@ pub fn translate(
             }
             one(command("fetchCandles", out, false))
         }
+        // As `RustEngineExchange.fetchOrderBook`: a REST snapshot, where the venue serves one.
+        "fetchOrderBook" if !capabilities.order_book_query => Err(refused(
+            "Error",
+            "Orderbook snapshot queries are unavailable for this venue",
+        )),
+        "fetchOrderBook" => {
+            let mut out = fields([("symbol", text(arg(args, 0), "symbol")?.into())]);
+            if let Some(limit) = limit(args.get(1))? {
+                out.insert("limit".into(), limit);
+            }
+            one(command("fetchOrderBook", out, false))
+        }
+        // As `RustEngineExchange.fetchStpMode` (AsterDEX); changeStpMode stays unsupported hosted.
+        "fetchStpMode" if public_only || !capabilities.stp_controls => Err(refused(
+            "Error",
+            "Self-trade prevention is unavailable for this venue",
+        )),
+        "fetchStpMode" => one(command("fetchStpMode", Map::new(), false)),
+        // The venue read behind `fetchLeverageForSymbol`; a mirror answers from
+        // its frame-fed rails first and asks only when they cannot.
+        "fetchLeverageForSymbol" if public_only => one(Plan::Reply(Value::Null)),
+        "fetchLeverageForSymbol" => one(command(
+            "fetchLeverage",
+            fields([("symbol", text(arg(args, 0), "symbol")?.into())]),
+            false,
+        )),
         "fetchPublicTrades" => {
             let mut out = fields([("symbol", text(arg(args, 0), "symbol")?.into())]);
             if let Some(limit) = limit(args.get(1))? {
@@ -1280,6 +1306,83 @@ mod tests {
             let Value::Array(args) = args else { panic!() };
             let refusal = translate("scheduleCancel", &args, capabilities, &[], false).unwrap_err();
             assert!(refusal.message.contains(message), "{}", refusal.message);
+        }
+    }
+
+    // A COSIGNED mirror forwards these reads (SDK #2506); the server answers them.
+    #[test]
+    fn hosted_order_book_stp_and_leverage_reads_reach_the_engine() {
+        let reads = Capabilities {
+            order_book_query: true,
+            stp_controls: true,
+            ..caps()
+        };
+        assert_eq!(
+            web("fetchOrderBook", json!(["BTCUSDT", 5]), &reads),
+            (
+                json!({"op":"fetchOrderBook","symbol":"BTCUSDT","limit":5}),
+                Reply::Result
+            )
+        );
+        assert_eq!(
+            web("fetchStpMode", json!([]), &reads),
+            (json!({"op":"fetchStpMode"}), Reply::Result)
+        );
+        assert_eq!(
+            web("fetchLeverageForSymbol", json!(["BTCUSDT"]), &reads),
+            (
+                json!({"op":"fetchLeverage","symbol":"BTCUSDT"}),
+                Reply::Result
+            )
+        );
+        // Venues without the axis refuse as the browser engine does.
+        for (method, message) in [
+            (
+                "fetchOrderBook",
+                "Orderbook snapshot queries are unavailable for this venue",
+            ),
+            (
+                "fetchStpMode",
+                "Self-trade prevention is unavailable for this venue",
+            ),
+        ] {
+            let refusal = translate(method, &[json!("BTCUSDT")], &caps(), &[], false).unwrap_err();
+            assert_eq!(refusal.message, message, "{method}");
+        }
+        // A public account has no leverage rails to read, and no STP setting.
+        assert_eq!(
+            translate(
+                "fetchLeverageForSymbol",
+                &[json!("BTCUSDT")],
+                &reads,
+                &[],
+                true
+            )
+            .unwrap(),
+            vec![Plan::Reply(Value::Null)]
+        );
+        assert!(translate("fetchStpMode", &[], &reads, &[], true).is_err());
+    }
+
+    // Out of hosted scope (README "Unsupported on hosted"): visible refusals, never guessed.
+    #[test]
+    fn options_stp_writes_and_rails_max_leverage_stay_unsupported_hosted() {
+        let all = Capabilities {
+            options: true,
+            stp_controls: true,
+            ..caps()
+        };
+        for method in [
+            "fetchOptionChain",
+            "fetchOptionExpiries",
+            "fetchAccountGreeks",
+            "changeStpMode",
+            "fetchSymbolMaxLeverage",
+        ] {
+            assert!(
+                translate(method, &[json!("BTCUSDT")], &all, &[], false).is_err(),
+                "{method}"
+            );
         }
     }
 

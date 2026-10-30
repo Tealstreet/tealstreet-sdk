@@ -82,6 +82,7 @@ import { InProcessPublicDataProvider } from './in-process-public-data';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { FrameApplier, FrameApplyError } from '../store/frameApplier';
 import { ExchangeEmitter } from './exchangeEmitter';
+import { claimWriteTiming, emitWriteTiming, TIMED_WRITE_METHODS } from '../writeTiming';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -329,6 +330,15 @@ export const WORKER_FORWARDED_METHODS = [
   'fetchHistoricalOrders',
   'fetchIncomeHistory',
   'fetchIncomeHistoryRange',
+  // Account settings and engine reads: a keyless mirror has neither the engine nor the key.
+  'setLeverage',
+  'setAllLeverage',
+  'changeMarginType',
+  'changePositionMode',
+  'updateSymbolMetadata',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ] as const;
 
 export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
@@ -349,6 +359,13 @@ export const WORKER_OPTIONAL_METHODS = [
   'fetchPositions',
   'fetchBalance',
   'fetchPositionMode',
+  // Rust-only engine methods a mirror forwards whole.
+  'fetchStpMode',
+  'changeStpMode',
+  'fetchOrderBook',
+  // A mirror answers these from its frame-fed rails and asks the worker only for a venue read.
+  'fetchSymbolMaxLeverage',
+  'fetchLeverageForSymbol',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
@@ -368,14 +385,20 @@ const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'fetchAccountTier',
   'fetchEngineCapabilities',
   'getAccount',
+  'fetchStpMode',
+  'fetchLeverageForSymbol',
+  'fetchSymbolMaxLeverage',
+  'updateSymbolMetadata',
+  'fetchOrderBook',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ]);
 
 /** Worker RPCs that dispatch venue writes: an interrupted one has an unknown outcome. */
 export const WORKER_WRITE_METHODS: ReadonlySet<string> = new Set<string>([
-  'setLeverage',
+  // Routed by its own method after validating the time; see RustEngineExchange.scheduleCancel.
   'scheduleCancel',
-  'changePositionMode',
-  'changeMarginType',
   ...[...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].filter((method) => !WORKER_READ_METHODS.has(method)),
 ]);
 
@@ -393,10 +416,7 @@ export const workerCallClientOrderIds = (method: unknown, args: unknown): string
 
 export type CallableMethodsInWorker =
   | WorkerForwardedMethod
-  | 'setLeverage'
   | 'scheduleCancel'
-  | 'changePositionMode'
-  | 'changeMarginType'
   | 'fetchAndSetPrivateSnapshot'
   | 'fetchEngineSnapshot'
   | 'reconnect'
@@ -405,7 +425,6 @@ export type CallableMethodsInWorker =
   | 'fetchHistoricalFills'
   | 'fetchOrders'
   | 'fetchAndSetOrders'
-  | 'updateSymbolMetadata'
   | 'fetchLastLogsFromWebsockets'
   | 'removeOrders'
   | 'fetchIncomeHistory'
@@ -1792,18 +1811,24 @@ export class BaseExchange implements Exchange {
     ...args: Parameters<this[M]>
   ): Promise<ReturnType<this[M]>> => {
     const requestId = nanoid();
+    const timing = TIMED_WRITE_METHODS.has(method) ? claimWriteTiming(method).timing : undefined;
 
     return new Promise<ReturnType<this[M]>>((resolve, reject) => {
       const timeout = setTimeout(() => {
         // Timeout path must also remove the listener, otherwise every timed-out
         // call leaks a handleDone closure permanently attached to the emitter.
         this.emitter.off('callMethod:done', handleDone);
+        if (timing) emitWriteTiming(this, timing, 'error');
         reject(this.workerCommandTimeoutError(method, args));
       }, this.workerCommandTimeoutMs(method));
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);
           this.emitter.off('callMethod:done', handleDone);
+          if (timing) {
+            Object.assign(timing.marks, event.timing);
+            emitWriteTiming(this, timing, event.success ? 'ok' : 'error');
+          }
           if (event.success) {
             const result = withHistoryCompleteness(event.result, event.completeness);
             resolve(result);
@@ -1815,7 +1840,7 @@ export class BaseExchange implements Exchange {
       };
       this.emitter.on('callMethod:done', handleDone);
       try {
-        this.emitter.dispatch('callMethod', { method, args, requestId });
+        this.emitter.dispatch('callMethod', { method, args, requestId, ...(timing ? { timing: timing.marks } : {}) });
       } catch (error) {
         clearTimeout(timeout);
         this.emitter.off('callMethod:done', handleDone);

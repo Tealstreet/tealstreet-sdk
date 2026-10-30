@@ -220,3 +220,39 @@ async fn a_feed_dropped_over_and_over_gives_up_instead_of_spinning() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn an_algo_host_whose_feed_gives_up_leaves_the_account_running() {
+    LocalSet::new()
+        .run_until(async {
+            let (handle, _tape) = account();
+            let (_algos, inbox) = mpsc::unbounded_channel();
+            let host = tokio::task::spawn_local(safe_cex_exchange_server::algos::run(
+                handle.clone(),
+                1,
+                Default::default(),
+                Box::new(|_| {}),
+                None,
+                Default::default(),
+                Default::default(),
+                inbox,
+            ));
+            // Drop the host's feed over and over, its rejoined clients included.
+            let ended = tokio::time::timeout(Duration::from_secs(10), async {
+                while !host.is_finished() {
+                    handle.leave(1);
+                    for id in (1u64 << 62)..(1u64 << 62) + 64 {
+                        handle.leave(id);
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await;
+            assert!(ended.is_ok(), "the algo host gave up");
+            assert!(
+                handle.join(99, false).await.is_ok(),
+                "an algo failure never disposes the account"
+            );
+        })
+        .await;
+}

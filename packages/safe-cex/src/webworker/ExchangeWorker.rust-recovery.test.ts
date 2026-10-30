@@ -12,6 +12,7 @@ import { registerCommandExecutor, resetCommandExecutor } from './commandExecutor
 import { ExchangeWorker } from './ExchangeWorker';
 import { setMainAcceptsFrames } from './frameForwarding';
 import startWorkerContext, { exchangeWorkers } from './store.webworker';
+import { setTwapLockManager } from './twap/twapLock';
 import { twapManager } from './twap/TwapManager';
 import { TwapStatus } from './twap/TwapStatus';
 
@@ -168,6 +169,8 @@ const panic = async (source: ControlledEngine) => {
 };
 
 beforeEach(() => {
+  // Web Locks callbacks run outside fake timers; one worker needs no cross-tab lock here.
+  setTwapLockManager(null);
   vi.useFakeTimers();
   trapStartup = false;
   sources.length = 0;

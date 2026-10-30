@@ -16,6 +16,14 @@ The matching BaseExchange receiver restores it before resolving or notifying
 result observers; senders and receivers must upgrade together. Never infer a
 complete window from missing metadata or attach a notice to another request.
 
+## Write timing marks
+
+User-write `callMethod` requests carry optional `data.timing` (write stage
+marks, epoch ms), and their `callMethod:done` reply returns the merged marks.
+The handler hands them to the exchange with `runWithWriteTiming`; the
+main-thread caller emits the one `write.timing` event. See
+`docs/plans/callers/rust-write-timing.md`.
+
 ## Time synchronization
 
 The browser main thread owns public time polling. It synchronizes once per
@@ -370,6 +378,21 @@ TWAP instances are tracked by actual handler-created instance identity, never
 account name, so terminating one worker cannot stop another same-name account.
 `TwapInstance.start()` checks termination again after its awaited placement;
 otherwise a reply arriving after terminate could schedule another old slice.
+
+## TWAP restore and the cross-tab owner lock
+
+`twap:state` replays one tab's `sessionStorage['twaps']`, and a duplicated tab
+copies it, so its own dedicated worker would run the same TWAP a second time.
+Every TWAP holds the Web Locks owner lock `tealstreet-twap:<account>:<id>`
+(`twap/twapLock.ts`) until it completes or stops. A restore builds the instance
+synchronously (the worker tracks the TWAPs a dispatch creates), runs it only
+once it holds the lock, and otherwise stops it and toasts "running in another
+tab". It keeps asking for `TWAP_RESTORE_LOCK_WAIT_MS` (5 s) first: a reloaded
+tab's previous worker holds its locks until the browser tears it down, and a
+refusal on the first try would end a TWAP that no tab then runs. The browser
+releases a dead worker's locks, so another tab can then restore it. `twapRestoreRefusal.ts` refuses finished, empty, inflated or
+foreign-account rows and running rows whose schedule lapsed, mirroring the
+exchange server. A runtime without Web Locks gets a no-op lock.
 
 ## Interrupted command replies
 

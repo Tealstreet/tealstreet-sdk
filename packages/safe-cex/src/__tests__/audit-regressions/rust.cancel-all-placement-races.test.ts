@@ -27,7 +27,7 @@ const setup = (name: ExchangeName) => {
   store.update({ markets: [market] });
   const exchange = new RustEngineExchange(name, { key: 'fixture', secret: 'fixture', passphrase: 'fixture-presentation' }, store);
   const command = vi.fn<(command: Record<string, unknown>) => Promise<unknown>>().mockResolvedValue(['native-order']);
-  Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  Object.assign(exchange, { host: { command: (input: Record<string, unknown>) => command(input), dispose: vi.fn() } });
   adoptEngineCapabilities(exchange);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   running.push(exchange);
