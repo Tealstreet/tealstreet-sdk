@@ -25,16 +25,23 @@ export const twapRestoreRefusal = (
   if (!Array.isArray(sizes) || (sizes.length === 0 && !state.inFlight)) return 'no slices remain';
   if (!sizes.every((size) => Number.isFinite(size) && size >= 0)) return 'its slice sizes are invalid';
   if (!(Number.isFinite(options.size) && options.size > 0)) return 'its size is invalid';
-  const remaining = sizes.reduce((sum, size) => sum + size, 0);
+  const inFlight = state.inFlight;
+  // A definitive lookup miss re-places the in-flight slice, so it counts as remaining.
+  if (inFlight && !(Number.isFinite(inFlight.size) && inFlight.size > 0)) return 'its in-flight slice is invalid';
+  const remaining = sizes.reduce((sum, size) => sum + size, 0) + (inFlight?.size ?? 0);
   if (remaining > options.size * (1 + 1e-9)) return 'its remaining slices exceed the TWAP size';
-  if (sizes.length + (state.ordersExecuted || 0) > options.ordersCount) {
+  if (sizes.length + (state.ordersExecuted || 0) + (inFlight ? 1 : 0) > options.ordersCount) {
     return 'its remaining and executed slices exceed ordersCount';
   }
   if (state.status === TwapStatus.Running) {
     const intervalMs = (options.duration / options.ordersCount) * 60_000;
     const latestMs =
       state.nextOrderAt + intervalMs * (1 + (options.randomnessPercentage || 0) / 100) + TWAP_RESTORE_SCHEDULE_GRACE_MS;
-    if (!Number.isFinite(latestMs) || nowMs > latestMs) return 'its schedule lapsed, so no tab was running it';
+    if (!Number.isFinite(latestMs) || nowMs > latestMs) {
+      return inFlight
+        ? 'its schedule lapsed, so no tab was running it; a slice may have been in flight, check open orders and fills'
+        : 'its schedule lapsed, so no tab was running it';
+    }
   }
   return undefined;
 };
