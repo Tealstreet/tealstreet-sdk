@@ -20,13 +20,14 @@ use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+mod venue_state;
+
 /// Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS: f64 = 30.0 * 60_000.0;
 const LISTEN_KEY_RETRY_MAX_MS: f64 = 60_000.0;
 /// 5 s doubling to the 60 s keepalive interval.
 const LISTEN_KEY_RETRY: Backoff = Backoff::new(5_000.0, 4, LISTEN_KEY_RETRY_MAX_MS);
 const HEALTH_CHECK_MS: f64 = 3_000.0;
-const VENUE_STATE_VERSION: u8 = 1;
 const ACCOUNT_INTERVAL_MS: f64 = 25_000.0;
 const DEGRADED_ACCOUNT_INTERVAL_MS: f64 = 3_000.0;
 const POSITION_RISK_INTERVAL_MS: f64 = 75_000.0;
@@ -3011,50 +3012,6 @@ impl BinanceFutures {
 }
 
 impl BinanceFutures {
-    /// VENUE_STATE: the stop-limit ids, whose amend a frame-fed engine refuses as
-    /// LOCAL does. Version byte, u32 count, then sorted ids as u32 length and
-    /// UTF-8 bytes (sorted, so unchanged state is not resent).
-    pub(crate) fn export_limit_stops(&self) -> Vec<u8> {
-        let mut ids: Vec<&String> = self.account.limit_stops.iter().collect();
-        ids.sort();
-        let mut out = vec![VENUE_STATE_VERSION];
-        out.extend_from_slice(&(ids.len() as u32).to_le_bytes());
-        for id in ids {
-            out.extend_from_slice(&(id.len() as u32).to_le_bytes());
-            out.extend_from_slice(id.as_bytes());
-        }
-        out
-    }
-
-    /// Replace the stop-limit ids with a data source's; `false` leaves them
-    /// unchanged when the bytes are not a version this build reads.
-    pub(crate) fn apply_limit_stops(&mut self, bytes: &[u8]) -> bool {
-        let Some((&VENUE_STATE_VERSION, mut rest)) = bytes.split_first() else {
-            return false;
-        };
-        let mut take = |length: usize| -> Option<&[u8]> {
-            let (head, tail) = rest.split_at_checked(length)?;
-            rest = tail;
-            Some(head)
-        };
-        let count = |bytes: &[u8]| u32::from_le_bytes(bytes.try_into().unwrap()) as usize;
-        let decoded = (|| {
-            let mut ids = HashSet::new();
-            for _ in 0..count(take(4)?) {
-                let length = count(take(4)?);
-                ids.insert(std::str::from_utf8(take(length)?).ok()?.to_owned());
-            }
-            Some(ids)
-        })();
-        match decoded {
-            Some(ids) if rest.is_empty() => {
-                self.account.limit_stops = ids;
-                true
-            }
-            _ => false,
-        }
-    }
-
     pub(crate) fn pm_order_source(&self, symbol: &str, client: &str) -> Option<PmOrderSource> {
         self.account
             .pm_order_owners
