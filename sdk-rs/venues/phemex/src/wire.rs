@@ -198,6 +198,8 @@ pub struct CandleRow(
     pub N,
     pub N,
     serde::de::IgnoredAny,
+    // REST rows append the symbol; socket `kline_p` rows stop at turnover.
+    #[serde(default)] serde::de::IgnoredAny,
 );
 impl CandleRow {
     pub fn candle(&self) -> Candle {
