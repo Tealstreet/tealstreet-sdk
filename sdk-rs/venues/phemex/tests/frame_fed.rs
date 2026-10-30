@@ -296,12 +296,12 @@ fn placed_pos_side(e: &mut Engine<PhemexPerpetuals>, id: &str) -> Option<String>
 fn a_confirmed_position_mode_outlasts_a_stale_source_frame() {
     let mut e = frame_fed();
     let mut oneway = source("OneWay");
-    e.apply_frame(1001., &oneway.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., oneway.snapshot_frame(1001.), true)
         .unwrap();
     assert!(!e.store().hedged());
     switch_to_hedged(&mut e);
     // The source has not re-read: its snapshot still says one-way.
-    e.apply_frame(1002., &oneway.snapshot_frame(1002.).to_vec(), true)
+    e.apply_frame(1002., oneway.snapshot_frame(1002.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     assert!(e.store().hedged(), "the held mode keeps the hedge flag");
@@ -316,12 +316,12 @@ fn a_confirmed_position_mode_outlasts_a_stale_source_frame() {
 fn a_source_frame_with_the_new_mode_releases_the_hold() {
     let mut e = frame_fed();
     let mut oneway = source("OneWay");
-    e.apply_frame(1001., &oneway.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., oneway.snapshot_frame(1001.), true)
         .unwrap();
     switch_to_hedged(&mut e);
     e.apply_frame(1002., &source_snapshot(), true).unwrap();
     // Released: the source's later one-way read applies at once.
-    e.apply_frame(1003., &oneway.snapshot_frame(1003.).to_vec(), true)
+    e.apply_frame(1003., oneway.snapshot_frame(1003.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     assert_eq!(
@@ -355,7 +355,7 @@ fn refresh_settings_on_a_source_re_reads_the_account_and_writes_nothing() {
 fn a_source_without_the_symbols_context_does_not_release_a_held_margin_type() {
     let mut e = frame_fed();
     let mut cross = source("OneWay");
-    e.apply_frame(1001., &cross.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., cross.snapshot_frame(1001.), true)
         .unwrap();
     let a = command(
         &mut e,
@@ -371,10 +371,10 @@ fn a_source_without_the_symbols_context_does_not_release_a_held_margin_type() {
 
     // The source's VENUE_STATE has no BTCUSDT context: that confirms nothing.
     let mut empty = source_with(vec![]);
-    e.apply_frame(1002., &empty.snapshot_frame(1002.).to_vec(), true)
+    e.apply_frame(1002., empty.snapshot_frame(1002.), true)
         .unwrap();
     // A stale one, still cross, must not overwrite the confirmed isolated margin.
-    e.apply_frame(1003., &cross.snapshot_frame(1003.).to_vec(), true)
+    e.apply_frame(1003., cross.snapshot_frame(1003.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let a = command(
@@ -426,7 +426,7 @@ fn late_landing(filled: f64) -> Vec<Action> {
     let mut e = frame_fed();
     let mut source = source("Hedged");
     source.store_mut().set_orders(vec![]);
-    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., source.snapshot_frame(1001.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let a = command(
@@ -459,7 +459,7 @@ fn late_landing(filled: f64) -> Vec<Action> {
         "cancel-all warns about the unknown placement: {a:?}"
     );
     source.store_mut().set_orders(vec![landed(filled)]);
-    e.apply_frame(1003., &source.snapshot_frame(1003.).to_vec(), true)
+    e.apply_frame(1003., source.snapshot_frame(1003.), true)
         .unwrap();
     e.drain_actions().collect()
 }
@@ -497,7 +497,7 @@ fn lost_and_canceled() -> (Engine<PhemexPerpetuals>, Engine<PhemexPerpetuals>) {
     let mut e = frame_fed();
     let mut source = source("Hedged");
     source.store_mut().set_orders(vec![]);
-    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., source.snapshot_frame(1001.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let sent = requests(&command(
@@ -535,7 +535,7 @@ fn warned_about(actions: &[Action], text: &str) -> bool {
 fn a_lost_placement_ends_once_a_source_frame_covers_its_signed_expiry() {
     let (mut e, mut source) = lost_and_canceled();
     // A frame written before the signed expiry proves nothing: still refused.
-    e.apply_frame(1003., &source.snapshot_frame(1003.).to_vec(), true)
+    e.apply_frame(1003., source.snapshot_frame(1003.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let a = command(
@@ -549,7 +549,7 @@ fn a_lost_placement_ends_once_a_source_frame_covers_its_signed_expiry() {
 
     // One written well past it, without the order: it never landed.
     let late = 10_000_000.;
-    e.apply_frame(late, &source.snapshot_frame(late).to_vec(), true)
+    e.apply_frame(late, source.snapshot_frame(late), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let a = command(
@@ -578,7 +578,7 @@ fn a_create_ack_does_not_reopen_an_order_an_orders_frame_showed_closed() {
     let mut e = frame_fed();
     let mut source = source("Hedged");
     source.store_mut().set_orders(vec![]);
-    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., source.snapshot_frame(1001.), true)
         .unwrap();
     e.drain_actions().for_each(drop);
     let sent = requests(&command(
@@ -593,7 +593,7 @@ fn a_create_ack_does_not_reopen_an_order_an_orders_frame_showed_closed() {
     filled.id = "real-1".into();
     filled.status = OrderStatus::Closed;
     source.store_mut().set_orders(vec![filled]);
-    e.apply_frame(1001., &source.snapshot_frame(1001.).to_vec(), true)
+    e.apply_frame(1001., source.snapshot_frame(1001.), true)
         .unwrap();
     respond(&mut e, &sent[0], &ack(&sent[0], "real-1").to_string());
     assert_eq!(

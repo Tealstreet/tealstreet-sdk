@@ -3071,8 +3071,14 @@ fn refresh_settings_for_a_flat_symbol_re_reads_its_leverage_and_margin_type() {
     let urls = h.requests.iter().map(|r| r.url.clone()).collect::<Vec<_>>();
     assert_eq!(urls.len(), 3, "{urls:?}");
     assert!(urls[0].contains(MODE), "{urls:?}");
-    assert!(urls[1].contains(LEVERAGE) && urls[1].contains("symbol=BTC-USDT"), "{urls:?}");
-    assert!(urls[2].contains(MARGIN) && urls[2].contains("symbol=BTC-USDT"), "{urls:?}");
+    assert!(
+        urls[1].contains(LEVERAGE) && urls[1].contains("symbol=BTC-USDT"),
+        "{urls:?}"
+    );
+    assert!(
+        urls[2].contains(MARGIN) && urls[2].contains("symbol=BTC-USDT"),
+        "{urls:?}"
+    );
     assert!(h.requests.iter().all(|r| r.method == Method::Get));
     h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
     h.respond(POSITIONS, 200, r#"{"code":0,"data":[]}"#);

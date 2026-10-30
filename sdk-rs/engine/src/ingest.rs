@@ -736,6 +736,8 @@ fn balance(
         .collect();
     if flags & 1 == 0 {
         store.set_coin_balances(coins);
+    } else {
+        store.clear_coin_balances();
     }
     store.set_currency_balances(currencies);
     Ok(())
@@ -751,6 +753,9 @@ fn settings(
     frame: &Frame<'_>,
     section: &Section<'_>,
 ) -> Result<(), IngestError> {
+    if section.revision > 1 {
+        return Err(IngestError("unknown SETTINGS revision"));
+    }
     let mut cursor = Cursor::new(section.payload);
     let count = cursor.u32()? as usize;
     let markets = (0..count)
@@ -1374,6 +1379,52 @@ pub(crate) mod tests {
         assert_eq!(leverage("ETHUSDT"), MinMax { min: 1., max: 100. });
         // A market the source does not list keeps its own limits.
         assert_eq!(leverage("SOLUSDT"), MinMax { min: 1., max: 1. });
+    }
+
+    #[test]
+    fn a_source_without_collateral_clears_the_ingested_coins() {
+        let mut source = funded();
+        source.set_coin_balances(vec![CoinBalance {
+            base: "BTC".into(),
+            amount: 1.,
+            notional: 100.,
+        }]);
+        source.set_currency_balances(vec![]);
+        let (mut store, mut state) = (Store::default(), IngestState::default());
+        ingest(&mut source, &mut state, &mut store, true);
+        assert!(store.coin_balances().is_some());
+        // A source without collateral writes the currency tail with flag bit 0.
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin(section::BALANCE);
+        writer.f64s([2., 3., 5., 0.]);
+        writer.u32(0);
+        writer.pad();
+        writer.u32(0);
+        writer.u32(1);
+        writer.end();
+        let frame = writer.finish();
+        apply(&mut store, &mut state, &parse(&frame).unwrap(), false).unwrap();
+        assert_eq!(store.coin_balances(), None);
+        assert_eq!(store.currency_balances(), Some(&[][..]));
+    }
+
+    #[test]
+    fn an_unknown_settings_revision_is_refused() {
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin_revision(section::SETTINGS, 2);
+        writer.u32(0);
+        writer.end();
+        let frame = writer.finish();
+        let mut store = Store::default();
+        assert!(
+            apply(
+                &mut store,
+                &mut IngestState::default(),
+                &parse(&frame).unwrap(),
+                false
+            )
+            .is_err()
+        );
     }
 
     #[test]
