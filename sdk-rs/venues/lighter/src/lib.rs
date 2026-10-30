@@ -5,6 +5,7 @@ mod identity;
 mod limits;
 pub mod sign;
 mod trading;
+mod venue_state;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
@@ -801,6 +802,23 @@ impl Venue for Lighter {
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
+    /// `None` until the account lookup or a tier read has something to carry.
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        let state = venue_state::VenueState {
+            account_index: self.account.account_index,
+            tier: self.limits_tier_code(),
+        };
+        (state != venue_state::VenueState::default()).then(|| state.encode())
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
+        let Some(state) = venue_state::VenueState::decode(bytes) else {
+            return;
+        };
+        if let Some(account) = state.account_index {
+            self.apply_account_index(cx, account);
+        }
+        self.apply_limits_tier_code(state.tier);
+    }
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -1338,6 +1356,12 @@ impl Venue for Lighter {
                 );
                 cx.store.set_markets(rows);
                 let _ = cx.finish_http_context(&context);
+                // Frame-fed engines load only the market catalogue: no ticker
+                // seed, socket or poll; their data source streams the rest.
+                if cx.frame_fed() {
+                    self.account_start(cx);
+                    return;
+                }
                 self.ticker_seed(cx);
                 self.account_start(cx);
                 self.connect(cx);
@@ -1664,7 +1688,7 @@ impl Venue for Lighter {
         self.tier_action(cx, command, action);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        let refresh = self.restore_retired_trades();
+        let refresh = self.restore_retired_trades(cx.frame_fed());
         self.command(cx, command);
         if refresh {
             self.refresh_account(cx);
