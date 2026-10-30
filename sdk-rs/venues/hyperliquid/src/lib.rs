@@ -1168,6 +1168,25 @@ impl Venue for Hyperliquid {
             }
         }
     }
+    /// VENUE_STATE v1: `[1, builder]`, builder 0 unknown, 1 refused, 2 approved.
+    /// The one write-path fact the store lacks: whether placements carry the builder.
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        let builder = match self.account.builder_approved {
+            None => 0,
+            Some(false) => 1,
+            Some(true) => 2,
+        };
+        Some(vec![1, builder])
+    }
+    fn apply_venue_state(&mut self, _cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        if let [1, builder, ..] = state {
+            self.account.builder_approved = match builder {
+                1 => Some(false),
+                2 => Some(true),
+                _ => self.account.builder_approved,
+            };
+        }
+    }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         // Public prices cannot establish a private snapshot or mark it loaded.
         self.account_prices(cx);
