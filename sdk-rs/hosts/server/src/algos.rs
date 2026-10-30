@@ -10,7 +10,7 @@ use std::cell::{Cell, Ref, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 
@@ -42,11 +42,33 @@ pub enum AlgoInput {
 /// Where algo replies go: the account's current signing socket.
 pub type Emit = Box<dyn Fn(String) + Send>;
 
+/// Who holds the account now.
+#[derive(Default)]
+pub struct Holding {
+    pub live: Vec<u64>,
+    pub parked: bool,
+}
+
+/// Sends a frame, if given, to every live holder; says who holds the account.
+pub type Broadcast = Box<dyn Fn(Option<String>) -> Holding + Send>;
+
 /// Keeps a stop notice for a client that is not there to see it.
 pub type StopNotice = Box<dyn Fn(String) + Send>;
 
 /// Errors kept for a browser that may not have seen them, oldest dropped first.
 const UNHEARD_ERRORS: usize = 32;
+/// Two resume windows: later, no socket that missed it can still come back.
+const UNHEARD_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// An error someone may not have seen.
+struct Unheard {
+    sent: Instant,
+    /// The sockets it went to, any of which can be dead and look live for 30s.
+    told: Vec<u64>,
+    /// A parked session, or nobody at all, was not told.
+    owed: bool,
+    data: String,
+}
 
 /// Bound on settling chaser cancels before the engine is disposed anyway.
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
@@ -75,12 +97,11 @@ struct Port {
     name: String,
     who: crate::audit::Who,
     emit: Emit,
+    broadcast: Broadcast,
     placed: crate::accounts::PlacedSymbols,
     signer: Option<Arc<safe_cex_remote_signer::SignerLink>>,
-    held: Arc<AtomicBool>,
-    /// Errors sent since the browser was last heard from, with when: a dropped
-    /// socket can look live for 30s, so a send proves nothing until a frame follows.
-    unheard: RefCell<VecDeque<(Instant, String)>>,
+    /// A send proves nothing until a frame follows it on that socket.
+    unheard: RefCell<VecDeque<Unheard>>,
 }
 
 impl AccountPort for Port {
@@ -136,7 +157,9 @@ impl AccountPort for Port {
     fn emit(&self, op: &str, data: String) {
         if op == "error" {
             crate::state::Log::warn(&format!("algo error {}: {data}", self.name));
-            self.keep_unheard(&data);
+            let holding = (self.broadcast)(Some(algo_error(&self.name, &data)));
+            self.keep_unheard(data, holding);
+            return;
         }
         (self.emit)(algo_msg(&self.name, op, data));
     }
@@ -154,18 +177,33 @@ fn algo_msg(account_name: &str, op: &str, data: String) -> String {
     crate::envelope::msg(account_name, op, data)
 }
 
+fn algo_error(account_name: &str, data: &str) -> String {
+    let data: Value = serde_json::from_str(data).unwrap_or_else(|_| Value::String(data.to_owned()));
+    crate::envelope::algo_error(account_name, data)
+}
+
 impl Port {
-    fn keep_unheard(&self, data: &str) {
+    fn still_unheard(&self, error: &Unheard) -> bool {
+        let heard = |socket: &u64| {
+            self.signer
+                .as_ref()
+                .is_some_and(|signer| signer.heard_since(*socket, error.sent))
+        };
+        error.sent.elapsed() < UNHEARD_TTL && (error.owed || !error.told.iter().all(heard))
+    }
+
+    fn keep_unheard(&self, data: String, holding: Holding) {
         let mut unheard = self.unheard.borrow_mut();
-        match &self.signer {
-            Some(signer) => unheard.retain(|(sent, _)| signer.unheard_since(*sent)),
-            None if self.held.load(Ordering::Relaxed) => return,
-            None => {}
-        }
+        unheard.retain(|error| self.still_unheard(error));
         if unheard.len() == UNHEARD_ERRORS {
             unheard.pop_front();
         }
-        unheard.push_back((Instant::now(), data.to_owned()));
+        unheard.push_back(Unheard {
+            sent: Instant::now(),
+            owed: holding.parked || holding.live.is_empty(),
+            told: holding.live,
+            data,
+        });
     }
 
     /// The errors no frame followed, once.
@@ -173,28 +211,33 @@ impl Port {
         self.unheard
             .borrow_mut()
             .drain(..)
-            .filter(|(sent, _)| {
-                self.signer
-                    .as_ref()
-                    .is_none_or(|signer| signer.unheard_since(*sent))
-            })
-            .map(|(_, data)| data)
+            .filter(|error| self.still_unheard(error))
+            .map(|error| error.data)
             .collect()
     }
 
-    /// For a joining socket: the unheard errors sent to an earlier socket. Those
-    /// this socket was already sent stay kept until a frame follows them.
+    /// For a joining socket: the unheard errors it was not sent. Each stays kept
+    /// until a frame follows it there, since this socket may be dying too.
     fn take_for_join(&self) -> Vec<String> {
         let Some(signer) = &self.signer else {
             return self.take_unheard();
         };
+        let joining = signer.socket();
+        let holding = (self.broadcast)(None);
         let mut unheard = self.unheard.borrow_mut();
-        unheard.retain(|(sent, _)| signer.unheard_since(*sent));
-        let (current, earlier): (VecDeque<_>, VecDeque<_>) = unheard
-            .drain(..)
-            .partition(|(sent, _)| signer.sent_on_current_socket(*sent));
-        *unheard = current;
-        earlier.into_iter().map(|(_, data)| data).collect()
+        unheard.retain(|error| self.still_unheard(error));
+        let mut replay = Vec::new();
+        for error in unheard
+            .iter_mut()
+            .filter(|error| !error.told.contains(&joining))
+        {
+            error.sent = Instant::now();
+            error.told.retain(|socket| holding.live.contains(socket));
+            error.told.push(joining);
+            error.owed = holding.parked;
+            replay.push(error.data.clone());
+        }
+        replay
     }
 
     fn apply(&self, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
@@ -428,6 +471,7 @@ pub async fn run(
     client: u64,
     who: crate::audit::Who,
     emit: Emit,
+    broadcast: Broadcast,
     link_signer: Option<Arc<safe_cex_remote_signer::SignerLink>>,
     placed: crate::accounts::PlacedSymbols,
     held: Arc<AtomicBool>,
@@ -456,9 +500,9 @@ pub async fn run(
         name: name.clone(),
         who: who.clone(),
         emit,
+        broadcast,
         placed: placed.clone(),
         signer: link_signer.clone(),
-        held: held.clone(),
         unheard: RefCell::default(),
     });
     let scope = Scope::new();
@@ -593,9 +637,8 @@ pub async fn run(
                     publish(&mut published);
                     // What it stopped for while the browser was gone, once.
                     for data in port.take_for_join() {
-                        // Kept again: this socket may be dying too.
-                        port.keep_unheard(&data);
-                        (port.emit)(algo_msg(&name, "error", data));
+                        crate::state::Log::info(&format!("algo error replayed {name}: {data}"));
+                        (port.emit)(algo_error(&name, &data));
                     }
                 }
                 Some(AlgoInput::Dispose { reason, stopped }) => break Some((reason, stopped)),
@@ -635,7 +678,10 @@ pub async fn run(
         }
         None => {
             if let Some(notice) = stop_notice {
-                (port.emit)(crate::envelope::msg(&name, "error", Value::String(notice)));
+                (port.broadcast)(Some(crate::envelope::algo_error(
+                    &name,
+                    Value::String(notice),
+                )));
             }
         }
     }

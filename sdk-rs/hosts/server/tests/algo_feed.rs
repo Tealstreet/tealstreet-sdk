@@ -232,6 +232,7 @@ async fn an_algo_host_whose_feed_gives_up_leaves_the_account_running() {
                 1,
                 Default::default(),
                 Box::new(|_| {}),
+                Box::new(|_| Default::default()),
                 None,
                 Default::default(),
                 Default::default(),

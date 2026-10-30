@@ -194,8 +194,20 @@ async fn run_nuke(
         handle,
         1,
         who,
+        Box::new({
+            let tx = tx.clone();
+            move |text| {
+                let _ = tx.send(text);
+            }
+        }),
         Box::new(move |text| {
-            let _ = tx.send(text);
+            if let Some(text) = text {
+                let _ = tx.send(text);
+            }
+            safe_cex_exchange_server::algos::Holding {
+                live: vec![1],
+                parked: false,
+            }
         }),
         None,
         safe_cex_exchange_server::accounts::PlacedSymbols::default(),
