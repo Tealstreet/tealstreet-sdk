@@ -37,6 +37,40 @@ impl ExecFactory {
     }
 }
 
+impl ExecFactory {
+    /// The exec nuke for a hosted `nuke()` call: `mode` is `all`, `positions` or
+    /// `orders`. Shares exec's one-nuke-at-a-time guard; awaits and reports every leg.
+    pub fn nuke(
+        &self,
+        mode: &str,
+        cx: &AlgoCx,
+    ) -> Result<impl std::future::Future<Output = Result<Value, Value>> + 'static, Value> {
+        if cx.scope.is_disposed() {
+            return Err(json!({"message":"EXEC scope is disposed","outcome":"notSent"}));
+        }
+        if self.nuking.replace(true) {
+            return Err(
+                json!({"message":"Nuke already in progress on this account","outcome":"notSent"}),
+            );
+        }
+        let guard = nuke::NukeGuard(self.nuking.clone());
+        let adapter = Adapter {
+            cx: cx.clone(),
+            exec: Weak::new(),
+            parallel: self.parallel.clone(),
+            nuking: self.nuking.clone(),
+            account_name: self.account_name.clone(),
+            chasers: self.chasers.clone(),
+            twap: self.twap.clone(),
+        };
+        let mode = mode.to_owned();
+        Ok(async move {
+            let _guard = guard;
+            adapter.run_nuke(&mode).await
+        })
+    }
+}
+
 impl AlgoFactory for ExecFactory {
     fn ops(&self) -> &'static [&'static str] {
         &["exec"]

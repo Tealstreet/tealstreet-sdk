@@ -22,6 +22,8 @@ pub enum Plan {
     Reply(Value),
     /// Answered from the account's engine store, as `rust.exchange.ts` reads its own.
     Read(StoreRead),
+    /// Exec's nuke on the account's algo host: `all`, `positions` or `orders`.
+    Nuke(&'static str),
 }
 
 #[derive(Debug, PartialEq)]
@@ -539,6 +541,13 @@ pub fn translate(
             }
             one(command("fetchOrderHistory", out, false))
         }
+        // The close-all button: exec's nuke, which awaits and reports every leg.
+        "nuke" | "nukePositions" | "nukeOrders" if public_only => {
+            Err(refused("Error", "A public account has nothing to nuke"))
+        }
+        "nuke" => one(Plan::Nuke("all")),
+        "nukePositions" => one(Plan::Nuke("positions")),
+        "nukeOrders" => one(Plan::Nuke("orders")),
         // A main-thread mirror learns the record here (`loadWorkerCapabilities`).
         "fetchEngineCapabilities" => one(Plan::Reply(
             serde_json::to_value(capabilities)
@@ -1075,6 +1084,22 @@ mod tests {
             json!([1, 2, "FUNDING_FEE"]),
             &caps(),
         );
+    }
+
+    // Web: useNuke -> nuke(); the mirror also forwards nukePositions / nukeOrders.
+    #[test]
+    fn web_nuke_runs_exec_nuke_and_never_on_a_public_account() {
+        for (method, mode) in [
+            ("nuke", "all"),
+            ("nukePositions", "positions"),
+            ("nukeOrders", "orders"),
+        ] {
+            assert_eq!(
+                translate(method, &[json!(0)], &caps(), &[], false).unwrap(),
+                vec![Plan::Nuke(mode)]
+            );
+            assert!(translate(method, &[], &caps(), &[], true).is_err());
+        }
     }
 
     #[test]
