@@ -4,8 +4,6 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
-#[cfg(feature = "algos")]
-mod algos;
 #[cfg(feature = "hosted-operation-proof")]
 mod hosted_operation_proof;
 #[cfg(feature = "kraken")]
@@ -261,7 +259,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
             Engine::set_entropy(self, fill)
         }
     }
-
     fn signing_pending(&self, attempt: RequestId) -> bool {
         Engine::signing_pending(self, attempt)
     }
@@ -313,7 +310,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
     {
         Engine::claim_http(self, now, token)
     }
-
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         Engine::capabilities(self)
     }
@@ -327,19 +323,15 @@ impl<V: Venue> AnyEngine for Engine<V> {
     fn start(&mut self, now: f64) {
         Engine::start(self, now);
     }
-
     fn apply_frame(&mut self, now: f64, frame: &[u8], snapshot: bool) -> Result<(), String> {
         Engine::apply_frame(self, now, frame, snapshot).map_err(|error| error.0.to_owned())
     }
-
     fn set_source_clock_offset(&mut self, offset_ms: Option<f64>) {
         Engine::set_source_clock_offset(self, offset_ms);
     }
-
     fn handle(&mut self, now: f64, event: Event<'_>) {
         Engine::handle(self, now, event);
     }
-
     fn handle_command(
         &mut self,
         now: f64,
@@ -348,11 +340,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
     ) -> Result<(), safe_cex_engine::request_context::Error> {
         Engine::handle_command(self, now, command, wait_ms)
     }
-
     fn drain(&mut self) -> Vec<Action> {
         self.drain_actions().collect()
     }
-
     fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]> {
         if market_only {
             self.take_market_frame(now)
@@ -360,14 +350,12 @@ impl<V: Venue> AnyEngine for Engine<V> {
             self.take_frame(now)
         }
     }
-
     fn snapshot(&mut self, now: f64) -> &[u8] {
         self.snapshot_frame(now)
     }
     fn account_snapshot(&mut self, now: f64) -> &[u8] {
         self.account_snapshot_frame(now)
     }
-
     fn health(&self) -> Health {
         Engine::health(self).clone()
     }
@@ -1575,6 +1563,9 @@ impl WasmEngine {
             .map(js_sys::Uint8Array::from)
     }
 }
+
+#[cfg(feature = "algos")]
+mod algos;
 
 #[cfg(feature = "algos")]
 impl WasmEngine {

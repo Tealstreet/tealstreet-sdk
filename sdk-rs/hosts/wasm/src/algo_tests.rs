@@ -44,7 +44,10 @@ impl Venue for TestVenue {
     fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
         match &command {
-            Command::PlaceOrders { command: id, orders } => {
+            Command::PlaceOrders {
+                command: id,
+                orders,
+            } => {
                 let mut ids = Vec::new();
                 for placed in orders {
                     self.next_order += 1;
@@ -176,16 +179,30 @@ fn a_chase_places_through_the_engine_and_completes_on_its_fill() {
     assert_eq!(rows[0]["op"], "store");
     assert_eq!(rows[0]["data"]["activeChasers"], serde_json::json!([]));
 
-    let actions = engine.algo_op("chaser:start", BUY_ONE, 10.0, WALL + 10.0).unwrap();
+    let actions = engine
+        .algo_op("chaser:start", BUY_ONE, 10.0, WALL + 10.0)
+        .unwrap();
     assert!(
         !actions.contains("\"done\""),
         "algo completions never reach the JS host: {actions}"
     );
     let placed = placements(&commands);
     assert_eq!(placed.len(), 1);
-    assert!(placed[0] >= FIRST_COMMAND_ID, "id {} in the algo range", placed[0]);
     assert!(
-        engine.algos.running.as_ref().unwrap().port.pending.borrow().is_empty(),
+        placed[0] >= FIRST_COMMAND_ID,
+        "id {} in the algo range",
+        placed[0]
+    );
+    assert!(
+        engine
+            .algos
+            .running
+            .as_ref()
+            .unwrap()
+            .port
+            .pending
+            .borrow()
+            .is_empty(),
         "the done notice settled the placement"
     );
     let started = emits(&mut engine);
@@ -196,14 +213,20 @@ fn a_chase_places_through_the_engine_and_completes_on_its_fill() {
                 .is_some_and(|line| line.contains("processInstance starting"))),
         "{started:?}"
     );
-    let row = started.iter().rev().find(|emit| emit["op"] == "store").unwrap();
+    let row = started
+        .iter()
+        .rev()
+        .find(|emit| emit["op"] == "store")
+        .unwrap();
     assert_eq!(row["data"]["activeChasers"][0]["symbol"], "BTCUSDT");
     // The chase settles after placing: its timer is the next deadline.
     assert_eq!(engine.algo_deadline(), Some(1010.0));
 
     engine.algo_advance(1100.0, WALL + 1100.0);
     engine.ws_message(1.0, "fill o1", 1200.0).unwrap();
-    let frame = engine.take_frame_with(1200.0, false, <[u8]>::to_vec).unwrap();
+    let frame = engine
+        .take_frame_with(1200.0, false, <[u8]>::to_vec)
+        .unwrap();
     assert_eq!(safe_cex_engine::wire::fills(&frame).unwrap().len(), 1);
     assert_eq!(
         engine.algo_deadline(),
@@ -217,7 +240,11 @@ fn a_chase_places_through_the_engine_and_completes_on_its_fill() {
         .find(|emit| emit["op"] == "chaser:complete")
         .unwrap_or_else(|| panic!("no chaser:complete in {done:?}"));
     assert_eq!(complete["data"]["symbol"], "BTCUSDT");
-    let row = done.iter().rev().find(|emit| emit["op"] == "store").unwrap();
+    let row = done
+        .iter()
+        .rev()
+        .find(|emit| emit["op"] == "store")
+        .unwrap();
     assert_eq!(row["data"]["activeChasers"], serde_json::json!([]));
 }
 
@@ -262,9 +289,16 @@ fn dispose_cancels_the_resting_chase_then_aborts_every_task() {
             _ => None,
         })
         .collect();
-    assert_eq!(cancels.len(), 1, "the chase cancelled its order before stopping");
+    assert_eq!(
+        cancels.len(),
+        1,
+        "the chase cancelled its order before stopping"
+    );
     assert!(cancels[0] >= FIRST_COMMAND_ID);
-    assert!(!engine.algo_running(), "shutdown finished and algos are gone");
+    assert!(
+        !engine.algo_running(),
+        "shutdown finished and algos are gone"
+    );
     assert_eq!(executor.live_tasks(), 0, "disposal aborted every task");
     assert_eq!(engine.algo_deadline(), None);
     let stopped = emits(&mut engine);
