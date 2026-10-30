@@ -16,7 +16,8 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'binance', 'bitget', 'bitgetusdc', 'bybit', 'hyperliquid', 'hyperliquidspot', 'kraken', 'krakenspot', 'paradex']);
   // Cap sweep 10-30: measured 1,461,044 B; ceil KiB + 2 KiB.
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_429 * 1_024);
+  // CI master d60d25a7153 measured 1,471,321 B (frame-fed core); ceil 8 KiB + 2 KiB.
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_439 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_952, 'venue', 'asterdex'), undefined);
@@ -40,7 +41,9 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_453_174, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_456_128, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_463_296, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_463_297, 'venue', 'asterdex'), /exceeds 1463296/);
+  assert.equal(wasmBudgetError(1_471_321, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_473_536, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(1_473_537, 'venue', 'asterdex'), /exceeds 1473536/);
   for (const venue of ['bitget', 'bitgetusdc']) {
     // Frame-fed Bitget (COSIGNED writer): 1,522,315 -> 1,549,604 B (+27,289); cap +27 KiB +2 KiB.
     // Settings holds: core 1,549,604 -> 1,558,459, Bitget -> 1,568,357 (+18,753); cap +19 KiB +2 KiB.
@@ -92,10 +95,12 @@ test('only the declared venue families carry overrides, and only for the venue p
     // Cutover 10-29: release run 40859840322 measured 1,366,837 B; 1344 KiB leaves room for #2362.
     // Frame-fed 10-30: ingest plus the settings guard measured 1,377,242 B; ceil KiB + 2 KiB.
     // Setting holds 10-30: measured 1,386,637 B (master 1,385,259 B); ceil KiB + 2 KiB.
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1357 * 1024);
+    // CI master d60d25a7153 measured 1,395,669 B (frame-fed core); ceil 6 KiB + 2 KiB.
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1365 * 1024);
     assert.equal(wasmBudgetError(1_363_789, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_389_568, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_389_569, 'venue', venue), /exceeds 1389568/);
+    assert.equal(wasmBudgetError(1_397_760, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_397_761, 'venue', venue), /exceeds 1397760/);
   }
   // Cap sweep 10-30: measured 1,490,257 B; ceil KiB + 2 KiB.
   assert.equal(WASM_VENUE_OVERRIDES.bybit, 1458 * 1024);
