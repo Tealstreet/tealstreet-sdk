@@ -389,6 +389,30 @@ fill would make the replacement overfill the target.
 | `approveAgent`         | Approve agent wallet                                               |
 | `approveBuilderFee`    | Approve builder fee                                                |
 
+### Future API announcements
+
+As of 2026-10-30 these upstream changes have been announced but should not be
+implemented during the code freeze:
+
+- Hyperliquid announced that, on a future network upgrade, native TWAP orders
+  with a stop price will be paused instead of canceled when the stop price is
+  breached, and can resume if the stop price is no longer breached within the
+  TWAP duration. The TS reference adapter does not currently place
+  venue-native TWAP actions; Tealstreet TWAP is a worker/Rust algo that slices
+  ordinary orders. If native Hyperliquid TWAP support or TWAP history/status
+  handling is added later, do not model a stop-price breach as a terminal
+  cancellation without checking for the new paused/resumable state.
+- Hyperliquid also reminded integrators that batched actions are treated with
+  less weight than equivalent unbatched actions during congestion. The current
+  public docs still say `/exchange` IP-based request weight is
+  `1 + floor(batch_length / 40)`, while batched requests count as `n` requests
+  for address-based limits. `hyperliquid.rateLimiter.ts` already models the
+  documented batch-length weight for `order`, `cancel`, `cancelByCloid`, and
+  `batchModify`. After the freeze, prefer batching bursty order/cancel/modify
+  flows where semantics allow it, but preserve per-order response mapping,
+  cancel suppression, optimistic/reconciliation behavior, and the no-retry rule
+  for writes whose accepted/failed state may be unknown.
+
 ### Dead man's switch (`scheduleCancel`)
 
 `HyperliquidExchange.scheduleCancel(time)` exposes the upstream account-wide
