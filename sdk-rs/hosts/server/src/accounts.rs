@@ -186,12 +186,16 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
         options.insert("testnet".into(), true.into());
     }
     // As `isUsableBuilder`: an unusable builder falls back to the default.
+    // The registry parses `feeTenthsBps` as u32, so it must go out as an integer.
     if let Some(builder) = init
         .hyperliquid_builder
         .as_ref()
         .filter(|builder| usable_builder(builder))
     {
-        options.insert("hyperliquidBuilder".into(), json!(builder));
+        options.insert(
+            "hyperliquidBuilder".into(),
+            json!({"address": builder.address, "feeTenthsBps": builder.fee_tenths_bps as u32}),
+        );
     }
     if public_only {
         options.insert("publicDataOnly".into(), true.into());
@@ -204,8 +208,9 @@ fn usable_builder(builder: &crate::envelope::HyperliquidBuilder) -> bool {
     address.len() == 42
         && address.starts_with(b"0x")
         && address[2..].iter().all(u8::is_ascii_hexdigit)
-        && builder.fee_tenths_bps.is_finite()
+        && builder.fee_tenths_bps.fract() == 0.0
         && builder.fee_tenths_bps > 0.0
+        && builder.fee_tenths_bps <= f64::from(u32::MAX)
 }
 
 impl Registry {
@@ -614,14 +619,18 @@ mod tests {
             ..InitPayload::default()
         };
         let good = format!("0x{}", "a".repeat(40));
+        // The browser's builder fee arrives as an f64; the registry parses it as u32.
+        let options = engine_options(&init(&good, 10.0), false).to_string();
         assert!(
-            engine_options(&init(&good, 10.0), false)
-                .get("hyperliquidBuilder")
-                .is_some()
+            options.contains(r#""feeTenthsBps":10}"#),
+            "the fee must serialize as an integer: {options}"
         );
         for (address, fee) in [
             (good.as_str(), 0.0),
             (good.as_str(), f64::NAN),
+            (good.as_str(), f64::INFINITY),
+            (good.as_str(), 10.5),
+            (good.as_str(), 5e9),
             ("0x12", 10.0),
         ] {
             assert!(
