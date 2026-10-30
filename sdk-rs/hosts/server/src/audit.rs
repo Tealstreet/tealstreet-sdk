@@ -176,14 +176,35 @@ pub fn typed(command: &Command) -> Option<Map<String, Value>> {
     self::command(&json)
 }
 
+/// An algo payload's audited fields, including a TWAP's nested `options` and market symbol.
+fn algo_fields(value: &Value) -> Map<String, Value> {
+    let mut fields = pick(value, &ALGO_FIELDS);
+    for nested in [&value["options"], &value["options"]["activeMarket"]] {
+        for (key, field) in pick(nested, &ALGO_FIELDS) {
+            fields.entry(key).or_insert(field);
+        }
+    }
+    fields
+}
+
 /// The audited fields of an algo op (`chaser:start`, `twap:stop`, `exec`, ...).
+/// `twap:state` restores TWAPs that then place orders, so each entry is listed.
 pub fn algo_op(op: &str, data: &str) -> Map<String, Value> {
     let data: Value = serde_json::from_str(data).unwrap_or(Value::Null);
     let mut fields = match &data {
         Value::String(_) => [("id".to_owned(), scalar(&data).unwrap_or_default())]
             .into_iter()
             .collect(),
-        _ => pick(&data, &ALGO_FIELDS),
+        Value::Array(entries) => [(
+            "twaps".to_owned(),
+            entries
+                .iter()
+                .map(|entry| Value::Object(algo_fields(entry)))
+                .collect(),
+        )]
+        .into_iter()
+        .collect(),
+        _ => algo_fields(&data),
     };
     fields.insert("op".into(), op.into());
     fields
@@ -316,5 +337,18 @@ mod tests {
         assert_eq!(start["clientId"], "c-1");
         assert!(start.get("accountName").is_none());
         assert_eq!(algo_op("chaser:terminate", r#""chase-7""#)["id"], "chase-7");
+    }
+
+    #[test]
+    fn a_twap_state_restore_lists_each_restored_twap() {
+        let state = r#"[{"id":"twap-1","options":{"accountName":"bear5","activeMarket":{"symbol":"BTCUSDT"},"size":0.3,"duration":30,"ordersCount":10,"side":"buy"},"state":{}}]"#;
+        let fields = algo_op("twap:state", state);
+        assert_eq!(fields["op"], "twap:state");
+        let twap = &fields["twaps"][0];
+        assert_eq!(twap["id"], "twap-1");
+        assert_eq!(twap["symbol"], "BTCUSDT");
+        assert_eq!(twap["side"], "buy");
+        assert_eq!(twap["size"], 0.3);
+        assert!(twap.get("accountName").is_none());
     }
 }
