@@ -276,3 +276,117 @@ fn an_amend_without_a_new_id_resolves_it_with_its_own_lookup_as_local() {
     );
     assert!(drain(&mut h).is_empty(), "nothing after the amend settles");
 }
+
+const OK: &str = r#"{"code":"00000","msg":"success","data":{}}"#;
+
+/// The page switches the account to hedge mode against a one-way source.
+fn page_switched_to_hedge(source: &mut Harness) -> Harness {
+    assert!(
+        !source.engine.store().hedged(),
+        "the source fixture is one-way"
+    );
+    let frame = source.engine.snapshot_frame(source.now).to_vec();
+    let mut h = page();
+    h.engine.apply_frame(h.now, &frame, true).unwrap();
+    h.collect();
+    h.command(Command::SetPositionMode {
+        command: 11,
+        hedged: true,
+        symbol: None,
+    });
+    let write = h.take("/set-position-mode");
+    assert!(h.requests.is_empty(), "{:?}", h.requests);
+    h.reply(write.id, 200, OK);
+    assert!(h.engine.store().hedged());
+    h
+}
+
+fn apply_source(h: &mut Harness, source: &mut Harness) {
+    let frame = source.engine.snapshot_frame(source.now).to_vec();
+    h.engine.apply_frame(h.now, &frame, true).unwrap();
+    h.collect();
+}
+
+#[test]
+fn a_stale_source_frame_keeps_the_new_mode_and_the_next_order_uses_it() {
+    let mut source = Harness::classic();
+    let mut h = page_switched_to_hedge(&mut source);
+    apply_source(&mut h, &mut source);
+    assert!(
+        h.engine.store().hedged(),
+        "held against the stale one-way frame"
+    );
+    place(&mut h);
+    let sent = std::mem::take(&mut h.requests);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let body = sent[0].body.as_deref().unwrap();
+    assert!(
+        body.contains(r#""tradeSide":"open""#),
+        "a hedge-mode placement: {body}"
+    );
+}
+
+#[test]
+fn a_source_frame_with_the_new_mode_releases_the_hold() {
+    let mut source = Harness::classic();
+    let mut h = page_switched_to_hedge(&mut source);
+    source.engine.store_mut().set_hedged(true);
+    apply_source(&mut h, &mut source);
+    assert!(h.engine.store().hedged());
+    // Released: the source's later one-way mode is taken again.
+    source.engine.store_mut().set_hedged(false);
+    apply_source(&mut h, &mut source);
+    assert!(!h.engine.store().hedged());
+}
+
+#[test]
+fn refresh_settings_re_reads_the_config_and_writes_nothing() {
+    use safe_cex_engine::VenueAction;
+    let mut h = Harness::classic();
+    h.requests.clear();
+    h.command(Command::Venue {
+        command: 12,
+        action: VenueAction::RefreshSettings {
+            symbol: Some("BTCUSDT".into()),
+        },
+    });
+    assert_eq!(h.requests.len(), 1, "{:?}", h.requests);
+    assert_eq!(h.requests[0].method, Method::Get);
+    assert!(
+        h.requests[0]
+            .url
+            .contains("/mix/account/account?symbol=BTCUSDT"),
+        "{}",
+        h.requests[0].url
+    );
+    let read = h.requests.remove(0);
+    h.reply(
+        read.id,
+        200,
+        r#"{"code":"00000","data":{"symbol":"btcusdt","marginCoin":"USDT","marginMode":"isolated","posMode":"hedge_mode","isolatedLongLever":"7","isolatedShortLever":"5","crossedMarginLeverage":"3"}}"#,
+    );
+    assert!(h.engine.store().hedged());
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(7.0)
+    );
+    assert!(
+        h.requests.iter().all(|r| r.method == Method::Get),
+        "{:?}",
+        h.requests
+    );
+
+    let mut uta = uta_source();
+    uta.requests.clear();
+    uta.command(Command::Venue {
+        command: 13,
+        action: VenueAction::RefreshSettings { symbol: None },
+    });
+    assert_eq!(uta.requests.len(), 1, "{:?}", uta.requests);
+    assert_eq!(uta.requests[0].method, Method::Get);
+    assert!(
+        uta.requests[0].url.ends_with("/account/settings"),
+        "{}",
+        uta.requests[0].url
+    );
+}

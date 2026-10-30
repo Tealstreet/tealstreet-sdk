@@ -623,6 +623,15 @@ impl Account {
         );
     }
 
+    /// Data source: re-read the position mode, whose response re-reads the
+    /// positions that carry margin type and leverage. Never a write.
+    pub fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
+        if cx.frame_fed() || !self.started {
+            return;
+        }
+        self.fetch_mode(cx, credentials);
+    }
+
     pub(crate) fn mode_known(&self) -> bool {
         self.mode_known
     }

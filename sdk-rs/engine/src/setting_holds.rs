@@ -104,16 +104,19 @@ impl SettingHolds {
     }
 
     /// After a frame: a held store value the source now matches is released;
-    /// one it contradicts is put back.
-    pub fn restore(&mut self, store: &mut Store, kept: Kept) {
-        if let Some(mine) = kept.hedged {
+    /// one it contradicts is put back. Only a frame that carried the value's
+    /// section says anything about it: the source writes STATUS and SETTINGS
+    /// only when they change, so a ticker or orders delta neither agrees nor
+    /// disagrees, and leaves the hold as it was.
+    pub fn restore(&mut self, store: &mut Store, kept: Kept, status: bool, settings: bool) {
+        if let Some(mine) = kept.hedged.filter(|_| status) {
             if store.hedged() == mine {
                 self.release(&SettingKey::Hedged);
             } else {
                 store.set_hedged(mine);
             }
         }
-        for (key, mine) in kept.settings {
+        for (key, mine) in kept.settings.into_iter().filter(|_| settings) {
             let Some(mine) = mine else {
                 continue;
             };
@@ -147,6 +150,35 @@ mod tests {
     use crate::model::MarginType;
 
     #[test]
+    fn a_frame_without_status_neither_releases_nor_restores_the_hedge_hold() {
+        let mut holds = SettingHolds::default();
+        let mut store = Store::default();
+        store.set_hedged(true);
+        holds.hold(SettingKey::Hedged, 0.);
+        // A ticker or orders delta: the store still agrees, but that is no evidence.
+        let kept = holds.keep(&store);
+        holds.restore(&mut store, kept, false, false);
+        assert!(holds.held(&SettingKey::Hedged));
+        // The source's next, stale STATUS: the confirmed value is kept.
+        let kept = holds.keep(&store);
+        store.set_hedged(false);
+        holds.restore(&mut store, kept, true, false);
+        assert!(store.hedged());
+        assert!(holds.held(&SettingKey::Hedged));
+    }
+
+    #[test]
+    fn a_frame_without_settings_leaves_a_margin_hold_in_place() {
+        let mut holds = SettingHolds::default();
+        let mut store = Store::default();
+        store.update_setting("BTCUSDT", |s| s.margin_type = Some(MarginType::Isolated));
+        holds.hold(SettingKey::MarginType("BTCUSDT".into()), 0.);
+        let kept = holds.keep(&store);
+        holds.restore(&mut store, kept, true, false);
+        assert!(holds.held(&SettingKey::MarginType("BTCUSDT".into())));
+    }
+
+    #[test]
     fn a_held_hedge_flag_survives_a_contradicting_frame_and_releases_when_it_agrees() {
         let mut holds = SettingHolds::default();
         let mut store = Store::default();
@@ -154,11 +186,11 @@ mod tests {
         holds.hold(SettingKey::Hedged, 0.);
         let kept = holds.keep(&store);
         store.set_hedged(false);
-        holds.restore(&mut store, kept);
+        holds.restore(&mut store, kept, true, false);
         assert!(store.hedged());
         assert!(holds.held(&SettingKey::Hedged));
         let kept = holds.keep(&store);
-        holds.restore(&mut store, kept);
+        holds.restore(&mut store, kept, true, false);
         assert!(!holds.held(&SettingKey::Hedged));
     }
 
@@ -170,7 +202,7 @@ mod tests {
         holds.hold(SettingKey::MarginType("BTCUSDT".into()), 0.);
         let kept = holds.keep(&store);
         store.update_setting("BTCUSDT", |s| s.margin_type = Some(MarginType::Cross));
-        holds.restore(&mut store, kept);
+        holds.restore(&mut store, kept, false, true);
         assert_eq!(
             store.setting("BTCUSDT").unwrap().margin_type,
             Some(MarginType::Isolated)

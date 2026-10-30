@@ -6,6 +6,7 @@ use safe_cex_engine::request_context::plan::{CallAuth, SerialCall, SerialPolicy,
 use safe_cex_engine::request_context::{
     Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -1238,7 +1239,11 @@ impl Lighter {
                         self.record_cancel(&order.id, cx.now);
                         cx.store.remove_orders(&[&order.id]);
                     }
-                    Step::Setting { .. } => {
+                    Step::Setting {
+                        leverage: asked_leverage,
+                        isolated: asked_margin,
+                        ..
+                    } => {
                         if let Effect::Setting {
                             symbol,
                             leverage,
@@ -1262,6 +1267,12 @@ impl Lighter {
                                     p.margin_type = Some(margin);
                                 }
                             });
+                            if asked_leverage.is_some() {
+                                cx.hold_setting(SettingKey::Leverage(symbol.clone()));
+                            }
+                            if asked_margin.is_some() {
+                                cx.hold_setting(SettingKey::MarginType(symbol.clone()));
+                            }
                             self.refresh_account(cx);
                         }
                     }
