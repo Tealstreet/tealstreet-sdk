@@ -13,7 +13,7 @@ path = "src/main.rs"
 safe-cex-engine.workspace = true
 safe-cex-native = { workspace = true, features = ["address-nonce"] }
 safe-cex-remote-signer = { path = "../remote-signer" }
-safe-cex-algos = { path = "../../algos/runtime" }
+safe-cex-algos = { path = "../../algos/runtime", features = ["product-semantics"] }
 safe-cex-chaser = { path = "../../algos/chaser" }
 safe-cex-algo-twap = { path = "../../algos/twap" }
 safe-cex-exec = { path = "../../algos/exec" }

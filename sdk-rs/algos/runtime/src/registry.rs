@@ -7,6 +7,16 @@ pub trait AlgoFactory {
     fn handle(&self, op: &str, data: &str, cx: &AlgoCx) -> Result<(), String>;
 }
 
+/// A factory the host also keeps (TWAP and exec are shared with nukes and rows).
+impl<T: AlgoFactory + ?Sized> AlgoFactory for std::rc::Rc<T> {
+    fn ops(&self) -> &'static [&'static str] {
+        (**self).ops()
+    }
+    fn handle(&self, op: &str, data: &str, cx: &AlgoCx) -> Result<(), String> {
+        (**self).handle(op, data, cx)
+    }
+}
+
 /// The server's op lookup over every algo family.
 pub struct Registry {
     factories: Vec<Box<dyn AlgoFactory>>,

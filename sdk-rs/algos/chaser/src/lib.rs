@@ -1,7 +1,6 @@
 //! Server-side chaser orders, ported from the TS webworker chaser
 //! (`packages/safe-cex/src/webworker/chaserOrder`): post-only orders that
 //! follow the touch, re-placing on adverse moves until filled or stopped.
-#![cfg(not(target_arch = "wasm32"))]
 
 mod book;
 mod chase;

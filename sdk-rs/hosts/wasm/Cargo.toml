@@ -8,6 +8,8 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+# The Rust algos (chaser, TWAP, exec) on this engine, host-driven; off by default.
+algos = ["dep:safe-cex-algos", "dep:safe-cex-chaser", "dep:safe-cex-algo-twap", "dep:safe-cex-exec"]
 hosted-operation-proof = ["kraken", "safe-cex-engine/test-support"]
 address-nonce = ["safe-cex-engine/address-nonce", "safe-cex-venues/address-nonce", "sign-meta"]
 http-mutation-barriers = ["safe-cex-engine/http-mutation-barriers"]
@@ -73,10 +75,10 @@ default = [
     "phemex",
 ]
 cryptocom = ["safe-cex-venues/cryptocom", "text-ingress", "dispatch-signing"]
-binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing", "hosted-signing"]
+binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing", "hosted-signing", "safe-cex-algos?/product-semantics"]
 kucoin = ["safe-cex-venues/kucoin", "text-ingress"]
 kucoinspot = ["safe-cex-venues/kucoinspot", "text-ingress", "safe-cex-engine/command-kucoinspot"]
-bybit = ["safe-cex-venues/bybit", "text-ingress", "dispatch-signing", "hosted-signing"]
+bybit = ["safe-cex-venues/bybit", "text-ingress", "dispatch-signing", "hosted-signing", "safe-cex-algos?/product-semantics"]
 hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress", "dispatch-signing", "address-nonce", "hosted-wallet"]
 okx = ["safe-cex-venues/okx", "text-ingress", "dispatch-signing", "hosted-signing"]
 orderly = ["safe-cex-venues/orderly", "text-ingress"]
@@ -89,6 +91,10 @@ serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true
 js-sys.workspace = true
+safe-cex-algos = { path = "../../algos/runtime", default-features = false, features = ["host-executor"], optional = true }
+safe-cex-chaser = { path = "../../algos/chaser", optional = true }
+safe-cex-algo-twap = { path = "../../algos/twap", optional = true }
+safe-cex-exec = { path = "../../algos/exec", optional = true }
 
 [lints]
 workspace = true

@@ -3,12 +3,12 @@
 //! Every algo of an account runs on that account's `LocalSet`, so state is
 //! `!Send` and per-account work is serial by construction. The server adapts its
 //! account handle to [`AccountPort`]; algos see only this crate's surface.
-#![cfg(not(target_arch = "wasm32"))]
 
 pub mod executor;
 #[cfg(feature = "host-executor")]
 pub mod host_executor;
 mod port;
+pub mod projection;
 mod registry;
 mod scope;
 mod store;
@@ -17,3 +17,5 @@ pub use port::{AccountPort, Change, CommandFuture, amend_command, cancel_command
 pub use registry::{AlgoFactory, Registry};
 pub use scope::{AlgoCx, Scope};
 pub use store::{AlgoStore, PrivateSocketHealth};
+/// The channels a port subscribes algos and completes their commands with.
+pub use tokio::sync::{mpsc, oneshot};

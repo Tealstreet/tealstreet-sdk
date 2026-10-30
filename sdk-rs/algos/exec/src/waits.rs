@@ -315,7 +315,6 @@ impl Condition {
         }
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn run(
     wait: Wait,
     cx: &safe_cex_algos::AlgoCx,

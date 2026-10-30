@@ -4,6 +4,8 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
+#[cfg(feature = "algos")]
+mod algos;
 #[cfg(feature = "hosted-operation-proof")]
 mod hosted_operation_proof;
 #[cfg(feature = "kraken")]
@@ -182,6 +184,11 @@ trait AnyEngine {
     fn account_snapshot(&mut self, now: f64) -> &[u8];
     fn health(&self) -> Health {
         Health::default()
+    }
+    /// The engine store, projected for algos between engine calls.
+    #[cfg(feature = "algos")]
+    fn store(&self) -> Option<&safe_cex_engine::Store> {
+        None
     }
 }
 
@@ -363,6 +370,11 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
     fn health(&self) -> Health {
         Engine::health(self).clone()
+    }
+
+    #[cfg(feature = "algos")]
+    fn store(&self) -> Option<&safe_cex_engine::Store> {
+        Some(Engine::store(self))
     }
 }
 
@@ -770,6 +782,8 @@ pub struct WasmEngine {
         safe_cex_engine::signing::Identities,
         safe_cex_venues::hosted_wallet::Account,
     )>,
+    #[cfg(feature = "algos")]
+    algos: algos::AlgoHost,
 }
 
 #[cfg(feature = "hosted-signing")]
@@ -1062,6 +1076,8 @@ impl WasmEngine {
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
             hosted_wallet,
+            #[cfg(feature = "algos")]
+            algos: algos::AlgoHost::new(venue),
         })
     }
 
@@ -1268,6 +1284,9 @@ impl WasmEngine {
     }
 
     fn flush(&mut self) -> String {
+        #[cfg(feature = "algos")]
+        return encode(&self.algos.route(self.inner.drain()));
+        #[cfg(not(feature = "algos"))]
         encode(&self.inner.drain())
     }
 
@@ -1547,9 +1566,50 @@ impl WasmEngine {
     /// book cadence); store sections wait for the next full frame.
     #[wasm_bindgen(js_name = takeFrame)]
     pub fn take_frame(&mut self, now: f64, market_only: bool) -> Option<js_sys::Uint8Array> {
+        #[cfg(feature = "algos")]
+        if self.algos.is_running() {
+            return self.take_frame_with(now, market_only, |frame| js_sys::Uint8Array::from(frame));
+        }
         self.inner
             .frame(now, market_only)
             .map(js_sys::Uint8Array::from)
+    }
+}
+
+#[cfg(feature = "algos")]
+impl WasmEngine {
+    /// A taken frame also reaches the algos: its fills and the store it left.
+    fn take_frame_with<T>(
+        &mut self,
+        now: f64,
+        market_only: bool,
+        copy: impl FnOnce(&[u8]) -> T,
+    ) -> Option<T> {
+        let frame = self.inner.frame(now, market_only)?;
+        let fills = safe_cex_engine::wire::fills(frame).unwrap_or_default();
+        let out = copy(frame);
+        self.algos.frame(self.inner.store(), fills);
+        Some(out)
+    }
+}
+
+#[cfg(all(test, feature = "algos"))]
+impl WasmEngine {
+    /// An engine over `inner`, for algo tests that drive a test venue.
+    fn for_algo_tests(venue: &str, inner: Box<dyn AnyEngine>) -> Self {
+        Self {
+            dispatch_signing: false,
+            external_signer: false,
+            construction: String::new(),
+            inner,
+            #[cfg(feature = "hosted-signing")]
+            hosted_identity: None,
+            #[cfg(feature = "hosted-signing")]
+            hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
+            algos: algos::AlgoHost::new(venue),
+        }
     }
 }
 
@@ -2585,6 +2645,8 @@ mod tests {
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
             hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::new(Commands {
@@ -2858,6 +2920,8 @@ mod tests {
                 hosted_captures: Default::default(),
                 #[cfg(feature = "hosted-wallet")]
                 hosted_wallet: None,
+                #[cfg(feature = "algos")]
+                algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
                 inner: Box::new(Counted),
@@ -2888,6 +2952,8 @@ mod tests {
                 hosted_captures: Default::default(),
                 #[cfg(feature = "hosted-wallet")]
                 hosted_wallet: None,
+                #[cfg(feature = "algos")]
+                algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
                 inner: Box::<Messages>::default(),
@@ -2915,6 +2981,8 @@ mod tests {
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
             hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
@@ -2947,6 +3015,8 @@ mod tests {
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
             hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
@@ -2959,6 +3029,8 @@ mod tests {
             hosted_captures: Default::default(),
             #[cfg(feature = "hosted-wallet")]
             hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),

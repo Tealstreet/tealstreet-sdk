@@ -1,11 +1,9 @@
 //! Server-side algos (chaser, TWAP, exec) for one private account: an
 //! `AccountPort` over `AccountHandle`, run on an engine thread's `LocalSet`.
+use safe_cex_algos::projection::{self, Snapshot};
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoStore, Change, CommandFuture, Registry, Scope};
 use safe_cex_engine::engine::{Command, CommandId, Fill, VenueAction};
 use safe_cex_engine::error::{Outcome, VenueError};
-use safe_cex_engine::model::{
-    Balance, CoinBalance, InstrumentClassification, Loaded, Market, Order, Position, Ticker,
-};
 use safe_cex_native::{AccountHandle, Outgoing};
 use serde_json::Value;
 use std::cell::{Cell, Ref, RefCell};
@@ -60,17 +58,6 @@ pub const OPS: [&str; 10] = [
     "twap:state",
     "exec",
 ];
-
-struct Snapshot {
-    orders: Vec<Order>,
-    positions: Vec<Position>,
-    tickers: Vec<Ticker>,
-    markets: Vec<Market>,
-    balance: Balance,
-    loaded: Loaded,
-    classifications: Option<Vec<InstrumentClassification>>,
-    coins: Option<Vec<CoinBalance>>,
-}
 
 struct Port {
     handle: AccountHandle,
@@ -153,75 +140,9 @@ fn algo_msg(account_name: &str, op: &str, data: String) -> String {
     crate::envelope::msg(account_name, op, data)
 }
 
-fn project(store: &safe_cex_engine::Store) -> Snapshot {
-    Snapshot {
-        orders: store.orders().to_vec(),
-        positions: store.positions().to_vec(),
-        tickers: store.tickers().to_vec(),
-        markets: store.markets().to_vec(),
-        balance: store.balance().clone(),
-        loaded: store.loaded(),
-        classifications: store.instrument_classifications().map(<[_]>::to_vec),
-        coins: store.coin_balances().map(<[_]>::to_vec),
-    }
-}
-
-/// Applies one engine read to the algo store; returns what changed.
-/// `rejoined`: fills sent while the feed was dropped are gone, so algos
-/// re-read orders and positions and reconcile before acting.
-fn apply(store: &mut AlgoStore, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
-    let orders = store.orders != snapshot.orders;
-    let positions = store.positions != snapshot.positions;
-    let tickers: HashMap<String, Ticker> = snapshot
-        .tickers
-        .into_iter()
-        .map(|ticker| (ticker.symbol.clone(), ticker))
-        .collect();
-    let tickers_changed = store.tickers != tickers;
-    if orders {
-        store.update_ids.orders += 1;
-    }
-    if positions {
-        store.update_ids.positions += 1;
-    }
-    store.orders = snapshot.orders;
-    store.positions = snapshot.positions;
-    store.tickers = tickers;
-    store.instrument_classifications = snapshot.classifications.map(|labels| {
-        labels
-            .into_iter()
-            .filter_map(|label| {
-                let market = snapshot.markets.get(label.market as usize)?;
-                Some((market.symbol.clone(), label))
-            })
-            .collect()
-    });
-    store.markets = snapshot
-        .markets
-        .into_iter()
-        .map(|market| (market.symbol.clone(), market))
-        .collect();
-    store.coins = snapshot.coins;
-    store.loaded = Some(snapshot.loaded);
-    if snapshot.loaded.balance {
-        store.balance = Some(snapshot.balance);
-    }
-    // The engine exposes no private-socket health: report it as unknown
-    // (uninitialized), never as healthy.
-    store.private_socket = Default::default();
-    Change {
-        orders: orders || rejoined,
-        positions: positions || rejoined,
-        tickers: tickers_changed,
-        fills,
-        // Set by the port on a feed rejoin (fe7lgm).
-        resync: rejoined,
-    }
-}
-
 impl Port {
     fn apply(&self, snapshot: Snapshot, fills: Vec<Fill>, rejoined: bool) -> Change {
-        let change = apply(&mut self.store.borrow_mut(), snapshot, fills, rejoined);
+        let change = projection::apply(&mut self.store.borrow_mut(), snapshot, fills, rejoined);
         self.placed.sync_markets(self.store.borrow().markets.keys());
         change
     }
@@ -508,8 +429,8 @@ pub async fn run(
     );
     let registry = Registry::new(vec![
         Box::new(chasers),
-        Box::new(SharedTwap(twap.clone())),
-        Box::new(SharedExec(exec.clone())),
+        Box::new(twap.clone()),
+        Box::new(exec.clone()),
     ]);
     let mut published = String::new();
     // `store` rows the frames do not carry (`activeChasers`, `activeTWAPs`).
@@ -555,7 +476,7 @@ pub async fn run(
                 }
                 // One store read per batch, carrying every coalesced frame's fills.
                 if (batch.frames > 0 || batch.rejoined)
-                    && let Some(snapshot) = handle.read(project).await
+                    && let Some(snapshot) = handle.read(projection::project).await
                 {
                     let change = port.apply(snapshot, batch.fills, batch.rejoined);
                     port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
@@ -682,26 +603,6 @@ impl Drop for NukeReply {
     }
 }
 
-struct SharedExec(Rc<safe_cex_exec::native::ExecFactory>);
-impl safe_cex_algos::AlgoFactory for SharedExec {
-    fn ops(&self) -> &'static [&'static str] {
-        self.0.ops()
-    }
-    fn handle(&self, op: &str, data: &str, cx: &AlgoCx) -> Result<(), String> {
-        self.0.handle(op, data, cx)
-    }
-}
-
-struct SharedTwap(Rc<safe_cex_algo_twap::factory::TwapFactory>);
-impl safe_cex_algos::AlgoFactory for SharedTwap {
-    fn ops(&self) -> &'static [&'static str] {
-        self.0.ops()
-    }
-    fn handle(&self, op: &str, data: &str, cx: &AlgoCx) -> Result<(), String> {
-        self.0.handle(op, data, cx)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -784,87 +685,6 @@ mod tests {
             [json!("unhandled op")]
         );
     }
-    use safe_cex_engine::model::{Limits, MinMax, Precision};
-
-    fn market(symbol: &str) -> Market {
-        Market {
-            id: symbol.into(),
-            symbol: symbol.into(),
-            pretty_symbol: None,
-            base: "BTC".into(),
-            quote: "USDT".into(),
-            active: true,
-            precision: Precision {
-                amount: 0.001,
-                price: 0.1,
-            },
-            limits: Limits {
-                amount: MinMax {
-                    min: 0.001,
-                    max: 1000.,
-                },
-                leverage: MinMax { min: 1., max: 100. },
-                price: None,
-            },
-            contract_size: None,
-            is_expiring: None,
-            is_inverse: None,
-            is_spot: None,
-            is_perpetual: Some(true),
-            is_read_only: None,
-            taker_fee: None,
-            maker_fee: None,
-        }
-    }
-
-    fn snapshot(classified: bool, balance_loaded: bool) -> Snapshot {
-        Snapshot {
-            orders: Vec::new(),
-            positions: Vec::new(),
-            tickers: Vec::new(),
-            markets: vec![market("BTCUSDT"), market("ETHUSDT")],
-            balance: Balance::default(),
-            loaded: Loaded {
-                balance: balance_loaded,
-                orders: true,
-                markets: true,
-                tickers: true,
-                positions: true,
-            },
-            coins: None,
-            classifications: classified.then(|| {
-                vec![InstrumentClassification {
-                    market: 1,
-                    symbol_type: Some("stock".into()),
-                    market_region: None,
-                    underlying_ticker: None,
-                }]
-            }),
-        }
-    }
-
-    #[test]
-    fn classifications_map_market_index_to_symbol_and_stay_none_until_sent() {
-        let mut store = AlgoStore::default();
-        apply(&mut store, snapshot(false, false), Vec::new(), false);
-        assert!(store.instrument_classifications.is_none());
-        assert!(store.coins.is_none(), "absent coins stay absent");
-        assert!(store.loaded.is_some_and(|loaded| loaded.orders));
-        assert!(
-            store.balance.is_none(),
-            "no balance before its section loads"
-        );
-        apply(&mut store, snapshot(true, true), Vec::new(), false);
-        let labels = store.instrument_classifications.as_ref().unwrap();
-        assert_eq!(labels.len(), 1);
-        assert_eq!(labels["ETHUSDT"].symbol_type.as_deref(), Some("stock"));
-        assert!(store.balance.is_some());
-        assert!(
-            !store.private_socket.initialized && !store.private_socket.healthy,
-            "unknown, never claimed healthy"
-        );
-        assert_eq!(store.markets.len(), 2);
-    }
 
     #[test]
     fn balance_info_is_the_payload_with_the_lighter_tier_merged_in() {
@@ -881,27 +701,5 @@ mod tests {
             "UNIFIED"
         );
         assert_eq!(balance_info(None, None), None);
-    }
-
-    #[test]
-    fn unchanged_reads_report_no_change() {
-        let mut store = AlgoStore::default();
-        apply(&mut store, snapshot(true, true), Vec::new(), false);
-        let fill = Fill {
-            id: None,
-            order_id: "o1".into(),
-            symbol: "BTCUSDT".into(),
-            side: safe_cex_engine::model::OrderSide::Buy,
-            price: 1.,
-            amount: 2.,
-        };
-        let change = apply(&mut store, snapshot(true, true), vec![fill.clone()], false);
-        assert_eq!(
-            change.fills,
-            vec![fill],
-            "a frame's fills reach subscribers"
-        );
-        assert!(!change.orders && !change.positions && !change.tickers);
-        assert_eq!(store.update_ids.orders, 0);
     }
 }
