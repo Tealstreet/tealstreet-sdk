@@ -130,6 +130,11 @@ impl Session {
         }
     }
 
+    /// Enough of the resume id to tell sessions apart in logs, never enough to resume one.
+    fn resume_id_prefix(&self) -> &str {
+        &self.resume_id[..self.resume_id.len().min(6)]
+    }
+
     /// Fires when a resume of this session's id takes it over: close and park now.
     pub fn taken_over(&self) -> Arc<tokio::sync::Notify> {
         self.taken_over.clone()
@@ -251,6 +256,11 @@ impl Session {
                 }
             }
             Inbound::Dispose { account_name } => {
+                Log::info(&format!(
+                    "dispose request {account_name} socket {} session {}",
+                    self.socket,
+                    self.resume_id_prefix()
+                ));
                 if let Some(joined) = self.joined.remove(&account_name) {
                     self.metrics.note_dispose();
                     self.leave(joined);
@@ -301,8 +311,11 @@ impl Session {
             return Err(PolicyViolation(reason));
         }
         Log::info(&format!(
-            "init {} ({})",
-            init.account_name, init.exchange_name
+            "init {} ({}) socket {} session {}",
+            init.account_name,
+            init.exchange_name,
+            self.socket,
+            self.resume_id_prefix()
         ));
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
@@ -312,6 +325,14 @@ impl Session {
             if let Some(link) = &self.joined[&init.account_name].account.link {
                 link.attach(self.socket, self.outbox());
             }
+            return Ok(());
+        }
+        // Another live socket holds it with other settings: keep both as they are.
+        if let Some(refusal) =
+            self.registry
+                .rebuild_refusal(self.user(), &init, public_only, self.socket)
+        {
+            self.send(envelope::error(Some(&init.account_name), &refusal));
             return Ok(());
         }
         if let Some(joined) = self.joined.remove(&init.account_name) {
