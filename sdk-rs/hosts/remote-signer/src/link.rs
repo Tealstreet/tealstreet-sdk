@@ -48,6 +48,8 @@ struct State {
     available: bool,
     suspended: bool,
     unavailable_since: Option<Instant>,
+    /// The last frame of any kind from the signing socket.
+    heard_at: Instant,
     /// id → (token, socket it was sent on, its sign-req frame, waiter).
     pending: HashMap<String, (u64, SocketId, String, Waiter)>,
     next_token: u64,
@@ -71,6 +73,7 @@ impl SignerLink {
                 available: true,
                 suspended: false,
                 unavailable_since: None,
+                heard_at: Instant::now(),
                 pending: HashMap::new(),
                 next_token: 0,
                 last_sign_req_bytes: 0,
@@ -90,6 +93,14 @@ impl SignerLink {
     pub fn is_available(&self) -> bool {
         let state = self.state();
         state.available && !state.suspended
+    }
+
+    /// Any frame from `socket`: the browser behind the signing socket is there.
+    pub fn heard(&self, socket: SocketId) {
+        let mut state = self.state();
+        if state.socket == socket {
+            state.heard_at = Instant::now();
+        }
     }
 
     /// How long the client has been gone, if it is.
@@ -142,15 +153,23 @@ impl SignerLink {
             id,
             token,
         };
+        let sent_at = Instant::now();
         if !out(frame) {
             return Err(Failure::SendFailed);
         }
         let result = match tokio::time::timeout_at(deadline, receiver).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(Failure::Aborted),
-            // No browser to answer is a suspension, not a slow signer.
-            Err(_) if self.state().suspended => Err(Failure::Suspended),
-            Err(_) => Err(Failure::TimedOut),
+            // No browser to answer (parked, or a dropped socket not yet seen,
+            // silent since the send) is a suspension, not a slow signer.
+            Err(_) => {
+                let state = self.state();
+                if state.suspended || state.heard_at < sent_at {
+                    Err(Failure::Suspended)
+                } else {
+                    Err(Failure::TimedOut)
+                }
+            }
         };
         drop(guard);
         result
@@ -222,6 +241,7 @@ impl SignerLink {
         state.out = out.clone();
         state.suspended = false;
         state.unavailable_since = None;
+        state.heard_at = Instant::now();
         drop(state);
         for (id, frame) in moved {
             if !out(frame) {

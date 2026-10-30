@@ -83,7 +83,16 @@ pub struct Session {
     /// A held client's account has loaded: `(account name, client id)`.
     loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     loaded_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
+    /// Told when a resume of this session's id takes it over.
+    taken_over: Arc<tokio::sync::Notify>,
+    /// The settings refusal last sent per account, so the client's backoff
+    /// retries show it once; cleared when that account's init succeeds.
+    refused: HashMap<String, String>,
 }
+
+/// How long a resume waits for the session it takes over to park, as long as
+/// that socket loop can be stuck in one send.
+const TAKEOVER_WAIT: std::time::Duration = std::time::Duration::from_secs(12);
 
 /// A private account's first snapshot waits for its orders and positions, so a
 /// fresh build never shows the client an empty account; past this it goes anyway.
@@ -120,6 +129,27 @@ impl Session {
             joined: HashMap::new(),
             loaded,
             loaded_rx: Some(loaded_rx),
+            taken_over: Arc::new(tokio::sync::Notify::new()),
+            refused: HashMap::new(),
+        }
+    }
+
+    /// Enough of the resume id to tell sessions apart in logs, never enough to resume one.
+    fn resume_id_prefix(&self) -> &str {
+        &self.resume_id[..self.resume_id.len().min(6)]
+    }
+
+    /// Fires when a resume of this session's id takes it over: close and park now.
+    pub fn taken_over(&self) -> Arc<tokio::sync::Notify> {
+        self.taken_over.clone()
+    }
+
+    /// Any frame from the browser: its sockets' signs are still being heard.
+    pub fn heard(&self) {
+        for joined in self.joined.values() {
+            if let Some(link) = &joined.account.link {
+                link.heard(self.socket);
+            }
         }
     }
 
@@ -165,9 +195,18 @@ impl Session {
             self.identity.user.clone(),
             self.identity.token.clone(),
         ) {
-            let accounts = self
-                .registry
-                .resume(&from, &user, self.socket, token, &self.outbox());
+            let mut accounts =
+                self.registry
+                    .resume(&from, &user, self.socket, token.clone(), &self.outbox());
+            // Not parked yet: the old socket dropped without a close frame. Close it now.
+            if accounts.is_empty()
+                && let Some(parked) = self.registry.take_over(&from, &user)
+            {
+                let _ = tokio::time::timeout(TAKEOVER_WAIT, parked).await;
+                accounts = self
+                    .registry
+                    .resume(&from, &user, self.socket, token, &self.outbox());
+            }
             resumed = !accounts.is_empty();
             // `init` is logged either way; this tells a resume from a rebuild.
             Log::info(&format!(
@@ -179,6 +218,9 @@ impl Session {
             for account in accounts {
                 self.join(account).await;
             }
+        }
+        if let Some(user) = &self.identity.user {
+            self.taken_over = self.registry.open_session(&self.resume_id, user);
         }
         self.send(envelope::session(&self.resume_id, resumed));
     }
@@ -218,6 +260,11 @@ impl Session {
                 }
             }
             Inbound::Dispose { account_name } => {
+                Log::info(&format!(
+                    "dispose request {account_name} socket {} session {}",
+                    self.socket,
+                    self.resume_id_prefix()
+                ));
                 if let Some(joined) = self.joined.remove(&account_name) {
                     self.metrics.note_dispose();
                     self.leave(joined);
@@ -268,8 +315,11 @@ impl Session {
             return Err(PolicyViolation(reason));
         }
         Log::info(&format!(
-            "init {} ({})",
-            init.account_name, init.exchange_name
+            "init {} ({}) socket {} session {}",
+            init.account_name,
+            init.exchange_name,
+            self.socket,
+            self.resume_id_prefix()
         ));
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
@@ -281,6 +331,17 @@ impl Session {
             }
             return Ok(());
         }
+        // Another live socket holds it with other settings: keep both as they are.
+        if let Some(refusal) =
+            self.registry
+                .rebuild_refusal(self.user(), &init, public_only, self.socket)
+        {
+            if first_refusal(&mut self.refused, &init.account_name, &refusal) {
+                self.send(envelope::error(Some(&init.account_name), &refusal));
+            }
+            return Ok(());
+        }
+        self.refused.remove(&init.account_name);
         if let Some(joined) = self.joined.remove(&init.account_name) {
             self.leave(joined);
         }
@@ -856,8 +917,18 @@ impl Session {
         }
         if let Some(user) = &self.identity.user {
             self.registry.park(self.resume_id.clone(), user, parked);
+            self.registry.session_closed(&self.resume_id);
         }
     }
+}
+
+/// True the first time `refusal` is the one for `account`; a changed refusal counts again.
+fn first_refusal(refused: &mut HashMap<String, String>, account: &str, refusal: &str) -> bool {
+    if refused.get(account).is_some_and(|sent| sent == refusal) {
+        return false;
+    }
+    refused.insert(account.to_owned(), refusal.to_owned());
+    true
 }
 
 fn failure_detail(kind: &str, message: &str, unknown: bool) -> Value {
@@ -1256,6 +1327,28 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_settings_refusal_is_sent_once_until_its_fields_change_or_it_resolves() {
+        let mut refused = HashMap::new();
+        let spot = "bear5 is open elsewhere with different settings (enableSpotMarkets)";
+        assert!(first_refusal(&mut refused, "bear5", spot));
+        for _ in 0..4 {
+            assert!(
+                !first_refusal(&mut refused, "bear5", spot),
+                "a backoff retry is quiet"
+            );
+        }
+        assert!(first_refusal(&mut refused, "other", spot), "per account");
+        let both = "bear5 is open elsewhere with different settings (enableSpotMarkets, testnet)";
+        assert!(
+            first_refusal(&mut refused, "bear5", both),
+            "changed fields show again"
+        );
+        // A successful init clears it (Session::init), so a later refusal shows again.
+        refused.remove("bear5");
+        assert!(first_refusal(&mut refused, "bear5", both));
+    }
 
     /// The COSIGNED data-source path end to end: a source account on the native
     /// actor, frames through this session's pump (base64, seq, snapshot,

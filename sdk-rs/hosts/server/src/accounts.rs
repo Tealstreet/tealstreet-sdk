@@ -240,6 +240,9 @@ struct Parked {
 pub struct Registry {
     accounts: Mutex<HashMap<(String, String), Arc<Account>>>,
     parked: Mutex<HashMap<String, Parked>>,
+    /// Resumable sessions still open, by resume id: a resume of one whose drop
+    /// the server has not seen yet (no close frame) takes it over.
+    open: Mutex<HashMap<String, OpenSession>>,
     threads: EngineThreads,
     ids: AtomicU64,
     engine_config: ServerConfig,
@@ -249,6 +252,15 @@ pub struct Registry {
     /// Why algos stopped while no browser was there to see it, one per
     /// (user, account), for that account's next init.
     notices: Notices,
+}
+
+/// A still-open resumable session, as a resume of its id reaches it.
+struct OpenSession {
+    user: String,
+    /// Tells its socket loop to close now, as though the drop had been seen.
+    close: Arc<tokio::sync::Notify>,
+    /// Told once its accounts are parked.
+    parked: Vec<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// Stop notices by (user, account), each with when it was kept.
@@ -417,6 +429,7 @@ impl Registry {
         Self {
             accounts: Mutex::default(),
             parked: Mutex::default(),
+            open: Mutex::default(),
             threads,
             ids: AtomicU64::new(1),
             engine_config: ServerConfig {
@@ -442,8 +455,54 @@ impl Registry {
         &self.threads
     }
 
+    /// Why `holder`'s init of an account must not rebuild it: another live
+    /// socket holds that account under a different fingerprint, and disposing
+    /// it would stop that client's account and algos (two clients would flap).
+    pub fn rebuild_refusal(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        public_only: bool,
+        holder: u64,
+    ) -> Option<String> {
+        // Shared public data carries no signer or algos; it rebuilds as before.
+        if public_only {
+            return None;
+        }
+        let key = (user.to_owned(), init.account_name.clone());
+        let account = self.accounts.lock().unwrap().get(&key).cloned()?;
+        let fingerprint = init.fingerprint();
+        if account.fingerprint == fingerprint && !account.is_public() {
+            return None;
+        }
+        let others: Vec<u64> = account
+            .holders
+            .lock()
+            .unwrap()
+            .by_id
+            .iter()
+            .filter(|(id, live)| **id != holder && live.is_some())
+            .map(|(id, _)| *id)
+            .collect();
+        if others.is_empty() {
+            return None;
+        }
+        let differs = differing_fields(&account.fingerprint, &fingerprint);
+        Log::warn(&format!(
+            "init {} from socket {holder} refused: socket(s) {others:?} hold it with other settings ({})",
+            init.account_name,
+            differs.join(", ")
+        ));
+        Some(format!(
+            "{} is open in another window or on another device with different settings ({}). The change was not applied and that copy keeps running: close it there, or reload both, and this one will load with the new settings.",
+            init.account_name,
+            differs.join(", ")
+        ))
+    }
+
     /// The account this user's `init` names, built or reused. Reuse requires an
-    /// identical fingerprint; otherwise the old account is disposed first.
+    /// identical fingerprint; otherwise the old account is disposed first, but
+    /// never while another live socket holds it (see `rebuild_refusal`).
     pub async fn obtain(
         self: &Arc<Self>,
         user: &str,
@@ -460,6 +519,9 @@ impl Registry {
             if account.fingerprint == fingerprint && account.is_public() == public_only {
                 account.hold(holder, Live { outbox, token });
                 return Ok(account);
+            }
+            if let Some(refusal) = self.rebuild_refusal(user, init, public_only, holder) {
+                return Err(refusal);
             }
             self.dispose(&account);
         }
@@ -682,6 +744,18 @@ impl Registry {
         reason: &str,
         stopped: Option<crate::algos::StopNotice>,
     ) {
+        let holders: Vec<u64> = account
+            .holders
+            .lock()
+            .unwrap()
+            .by_id
+            .keys()
+            .copied()
+            .collect();
+        Log::info(&format!(
+            "dispose {}: {reason} (holders {holders:?})",
+            account.name
+        ));
         let mut accounts = self.accounts.lock().unwrap();
         let key = (account.user.clone(), account.name.clone());
         if accounts
@@ -758,6 +832,46 @@ impl Registry {
         });
     }
 
+    /// A resumable session opened under `resume_id`; it closes when told.
+    pub fn open_session(&self, resume_id: &str, user: &str) -> Arc<tokio::sync::Notify> {
+        let close = Arc::new(tokio::sync::Notify::new());
+        self.open.lock().unwrap().insert(
+            resume_id.to_owned(),
+            OpenSession {
+                user: user.to_owned(),
+                close: close.clone(),
+                parked: Vec::new(),
+            },
+        );
+        close
+    }
+
+    /// The session under `resume_id` has closed and parked its accounts.
+    pub fn session_closed(&self, resume_id: &str) {
+        if let Some(open) = self.open.lock().unwrap().remove(resume_id) {
+            for parked in open.parked {
+                let _ = parked.send(());
+            }
+        }
+    }
+
+    /// A resume naming a session still open for the same user: the old socket
+    /// dropped without a close frame. Tells it to close; resolves once parked.
+    pub fn take_over(
+        &self,
+        resume_id: &str,
+        user: &str,
+    ) -> Option<tokio::sync::oneshot::Receiver<()>> {
+        let mut open = self.open.lock().unwrap();
+        let session = open
+            .get_mut(resume_id)
+            .filter(|session| session.user == user)?;
+        let (parked, wait) = tokio::sync::oneshot::channel();
+        session.parked.push(parked);
+        session.close.notify_one();
+        Some(wait)
+    }
+
     /// Takes back a parked session for the same user; the new socket becomes
     /// the holder and signer owner. False for unknown, expired or foreign ids.
     pub fn resume(
@@ -793,6 +907,23 @@ impl Registry {
             })
             .collect()
     }
+}
+
+/// The top-level init fields (names only) on which two fingerprints differ.
+fn differing_fields(old: &str, new: &str) -> Vec<String> {
+    let parse = |text: &str| {
+        serde_json::from_str::<serde_json::Map<String, Value>>(text).unwrap_or_default()
+    };
+    let (old, new) = (parse(old), parse(new));
+    let mut fields: Vec<String> = old
+        .keys()
+        .chain(new.keys())
+        .filter(|field| old.get(*field) != new.get(*field))
+        .cloned()
+        .collect();
+    fields.sort();
+    fields.dedup();
+    fields
 }
 
 /// 128 bits from the OS CSPRNG, hex; never derived from time, counters or users.
@@ -864,6 +995,17 @@ mod tests {
         Arc<Account>,
         mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
     ) {
+        held_account_with(None, String::new())
+    }
+
+    /// `held_account` with a signer link and the fingerprint it was built from.
+    fn held_account_with(
+        link: Option<Arc<SignerLink>>,
+        fingerprint: String,
+    ) -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
         let engine = safe_cex_engine::test_support::seeded_engine(Idle);
         let (handle, _task) = safe_cex_native::spawn_account(
             safe_cex_native::Host::new(engine, NoIo),
@@ -876,9 +1018,9 @@ mod tests {
             name: "acct".into(),
             venue: "bitget".into(),
             handle,
-            link: None,
+            link,
             token: ProxyToken::new(),
-            fingerprint: String::new(),
+            fingerprint,
             holders: Mutex::default(),
             algos: Some(algos),
             algo_owner: Arc::default(),
@@ -980,6 +1122,162 @@ mod tests {
                 );
             })
             .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_abrupt_drop_resumed_at_8s_takes_over_the_open_session() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, mut algos) = held_account();
+                let taken_over = registry.open_session("r1", "u");
+                // The old socket loop as http.rs runs it: it never saw the drop,
+                // and closes and parks only when the resume tells it to.
+                let old = {
+                    let (registry, account) = (registry.clone(), account.clone());
+                    tokio::task::spawn_local(async move {
+                        taken_over.notified().await;
+                        registry.park("r1".into(), "u", vec![(account, 7)]);
+                        registry.session_closed("r1");
+                    })
+                };
+                tokio::time::sleep(Duration::from_secs(8)).await;
+                let outbox: Outbox = Arc::new(|_| true);
+                let token = ("t".to_owned(), u64::MAX);
+                assert!(
+                    registry
+                        .resume("r1", "u", 8, token.clone(), &outbox)
+                        .is_empty(),
+                    "nothing is parked while the old socket looks open"
+                );
+                assert!(
+                    registry.take_over("r1", "other").is_none(),
+                    "never another user's"
+                );
+                registry
+                    .take_over("r1", "u")
+                    .expect("the open session")
+                    .await
+                    .unwrap();
+                old.await.unwrap();
+                let resumed = registry.resume("r1", "u", 8, token, &outbox);
+                assert_eq!(resumed.len(), 1, "resumed, not re-inited");
+                assert!(Arc::ptr_eq(&resumed[0], &account));
+                assert_eq!(account.holders.lock().unwrap().signing, Some(8));
+                tokio::time::sleep(Duration::from_secs(200)).await;
+                assert!(algos.try_recv().is_err(), "algos alive: never disposed");
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_identical_reinit_on_a_new_socket_never_disposes_or_stops_algos() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bitget".into(),
+                    ..InitPayload::default()
+                };
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .insert(("u".into(), "acct".into()), account.clone());
+                let again = registry
+                    .obtain("u", &init, false, 8, None, Arc::new(|_| true))
+                    .await
+                    .unwrap();
+                assert!(Arc::ptr_eq(&again, &account), "reused, not rebuilt");
+                // The old socket's drop is seen later: it parks, and its window expires.
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                tokio::time::sleep(Duration::from_secs(200)).await;
+                assert!(algos.try_recv().is_err(), "algos alive: never disposed");
+                assert_eq!(registry.account_count(), 1);
+                assert_eq!(account.holders.lock().unwrap().signing, Some(8));
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_second_client_with_other_settings_never_disposes_a_live_account() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bitget".into(),
+                    ..InitPayload::default()
+                };
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let (account, mut algos) = held_account_with(Some(link), init.fingerprint());
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .insert(("u".into(), "acct".into()), account.clone());
+                let other = InitPayload {
+                    enable_spot_markets: Some(true),
+                    ..init.clone()
+                };
+                for _ in 0..3 {
+                    let refused = registry
+                        .obtain("u", &other, false, 8, None, Arc::new(|_| true))
+                        .await
+                        .map(|_| ())
+                        .unwrap_err();
+                    assert!(refused.contains("enableSpotMarkets"), "{refused}");
+                    assert!(
+                        refused.contains("close it there, or reload both"),
+                        "{refused}"
+                    );
+                }
+                assert!(registry.rebuild_refusal("u", &other, false, 8).is_some());
+                assert!(
+                    registry.rebuild_refusal("u", &init, false, 8).is_none(),
+                    "same settings join"
+                );
+                assert!(
+                    registry.rebuild_refusal("u", &other, false, 7).is_none(),
+                    "the holder itself changing its settings rebuilds"
+                );
+                assert!(algos.try_recv().is_err(), "the live holder's algos run on");
+                assert_eq!(account.holders.lock().unwrap().signing, Some(7));
+                let current = registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .get(&("u".into(), "acct".into()))
+                    .cloned();
+                assert!(current.is_some_and(|current| Arc::ptr_eq(&current, &account)));
+
+                // Once that client is gone (parked only), the new settings rebuild as before.
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                assert!(registry.rebuild_refusal("u", &other, false, 8).is_none());
+            })
+            .await;
+    }
+
+    #[test]
+    fn differing_fields_name_only_the_fields_that_changed() {
+        let a = InitPayload {
+            account_name: "a".into(),
+            exchange_name: "bybit".into(),
+            ..InitPayload::default()
+        };
+        let b = InitPayload {
+            enable_spot_markets: Some(true),
+            testnet: Some(true),
+            ..a.clone()
+        };
+        assert_eq!(
+            differing_fields(&a.fingerprint(), &b.fingerprint()),
+            ["enableSpotMarkets", "testnet"]
+        );
+        assert!(differing_fields(&a.fingerprint(), &a.fingerprint()).is_empty());
     }
 
     #[test]
