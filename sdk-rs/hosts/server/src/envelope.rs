@@ -113,9 +113,9 @@ pub struct PingData {
     pub accounts: Vec<String>,
 }
 
-/// `t` first, whatever the map order: the client routes `session`, `pong`,
-/// `echo` and `sign-req` by their exact `{"t":"<type>"` prefix, and this crate's
-/// serde_json has no `preserve_order`, so a `json!` envelope sorted `d` ahead.
+/// `t` first: the client routes `session`, `pong`, `echo` and `sign-req` by
+/// their exact `{"t":"<type>"` prefix, and this crate's `json!` maps serialize
+/// keys sorted, which put `d` ahead.
 fn envelope(t: &str, d: Value) -> String {
     format!(r#"{{"t":"{t}","d":{d}}}"#)
 }
