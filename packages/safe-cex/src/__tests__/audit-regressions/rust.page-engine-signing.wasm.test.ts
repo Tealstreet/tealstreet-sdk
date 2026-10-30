@@ -6,6 +6,7 @@ import { ethers } from 'ethers';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { BETA_VENUES } from '../../exchanges/rust/betaVenues';
+import vectors from '../../../../../sdk-rs/venues/paradex/tests/sign-vectors.json';
 import rules from '../../exchanges/rust/construction-rules.json';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
@@ -27,8 +28,10 @@ const venueRules = (name: string) => (rules as Rules).venues[name] ?? {};
 
 interface SigningCase {
   options: Partial<ExchangeOptions>;
+  /** The device clock, where the venue's statements carry times. */
+  now?: number;
   /** Sign-reqs as the native server's remote signer sends them, with the expected answer. */
-  requests: { outputFormat: string; toSign: string; expected: string }[];
+  requests: { outputFormat: string; toSign: string; expected: string | RegExp }[];
 }
 
 /** HMAC families: every REST and socket signature is one ws-auth `toSign` in the venue's declared encoding. */
@@ -57,7 +60,39 @@ const wallet = (): SigningCase => ({
   ],
 });
 
+/** Paradex: the native server binds the Stark public key, then sends `paradex/1` statements. */
+const paradex = (): SigningCase => {
+  const vector = vectors.cases.find((item) => item.environment === 'prod')!;
+  const nowS = Math.floor(vector.now / 1000);
+  const statement = JSON.stringify({ family: 'paradex', op: 'auth', revision: 'paradex/1', timestampS: nowS, expirationS: nowS + 300 });
+  // starknet.js `["r","s"]` felts as the device's `0x` r || s.
+  const rs = (JSON.parse(vector.shortAuth.signature) as string[]).map((felt) => BigInt(felt).toString(16).padStart(64, '0')).join('');
+  return {
+    now: vector.now,
+    options: { key: vector.key, secret: '', paradexAddress: vector.address, subkeyAddress: vector.subkey },
+    requests: [
+      // The Stark generator's x: the public key of the vector's scalar 1.
+      { outputFormat: 'paradex-public', toSign: vector.address, expected: '0x01ef15c18599971b7beced415a40f0c7deacfd9b0d1819e03d723d8bc943cfca' },
+      { outputFormat: 'paradex-stark', toSign: statement, expected: `0x${rs}` },
+    ],
+  };
+};
+
+/** Lighter: the native server sends canonical statements as `lighter-tx`; answers are 80-byte Schnorr signatures. */
+const lighter = (): SigningCase => {
+  // The device checks Lighter deadlines against its own wall clock.
+  const deadline = Math.floor(Date.now() / 1000) + 60;
+  const auth = (account: number) => `{"kind":"auth","chainId":300,"accountIndex":${account},"apiKeyIndex":0,"deadline":${deadline}}`;
+  return {
+    now: Date.now(),
+    options: { key: '', secret: `01${'00'.repeat(39)}`, apiKeyIndex: '0', applicationId: '718895', testnet: true },
+    requests: [{ outputFormat: 'lighter-tx', toSign: auth(718895), expected: /^0x[0-9a-f]{160}$/ }],
+  };
+};
+
 const CASES: Partial<Record<ExchangeName, () => SigningCase>> = {
+  lighter,
+  paradex,
   bybit: () => hmac('bybit'),
   bybitinverse: () => hmac('bybitinverse'),
   bybitspot: () => hmac('bybitspot'),
@@ -92,10 +127,10 @@ afterEach(() => {
 });
 
 /** The page engine as `createExchangeFromAccount(account, { workerMirror: true })` builds it. */
-const pageEngine = async (name: ExchangeName, options: Partial<ExchangeOptions>) => {
+const pageEngine = async (name: ExchangeName, options: Partial<ExchangeOptions>, now = STAMP, mirror = true) => {
   const sockets: string[] = [];
   const transport: Transport = {
-    now: () => STAMP,
+    now: () => now,
     // Frame-fed start may ask for public metadata; signing never needs it.
     request: () => new Promise(() => {}),
     connect: () => {
@@ -106,7 +141,7 @@ const pageEngine = async (name: ExchangeName, options: Partial<ExchangeOptions>)
     clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
   };
   setRustEngineTransport(() => transport);
-  const exchange = new RustEngineExchange(name, { ...options, workerMirror: true } as ExchangeOptions, new DefaultStore());
+  const exchange = new RustEngineExchange(name, { ...options, ...(mirror ? { workerMirror: true } : {}) } as ExchangeOptions, new DefaultStore());
   live.push(exchange);
   return { exchange, sockets };
 };
@@ -119,10 +154,24 @@ describe('every frame-fed family signs its COSIGNED sign-reqs on the page engine
 
   it.each(BETA_VENUES)('%s', async (name) => {
     if (!frameFed.includes(name)) return;
-    const { options, requests } = CASES[name]!();
-    const { exchange, sockets } = await pageEngine(name, options);
+    const { options, requests, now } = CASES[name]!();
+    const { exchange, sockets } = await pageEngine(name, options, now);
     await expect(exchange.frameFedReady).resolves.toBe(true);
     expect(exchange.isFrameFed).toBe(true);
+    await answers(exchange, name, requests);
+    expect(sockets).toEqual([]);
+  });
+
+  // Ready ahead of a family's frame-fed switch: its case already signs on the keyed device.
+  it.each(Object.keys(CASES) as ExchangeName[])('%s case signs before its family is frame-fed', async (name) => {
+    if (frameFed.includes(name)) return;
+    const { options, requests, now } = CASES[name]!();
+    const { exchange } = await pageEngine(name, options, now, false);
+    await answers(exchange, name, requests);
+  });
+});
+
+const answers = async (exchange: RustEngineExchange, name: ExchangeName, requests: SigningCase['requests']) => {
     for (const { outputFormat, toSign, expected } of requests) {
       const answer = await exchange.signWsAuth({
         id: `${name}-${outputFormat}`,
@@ -132,8 +181,7 @@ describe('every frame-fed family signs its COSIGNED sign-reqs on the page engine
       });
       expect(answer.error, `${name} ${outputFormat}`).toBeUndefined();
       const signature = outputFormat === 'hyperliquid-address' ? answer.wsAuthSignature?.toLowerCase() : answer.wsAuthSignature;
-      expect(signature, `${name} ${outputFormat}`).toBe(expected);
+      if (expected instanceof RegExp) expect(signature, `${name} ${outputFormat}`).toMatch(expected);
+      else expect(signature, `${name} ${outputFormat}`).toBe(expected);
     }
-    expect(sockets).toEqual([]);
-  });
-});
+};
