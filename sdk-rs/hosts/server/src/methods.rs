@@ -22,11 +22,17 @@ pub enum Plan {
     Reply(Value),
     /// Answered from the account's engine store, as `rust.exchange.ts` reads its own.
     Read(StoreRead),
+    /// A command sent once the account's private sections load (`getAccount` on
+    /// `afterLoad` venues, which TS sends after `start()`), or refused after `READ_WAIT`.
+    AfterLoad {
+        command: Value,
+        reply: Reply,
+    },
     /// Exec's nuke on the account's algo host: `all`, `positions` or `orders`.
     Nuke(&'static str),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StoreRead {
     Orders(Option<Vec<String>>),
     Positions(Option<Vec<String>>),
@@ -67,7 +73,80 @@ pub fn worker_order_ids(result: Value) -> Value {
     }
 }
 
-/// Answers a store read; reads wait for nothing, so an unloaded section refuses.
+/// How long a store read waits for its sections, as `untilNativeData` in rust.exchange.ts.
+pub const READ_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+const READ_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Whether `read`'s sections have loaded (markets plus the section it reads).
+pub fn read_loaded(read: &StoreRead, store: &Store) -> bool {
+    let loaded = store.loaded();
+    loaded.markets
+        && match read {
+            StoreRead::Orders(_) | StoreRead::ClientOrder { .. } => loaded.orders,
+            StoreRead::Positions(_) | StoreRead::PositionMode => loaded.positions,
+            StoreRead::Balance => loaded.balance,
+        }
+}
+
+/// Answers `read` once its sections load, or refuses after `wait` (eager warm-start
+/// reads arrive before the first load).
+pub async fn read_when_loaded(
+    handle: &safe_cex_native::AccountHandle,
+    read: StoreRead,
+    wait: std::time::Duration,
+) -> Result<Value, Refused> {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        let attempt = read.clone();
+        let answer = handle
+            .read(move |store| read_loaded(&attempt, store).then(|| read_store(&attempt, store)))
+            .await;
+        match answer {
+            None => return Err(refused("Error", "account is closed")),
+            Some(Some(answer)) => return answer,
+            Some(None) if tokio::time::Instant::now() >= deadline => {
+                let what = match read {
+                    StoreRead::Orders(_) | StoreRead::ClientOrder { .. } => "orders",
+                    StoreRead::Positions(_) | StoreRead::PositionMode => "positions",
+                    StoreRead::Balance => "balances",
+                };
+                return Err(refused(
+                    "Error",
+                    format!("{what} did not load within {}s", wait.as_secs()),
+                ));
+            }
+            Some(None) => tokio::time::sleep(READ_POLL).await,
+        }
+    }
+}
+
+/// Waits up to `wait` for the account's start: markets, balance, orders and positions.
+pub async fn until_account_loaded(
+    handle: &safe_cex_native::AccountHandle,
+    wait: std::time::Duration,
+) -> Result<(), Refused> {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        let loaded = handle.read(|store| store.loaded()).await;
+        match loaded {
+            None => return Err(refused("Error", "account is closed")),
+            Some(loaded)
+                if loaded.markets && loaded.balance && loaded.orders && loaded.positions =>
+            {
+                return Ok(());
+            }
+            Some(_) if tokio::time::Instant::now() >= deadline => {
+                return Err(refused(
+                    "Error",
+                    format!("the account did not load within {}s", wait.as_secs()),
+                ));
+            }
+            Some(_) => tokio::time::sleep(READ_POLL).await,
+        }
+    }
+}
+
+/// Answers a store read from loaded sections; an unloaded section refuses.
 pub fn read_store(read: &StoreRead, store: &Store) -> Result<Value, Refused> {
     let loaded = store.loaded();
     let ready = |section: bool, what: &str| {
@@ -555,9 +634,11 @@ pub fn translate(
         )),
         "getAccount" => match capabilities.account {
             AccountLookup::Unsupported => Err(refused("Error", "Not implemented")),
-            AccountLookup::Query | AccountLookup::AfterLoad => {
-                one(command("fetchAccount", Map::new(), false))
-            }
+            AccountLookup::Query => one(command("fetchAccount", Map::new(), false)),
+            AccountLookup::AfterLoad => one(Plan::AfterLoad {
+                command: json!({"op": "fetchAccount"}),
+                reply: Reply::Result,
+            }),
         },
         // Native account reads, answered from the engine store as rust.exchange.ts does.
         "fetchOrders" => one(Plan::Read(StoreRead::Orders(symbols(arg(args, 0))?))),
@@ -978,6 +1059,21 @@ mod tests {
             ..caps()
         };
         web("getAccount", json!([]), &query);
+        let after_load = Capabilities {
+            account: AccountLookup::AfterLoad,
+            ..caps()
+        };
+        let plans = translate("getAccount", &[], &after_load, &[], false).unwrap();
+        let [Plan::AfterLoad { command, reply }] = plans.as_slice() else {
+            panic!("{plans:?}")
+        };
+        assert_eq!(
+            (command, reply),
+            (&json!({"op":"fetchAccount"}), &Reply::Result)
+        );
+        let mut wire = command.clone();
+        wire["command"] = 1.into();
+        safe_cex_engine::command::decode_host_input(&wire.to_string()).unwrap();
         let none = Capabilities {
             account: AccountLookup::Unsupported,
             ..caps()
