@@ -14,7 +14,7 @@ with no Worker in front: every route answers both under `/candles/` and bare.
 
 `GET /candles` redirects (308) to `/candles/`. Anything else is
 `404 {"error":"not found"}`. Errors are `{error, code}` with 400 `bad-request`,
-404 `market-not-found`, 502 `upstream-error` and 503 `service-unavailable`.
+404 `market-not-found`, 503 `upstream-error` and 503 `service-unavailable`.
 The query parameter `verbose` is never honoured. Only a 200 candle response
 whose `to` falls before the current candle of its interval carries
 `Cache-Control: public, max-age=<CANDLE_CACHE_TTL_SECONDS, default 300>`;

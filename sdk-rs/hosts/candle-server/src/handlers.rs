@@ -589,7 +589,8 @@ pub async fn candles(app: &App, query: &Query) -> Reply {
                 ("reason", &reason),
             ],
         );
-        error(502, reason, "upstream-error")
+        // Not 502: Cloudflare replaces origin 502 bodies, losing the venue reason.
+        error(503, reason, "upstream-error")
     };
     let resident = match app.pool.hold(&request.exchange).await {
         Ok(resident) => resident,
