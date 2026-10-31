@@ -3669,3 +3669,43 @@ fn an_unknown_market_is_refused_before_any_request() {
     assert!(matches!(h.result(99), Some(Err(_))));
     assert!(!h.has_request("/v5/position/list?category=linear&symbol=NOPEUSDT"));
 }
+
+#[test]
+fn a_position_row_on_another_symbol_does_not_discard_a_flat_read() {
+    let mut h = ready();
+    let request = fetch_leverage(&mut h, 100, "ETHUSDT");
+    h.message(
+        "/v5/private",
+        r#"{"topic":"position","data":[{"symbol":"BTCUSDT","category":"linear","side":"Buy","size":"0.5","positionIdx":0,"avgPrice":"90000","markPrice":"90000","positionValue":"45000","unrealisedPnl":"0","leverage":"9","seq":99999,"updatedTime":"1713434102753"}]}"#,
+    );
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","positionIdx":0,"leverage":"50"}]}}"#,
+    );
+    assert_eq!(h.engine.store().setting("ETHUSDT").unwrap().leverage, 50.0);
+}
+
+#[test]
+fn a_leverage_write_goes_out_unless_both_rails_already_match() {
+    let mut h = ready();
+    let request = fetch_leverage(&mut h, 101, "ETHUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","positionIdx":1,"leverage":"20"},{"symbol":"ETHUSDT","positionIdx":2,"leverage":"7"}]}}"#,
+    );
+    let set = |h: &mut Harness, command| {
+        h.command(Command::SetLeverage {
+            command,
+            symbol: "ETHUSDT".into(),
+            leverage: 20.0,
+            side: None,
+        });
+    };
+    set(&mut h, 102);
+    let write = h.take("/v5/position/set-leverage");
+    h.reply(write.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{}}"#);
+    set(&mut h, 103);
+    assert!(!h.has_request("/v5/position/set-leverage"));
+}

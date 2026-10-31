@@ -3,6 +3,7 @@ mod account;
 mod funding;
 mod history;
 mod identity;
+mod leverage;
 pub mod sign;
 #[cfg(feature = "spot")]
 pub mod spot;
@@ -73,6 +74,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 
 pub enum Pending {
     Identity(CommandId),
+    Leverage(leverage::Read),
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -818,6 +820,7 @@ impl Venue for Kucoin {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             cancel_all: safe_cex_engine::CancelAll::Native,
             account: safe_cex_engine::AccountLookup::Query,
+            leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -996,6 +999,10 @@ impl Venue for Kucoin {
             self.identity_response(cx, command, response);
             return;
         }
+        if let Pending::Leverage(read) = pending {
+            self.leverage_response(cx, read, response);
+            return;
+        }
         let status = response.status;
         let body = response.body;
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
@@ -1003,7 +1010,7 @@ impl Venue for Kucoin {
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         }
         match pending {
-            Pending::Identity(_) => unreachable!(),
+            Pending::Identity(_) | Pending::Leverage(_) => unreachable!(),
             Pending::Account(request) => self.account_response(cx, request, status, body),
             Pending::Trade(request) => self.trading_response(cx, request, status, body),
             Pending::History(request) => self.history_response(cx, request, status, body),
@@ -1154,6 +1161,10 @@ impl Venue for Kucoin {
             self.identity_failed(cx, command, error);
             return;
         }
+        if let Pending::Leverage(read) = pending {
+            cx.fail(read.command(), error);
+            return;
+        }
         match pending {
             Pending::Account(request) => self.account_response(cx, request, 0, error),
             Pending::Trade(request) => self.trading_response(cx, request, 0, error),
@@ -1184,7 +1195,7 @@ impl Venue for Kucoin {
                 let pause = self.discovery_paused_until - cx.now;
                 self.discovery.failed_after(cx, true, pause);
             }
-            Pending::Identity(_) => unreachable!(),
+            Pending::Identity(_) | Pending::Leverage(_) => unreachable!(),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1243,16 +1254,7 @@ impl Venue for Kucoin {
         }
         match command {
             Command::SetTickerSymbols { .. } => {}
-            Command::FetchLeverage { .. } => {
-                let Ok(context) = cx.admit_http_command(local_read_command_policy()) else {
-                    return;
-                };
-                let _ = cx.fail_context(
-                    &context,
-                    not_sent("KuCoin leverage query is unsupported")
-                        .kind(safe_cex_engine::ErrorKind::Unsupported),
-                );
-            }
+            Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
                     cx.notice(

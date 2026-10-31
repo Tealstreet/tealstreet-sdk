@@ -2727,6 +2727,7 @@ impl BitgetFutures {
     /// A confirmed setting write, through one Store closure per table.
     fn apply_setting(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
         self.account.config_at = Some(cx.now);
+        self.account.settings_version += 1;
         // Frame-fed: keep this write's value until the source's frames agree.
         match effect {
             Effect::Mode(_) => cx.hold_setting(SettingKey::Hedged),

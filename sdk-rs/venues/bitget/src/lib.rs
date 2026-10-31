@@ -3,6 +3,7 @@ mod account;
 mod book;
 mod history;
 mod identity;
+mod leverage;
 mod paths;
 mod sign;
 mod trading;
@@ -44,6 +45,7 @@ pub struct Options {
 
 pub enum Pending {
     Identity(Context),
+    Leverage(leverage::Read),
     History(Box<history::Request>),
     Trade(Box<trading::Request>),
     Account {
@@ -623,6 +625,7 @@ impl Venue for BitgetFutures {
                 safe_cex_engine::QuantityUnits::Base
             },
             account: safe_cex_engine::AccountLookup::Query,
+            leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -800,7 +803,7 @@ impl Venue for BitgetFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Identity(_) => {}
+            Pending::Identity(_) | Pending::Leverage(_) => {}
             Pending::History(request) => self.query_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::Account {
@@ -893,6 +896,10 @@ impl Venue for BitgetFutures {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::Identity(root) = pending {
             self.identity_response(cx, &root, response);
+            return;
+        }
+        if let Pending::Leverage(read) = pending {
+            self.leverage_response(cx, read, response);
             return;
         }
         if let Pending::History(request) = pending {
@@ -1048,6 +1055,7 @@ impl Venue for BitgetFutures {
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
+            Pending::Leverage(read) => self.leverage_failed(cx, read, error),
             Pending::History(request) => self.query_strict_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, false),
             pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
@@ -1079,6 +1087,7 @@ impl Venue for BitgetFutures {
                 let _ = cx.fail_context(&root, error);
             }
             Pending::Identity(root) if deadline => self.identity_failed(cx, &root, error),
+            Pending::Leverage(read) => self.leverage_failed(cx, read, error),
             Pending::History(request) => self.query_http_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, true),
             pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
@@ -1089,6 +1098,10 @@ impl Venue for BitgetFutures {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Identity(root) = pending {
             self.identity_failed(cx, &root, safe_cex_engine::VenueError::new(error));
+            return;
+        }
+        if let Pending::Leverage(read) = pending {
+            self.leverage_failed(cx, read, safe_cex_engine::VenueError::new(error));
             return;
         }
         match pending {
@@ -1123,7 +1136,7 @@ impl Venue for BitgetFutures {
                     .kind(safe_cex_engine::ErrorKind::Network);
                 self.discovery_failed(cx, &pending, error);
             }
-            Pending::Identity(_) => unreachable!(),
+            Pending::Identity(_) | Pending::Leverage(_) => unreachable!(),
         }
     }
     fn read_root_retired(
@@ -1172,6 +1185,10 @@ impl Venue for BitgetFutures {
         // The engine binds the command when the identity read is admitted.
         if let Command::FetchAccount { .. } = command {
             self.fetch_identity(cx);
+            return;
+        }
+        if let Command::FetchLeverage { symbol, .. } = command {
+            self.fetch_leverage(cx, symbol);
             return;
         }
         match command {

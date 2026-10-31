@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct Read {
     context: Context,
     symbol: String,
-    position_version: u32,
+    settings_version: u32,
 }
 
 #[derive(Deserialize)]
@@ -148,7 +148,7 @@ impl BybitLinear {
         let read = Read {
             context: context.clone(),
             symbol,
-            position_version: self.account.position_version,
+            settings_version: self.account.settings_version,
         };
         self.queue_read(cx, context, rest, Then::Leverage(read));
     }
@@ -172,7 +172,7 @@ impl BybitLinear {
         };
         let margin_type = self.margin_type();
         // A leverage write since this read was sent owns the setting; report it.
-        let (buy, sell) = if self.account.position_version == read.position_version {
+        let (buy, sell) = if self.account.settings_version == read.settings_version {
             cx.store.update_setting(&read.symbol, |setting| {
                 setting.leverage = rails.buy;
                 setting.buy_leverage = rails.hedged.then_some(rails.buy);

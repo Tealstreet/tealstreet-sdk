@@ -875,3 +875,102 @@ fn clean_position_delta_cannot_change_global_mode_while_other_symbol_is_retained
             .all(|p| p.position_mode == Some(safe_cex_engine::model::PositionMode::Oneway))
     );
 }
+
+fn fetch_leverage(h: &mut Harness, command: u32, symbol: &str) {
+    h.command(safe_cex_engine::Command::FetchLeverage {
+        command,
+        symbol: symbol.into(),
+    });
+}
+
+fn fetched(h: &Harness, command: u32) -> serde_json::Value {
+    let (_, result) = h
+        .done
+        .iter()
+        .find(|(id, _)| *id == command)
+        .expect("the read must settle");
+    serde_json::from_str(result.as_ref().expect("the read must succeed")).unwrap()
+}
+
+#[test]
+fn a_classic_flat_symbol_reads_its_leverage_on_demand() {
+    let mut h = Harness::classic();
+    assert_eq!(
+        h.engine.capabilities().leverage_query,
+        safe_cex_engine::LeverageQuery::OnReadAndMetadata
+    );
+    fetch_leverage(&mut h, 80, "BTCUSDT");
+    let request = h.take("/mix/account/account?symbol=BTCUSDT");
+    assert!(request.url.contains("marginCoin=USDT"), "{}", request.url);
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"marginMode":"crossed","posMode":"one_way_mode","crossedMarginLeverage":"33"}}"#,
+    );
+    let value = fetched(&h, 80);
+    assert_eq!(value["buyLeverage"], 33.0);
+    assert_eq!(value["sellLeverage"], 33.0);
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 33.0);
+}
+
+#[test]
+fn a_classic_isolated_hedged_symbol_reads_each_side() {
+    let mut h = Harness::classic();
+    fetch_leverage(&mut h, 81, "BTCUSDT");
+    let request = h.take("/mix/account/account?symbol=BTCUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"marginMode":"isolated","posMode":"hedge_mode","isolatedLongLever":"11","isolatedShortLever":"6"}}"#,
+    );
+    let value = fetched(&h, 81);
+    assert_eq!(value["buyLeverage"], 11.0);
+    assert_eq!(value["sellLeverage"], 6.0);
+    assert_eq!(value["positionMode"], "hedged");
+}
+
+#[test]
+fn a_failed_leverage_read_fails_its_command_and_writes_nothing() {
+    let mut h = Harness::classic();
+    let before = h.engine.store().setting("BTCUSDT");
+    fetch_leverage(&mut h, 82, "BTCUSDT");
+    let request = h.take("/mix/account/account?symbol=BTCUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"40001","msg":"no permission","data":null}"#,
+    );
+    let (_, result) = h.done.iter().find(|(id, _)| *id == 82).unwrap();
+    assert!(result.as_ref().unwrap_err().contains("no permission"));
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn a_uta_symbol_absent_from_the_settings_list_fails_rather_than_guessing() {
+    let mut h = uta(r#"{"code":"00000","data":{"list":[]}}"#);
+    fetch_leverage(&mut h, 83, "BTCUSDT");
+    let request = h.take("/account/settings");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"holdMode":"one_way_mode","symbolConfigList":[{"symbol":"BTCUSDT","category":"USDT-FUTURES","leverage":"44","marginMode":"crossed"}]}}"#,
+    );
+    assert_eq!(fetched(&h, 83)["buyLeverage"], 44.0);
+    fetch_leverage(&mut h, 84, "BTCUSDT");
+    let request = h.take("/account/settings");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"holdMode":"one_way_mode","symbolConfigList":[]}}"#,
+    );
+    let (_, result) = h.done.iter().find(|(id, _)| *id == 84).unwrap();
+    assert!(result.as_ref().unwrap_err().contains("do not list"));
+}
+
+#[test]
+fn an_unknown_symbol_is_refused_before_any_request() {
+    let mut h = Harness::classic();
+    fetch_leverage(&mut h, 85, "NOPEUSDT");
+    let (_, result) = h.done.iter().find(|(id, _)| *id == 85).unwrap();
+    assert!(result.as_ref().unwrap_err().contains("unknown market"));
+}

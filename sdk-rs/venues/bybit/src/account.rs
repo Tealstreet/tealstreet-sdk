@@ -247,7 +247,9 @@ pub struct AccountState {
     classic: bool,
     tick_timer: Option<TimerId>,
     partial_stop_refresh: Option<TimerId>,
-    pub(crate) position_version: u32,
+    position_version: u32,
+    /// Bumped by acknowledged leverage and mode writes only, unlike `position_version`.
+    pub(crate) settings_version: u32,
     positions_generation: u32,
     positions: Option<PositionsJoin>,
     positions_follow_up: bool,
@@ -2936,6 +2938,7 @@ impl BybitLinear {
 
     /// A read issued before an acknowledged setting cannot publish old rails.
     pub(crate) fn note_leverage_ack(&mut self) {
+        self.account.settings_version = self.account.settings_version.wrapping_add(1);
         // Hyro owns an atomic snapshot guarded by note_hyro_write/revision.
         if self.variant.is_hyro() {
             return;
@@ -2945,6 +2948,7 @@ impl BybitLinear {
     }
 
     pub(crate) fn refresh_after_mode_change(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.settings_version = self.account.settings_version.wrapping_add(1);
         // A response issued before the switch cannot restore the old mode.
         self.account.position_version += 1;
         if self.category == Category::Inverse {
