@@ -138,14 +138,27 @@ impl Adapter {
                 .find(|e| e["outcome"] == "unknown")
                 .unwrap_or(&failures[0])
                 .clone();
+            let store = self.snapshot();
+            let open = rows(&store, "orders")
+                .iter()
+                .map(|o| {
+                    format!(
+                        "{} {}",
+                        o["symbol"].as_str().unwrap_or(""),
+                        o["id"].as_str().unwrap_or("")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
             error["message"] = json!(format!(
-                "Nuke completed {completed} operation(s), {} failed: {}",
+                "Nuke completed {completed} operation(s), {} failed: {}. Open orders: {}",
                 failures.len(),
                 failures
                     .iter()
                     .map(|e| e["message"].as_str().unwrap_or("command failed"))
                     .collect::<Vec<_>>()
-                    .join("; ")
+                    .join("; "),
+                if open.is_empty() { "none" } else { &open }
             ));
             error["partialOrderIds"] = json!(ids);
             error["failedOperationCount"] = json!(failures.len());

@@ -544,6 +544,23 @@ describe('Rust native current-account reads', () => {
     expect(r.exchange.isNuking).toBe(false);
   });
 
+  it('tries every symbol after one cancel fails, then names the failure and what is left', async () => {
+    const r = fixture('bybit');
+    await r.start();
+    r.update({
+      positions: [],
+      orders: [order('eth-stop', 'ETHUSDT'), order('btc-limit', 'BTCUSDT')],
+    });
+    const cancel = vi.spyOn(r.exchange, 'cancelSymbolOrders').mockImplementation(async (symbol) => {
+      if (symbol === 'ETHUSDT') throw new Error('left eth-stop');
+    });
+    const logged = vi.spyOn(r.exchange, 'log');
+    await expect(r.exchange.nuke(3)).rejects.toThrow('ETHUSDT: left eth-stop');
+    expect(cancel.mock.calls.map(([symbol]) => symbol)).toEqual(['ETHUSDT', 'BTCUSDT']);
+    expect(logged.mock.calls.flat().join(' ')).toContain('ETHUSDT: eth-stop');
+    expect(r.exchange.isNuking).toBe(false);
+  });
+
   // Ruling 2026-10-30: a running chaser or TWAP would place again behind the nuke.
   it('stops every running chaser and TWAP on the account first, then cancels and closes, and reports them', async () => {
     const r = fixture();

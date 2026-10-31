@@ -2635,6 +2635,9 @@ impl BybitLinear {
                     }
                 }
                 self.finish_orders(cx);
+                if self.account.orders.is_none() {
+                    self.unlisted_read_landed(cx, !self.account.orders_stale);
+                }
             }
             Request::Positions {
                 generation,

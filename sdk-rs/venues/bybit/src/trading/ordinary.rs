@@ -22,7 +22,9 @@ use safe_cex_engine::request_context::{
     RetryEvidence, RetryPolicy, WriteResult,
 };
 use safe_cex_engine::setting_holds::SettingKey;
-use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError,
+};
 use std::collections::VecDeque;
 
 mod placements;
@@ -82,6 +84,13 @@ struct Run {
     continue_on_error: bool,
     ids: Vec<String>,
     error: Option<VenueError>,
+    /// Live rows a cancel-all did not list. The stream can lag a venue-side
+    /// removal, so only an order read issued after its answer settles them.
+    unlisted: Vec<String>,
+    /// That read's category, once issued.
+    unlisted_read: Option<Category>,
+    /// That read has landed: whether it was complete.
+    unlisted_landed: Option<bool>,
 }
 
 struct Leg {
@@ -111,6 +120,8 @@ struct Active {
 /// What one delivered plan call means for the rest of the plan.
 enum Decision {
     Next(Vec<String>),
+    /// Accepted, but these captured rows wait for the plan's order read.
+    Unlisted(Vec<String>),
     Failed(VenueError),
     Resend(ResendGrant),
     Replace(Vec<(String, Vec<safe_cex_engine::model::OrderIdentityReceipt>)>),
@@ -461,6 +472,9 @@ impl BybitLinear {
             continue_on_error: job.continue_on_error,
             ids: Vec::new(),
             error: None,
+            unlisted: Vec::new(),
+            unlisted_read: None,
+            unlisted_landed: None,
         })
     }
 
@@ -543,6 +557,18 @@ impl BybitLinear {
         };
         if slots.is_empty() {
             if run.queue.is_empty() {
+                if !run.unlisted.is_empty() {
+                    if run.unlisted_read.is_some() {
+                        self.park(id, entry);
+                        return;
+                    }
+                    let category = self.category;
+                    run.unlisted_read = Some(category);
+                    // Parked first: a refused read settles it synchronously.
+                    self.park(id, entry);
+                    self.reconcile_orders(cx);
+                    return;
+                }
                 // A Hyro result names every lot of the intent, earlier calls' included.
                 let ids = match &entry.hyro {
                     Some(call) => self
@@ -898,6 +924,16 @@ impl BybitLinear {
                     return;
                 }
             }
+            Decision::Unlisted(unlisted) => {
+                run.unlisted.extend(unlisted);
+                if cx
+                    .finish_plan_call(&plan, &active.slot, &active.context)
+                    .is_err()
+                {
+                    let _ = cx.fail_plan(&plan, internal("Bybit trading plan lost its call"));
+                    return;
+                }
+            }
             Decision::Failed(error) => {
                 // An execution's journal reports each failure to every observer.
                 if entry.hyro.is_none() {
@@ -973,6 +1009,78 @@ impl BybitLinear {
             }
         }
         self.continue_ordinary(cx, id, entry);
+    }
+
+    /// This category's order read has landed. A plan cannot seal inside another
+    /// call's delivery, so the cancel-alls waiting on it settle on a zero timer.
+    /// Only a read they issued answers them: one landing earlier found no waiter.
+    pub(crate) fn unlisted_read_landed(&mut self, cx: &mut Cx<'_, Pending>, confirmed: bool) {
+        let category = self.category;
+        let mut landed = false;
+        for entry in self.trading.ordinary.values_mut() {
+            if let Stage::Plan(run) = &mut entry.stage
+                && run.unlisted_read == Some(category)
+                && run.unlisted_landed.is_none()
+            {
+                run.unlisted_landed = Some(confirmed);
+                landed = true;
+            }
+        }
+        if landed && self.trading.unlisted_timer.is_none() {
+            self.trading.unlisted_timer = Some(cx.set_timer(0.0));
+        }
+    }
+
+    /// Every cancel-all whose read landed reports what the venue still lists,
+    /// by symbol and id, or succeeds. False for any other timer.
+    pub(crate) fn on_unlisted_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.trading.unlisted_timer != Some(timer) {
+            return false;
+        }
+        self.trading.unlisted_timer = None;
+        let landed: Vec<CommandId> = self
+            .trading
+            .ordinary
+            .iter()
+            .filter(|(_, entry)| {
+                matches!(&entry.stage, Stage::Plan(run) if run.unlisted_landed.is_some())
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in landed {
+            let Some(mut entry) = self.trading.ordinary.remove(&id) else {
+                continue;
+            };
+            if let Stage::Plan(run) = &mut entry.stage {
+                let unlisted = std::mem::take(&mut run.unlisted);
+                let confirmed = run.unlisted_landed.take() == Some(true);
+                run.unlisted_read = None;
+                let left: Vec<&str> = unlisted
+                    .iter()
+                    .filter(|order| {
+                        cx.store.order(order).is_some_and(|order| {
+                            !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+                        })
+                    })
+                    .map(String::as_str)
+                    .collect();
+                if let Some(first) = left.first().and_then(|order| cx.store.order(order)) {
+                    let (count, symbol, list) = (left.len(), &first.symbol, left.join(", "));
+                    let message = if confirmed {
+                        format!("Bybit cancel-all left {count} live order(s) on {symbol}: {list}")
+                    } else {
+                        format!(
+                            "Bybit cancel-all could not confirm {count} order(s) on {symbol}: {list}"
+                        )
+                    };
+                    cx.command_error(id, message.clone());
+                    run.error
+                        .get_or_insert(VenueError::new(message).outcome(Outcome::Unknown));
+                }
+            }
+            self.continue_ordinary(cx, id, entry);
+        }
+        true
     }
 
     /// A leg the engine failed before or after release (provider refusal,
@@ -1438,8 +1546,8 @@ impl BybitLinear {
                     );
                 };
                 // Futures select at most 500 native orders. The affected
-                // list, including uncaptured arrivals, is the only proof.
-                let omitted = ids
+                // list, including uncaptured arrivals, proves what it cancelled.
+                let unlisted: Vec<String> = ids
                     .iter()
                     .filter(|id| {
                         !affected.contains(id)
@@ -1447,28 +1555,15 @@ impl BybitLinear {
                                 !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
                             })
                     })
-                    .count();
-                let decision = if omitted == 0 {
-                    if !Self::accepted(cx, context, Vec::new()) {
-                        return Decision::Lost;
-                    }
+                    .cloned()
+                    .collect();
+                if !Self::accepted(cx, context, Vec::new()) {
+                    return Decision::Lost;
+                }
+                let decision = if unlisted.is_empty() {
                     Decision::Next(Vec::new())
                 } else {
-                    let message = format!(
-                        "Bybit cancel-all left {omitted} live order(s) unconfirmed; reconcile before retrying"
-                    );
-                    match Self::record_failure(
-                        cx,
-                        context,
-                        None,
-                        message,
-                        true,
-                        &[],
-                        !affected.is_empty(),
-                    ) {
-                        Some((_, _, error)) => Decision::Failed(error),
-                        None => return Decision::Lost,
-                    }
+                    Decision::Unlisted(unlisted)
                 };
                 if !affected.is_empty() {
                     self.note_order_terminal(&affected);

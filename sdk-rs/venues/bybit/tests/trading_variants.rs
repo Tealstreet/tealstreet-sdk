@@ -790,17 +790,9 @@ fn demo_capped_cancel_all_preserves_omitted_live_order_and_reports_partial_failu
         "omitted order must remain visible"
     );
     assert_eq!(h.engine.store().orders().len(), 1);
-    assert!(
-        h.result(91)
-            .unwrap()
-            .as_ref()
-            .unwrap_err()
-            .contains("1 live order")
-    );
 
-    // The Unknown seal's one reconcile read, issued after the ACK, must
-    // commit the omitted row and unrelated arrivals while still filtering a
-    // replica-stale listed order.
+    // The proof read, issued after the ACK, must commit the omitted row and
+    // unrelated arrivals while still filtering a replica-stale listed order.
     assert!(
         h.requests
             .iter()
@@ -810,6 +802,7 @@ fn demo_capped_cancel_all_preserves_omitted_live_order_and_reports_partial_failu
     let stale = survivor.replace("survivor", "active-0");
     h.respond("settleCoin=USDT&limit=50", 200, &format!(r#"{{"retCode":0,"result":{{"list":[{survivor},{unrelated},{stale}],"nextPageCursor":""}}}}"#));
     h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    h.advance(0.0);
     for id in ["survivor", "unrelated-live"] {
         assert_eq!(
             h.engine.store().order(id).unwrap().status,
@@ -817,7 +810,13 @@ fn demo_capped_cancel_all_preserves_omitted_live_order_and_reports_partial_failu
         );
     }
     assert!(h.engine.store().order("active-0").is_none());
-    assert!(!h.has_request("/v5/order/realtime"));
+    assert!(
+        h.result(91)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("1 live order(s) on BTCUSDT: survivor")
+    );
 }
 
 #[test]
@@ -849,8 +848,7 @@ fn demo_cancel_all_without_affected_identity_cannot_retire_or_tombstone_live_row
         });
         h.respond("/v5/order/cancel-all", 200, ack);
         assert!(h.engine.store().order("live").is_some(), "{ack}");
-        assert!(h.result(92).unwrap().is_err(), "{ack}");
-        // The Unknown seal's one reconcile read keeps the live row.
+        // The reconcile read keeps the live row, and the command fails.
         assert!(
             h.requests
                 .iter()
@@ -863,11 +861,13 @@ fn demo_cancel_all_without_affected_identity_cannot_retire_or_tombstone_live_row
             &format!(r#"{{"retCode":0,"result":{{"list":[{row}],"nextPageCursor":""}}}}"#),
         );
         h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+        h.advance(0.0);
         assert_eq!(
             h.engine.store().order("live").unwrap().status,
             safe_cex_engine::model::OrderStatus::Open,
             "{ack}"
         );
+        assert!(h.result(92).unwrap().is_err(), "{ack}");
         assert!(!h.has_request("/v5/order/realtime"), "{ack}");
     }
 }
@@ -928,7 +928,6 @@ fn demo_terminal_cleanup_does_not_prove_cancellation_of_omitted_native_ids() {
     }
     assert!(h.engine.store().order("later-terminal").is_some());
     assert!(h.engine.store().order("live").is_some());
-    assert!(h.result(97).unwrap().is_err());
     h.message("/v5/private", r#"{"op":"auth","success":true}"#);
     h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
     let filled = row.replace("live", "old-filled");
@@ -948,6 +947,17 @@ fn demo_terminal_cleanup_does_not_prove_cancellation_of_omitted_native_ids() {
             "terminal cleanup must not invent native cancellation proof for {id}"
         );
     }
+    // The reconnect outdated that read, so its follow-up is the proof.
+    h.respond(
+        "settleCoin=USDT&limit=50",
+        200,
+        &format!(
+            r#"{{"retCode":0,"result":{{"list":[{row},{filled},{canceled}],"nextPageCursor":""}}}}"#
+        ),
+    );
+    h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    h.advance(0.0);
+    assert!(h.result(97).unwrap().is_err());
 }
 
 #[test]
@@ -1016,6 +1026,79 @@ fn cancel_all_omitted_targets_that_finished_during_request_are_not_partial_failu
     }
 }
 
+const STOP_ROW: &str = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"stop-1","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"Stop","triggerPrice":"70000","triggerDirection":2,"side":"Sell","price":"0","qty":"1","cumExecQty":"0","leavesQty":"1","reduceOnly":true}"#;
+
+/// A stop the stream still shows, omitted from an empty cancel-all answer: the
+/// venue dropped it with the position, or it survived. Only a read can tell.
+fn cancel_all_omitting_a_stop(command: u32) -> Harness {
+    let mut h = ready(Variant::Demo);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{STOP_ROW}]}}"#),
+    );
+    h.command(Command::CancelSymbolOrders {
+        command,
+        symbol: "BTCUSDT".into(),
+    });
+    h.respond(
+        "/v5/order/cancel-all",
+        200,
+        r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#,
+    );
+    assert_eq!(h.result(command), None, "no verdict before the venue read");
+    h
+}
+
+#[test]
+fn cancel_all_omitting_a_stop_the_venue_already_removed_succeeds_after_the_read() {
+    let mut h = cancel_all_omitting_a_stop(96);
+    h.respond("settleCoin=USDT&limit=50", 200, EMPTY);
+    h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    h.advance(0.0);
+    assert_eq!(h.result(96), Some(&Ok("[]".into())));
+    assert!(h.engine.store().order("stop-1").is_none());
+}
+
+#[test]
+fn cancel_all_omitting_a_stop_the_venue_still_lists_names_it() {
+    let mut h = cancel_all_omitting_a_stop(97);
+    h.respond(
+        "settleCoin=USDT&limit=50",
+        200,
+        &format!(r#"{{"retCode":0,"result":{{"list":[{STOP_ROW}],"nextPageCursor":""}}}}"#),
+    );
+    h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    h.advance(0.0);
+    let error = h.result(97).unwrap().as_ref().unwrap_err();
+    assert!(
+        error.contains("1 live order(s) on BTCUSDT: stop-1"),
+        "{error}"
+    );
+}
+
+#[test]
+fn cancel_all_whose_read_never_answers_still_settles() {
+    let mut h = cancel_all_omitting_a_stop(99);
+    h.advance(120_000.0);
+    assert!(h.result(99).is_some_and(Result::is_err));
+}
+
+#[test]
+fn cancel_all_whose_read_fails_says_the_order_is_unconfirmed() {
+    let mut h = cancel_all_omitting_a_stop(98);
+    h.respond(
+        "settleCoin=USDT&limit=50",
+        200,
+        r#"{"retCode":0,"result":{}}"#,
+    );
+    h.advance(0.0);
+    let error = h.result(98).unwrap().as_ref().unwrap_err();
+    assert!(
+        error.contains("could not confirm 1 order(s) on BTCUSDT: stop-1"),
+        "{error}"
+    );
+}
+
 #[test]
 fn inverse_cancel_all_without_success_field_uses_only_documented_affected_ids() {
     let mut h = ready(Variant::Inverse);
@@ -1038,6 +1121,16 @@ fn inverse_cancel_all_without_success_field_uses_only_documented_affected_ids() 
         h.engine.store().order("omitted").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
     );
+    let omitted = r#"{"category":"inverse","symbol":"BTCUSD","orderId":"omitted","orderStatus":"New","orderType":"Limit","side":"Buy","price":"50000","qty":"1000","cumExecQty":"0","leavesQty":"1000"}"#;
+    let pages: Vec<_> = h.requests.iter().map(|r| r.id).collect();
+    for page in pages {
+        h.reply(
+            page,
+            200,
+            &format!(r#"{{"retCode":0,"result":{{"list":[{omitted}],"nextPageCursor":""}}}}"#),
+        );
+    }
+    h.advance(0.0);
     assert!(h.result(96).unwrap().is_err());
 }
 
@@ -2537,8 +2630,20 @@ fn managed_cancel_all_housekeeping_preserves_live_and_uncaptured_children() {
     assert_eq!(h.engine.store().order(&uncaptured.id), Some(&uncaptured));
     assert_eq!(h.engine.store().order(&revived.id), Some(&revived));
     assert!(h.engine.store().order("live").is_some());
-    assert!(h.result(102).unwrap().is_err());
-    assert!(h.unknown.contains(&102));
+    h.respond(
+        "settleCoin=USDT&limit=50",
+        200,
+        &format!(r#"{{"retCode":0,"result":{{"list":[{row}],"nextPageCursor":""}}}}"#),
+    );
+    h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    h.advance(0.0);
+    assert!(
+        h.result(102)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("on BTCUSDT: live")
+    );
 }
 
 #[test]
