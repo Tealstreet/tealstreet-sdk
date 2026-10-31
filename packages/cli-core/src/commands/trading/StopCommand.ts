@@ -15,17 +15,14 @@ export class StopCommand extends TradingBaseCommand {
     // `at` is optional; the bare form is listed first because it is what
     // people type before reading anything.
     'stop 18500',
-    'stop -1%',
     'stop at 0.1%',
     'stop at 0.1% ETHUSDT',
-    'stop at -100',
     'stop at 18500',
     'stop buy at +100',
     'stop sell at 1%',
     'stop $500 at 1%',
     'stop $500 at 1% ETHUSDT',
     'stop buy $500 at 1%',
-    'stop sell 0.01 at -100',
     // Limit stops: trigger keyword separates trigger from limit price.
     'stop at 0.1% trigger 18500',
     'stop buy at +100 trigger 19500',

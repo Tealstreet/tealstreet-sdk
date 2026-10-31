@@ -201,12 +201,11 @@
     "description": "Move open limit orders by a price delta",
     "examples": [
       "bump +10",
-      "bump -5",
       "bump ETHUSDT +10",
       "bump buy +10",
-      "bump sell -5 ETHUSDT",
+      "bump sell +5 ETHUSDT",
       "bump top 3 +5",
-      "bump buy bottom 5 -2 ETHUSDT",
+      "bump buy bottom 5 +2 ETHUSDT",
       "bump 100 --buys"
     ]
   },
@@ -218,8 +217,7 @@
     "description": "Move an order to a new price",
     "examples": [
       "move abc123 50000",
-      "move abc123 +10",
-      "move abc -5"
+      "move abc123 +10"
     ]
   },
   {
@@ -324,7 +322,7 @@
     "description": "Create scaled orders",
     "examples": [
       "scale buy 10 into 10 from 31000 to 32000",
-      "scale buy $1000 into 10 from -0.25% to -1% ETHUSDT",
+      "scale sell $1000 into 10 from +0.25% to +1% ETHUSDT",
       "scale sell $10000 into 25 from 50000 to 48500 reduce",
       "scale sell $10000 into 25 from 50000 to 48500 taker",
       "scale sell 1 into 5 from +1% to 32000 reduce"
@@ -336,17 +334,14 @@
     "description": "Create a stop order",
     "examples": [
       "stop 18500",
-      "stop -1%",
       "stop at 0.1%",
       "stop at 0.1% ETHUSDT",
-      "stop at -100",
       "stop at 18500",
       "stop buy at +100",
       "stop sell at 1%",
       "stop $500 at 1%",
       "stop $500 at 1% ETHUSDT",
       "stop buy $500 at 1%",
-      "stop sell 0.01 at -100",
       "stop at 0.1% trigger 18500",
       "stop buy at +100 trigger 19500",
       "stop 500$ at 1% trigger 19000",
@@ -362,7 +357,6 @@
     "examples": [
       "be",
       "be +3%",
-      "be -0.5%",
       "be +100",
       "be ETHUSDT"
     ]

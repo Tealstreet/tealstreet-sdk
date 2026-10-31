@@ -17,7 +17,7 @@ export class MoveCommand extends BaseCommand {
   readonly description = 'Move an order to a new price';
   readonly category = CommandCategory.Trading;
   readonly aliases = ['mv'];
-  readonly examples = ['move abc123 50000', 'move abc123 +10', 'move abc -5'];
+  readonly examples = ['move abc123 50000', 'move abc123 +10'];
   readonly requiresConnection = true;
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
