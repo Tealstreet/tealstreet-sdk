@@ -2305,8 +2305,9 @@ export class RustEngineExchange extends BaseExchange {
         } catch (error) {
           this.reportCommandError(error);
           // Both legs failed: the final error names each.
-          if (failed && failure instanceof Error) failure.message += `; ${errorMessage(error)}`;
-          else failure = error;
+          if (failed && failure instanceof Error) {
+            if (failure.message !== errorMessage(error)) failure.message += `; ${errorMessage(error)}`;
+          } else failure = error;
           failed = true;
         }
       }
@@ -2394,7 +2395,9 @@ export class RustEngineExchange extends BaseExchange {
     for (const { symbol, id } of this.store.orders) ids.set(symbol, [...(ids.get(symbol) ?? []), id]);
     const orders = [...ids].map(([symbol, list]) => `${symbol}: ${list.join(', ')}`).join('; ');
     const positions = this.store.positions.filter((position) => position.contracts !== 0).map((position) => position.symbol).join(', ');
-    this.log(`Nuke incomplete. Open orders: ${orders || 'none'}. Open positions: ${positions || 'none'}.`, LogSeverity.Error);
+    // Unloaded rows are not "none": the failure may be that they never loaded.
+    const list = (rows: string, loaded: boolean) => rows || (loaded ? 'none' : 'unknown, not loaded');
+    this.log(`Nuke incomplete. Open orders: ${list(orders, this.store.loaded.orders)}. Open positions: ${list(positions, this.store.loaded.positions)}.`, LogSeverity.Error);
   };
 
   /** Engine health counters; undefined before the engine starts or after disposal. */

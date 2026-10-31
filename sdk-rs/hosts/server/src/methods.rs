@@ -131,6 +131,42 @@ pub async fn read_when_loaded(
 }
 
 /// Waits up to `wait` for the account's start: markets, balance, orders and positions.
+/// Whether a nuke in `mode` can see everything it acts on; stopping algos needs nothing.
+pub fn nuke_can_see(mode: &str, markets: bool, positions: bool, orders: bool) -> bool {
+    match mode {
+        "algos" => true,
+        "orders" => orders,
+        "positions" => markets && positions,
+        _ => markets && positions && orders,
+    }
+}
+
+/// What a nuke that never saw the account answers: acting on an empty store
+/// would report success with a position open.
+pub const NUKE_NOT_LOADED: &str = "Nuke did not run: positions and orders did not load within 30s. Nothing was sent; check the venue";
+
+/// Waits for what a nuke in `mode` needs, up to `wait`.
+pub async fn until_nuke_can_see(
+    handle: &safe_cex_native::AccountHandle,
+    mode: &'static str,
+    wait: std::time::Duration,
+) -> Result<(), Refused> {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        let loaded = handle.read(|store| store.loaded()).await;
+        match loaded {
+            None => return Err(refused("Error", "Nuke did not run: the account is closed")),
+            Some(loaded) if nuke_can_see(mode, loaded.markets, loaded.positions, loaded.orders) => {
+                return Ok(());
+            }
+            Some(_) if tokio::time::Instant::now() >= deadline => {
+                return Err(refused("Error", NUKE_NOT_LOADED));
+            }
+            Some(_) => tokio::time::sleep(READ_POLL).await,
+        }
+    }
+}
+
 pub async fn until_account_loaded(
     handle: &safe_cex_native::AccountHandle,
     wait: std::time::Duration,

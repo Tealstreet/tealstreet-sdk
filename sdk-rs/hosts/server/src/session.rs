@@ -96,6 +96,9 @@ const TAKEOVER_WAIT: std::time::Duration = std::time::Duration::from_secs(12);
 
 /// A private account's first snapshot waits for its orders and positions, so a
 /// fresh build never shows the client an empty account; past this it goes anyway.
+/// Forced past a reconnect or a hidden tab: the user pressed an emergency control.
+const NUKE_WAITING: &str = "Nuke is waiting for this account's positions and orders to load. It runs once they are known, and fails if they have not loaded within 30s.";
+
 pub const SNAPSHOT_HOLD_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 const SNAPSHOT_HOLD_CHECK: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -717,16 +720,20 @@ impl Session {
                     json!({"requestId": request_id, "success": true, "result": result}),
                 )),
                 Plan::Nuke(mode) => {
-                    let algos = self.joined[name].account.algos.clone();
-                    let sent = algos.is_some_and(|algos| {
-                        algos
-                            .send(crate::algos::AlgoInput::Nuke {
-                                mode,
-                                request_id: request_id.clone(),
-                            })
-                            .is_ok()
-                    });
-                    if !sent {
+                    let handle = account.handle.clone();
+                    // Asked of the whole account, so a page running its own legs after
+                    // `algos` is told too: its positions read then waits the same 30s.
+                    let waiting =
+                        !methods::until_nuke_can_see(&handle, "all", std::time::Duration::ZERO)
+                            .await
+                            .is_ok();
+                    if waiting {
+                        self.send(envelope::algo_error(
+                            name,
+                            Value::String(NUKE_WAITING.to_owned()),
+                        ));
+                    }
+                    let Some(algos) = account.algos.clone() else {
                         self.reply_failure(
                             name,
                             &request_id,
@@ -734,7 +741,43 @@ impl Session {
                             "nuke is unavailable for this account",
                             Some("notSent"),
                         );
+                        continue;
+                    };
+                    let input = crate::algos::AlgoInput::Nuke {
+                        mode,
+                        request_id: request_id.clone(),
+                    };
+                    if !waiting || mode == "algos" {
+                        if algos.send(input).is_err() {
+                            self.reply_failure(
+                                name,
+                                &request_id,
+                                "Error",
+                                "nuke is unavailable for this account",
+                                Some("notSent"),
+                            );
+                        }
+                        continue;
                     }
+                    // Off the socket loop: the wait must not hold the signatures loading needs.
+                    let (out, name, request_id) =
+                        (self.out.clone(), name.to_owned(), request_id.clone());
+                    tokio::spawn(async move {
+                        let refused =
+                            match methods::until_nuke_can_see(&handle, mode, methods::READ_WAIT)
+                                .await
+                            {
+                                Ok(()) if algos.send(input).is_ok() => return,
+                                Ok(()) => "nuke is unavailable for this account".to_owned(),
+                                Err(refused) => refused.message,
+                            };
+                        out.send(envelope::msg(
+                            &name,
+                            "callMethod:done",
+                            json!({"requestId": request_id, "success": false, "result":
+                                {"name": "Error", "message": refused, "outcome": "notSent"}}),
+                        ));
+                    });
                 }
                 Plan::Resnapshot(result) => {
                     if self.resnapshot(name).await {
@@ -1580,6 +1623,101 @@ mod tests {
                     .expect("a call in the gap is answered");
                 assert!(reply.contains("n1") && reply.contains("stopped"), "{reply}");
                 assert!(reply.contains("notSent"), "{reply}");
+            })
+            .await;
+    }
+
+    fn sign_silent_session(
+        registry: Arc<Registry>,
+    ) -> (Session, tokio::sync::mpsc::Receiver<String>) {
+        let (out, sent, _) = Out::channel(64);
+        let identity = Identity {
+            user: Some("u".into()),
+            token: Some(("t".into(), u64::MAX)),
+            resume_from: Some("r1".into()),
+            resumable: true,
+        };
+        let session = Session::new(registry, Arc::new(Metrics::default()), identity, out);
+        (session, sent)
+    }
+
+    const NUKE_CALL: &str = r#"{"t":"msg","d":{"op":"callMethod","accountName":"acct","data":{"requestId":"n1","method":"nuke","args":[]}}}"#;
+
+    /// Startup held and the signer silent, with a position the store cannot show yet.
+    #[tokio::test(start_paused = true)]
+    async fn a_nuke_during_load_says_it_waits_then_closes_what_it_can_see() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let (account, placed) =
+                    crate::accounts::tests::held_load_account(link, Some(5_000.));
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                let (mut session, mut sent) = sign_silent_session(registry);
+                session.open().await;
+                settle().await;
+                while sent.try_recv().is_ok() {}
+
+                session.handle(NUKE_CALL).await.ok();
+                settle().await;
+                let mut frames = Vec::new();
+                while let Ok(frame) = sent.try_recv() {
+                    frames.push(frame);
+                }
+                assert!(
+                    frames
+                        .iter()
+                        .any(|f| f.contains("Nuke is waiting") && f.contains("forceToast")),
+                    "told at once: {frames:?}"
+                );
+                assert!(
+                    !frames.iter().any(|f| f.contains("callMethod:done")),
+                    "no verdict before it has seen positions: {frames:?}"
+                );
+
+                assert_eq!(placed.load(std::sync::atomic::Ordering::SeqCst), 0);
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                assert_eq!(
+                    placed.load(std::sync::atomic::Ordering::SeqCst),
+                    1,
+                    "the close goes out once positions are known"
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_nuke_on_an_account_that_never_loads_fails_visibly_and_never_succeeds() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let (account, placed) = crate::accounts::tests::held_load_account(link, None);
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                let (mut session, mut sent) = sign_silent_session(registry);
+                session.open().await;
+                settle().await;
+                while sent.try_recv().is_ok() {}
+                session.handle(NUKE_CALL).await.ok();
+                tokio::time::sleep(methods::READ_WAIT + std::time::Duration::from_secs(1)).await;
+                let mut frames = Vec::new();
+                while let Ok(frame) = sent.try_recv() {
+                    frames.push(frame);
+                }
+                let reply = frames
+                    .iter()
+                    .find(|f| f.contains("callMethod:done"))
+                    .expect("answered within the bound");
+                assert!(reply.contains(r#""success":false"#), "{reply}");
+                assert!(reply.contains("did not load"), "{reply}");
+                assert!(reply.contains("notSent"), "{reply}");
+                assert_eq!(placed.load(std::sync::atomic::Ordering::SeqCst), 0);
             })
             .await;
     }
