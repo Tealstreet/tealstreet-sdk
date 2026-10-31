@@ -39,6 +39,7 @@ import type {
   OrderBook,
   OrderHistoryOptions,
   PlaceOrderOpts,
+  Position,
   PublicTrade,
   RemoteSignerRequest,
   RemoteSignerResponse,
@@ -294,6 +295,9 @@ const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
   'nukePositions',
   'nukeOrders',
 ]);
+const NUKE_CLOSE_RETRIES = 3;
+const NUKE_CLOSE_RETRY_MS = 100;
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode'] as const;
 /**
  * Engine methods a main-thread worker mirror cannot answer and does not forward:
@@ -2183,45 +2187,7 @@ export class RustEngineExchange extends BaseExchange {
     try {
       const stopped = await this.stopAlgosForNuke();
       try {
-        const orders: PlaceOrderOpts[] = [];
-        // One unusable position (an unlisted market, a missing inverse notional)
-        // must not stop the others from closing; it fails the nuke afterwards.
-        const skipped: string[] = [];
-        for (const position of await this.fetchPositions()) {
-          const market = this.store.marketsBySymbol[position.symbol];
-          if (!market) {
-            if (position.contracts !== 0) skipped.push(`${position.symbol}: market not found`);
-            continue;
-          }
-          const sized = market.isInverse ? position.notional : position.contracts;
-          const native = position.extra?.contractsNative;
-          if (
-            sized === undefined ||
-            !Number.isFinite(sized) ||
-            (native !== undefined && !Number.isFinite(native)) ||
-            (market.contractSize !== undefined && (!Number.isFinite(market.contractSize) || market.contractSize < 0))
-          ) {
-            skipped.push(`${position.symbol}: invalid close size`);
-            continue;
-          }
-          const amount = nativePositionSize(position, market);
-          if (!Number.isFinite(amount) || amount < 0) {
-            skipped.push(`${position.symbol}: invalid close size`);
-            continue;
-          }
-          if (amount > 0)
-            orders.push({
-              symbol: position.symbol,
-              side: position.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
-              type: OrderType.Market,
-              amount,
-              reduceOnly: true,
-            });
-        }
-        // One batch retains native partial/unknown outcomes without replaying
-        // a close against positions that have not yet reconciled.
-        if (orders.length) await this.placeOrders(orders);
-        if (skipped.length) throw new Error(`Nuke could not close ${skipped.join('; ')}`);
+        await this.closeAllPositions();
       } catch (error) {
         this.reportCommandError(error);
         failed = true;
@@ -2232,7 +2198,9 @@ export class RustEngineExchange extends BaseExchange {
           await this.cancelAllOrders();
         } catch (error) {
           this.reportCommandError(error);
-          if (!failed) failure = error;
+          // Both legs failed: the final error names each.
+          if (failed && failure instanceof Error) failure.message += `; ${errorMessage(error)}`;
+          else failure = error;
           failed = true;
         }
       }
@@ -2244,6 +2212,74 @@ export class RustEngineExchange extends BaseExchange {
     } finally {
       this.isNuking = false;
     }
+  };
+
+  /**
+   * Closes one position at a time so a failure names its symbol, as legacy, and
+   * retries only a failed close whose position still shows open: a close that
+   * succeeded behind a lagging store is never sent again. Every close is reduce-only.
+   */
+  private closeAllPositions = async (): Promise<void> => {
+    const unusable: { symbol: string; error: unknown }[] = [];
+    let failures = new Map<string, { symbol: string; error: unknown }>();
+    for (let attempt = 0; attempt <= NUKE_CLOSE_RETRIES; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, NUKE_CLOSE_RETRY_MS));
+      const failedLast = failures;
+      failures = new Map();
+      for (const position of await this.fetchPositions()) {
+        const key = `${position.symbol}:${position.side}`;
+        if (this.isDisposed || (attempt > 0 && !failedLast.has(key))) continue;
+        let order: PlaceOrderOpts | undefined;
+        try {
+          order = this.nukeCloseOrder(position);
+        } catch (error) {
+          unusable.push({ symbol: position.symbol, error });
+          continue;
+        }
+        try {
+          if (order) await this.placeOrders([order]);
+        } catch (error) {
+          failures.set(key, { symbol: position.symbol, error });
+        }
+      }
+      if (!failures.size) break;
+    }
+    const open = new Set((await this.fetchPositions()).filter((position) => position.contracts !== 0).map((position) => `${position.symbol}:${position.side}`));
+    for (const key of failures.keys()) if (!open.has(key)) failures.delete(key);
+    const failed = [...failures.values(), ...unusable];
+    if (!failed.length) return;
+    const unknown = failed.find(({ error }) => (error as { outcome?: unknown })?.outcome === 'unknown');
+    const details = (unknown ?? failed[0]).error;
+    throw Object.assign(new Error(`Nuke could not close ${failed.map(({ symbol, error }) => `${symbol}: ${errorMessage(error)}`).join('; ')}`), details instanceof Error ? { ...details } : {});
+  };
+
+  /** The reduce-only market close; undefined for a flat position, throws on an unusable one. */
+  private nukeCloseOrder = (position: Position): PlaceOrderOpts | undefined => {
+    const market = this.store.marketsBySymbol[position.symbol];
+    if (!market) {
+      if (position.contracts !== 0) throw new Error('market not found');
+      return undefined;
+    }
+    const sized = market.isInverse ? position.notional : position.contracts;
+    const native = position.extra?.contractsNative;
+    if (
+      sized === undefined ||
+      !Number.isFinite(sized) ||
+      (native !== undefined && !Number.isFinite(native)) ||
+      (market.contractSize !== undefined && (!Number.isFinite(market.contractSize) || market.contractSize < 0))
+    ) {
+      throw new Error('invalid close size');
+    }
+    const amount = nativePositionSize(position, market);
+    if (!Number.isFinite(amount) || amount < 0) throw new Error('invalid close size');
+    if (amount === 0) return undefined;
+    return {
+      symbol: position.symbol,
+      side: position.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
+      type: OrderType.Market,
+      amount,
+      reduceOnly: true,
+    };
   };
 
   private logNukeRemainder = (): void => {

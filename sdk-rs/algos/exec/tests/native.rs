@@ -626,8 +626,8 @@ fn native_order(symbol: &str) -> safe_cex_engine::model::Order {
         extra: None,
     }
 }
-#[tokio::test]
-async fn nuke_cancels_account_symbols_then_attempts_every_position_after_unknown_without_retry() {
+#[tokio::test(start_paused = true)]
+async fn nuke_cancels_account_symbols_then_retries_only_the_failed_close_and_names_it() {
     LocalSet::new().run_until(async {
         let port=Rc::new(Port::default());wait_market(&port);
         let mut eth=port.store.borrow().markets["BTCUSDT"].clone();eth.symbol="ETHUSDT".into();eth.id="ETHUSDT".into();eth.base="ETH".into();port.store.borrow_mut().markets.insert("ETHUSDT".into(),eth);
@@ -645,11 +645,18 @@ async fn nuke_cancels_account_symbols_then_attempts_every_position_after_unknown
         port.replies.borrow_mut().remove(0).send(Err(VenueError::new("lost close").outcome(Outcome::Unknown))).unwrap();settle_exec().await;
         assert!(matches!(&port.commands.borrow()[3],Command::PlaceOrders{orders,..} if orders[0].symbol=="ETHUSDT"&&orders[0].reduce_only==Some(true)&&orders[0].amount==0.02));
         port.replies.borrow_mut().remove(0).send(Ok(r#"["real-eth-close"]"#.into())).unwrap();settle_exec().await;
+        // ETH closed but the store still shows it: only BTC, reduce-only, is sent again.
+        for attempt in 4..7 {
+            tokio::time::sleep(std::time::Duration::from_millis(101)).await;settle_exec().await;
+            assert!(matches!(&port.commands.borrow()[attempt],Command::PlaceOrders{orders,..} if orders[0].symbol=="BTCUSDT"&&orders[0].reduce_only==Some(true)));
+            port.replies.borrow_mut().remove(0).send(Err(VenueError::new("lost close").outcome(Outcome::Unknown))).unwrap();settle_exec().await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(101)).await;settle_exec().await;
         let events=port.events.borrow();let result=&events.iter().find(|(op,e)|op=="exec-result"&&e["reqId"]=="nuke").unwrap().1;
         assert_eq!(result["success"],false);assert_eq!(result["errorDetails"]["outcome"],"unknown");assert_eq!(result["errorDetails"]["failedOperationCount"],1);assert_eq!(result["errorDetails"]["partialOrderIds"],json!(["real-eth-close"]));
         assert_eq!(result["errorDetails"]["failedLegs"][0]["symbol"],"BTCUSDT");
         assert!(result["error"].as_str().unwrap().contains("BTCUSDT close: lost close"));
-        assert!(result["error"].as_str().unwrap().contains("3 operation(s), 1 failed"));assert_eq!(port.commands.borrow().len(),4);cx.scope.dispose();
+        assert!(result["error"].as_str().unwrap().contains("3 operation(s), 1 failed"));assert_eq!(port.commands.borrow().len(),7);cx.scope.dispose();
     }).await;
 }
 #[tokio::test]
@@ -779,6 +786,62 @@ async fn task_list_and_kill_use_injected_chase_and_twap_books_with_ts_ordering()
         .await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn nuke_close_retries_a_transient_failure_and_reports_success() {
+    LocalSet::new().run_until(async {
+        let port=Rc::new(Port::default());wait_market(&port);
+        port.store.borrow_mut().positions=vec![native_position("BTCUSDT")];
+        let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();
+        factory.handle("exec",r#"{"symbol":"BTCUSDT","command":"nuke pos","reqId":"r"}"#,&cx).unwrap();settle_exec().await;
+        port.replies.borrow_mut().remove(0).send(Err(VenueError::new("busy"))).unwrap();settle_exec().await;
+        tokio::time::sleep(std::time::Duration::from_millis(101)).await;settle_exec().await;
+        assert!(matches!(&port.commands.borrow()[1],Command::PlaceOrders{orders,..} if orders[0].reduce_only==Some(true)));
+        // The store still lags the accepted close: no further send and no failure.
+        port.replies.borrow_mut().remove(0).send(Ok(r#"["close"]"#.into())).unwrap();settle_exec().await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;settle_exec().await;
+        assert_eq!(port.commands.borrow().len(),2);
+        let events=port.events.borrow();let result=&events.iter().find(|(op,e)|op=="exec-result"&&e["reqId"]=="r").unwrap().1;
+        assert_eq!(result["success"],true,"{result}");cx.scope.dispose();
+    }).await;
+}
+#[tokio::test(start_paused = true)]
+async fn nuke_close_does_not_retry_a_position_already_gone() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            wait_market(&port);
+            port.store.borrow_mut().positions = vec![native_position("BTCUSDT")];
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            factory
+                .handle(
+                    "exec",
+                    r#"{"symbol":"BTCUSDT","command":"nuke pos","reqId":"r"}"#,
+                    &cx,
+                )
+                .unwrap();
+            settle_exec().await;
+            port.store.borrow_mut().positions = Vec::new();
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Err(VenueError::new("answer lost").outcome(Outcome::Unknown)))
+                .unwrap();
+            settle_exec().await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            settle_exec().await;
+            assert_eq!(port.commands.borrow().len(), 1);
+            let events = port.events.borrow();
+            let result = &events
+                .iter()
+                .find(|(op, e)| op == "exec-result" && e["reqId"] == "r")
+                .unwrap()
+                .1;
+            assert_eq!(result["success"], true, "{result}");
+            cx.scope.dispose();
+        })
+        .await;
+}
 #[tokio::test]
 async fn nuke_cancel_attempts_every_symbol_after_an_unknown_second_cancel() {
     LocalSet::new().run_until(async {
