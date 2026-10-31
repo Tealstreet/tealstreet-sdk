@@ -626,6 +626,47 @@ fn native_order(symbol: &str) -> safe_cex_engine::model::Order {
         extra: None,
     }
 }
+#[tokio::test]
+async fn be_does_not_cancel_a_stop_the_venue_already_ended() {
+    use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            wait_market(&port);
+            let stop = |id: &str, status| safe_cex_engine::model::Order {
+                id: id.into(),
+                status,
+                kind: OrderType::StopLoss,
+                side: OrderSide::Sell,
+                ..native_order("BTCUSDT")
+            };
+            port.store.borrow_mut().venue = "bybit".into();
+            port.store.borrow_mut().instrument_classifications = Some(Default::default());
+            port.store.borrow_mut().tickers.get_mut("BTCUSDT").unwrap().mark = 50100.;
+            port.store.borrow_mut().positions = vec![native_position("BTCUSDT")];
+            port.store.borrow_mut().orders =
+                vec![stop("ended", OrderStatus::Canceled), stop("fired", OrderStatus::Closed)];
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            factory
+                .handle("exec", r#"{"symbol":"BTCUSDT","command":"be","reqId":"be"}"#, &cx)
+                .unwrap();
+            settle_exec().await;
+            assert!(matches!(&port.commands.borrow()[0], Command::PlaceOrders { .. }));
+
+            port.store.borrow_mut().orders =
+                vec![stop("ended", OrderStatus::Canceled), stop("live", OrderStatus::Open)];
+            port.replies.borrow_mut().remove(0).send(Ok(r#"["placed"]"#.into())).unwrap();
+            settle_exec().await;
+            factory
+                .handle("exec", r#"{"symbol":"BTCUSDT","command":"be","reqId":"again"}"#, &cx)
+                .unwrap();
+            settle_exec().await;
+            assert!(matches!(&port.commands.borrow()[1], Command::CancelOrders { ids, .. } if ids == &["live"]));
+            cx.scope.dispose();
+        })
+        .await;
+}
 #[tokio::test(start_paused = true)]
 async fn nuke_cancels_account_symbols_then_retries_only_the_failed_close_and_names_it() {
     LocalSet::new().run_until(async {
