@@ -648,17 +648,11 @@ impl Registry {
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
         account.hold(holder, live);
         if let Some(remote) = remote {
-            // As TS `setFatalFailureCallback`: a signer failing repeatedly disposes the account.
             let registry = Arc::downgrade(self);
             let weak = Arc::downgrade(&account);
             remote.on_fatal(move || {
                 if let (Some(registry), Some(account)) = (registry.upgrade(), weak.upgrade()) {
-                    Log::warn(&format!("signer for {} failing; disposing", account.venue));
-                    account.notify(crate::envelope::error(
-                        Some(&account.name),
-                        "Remote signing failed repeatedly; the account was disposed",
-                    ));
-                    registry.dispose(&account);
+                    registry.signer_failed(&account);
                 }
             });
         }
@@ -856,6 +850,46 @@ impl Registry {
             }
             account.handle.dispose();
         }
+    }
+
+    /// A signer that keeps answering with failures stops the account. The page
+    /// re-inits on its next pong; algos do not restart, so whoever holds it is told.
+    fn signer_failed(&self, account: &Arc<Account>) {
+        Log::warn(&format!("signer for {} failing; disposing", account.venue));
+        let name = account.name.clone();
+        let live: Vec<Outbox> = account
+            .holders
+            .lock()
+            .unwrap()
+            .by_id
+            .values()
+            .flatten()
+            .map(|live| live.outbox.clone())
+            .collect();
+        for outbox in &live {
+            outbox(crate::envelope::algo_error(
+                &name,
+                Value::String(
+                    "Remote signing failed repeatedly: this account stopped and is restarting. \
+                     Orders and Nuke need it back; reload if it does not return."
+                        .to_owned(),
+                ),
+            ));
+        }
+        let stopped: crate::algos::StopNotice = Box::new(move |notice| {
+            for outbox in &live {
+                outbox(crate::envelope::algo_error(
+                    &name,
+                    Value::String(notice.clone()),
+                ));
+            }
+        });
+        self.dispose_for(account, "remote signing failed repeatedly", Some(stopped));
+    }
+
+    /// Whether `holder` still holds `account`; disposing drops every holder.
+    pub fn holds(&self, account: &Account, holder: u64) -> bool {
+        account.holders.lock().unwrap().by_id.contains_key(&holder)
     }
 
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
@@ -1220,6 +1254,48 @@ pub(crate) mod tests {
             (account.user.clone(), account.name.clone()),
             account.clone(),
         );
+    }
+
+    #[tokio::test]
+    async fn a_failing_signer_tells_live_sockets_what_stopped_with_the_account() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, mut algos) = held_account();
+                let sent: Arc<Mutex<Vec<String>>> = Arc::default();
+                let seen = sent.clone();
+                hold_live(
+                    &account,
+                    8,
+                    Arc::new(move |text| {
+                        seen.lock().unwrap().push(text);
+                        true
+                    }),
+                );
+                registry.signer_failed(&account);
+                let frames = sent.lock().unwrap().clone();
+                assert!(
+                    frames.iter().any(|frame| frame.contains("restarting")
+                        && frame.contains("Nuke")
+                        && frame.contains("forceToast")),
+                    "says what stopped, even to a hidden tab: {frames:?}"
+                );
+                let Ok(crate::algos::AlgoInput::Dispose { stopped, .. }) = algos.try_recv() else {
+                    panic!("the algo host is told to stop");
+                };
+                // The holders are gone by the time the host reports what it stopped.
+                stopped.expect("the live socket stays reachable")(
+                    "Chase on BTCUSDT stopped".into(),
+                );
+                assert!(
+                    sent.lock()
+                        .unwrap()
+                        .last()
+                        .is_some_and(|frame| frame.contains("Chase on BTCUSDT stopped")
+                            && frame.contains("forceToast"))
+                );
+            })
+            .await;
     }
 
     pub(crate) fn registry() -> Arc<Registry> {

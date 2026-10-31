@@ -280,6 +280,7 @@ impl Session {
                 }
             }
             Inbound::Ping(ping) => {
+                self.forget_disposed();
                 let names: Vec<String> = self.joined.keys().cloned().collect();
                 self.send(envelope::pong(&names));
                 let keep = ping.unwrap_or_default().accounts;
@@ -321,6 +322,7 @@ impl Session {
             self.socket,
             self.resume_id_prefix()
         ));
+        self.forget_disposed();
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
         {
@@ -473,19 +475,52 @@ impl Session {
     }
 
     fn leave(&self, joined: Joined) {
+        let account = joined.account.clone();
+        Self::leave_engine(joined);
+        self.registry.release(&account, self.socket);
+    }
+
+    fn leave_engine(joined: Joined) {
         for client in std::iter::once(joined.client).chain(joined.old) {
             client.pump.abort();
             joined.account.handle.leave(client.id);
         }
-        self.registry.release(&joined.account, self.socket);
+    }
+
+    /// Accounts disposed under this socket (a failing signer) are no longer
+    /// joined: the pong then omits them, which is what the page re-inits on.
+    fn forget_disposed(&mut self) {
+        let socket = self.socket;
+        let registry = self.registry.clone();
+        let gone: Vec<String> = self
+            .joined
+            .iter()
+            .filter(|(_, joined)| !registry.holds(&joined.account, socket))
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in gone {
+            if let Some(joined) = self.joined.remove(&name) {
+                Self::leave_engine(joined);
+            }
+        }
     }
 
     async fn msg(&mut self, msg: AccountMsg) {
         let Some(name) = msg.account_name.clone() else {
             return;
         };
+        self.forget_disposed();
         if !self.joined.contains_key(&name) {
             Log::warn(&format!("no joined account for op {}", msg.op));
+            if msg.op == "callMethod" {
+                self.reply_failure(
+                    &name,
+                    &msg.data.get("requestId").cloned().unwrap_or(Value::Null),
+                    "Error",
+                    "this account stopped and is restarting; reload if it does not return",
+                    Some("notSent"),
+                );
+            }
             return;
         }
         let symbol = msg
@@ -1472,6 +1507,79 @@ mod tests {
                 while let Ok(frame) = sent.try_recv() {
                     assert!(!frame.contains(r#""op":"error""#), "stale repeat: {frame}");
                 }
+            })
+            .await;
+    }
+
+    /// A stalled or failing signer ends here: the page must see the account gone,
+    /// so its existing re-init runs, and a call in the gap must be answered.
+    #[tokio::test(start_paused = true)]
+    async fn a_disposed_account_leaves_the_pong_and_refuses_calls_by_name() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account = crate::accounts::tests::held_account_running_algos(
+                    link,
+                    init.fingerprint(),
+                );
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
+                let (out, mut sent, _) = Out::channel(64);
+                let identity = Identity {
+                    user: Some("u".into()),
+                    token: Some(("t".into(), u64::MAX)),
+                    resume_from: Some("r1".into()),
+                    resumable: true,
+                };
+                let mut session =
+                    Session::new(registry.clone(), Arc::new(Metrics::default()), identity, out);
+                session.open().await;
+                settle().await;
+                session.handle(r#"{"t":"ping"}"#).await.ok();
+                settle().await;
+                let mut frames = Vec::new();
+                while let Ok(frame) = sent.try_recv() {
+                    frames.push(frame);
+                }
+                assert!(
+                    frames.iter().any(|f| f.contains(r#"{"t":"pong""#) && f.contains("acct")),
+                    "held and listed: {frames:?}"
+                );
+
+                registry.dispose(&account);
+                settle().await;
+                session.handle(r#"{"t":"ping"}"#).await.ok();
+                session
+                    .handle(
+                        r#"{"t":"msg","d":{"op":"callMethod","accountName":"acct","data":{"requestId":"n1","method":"nuke","args":[]}}}"#,
+                    )
+                    .await
+                    .ok();
+                let mut frames = Vec::new();
+                while let Ok(frame) = sent.try_recv() {
+                    frames.push(frame);
+                }
+                assert!(
+                    frames
+                        .iter()
+                        .any(|f| f.contains(r#"{"t":"pong""#) && !f.contains("acct")),
+                    "the page's re-init needs it missing: {frames:?}"
+                );
+                let reply = frames
+                    .iter()
+                    .find(|f| f.contains("callMethod:done"))
+                    .expect("a call in the gap is answered");
+                assert!(reply.contains("n1") && reply.contains("stopped"), "{reply}");
+                assert!(reply.contains("notSent"), "{reply}");
             })
             .await;
     }

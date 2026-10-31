@@ -548,7 +548,7 @@ async fn setup_refuses_secrets_secondaries_missing_passphrases_and_undeclared_ve
 }
 
 #[tokio::test(start_paused = true)]
-async fn timeouts_count_toward_the_fatal_streak_and_suspension_does_not() {
+async fn a_stalled_page_on_a_live_socket_never_trips_the_fatal_streak() {
     let link = SignerLink::new(1, Arc::new(|_| true));
     // A browser still sending frames on socket 1 that never answers a sign.
     let alive = Arc::downgrade(&link);
@@ -580,10 +580,9 @@ async fn timeouts_count_toward_the_fatal_streak_and_suspension_does_not() {
             Err(SignError::TimedOut)
         );
     }
-    // Ten 15s timeouts span 150s, past the 30s floor.
-    assert_eq!(*fired.lock().unwrap(), 1);
-    account.provider.sign(work()).await.ok();
-    assert_eq!(*fired.lock().unwrap(), 1, "fires once");
+    // Ten 15s timeouts span 150s, past the 30s floor: a stalled page thread
+    // behind a worker that still answers echoes is slow, not a failed signer.
+    assert_eq!(*fired.lock().unwrap(), 0);
 
     // Sent, then parked past its timeout with no browser: not a signer failure.
     let pending = tokio::spawn(account.provider.sign(work()));
@@ -593,7 +592,7 @@ async fn timeouts_count_toward_the_fatal_streak_and_suspension_does_not() {
         pending.await.unwrap().map(|_| ()),
         Err(SignError::Unavailable)
     );
-    assert_eq!(*fired.lock().unwrap(), 1);
+    assert_eq!(*fired.lock().unwrap(), 0);
     let pending = tokio::spawn(account.provider.sign(work()));
     tokio::task::yield_now().await;
     assert!(!link.is_available());
