@@ -32,6 +32,7 @@ const current: Partial<StoreData> = {
 };
 let venue: ExchangeName = 'bybit';
 const reads: string[] = [];
+let holdFrames = false;
 class ReadEngine implements WasmEngineLike {
   capabilities = () => engineCapabilities(venue);
   start = () => '[]';
@@ -46,7 +47,7 @@ class ReadEngine implements WasmEngineLike {
   };
   private pending = true;
   takeFrame = () => {
-    if (!this.pending) return undefined;
+    if (!this.pending || holdFrames) return undefined;
     this.pending = false;
     return new Uint8Array(consumerFrame(current, undefined, true));
   };
@@ -102,6 +103,7 @@ const select = async (worker: ExchangeWorker, symbol: string) => {
 
 beforeEach(() => {
   reads.length = 0;
+  holdFrames = false;
   setTwapLockManager(null);
   vi.useFakeTimers();
   vi.spyOn(virtualClock, 'start').mockResolvedValue();
@@ -137,4 +139,67 @@ it('warns rather than dropping a selection before the worker engine reports capa
   await select(worker, 'LSKUSDT');
   expect(reads).toEqual([]);
   expect(logs).toHaveBeenCalledWith(expect.stringContaining('LSKUSDT'), LogSeverity.Warning);
+});
+
+it('a selection that beats the engine markets is read once they load', async () => {
+  venue = 'bybit';
+  holdFrames = true;
+  const messages: Array<{ op: string; data?: any }> = [];
+  const worker = new ExchangeWorker(
+    { postMessage: (message: never) => messages.push(message) } as unknown as Worker,
+    'bear5',
+    venue,
+    { key: 'key', secret: 'secret', passphrase: 'pass', engine: 'rust' } as never,
+    {} as never,
+    {} as never,
+    'fixture',
+  );
+  workers.push(worker);
+  const started = worker.start();
+  await vi.advanceTimersByTimeAsync(50);
+  await select(worker, 'LSKUSDT');
+  expect(reads).toEqual([]);
+  holdFrames = false;
+  await vi.advanceTimersByTimeAsync(500);
+  await started;
+  expect(reads).toEqual(['LSKUSDT']);
+  expect(messages.filter((message) => message.data?.fetchedLeverage).at(-1)?.data.fetchedLeverage.LSKUSDT).toMatchObject({
+    buyLeverage: 10,
+  });
+});
+
+it('calls during a cold wasm fetch wait for the engine instead of failing or being lost', async () => {
+  venue = 'bybit';
+  let loaded!: () => void;
+  const wasm = new Promise<void>((resolve) => (loaded = resolve));
+  setWasmEngineLoader(async () => {
+    await wasm;
+    return { WasmEngine: ReadEngine as never };
+  });
+  const messages: Array<{ op: string; data?: any }> = [];
+  const worker = new ExchangeWorker(
+    { postMessage: (message: never) => messages.push(message) } as unknown as Worker,
+    'bear5',
+    venue,
+    { key: 'key', secret: 'secret', passphrase: 'pass', engine: 'rust' } as never,
+    {} as never,
+    {} as never,
+    'fixture',
+  );
+  workers.push(worker);
+  const started = worker.start();
+  await vi.advanceTimersByTimeAsync(50);
+  await select(worker, 'LSKUSDT');
+  worker.handlePayload({
+    op: 'callMethod',
+    data: { requestId: 'candles', method: 'fetchOHLCV', args: [{ symbol: 'LSKUSDT', interval: '1h', limit: 1 }] },
+  } as never);
+  await vi.advanceTimersByTimeAsync(50);
+  expect(reads).toEqual([]);
+  loaded();
+  await vi.advanceTimersByTimeAsync(500);
+  await started;
+  expect(reads).toEqual(['LSKUSDT']);
+  const candles = messages.find((message) => message.op === 'callMethod:done' && message.data.requestId === 'candles');
+  expect(candles?.data.success).toBe(true);
 });
