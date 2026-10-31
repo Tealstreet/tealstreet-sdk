@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use safe_cex_algo_twap::SliceFailure;
 use safe_cex_algo_twap::{
     ChaserProgress, OrderKind, OrderSide, TickerQuote, TwapBook, TwapEffect, TwapEnv,
     TwapMarketView, TwapStatus,
@@ -152,12 +153,19 @@ fn state_updates(effects: &[TwapEffect]) -> Vec<&Value> {
 }
 
 /// Settle every slice placement in `effects` with `outcome`.
+fn refused(message: &str) -> Result<Vec<String>, SliceFailure> {
+    Err(SliceFailure {
+        message: message.to_owned(),
+        nothing_placed: true,
+    })
+}
+
 fn settle_all(
     book: &mut TwapBook,
     env: &mut Env,
     id: &str,
     effects: &[TwapEffect],
-    outcome: Result<Vec<String>, String>,
+    outcome: Result<Vec<String>, SliceFailure>,
 ) -> Vec<TwapEffect> {
     let mut out = Vec::new();
     for (token, _) in placements(effects) {
@@ -358,7 +366,7 @@ fn slices_run_on_the_interval_and_complete() {
 }
 
 #[test]
-fn failed_slice_logs_and_advances() {
+fn a_refused_slice_logs_advances_and_is_not_counted() {
     let (mut env, view) = (Env::new(), View::default());
     let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
@@ -367,13 +375,54 @@ fn failed_slice_logs_and_advances() {
         &mut env,
         &id,
         &effects,
-        Err("insufficient margin".into()),
+        refused("insufficient margin"),
     );
     assert!(settled.contains(&TwapEffect::Log {
         message: "TWAP BTCUSDT slice failed: insufficient margin".into()
     }));
-    assert_eq!(book.get(&id).unwrap().state.orders_executed, 1);
+    assert_eq!(book.get(&id).unwrap().state.orders_executed, 0);
     assert!(book.wake_at().is_some());
+}
+
+#[test]
+fn a_twap_whose_every_slice_is_refused_ends_saying_none_were_placed() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
+    let first = settle_all(&mut book, &mut env, &id, &effects, refused("reduce only"));
+    assert_eq!(logs(&first), ["TWAP BTCUSDT slice failed: reduce only"]);
+
+    env.now = book.wake_at().unwrap();
+    let effects = book.wake(&mut env, &view);
+    let last = settle_all(&mut book, &mut env, &id, &effects, refused("reduce only"));
+    assert_eq!(
+        logs(&last),
+        [
+            "TWAP BTCUSDT slice failed: reduce only",
+            "TWAP BTCUSDT ended with 0 of 2 slices placed",
+        ]
+    );
+    assert_eq!(book.wake_at(), None);
+    assert!(book.get(&id).is_none());
+}
+
+#[test]
+fn a_twap_that_placed_every_slice_ends_without_a_shortfall_error() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 1 }));
+    let last = settle_all(&mut book, &mut env, &id, &effects, Ok(vec!["a".into()]));
+    assert!(logs(&last).is_empty());
+}
+
+#[test]
+fn a_user_stop_during_a_refused_placement_reports_no_shortfall() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
+    book.handle("twap:stop", &json!(id), &mut env, &view);
+    let settled = settle_all(&mut book, &mut env, &id, &effects, refused("no"));
+    assert_eq!(logs(&settled), ["TWAP BTCUSDT slice failed: no"]);
 }
 
 #[test]
@@ -424,7 +473,7 @@ fn in_flight_failure_after_terminate_still_logs() {
     let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
     book.handle("twap:stop", &json!(id), &mut env, &view);
-    let settled = settle_all(&mut book, &mut env, &id, &effects, Err("boom".into()));
+    let settled = settle_all(&mut book, &mut env, &id, &effects, refused("boom"));
     assert_eq!(
         settled,
         vec![TwapEffect::Log {
@@ -874,7 +923,10 @@ fn an_unknown_placement_outcome_still_advances_the_slice() {
         &mut env,
         &id,
         &effects,
-        Err("outcome unknown, the order may be live: timeout".into()),
+        Err(SliceFailure {
+            message: "outcome unknown, the order may be live: timeout".into(),
+            nothing_placed: false,
+        }),
     );
     assert_eq!(
         logs(&settled),

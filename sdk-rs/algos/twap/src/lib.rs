@@ -78,6 +78,14 @@ pub struct TwapOrderRequest {
     pub client_order_id: Option<String>,
 }
 
+/// Why a slice placement failed, and whether that proves no order exists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SliceFailure {
+    pub message: String,
+    /// False when an order may be live: the slice still counts as executed.
+    pub nothing_placed: bool,
+}
+
 /// The chaser a `useChaserOrders` slice starts, with the id TWAP tracks it by.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChaserRequest {
@@ -256,7 +264,7 @@ impl TwapBook {
         &mut self,
         twap_id: &str,
         token: u64,
-        outcome: Result<Vec<String>, String>,
+        outcome: Result<Vec<String>, SliceFailure>,
         env: &mut dyn TwapEnv,
     ) -> Vec<TwapEffect> {
         let mut effects = Vec::new();
@@ -268,6 +276,20 @@ impl TwapBook {
             entry
                 .instance
                 .placement_settled(token, outcome, env, &mut effects);
+        }
+        self.settle(&mut effects);
+        effects
+    }
+
+    /// The chaser runtime refused the chaser of a slice [`TwapEffect::StartChaser`].
+    pub fn slice_chaser_refused(&mut self, twap_id: &str, chaser_id: &str) -> Vec<TwapEffect> {
+        let mut effects = Vec::new();
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.instance.id == twap_id)
+        {
+            entry.instance.slice_chaser_refused(chaser_id, &mut effects);
         }
         self.settle(&mut effects);
         effects
