@@ -2232,15 +2232,29 @@ export class RustEngineExchange extends BaseExchange {
           await this.cancelAllOrders();
         } catch (error) {
           this.reportCommandError(error);
-          if (!failed) throw error;
+          if (!failed) failure = error;
+          failed = true;
         }
       }
-      if (failed) throw failure;
+      if (failed) {
+        this.logNukeRemainder();
+        throw failure;
+      }
       return stopped;
     } finally {
       this.isNuking = false;
     }
   };
+
+  private logNukeRemainder = (): void => {
+    this.syncAccountState();
+    const ids = new Map<string, string[]>();
+    for (const { symbol, id } of this.store.orders) ids.set(symbol, [...(ids.get(symbol) ?? []), id]);
+    const orders = [...ids].map(([symbol, list]) => `${symbol}: ${list.join(', ')}`).join('; ');
+    const positions = this.store.positions.filter((position) => position.contracts !== 0).map((position) => position.symbol).join(', ');
+    this.log(`Nuke incomplete. Open orders: ${orders || 'none'}. Open positions: ${positions || 'none'}.`, LogSeverity.Error);
+  };
+
   /** Engine health counters; undefined before the engine starts or after disposal. */
   getHealth = (): EngineHealth | undefined => (this.host && !this.isDisposed ? this.host.health() : undefined);
 
@@ -2261,17 +2275,16 @@ export class RustEngineExchange extends BaseExchange {
 
   // Native current orders, not a JS store that can lag the engine's flush.
   private cancelEachNativeOrderSymbol = async () => {
-    const symbols = new Set((await this.fetchOrders()).map((order) => order.symbol));
-    for (const symbol of symbols) {
-      if (this.isDisposed) break;
-      await this.cancelSymbolOrders(symbol);
-    }
+    await this.cancelEachSymbol(new Set((await this.fetchOrders()).map((order) => order.symbol)));
   };
 
   private cancelEachPlacedSymbol = async () => {
     // Frames can lag placement ACKs. Keep attempted scopes for this account's
     // lifetime, including uncertain/rejected outcomes and races with later places.
-    const symbols = new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]);
+    await this.cancelEachSymbol(new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]));
+  };
+
+  private cancelEachSymbol = async (symbols: Set<string>) => {
     const failures: string[] = [];
     for (const symbol of symbols) {
       if (this.isDisposed) continue;

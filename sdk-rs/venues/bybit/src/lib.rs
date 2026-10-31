@@ -3044,6 +3044,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.on_unlisted_timer(cx, timer) {
+            return;
+        }
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);

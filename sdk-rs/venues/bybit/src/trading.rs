@@ -93,6 +93,8 @@ struct Job {
 pub struct TradingState {
     ordinary: HashMap<CommandId, ordinary::Ordinary>,
     mode_version: u64,
+    /// Settles cancel-alls whose order read has landed.
+    unlisted_timer: Option<safe_cex_engine::TimerId>,
     pub(crate) hyro: crate::hyro::State,
 }
 
