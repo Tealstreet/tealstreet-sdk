@@ -1708,18 +1708,22 @@ export class RustEngineExchange extends BaseExchange {
 
   updateSymbolMetadata = async (symbol: string) => {
     if (this.isPublicDataOnly) return;
+    // A page with cached or kept rows selects before this engine has its markets, and nothing asks again.
+    if (this.startupState === 'pending') await this.startup?.catch(() => undefined);
     const capabilities = this.capabilityRecord;
     if (!capabilities) {
       this.log(`Symbol metadata for ${symbol} was not refreshed: the engine has not started`, LogSeverity.Warning);
       return;
     }
-    if (capabilities.maxLeverage === 'query') {
-      await this.fetchSymbolMaxLeverage(symbol);
-      return;
-    }
-    if (capabilities.leverageQuery !== 'onMetadata' && capabilities.leverageQuery !== 'onReadAndMetadata') return;
+    const readsLeverage = capabilities.leverageQuery === 'onMetadata' || capabilities.leverageQuery === 'onReadAndMetadata';
+    if (capabilities.maxLeverage !== 'query' && !readsLeverage) return;
     // Refreshed on every symbol selection, and a read can refuse routinely (portfolio margin).
     try {
+      await this.untilNativeData(LOADED_FLAG.MARKETS, 'markets');
+      if (capabilities.maxLeverage === 'query') {
+        await this.fetchSymbolMaxLeverage(symbol);
+        return;
+      }
       const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
       this.applier.applyLeverage(symbol, rails);
@@ -2020,6 +2024,8 @@ export class RustEngineExchange extends BaseExchange {
     try {
       if (this.engineFailure) throw this.engineFailure;
       if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
+      // A cold wasm fetch: the worker takes calls before its engine is built.
+      if (!this.host && this.startupState === 'pending') await this.ensureHost();
       if (!this.host) throw new Error(`${this.name} engine is not started`);
       if (this.requireCapabilities('command').finiteCommandNumbers) {
         const invalid = (value: unknown): boolean =>

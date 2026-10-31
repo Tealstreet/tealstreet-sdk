@@ -578,7 +578,11 @@ pub fn translate(
             } else {
                 return one(Plan::Reply(Value::Null));
             };
-            one(command(op, fields([("symbol", symbol.into())]), true))
+            // A selection can beat this engine's markets: a kept page store already says loaded.
+            one(Plan::AfterLoad {
+                command: json!({"op": op, "symbol": symbol}),
+                reply: Reply::Unit,
+            })
         }
         "fetchHistoricalFills" if capabilities.fill_history => {
             let options = arg(args, 0);
@@ -810,9 +814,30 @@ mod tests {
             .unwrap()
             .as_slice()
         {
-            [Plan::Command { command, .. }] => command.clone(),
+            [Plan::Command { command, .. }] | [Plan::AfterLoad { command, .. }] => command.clone(),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn a_metadata_refresh_waits_for_the_account_to_load() {
+        let rails = Capabilities {
+            leverage_query: LeverageQuery::OnReadAndMetadata,
+            ..caps()
+        };
+        let plans = translate(
+            "updateSymbolMetadata",
+            &[json!("LSKUSDT")],
+            &rails,
+            &[],
+            false,
+        )
+        .unwrap();
+        let [Plan::AfterLoad { command, reply }] = plans.as_slice() else {
+            panic!("{plans:?}")
+        };
+        assert_eq!(command, &json!({"op":"fetchLeverage","symbol":"LSKUSDT"}));
+        assert_eq!(reply, &Reply::Unit);
     }
 
     #[test]
