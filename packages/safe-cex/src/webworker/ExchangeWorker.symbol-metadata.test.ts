@@ -32,6 +32,7 @@ const current: Partial<StoreData> = {
 };
 let venue: ExchangeName = 'bybit';
 const reads: string[] = [];
+const sent: string[] = [];
 let holdFrames = false;
 class ReadEngine implements WasmEngineLike {
   capabilities = () => engineCapabilities(venue);
@@ -39,6 +40,7 @@ class ReadEngine implements WasmEngineLike {
   command = (json: string) => {
     const command = JSON.parse(json);
     if (command.op === 'fetchLeverage') reads.push(command.symbol);
+    sent.push(command.op);
     const result =
       command.op === 'fetchLeverage' ? JSON.stringify({ buyLeverage: 10, sellLeverage: 10 }) : '[]';
     return command.command === undefined
@@ -103,6 +105,7 @@ const select = async (worker: ExchangeWorker, symbol: string) => {
 
 beforeEach(() => {
   reads.length = 0;
+  sent.length = 0;
   holdFrames = false;
   setTwapLockManager(null);
   vi.useFakeTimers();
@@ -202,4 +205,53 @@ it('calls during a cold wasm fetch wait for the engine instead of failing or bei
   expect(reads).toEqual(['LSKUSDT']);
   const candles = messages.find((message) => message.op === 'callMethod:done' && message.data.requestId === 'candles');
   expect(candles?.data.success).toBe(true);
+});
+
+it('writes during a cold wasm fetch fail at once and are never sent; placeOrders queues', async () => {
+  venue = 'bybit';
+  let loaded!: () => void;
+  const wasm = new Promise<void>((resolve) => (loaded = resolve));
+  setWasmEngineLoader(async () => {
+    await wasm;
+    return { WasmEngine: ReadEngine as never };
+  });
+  const messages: Array<{ op: string; data?: any }> = [];
+  const worker = new ExchangeWorker(
+    { postMessage: (message: never) => messages.push(message) } as unknown as Worker,
+    'bear5',
+    venue,
+    { key: 'key', secret: 'secret', passphrase: 'pass', engine: 'rust' } as never,
+    {} as never,
+    {} as never,
+    'fixture',
+  );
+  workers.push(worker);
+  const started = worker.start();
+  await vi.advanceTimersByTimeAsync(50);
+  const order = { symbol: 'BTCUSDT', side: 'buy', type: 'limit', amount: 1, price: 1 };
+  const writes: Array<[string, unknown[]]> = [
+    ['setLeverage', ['BTCUSDT', 5]],
+    ['cancelOrders', [[{ id: 'a', symbol: 'BTCUSDT' }]]],
+    ['cancelAllOrders', []],
+    ['changeMarginType', [true, 'BTCUSDT']],
+    ['changePositionMode', [true]],
+    ['updateOrder', [{ order: { id: 'a', symbol: 'BTCUSDT' }, update: { price: 2 } }]],
+  ];
+  for (const [method, args] of writes) {
+    worker.handlePayload({ op: 'callMethod', data: { requestId: method, method, args } } as never);
+  }
+  worker.handlePayload({ op: 'callMethod', data: { requestId: 'place', method: 'placeOrders', args: [[order]] } } as never);
+  await vi.advanceTimersByTimeAsync(50);
+  for (const [method] of writes) {
+    const reply = messages.find((message) => message.op === 'callMethod:done' && message.data.requestId === method);
+    expect(reply?.data.success, method).toBe(false);
+    expect(reply?.data.result.message, method).toContain('not started');
+  }
+  expect(messages.some((message) => message.data?.requestId === 'place')).toBe(false);
+  loaded();
+  await vi.advanceTimersByTimeAsync(500);
+  await started;
+  await vi.advanceTimersByTimeAsync(500);
+  for (const op of ['setLeverage', 'cancelOrders', 'setMarginType', 'setPositionMode']) expect(sent).not.toContain(op);
+  expect(sent).toContain('placeOrders');
 });
