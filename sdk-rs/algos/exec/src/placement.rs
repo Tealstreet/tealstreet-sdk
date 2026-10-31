@@ -45,6 +45,12 @@ pub(crate) fn parse(
     };
     let keywords = ["reduce", "po", "at", "best", "stop"];
     for (i, tok) in args.iter().enumerate().skip(1) {
+        let operand = i > 1 && matches!(args[i - 1].to_lowercase().as_str(), "at" | "stop");
+        if crate::is_negative(tok) && !operand {
+            return Err(format!("Unexpected negative argument \"{tok}\""));
+        }
+    }
+    for (i, tok) in args.iter().enumerate().skip(1) {
         if keywords.contains(&tok.to_lowercase().as_str())
             || i > 1 && matches!(args[i - 1].as_str(), "at" | "stop")
             || numeric_token(tok)

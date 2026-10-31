@@ -214,6 +214,14 @@ fn stop(symbol: &str, args: &[String], store: &Value, raw: &str) -> Result<Evalu
                 .find(|(i, s)| Some(*i) != size_index && price(s, 1.).is_ok())
                 .map(|(i, _)| i)
         });
+    if let Some((_, stray)) = args
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(i, s)| crate::is_negative(s) && Some(*i) != index)
+    {
+        return Err(format!("stop: unexpected negative argument \"{stray}\""));
+    }
     let text=index.and_then(|i|args.get(i)).ok_or_else(||format!("stop: could not find a trigger price in \"{raw}\". Expected e.g. `stop 18500`, `stop at -1%`, `stop sell $500 at 1%`."))?;
     let t = ticker(store, &target);
     let last = n(t, "last");
@@ -223,6 +231,9 @@ fn stop(symbol: &str, args: &[String], store: &Value, raw: &str) -> Result<Evalu
         ));
     }
     let limit = price(text, last)?;
+    if limit <= 0. {
+        return Err(format!("stop: {text} is not a usable price ({limit})"));
+    }
     let trigger = if let Some(i) = args.iter().position(|s| s == "trigger") {
         let text = args
             .get(i + 1)
@@ -307,6 +318,13 @@ fn breakeven(symbol: &str, args: &[String], store: &Value) -> Result<Evaluation,
     }
     let base = n(p, "entryPrice");
     let offset = args.iter().skip(1).find(|s| price(s, base).is_ok());
+    if let Some(stray) = args
+        .iter()
+        .skip(1)
+        .find(|s| crate::is_negative(s) && Some(*s) != offset)
+    {
+        return Err(format!("be: unexpected negative argument \"{stray}\""));
+    }
     let value = offset.map(|s| price(s, base)).transpose()?.unwrap_or(base);
     if value <= 0. || !value.is_finite() {
         return Err(format!(

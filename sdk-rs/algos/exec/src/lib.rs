@@ -805,6 +805,69 @@ fn resolve(store: &Value, symbol: &str) -> Option<String> {
         .map(String::from)
 }
 
+/// A flag consumes the token after it, and these commands ignore one they do
+/// not know, so either would change the order the user asked for.
+fn order_token_error(text: &str, args: &[String]) -> Option<String> {
+    let head = args.first()?.as_str();
+    if !matches!(
+        head,
+        "buy"
+            | "b"
+            | "sell"
+            | "s"
+            | "close"
+            | "c"
+            | "stop"
+            | "be"
+            | "breakeven"
+            | "trail"
+            | "move"
+            | "mv"
+            | "scale"
+            | "bump"
+            | "chase"
+            | "twap"
+            | "swarm"
+            | "nuke"
+            | "cancel"
+            | "x"
+            | "leverage"
+            | "lev"
+            | "kill"
+    ) {
+        return None;
+    }
+    let tokens = tokens(text);
+    for (i, token) in tokens.iter().enumerate() {
+        let bump_side = head == "bump"
+            && i + 1 == tokens.len()
+            && matches!(token.as_str(), "--buys" | "-b" | "--sells" | "-s");
+        if is_flag(token) && !bump_side {
+            return Some(format!("{head}: unsupported flag \"{token}\""));
+        }
+    }
+    // These take no signed argument; the others check theirs where they parse it.
+    let unsigned = matches!(
+        head,
+        "close"
+            | "c"
+            | "trail"
+            | "chase"
+            | "twap"
+            | "swarm"
+            | "nuke"
+            | "cancel"
+            | "x"
+            | "leverage"
+            | "lev"
+            | "kill"
+    );
+    let stray = args.iter().enumerate().skip(1).find(|(i, token)| {
+        is_negative(token) && (unsigned || (matches!(head, "move" | "mv") && *i != 2))
+    });
+    stray.map(|(_, token)| format!("{head}: unexpected negative argument \"{token}\""))
+}
+
 fn evaluate(
     symbol: &str,
     text: &str,
@@ -817,6 +880,9 @@ fn evaluate(
         *head = display::canonical(head)
             .map(str::to_string)
             .unwrap_or_else(|| head.to_ascii_lowercase());
+    }
+    if let Some(error) = order_token_error(text, &args) {
+        return failed(error);
     }
     if !args.is_empty()
         && let Some(result) = configuration::evaluate(symbol, &args, store)
@@ -1066,8 +1132,7 @@ fn cancel(symbol: &str, args: &[String], store: &Value) -> Evaluation {
     }
 }
 
-/// Mirrors CLI parseArgs: quotes group words; flags/options are not positional.
-pub fn positional(input: &str) -> Vec<String> {
+fn tokens(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut word = String::new();
     let mut quote = None;
@@ -1091,11 +1156,28 @@ pub fn positional(input: &str) -> Vec<String> {
     if !word.is_empty() {
         tokens.push(word);
     }
+    tokens
+}
+
+/// `-5`, `-0.5%` and `-$5` are signed values; flags never start with a number.
+fn is_flag(token: &str) -> bool {
+    token.len() > 1
+        && token.starts_with('-')
+        && !token[1..].starts_with(|c: char| c.is_ascii_digit() || c == '.' || c == '$')
+}
+
+pub(crate) fn is_negative(token: &str) -> bool {
+    token.len() > 1 && token.starts_with('-')
+}
+
+/// Mirrors CLI parseArgs: quotes group words; flags/options are not positional.
+pub fn positional(input: &str) -> Vec<String> {
+    let tokens = tokens(input);
     let mut result = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
         let t = &tokens[i];
-        if t.starts_with('-') && t.len() > 1 {
+        if is_flag(t) {
             if !t.contains('=') && tokens.get(i + 1).is_some_and(|next| !next.starts_with('-')) {
                 i += 1;
             }
