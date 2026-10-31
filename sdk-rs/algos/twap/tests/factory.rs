@@ -365,11 +365,15 @@ async fn a_refused_chase_slice_is_not_counted() {
                 .unwrap();
             settle().await;
             assert_eq!(factory.active_twaps("a")[0]["ordersExecuted"], 0);
-            assert!(
-                port.emits
-                    .borrow()
-                    .contains(&("error".to_owned(), json!("chaser refused")))
-            );
+            let emits = port.emits.borrow();
+            assert!(emits.contains(&("error".to_owned(), json!("chaser refused"))));
+            let (_, last_state) = emits
+                .iter()
+                .rev()
+                .find(|(op, _)| op == "twap:stateUpdate")
+                .unwrap();
+            let row = last_state.as_object().unwrap().values().next().unwrap();
+            assert_eq!(row["state"]["ordersExecuted"], 0);
         })
         .await;
 }

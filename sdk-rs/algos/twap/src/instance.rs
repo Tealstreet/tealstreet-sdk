@@ -144,8 +144,13 @@ impl TwapInstance {
         };
 
         if self.options.use_chaser_orders {
-            self.start_slice_chaser(order_size, env, effects);
-            self.finish_slice(executed_before + 1, next_order_at, wait_ms, now);
+            let started = self.start_slice_chaser(order_size, env, view, effects);
+            self.finish_slice(
+                executed_before + u32::from(started),
+                next_order_at,
+                wait_ms,
+                now,
+            );
             self.report_shortfall(effects);
             return;
         }
@@ -282,16 +287,6 @@ impl TwapInstance {
         }
     }
 
-    /// The chaser runtime refused a slice's chaser, which was counted when it started.
-    pub(crate) fn slice_chaser_refused(&mut self, chaser_id: &str, effects: &mut Vec<TwapEffect>) {
-        self.tracked_chaser_ids.retain(|id| id != chaser_id);
-        self.slice_timeouts
-            .retain(|timeout| timeout.chaser_id != chaser_id);
-        self.state.orders_executed = self.state.orders_executed.saturating_sub(1);
-        self.state_changed = true;
-        self.report_shortfall(effects);
-    }
-
     fn finish_slice(&mut self, orders_executed: u32, next_order_at: f64, wait_ms: f64, now: f64) {
         self.state.orders_executed = orders_executed;
         self.state_changed = true;
@@ -303,26 +298,29 @@ impl TwapInstance {
         self.slice_due_at = Some(now + wait_ms);
     }
 
+    /// False when the chaser runtime refused it: nothing runs for this slice.
     fn start_slice_chaser(
         &mut self,
         size: f64,
         env: &mut dyn TwapEnv,
+        view: &dyn TwapMarketView,
         effects: &mut Vec<TwapEffect>,
-    ) {
+    ) -> bool {
         let chaser_id = env.new_id();
+        let request = ChaserRequest {
+            id: chaser_id.clone(),
+            symbol: self.options.symbol().to_owned(),
+            size,
+            side: self.options.side,
+            max_attempts: SLICE_CHASER_MAX_ATTEMPTS,
+            reduce_only: self.options.reduce_only,
+            delay: self.options.chaser_delay,
+        };
+        if let Err(message) = view.start_chaser(&request) {
+            effects.push(TwapEffect::Log { message });
+            return false;
+        }
         self.tracked_chaser_ids.push(chaser_id.clone());
-        effects.push(TwapEffect::StartChaser {
-            twap_id: self.id.clone(),
-            request: ChaserRequest {
-                id: chaser_id.clone(),
-                symbol: self.options.symbol().to_owned(),
-                size,
-                side: self.options.side,
-                max_attempts: SLICE_CHASER_MAX_ATTEMPTS,
-                reduce_only: self.options.reduce_only,
-                delay: self.options.chaser_delay,
-            },
-        });
         // `twap chase` policy: settle the chaser at `timeoutPct%` of the slice.
         if self.options.timeout_pct.is_some() {
             let pct = self.options.timeout_pct.unwrap_or(50.0);
@@ -332,6 +330,7 @@ impl TwapInstance {
                 chaser_id,
             });
         }
+        true
     }
 
     fn fire_slice_timeout(

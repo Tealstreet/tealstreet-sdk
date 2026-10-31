@@ -51,9 +51,18 @@ struct View {
     ticker: Option<TickerQuote>,
     chasers: HashMap<String, ChaserProgress>,
     client_id: Option<String>,
+    started: std::cell::RefCell<Vec<safe_cex_algo_twap::ChaserRequest>>,
+    refuse_chasers: std::cell::Cell<bool>,
 }
 
 impl TwapMarketView for View {
+    fn start_chaser(&self, request: &safe_cex_algo_twap::ChaserRequest) -> Result<(), String> {
+        if self.refuse_chasers.get() {
+            return Err("chaser refused".to_owned());
+        }
+        self.started.borrow_mut().push(request.clone());
+        Ok(())
+    }
     fn ticker(&self, _symbol: &str) -> Option<TickerQuote> {
         self.ticker
     }
@@ -122,13 +131,12 @@ fn market_amounts(effects: &[TwapEffect]) -> Vec<f64> {
         .collect()
 }
 
-fn chaser_ids(effects: &[TwapEffect]) -> Vec<String> {
-    effects
-        .iter()
-        .filter_map(|effect| match effect {
-            TwapEffect::StartChaser { request, .. } => Some(request.id.clone()),
-            _ => None,
-        })
+/// The chasers started since the last call.
+fn chaser_ids(view: &View) -> Vec<String> {
+    view.started
+        .take()
+        .into_iter()
+        .map(|request| request.id)
         .collect()
 }
 
@@ -496,7 +504,7 @@ fn start_chase(overrides: Value) -> (TwapBook, Env, View, String, String) {
     let (mut env, mut view) = (Env::new(), View::default());
     let mut book = TwapBook::new("test-account");
     let (id, effects) = start(&mut book, &mut env, &view, chase(overrides));
-    let chasers = chaser_ids(&effects);
+    let chasers = chaser_ids(&view);
     assert_eq!(chasers.len(), 1);
     assert!(market_amounts(&effects).is_empty());
     view.chasers.insert(
@@ -513,17 +521,13 @@ fn start_chase(overrides: Value) -> (TwapBook, Env, View, String, String) {
 fn chaser_slice_request_matches_ts() {
     let (mut env, view) = (Env::new(), View::default());
     let mut book = TwapBook::new("test-account");
-    let (_, effects) = start(
+    start(
         &mut book,
         &mut env,
         &view,
         chase(json!({ "reduceOnly": true, "chaserDelay": 750 })),
     );
-    let request = effects.iter().find_map(|e| match e {
-        TwapEffect::StartChaser { request, .. } => Some(request.clone()),
-        _ => None,
-    });
-    let request = request.unwrap();
+    let request = view.started.borrow()[0].clone();
     assert_eq!(
         (
             request.size,
@@ -537,6 +541,53 @@ fn chaser_slice_request_matches_ts() {
 }
 
 #[test]
+fn a_refused_last_chase_slice_ends_with_the_true_count() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    view.refuse_chasers.set(true);
+    let (id, first) = start(
+        &mut book,
+        &mut env,
+        &view,
+        chase(json!({ "ordersCount": 3 })),
+    );
+    assert_eq!(logs(&first), ["chaser refused"]);
+    assert_eq!(book.get(&id).unwrap().state.orders_executed, 0);
+    let update = state_updates(&first).pop().unwrap().clone();
+    assert_eq!(update[&id]["state"]["ordersExecuted"], 0);
+
+    view.refuse_chasers.set(false);
+    env.advance(book.wake_at().unwrap() - env.now);
+    book.wake(&mut env, &view);
+    assert_eq!(book.get(&id).unwrap().state.orders_executed, 1);
+
+    view.refuse_chasers.set(true);
+    env.advance(book.wake_at().unwrap() - env.now);
+    let last = book.wake(&mut env, &view);
+    assert_eq!(
+        logs(&last),
+        [
+            "chaser refused",
+            "TWAP BTCUSDT ended with 1 of 3 slices placed"
+        ]
+    );
+    assert!(book.get(&id).is_none());
+}
+
+#[test]
+fn a_chase_twap_that_started_every_slice_ends_without_a_shortfall_error() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = TwapBook::new("test-account");
+    let (_, effects) = start(
+        &mut book,
+        &mut env,
+        &view,
+        chase(json!({ "ordersCount": 1 })),
+    );
+    assert!(logs(&effects).is_empty());
+}
+
+#[test]
 fn no_timeout_without_timeout_pct() {
     let (mut book, mut env, view, _, _) = start_chase(json!({}));
     env.advance(60_000.0);
@@ -545,7 +596,7 @@ fn no_timeout_without_timeout_pct() {
     let effects = book.wake(&mut env, &view);
     assert!(removed_chasers(&effects).is_empty());
     assert!(market_amounts(&effects).is_empty());
-    assert_eq!(chaser_ids(&effects).len(), 1);
+    assert_eq!(chaser_ids(&view).len(), 1);
 }
 
 #[test]
@@ -654,7 +705,7 @@ fn reduce_only_reaches_the_fallback_market() {
 fn last_slice_timeout_still_fires_after_completion() {
     let (mut env, mut view) = (Env::new(), View::default());
     let mut book = TwapBook::new("test-account");
-    let (id, effects) = start(
+    let (id, _) = start(
         &mut book,
         &mut env,
         &view,
@@ -665,7 +716,7 @@ fn last_slice_timeout_still_fires_after_completion() {
         "a one-slice TWAP completes on its first slice"
     );
     view.chasers.insert(
-        chaser_ids(&effects)[0].clone(),
+        chaser_ids(&view)[0].clone(),
         ChaserProgress {
             remaining_size: 1.0,
             stopped: false,
