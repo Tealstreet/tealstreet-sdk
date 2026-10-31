@@ -236,6 +236,9 @@ it('writes during a cold wasm fetch fail at once and are never sent; placeOrders
     ['changeMarginType', [true, 'BTCUSDT']],
     ['changePositionMode', [true]],
     ['updateOrder', [{ order: { id: 'a', symbol: 'BTCUSDT' }, update: { price: 2 } }]],
+    ['setAllLeverage', [5]],
+    ['scheduleCancel', [null]],
+    ['changeStpMode', ['EXPIRE_TAKER']],
   ];
   for (const [method, args] of writes) {
     worker.handlePayload({ op: 'callMethod', data: { requestId: method, method, args } } as never);
@@ -252,6 +255,80 @@ it('writes during a cold wasm fetch fail at once and are never sent; placeOrders
   await vi.advanceTimersByTimeAsync(500);
   await started;
   await vi.advanceTimersByTimeAsync(500);
-  for (const op of ['setLeverage', 'cancelOrders', 'setMarginType', 'setPositionMode']) expect(sent).not.toContain(op);
+  for (const op of ['setLeverage', 'cancelOrders', 'setMarginType', 'setPositionMode', 'scheduleCancel', 'setStpMode']) expect(sent).not.toContain(op);
   expect(sent).toContain('placeOrders');
+});
+
+const loadingWorker = async () => {
+  venue = 'bybit';
+  holdFrames = true;
+  const messages: Array<{ op: string; data?: any }> = [];
+  const worker = new ExchangeWorker(
+    { postMessage: (message: never) => messages.push(message) } as unknown as Worker,
+    'bear5',
+    venue,
+    { key: 'key', secret: 'secret', passphrase: 'pass', engine: 'rust' } as never,
+    {} as never,
+    {} as never,
+    'fixture',
+  );
+  workers.push(worker);
+  void worker.start();
+  await vi.advanceTimersByTimeAsync(50);
+  return { worker, messages };
+};
+const order = { symbol: 'BTCUSDT', side: 'buy', type: 'limit', amount: 1, price: 1 };
+const place = (worker: ExchangeWorker) =>
+  worker.handlePayload({ op: 'callMethod', data: { requestId: 'place', method: 'placeOrders', args: [[order]] } } as never);
+const reply = (messages: Array<{ op: string; data?: any }>, id: string) =>
+  messages.find((message) => message.op === 'callMethod:done' && message.data.requestId === id);
+
+it('a placement queued past the bound is refused, shown, and never sent even if the account then loads', async () => {
+  const { worker, messages } = await loadingWorker();
+  place(worker);
+  await vi.advanceTimersByTimeAsync(29_999);
+  expect(reply(messages, 'place')).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(reply(messages, 'place')?.data).toMatchObject({ success: false, result: { outcome: 'notSent' } });
+  expect(reply(messages, 'place')?.data.result.message).toContain('was not sent');
+  const shown = messages.filter((message) => message.op === 'error' && String(message.data).includes('was not sent'));
+  expect(shown).toHaveLength(1);
+  holdFrames = false;
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(sent).not.toContain('placeOrders');
+  expect(messages.filter((message) => message.op === 'callMethod:done' && message.data.requestId === 'place')).toHaveLength(1);
+});
+
+it('a placement whose account loads just inside the bound is sent once and never refused', async () => {
+  const { worker, messages } = await loadingWorker();
+  place(worker);
+  await vi.advanceTimersByTimeAsync(29_000);
+  holdFrames = false;
+  await vi.advanceTimersByTimeAsync(990);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(sent.filter((op) => op === 'placeOrders')).toHaveLength(1);
+  expect(reply(messages, 'place')?.data.success).toBe(true);
+  expect(messages.filter((message) => message.op === 'error')).toHaveLength(0);
+});
+
+it('other queued writes take the same bound once the engine exists', async () => {
+  const { worker, messages } = await loadingWorker();
+  for (const [method, args] of [
+    ['cancelAllOrders', []],
+    ['scheduleCancel', [null]],
+    ['changeStpMode', ['EXPIRE_TAKER']],
+  ] as const) {
+    worker.handlePayload({ op: 'callMethod', data: { requestId: method, method, args } } as never);
+  }
+  await vi.advanceTimersByTimeAsync(29_999);
+  expect(reply(messages, 'cancelAllOrders')).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(1);
+  for (const method of ['cancelAllOrders', 'scheduleCancel', 'changeStpMode']) {
+    expect(reply(messages, method)?.data.result, method).toMatchObject({ outcome: 'notSent' });
+  }
+  holdFrames = false;
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(sent).not.toContain('cancelSymbolOrders');
+  expect(sent).not.toContain('scheduleCancel');
+  expect(sent).not.toContain('setStpMode');
 });

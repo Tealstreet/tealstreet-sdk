@@ -351,6 +351,8 @@ type NativeAccountRead = (typeof NATIVE_ACCOUNT_READS)[number];
 const MULTI_COMMAND_WAIT_FACTOR = 5;
 /** Engine ops safe to delay until the engine exists; anything unlisted is treated as a write. */
 const COLD_START_READS = /^(fetch|find|refresh)/;
+/** How long a write may queue for startup; it must not outlive its caller's wait. */
+const STARTUP_WRITE_WAIT_MS = 30_000;
 const WORKER_CAPABILITY_RETRY_MS = 30_000;
 const WORKER_BRIDGE_WAIT_MS = 30_000;
 const WORKER_BRIDGE_POLL_MS = 25;
@@ -608,6 +610,43 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (this.startupState === 'failed') return this.capabilitiesUnavailable(method, true);
     return this.requireCapabilities(method);
+  }
+
+  /** `capabilitiesFor` for a write: queued past the bound it is refused and can never send. */
+  private writeCapabilitiesFor(method: string): EngineCapabilities | Promise<EngineCapabilities> {
+    const startup = this.startup;
+    if (this.startupState !== 'pending' || !startup) return this.capabilitiesFor(method);
+    return new Promise<EngineCapabilities>((resolve, reject) => {
+      // Whichever runs first clears the other, so the refusal and the send are exclusive.
+      const timer = setTimeout(() => {
+        const message = `${this.name} ${method} was not sent: the account did not load within ${
+          this.startupWriteWaitMs / 1000
+        }s. Retry once it loads.`;
+        const error = new ExchangeError(message, { message, kind: 'timeout', outcome: 'notSent' });
+        settled = true;
+        this.reportCommandError(error);
+        reject(error);
+      }, this.startupWriteWaitMs);
+      let settled = false;
+      const finish = (answer: () => EngineCapabilities) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try {
+          resolve(answer());
+        } catch (error) {
+          reject(error);
+        }
+      };
+      startup.then(
+        () => finish(() => this.requireCapabilities(method)),
+        () => finish(() => this.capabilitiesUnavailable(method, true)),
+      );
+    });
+  }
+
+  private get startupWriteWaitMs(): number {
+    return Math.min(STARTUP_WRITE_WAIT_MS, this.commandTimeoutMs);
   }
 
   // History axes the engine lacks take the branded base fallbacks, which
@@ -2075,7 +2114,7 @@ export class RustEngineExchange extends BaseExchange {
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
     const timing = claimWriteTiming('placeOrders');
-    const ready = this.capabilitiesFor('placeOrders');
+    const ready = this.writeCapabilitiesFor('placeOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
     for (const order of orders) {
       if (order.impliedVolatility === undefined) continue;
@@ -2327,7 +2366,7 @@ export class RustEngineExchange extends BaseExchange {
 
   cancelAllOrders = async () => {
     this.refuseWriteBeforeEngine();
-    const ready = this.capabilitiesFor('cancelAllOrders');
+    const ready = this.writeCapabilitiesFor('cancelAllOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const mode = capabilities.cancelAll;
     if (mode === 'native') await this.command({ op: 'cancelSymbolOrders', symbol: '' });
@@ -2372,6 +2411,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   setAllLeverage = async (leverage: number) => {
+    this.refuseWriteBeforeEngine();
     if (this.capabilityRecord?.accountLeverage) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
       for (const position of await this.fetchPositions()) {
@@ -2411,7 +2451,7 @@ export class RustEngineExchange extends BaseExchange {
 
   changeStpMode = async (mode: AsterDEXStpMode): Promise<void> => {
     this.refuseWriteBeforeEngine();
-    const ready = this.capabilitiesFor('changeStpMode');
+    const ready = this.writeCapabilitiesFor('changeStpMode');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.stpControls) throw new Error('Self-trade prevention is unavailable for this venue');
     this.validateAsterStp('EXPIRE_TAKER');
@@ -2631,7 +2671,7 @@ export class RustEngineExchange extends BaseExchange {
       return;
     }
     this.refuseWriteBeforeEngine();
-    const ready = this.capabilitiesFor('scheduleCancel');
+    const ready = this.writeCapabilitiesFor('scheduleCancel');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.scheduleCancel) throw new Error('scheduleCancel is unavailable for this venue');
     if (time != null && time < this.engineNow() + 5_000)
