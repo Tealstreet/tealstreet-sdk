@@ -207,6 +207,17 @@ describe('order commands refuse tokens parseArgs would drop', () => {
     expect(writes).toEqual(['placeOrder']);
   });
 
+  it('sets refuses a dash token rather than storing the source without it', async () => {
+    const store = new MemoryPreprocessStore();
+    const adapter = new Proxy({}, { get: () => () => undefined }) as unknown as CLIPlatformAdapter;
+    const result = await executeCommand('sets @x $entry -1.5%', 'BTCUSDT', 't', null, adapter, undefined, store);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('"-1.5%"');
+    expect(store.getLiveVar('x')).toBeUndefined();
+    await executeCommand('sets @x $entry*0.99', 'BTCUSDT', 't', null, adapter, undefined, store);
+    expect(store.getLiveVar('x')).toBe('$entry*0.99');
+  });
+
   it('track refuses a dash token rather than storing the source without it', async () => {
     const store = new MemoryPreprocessStore();
     const adapter = new Proxy({}, { get: () => () => undefined }) as unknown as CLIPlatformAdapter;
