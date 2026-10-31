@@ -658,7 +658,25 @@ pub async fn run(
                     publish(&mut published);
                 }
                 Some(AlgoInput::Nuke { mode, request_id }) => {
-                    let started = exec.nuke(mode, &cx);
+                    // The engine may have loaded ahead of this store's frames: read it
+                    // now, so the nuke never acts on rows older than what was checked.
+                    let seen = handle.read(projection::project).await.map(|snapshot| {
+                        let loaded = (snapshot.loaded.markets, snapshot.loaded.positions, snapshot.loaded.orders);
+                        let change = port.apply(snapshot, Vec::new(), false);
+                        port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
+                        loaded
+                    });
+                    let started = match seen {
+                        Some((markets, positions, orders))
+                            if crate::methods::nuke_can_see(mode, markets, positions, orders) =>
+                        {
+                            exec.nuke(mode, &cx)
+                        }
+                        _ => Err(serde_json::json!({
+                            "message": crate::methods::NUKE_NOT_LOADED,
+                            "outcome": "notSent",
+                        })),
+                    };
                     let (port, name, who) = (port.clone(), name.clone(), who.clone());
                     let settle = move |outcome: Result<Value, Value>| {
                         let audit = match &outcome {

@@ -519,6 +519,26 @@ describe('Rust native current-account reads', () => {
     ]);
   });
 
+  it('reports unloaded rows as unknown, never as none, when a nuke could not read them', async () => {
+    const r = fixture();
+    await r.start();
+    const logs: string[] = [];
+    r.exchange.on('log', (message: string) => logs.push(message));
+    r.exchange.fetchPositions = () => Promise.reject(new Error('positions did not load within 30s'));
+    r.exchange.syncAccountState = () => undefined;
+    r.store.update({ loaded: { ...r.store.loaded, positions: false } });
+    await expect(r.exchange.nukePositions()).rejects.toThrow('positions did not load');
+    expect(logs.join()).toContain('Open positions: unknown, not loaded');
+  });
+
+  it('names a cause shared by both nuke legs once', async () => {
+    const r = fixture();
+    await r.start();
+    r.exchange.fetchPositions = () => Promise.reject(new Error('account is closed'));
+    r.exchange.cancelAllOrders = () => Promise.reject(new Error('account is closed'));
+    await expect(r.exchange.nuke()).rejects.toThrow(/^account is closed$/);
+  });
+
   it('does not invent a close for empty native positions despite a stale JS row', async () => {
     const r = fixture();
     await r.start();

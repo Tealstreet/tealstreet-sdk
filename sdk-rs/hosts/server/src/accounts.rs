@@ -1171,7 +1171,18 @@ pub(crate) mod tests {
         Arc<Account>,
         mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
     ) {
-        let engine = safe_cex_engine::test_support::seeded_engine(Idle);
+        held_account_on(Idle, link, fingerprint)
+    }
+
+    fn held_account_on<V: safe_cex_engine::Venue + 'static>(
+        venue: V,
+        link: Option<Arc<SignerLink>>,
+        fingerprint: String,
+    ) -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        let engine = safe_cex_engine::test_support::seeded_engine(venue);
         let (handle, _task) = safe_cex_native::spawn_account(
             safe_cex_native::Host::new(engine, NoIo),
             ServerConfig::default(),
@@ -1211,6 +1222,130 @@ pub(crate) mod tests {
         fingerprint: String,
     ) -> Arc<Account> {
         let (account, inbox) = held_account_with(Some(link.clone()), fingerprint);
+        run_algos(account, link, inbox)
+    }
+
+    /// A private account whose startup is held until `HeldLoad` releases it, as a
+    /// silent signer holds it, with one long open on BTCUSDT.
+    pub(crate) fn held_load_account(
+        link: Arc<SignerLink>,
+        load_after_ms: Option<f64>,
+    ) -> (Arc<Account>, Arc<std::sync::atomic::AtomicUsize>) {
+        let placed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let venue = HeldLoad {
+            placed: placed.clone(),
+            load_after_ms,
+        };
+        let (account, inbox) = held_account_on(venue, Some(link.clone()), String::new());
+        (run_algos(account, link, inbox), placed)
+    }
+
+    struct HeldLoad {
+        placed: Arc<std::sync::atomic::AtomicUsize>,
+        load_after_ms: Option<f64>,
+    }
+    impl safe_cex_engine::Venue for HeldLoad {
+        type Pending = ();
+        fn start(&mut self, cx: &mut safe_cex_engine::Cx<'_, ()>) {
+            if let Some(delay) = self.load_after_ms {
+                cx.set_timer(delay);
+            }
+        }
+        fn on_open(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::SocketId) {}
+        fn on_message(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: &str,
+        ) {
+        }
+        fn on_close(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: u16,
+        ) {
+        }
+        fn on_response(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: (),
+            _: safe_cex_engine::Response<'_>,
+        ) {
+        }
+        fn on_request_failed(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_command(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            command: safe_cex_engine::Command,
+        ) {
+            if matches!(command, safe_cex_engine::Command::PlaceOrders { .. }) {
+                self.placed.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        fn on_timer(&mut self, cx: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::TimerId) {
+            use safe_cex_engine::model::{
+                Limits, Market, MinMax, Position, PositionSide, Precision,
+            };
+            cx.store.set_markets(vec![Market {
+                id: "BTCUSDT".into(),
+                symbol: "BTCUSDT".into(),
+                pretty_symbol: None,
+                base: "BTC".into(),
+                quote: "USDT".into(),
+                active: true,
+                precision: Precision {
+                    amount: 0.001,
+                    price: 0.1,
+                },
+                limits: Limits {
+                    amount: MinMax {
+                        min: 0.001,
+                        max: 1000.,
+                    },
+                    leverage: MinMax { min: 1., max: 100. },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: Some(true),
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            }]);
+            cx.store.set_orders(Vec::new());
+            cx.store.set_positions(vec![Position {
+                id: "BTCUSDT-long".into(),
+                symbol: "BTCUSDT".into(),
+                side: PositionSide::Long,
+                entry_price: 77_000.,
+                notional: 77.,
+                leverage: 10.,
+                margin_type: None,
+                position_mode: None,
+                unrealized_pnl: 0.,
+                realized_pnl: None,
+                contracts: 0.001,
+                liquidation_price: 0.,
+                margin_size: None,
+                last_update: None,
+            }]);
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn run_algos(
+        account: Arc<Account>,
+        link: Arc<SignerLink>,
+        inbox: mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) -> Arc<Account> {
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
         let owner = account.algo_owner.clone();
         let (emit, broadcast) = algo_reach(owner);
