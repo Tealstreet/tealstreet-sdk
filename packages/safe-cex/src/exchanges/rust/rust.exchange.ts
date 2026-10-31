@@ -349,6 +349,8 @@ const rowsFromAccountFrame = (method: string, result: unknown, symbols: unknown)
 };
 type NativeAccountRead = (typeof NATIVE_ACCOUNT_READS)[number];
 const MULTI_COMMAND_WAIT_FACTOR = 5;
+/** Engine ops safe to delay until the engine exists; anything unlisted is treated as a write. */
+const COLD_START_READS = /^(fetch|find|refresh)/;
 const WORKER_CAPABILITY_RETRY_MS = 30_000;
 const WORKER_BRIDGE_WAIT_MS = 30_000;
 const WORKER_BRIDGE_POLL_MS = 25;
@@ -2024,8 +2026,9 @@ export class RustEngineExchange extends BaseExchange {
     try {
       if (this.engineFailure) throw this.engineFailure;
       if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
-      // A cold wasm fetch: the worker takes calls before its engine is built.
-      if (!this.host && this.startupState === 'pending') await this.ensureHost();
+      // A cold wasm fetch: the worker takes calls before its engine is built. Reads wait.
+      if (!this.host && this.startupState === 'pending' && COLD_START_READS.test(command.op)) await this.ensureHost();
+      this.refuseWriteBeforeEngine();
       if (!this.host) throw new Error(`${this.name} engine is not started`);
       if (this.requireCapabilities('command').finiteCommandNumbers) {
         const invalid = (value: unknown): boolean =>
@@ -2040,6 +2043,13 @@ export class RustEngineExchange extends BaseExchange {
       throw error;
     }
   };
+
+  /** A write that waited could go out after its caller timed out; failing lets the user retry. */
+  private refuseWriteBeforeEngine() {
+    if (this.host || this.startupState !== 'pending') return;
+    const message = `${this.name} engine is not started; nothing was sent, retry once it loads`;
+    throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+  }
 
   /** A user write: its stages are stamped, and emitted here unless a caller in another thread owns them. */
   private writeCommand = async <T>(
@@ -2316,6 +2326,7 @@ export class RustEngineExchange extends BaseExchange {
       : this.findOrderFromOpenOrders(symbol, clientOrderId);
 
   cancelAllOrders = async () => {
+    this.refuseWriteBeforeEngine();
     const ready = this.capabilitiesFor('cancelAllOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const mode = capabilities.cancelAll;
@@ -2399,6 +2410,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   changeStpMode = async (mode: AsterDEXStpMode): Promise<void> => {
+    this.refuseWriteBeforeEngine();
     const ready = this.capabilitiesFor('changeStpMode');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.stpControls) throw new Error('Self-trade prevention is unavailable for this venue');
@@ -2618,6 +2630,7 @@ export class RustEngineExchange extends BaseExchange {
       await this.callWorker('scheduleCancel', time);
       return;
     }
+    this.refuseWriteBeforeEngine();
     const ready = this.capabilitiesFor('scheduleCancel');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.scheduleCancel) throw new Error('scheduleCancel is unavailable for this venue');
