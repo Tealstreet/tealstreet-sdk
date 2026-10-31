@@ -1567,11 +1567,18 @@ export class RustEngineExchange extends BaseExchange {
       members[method] = (...args: unknown[]) => {
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
         const viaWorker = () =>
-          this.callWorker(method, ...args).then((result) =>
-            // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-            method === 'updateOrder'
-              ? decodeWorkerOrderIds(result as WorkerOrderIds)
-              : rowsFromAccountFrame(method, result, args[0]),
+          this.callWorker(method, ...args).then(
+            (result) =>
+              // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+              method === 'updateOrder'
+                ? decodeWorkerOrderIds(result as WorkerOrderIds)
+                : rowsFromAccountFrame(method, result, args[0]),
+            (error: unknown) => {
+              // Never passed through `command` here, and the hosted server marks no failure as
+              // reported. A LOCAL worker's report arrives marked, so this says nothing twice.
+              if (FRAME_FED_WRITES.has(method)) this.reportCommandError(error);
+              throw error;
+            },
           );
         if (!this.isWorkerMirror || !PAGE_ENGINE_PLACEMENTS.has(method) || this.frameFedSettled) return viaWorker();
         return this.untilFrameFedSettled(method).then(() => (this.frameFed ? local(...args) : viaWorker()));

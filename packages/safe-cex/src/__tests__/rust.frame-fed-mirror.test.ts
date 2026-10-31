@@ -84,7 +84,7 @@ const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
   return fake;
 };
 
-const mirrorWith = (fake: Fake) => {
+const mirrorWith = (fake: Fake, failure?: Record<string, unknown>) => {
   void fake;
   const exchange = new RustEngineExchange(
     'bybit',
@@ -94,6 +94,10 @@ const mirrorWith = (fake: Fake) => {
   const calls: string[] = [];
   exchange.on('callMethod', (event: { requestId: string; method: string }) => {
     calls.push(event.method);
+    if (failure) {
+      exchange.emitter.emit('callMethod:done', { requestId: event.requestId, success: false, result: failure });
+      return;
+    }
     const result =
       event.method === 'stopAccountAlgos'
         ? { stoppedChasers: ['c-1'], stoppedTwaps: [] }
@@ -192,6 +196,38 @@ describe('frame-fed main-thread mirror', () => {
 
       expect(fake.commands.map((command) => command.op)).not.toContain('placeOrders');
       expect(mirror.calls.some((method) => method.startsWith('placeOrder'))).toBe(true);
+    });
+  });
+
+  describe('a write that fails on its data source', () => {
+    const failingMirror = async (failure: Record<string, unknown>) => {
+      const mirror = mirrorWith(fakeEngine({ supported: false }), failure);
+      exchange = mirror.exchange;
+      await mirror.exchange.frameFedReady;
+      const errors: unknown[] = [];
+      mirror.exchange.on('error', (error: unknown) => errors.push(error));
+      return { mirror, errors };
+    };
+
+    it('reports it on the page, as a hosted server reports nothing', async () => {
+      const { mirror, errors } = await failingMirror({
+        message: 'Signing timed out before dispatch',
+        kind: 'timeout',
+        outcome: 'notSent',
+      });
+
+      await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
+
+      expect(errors).toHaveLength(1);
+      expect(String(errors[0])).toContain('Signing timed out before dispatch');
+    });
+
+    it('stays quiet on one its worker already reported', async () => {
+      const { mirror, errors } = await failingMirror({ message: 'rejected', outcome: 'rejected', errorReported: true });
+
+      await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'rejected' });
+
+      expect(errors).toHaveLength(0);
     });
   });
 
