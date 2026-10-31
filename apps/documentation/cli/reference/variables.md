@@ -150,8 +150,7 @@ price. A bare negative offset with no anchor is
 [refused](./sizing-and-prices.md#negative-offsets).
 
 With `sets`, write the source as **one token** (`sets @x $entry*0.99`).
-`sets @x $entry -1%` loses the offset and `@x` reads as `$entry`. `set` is not
-affected.
+`sets @x $entry -1%` is refused and nothing is stored. `set @x $entry -1%` works.
 
 Anchors that accept inline offsets:
 
