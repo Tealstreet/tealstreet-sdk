@@ -20,6 +20,8 @@ type Fake = {
   offsets: Array<number | undefined>;
 };
 
+let lastModule: WasmEngineModule | undefined;
+
 const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
   const fake: Fake = { commands: [], applied: [], started: 0, constructed: 0, offsets: [] };
   const idle = () => '[]';
@@ -77,7 +79,8 @@ const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
   };
   // A static on the class, as the wasm exports it.
   const WasmEngine = Object.assign(construct, { frameFedSupported: () => supported });
-  setWasmEngineLoader(async () => ({ WasmEngine: WasmEngine as unknown as WasmEngineModule['WasmEngine'] }));
+  lastModule = { WasmEngine: WasmEngine as unknown as WasmEngineModule['WasmEngine'] };
+  setWasmEngineLoader(async () => lastModule!);
   return fake;
 };
 
@@ -133,6 +136,63 @@ describe('frame-fed main-thread mirror', () => {
     expect(mirror.calls).not.toContain('setLeverage');
     expect(mirror.calls).not.toContain('cancelSymbolOrders');
     expect(mirror.calls).not.toContain('updateOrder');
+  });
+
+  describe('a placement clicked while the page engine loads', () => {
+    it('waits for the engine and sends one leg, never through the data source', async () => {
+      const fake = fakeEngine();
+      const mirror = mirrorWith(fake);
+      exchange = mirror.exchange;
+
+      const placed = mirror.exchange.placeOrder(order);
+      await expect(placed).resolves.toEqual(['placed-1']);
+
+      expect(fake.commands.map((command) => command.op)).toContain('placeOrders');
+      expect(mirror.calls).not.toContain('placeOrders');
+      expect(mirror.calls).not.toContain('placeOrder');
+    });
+
+    it('refuses as notSent at the bound and sends nothing when the engine arrives later', async () => {
+      vi.useFakeTimers();
+      try {
+        const fake = fakeEngine();
+        let finishLoad = () => {};
+        const loaded = new Promise<void>((resolve) => {
+          finishLoad = resolve;
+        });
+        const realLoader = lastModule!;
+        setWasmEngineLoader(async () => {
+          await loaded;
+          return realLoader;
+        });
+        const mirror = mirrorWith(fake);
+        exchange = mirror.exchange;
+
+        const placed = mirror.exchange.placeOrder(order);
+        const refused = expect(placed).rejects.toMatchObject({ outcome: 'notSent' });
+        await vi.advanceTimersByTimeAsync(30_000);
+        await refused;
+
+        finishLoad();
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(fake.commands.map((command) => command.op)).not.toContain('placeOrders');
+        expect(mirror.calls).not.toContain('placeOrder');
+        expect(mirror.calls).not.toContain('placeOrders');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('forwards to the data source once a family proves to have no page engine', async () => {
+      const fake = fakeEngine({ supported: false });
+      const mirror = mirrorWith(fake);
+      exchange = mirror.exchange;
+
+      await mirror.exchange.placeOrder(order);
+
+      expect(fake.commands.map((command) => command.op)).not.toContain('placeOrders');
+      expect(mirror.calls.some((method) => method.startsWith('placeOrder'))).toBe(true);
+    });
   });
 
   it('asks its data source to re-read a setting it holds', async () => {

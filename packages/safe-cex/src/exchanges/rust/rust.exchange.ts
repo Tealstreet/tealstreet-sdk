@@ -312,6 +312,13 @@ export type WorkerMirrorExchange = Omit<RustEngineExchange, WorkerMirrorUnsuppor
 const RUST_FORWARDED_METHODS = ['fetchStpMode', 'changeStpMode', 'fetchOrderBook'] as const;
 
 /** A frame-fed mirror signs and sends these itself; everything else still goes to the account's data source. */
+/** Placements that wait for the page engine on a mirror instead of taking the source's slower leg. */
+const PAGE_ENGINE_PLACEMENTS: ReadonlySet<string> = new Set([
+  'placeOrder',
+  'placeOrders',
+  'placeOrderWithClientOrderId',
+]);
+
 const FRAME_FED_WRITES: ReadonlySet<string> = new Set([
   'placeOrder',
   'placeOrders',
@@ -503,6 +510,7 @@ export class RustEngineExchange extends BaseExchange {
    */
   readonly frameFedReady: Promise<boolean>;
   private frameFed = false;
+  private frameFedSettled = false;
   private frameFedEngine = false;
   private sourceBaseline = false;
   /** Recent (source write time - arrival) samples, and the offset last handed to the engine. */
@@ -831,6 +839,10 @@ export class RustEngineExchange extends BaseExchange {
     this.forwardToWorker();
     if (this.isWorkerMirror) this.refuseOnMirror();
     this.frameFedReady = this.isWorkerMirror && !this.isPublicDataOnly ? this.startFrameFed() : Promise.resolve(false);
+    const frameFedSettled = () => {
+      this.frameFedSettled = true;
+    };
+    this.frameFedReady.then(frameFedSettled, frameFedSettled);
     // Hosts that write through `callMethodInWorker` reach the frame-fed engine too.
     const viaWorker = this.callMethodInWorker;
     const members = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
@@ -1493,6 +1505,26 @@ export class RustEngineExchange extends BaseExchange {
     return timing ? runWithWriteTiming(timing, call) : call();
   };
 
+  /**
+   * A placement clicked while the page engine loads. Past the bound it is refused,
+   * and the rejection and the continuation that sends are exclusive: nothing goes
+   * out after the user was told it failed.
+   */
+  private untilFrameFedSettled = (method: string): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const message = `${this.name} ${method} was not sent: the account did not load within ${
+          this.startupWriteWaitMs / 1000
+        }s. Retry once it loads.`;
+        reject(new ExchangeError(message, { message, kind: 'timeout', outcome: 'notSent' }));
+      }, this.startupWriteWaitMs);
+      const settled = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.frameFedReady.then(settled, settled);
+    });
+
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
   private untilWorkerBridge = async (): Promise<void> => {
     const deadline = Date.now() + WORKER_BRIDGE_WAIT_MS;
@@ -1534,12 +1566,15 @@ export class RustEngineExchange extends BaseExchange {
       // An engine-owning instance calls straight through, keeping its own synchronous refusals.
       members[method] = (...args: unknown[]) => {
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
-        return this.callWorker(method, ...args).then((result) =>
-          // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-          method === 'updateOrder'
-            ? decodeWorkerOrderIds(result as WorkerOrderIds)
-            : rowsFromAccountFrame(method, result, args[0]),
-        );
+        const viaWorker = () =>
+          this.callWorker(method, ...args).then((result) =>
+            // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+            method === 'updateOrder'
+              ? decodeWorkerOrderIds(result as WorkerOrderIds)
+              : rowsFromAccountFrame(method, result, args[0]),
+          );
+        if (!this.isWorkerMirror || !PAGE_ENGINE_PLACEMENTS.has(method) || this.frameFedSettled) return viaWorker();
+        return this.untilFrameFedSettled(method).then(() => (this.frameFed ? local(...args) : viaWorker()));
       };
     }
   }
