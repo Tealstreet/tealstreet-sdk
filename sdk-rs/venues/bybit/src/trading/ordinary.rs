@@ -1277,12 +1277,20 @@ impl BybitLinear {
                     );
                 };
                 let items = Self::batch_items(&rows);
+                // The reason travels in the error: algo callers never see `command_error`.
+                let reasons: Vec<String> = rows
+                    .iter()
+                    .filter_map(|row| match row {
+                        Row::Refused { code, message } => Some(describe((*code, message.clone()))),
+                        Row::Accepted(_) => None,
+                    })
+                    .collect();
                 let Ok(outcome) = cx.http_write_batch(
                     context,
                     &BYBIT,
                     links.len(),
                     &items,
-                    "Failed to place batch orders",
+                    format!("Failed to place batch orders: {}", reasons.join("; ")),
                     None,
                 ) else {
                     return Decision::Lost;

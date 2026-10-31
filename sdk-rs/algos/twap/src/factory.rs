@@ -14,8 +14,8 @@ use serde_json::{Value, json};
 use tokio::sync::Notify;
 
 use crate::{
-    ChaserProgress, ChaserRequest, OrderKind, OrderSide, TickerQuote, TwapBook, TwapEffect,
-    TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest,
+    ChaserProgress, ChaserRequest, OrderKind, OrderSide, SliceFailure, TickerQuote, TwapBook,
+    TwapEffect, TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest,
 };
 
 /// The account's chaser runtime, as TWAP slices use it.
@@ -219,9 +219,15 @@ impl Inner {
                 } => {
                     Self::place(inner, cx, twap_id, settle_token, &request);
                 }
-                TwapEffect::StartChaser { request, .. } => {
+                TwapEffect::StartChaser { twap_id, request } => {
                     if let Err(message) = inner.chasers.start_with_id(cx, &request) {
                         report(cx, &message);
+                        let effects = inner
+                            .book
+                            .borrow_mut()
+                            .slice_chaser_refused(&twap_id, &request.id);
+                        Self::run(inner, cx, effects);
+                        inner.rescheduled.notify_one();
                     }
                 }
                 TwapEffect::RemoveChaser { chaser_id, .. } => inner.chasers.remove(cx, &chaser_id),
@@ -244,18 +250,26 @@ impl Inner {
         let command = match place_command(cx, request) {
             Ok(command) => command,
             Err(message) => {
-                if let Some(token) = settle_token {
-                    Self::settled(inner, cx, &twap_id, token, Err(message));
+                let failure = SliceFailure {
+                    message,
+                    nothing_placed: true,
+                };
+                match settle_token {
+                    Some(token) => Self::settled(inner, cx, &twap_id, token, Err(failure)),
+                    None => report_remainder(cx, &request.symbol, &failure.message),
                 }
                 return;
             }
         };
         let future = cx.port.command(command);
         let (inner, task_cx) = (inner.clone(), cx.clone());
+        let symbol = request.symbol.clone();
         cx.spawn(async move {
             let outcome = placement_outcome(future.await);
-            if let Some(token) = settle_token {
-                Self::settled(&inner, &task_cx, &twap_id, token, outcome);
+            match (settle_token, outcome) {
+                (Some(token), outcome) => Self::settled(&inner, &task_cx, &twap_id, token, outcome),
+                (None, Err(failure)) => report_remainder(&task_cx, &symbol, &failure.message),
+                (None, Ok(_)) => {}
             }
         });
     }
@@ -265,7 +279,7 @@ impl Inner {
         cx: &AlgoCx,
         twap_id: &str,
         token: u64,
-        outcome: Result<Vec<String>, String>,
+        outcome: Result<Vec<String>, SliceFailure>,
     ) {
         let effects = {
             let mut env = inner.env.borrow_mut();
@@ -280,18 +294,24 @@ impl Inner {
     }
 }
 
-/// A slice placement's ids, or the message its failure log carries. Ids that
-/// cannot be read and unknown outcomes say the order may be live: the TWAP
-/// advances as TS does, but never as if nothing was placed.
-pub fn placement_outcome(result: Result<String, VenueError>) -> Result<Vec<String>, String> {
+/// A slice placement's ids, or its failure. Ids that cannot be read and unknown
+/// outcomes say the order may be live. Only a whole refusal proves nothing was
+/// placed; an unclassified error or a partial one does not.
+pub fn placement_outcome(result: Result<String, VenueError>) -> Result<Vec<String>, SliceFailure> {
     match result {
-        Ok(result) => serde_json::from_str::<Vec<String>>(&result)
-            .map_err(|_| format!("order ids unknown, the order may be live (result {result})")),
-        Err(error) if error.outcome == Some(Outcome::Unknown) => Err(format!(
-            "outcome unknown, the order may be live: {}",
-            error.message
-        )),
-        Err(error) => Err(error.message),
+        Ok(result) => serde_json::from_str::<Vec<String>>(&result).map_err(|_| SliceFailure {
+            message: format!("order ids unknown, the order may be live (result {result})"),
+            nothing_placed: false,
+        }),
+        Err(error) if error.outcome == Some(Outcome::Unknown) => Err(SliceFailure {
+            message: format!("outcome unknown, the order may be live: {}", error.message),
+            nothing_placed: false,
+        }),
+        Err(error) => Err(SliceFailure {
+            nothing_placed: matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                && error.partial.is_none(),
+            message: error.message,
+        }),
     }
 }
 
@@ -429,6 +449,14 @@ impl TwapChasers for Rc<ChaserBook> {
     fn remove(&self, _cx: &AlgoCx, chaser_id: &str) {
         ChaserBook::remove(self, chaser_id);
     }
+}
+
+/// A chase slice's market remainder failed; the TWAP goes on without it.
+fn report_remainder(cx: &AlgoCx, symbol: &str, message: &str) {
+    report(
+        cx,
+        &format!("TWAP {symbol} slice remainder failed: {message}"),
+    );
 }
 
 /// A TWAP error the user must see: the `error` op is what the web toasts.

@@ -23,6 +23,7 @@ struct Port {
     commands: RefCell<Vec<Command>>,
     emits: RefCell<Vec<(String, Value)>>,
     fail: Cell<bool>,
+    fail_outcome: Cell<Option<safe_cex_engine::error::Outcome>>,
 }
 
 impl AccountPort for Port {
@@ -39,10 +40,12 @@ impl AccountPort for Port {
     fn command(&self, command: Command) -> CommandFuture {
         self.commands.borrow_mut().push(command);
         let fail = self.fail.get();
+        let outcome = self.fail_outcome.get();
         Box::pin(async move {
             if fail {
                 Err(VenueError {
                     message: "rejected".into(),
+                    outcome,
                     ..Default::default()
                 })
             } else {
@@ -158,6 +161,43 @@ async fn a_failed_slice_logs_an_error_and_continues() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_venue_refusal_is_not_counted_and_the_end_says_so() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            port.fail.set(true);
+            port.fail_outcome
+                .set(Some(safe_cex_engine::error::Outcome::Rejected));
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            factory
+                .handle("twap:start", &twap_options(json!({})), &cx)
+                .unwrap();
+            settle().await;
+            assert_eq!(factory.active_twaps("a")[0]["ordersExecuted"], 0);
+            tokio::time::advance(std::time::Duration::from_secs(31)).await;
+            settle().await;
+            assert!(factory.active_twaps("a").is_empty());
+            let errors: Vec<Value> = port
+                .emits
+                .borrow()
+                .iter()
+                .filter(|(op, _)| op == "error")
+                .map(|(_, data)| data.clone())
+                .collect();
+            assert_eq!(
+                errors,
+                [
+                    json!("TWAP BTCUSDT slice failed: rejected"),
+                    json!("TWAP BTCUSDT slice failed: rejected"),
+                    json!("TWAP BTCUSDT ended with 0 of 2 slices placed"),
+                ]
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn chaser_slices_start_through_the_chaser_runtime() {
     LocalSet::new()
         .run_until(async {
@@ -247,6 +287,7 @@ fn rejects_malformed_payloads() {
 
 #[test]
 fn placement_outcomes_read_ids_strictly() {
+    use safe_cex_algo_twap::SliceFailure;
     use safe_cex_algo_twap::factory::placement_outcome;
     use safe_cex_engine::error::Outcome;
     assert_eq!(
@@ -257,28 +298,80 @@ fn placement_outcomes_read_ids_strictly() {
     for unreadable in [r#"{"orderIds":["a"]}"#, "null", ""] {
         let error = placement_outcome(Ok(unreadable.into())).unwrap_err();
         assert!(
-            error.starts_with("order ids unknown, the order may be live"),
+            error
+                .message
+                .starts_with("order ids unknown, the order may be live"),
             "{unreadable}"
         );
+        assert!(!error.nothing_placed);
     }
-    let unknown = VenueError {
-        message: "timeout".into(),
-        outcome: Some(Outcome::Unknown),
-        ..Default::default()
+    let failed = |message: &str, outcome| {
+        placement_outcome(Err(VenueError {
+            message: message.into(),
+            outcome,
+            ..Default::default()
+        }))
     };
     assert_eq!(
-        placement_outcome(Err(unknown)),
-        Err("outcome unknown, the order may be live: timeout".to_owned())
+        failed("timeout", Some(Outcome::Unknown)),
+        Err(SliceFailure {
+            message: "outcome unknown, the order may be live: timeout".to_owned(),
+            nothing_placed: false,
+        })
     );
-    let rejected = VenueError {
-        message: "insufficient margin".into(),
-        outcome: Some(Outcome::Rejected),
-        ..Default::default()
-    };
-    assert_eq!(
-        placement_outcome(Err(rejected)),
-        Err("insufficient margin".to_owned())
-    );
+    for outcome in [Outcome::Rejected, Outcome::NotSent] {
+        assert_eq!(
+            failed("insufficient margin", Some(outcome)),
+            Err(SliceFailure {
+                message: "insufficient margin".to_owned(),
+                nothing_placed: true,
+            })
+        );
+    }
+    // Unclassified proves nothing, and neither does a refusal with accepted legs.
+    assert!(!failed("?", None).unwrap_err().nothing_placed);
+    let partial = VenueError::new("partly refused")
+        .outcome(Outcome::Rejected)
+        .partial_ids(&["a".to_owned()]);
+    assert!(!placement_outcome(Err(partial)).unwrap_err().nothing_placed);
+}
+
+#[derive(Default)]
+struct RefusingChasers;
+
+impl TwapChasers for RefusingChasers {
+    fn start_with_id(&self, _cx: &AlgoCx, _request: &ChaserRequest) -> Result<(), String> {
+        Err("chaser refused".to_owned())
+    }
+    fn progress(&self, _chaser_id: &str) -> Option<ChaserProgress> {
+        None
+    }
+    fn remove(&self, _cx: &AlgoCx, _chaser_id: &str) {}
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_chase_slice_is_not_counted() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(RefusingChasers));
+            factory
+                .handle(
+                    "twap:start",
+                    &twap_options(json!({ "useChaserOrders": true })),
+                    &cx,
+                )
+                .unwrap();
+            settle().await;
+            assert_eq!(factory.active_twaps("a")[0]["ordersExecuted"], 0);
+            assert!(
+                port.emits
+                    .borrow()
+                    .contains(&("error".to_owned(), json!("chaser refused")))
+            );
+        })
+        .await;
 }
 
 #[tokio::test(start_paused = true)]

@@ -5,7 +5,9 @@ use crate::math::{add, lodash_random, multiply, subtract};
 use crate::types::{
     InFlightSlice, OrderSide, SliceAction, TwapOptions, TwapOrigin, TwapState, TwapStatus,
 };
-use crate::{ChaserRequest, OrderKind, TwapEffect, TwapEnv, TwapMarketView, TwapOrderRequest};
+use crate::{
+    ChaserRequest, OrderKind, SliceFailure, TwapEffect, TwapEnv, TwapMarketView, TwapOrderRequest,
+};
 use serde_json::Map;
 
 /// The chaser a slice spawns gives up after this many reprices, as in TS.
@@ -144,6 +146,7 @@ impl TwapInstance {
         if self.options.use_chaser_orders {
             self.start_slice_chaser(order_size, env, effects);
             self.finish_slice(executed_before + 1, next_order_at, wait_ms, now);
+            self.report_shortfall(effects);
             return;
         }
 
@@ -214,11 +217,12 @@ impl TwapInstance {
     }
 
     /// The engine's answer to a slice [`TwapEffect::PlaceOrder`]: the order ids,
-    /// or the error message. The slice advances either way, as in TS.
+    /// or the failure. The TWAP moves on either way, as in TS, but a slice proven
+    /// not placed is not counted as executed (TS counts it).
     pub fn placement_settled(
         &mut self,
         token: u64,
-        outcome: Result<Vec<String>, String>,
+        outcome: Result<Vec<String>, SliceFailure>,
         env: &mut dyn TwapEnv,
         effects: &mut Vec<TwapEffect>,
     ) {
@@ -234,27 +238,58 @@ impl TwapInstance {
         if self.pending.is_empty() {
             self.state.in_flight = None;
         }
+        let mut executed = pending.executed_before + 1;
         match outcome {
             Ok(order_ids) => {
                 if pending.priced_limit && !order_ids.is_empty() {
                     self.tracked_limit_order_ids.extend(order_ids);
                 }
             }
-            Err(message) => effects.push(TwapEffect::Log {
-                message: format!("TWAP {} slice failed: {message}", self.options.symbol()),
-            }),
+            Err(failure) => {
+                if failure.nothing_placed {
+                    executed = pending.executed_before;
+                }
+                effects.push(TwapEffect::Log {
+                    message: format!(
+                        "TWAP {} slice failed: {}",
+                        self.options.symbol(),
+                        failure.message
+                    ),
+                });
+            }
         }
         // terminate() may have run while the placement was in flight.
         if self.state.status == TwapStatus::Completed {
             return;
         }
         let now = env.now_ms();
-        self.finish_slice(
-            pending.executed_before + 1,
-            pending.next_order_at,
-            pending.wait_ms,
-            now,
-        );
+        self.finish_slice(executed, pending.next_order_at, pending.wait_ms, now);
+        self.report_shortfall(effects);
+    }
+
+    /// `Completed` alone must not read as done: say how few slices were placed.
+    fn report_shortfall(&self, effects: &mut Vec<TwapEffect>) {
+        let state = &self.state;
+        if state.status == TwapStatus::Completed && state.orders_executed < state.orders_count {
+            effects.push(TwapEffect::Log {
+                message: format!(
+                    "TWAP {} ended with {} of {} slices placed",
+                    self.options.symbol(),
+                    state.orders_executed,
+                    state.orders_count
+                ),
+            });
+        }
+    }
+
+    /// The chaser runtime refused a slice's chaser, which was counted when it started.
+    pub(crate) fn slice_chaser_refused(&mut self, chaser_id: &str, effects: &mut Vec<TwapEffect>) {
+        self.tracked_chaser_ids.retain(|id| id != chaser_id);
+        self.slice_timeouts
+            .retain(|timeout| timeout.chaser_id != chaser_id);
+        self.state.orders_executed = self.state.orders_executed.saturating_sub(1);
+        self.state_changed = true;
+        self.report_shortfall(effects);
     }
 
     fn finish_slice(&mut self, orders_executed: u32, next_order_at: f64, wait_ms: f64, now: f64) {

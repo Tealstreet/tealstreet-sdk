@@ -3530,3 +3530,26 @@ fn a_settings_refresh_re_reads_the_mode_and_writes_nothing() {
         h.paths()
     );
 }
+
+#[test]
+fn a_refused_batch_row_carries_the_venue_reason_in_its_error() {
+    let mut h = ready();
+    place(
+        &mut h,
+        93,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let batch = h.take("/v5/order/create-batch");
+    h.reply(
+        batch.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":""}]},"retExtInfo":{"list":[{"code":110017,"msg":"current position is zero, cannot fix reduce-only order qty"}]}}"#,
+    );
+    assert_eq!(
+        h.result(93),
+        Some(&Err(
+            "Failed to place batch orders: current position is zero, cannot fix reduce-only order qty"
+                .to_owned()
+        ))
+    );
+}
