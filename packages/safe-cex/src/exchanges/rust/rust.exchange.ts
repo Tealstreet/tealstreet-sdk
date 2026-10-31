@@ -1707,8 +1707,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   updateSymbolMetadata = async (symbol: string) => {
+    if (this.isPublicDataOnly) return;
     const capabilities = this.capabilityRecord;
-    if (!capabilities || this.isPublicDataOnly) return;
+    if (!capabilities) {
+      this.log(`Symbol metadata for ${symbol} was not refreshed: the engine has not started`, LogSeverity.Warning);
+      return;
+    }
     if (capabilities.maxLeverage === 'query') {
       await this.fetchSymbolMaxLeverage(symbol);
       return;
