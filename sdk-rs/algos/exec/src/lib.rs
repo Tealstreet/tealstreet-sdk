@@ -818,6 +818,9 @@ fn evaluate(
             .map(str::to_string)
             .unwrap_or_else(|| head.to_ascii_lowercase());
     }
+    if let Some(error) = args.first().and_then(|head| refused_token(text, head)) {
+        return failed(error);
+    }
     if !args.is_empty()
         && let Some(result) = configuration::evaluate(symbol, &args, store)
     {
@@ -1066,8 +1069,7 @@ fn cancel(symbol: &str, args: &[String], store: &Value) -> Evaluation {
     }
 }
 
-/// Mirrors CLI parseArgs: quotes group words; flags/options are not positional.
-pub fn positional(input: &str) -> Vec<String> {
+fn tokens(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut word = String::new();
     let mut quote = None;
@@ -1091,6 +1093,55 @@ pub fn positional(input: &str) -> Vec<String> {
     if !word.is_empty() {
         tokens.push(word);
     }
+    tokens
+}
+
+/// `positional` drops a dash token and the token after it, so a command that
+/// can change an order refuses them rather than acting on what is left.
+fn refused_token(text: &str, head: &str) -> Option<String> {
+    if !matches!(
+        head,
+        "buy"
+            | "b"
+            | "sell"
+            | "s"
+            | "close"
+            | "c"
+            | "stop"
+            | "be"
+            | "breakeven"
+            | "trail"
+            | "move"
+            | "mv"
+            | "scale"
+            | "bump"
+            | "chase"
+            | "twap"
+            | "swarm"
+            | "nuke"
+            | "cancel"
+            | "x"
+            | "leverage"
+            | "lev"
+            | "kill"
+    ) {
+        return None;
+    }
+    let tokens = tokens(text);
+    let refused = tokens.iter().enumerate().find(|(i, token)| {
+        let bump_side = head == "bump"
+            && i + 1 == tokens.len()
+            && matches!(token.as_str(), "--buys" | "-b" | "--sells" | "-s");
+        token.len() > 1 && token.starts_with('-') && !bump_side
+    });
+    refused.map(|(_, token)| {
+        format!("{head}: refusing \"{token}\": flags and negative values are not supported, nothing was placed")
+    })
+}
+
+/// Mirrors CLI parseArgs: quotes group words; flags/options are not positional.
+pub fn positional(input: &str) -> Vec<String> {
+    let tokens = tokens(input);
     let mut result = Vec::new();
     let mut i = 0;
     while i < tokens.len() {

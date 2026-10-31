@@ -214,7 +214,7 @@ fn stop(symbol: &str, args: &[String], store: &Value, raw: &str) -> Result<Evalu
                 .find(|(i, s)| Some(*i) != size_index && price(s, 1.).is_ok())
                 .map(|(i, _)| i)
         });
-    let text=index.and_then(|i|args.get(i)).ok_or_else(||format!("stop: could not find a trigger price in \"{raw}\". Expected e.g. `stop 18500`, `stop at -1%`, `stop sell $500 at 1%`."))?;
+    let text=index.and_then(|i|args.get(i)).ok_or_else(||format!("stop: could not find a trigger price in \"{raw}\". Expected e.g. `stop 18500`, `stop at 1%`, `stop sell $500 at 1%`."))?;
     let t = ticker(store, &target);
     let last = n(t, "last");
     if last == 0. {

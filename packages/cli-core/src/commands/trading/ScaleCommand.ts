@@ -33,7 +33,7 @@ export class ScaleCommand extends TradingBaseCommand {
   readonly aliases = [];
   readonly examples = [
     'scale buy 10 into 10 from 31000 to 32000',
-    'scale buy $1000 into 10 from -0.25% to -1% ETHUSDT',
+    'scale sell $1000 into 10 from +0.25% to +1% ETHUSDT',
     'scale sell $10000 into 25 from 50000 to 48500 reduce',
     'scale sell $10000 into 25 from 50000 to 48500 taker',
     'scale sell 1 into 5 from +1% to 32000 reduce',

@@ -169,6 +169,9 @@ fn request_ids_and_completions_are_isolated_across_concurrent_execs() {
     e.complete(p.calls[0].0, Ok(json!([])), &mut p);
     assert_eq!(results(&p)[1]["reqId"], "cb:1");
 }
+// Dropping stays only for commands that change no order: order commands now
+// refuse the same tokens before this runs (refused_tokens.rs), as dropping one
+// silently changed their order.
 #[test]
 fn quote_flag_and_option_tokenization_matches_parse_args() {
     assert_eq!(
@@ -176,6 +179,9 @@ fn quote_flag_and_option_tokenization_matches_parse_args() {
         ["echo", "hello world", "tail"]
     );
     assert_eq!(positional("echo 'quoted text'"), ["echo", "quoted text"]);
+    let mut p = port();
+    Exec::default().handle(&request("buy $100 -v reduce"), &mut p);
+    assert!(p.calls.is_empty());
 }
 #[test]
 fn price_aliases_and_comma_symbols_use_only_the_store() {
