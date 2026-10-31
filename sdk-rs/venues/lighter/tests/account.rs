@@ -1415,3 +1415,92 @@ fn exhausted_backfill_is_account_scoped_without_a_query_owner() {
     )));
     assert_eq!(e.take_frame(NOW + 5200.0).map_or(0, fill_count), 0);
 }
+
+/// Legacy notifies from the stream only, for an event under 5s old and more
+/// than 5s after connecting, and never for the user's own cancel.
+#[test]
+fn a_rejected_order_reports_its_reason_once_from_the_stream() {
+    let (mut e, s) = ready();
+    let row = |id: &str, status: &str, extra: &str, time: f64| {
+        format!(
+            r#"{{"channel":"account_all_orders:718895","timestamp":{},"orders":{{"1":[{{"order_index":"{id}","market_id":1,"type":"limit","time_in_force":"post-only","status":"{status}","initial_base_amount":"1","price":"120"{extra}}}]}}}}"#,
+            time as u64
+        )
+    };
+    let notices = |e: &mut safe_cex_engine::Engine<safe_cex_venue_lighter::Lighter>| {
+        e.drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == "order.rejected" =>
+                {
+                    Some((event.level, event.message))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let cases = [
+        // Within 5s of connecting: not reported, as legacy.
+        ("60", "canceled-post-only", "", NOW + 1_000.0, None),
+        (
+            "61",
+            "canceled-post-only",
+            "",
+            NOW + 10_000.0,
+            Some("canceled-post-only"),
+        ),
+        (
+            "62",
+            "canceled-reduce-only",
+            "",
+            NOW + 11_000.0,
+            Some("canceled-reduce-only"),
+        ),
+        (
+            "63",
+            "canceled",
+            r#","cancel_reason":"MARGIN""#,
+            NOW + 12_000.0,
+            Some("MARGIN"),
+        ),
+        (
+            "64",
+            "canceled",
+            r#","cancelReason":"USER_CANCELED""#,
+            NOW + 13_000.0,
+            None,
+        ),
+        ("65", "canceled", "", NOW + 14_000.0, None),
+        (
+            "66",
+            "filled",
+            r#","cancel_reason":"MARGIN""#,
+            NOW + 15_000.0,
+            None,
+        ),
+        ("67", "open", "", NOW + 16_000.0, None),
+    ];
+    for (id, status, extra, now, expected) in cases {
+        notices(&mut e);
+        message(&mut e, s, now, &row(id, status, extra, now));
+        let seen = notices(&mut e);
+        assert_eq!(
+            seen,
+            expected
+                .map(|m| vec![(safe_cex_engine::Level::Error, m.to_string())])
+                .unwrap_or_default(),
+            "{id} {status}"
+        );
+    }
+    // The same terminal row again, and a stale event, report nothing.
+    let now = NOW + 17_000.0;
+    message(&mut e, s, now, &row("61", "canceled-post-only", "", now));
+    assert!(notices(&mut e).is_empty());
+    message(
+        &mut e,
+        s,
+        now,
+        &row("68", "canceled-post-only", "", now - 6_000.0),
+    );
+    assert!(notices(&mut e).is_empty());
+}

@@ -481,6 +481,38 @@ impl OrderRowError {
     }
 }
 /// A stream row's own client order index (top level or nested `order`).
+/// What legacy would report for a cancelled row: its reason, or the status
+/// when that names a rejection. `None` for the user's own cancel.
+fn rejection_message(raw: &RawValue, order: &Order) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Nested<'a> {
+        #[serde(default, borrow)]
+        order: Option<&'a RawValue>,
+    }
+    #[derive(Deserialize)]
+    struct Row<'a> {
+        #[serde(default, borrow)]
+        status: Cow<'a, str>,
+        #[serde(default, borrow, alias = "cancelReason")]
+        cancel_reason: Cow<'a, str>,
+    }
+    let nested = serde_json::from_str::<Nested<'_>>(raw.get()).ok()?;
+    let row = serde_json::from_str::<Row<'_>>(nested.order.unwrap_or(raw).get()).ok()?;
+    let reason = row.cancel_reason.trim();
+    if !reason.is_empty() {
+        return (!matches!(
+            reason.to_ascii_uppercase().as_str(),
+            "USER_CANCELLED" | "USER_CANCELED"
+        ))
+        .then(|| reason.to_owned());
+    }
+    order
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.reject_reason)
+        .map(|_| row.status.into_owned())
+}
+
 fn client_order_index(raw: &RawValue) -> Option<String> {
     #[derive(Deserialize)]
     struct Nested<'a> {
@@ -2368,6 +2400,13 @@ impl Lighter {
                     self.account
                         .order_revision
                         .insert(order.id.clone(), self.account.revision);
+                    if order.status == OrderStatus::Canceled
+                        && cx.now - order.last_update <= 5_000.0
+                        && cx.now - self.account.connection.connected_at > 5_000.0
+                        && let Some(message) = rejection_message(row, &order)
+                    {
+                        cx.notice(Level::Error, code::ORDER_REJECTED, message);
+                    }
                     if matches!(order.status, OrderStatus::Canceled | OrderStatus::Closed) {
                         self.account.suppressed.insert(order.id.clone());
                         self.account.records.remove(&order.id);
