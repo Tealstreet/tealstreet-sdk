@@ -219,17 +219,6 @@ impl Inner {
                 } => {
                     Self::place(inner, cx, twap_id, settle_token, &request);
                 }
-                TwapEffect::StartChaser { twap_id, request } => {
-                    if let Err(message) = inner.chasers.start_with_id(cx, &request) {
-                        report(cx, &message);
-                        let effects = inner
-                            .book
-                            .borrow_mut()
-                            .slice_chaser_refused(&twap_id, &request.id);
-                        Self::run(inner, cx, effects);
-                        inner.rescheduled.notify_one();
-                    }
-                }
                 TwapEffect::RemoveChaser { chaser_id, .. } => inner.chasers.remove(cx, &chaser_id),
                 TwapEffect::Log { message } => report(cx, &message),
                 TwapEffect::StateUpdate { data } => {
@@ -360,6 +349,10 @@ impl TwapMarketView for CxView<'_> {
 
     fn chaser(&self, chaser_id: &str) -> Option<ChaserProgress> {
         self.chasers.progress(chaser_id)
+    }
+
+    fn start_chaser(&self, request: &ChaserRequest) -> Result<(), String> {
+        self.chasers.start_with_id(self.cx, request)
     }
 
     /// As the chaser's: only the account's markets, never an order the venue would split.

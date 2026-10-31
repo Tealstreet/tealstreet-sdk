@@ -54,6 +54,9 @@ pub trait TwapMarketView {
     fn ticker(&self, symbol: &str) -> Option<TickerQuote>;
     /// `None` once the chaser runtime has dropped the chaser.
     fn chaser(&self, chaser_id: &str) -> Option<ChaserProgress>;
+    /// Start a slice's chaser. Asked, not an effect: the slice's count and the
+    /// state that reports it depend on a refusal.
+    fn start_chaser(&self, request: &ChaserRequest) -> Result<(), String>;
     /// A caller id the venue honors on `request` (`mintClientOrderId`), or `None`.
     fn client_order_id(&self, _request: &TwapOrderRequest) -> Option<String> {
         None
@@ -106,10 +109,6 @@ pub enum TwapEffect {
         twap_id: String,
         settle_token: Option<u64>,
         request: TwapOrderRequest,
-    },
-    StartChaser {
-        twap_id: String,
-        request: ChaserRequest,
     },
     /// Stop the chaser and cancel its open order.
     RemoveChaser { twap_id: String, chaser_id: String },
@@ -276,20 +275,6 @@ impl TwapBook {
             entry
                 .instance
                 .placement_settled(token, outcome, env, &mut effects);
-        }
-        self.settle(&mut effects);
-        effects
-    }
-
-    /// The chaser runtime refused the chaser of a slice [`TwapEffect::StartChaser`].
-    pub fn slice_chaser_refused(&mut self, twap_id: &str, chaser_id: &str) -> Vec<TwapEffect> {
-        let mut effects = Vec::new();
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|entry| entry.instance.id == twap_id)
-        {
-            entry.instance.slice_chaser_refused(chaser_id, &mut effects);
         }
         self.settle(&mut effects);
         effects
