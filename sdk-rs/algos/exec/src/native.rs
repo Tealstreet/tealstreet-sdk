@@ -6,6 +6,7 @@ use safe_cex_algos::{AccountPort, AlgoCx, AlgoFactory};
 use safe_cex_engine::command::decode_command;
 use safe_cex_engine::engine::{Command, CommandId};
 use safe_cex_engine::error::VenueError;
+use safe_cex_engine::model::OrderStatus;
 use serde_json::{Value, json};
 
 use crate::{AlgoReply, AlgoRequest, Exec, Host};
@@ -175,8 +176,15 @@ impl Host for Adapter {
             }
             value
         }).collect();
+        // A venue's terminal rows stay in the store. Cancelling one answers "absent",
+        // which fences the symbol, so `be` lost its replacement stop to that fence.
+        let live_orders: Vec<_> = store
+            .orders
+            .iter()
+            .filter(|order| !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled))
+            .collect();
         json!({"venue":store.venue,"accountName":self.account_name,"markets":markets,"instrumentClassificationsReady":store.instrument_classifications.is_some(),
-            "tickers":store.tickers.values().collect::<Vec<_>>(),"orders":store.orders,"positions":store.positions,"balance":store.balance,"coins":store.coins,"loaded":store.loaded,"socketHealth":{"privateInitialized":store.private_socket.initialized,"privateHealthy":store.private_socket.healthy}})
+            "tickers":store.tickers.values().collect::<Vec<_>>(),"orders":live_orders,"positions":store.positions,"balance":store.balance,"coins":store.coins,"loaded":store.loaded,"socketHealth":{"privateInitialized":store.private_socket.initialized,"privateHealthy":store.private_socket.healthy}})
     }
     fn call(&mut self, token: u64, method: &str, args: Value) -> Result<(), Value> {
         self.call_scoped(token, method, args, false)

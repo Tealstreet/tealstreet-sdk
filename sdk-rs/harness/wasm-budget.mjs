@@ -76,9 +76,10 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // LOCAL Rust algos (chaser, TWAP, exec) link into every family (Sam, option a):
 // each cap is its CI wasm-family node size on master 3617d7fad63 (run 41052374903)
 // plus 10 KiB, rounded up to a KiB.
+// Tightest families at CI (abc18ecd30a) + 10 KiB, rounded up to KiB, before the exec store fix.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_866_752,
-  asterdex: 1_999_872,
+  asterdex: 2_006_016,
   backpack: 1_780_736,
   binance: 2_041_856,
   bingx: 1_866_752,
@@ -86,10 +87,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitgetusdc: 2_138_112,
   bitrue: 1_719_296,
   bitunix: 1_727_488,
-  blofin: 1_824_768,
+  blofin: 1_830_912,
   breakoutprop: 1_420_288,
-  bybit: 2_032_640,
-  coinbase: 1_720_320,
+  bybit: 2_042_880,
+  coinbase: 1_726_464,
   cryptocom: 1_612_800,
   grvt: 1_686_528,
   hyperliquid: 1_964_032,
@@ -97,18 +98,18 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kraken: 2_002_944,
   krakenspot: 2_002_944,
   kucoin: 1_494_016,
-  kucoinspot: 1_969_152,
-  lighter: 1_864_704,
+  kucoinspot: 1_975_296,
+  lighter: 1_872_896,
   'lighter-robinhood': 1_864_704,
   mexc: 1_634_304,
-  okx: 1_797_120,
+  okx: 1_803_264,
   orderly: 1_632_256,
-  paradex: 2_102_272,
+  paradex: 2_108_416,
   phemex: 1_901_568,
   polymarket: 1_509_376,
-  txflow: 1_736_704,
+  txflow: 1_742_848,
   weex: 1_824_768,
-  woo: 2_238_464,
+  woo: 2_244_608,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
