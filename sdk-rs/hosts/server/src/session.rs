@@ -1273,6 +1273,9 @@ fn notice_to_msg(
         }
         ("event" | "accountAuth", _) => {
             let _ = out.send(envelope::msg(name, "engine-event", notice.clone()));
+            if notice["code"] == "order.rejected" && notice["level"] == "error" {
+                let _ = out.send(envelope::msg(name, "error", json!([notice["message"]])));
+            }
         }
         ("deactivate", _) => {
             let _ = out.send(envelope::msg(name, "deactivate-status", notice.clone()));
@@ -2318,6 +2321,35 @@ mod tests {
                 unauthenticated_init_refusal(&venue_field).is_some(),
                 "{venue_field:?}"
             );
+        }
+    }
+
+    /// A LOCAL engine turns these into the account's `error` line; `engine-event`
+    /// alone reaches no toast in the browser.
+    #[test]
+    fn an_order_rejected_error_event_also_reaches_the_error_channel() {
+        let (out, mut sent, _) = Out::channel(16);
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        notice_to_msg(
+            &out,
+            "acct",
+            &json!({"type":"event","level":"error","code":"order.rejected","message":"EC_PostOnlyWillTakeLiquidity"}),
+            &pending,
+        );
+        let event: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(event["d"]["op"], "engine-event");
+        let error: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(error["d"]["op"], "error");
+        assert_eq!(error["d"]["data"], json!(["EC_PostOnlyWillTakeLiquidity"]));
+
+        // A warning, and any other code, stays on `engine-event` only.
+        for event in [
+            json!({"type":"event","level":"warn","code":"order.rejected","message":"m"}),
+            json!({"type":"event","level":"error","code":"ws.closed","message":"m"}),
+        ] {
+            notice_to_msg(&out, "acct", &event, &pending);
+            sent.try_recv().unwrap();
+            assert!(sent.try_recv().is_err(), "{event}");
         }
     }
 
