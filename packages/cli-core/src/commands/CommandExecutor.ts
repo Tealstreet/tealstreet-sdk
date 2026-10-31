@@ -3,7 +3,7 @@ import type { CLIPlatformAdapter, ExchangeLike, TaskAction } from '../types';
 import type { CommandContext, CommandResult as CmdResult } from './Command';
 import type { PreprocessStore } from '../preprocess/types';
 import { commandRegistry } from './CommandRegistry';
-import { parseArgs } from './parseArgs';
+import { parseArgs, refusedOrderToken } from './parseArgs';
 
 // Import all commands to register them
 import { HelpCommand } from './session/HelpCommand';
@@ -289,6 +289,12 @@ export async function executeCommand(
   if (!command) {
     // Not a registered command - pass to trading router
     return { handled: false };
+  }
+
+  const refusal = refusedOrderToken(command.name, trimmed);
+  if (refusal) {
+    adapter.printError(refusal);
+    return { handled: true, success: false, error: refusal, errorReported: true };
   }
 
   // Adjust args: keep command name at index 0, followed by remaining args

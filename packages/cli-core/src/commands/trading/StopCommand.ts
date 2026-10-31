@@ -141,7 +141,7 @@ export class StopCommand extends TradingBaseCommand {
     // Naming the expected form matters more than it looks: the previous message
     // here was the bare string "Not implemented", which a user reasonably read
     // as "this command does not exist yet" and gave up on.
-    const usage = `stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`, \`stop at -1%\`, \`stop sell $500 at 1%\`.`;
+    const usage = `stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`, \`stop at 1%\`, \`stop sell $500 at 1%\`.`;
     this.printError(ctx, usage);
     return this.error(usage);
   }

@@ -1,3 +1,4 @@
+import { firstDashToken } from '../parseArgs';
 import { validateLiveVarSource } from '../../preprocess/reactiveVars';
 import { BaseCommand } from '../BaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
@@ -44,6 +45,13 @@ export class TrackCommand extends BaseCommand {
   async execute(ctx: CommandContext): Promise<CommandResult> {
     if (!ctx.preprocessStore) {
       return this.error('track: preprocess store unavailable');
+    }
+    // parseArgs would drop it, so `$last -2%` would track `$last` with no offset.
+    const dashToken = firstDashToken(ctx.raw);
+    if (dashToken) {
+      const message = `track: refusing "${dashToken}": flags and negative values are not supported, nothing was stored`;
+      this.printError(ctx, message);
+      return this.error(message);
     }
     const sub = (this.getArg(ctx, 1) ?? '').toLowerCase();
 
