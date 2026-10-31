@@ -268,7 +268,7 @@ This has landed as the crate `safe-cex-remote-signer` (`sdk-rs/hosts/remote-sign
 - **`remote_account(link, venue, Some(accountName), engine_options_json)`:** returns a `RemoteAccount` with:
   - `provider`, which you pass to `build_with_signer` / `FrameServer::add_venue_with_signer`;
   - `options_json`, which you construct the engine with;
-  - `on_fatal(cb)`, which fires once after 10 consecutive failures spanning at least 30s. Dispose the account, as today.
+  - `on_fatal(cb)`, which fires once after 10 consecutive failures spanning at least 30s. A timeout is not a failure here: only an error or undecodable answer, or a socket that cannot take the request. It disposes the account, and the page re-inits when its pong no longer lists it.
 - **Input:** `engine_options_json` holds the options the server would otherwise build. That includes the public `key` and an optional `passphrase`, with no secret.
 - **Output:** `options_json` has those fields stripped and carries `signing` (opaque refs), `remoteSigning: true`, `payloadSigner: false` and `publicMode`.
 - **`sign-res`:** call `link.resolve(socket_id, d)` only on links of accounts this socket joined. A request resolves only from the socket it was sent on, and only once. An oversized field settles as an error.

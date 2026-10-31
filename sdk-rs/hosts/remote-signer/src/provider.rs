@@ -309,8 +309,8 @@ impl Inner {
         self.streak.lock().unwrap_or_else(|p| p.into_inner()).count = 0;
     }
 
-    /// One ws-auth round trip; returns `wsAuthSignature`. Failures count toward
-    /// the account's fatal streak exactly where the TS signer counts them.
+    /// One ws-auth round trip; returns `wsAuthSignature`. Failures the device
+    /// reports count toward the account's fatal streak; a timeout does not.
     async fn ask<T>(
         &self,
         id: String,
@@ -349,14 +349,9 @@ impl Inner {
         let response = match response {
             Ok(response) => response,
             Err(Failure::Suspended | Failure::Aborted) => return Err(SignError::Unavailable),
-            Err(Failure::Duplicate) => {
-                self.record_failure();
-                return Err(SignError::TimedOut);
-            }
-            Err(Failure::TimedOut) => {
-                self.record_failure();
-                return Err(SignError::TimedOut);
-            }
+            // Silence is a slow page, not a failed signer: the socket's worker
+            // answers echoes while the page's thread is too busy to sign.
+            Err(Failure::Duplicate | Failure::TimedOut) => return Err(SignError::TimedOut),
             Err(Failure::Unavailable | Failure::SendFailed) => {
                 self.record_failure();
                 return Err(SignError::Unavailable);
