@@ -1306,7 +1306,11 @@ impl BybitLinear {
 
     fn apply_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, leverage: f64) {
         self.note_leverage_ack();
-        cx.store.update_setting(symbol, |s| s.leverage = leverage);
+        cx.store.update_setting(symbol, |s| {
+            s.leverage = leverage;
+            s.buy_leverage = None;
+            s.sell_leverage = None;
+        });
         cx.store.update_positions(|p| {
             if p.symbol == symbol {
                 p.leverage = leverage;

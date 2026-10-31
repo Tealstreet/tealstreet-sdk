@@ -6,6 +6,7 @@ mod history;
 pub mod hosted_signing;
 mod hyro;
 mod identity;
+mod leverage;
 mod options;
 mod paths;
 mod policy;
@@ -144,6 +145,7 @@ impl Rest {
 /// element (see `Cx::request_streamed`); their continuations collect the rows.
 pub enum Then {
     Identity(safe_cex_engine::request_context::Context),
+    Leverage(leverage::Read),
     Markets {
         prelaunch: bool,
         markets: Vec<Market>,
@@ -873,6 +875,12 @@ impl BybitLinear {
                         .venue_error()
                         .outcome(safe_cex_engine::Outcome::NotSent);
                     self.identity_response(cx, context, Err(error));
+                }
+                Then::Leverage(read) => {
+                    let error = error
+                        .venue_error()
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    self.leverage_response(cx, read, Err(error));
                 }
                 // A page refused before any send keeps the engine's typed error.
                 Then::History(request) => {
@@ -2067,6 +2075,11 @@ impl BybitLinear {
                     response.map_err(|error| VenueError::new(error).kind(ErrorKind::Internal));
                 self.identity_response(cx, context, response)
             }
+            Then::Leverage(read) => {
+                let response =
+                    response.map_err(|error| VenueError::new(error).kind(ErrorKind::Internal));
+                self.leverage_response(cx, read, response)
+            }
             Then::Markets {
                 prelaunch,
                 markets,
@@ -2497,6 +2510,7 @@ impl Venue for BybitLinear {
             Then::Ordinary(request) => self.on_ordinary_leg_failed(cx, request, error),
             Then::Candles(read) => Self::candles_failed(cx, read, error),
             Then::Identity(context) => self.identity_response(cx, context, Err(error)),
+            Then::Leverage(read) => self.leverage_response(cx, read, Err(error)),
             Then::Options(request) => self.on_options_response(cx, request, Err(error)),
             Then::History(request) => self.on_history_failed(cx, request, error),
             Then::Closed(request) => self.on_closed_failed(cx, *request, error),
@@ -2556,6 +2570,12 @@ impl Venue for BybitLinear {
             closed_positions: !self.variant.is_spot(),
             balance_info: true,
             market_refresh: true,
+            // Hyro's snapshot replaces every setting, so a flat read would not last.
+            leverage_query: if self.variant.is_spot() || self.variant.is_hyro() {
+                safe_cex_engine::LeverageQuery::Settings
+            } else {
+                safe_cex_engine::LeverageQuery::OnReadAndMetadata
+            },
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -2981,6 +3001,10 @@ impl Venue for BybitLinear {
             self.identity_response(cx, context, Err(error));
             return;
         }
+        if let Then::Leverage(read) = pending.then {
+            self.leverage_response(cx, read, Err(error));
+            return;
+        }
         // A page or its re-read keeps the signer's typed error.
         if let Then::History(request) = pending.then {
             self.on_history_failed(cx, request, error);
@@ -3093,6 +3117,7 @@ impl Venue for BybitLinear {
             | Command::FetchCandles { symbol, .. }
             | Command::CancelSymbolOrders { symbol, .. }
             | Command::SetLeverage { symbol, .. }
+            | Command::FetchLeverage { symbol, .. }
             | Command::SetMarginType { symbol, .. } => Some(symbol.as_str()),
             Command::AmendOrder { id, .. } => cx.store.order(id).map(|order| order.symbol.as_str()),
             Command::Query { query, .. } => match query {
@@ -3115,6 +3140,7 @@ impl Venue for BybitLinear {
                 Command::FetchCandles { command, .. }
                 | Command::CancelSymbolOrders { command, .. }
                 | Command::SetLeverage { command, .. }
+                | Command::FetchLeverage { command, .. }
                 | Command::SetMarginType { command, .. }
                 | Command::AmendOrder { command, .. }
                 | Command::Query { command, .. } => Some(*command),
@@ -3124,7 +3150,9 @@ impl Venue for BybitLinear {
                 // A refusal before any I/O still needs this command's authority.
                 let operation = if matches!(
                     command,
-                    Command::FetchCandles { .. } | Command::Query { .. }
+                    Command::FetchCandles { .. }
+                        | Command::FetchLeverage { .. }
+                        | Command::Query { .. }
                 ) {
                     safe_cex_engine::request_context::Operation::Read
                 } else {
@@ -3172,6 +3200,8 @@ impl Venue for BybitLinear {
                 from_ms,
                 to_ms,
             } => self.fetch_candles(cx, &symbol, interval, (limit, from_ms, to_ms)),
+            // The engine binds the command when the read is admitted.
+            Command::FetchLeverage { command: _, symbol } => self.fetch_leverage(cx, symbol),
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),
         }

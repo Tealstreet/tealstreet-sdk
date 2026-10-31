@@ -247,7 +247,7 @@ pub struct AccountState {
     classic: bool,
     tick_timer: Option<TimerId>,
     partial_stop_refresh: Option<TimerId>,
-    position_version: u32,
+    pub(crate) position_version: u32,
     positions_generation: u32,
     positions: Option<PositionsJoin>,
     positions_follow_up: bool,
@@ -338,6 +338,19 @@ pub(crate) fn valid_hyro_order(row: &OrderRow<'_>) -> bool {
         ]
         .into_iter()
         .all(optional_numeric)
+}
+
+/// A hedged position speaks for its own side's rail; a one-way one for both.
+fn position_leverage(setting: &mut MarketSetting, position: &Position) {
+    setting.leverage = position.leverage;
+    if position.position_mode != Some(PositionMode::Hedged) {
+        setting.buy_leverage = None;
+        setting.sell_leverage = None;
+    } else if position.side == PositionSide::Long {
+        setting.buy_leverage = Some(position.leverage);
+    } else {
+        setting.sell_leverage = Some(position.leverage);
+    }
 }
 
 fn valid_hyro_position(row: &PositionRow<'_>) -> bool {
@@ -1405,7 +1418,7 @@ impl BybitLinear {
         }
     }
 
-    fn margin_type(&self) -> MarginType {
+    pub(crate) fn margin_type(&self) -> MarginType {
         self.account.margin_type.unwrap_or(MarginType::Cross)
     }
 
@@ -2298,9 +2311,8 @@ impl BybitLinear {
                     .insert(position.symbol.clone(), mode == PositionMode::Hedged);
             }
             if position.leverage > 0.0 {
-                let leverage = position.leverage;
                 cx.store.update_setting(&position.symbol, |s| {
-                    s.leverage = leverage;
+                    position_leverage(s, &position);
                     s.margin_type = Some(margin_type);
                 });
             }
@@ -3005,7 +3017,7 @@ impl BybitLinear {
         for row in &best {
             if row.position.leverage > 0.0 {
                 cx.store.update_setting(&row.position.symbol, |setting| {
-                    setting.leverage = row.position.leverage;
+                    position_leverage(setting, &row.position);
                     setting.margin_type = row.position.margin_type;
                 });
             }
