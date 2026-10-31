@@ -2303,7 +2303,20 @@ mod tests {
                 } else {
                     CancelAll::EachOpenSymbol
                 },
-                leverage_query: if any(&["bingx", "weex"], venue) {
+                leverage_query: if any(
+                    &[
+                        "bingx",
+                        "weex",
+                        "bybit",
+                        "bybitinverse",
+                        "bybitdemo",
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "kucoin",
+                    ],
+                    venue,
+                ) {
                     LeverageQuery::OnReadAndMetadata
                 } else if any(
                     &[

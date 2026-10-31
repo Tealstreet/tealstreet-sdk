@@ -99,6 +99,8 @@ pub struct Account {
     pub(crate) supervisor: Supervisor,
     pub generation: u64,
     pub orders_version: u64,
+    /// Bumped by each acknowledged settings write; an older read must not overwrite it.
+    pub settings_version: u64,
     pub config_at: Option<f64>,
     pub uta: bool,
     pub detected: bool,

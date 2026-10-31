@@ -1331,7 +1331,11 @@ fn plan_leverage(
     let leverage = input
         .max(market.limits.leverage.min)
         .min(market.limits.leverage.max);
-    if cx.store.setting(&symbol).map(|s| s.leverage) == Some(leverage) {
+    // Flat hedged rails can differ, and the write sets both.
+    if cx.store.setting(&symbol).is_some_and(|s| {
+        s.buy_leverage.unwrap_or(s.leverage) == leverage
+            && s.sell_leverage.unwrap_or(s.leverage) == leverage
+    }) {
         return Ok(Job::default());
     }
     let value = number(leverage);

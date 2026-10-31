@@ -880,7 +880,7 @@ fn private_snapshot_starts_once_before_ticker_and_launch_independent_of_welcome(
 }
 
 #[test]
-fn direct_leverage_query_rejects_without_requests_before_and_after_start() {
+fn a_leverage_query_without_credentials_rejects_without_requests() {
     let unstarted = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
         public_data_only: true,
         ..Default::default()
@@ -895,7 +895,7 @@ fn direct_leverage_query_rejects_without_requests_before_and_after_start() {
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(
-            matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandFailed { command: id, error })] if *id == command && error.legacy_text() == "KuCoin leverage query is unsupported")
+            matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandFailed { command: id, error })] if *id == command && error.legacy_text() == "KuCoin leverage requires credentials")
         );
     }
 }

@@ -517,16 +517,25 @@ struct BalanceRow {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Metadata<'a> {
+pub(crate) struct Metadata<'a> {
     #[serde(default)]
-    margin_mode: &'a str,
+    pub(crate) margin_mode: &'a str,
     #[serde(default, borrow)]
     position_mode: Option<&'a RawValue>,
     #[serde(default)]
-    leverage: Number,
+    pub(crate) leverage: Number,
 }
 
 impl Kucoin {
+    pub(crate) fn account_revision(&self) -> u64 {
+        self.account.revision
+    }
+    pub(crate) fn account_settings_unchanged_since(&self, revision: u64) -> bool {
+        revision >= self.account.settings_revision
+    }
+    pub(crate) fn mode_known(&self) -> bool {
+        self.account.mode_known
+    }
     pub(crate) fn account_order_complete(&self, id: &str) -> bool {
         !self.account.incomplete_orders.contains(id)
     }

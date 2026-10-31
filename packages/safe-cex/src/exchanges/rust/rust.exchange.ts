@@ -1714,9 +1714,14 @@ export class RustEngineExchange extends BaseExchange {
       return;
     }
     if (capabilities.leverageQuery !== 'onMetadata' && capabilities.leverageQuery !== 'onReadAndMetadata') return;
-    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
-    this.host?.flush();
-    this.applier.applyLeverage(symbol, rails);
+    // Refreshed on every symbol selection, and a read can refuse routinely (portfolio margin).
+    try {
+      const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
+      this.host?.flush();
+      this.applier.applyLeverage(symbol, rails);
+    } catch (error) {
+      this.log(`Error refreshing leverage for ${symbol}: ${error}`, LogSeverity.Warning);
+    }
   };
 
   private frameRecoveryPending = false;

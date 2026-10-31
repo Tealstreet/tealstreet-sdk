@@ -1221,3 +1221,97 @@ fn cancel_legs_combine_outcomes_without_overclaiming() {
 #[cfg(feature = "private-adoption-originals")]
 #[path = "support/trading_context.rs"]
 mod trading_context;
+
+fn leverage_result(h: &Harness, command: u32) -> serde_json::Value {
+    serde_json::from_str(&h.done(command).expect("the read must succeed")).unwrap()
+}
+
+#[test]
+fn a_flat_cross_symbol_reads_margin_then_leverage() {
+    let mut h = Harness::new();
+    assert_eq!(
+        h.engine.capabilities().leverage_query,
+        safe_cex_engine::LeverageQuery::OnReadAndMetadata
+    );
+    h.command(Command::FetchLeverage {
+        command: 70,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(
+        &margin,
+        200,
+        r#"{"code":"200000","data":{"symbol":"XBTUSDTM","marginMode":"CROSS"}}"#,
+    );
+    let leverage = h.take("/api/v2/getCrossUserLeverage");
+    h.response(
+        &leverage,
+        200,
+        r#"{"code":"200000","data":{"symbol":"XBTUSDTM","leverage":"7"}}"#,
+    );
+    let value = leverage_result(&h, 70);
+    assert_eq!(value["buyLeverage"], 7.0);
+    assert_eq!(value["sellLeverage"], 7.0);
+    assert_eq!(value["marginType"], "cross");
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 7.0);
+}
+
+#[test]
+fn a_flat_isolated_symbol_is_one_as_in_ts_with_no_cross_read() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 71,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(
+        &margin,
+        200,
+        r#"{"code":"200000","data":{"symbol":"XBTUSDTM","marginMode":"ISOLATED"}}"#,
+    );
+    assert!(!h.has("getCrossUserLeverage"));
+    let value = leverage_result(&h, 71);
+    assert_eq!(value["buyLeverage"], 1.0);
+    assert_eq!(value["marginType"], "isolated");
+}
+
+#[test]
+fn a_failed_or_invalid_leverage_read_fails_its_command() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 72,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(&margin, 200, r#"{"code":"400100","msg":"denied"}"#);
+    assert!(h.done(72).unwrap_err().contains("denied"));
+
+    h.command(Command::FetchLeverage {
+        command: 73,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(
+        &margin,
+        200,
+        r#"{"code":"200000","data":{"marginMode":"CROSS"}}"#,
+    );
+    let leverage = h.take("/api/v2/getCrossUserLeverage");
+    h.response(
+        &leverage,
+        200,
+        r#"{"code":"200000","data":{"leverage":"0"}}"#,
+    );
+    assert!(h.done(73).unwrap_err().contains("invalid leverage"));
+}
+
+#[test]
+fn an_unknown_symbol_leverage_read_sends_nothing() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 74,
+        symbol: "NOPEUSDT".into(),
+    });
+    assert!(h.done(74).unwrap_err().contains("unknown market"));
+    assert!(!h.has("getMarginMode"));
+}

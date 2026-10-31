@@ -37,10 +37,16 @@ it('keeps a failed symbol-switch leverage read at warning level', async () => {
   expect(errors).not.toHaveBeenCalled();
 });
 
-it('lets symbol metadata and chaser fill reads reject without an error event', async () => {
+it('keeps a failed symbol metadata refresh at warning level, with no rejection for the worker', async () => {
   const mexc = rejecting('mexc');
-  await expect(mexc.exchange.updateSymbolMetadata('BTCUSDT')).rejects.toThrow('leverage unavailable');
+  const warnings = vi.fn();
+  mexc.exchange.on('warning', warnings);
+  await expect(mexc.exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();
+  expect(warnings).toHaveBeenCalledTimes(1);
   expect(mexc.errors).not.toHaveBeenCalled();
+});
+
+it('lets chaser fill reads reject without an error event', async () => {
   const grvt = rejecting('grvt');
   await expect(grvt.exchange.fetchFillsForOrderIds!(['order-1'])).rejects.toThrow('leverage unavailable');
   expect(grvt.errors).not.toHaveBeenCalled();
