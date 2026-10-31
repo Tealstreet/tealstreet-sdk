@@ -1,4 +1,5 @@
 import { validateLiveVarSource } from '../../preprocess/reactiveVars';
+import { firstDashToken } from '../parseArgs';
 import { BaseCommand } from '../BaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 
@@ -41,6 +42,13 @@ export class SetsCommand extends BaseCommand {
   async execute(ctx: CommandContext): Promise<CommandResult> {
     if (!ctx.preprocessStore) {
       return this.error('sets: preprocess store unavailable');
+    }
+    // parseArgs would drop it, so `$entry -1.5%` would store `$entry` with no offset.
+    const dashToken = firstDashToken(ctx.raw);
+    if (dashToken) {
+      const message = `sets: refusing "${dashToken}": flags and negative values are not supported, nothing was stored`;
+      this.printError(ctx, message);
+      return this.error(message);
     }
     const target = this.getArg(ctx, 1);
     if (!target || !target.startsWith('@') || target.length < 2) {
