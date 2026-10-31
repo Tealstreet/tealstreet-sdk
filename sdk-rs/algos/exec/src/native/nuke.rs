@@ -18,6 +18,7 @@ impl Adapter {
         let mut cancelled = 0;
         let mut swept = 0;
         let mut cancelled_symbols = Vec::new();
+        let mut close_failures = Vec::new();
         // Running chasers and TWAPs would place again after the cancels below, so a
         // close-all would not close all: stop them first, waiting for their cancels.
         let stopped_twaps = self
@@ -66,50 +67,71 @@ impl Adapter {
             }
         }
         if !matches!(mode, "orders" | "ord") {
-            let store = self.snapshot();
-            let positions = rows(&store, "positions")
-                .iter()
-                .filter(|p| p["contracts"].as_f64().is_some_and(|v| v != 0.))
-                .cloned()
-                .collect::<Vec<_>>();
-            for position in positions {
-                if self.cx.scope.is_disposed() {
-                    return Err(
-                        json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
-                    );
+            let mut positions = open_positions(&self.snapshot());
+            for attempt in 0..=NUKE_CLOSE_RETRIES {
+                let mut failed = Vec::new();
+                for position in positions {
+                    if self.cx.scope.is_disposed() {
+                        return Err(
+                            json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
+                        );
+                    }
+                    let symbol = position["symbol"].as_str().unwrap_or("unknown").to_owned();
+                    let result = match protection::prepare_close(&position, None, &self.snapshot())
+                    {
+                        Err(message) => Err(json!({"message":message,"outcome":"notSent"})),
+                        Ok(order) => self.nuke_command("placeOrder", json!([order])).await,
+                    };
+                    let failure = match result {
+                        Ok(value) => {
+                            if let Some(real) =
+                                value.as_array().filter(|a| a.iter().all(Value::is_string))
+                            {
+                                ids.extend(real.iter().cloned());
+                                completed += 1;
+                                closed += 1;
+                                continue;
+                            }
+                            json!({"message":"Invalid placement result","outcome":"unknown"})
+                        }
+                        Err(error) => {
+                            if let Some(partial) = error["partialOrderIds"].as_array() {
+                                ids.extend(partial.iter().cloned());
+                            }
+                            error
+                        }
+                    };
+                    failed.push((position, named(failure, "close", &symbol)));
                 }
-                let result = match protection::prepare_close(&position, None, &self.snapshot()) {
-                    Err(message) => Err(json!({"message":message,"outcome":"notSent"})),
-                    Ok(order) => self.nuke_command("placeOrder", json!([order])).await,
-                };
-                match result {
-                    Ok(value) => {
-                        if let Some(real) =
-                            value.as_array().filter(|a| a.iter().all(Value::is_string))
-                        {
-                            ids.extend(real.iter().cloned());
-                            completed += 1;
-                            closed += 1;
-                        } else {
-                            failures.push(named(
-                                json!({"message":"Invalid placement result","outcome":"unknown"}),
-                                "close",
-                                position["symbol"].as_str().unwrap_or("unknown"),
-                            ));
-                        }
-                    }
-                    Err(error) => {
-                        if let Some(partial) = error["partialOrderIds"].as_array() {
-                            ids.extend(partial.iter().cloned());
-                        }
-                        failures.push(named(
-                            error,
-                            "close",
-                            position["symbol"].as_str().unwrap_or("unknown"),
-                        ));
-                    }
+                if failed.is_empty() {
+                    close_failures.clear();
+                    break;
+                }
+                if attempt < NUKE_CLOSE_RETRIES {
+                    safe_cex_algos::executor::sleep_ms(NUKE_CLOSE_RETRY_MS).await;
+                }
+                // Retry only a failed close whose position still shows open; a
+                // close that succeeded behind a lagging store is never resent.
+                let open = open_positions(&self.snapshot());
+                failed.retain(|(position, _)| {
+                    open.iter().any(|row| {
+                        row["symbol"] == position["symbol"] && row["side"] == position["side"]
+                    })
+                });
+                positions = open
+                    .into_iter()
+                    .filter(|row| {
+                        failed.iter().any(|(position, _)| {
+                            row["symbol"] == position["symbol"] && row["side"] == position["side"]
+                        })
+                    })
+                    .collect();
+                close_failures = failed.into_iter().map(|(_, failure)| failure).collect();
+                if positions.is_empty() {
+                    break;
                 }
             }
+            failures.append(&mut close_failures);
         }
         // The venue's cancel-all reaches orders the store does not track, as in the browser.
         if !matches!(mode, "positions" | "pos") {
@@ -231,6 +253,16 @@ impl Adapter {
 }
 
 const NUKE_STOP_REASON: &str = "Stopped by nuke";
+const NUKE_CLOSE_RETRIES: u32 = 3;
+const NUKE_CLOSE_RETRY_MS: u64 = 100;
+
+fn open_positions(store: &Value) -> Vec<Value> {
+    rows(store, "positions")
+        .iter()
+        .filter(|p| p["contracts"].as_f64().is_some_and(|v| v != 0.))
+        .cloned()
+        .collect()
+}
 
 fn named(mut error: Value, phase: &str, symbol: &str) -> Value {
     error["message"] = json!(format!(

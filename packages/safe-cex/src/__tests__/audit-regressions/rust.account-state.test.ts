@@ -499,10 +499,10 @@ describe('Rust native current-account reads', () => {
       { ...position(), id: 'BTCUSDT-short', side: PositionSide.Short, contracts: 3 },
     ], options: { isHedged: true } });
     await r.exchange.nukePositions(3);
-    expect(r.commands.filter((c) => c.op === 'placeOrders').map((c) => c.orders)).toEqual([[
-      { symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 20, reduceOnly: true },
-      { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Market, amount: 30, reduceOnly: true },
-    ]]);
+    expect(r.commands.filter((c) => c.op === 'placeOrders').map((c) => c.orders)).toEqual([
+      [{ symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 20, reduceOnly: true }],
+      [{ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Market, amount: 30, reduceOnly: true }],
+    ]);
     expect(r.exchange.isNuking).toBe(false);
   });
 
@@ -527,7 +527,7 @@ describe('Rust native current-account reads', () => {
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
   });
 
-  it.each(['partial', 'unknown'] as const)('preserves an original %s rejection and cancels orders without retrying closes', async (kind) => {
+  it.each(['partial', 'unknown'] as const)('keeps a %s close outcome, names the symbol, retries reduce-only 3 times and cancels orders', async (kind) => {
     const r = fixture();
     await r.start();
     r.update({ positions: [position()], orders: [order()] });
@@ -537,11 +537,56 @@ describe('Rust native current-account reads', () => {
     const place = vi.spyOn(r.exchange, 'placeOrders').mockRejectedValue(failure);
     const error = vi.fn();
     r.exchange.on('error', error);
-    await expect(r.exchange.nuke(3)).rejects.toBe(failure);
-    expect(place).toHaveBeenCalledOnce();
+    const nuking = r.exchange.nuke(3).catch((thrown: unknown) => thrown);
+    await vi.advanceTimersByTimeAsync(300);
+    const thrown = (await nuking) as Error;
+    expect(thrown.message).toBe('Nuke could not close BTCUSDT: Close interrupted');
+    expect(thrown).toMatchObject(kind === 'unknown' ? { outcome: 'unknown', clientOrderId: 'close-request' } : { partialOrderIds: ['accepted'] });
+    expect(place).toHaveBeenCalledTimes(4);
+    expect(place.mock.calls.every(([[close]]) => close.reduceOnly === true)).toBe(true);
     expect(error).toHaveBeenCalledOnce();
     expect(r.commands.filter((c) => c.op === 'cancelSymbolOrders')).toHaveLength(1);
     expect(r.exchange.isNuking).toBe(false);
+  });
+
+  it('a transient close failure closes on retry with no final error', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position()] });
+    const place = vi.spyOn(r.exchange, 'placeOrders').mockRejectedValueOnce(new Error('busy')).mockResolvedValue(['close']);
+    const nuking = r.exchange.nukePositions();
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(nuking).resolves.toBeDefined();
+    expect(place).toHaveBeenCalledTimes(2);
+  });
+
+  it('a successful close behind a lagging store is not resent and is not a failure', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position('BTCUSDT'), position('ETHUSDT')] });
+    const place = vi.spyOn(r.exchange, 'placeOrders').mockImplementation(async ([close]) => {
+      if (close.symbol === 'ETHUSDT') throw new Error('busy');
+      return ['close'];
+    });
+    const nuking = r.exchange.nukePositions().catch((thrown: unknown) => thrown);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(((await nuking) as Error).message).toBe('Nuke could not close ETHUSDT: busy');
+    expect(place.mock.calls.filter(([[close]]) => close.symbol === 'BTCUSDT')).toHaveLength(1);
+    expect(place.mock.calls.filter(([[close]]) => close.symbol === 'ETHUSDT')).toHaveLength(4);
+  });
+
+  it('stops retrying once a failed close\'s position is gone', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position()] });
+    const place = vi.spyOn(r.exchange, 'placeOrders').mockImplementation(async () => {
+      r.update({ positions: [] });
+      throw new Error('answer lost');
+    });
+    const nuking = r.exchange.nukePositions();
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(nuking).resolves.toBeDefined();
+    expect(place).toHaveBeenCalledOnce();
   });
 
   it('tries every symbol after one cancel fails, then names the failure and what is left', async () => {
