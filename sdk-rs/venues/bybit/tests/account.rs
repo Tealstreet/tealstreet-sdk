@@ -3553,3 +3553,119 @@ fn a_refused_batch_row_carries_the_venue_reason_in_its_error() {
         ))
     );
 }
+
+fn fetch_leverage(h: &mut Harness, command: u32, symbol: &str) -> safe_cex_engine::HttpRequest {
+    h.command(safe_cex_engine::Command::FetchLeverage {
+        command,
+        symbol: symbol.into(),
+    });
+    h.take("/v5/position/list")
+}
+
+#[test]
+fn a_flat_symbol_reads_its_leverage_with_a_symbol_query() {
+    let mut h = ready();
+    assert_eq!(
+        h.engine.capabilities().leverage_query,
+        safe_cex_engine::LeverageQuery::OnReadAndMetadata
+    );
+    let request = fetch_leverage(&mut h, 94, "ETHUSDT");
+    assert!(request.url.contains("category=linear"), "{}", request.url);
+    assert!(request.url.contains("symbol=ETHUSDT"), "{}", request.url);
+    assert!(!request.url.contains("settleCoin"), "{}", request.url);
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"ETHUSDT","side":"","size":"0","positionIdx":0,"leverage":"50","avgPrice":"0"}],"nextPageCursor":"","category":"linear"}}"#,
+    );
+    let Some(Ok(result)) = h.result(94) else {
+        panic!("the read must succeed: {:?}", h.result(94));
+    };
+    let fetched: serde_json::Value = serde_json::from_str(result).unwrap();
+    assert_eq!(fetched["buyLeverage"], 50.0);
+    assert_eq!(fetched["sellLeverage"], 50.0);
+    assert_eq!(fetched["positionMode"], "oneway");
+    let setting = h.engine.store().setting("ETHUSDT").unwrap();
+    assert_eq!(setting.leverage, 50.0);
+    assert_eq!(setting.buy_leverage, None);
+    assert!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .all(|position| position.symbol != "ETHUSDT"),
+        "a flat row is not a position"
+    );
+}
+
+#[test]
+fn flat_hedged_rows_set_each_rail() {
+    let mut h = ready();
+    let request = fetch_leverage(&mut h, 95, "ETHUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","side":"","size":"0","positionIdx":1,"leverage":"20"},{"symbol":"ETHUSDT","side":"","size":"0","positionIdx":2,"leverage":"7"}]}}"#,
+    );
+    let setting = h.engine.store().setting("ETHUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(20.0));
+    assert_eq!(setting.sell_leverage, Some(7.0));
+    let Some(Ok(result)) = h.result(95) else {
+        panic!("the read must succeed");
+    };
+    let fetched: serde_json::Value = serde_json::from_str(result).unwrap();
+    assert_eq!(fetched["positionMode"], "hedged");
+}
+
+#[test]
+fn a_leverage_write_during_the_read_keeps_the_written_value() {
+    let mut h = ready();
+    let request = fetch_leverage(&mut h, 96, "ETHUSDT");
+    h.command(safe_cex_engine::Command::SetLeverage {
+        command: 97,
+        symbol: "ETHUSDT".into(),
+        leverage: 12.0,
+        side: None,
+    });
+    let write = h.take("/v5/position/set-leverage");
+    h.reply(write.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{}}"#);
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","positionIdx":0,"leverage":"50"}]}}"#,
+    );
+    assert_eq!(h.engine.store().setting("ETHUSDT").unwrap().leverage, 12.0);
+    let Some(Ok(result)) = h.result(96) else {
+        panic!("the read must succeed");
+    };
+    let fetched: serde_json::Value = serde_json::from_str(result).unwrap();
+    assert_eq!(fetched["buyLeverage"], 12.0);
+}
+
+#[test]
+fn a_portfolio_margin_row_fails_the_read_and_writes_nothing() {
+    let mut h = ready();
+    let before = h.engine.store().setting("ETHUSDT");
+    let request = fetch_leverage(&mut h, 98, "ETHUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","positionIdx":0,"leverage":""}]}}"#,
+    );
+    let Some(Err(error)) = h.result(98) else {
+        panic!("the read must fail");
+    };
+    assert!(error.contains("portfolio margin"), "{error}");
+    assert_eq!(h.engine.store().setting("ETHUSDT"), before);
+}
+
+#[test]
+fn an_unknown_market_is_refused_before_any_request() {
+    let mut h = ready();
+    h.command(safe_cex_engine::Command::FetchLeverage {
+        command: 99,
+        symbol: "NOPEUSDT".into(),
+    });
+    assert!(matches!(h.result(99), Some(Err(_))));
+    assert!(!h.has_request("/v5/position/list?category=linear&symbol=NOPEUSDT"));
+}
