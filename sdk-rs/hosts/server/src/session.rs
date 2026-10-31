@@ -798,7 +798,9 @@ impl Session {
     ) {
         // An after-load wait polls the account like a waiting read, under the same cap.
         let permit = if after_load {
-            match self.joined[name].account.reads.clone().try_acquire_owned() {
+            let account = &self.joined[name].account;
+            let pool = after_load_pool(method, &account.reads, &account.metadata_refreshes);
+            match pool.clone().try_acquire_owned() {
                 Ok(permit) => Some(permit),
                 Err(_) => {
                     self.reply_failure(
@@ -963,6 +965,18 @@ fn audit_who(account: &Account) -> crate::audit::Who {
         user: account.user.clone(),
         account: account.name.clone(),
         venue: account.venue.clone(),
+    }
+}
+
+fn after_load_pool<'a>(
+    method: &str,
+    reads: &'a Arc<tokio::sync::Semaphore>,
+    metadata_refreshes: &'a Arc<tokio::sync::Semaphore>,
+) -> &'a Arc<tokio::sync::Semaphore> {
+    if method == "updateSymbolMetadata" {
+        metadata_refreshes
+    } else {
+        reads
     }
 }
 
@@ -1337,6 +1351,24 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metadata_refreshes_wait_in_their_own_pool() {
+        let reads = Arc::new(tokio::sync::Semaphore::new(0));
+        let refreshes = Arc::new(tokio::sync::Semaphore::new(1));
+        assert!(
+            after_load_pool("updateSymbolMetadata", &reads, &refreshes)
+                .clone()
+                .try_acquire_owned()
+                .is_ok()
+        );
+        assert!(
+            after_load_pool("getAccount", &reads, &refreshes)
+                .clone()
+                .try_acquire_owned()
+                .is_err()
+        );
+    }
 
     /// On the wire: an algo error raised during a drop, then the resume. The op is
     /// a chase the book refuses; every algo error takes this one `Port::emit` path.

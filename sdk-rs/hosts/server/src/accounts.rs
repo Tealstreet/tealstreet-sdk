@@ -76,10 +76,15 @@ pub struct Account {
     pub frame_reads: Arc<tokio::sync::Semaphore>,
     /// Other store reads in flight (balance, position mode), which may wait for load.
     pub reads: Arc<tokio::sync::Semaphore>,
+    /// Metadata refreshes waiting for load, one per selected symbol.
+    pub metadata_refreshes: Arc<tokio::sync::Semaphore>,
 }
 
 /// Concurrent waiting store reads per account; more are refused, not queued.
 pub const MAX_READS: usize = 4;
+
+/// Own pool: a selection during load must not be refused, nor crowd out other reads.
+pub const MAX_METADATA_REFRESHES: usize = 32;
 
 /// Concurrent `fetchOrders`/`fetchPositions` per account; more are refused, not queued.
 pub const MAX_FRAME_READS: usize = 2;
@@ -764,6 +769,7 @@ impl Registry {
             held,
             frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
             reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
+            metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
         };
         Ok((account, remote))
     }
@@ -1153,6 +1159,7 @@ pub(crate) mod tests {
             held: Arc::default(),
             frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
             reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
+            metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
         });
         account.hold(
             7,
