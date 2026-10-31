@@ -60,6 +60,22 @@ export class StopCommand extends TradingBaseCommand {
         ? atIdx + 1
         : args.findIndex((arg, index) => index > 0 && index !== sizePosition && this.looksLikePrice(arg));
 
+    // Only `$` sizes count, and an ignored size would stop the whole position.
+    const triggerOperand = this.findArgIndex(args, 'trigger') + 1;
+    const stray = args.find(
+      (arg, index) =>
+        index > 0 &&
+        index !== sizePosition &&
+        index !== pricePosition &&
+        index !== triggerOperand &&
+        (this.looksLikeSize(arg) || this.looksLikePrice(arg)),
+    );
+    if (stray !== undefined) {
+      const refusal = `stop: refusing "${stray}": it would be ignored and the stop would cover the whole position. A stop size needs a $, e.g. \`stop sell $500 at 1%\`; nothing was placed`;
+      this.printError(ctx, refusal);
+      return this.error(refusal);
+    }
+
     if (pricePosition > 0 && args[pricePosition] !== undefined) {
       const ticker = exchange.store?.tickers?.find((ticker) => ticker.symbol === targetSymbol);
       const currentPrice = ticker?.last;
@@ -67,7 +83,11 @@ export class StopCommand extends TradingBaseCommand {
         return this.error(`Current price is not available for ticker ${targetSymbol}, try again.`);
       }
 
-      const side = this.hasArgValue(args, 'buy') ? OrderSide.Buy : this.hasArgValue(args, 'sell') ? OrderSide.Sell : undefined;
+      const side = this.hasArgValue(args, 'buy')
+        ? OrderSide.Buy
+        : this.hasArgValue(args, 'sell')
+          ? OrderSide.Sell
+          : undefined;
       const limitPrice = parseFloat(this.processPrice(args[pricePosition], currentPrice));
 
       // Optional `trigger <abs>` keyword turns this into a true limit

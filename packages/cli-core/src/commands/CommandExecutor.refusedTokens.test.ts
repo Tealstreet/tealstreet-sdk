@@ -171,6 +171,33 @@ describe('order commands refuse tokens parseArgs would drop', () => {
     expect(result.error ?? '').not.toContain('refusing');
   });
 
+  it.each([
+    ['stop sell 0.01 at 70000', '0.01'],
+    ['stop 0.01 at 70000', '0.01'],
+    ['stop sell 50% at 70000', '50%'],
+    ['stop at 70000 $500', '$500'],
+    ['stop at 70000 500$', '500$'],
+    ['stop 70000 69000', '69000'],
+    ['stop at 70000 trigger 69000 5', '5'],
+  ])('%s refuses the token it would ignore as a size', async (command, token) => {
+    const { result, writes } = await run(command);
+    expect(writes).toEqual([]);
+    expect(result.error).toContain(`"${token}"`);
+  });
+
+  it.each([
+    'stop 70000',
+    'stop at 70000 ETHUSDT',
+    'stop at 70000 trigger 69000',
+    'stop sell at 70000',
+    'stop $500 at 70000',
+    'stop sell $500 at 70000',
+    'stop 500$ at 70000 trigger 69000',
+  ])('%s still places', async (command) => {
+    const { writes } = await run(command);
+    expect(writes).toEqual(['placeOrder']);
+  });
+
   it('track refuses a dash token rather than storing the source without it', async () => {
     const store = new MemoryPreprocessStore();
     const adapter = new Proxy({}, { get: () => () => undefined }) as unknown as CLIPlatformAdapter;

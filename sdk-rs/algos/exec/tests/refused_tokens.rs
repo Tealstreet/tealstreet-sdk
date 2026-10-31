@@ -147,6 +147,42 @@ fn a_flag_or_negative_on_a_command_that_can_change_an_order_is_refused_by_name()
     }
 }
 
+/// A stop size needs a `$`; anything else was ignored and the stop covered the
+/// whole position.
+#[test]
+fn a_stop_refuses_a_token_it_would_ignore_as_a_size() {
+    for (command, token) in [
+        ("stop sell 0.01 at 70000", "0.01"),
+        ("stop 0.01 at 70000", "0.01"),
+        ("stop sell 50% at 70000", "50%"),
+        ("stop at 70000 $500", "$500"),
+        ("stop at 70000 500$", "500$"),
+        ("stop 70000 69000", "69000"),
+        ("stop at 70000 trigger 69000 5", "5"),
+    ] {
+        let p = run(command);
+        assert!(p.calls.is_empty(), "{command} issued {:?}", p.calls);
+        let error = failure(&p);
+        assert!(
+            error.contains(&format!("\"{token}\"")),
+            "{command}: {error}"
+        );
+    }
+    for (command, amount) in [
+        ("stop 70000", 0.),
+        ("stop at 70000 ETHUSDT", 0.),
+        ("stop at 70000 trigger 69000", 0.),
+        ("stop sell at 70000", 0.),
+        ("stop $500 at 70000", 0.01),
+        ("stop sell $500 at 70000", 0.01),
+        ("stop 500$ at 70000 trigger 69000", 0.01),
+    ] {
+        let p = run(command);
+        assert_eq!(p.calls.len(), 1, "{command}: {:?}", p.events);
+        assert_eq!(p.calls[0].2[0]["amount"], amount, "{command}");
+    }
+}
+
 #[test]
 fn a_price_at_or_below_zero_places_nothing() {
     for command in [
