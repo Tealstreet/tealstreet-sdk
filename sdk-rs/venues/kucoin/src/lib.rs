@@ -1162,7 +1162,7 @@ impl Venue for Kucoin {
             return;
         }
         if let Pending::Leverage(read) = pending {
-            cx.fail(read.command(), error);
+            let _ = cx.fail_context(read.context(), error);
             return;
         }
         match pending {
@@ -1254,7 +1254,7 @@ impl Venue for Kucoin {
         }
         match command {
             Command::SetTickerSymbols { .. } => {}
-            Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
+            Command::FetchLeverage { symbol, .. } => self.fetch_leverage(cx, symbol),
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
                     cx.notice(

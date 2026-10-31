@@ -4,7 +4,8 @@ use crate::account::Metadata;
 use crate::wire::Envelope;
 use crate::{Kucoin, Pending, api_symbol};
 use safe_cex_engine::model::{MarginType, PositionMode};
-use safe_cex_engine::{CommandId, Cx, Method, Response};
+use safe_cex_engine::request_context::Context;
+use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::Serialize;
 
 #[derive(Clone, Copy)]
@@ -14,7 +15,7 @@ enum Step {
 }
 
 pub struct Read {
-    command: CommandId,
+    context: Context,
     symbol: String,
     revision: u64,
     step: Step,
@@ -47,26 +48,34 @@ fn row<'a>(response: &Response<'a>) -> Result<Metadata<'a>, String> {
 }
 
 impl Read {
-    pub(crate) fn command(&self) -> CommandId {
-        self.command
+    pub(crate) fn context(&self) -> &Context {
+        &self.context
     }
 }
 
 impl Kucoin {
-    pub(crate) fn fetch_leverage(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        symbol: String,
-    ) {
-        if self.options.public_data_only || self.credentials.is_none() {
-            return cx.fail(command, "KuCoin leverage requires credentials");
-        }
-        if cx.store.market(&symbol).is_none() {
-            return cx.fail(command, format!("unknown market {symbol}"));
+    pub(crate) fn fetch_leverage(&self, cx: &mut Cx<'_, Pending>, symbol: String) {
+        // The engine owns an admission refusal. The context owns completion only:
+        // signing stays on the `signed` wrapper, as for every private read here.
+        let Ok(context) = cx.admit_http_command(crate::local_read_command_policy()) else {
+            return;
+        };
+        let refusal = if self.options.public_data_only || self.credentials.is_none() {
+            Some("KuCoin leverage requires credentials".to_owned())
+        } else if cx.store.market(&symbol).is_none() {
+            Some(format!("unknown market {symbol}"))
+        } else {
+            None
+        };
+        if let Some(message) = refusal {
+            let error = VenueError::new(message)
+                .kind(ErrorKind::InvalidInput)
+                .outcome(Outcome::NotSent);
+            let _ = cx.fail_context(&context, error);
+            return;
         }
         let read = Read {
-            command,
+            context,
             symbol,
             revision: self.account_revision(),
             step: Step::Margin,
@@ -91,14 +100,18 @@ impl Kucoin {
     ) {
         let row = match row(&response) {
             Ok(row) => row,
-            Err(error) => return cx.fail(read.command, error),
+            Err(error) => {
+                let _ = cx.fail_context(&read.context, error);
+                return;
+            }
         };
         let current = self.account_settings_unchanged_since(read.revision);
         match read.step {
             Step::Margin => {
                 if !matches!(row.margin_mode, "CROSS" | "ISOLATED") {
                     let error = format!("KuCoin returned no margin mode for {}", read.symbol);
-                    return cx.fail(read.command, error);
+                    let _ = cx.fail_context(&read.context, error);
+                    return;
                 }
                 if row.margin_mode == "CROSS" {
                     if current {
@@ -122,7 +135,8 @@ impl Kucoin {
                 let leverage = row.leverage.get();
                 if !(leverage.is_finite() && leverage > 0.0) {
                     let error = format!("KuCoin returned invalid leverage for {}", read.symbol);
-                    return cx.fail(read.command, error);
+                    let _ = cx.fail_context(&read.context, error);
+                    return;
                 }
                 if current {
                     cx.store
@@ -140,7 +154,8 @@ impl Kucoin {
                 "KuCoin leverage for {} changed during the read",
                 read.symbol
             );
-            return cx.fail(read.command, error);
+            let _ = cx.fail_context(&read.context, error);
+            return;
         };
         let fetched = Fetched {
             buy_leverage: setting.leverage,
@@ -155,8 +170,12 @@ impl Kucoin {
             }),
         };
         match serde_json::to_string(&fetched) {
-            Ok(data) => cx.done(read.command, data),
-            Err(error) => cx.fail(read.command, error.to_string()),
+            Ok(data) => {
+                let _ = cx.done_context(&read.context, data);
+            }
+            Err(error) => {
+                let _ = cx.fail_context(&read.context, error.to_string());
+            }
         }
     }
 }
