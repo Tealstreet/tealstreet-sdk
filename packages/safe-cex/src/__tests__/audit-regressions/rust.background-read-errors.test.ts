@@ -7,6 +7,7 @@ import type { ExchangeName } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
+import { LogSeverity } from '../../types';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
@@ -39,10 +40,10 @@ it('keeps a failed symbol-switch leverage read at warning level', async () => {
 
 it('keeps a failed symbol metadata refresh at warning level, with no rejection for the worker', async () => {
   const mexc = rejecting('mexc');
-  const warnings = vi.fn();
-  mexc.exchange.on('warning', warnings);
+  const logs = vi.fn();
+  mexc.exchange.on('log', logs);
   await expect(mexc.exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();
-  expect(warnings).toHaveBeenCalledTimes(1);
+  expect(logs).toHaveBeenCalledWith(expect.stringContaining('Error refreshing leverage for BTCUSDT'), LogSeverity.Warning);
   expect(mexc.errors).not.toHaveBeenCalled();
 });
 
