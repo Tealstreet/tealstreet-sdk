@@ -677,6 +677,7 @@
     "toggle-place-order-overlay-description": "Toggle the place order module as an overlay on top of the terminal. Click on a module to bind focus",
     "hotkey-toggle-tooltip": "Hotkey Toggle",
     "order-type-limit": "Limit",
+    "order-submitted": "submitted",
     "order-type-market": "Market",
     "order-type-stoploss": "Stop Loss",
     "order-type-stop_market": "Stop Loss",
