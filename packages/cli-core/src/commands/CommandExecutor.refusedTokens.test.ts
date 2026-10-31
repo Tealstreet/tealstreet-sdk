@@ -33,6 +33,15 @@ function exchange() {
       balance: { free: 100000, total: 100000, used: 0, upnl: 0 },
       positions: [
         {
+          symbol: 'ETHUSDT',
+          side: 'long',
+          contracts: 2,
+          notional: 6000,
+          entryPrice: 2000,
+          liquidationPrice: 1000,
+          leverage: 1,
+        },
+        {
           symbol: 'BTCUSDT',
           side: 'long',
           contracts: 1,
