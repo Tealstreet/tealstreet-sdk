@@ -885,7 +885,8 @@ describe('Rust frame recovery callers', () => {
       const store = new DefaultStore();
       const exchange = new RustEngineExchange(venue, { key: 'key', secret: 'secret' }, store);
       adoptEngineCapabilities(exchange);
-      receive(exchange, fixture({ fills: 0 }));
+      // The metadata refresh waits for the engine's own markets, which only a frame's status can say.
+      receive(exchange, fixture({ fills: 0, loaded: LOADED_FLAG.MARKETS }));
       const rails = { buyLeverage: 7, sellLeverage: 9 };
       const command = vi.fn().mockResolvedValue(rails);
       (exchange as unknown as { command: unknown }).command = command;
