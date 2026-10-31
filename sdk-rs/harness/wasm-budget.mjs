@@ -77,14 +77,15 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // each cap is its CI wasm-family node size on master 3617d7fad63 (run 41052374903)
 // plus 10 KiB, rounded up to a KiB.
 // Tightest families at CI (abc18ecd30a) + 10 KiB, rounded up to KiB, before the exec store fix.
+// #2650 Bitget flat leverage read: CI 2,140,041 B; ddi's rule, CI + 10 KiB, rounded up to a KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_866_752,
   asterdex: 2_006_016,
   backpack: 1_780_736,
   binance: 2_041_856,
   bingx: 1_866_752,
-  bitget: 2_138_112,
-  bitgetusdc: 2_138_112,
+  bitget: 2_150_400,
+  bitgetusdc: 2_150_400,
   bitrue: 1_719_296,
   bitunix: 1_727_488,
   blofin: 1_830_912,
