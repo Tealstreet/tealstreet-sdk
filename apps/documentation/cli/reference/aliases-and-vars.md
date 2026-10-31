@@ -45,7 +45,7 @@ time you read the variable.
 
 ```text
 sets @spread $ask-$bid
-sets @stopline $entry -1%
+sets @stopline $entry*0.99
 
 echo @spread          # re-reads bid/ask now
 sleep 5s; echo @spread # re-reads again

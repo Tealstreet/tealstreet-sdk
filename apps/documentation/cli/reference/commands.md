@@ -58,11 +58,15 @@ Reduce-only stop loss or take-profit. Decided by trigger price vs mark.
 | -------------------------------- | -------------------------------------------- |
 | `stop 18500`                     | Market stop for full focused position        |
 | `stop at 18500`                  | Same, with the optional `at`                 |
-| `stop -1%`                       | Relative to entry                            |
+| `stop $entry -1%`                | 1% below entry                               |
 | `stop buy at +100`               | Explicit side (when hedge-mode is ambiguous) |
 | `stop $500 at 1%`                | Partial-size stop                            |
-| `stop sell 0.01 at -100 ETHUSDT` | Symbol override                              |
-| `stop at -1% trigger 18500`      | **Limit** stop — trigger ≠ limit price       |
+| `stop at 3000 ETHUSDT`           | Symbol override                              |
+| `stop at 18400 trigger 18500`    | **Limit** stop — trigger ≠ limit price       |
+
+Bare negative offsets such as `stop -1%` are
+[refused for now](./sizing-and-prices.md#negative-offsets). On Bybit a limit stop
+currently rests as a market stop at the trigger.
 
 Source: `StopCommand.ts`.
 
@@ -93,7 +97,7 @@ than placing it at entry.
 | ------------ | -------------------------------- |
 | `be`         | Stop at your entry price         |
 | `be +3%`     | 3% **above** entry               |
-| `be -0.5%`   | 0.5% **below** entry             |
+| `be $entry -0.5%` | 0.5% **below** entry        |
 | `be +100`    | Absolute offset, same directions |
 | `be ETHUSDT` | Symbol override                  |
 
@@ -101,7 +105,8 @@ An offset is relative to **entry**, not to the mark, and it is a plain
 direction rather than a side-aware one: `+` is always up the price axis. On a
 LONG, `be +3%` is the one you want — it puts the stop above entry and locks a
 little in. On a SHORT the profitable side is DOWN, so the same buffer is
-`be -3%`; `be +3%` there widens the stop instead of tightening it.
+`be $entry -3%`; `be +3%` there widens the stop instead of tightening it. A bare
+`be -3%` is [refused for now](./sizing-and-prices.md#negative-offsets).
 
 **It cancels stop losses only — your take-profits are left alone.** Writing this
 by hand as `cancel stops; stop $entry` does not do the same thing: `cancel
@@ -196,7 +201,7 @@ Shift open **limit** orders by a price delta. Stops are untouched.
 | -------------------------- | --------------------------------- |
 | `bump +10`                 | Shift every limit by +10, focused |
 | `bump ETHUSDT +10`         | Symbol override                   |
-| `bump buy +10` / `sell -5` | Side filter                       |
+| `bump buy +10`             | Side filter                       |
 | `bump top 3 +5`            | Top-N price selector              |
 | `bump 100 --buys`          | Legacy flag form — still accepted |
 
@@ -211,7 +216,10 @@ Move a specific limit order by ID (full or unique prefix).
 | Form                        | Result          |
 | --------------------------- | --------------- |
 | `move <orderId> 50000`      | Absolute        |
-| `move <orderId> +10` / `-5` | Relative offset |
+| `move <orderId> +10`        | Relative offset |
+
+Downward offsets are [refused for now](./sizing-and-prices.md#negative-offsets);
+use an absolute price.
 
 Source: `MoveCommand.ts`.
 
@@ -236,7 +244,7 @@ Examples:
 ```text
 scale buy 10 into 10 from 31000 to 32000
 scale sell $1000 into 25 from 50000 to 48500 reduce
-scale buy $1000 into 10 from -0.25% to -1% ETHUSDT
+scale buy $1000 into 10 from 3000 to 2950 ETHUSDT
 ```
 
 Source: `ScaleCommand.ts`.

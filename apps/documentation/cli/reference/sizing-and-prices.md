@@ -108,10 +108,29 @@ Source: `TradingBaseCommand.ts:166-208`.
 | Form                         | Meaning                                                    |
 | ---------------------------- | ---------------------------------------------------------- |
 | `50000`                      | Absolute price                                             |
-| `+100` / `-100`              | Relative offset (added to last)                            |
-| `1%` / `-0.5%`               | Percent offset (anchor × (1 + pct/100))                    |
+| `+100`                       | Relative offset (added to last)                            |
+| `1%`                         | Percent offset (anchor × (1 + pct/100))                    |
 | `$anchor`                    | Constant — `$entry`, `$last`, etc.                         |
 | `$anchor +N` / `+N%` / `-N%` | Anchor with [inline offset](./variables.md#inline-offsets) |
+
+### Negative offsets
+
+**A token starting with `-` is refused for now on order commands**, and nothing
+is placed: `buy`, `sell`, `close`, `stop`, `be`, `trail`, `move`, `scale`, `bump`,
+`chase`, `twap`, `swarm`, `nuke`, `cancel`, `leverage` and `kill`.
+
+| Refused              | Use instead                                    |
+| -------------------- | ---------------------------------------------- |
+| `buy $100 stop -1%`  | `buy $100 stop $last -1%` or `stop 49500`      |
+| `stop -1%`           | `stop $entry -1%` or `stop 49500`              |
+| `be -0.5%`           | `be $entry -0.5%`                              |
+| `move <id> -5`       | `move <id> 49995`                              |
+| `bump -5`            | No replacement yet; `move` each order          |
+| `stop $entry -3*$ticksize` | `stop $entry-3*$ticksize`                |
+
+An anchor with an offset, such as `$last -1%`, is allowed because it becomes one
+absolute price before the command runs. **Anchors read the focused symbol**, so
+with a symbol override like `buy $250 SOLUSDT at ...` pass an absolute price.
 
 See [Variables](./variables.md) for the full list of price anchors and
 which ones support inline offsets.
@@ -156,7 +175,7 @@ A few full sentences to anchor the grammar:
 ```text
 buy $100 at $bid +0.1% po reduce
 chase sell %all% 20% reduce to 1%
-scale buy $1000 into 10 from -0.25% to -1% reduce
+scale buy $1000 into 10 from $last -0.25% to $last -1% reduce
 twap chase buy $500 into 5 over 30 reduce timeout 30% next fail next
 cancel buys ro from 49000 to 50000
 ```
