@@ -3906,6 +3906,7 @@ dependencies = [
  "safe-cex-algo-twap",
  "safe-cex-algos",
  "safe-cex-chaser",
+ "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-exec",
  "safe-cex-native",
