@@ -455,7 +455,11 @@ impl Grvt {
             page_lifecycles: HashMap::new(),
             from,
             to,
-            limit: limit.unwrap_or(1000).clamp(1, 1000) as usize,
+            // A window with no limit walks to its start; no default may stop it.
+            limit: match limit {
+                None if from.is_some() => usize::MAX,
+                limit => limit.unwrap_or(1000).clamp(1, 1000) as usize,
+            },
             income_kind,
             combine_income,
             history: Box::new(CursorHistory::new(

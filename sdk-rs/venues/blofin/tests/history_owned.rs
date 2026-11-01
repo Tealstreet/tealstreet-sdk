@@ -383,3 +383,25 @@ fn native_admission_facts_have_explicit_user_error_kinds_before_io() {
         assert_eq!(timeline(&h, 7), ["failed"]);
     }
 }
+
+#[test]
+fn window_orders_with_no_limit_walk_the_cursor_on_a_full_page() {
+    let mut h = harness();
+    query(
+        &mut h,
+        21,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: Some(1.0),
+            to_ms: Some(2_000_000_000_000.0),
+            limit: None,
+        },
+    );
+    let r = h.take("/api/v1/trade/orders-history");
+    let rows = (1..=100)
+        .map(|n| format!(r#"{{"orderId":"{n}","instId":"BTC-USDT","instType":"SWAP","side":"buy","orderType":"limit","state":"filled","price":"1","size":"1","filledSize":"1","averagePrice":"1","createTime":"1700000000000","updateTime":"1700000000000"}}"#))
+        .collect::<Vec<_>>();
+    h.respond(r, &page(&rows));
+    let next = h.take("/api/v1/trade/orders-history");
+    assert!(next.url.contains("after=100"), "{}", next.url);
+}

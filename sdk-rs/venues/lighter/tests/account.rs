@@ -1653,3 +1653,23 @@ fn an_amend_by_the_returned_client_index_finds_the_order() {
     });
     assert!(!failed);
 }
+
+// Live: a verification page during start left the engine waiting past 150 s with no retry.
+#[test]
+fn a_405_page_on_the_account_lookup_retries() {
+    let mut options = options();
+    options.application_id = Some(ADDRESS.into());
+    options.api_key_index = Some("4".into());
+    let (mut e, mut actions) = to_lookup(options);
+    let mut retried = false;
+    for _ in 0..6 {
+        for r in account_requests(&actions) {
+            reply(&mut e, &r, 405, "<html>Human Verification</html>");
+        }
+        actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        retried |= actions.iter().any(
+            |a| matches!(a, Action::SetTimer { at_ms, .. } if (*at_ms - NOW - 5_000.0).abs() < 1_000.0),
+        );
+    }
+    assert!(retried);
+}

@@ -28,6 +28,8 @@ const STALE_SNAPSHOT_LIMIT: u8 = 2;
 const SKIP_LOG_LIMIT: usize = 4_096;
 const EXECUTION_PROGRESS_LIMIT: usize = 20_000;
 
+const FILLS_PAGE: usize = 100;
+
 pub enum Pending {
     Markets {
         context: Context,
@@ -54,7 +56,8 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
-    Fills(Box<HistoryRows<String>>),
+    /// The flag marks a window read with no limit: a full page cannot prove coverage.
+    Fills(Box<HistoryRows<String>>, bool),
     Account(CommandId),
 }
 impl Pending {
@@ -1405,7 +1408,7 @@ impl Venue for KucoinSpot {
                     Err(error) => cx.fail(command, error),
                 };
             }
-            Pending::Fills(mut owner) => {
+            Pending::Fills(mut owner, open_window) => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Execution<'a> {
@@ -1441,11 +1444,20 @@ impl Venue for KucoinSpot {
                 })();
                 match out {
                     Ok(rows) => {
+                        let full = open_window && rows.len() >= FILLS_PAGE;
                         for row in rows {
                             owner.stage(row);
                         }
                         owner.accept_page();
-                        owner.finish(cx, Ok(()));
+                        // Accepted rows plus an error finish as rows with one incomplete marker.
+                        owner.finish(
+                            cx,
+                            if full {
+                                Err(VenueError::new("KuCoin Spot fills read one full page"))
+                            } else {
+                                Ok(())
+                            },
+                        );
                     }
                     Err(error) => owner.finish(cx, Err(VenueError::new(error))),
                 }
@@ -1500,7 +1512,7 @@ impl Venue for KucoinSpot {
                 self.write_failed(cx, j, crate::wire::write_failure(0, "", error.into()));
                 return;
             }
-            Pending::Fills(owner) => {
+            Pending::Fills(owner, _) => {
                 cx.command_error(owner.command(), error);
                 owner.finish(cx, Err(VenueError::new(error)));
                 return;
@@ -1717,11 +1729,31 @@ impl KucoinSpot {
                 to_ms,
                 limit,
             } => {
+                let open_window = from_ms.is_some() && limit.is_none();
                 let Some(symbol) = symbol else {
                     let Ok(context) = cx.admit_http_command(crate::local_read_command_policy())
                     else {
                         return;
                     };
+                    if open_window {
+                        // No request was made, so the empty answer cannot cover the window.
+                        match safe_cex_engine::history::ReadCompletion::from_context(
+                            cx,
+                            command,
+                            context.clone(),
+                        ) {
+                            Ok(mut completion) => {
+                                completion.incomplete(
+                                    "history is INCOMPLETE: KuCoin Spot fills need a symbol",
+                                );
+                                let _ = completion.finish(cx, Ok("[]".into()));
+                            }
+                            Err(error) => {
+                                let _ = cx.fail_context(&context, error.read_venue_error());
+                            }
+                        }
+                        return;
+                    }
                     let _ = cx.done_context(&context, "[]".into());
                     return;
                 };
@@ -1731,7 +1763,10 @@ impl KucoinSpot {
                 }
                 path.push_str(&format!(
                     "&limit={}",
-                    limit.filter(|n| *n > 0).unwrap_or(100).min(100)
+                    limit
+                        .filter(|n| *n > 0)
+                        .unwrap_or(FILLS_PAGE as u32)
+                        .min(FILLS_PAGE as u32)
                 ));
                 if let Some(n) = from_ms {
                     path.push_str(&format!("&startAt={}", n as u64));
@@ -1745,10 +1780,12 @@ impl KucoinSpot {
                     &path,
                     None,
                     true,
-                    Pending::Fills(Box::new(HistoryRows::new(
-                        Completion::new(command),
-                        |rows| Ok(format!("[{}]", rows.join(","))),
-                    ))),
+                    Pending::Fills(
+                        Box::new(HistoryRows::new(Completion::new(command), |rows| {
+                            Ok(format!("[{}]", rows.join(",")))
+                        })),
+                        open_window,
+                    ),
                 );
             }
             Query::OrderByClientId {

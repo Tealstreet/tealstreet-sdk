@@ -1549,3 +1549,32 @@ fn provider_refusal_after_an_accepted_page_rejects_strictly_without_partial_rows
     let error = result(&actions).unwrap_err();
     assert!(!error.is_empty());
 }
+
+#[test]
+fn window_fills_with_no_limit_flag_a_full_page() {
+    let mut e = engine();
+    let actions = command(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(NOW),
+            to_ms: Some(NOW + 1000.0),
+            limit: None,
+        },
+    );
+    let first = request(&actions, "/userTrades");
+    assert!(first.url.contains("limit=100"), "{}", first.url);
+    let rows = (0..100)
+        .map(|n| format!(r#"{{"id":"f{n}","orderId":"o","symbol":"BTCUSDT","side":"SELL","price":"1","qty":"1","time":{NOW}}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    let actions = response(&mut e, NOW, first.id, &format!("[{rows}]"));
+    owned_incomplete(&actions, 7);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&result(&actions).unwrap())
+            .unwrap()
+            .len(),
+        100
+    );
+}

@@ -793,3 +793,59 @@ fn spot_setting_setters_keep_native_noops_and_capability() {
     assert_eq!(setting.sell_leverage, Some(1.));
     assert_eq!(setting.margin_type, Some(MarginType::Cross));
 }
+
+fn has_incomplete_marker(a: &[Action]) -> bool {
+    a.iter().any(|a| {
+        matches!(a, Action::Notice(Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+    })
+}
+
+#[test]
+fn spot_window_fills_with_no_limit_flag_a_full_page_or_a_missing_symbol() {
+    let mut e = spot(true);
+    let a = run(
+        &mut e,
+        100.,
+        query(Query::Fills {
+            symbol: Some(SYMBOL.into()),
+            order_id: None,
+            from_ms: Some(1.),
+            to_ms: Some(2.),
+            limit: None,
+        }),
+    );
+    let id = native_request(
+        &a,
+        "/api/v1/hf/fills?symbol=BTC-USDT&limit=100&startAt=1&endAt=2",
+    )
+    .id;
+    let rows = vec![
+        json!({"symbol":SYMBOL,"orderId":"o","side":"buy","price":"1","size":"1","fee":"0","feeCurrency":"USDT","createdAt":1});
+        100
+    ];
+    let out = reply(
+        &mut e,
+        id,
+        &json!({"code":"200000","data":{"items":rows}}).to_string(),
+    );
+    assert!(has_incomplete_marker(&out), "{out:?}");
+
+    let mut e = spot(true);
+    let out = run(
+        &mut e,
+        100.,
+        query(Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: Some(1.),
+            to_ms: Some(2.),
+            limit: None,
+        }),
+    );
+    assert!(has_incomplete_marker(&out), "{out:?}");
+    assert!(out.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { command: COMMAND, result }) if result == "[]"
+    )));
+}

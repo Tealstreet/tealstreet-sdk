@@ -1525,3 +1525,47 @@ fn a_real_empty_rows_page_is_empty_not_an_error() {
         assert_eq!(result(&mut e).unwrap(), "[]");
     }
 }
+
+#[test]
+fn window_fills_with_no_limit_walk_the_offset_on_a_full_page() {
+    let mut e = engine(true);
+    let a = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(1_669_407_000_000.0),
+            to_ms: Some(1_669_408_000_000.0),
+            limit: None,
+        },
+    );
+    let Action::Http(first) = &a else {
+        panic!("HTTP")
+    };
+    assert!(first.url.contains("&offset=0&limit=200"), "{}", first.url);
+    let rows = (0..200)
+        .map(|n| FILL.replace("5c3d96e1", &format!("{n:08x}")))
+        .collect::<Vec<_>>()
+        .join(",");
+    respond(&mut e, &a, &format!("[{rows}]"), true);
+    let next = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .expect("second page");
+    let Action::Http(second) = &next else {
+        panic!("HTTP")
+    };
+    assert!(
+        second.url.contains("&offset=200&limit=200"),
+        "{}",
+        second.url
+    );
+    respond(
+        &mut e,
+        &next,
+        &format!("[{}]", FILL.replace("5c3d96e1", "ffffffff")),
+        true,
+    );
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    assert_eq!(rows.len(), 201);
+}

@@ -4003,3 +4003,44 @@ fn cancelling_an_attached_stop_alone_clears_it_on_its_parent() {
     assert!(h.engine.store().order(&leg.id).is_none());
     assert!(h.engine.store().order(&id).is_some());
 }
+
+#[test]
+fn income_window_with_no_limit_is_not_capped_at_the_default() {
+    let mut h = ready();
+    h.command(Command::Query {
+        command: 805,
+        query: Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(1672120000000.0),
+            to_ms: Some(1672130000000.0),
+            limit: None,
+        },
+    });
+    let rows = (0..1000)
+        .map(|n| owned_history_row(2, &n.to_string()))
+        .collect::<Vec<_>>();
+    let mut chunks = rows.chunks(50).enumerate().peekable();
+    while let Some((index, chunk)) = chunks.next() {
+        let cursor = if chunks.peek().is_some() {
+            format!("c{index}")
+        } else {
+            "beyond-the-old-default".to_owned()
+        };
+        h.respond(
+            "/v5/account/transaction-log",
+            200,
+            &owned_history_page(chunk, &cursor),
+        );
+    }
+    let last = h.take("/v5/account/transaction-log");
+    assert!(last.url.contains("cursor=beyond-the-old-default"));
+    h.reply(
+        last.id,
+        200,
+        &owned_history_page(&[owned_history_row(2, "1000")], ""),
+    );
+    let result = h.result(805).unwrap().as_ref().unwrap();
+    let rows = serde_json::from_str::<Vec<serde_json::Value>>(result).unwrap();
+    assert_eq!(rows.len(), 1001);
+}

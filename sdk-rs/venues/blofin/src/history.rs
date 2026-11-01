@@ -838,6 +838,12 @@ impl Blofin {
                 (count, limit.is_some() && seen >= count)
             }
             Query::Income { .. } => (100, false),
+            // A window with no limit walks its `after` cursor to the window's start.
+            Query::OrderHistory {
+                limit: None,
+                from_ms: Some(_),
+                ..
+            } => (100, false),
             _ => (usize::MAX, true),
         };
         let want_more = request.received >= page_limit && !request.reached_start && !enough;

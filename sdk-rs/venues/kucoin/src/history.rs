@@ -300,6 +300,7 @@ impl Kucoin {
                 (Kind::Trades, Some(symbol), None, None, None, None, limit)
             }
         };
+        let open_window = from.is_some() && limit.is_none();
         if order.as_ref().is_some_and(|id| {
             id.is_empty()
                 || id.len() > 100
@@ -423,7 +424,11 @@ impl Kucoin {
             windows,
             page: 1,
             offset: None,
-            limit: limit.unwrap_or(if kind == Kind::Trades { 100 } else { 1000 }) as usize,
+            limit: match limit {
+                // A window with no limit walks to its start; no default may stop it.
+                None if open_window => usize::MAX,
+                limit => limit.unwrap_or(if kind == Kind::Trades { 100 } else { 1000 }) as usize,
+            },
             explicit_range,
             clipped,
             page_rows: Vec::new(),
