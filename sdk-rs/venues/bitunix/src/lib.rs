@@ -542,6 +542,9 @@ impl Venue for BitunixFutures {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
     /// One mutation per order for its whole job, continuations included.
     fn guard_order_mutations(&self) -> bool {
         true

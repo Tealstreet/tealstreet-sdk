@@ -23,6 +23,7 @@ const CALL_MS: u32 = 20_000;
 /// 2026-10-26). Cited refusals are pre-execution; anything unlisted proves
 /// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
 /// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
+const NONE_PLACED: &str = "none-placed";
 const CODES: CodeTable = CodeTable {
     rows: &[
         // "Bad Request" and "Invalid signature" body codes.
@@ -60,6 +61,10 @@ const CODES: CodeTable = CodeTable {
         refused(Key::Int(152406), ErrorKind::AuthPermission),
         refused(Key::Int(152408), ErrorKind::AuthInvalid),
         refused(Key::Int(152409), ErrorKind::AuthInvalid),
+        // Seen live inside a 200 on refused placements (deaws2 capture).
+        refused(Key::Int(102016), ErrorKind::Rejected),
+        refused(Key::Int(102123), ErrorKind::Rejected),
+        refused(Key::Text(NONE_PLACED), ErrorKind::Rejected),
         // Internal error: proves nothing.
         Row {
             key: Key::Int(103013),
@@ -282,13 +287,13 @@ struct Cancel<'a> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct ResultRow<'a> {
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     order_id: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     tpsl_id: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     algo_id: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     code: Str<'a>,
     #[serde(borrow, default, deserialize_with = "nullable_text")]
     msg: Str<'a>,
@@ -403,6 +408,13 @@ impl Blofin {
         opts: &PlaceOrderOpts,
         source: Option<&account::Source>,
     ) -> Result<Vec<(u8, Placement, Order)>, String> {
+        // Zero means unset for these fields, as in the TS exchange and the Bybit port.
+        let opts = &PlaceOrderOpts {
+            price: opts.price.filter(|p| *p != 0.0),
+            stop_loss: opts.stop_loss.filter(|p| *p != 0.0),
+            take_profit: opts.take_profit.filter(|p| *p != 0.0),
+            ..opts.clone()
+        };
         let m = cx
             .store
             .market(&opts.symbol)
@@ -1927,15 +1939,32 @@ impl Blofin {
                         _ => &row.algo_id,
                     };
                     let text = row.msg.trim().to_ascii_lowercase();
-                    // Only a non-zero row code refuses; a cancel-only "gone" code
-                    // or an unexpected success message proves nothing here.
+                    // Only a non-zero row code refuses, and code 0 accepts whatever its
+                    // text says. A cancel-only "gone" code or a code-less row with
+                    // unexpected text proves nothing here.
                     let refused = !row.code.is_empty() && row.code != "0";
                     let gone = matches!(&*row.code, "1000" | "102068");
-                    let odd = !matches!(text.as_str(), "" | "success" | "order placed");
-                    if refused && !gone {
+                    let odd = row.code.is_empty()
+                        && !matches!(text.as_str(), "" | "success" | "order placed");
+                    // Order ID 0 under this envelope names no order: nothing was placed.
+                    let none_placed = id == "0"
+                        && reply.code != "0"
+                        && reply.msg.eq_ignore_ascii_case("All operations failed");
+                    if none_placed {
+                        items.push(BatchItem::Native(Native {
+                            code: NativeCode::Text(NONE_PLACED),
+                            message: &row.msg,
+                        }));
+                        error = Some(format!("BloFin placement rejected: {}", row.msg));
+                    } else if refused && !gone {
                         items.push(BatchItem::Native(native(&row.code, &row.msg)));
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
-                    } else if refused || id.is_empty() || !seen.insert(id.to_string()) || odd {
+                    } else if refused
+                        || id.is_empty()
+                        || id == "0"
+                        || !seen.insert(id.to_string())
+                        || odd
+                    {
                         unproven = true;
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else {
@@ -1996,11 +2025,18 @@ impl Blofin {
                 let mut error =
                     unproven.then(|| "BloFin cancellation response count mismatch".to_owned());
                 for row in &rows {
-                    let found = targets.iter().position(|t| match t.family {
-                        0 => row.order_id == t.id,
-                        1 => row.tpsl_id == t.id || row.algo_id == t.id,
-                        _ => row.algo_id == t.id,
-                    });
+                    // A gone trigger's one row answers with null identities.
+                    let anonymous =
+                        row.order_id.is_empty() && row.tpsl_id.is_empty() && row.algo_id.is_empty();
+                    let found = if anonymous && rows.len() == 1 && targets.len() == 1 {
+                        Some(0)
+                    } else {
+                        targets.iter().position(|t| match t.family {
+                            0 => row.order_id == t.id,
+                            1 => row.tpsl_id == t.id || row.algo_id == t.id,
+                            _ => row.algo_id == t.id,
+                        })
+                    };
                     match found {
                         None => {
                             unproven = true;

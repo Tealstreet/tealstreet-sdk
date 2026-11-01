@@ -208,12 +208,15 @@ impl OrderLocks {
         command: &Command,
         store: &Store,
         fence_cancel_all: bool,
+        enforced_close: bool,
     ) -> Result<(), CommandId> {
         let Some((command, scope)) = scope_of(command, store) else {
             return Ok(());
         };
         let cancel_all = |symbol: &String| fence_cancel_all && self.uncertain(symbol);
-        if self.fenced(&scope) || scope.all_symbol.as_ref().is_some_and(cancel_all) {
+        if !enforced_close && self.fenced(&scope)
+            || scope.all_symbol.as_ref().is_some_and(cancel_all)
+        {
             return Err(command);
         }
         self.mark(command, &scope);
@@ -257,11 +260,24 @@ impl OrderLocks {
         })
     }
 
+    #[cfg(test)]
     pub fn acquire(
         &mut self,
         command: &Command,
         store: &Store,
         fence_uncertain: bool,
+    ) -> Result<(), Refusal> {
+        self.acquire_admitting(command, store, fence_uncertain, false)
+    }
+
+    /// `acquire`, with `enforced_close` passing the placement fence: the venue
+    /// enforces reduce-only, so the order cannot open a position.
+    pub fn acquire_admitting(
+        &mut self,
+        command: &Command,
+        store: &Store,
+        fence_uncertain: bool,
+        enforced_close: bool,
     ) -> Result<(), Refusal> {
         let Some((command, scope)) = scope_of(command, store) else {
             return Ok(());
@@ -275,7 +291,7 @@ impl OrderLocks {
                     .as_ref()
                     .is_some_and(|s| s.is_empty() || s == all)
         };
-        if self.fenced(&scope) {
+        if !enforced_close && self.fenced(&scope) {
             return Err(Refusal::Uncertain(command));
         }
         if fence_uncertain
@@ -610,6 +626,26 @@ impl OrderLocks {
         self.epoch
     }
 
+    /// A whole-account read cleared every fence up to `token` but `unproven`
+    /// symbols; an empty symbol there means any fence may be its row's.
+    pub fn reconciled_except(&mut self, unproven: &[String], token: u64) {
+        if unproven.iter().any(String::is_empty) {
+            return;
+        }
+        if unproven.is_empty() {
+            return self.reconciled(None, token);
+        }
+        let symbols: Vec<String> = self
+            .uncertain
+            .keys()
+            .filter(|symbol| !symbol.is_empty() && !unproven.contains(symbol))
+            .cloned()
+            .collect();
+        for symbol in symbols {
+            self.reconciled(Some(&symbol), token);
+        }
+    }
+
     pub fn reconciled(&mut self, symbol: Option<&str>, token: u64) {
         if self.repair_placing_cfg(symbol.unwrap_or("")) {
             return;
@@ -821,6 +857,39 @@ mod repair_cancel_overlap_tests {
         assert_eq!(
             repair(&mut locks, 11, "x", false),
             Err(Refusal::Conflict(0))
+        );
+    }
+
+    #[test]
+    fn a_read_keeps_only_the_unproven_fences() {
+        let mut locks = OrderLocks::fencing_placements(true);
+        locks.fence(Some(&["A".to_owned(), "B".to_owned()]));
+        locks.reconciled_except(&[String::new()], locks.token());
+        assert!(locks.uncertain("A") && locks.uncertain("B"));
+        locks.reconciled_except(&["A".to_owned()], locks.token());
+        assert!(locks.uncertain("A") && !locks.uncertain("B"));
+        locks.reconciled_except(&[], locks.token());
+        assert!(!locks.uncertain("A"));
+    }
+
+    #[test]
+    fn only_an_enforced_close_passes_the_fence() {
+        let close = Command::PlaceOrders {
+            command: 1,
+            orders: vec![
+                serde_json::from_value(serde_json::json!({
+                    "symbol": "A", "type": "market", "side": "sell", "amount": 1, "reduceOnly": true
+                }))
+                .unwrap(),
+            ],
+        };
+        let mut locks = OrderLocks::fencing_placements(true);
+        locks.fence(Some(&["A".to_owned()]));
+        assert!(locks.acquire(&close, &Store::default(), false).is_err());
+        assert!(
+            locks
+                .acquire_admitting(&close, &Store::default(), false, true)
+                .is_ok()
         );
     }
 }
