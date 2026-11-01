@@ -422,9 +422,9 @@ fn a_proven_placement_and_a_later_cancel_all_still_proceed() {
 }
 
 /// Live: a snapshot dropped the placed row before the stream named its native
-/// id, and a cancel by the index the placement returned said "not found".
+/// id. Lighter cancels by client index, so the cancel goes out as asked.
 #[test]
-fn a_cancel_by_the_returned_index_before_its_row_arrives_is_not_called_not_found() {
+fn a_cancel_by_the_returned_index_before_its_row_arrives_is_sent() {
     let (mut e, mut t) = ready_eth();
     let send = submit(&mut e, &mut t, 7, 10);
     reply(
@@ -447,8 +447,10 @@ fn a_cancel_by_the_returned_index_before_its_row_arrives_is_not_called_not_found
         }),
     );
     let out = drain(&mut e, &mut t);
-    let [Notice::CommandFailed { error, .. }] = &terminals(&out, 8)[..] else {
-        panic!("{:?}", terminals(&out, 8));
-    };
-    assert!(error.message.contains("no row yet"), "{}", error.message);
+    assert!(terminals(&out, 8).is_empty(), "{:?}", terminals(&out, 8));
+    assert!(
+        find(&out, "nextNonce").is_some() || find(&out, "sendTx").is_some(),
+        "the cancel proceeds to signing: {:?}",
+        http(&out)
+    );
 }
