@@ -275,6 +275,26 @@ fn fence_sequence(variant: Variant) {
     );
 }
 
+/// One row that does not decode costs only itself, not the whole read.
+#[test]
+fn an_undecodable_row_does_not_fail_the_read() {
+    let variant = Variant::UsdM;
+    let mut h = ready(variant);
+    let stale = pre_mark_reads(&mut h, variant);
+    unknown_placement(&mut h, variant, 70);
+    answer(&mut h, stale, "[]");
+    let mut fresh = take_reads(&mut h, variant);
+    let regular = fresh.remove(0);
+    answer(
+        &mut h,
+        vec![regular],
+        r#"[{"symbol":"ETHUSDT","orderId":77}]"#,
+    );
+    answer(&mut h, fresh, "[]");
+    place(&mut h, variant, 73);
+    assert_eq!(posts(&h, variant), 1);
+}
+
 /// A rejected row keeps only its own market's fence.
 #[test]
 fn a_rejected_row_on_another_market_releases_the_fence() {

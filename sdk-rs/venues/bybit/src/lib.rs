@@ -2932,6 +2932,12 @@ impl Venue for BybitLinear {
             self.on_options_response(cx, request, response);
             return;
         }
+        // A private snapshot with nothing in it can answer `list: null`.
+        if matches!(&pending.then, Then::Account(request) if request.is_snapshot_read())
+            && account::success_with_null_list(response.body)
+        {
+            return self.on_response(cx, pending, response);
+        }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still
         // requires its streamed list.

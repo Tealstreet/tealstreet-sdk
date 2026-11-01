@@ -31,6 +31,8 @@ const HEALTH_CHECK_MS: f64 = 3_000.0;
 const ACCOUNT_INTERVAL_MS: f64 = 25_000.0;
 const DEGRADED_ACCOUNT_INTERVAL_MS: f64 = 3_000.0;
 const POSITION_RISK_INTERVAL_MS: f64 = 75_000.0;
+/// A failed position read is tried again this soon, not at the next interval.
+const FAILED_POSITION_RETRY_MS: f64 = 5_000.0;
 /// `ACCOUNT_UPDATE` omits leverage, margin type and liquidation price; the
 /// REST repair that fills them in runs at most this often.
 const POSITION_REPAIR_THROTTLE_MS: f64 = 10_000.0;
@@ -1171,7 +1173,7 @@ impl BinanceFutures {
                 let mut position_sides = Vec::new();
                 let client_keyed = self.options.portfolio_margin || self.is_spot();
                 let spot = self.is_spot();
-                let parsed = json::each::<OpenOrder>(body, |o| {
+                let (parsed, undecodable) = each_decodable::<OpenOrder>(body, |o| {
                     let id = match (&o.client_order_id, client_keyed) {
                         (Some(client), true) => client.to_string(),
                         _ => o.order_id.to_string(),
@@ -1231,6 +1233,7 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                rejected.extend(undecodable);
                 self.note_limit_stops(limit_stops);
                 for (id, position_side) in position_sides {
                     self.note_position_side(&id, position_side.as_deref());
@@ -1264,7 +1267,7 @@ impl BinanceFutures {
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
                 let mut position_sides = Vec::new();
-                let parsed = json::each::<PmConditionalOrder>(body, |o| {
+                let (parsed, undecodable) = each_decodable::<PmConditionalOrder>(body, |o| {
                     let id = o.new_client_strategy_id.as_ref();
                     let Some(kind) = order_type(&o.strategy_type) else {
                         let message =
@@ -1319,6 +1322,7 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                rejected.extend(undecodable);
                 self.note_limit_stops(limit_stops);
                 for (id, position_side) in position_sides {
                     self.note_position_side(&id, position_side.as_deref());
@@ -1343,7 +1347,7 @@ impl BinanceFutures {
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
                 let mut position_sides = Vec::new();
-                let parsed = json::each::<OpenAlgoOrder>(body, |o| {
+                let (parsed, undecodable) = each_decodable::<OpenAlgoOrder>(body, |o| {
                     let Some(kind) = order_type(&o.order_type) else {
                         let id = o.algo_id.to_string();
                         let message = format!("Binance open order {id} has an unsupported type");
@@ -1378,6 +1382,7 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                rejected.extend(undecodable);
                 self.note_limit_stops(limit_stops);
                 for (id, position_side) in position_sides {
                     self.note_position_side(&id, position_side.as_deref());
@@ -1407,6 +1412,10 @@ impl BinanceFutures {
             return;
         }
         let join = self.account.positions.take().expect("checked above");
+        if join.failed {
+            self.account.last_risk_at =
+                cx.now - POSITION_RISK_INTERVAL_MS + FAILED_POSITION_RETRY_MS;
+        }
         if !join.failed {
             let configs = join.configs.unwrap_or_default();
             let settings: std::collections::HashMap<&str, MarketSetting> =
@@ -1796,7 +1805,8 @@ impl BinanceFutures {
                 .or_default()
                 .push(symbol.clone());
             let fence = symbol;
-            join.skipped.reject_in(Some(id), &fence);
+            join.skipped
+                .reject_in((!id.is_empty()).then_some(id), &fence);
         }
     }
 
@@ -3436,4 +3446,42 @@ mod tests {
             assert_eq!(risk.leverage, expected, "{leverage}");
         }
     }
+}
+
+/// Each row that decodes; those that do not come back as (id, symbol, message), so
+/// one bad row costs only itself. A body that is not a list is still an error.
+fn each_decodable<'de, T: serde::Deserialize<'de>>(
+    body: &'de str,
+    mut each: impl FnMut(T),
+) -> (serde_json::Result<()>, Vec<(String, String, String)>) {
+    #[derive(serde::Deserialize, Default)]
+    #[serde(rename_all = "camelCase", default)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        symbol: Option<std::borrow::Cow<'a, str>>,
+        #[serde(borrow)]
+        client_order_id: Option<std::borrow::Cow<'a, str>>,
+        order_id: Option<crate::wire::Id>,
+        strategy_id: Option<crate::wire::Id>,
+        algo_id: Option<crate::wire::Id>,
+    }
+    let mut undecodable = Vec::new();
+    let parsed = json::each::<&'de serde_json::value::RawValue>(body, |raw| {
+        match serde_json::from_str::<T>(raw.get()) {
+            Ok(row) => each(row),
+            Err(_) => {
+                let row = serde_json::from_str::<Identity<'_>>(raw.get()).unwrap_or_default();
+                let id = row
+                    .order_id
+                    .or(row.strategy_id)
+                    .or(row.algo_id)
+                    .map(|id| id.to_string())
+                    .or(row.client_order_id.map(|id| id.into_owned()))
+                    .unwrap_or_default();
+                let message = format!("Binance open order {id} could not be read");
+                undecodable.push((id, row.symbol.unwrap_or_default().into_owned(), message));
+            }
+        }
+    });
+    (parsed, undecodable)
 }
