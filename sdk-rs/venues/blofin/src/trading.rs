@@ -2065,7 +2065,8 @@ impl Blofin {
                     };
                     // Code-only: the "does not exist" text is 102068's own message.
                     let gone = matches!(&*row.code, "1000" | "102068");
-                    let accepted = reply.code == "0" && (row.code.is_empty() || row.code == "0");
+                    // Each row speaks for itself: code 2 is "partially succeeded".
+                    let accepted = row.code == "0" || (reply.code == "0" && row.code.is_empty());
                     if gone && !job.replacement_targets.is_empty() {
                         error = Some("BloFin replacement requires a confirmed cancellation".into());
                     }

@@ -108,3 +108,21 @@ fn missing_fee_currency_and_market_still_fail_without_partial_results() {
     assert_eq!(results.len(), 1);
     assert!(results[0].1.as_ref().unwrap_err().contains("incomplete"));
 }
+
+#[test]
+fn a_null_fill_list_is_an_empty_page() {
+    for body in [
+        r#"{"code":"00000","data":{"fillList":null,"endId":""}}"#,
+        r#"{"code":"00000","data":null}"#,
+    ] {
+        let mut h = inverse();
+        h.respond("/order/fills", 200, body);
+        assert!(
+            h.done
+                .iter()
+                .any(|(id, result)| *id == 42 && result.is_ok()),
+            "{body}: {:?}",
+            h.done
+        );
+    }
+}
