@@ -326,6 +326,37 @@ describe('frame-fed main-thread mirror', () => {
     });
   });
 
+  it('re-sends a chase stop through its bridge until the rows confirm it, and tells the user when they do not', async () => {
+    vi.useFakeTimers();
+    try {
+      fakeEngine({ supported: false });
+      const store = new DefaultStore();
+      exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false }, store);
+      const bridged: unknown[] = [];
+      exchange.on('chaser:terminate', (id: unknown) => bridged.push(id));
+      const errors: unknown[] = [];
+      exchange.on('error', (message: unknown) => errors.push(message));
+      store.update({ activeChasers: [{ id: 'c1', symbol: 'BTCUSDT', isStopped: false } as never] });
+      exchange.emitter.emit('chaser:terminate', 'c1');
+      expect(bridged).toEqual(['c1']);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(bridged).toEqual(['c1', 'c1']);
+      await vi.advanceTimersByTimeAsync(55_000);
+      expect(errors.at(-1)).toContain('NOT confirmed');
+
+      errors.length = 0;
+      bridged.length = 0;
+      exchange.emitter.emit('chaser:terminate', 'c1');
+      await vi.advanceTimersByTimeAsync(5_000);
+      store.update({ activeChasers: [] });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(bridged).toHaveLength(2);
+      expect(errors).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('asks its data source to re-read a setting it holds', async () => {
     const fake = fakeEngine();
     const mirror = mirrorWith(fake);

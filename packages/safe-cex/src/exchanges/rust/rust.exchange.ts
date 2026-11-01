@@ -109,6 +109,7 @@ import {
   withReplacementClientOrderId,
 } from '../clientOrderId';
 import { isKeylessRemoteSigned } from '../hostedSigningVenues';
+import { AlgoControlWatch } from './algoControlWatch';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
@@ -289,6 +290,7 @@ export const setRustEngineTransport = (factory?: () => Transport) => {
   engineTransport = factory;
 };
 
+const ALGO_CONTROL_OPS = ['chaser:start', 'chaser:terminate', 'twap:start', 'twap:resume', 'twap:pause', 'twap:stop'];
 const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
   'cancelAllOrders',
   'nuke',
@@ -839,6 +841,7 @@ export class RustEngineExchange extends BaseExchange {
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
     this.forwardToWorker();
+    if (this.isWorkerMirror) this.watchAlgoControls();
     if (this.isWorkerMirror) this.refuseOnMirror();
     this.frameFedReady = this.isWorkerMirror && !this.isPublicDataOnly ? this.startFrameFed() : Promise.resolve(false);
     const frameFedSettled = () => {
@@ -853,6 +856,23 @@ export class RustEngineExchange extends BaseExchange {
         ? members[method](...args)
         : (viaWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args)) as typeof viaWorker;
     this.stopWorkerCapabilitySync = this.store.subscribe(this.syncWorkerCapabilities);
+  }
+
+  private algoControlWatch?: AlgoControlWatch;
+
+  /** The page clicks algo ops; only their account rows say they landed. */
+  private watchAlgoControls() {
+    const watch = new AlgoControlWatch({
+      rows: () => this.store,
+      subscribe: (listener) => this.store.subscribe(listener),
+      resend: (op, data) => this.emitter.emit(op, data),
+      tell: (message) => this.emitter.emit('error', message, { forceToast: true }),
+    });
+    this.algoControlWatch = watch;
+    for (const op of ALGO_CONTROL_OPS) this.on(op, (data: unknown) => watch.observe(op, data));
+    this.on('chaser:complete', (event?: { symbol?: string }) => {
+      if (event?.symbol) watch.chaseCompleted(event.symbol);
+    });
   }
 
   override fetchHistoricalPositions = async (opts: Parameters<BaseExchange['fetchHistoricalPositions']>[0]) => {
@@ -3070,6 +3090,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.algoControlWatch?.dispose();
     this.signerSetup?.dispose();
     this.stopWorkerCapabilitySync?.();
     this.stopWorkerCapabilitySync = undefined;
