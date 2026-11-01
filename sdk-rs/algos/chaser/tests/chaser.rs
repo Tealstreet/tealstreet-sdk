@@ -2020,6 +2020,39 @@ async fn a_post_only_refusal_steps_one_tick_further_and_retries() {
     .await;
 }
 
+/// Lighter: the placement answers with the client id; the row soon has the venue's.
+#[tokio::test(start_paused = true)]
+async fn a_chase_follows_its_order_to_the_venue_id_a_snapshot_shows() {
+    local(async {
+        let port = FakePort::new("lighter");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let mut native = order("n1", 100.0, 1.0, 0.0, OrderStatus::Open);
+        native.client_order_id = Some("o1".into());
+        for _ in 0..2 {
+            {
+                let mut store = port.store.borrow_mut();
+                store.orders = vec![native.clone()];
+                store.update_ids.orders += 1;
+            }
+            port.publish(Change {
+                orders: true,
+                ..Change::default()
+            });
+            settle(10).await;
+        }
+        settle(2_000).await;
+        assert!(port.completes().is_empty(), "{:?}", port.completes());
+        assert!(port.cancels().is_empty());
+        let id = factory.book().active_chasers()[0].id.clone();
+        factory.book().remove(&id);
+        settle(100).await;
+        assert_eq!(port.cancels(), vec!["n1".to_string()]);
+    })
+    .await;
+}
+
 #[tokio::test(start_paused = true)]
 async fn an_unknown_placement_outcome_stops_without_placing_again() {
     local(async {
