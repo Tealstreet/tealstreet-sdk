@@ -837,6 +837,9 @@ impl Venue for BitgetFutures {
                             {
                                 safe_cex_engine::startup::skipped_row(cx);
                             } else {
+                                self.trading
+                                    .min_order_value
+                                    .insert(row.symbol.to_string(), row.min_trade_usdt.get());
                                 let mut mapped = market(&row);
                                 if self.inverse() {
                                     if row.min_lever.get() == 0.0 {
