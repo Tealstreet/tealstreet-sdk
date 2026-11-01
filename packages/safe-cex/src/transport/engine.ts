@@ -6,10 +6,7 @@ import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } fr
 
 import { AxiosHeaders } from 'axios';
 
-import {
-  TradeTunnelPreparationError,
-  TradeTunnelTimeoutError,
-} from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
+import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 import { tunnelEgressUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/host';
 import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
@@ -525,8 +522,6 @@ const httpTransport = (
         if (error instanceof TradeTunnelTimeoutError) proxyAuthorization?.failed(relayFailed(exchange, error));
         if (intent !== undefined && error instanceof TradeTunnelTimeoutError)
           throw new HttpPreparationError('timedOut');
-        if (error instanceof TradeTunnelPreparationError && error.code === 'HTTP_PREPARATION_UNSUPPORTED')
-          throw new HttpPreparationError('unsupported');
         throw error;
       }
     };

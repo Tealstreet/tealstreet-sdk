@@ -777,6 +777,13 @@ pub(crate) fn http_packet(
     .map_err(|_| "Invalid HTTP tunnel packet".into())
 }
 
+/// The tunnel's own words: a JSON string as text, anything else as sent, bounded.
+fn tunnel_error_text(error: &RawValue) -> String {
+    let text =
+        serde_json::from_str::<String>(error.get()).unwrap_or_else(|_| error.get().to_owned());
+    text.chars().take(200).collect()
+}
+
 pub(crate) async fn receive_http(
     socket: &mut Socket,
     request: RequestId,
@@ -792,8 +799,11 @@ pub(crate) async fn receive_http(
             continue;
         }
         let response = message.data.ok_or("tunnel response missing data")?;
-        if response.error.is_some() {
-            return Err("tunnel request failed".into());
+        if let Some(error) = response.error {
+            return Err(format!(
+                "tunnel request failed: {}",
+                tunnel_error_text(&error)
+            ));
         }
         let status = response.status.ok_or("tunnel response missing status")?;
         let mut response_headers = Vec::new();
@@ -847,6 +857,16 @@ fn report_response(request: RequestId, status: u16, headers: String, body: &[u8]
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tunnel_error_keeps_its_text() {
+        let text = |json: &str| {
+            let raw: Box<serde_json::value::RawValue> = serde_json::from_str(json).unwrap();
+            super::tunnel_error_text(&raw)
+        };
+        assert_eq!(text(r#""upstream refused""#), "upstream refused");
+        assert_eq!(text(r#"{"code":5}"#), r#"{"code":5}"#);
+    }
+
     use super::*;
     use safe_cex_engine::{Method, RequestId};
 

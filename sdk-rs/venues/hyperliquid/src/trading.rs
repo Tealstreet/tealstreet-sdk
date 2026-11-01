@@ -283,6 +283,21 @@ impl Hyperliquid {
                 };
                 (command, VecDeque::from([Step::Cancel(orders)]))
             }
+            // An order the store has lost is still cancelled by its id and symbol.
+            Command::CancelOrdersWithSymbols { command, orders } => (
+                command,
+                VecDeque::from([Step::Cancel(
+                    orders
+                        .iter()
+                        .map(|order| {
+                            cx.store
+                                .order(&order.id)
+                                .cloned()
+                                .unwrap_or_else(|| order.limit_stand_in())
+                        })
+                        .collect(),
+                )]),
+            ),
             Command::CancelSymbolOrders { command, symbol } => (
                 command,
                 VecDeque::from([Step::Cancel(

@@ -459,7 +459,11 @@ fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
 }
 
 /// retCode 0 with `result.list` explicitly null: an empty page, on this read only.
-pub(crate) fn success_with_null_list(body: &str) -> bool {
+pub(crate) fn success_with_null_list(response: &Response<'_>) -> bool {
+    null_list_body(response.body)
+}
+
+fn null_list_body(body: &str) -> bool {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Envelope<'a> {
@@ -3391,14 +3395,12 @@ mod row_class_tests {
     #[test]
     fn a_null_list_counts_only_on_success() {
         let null = r#"{"retCode":0,"result":{"list":null}}"#;
-        assert!(success_with_null_list(null));
+        assert!(null_list_body(null));
         assert!(valid_snapshot_list(null, ""));
-        assert!(!success_with_null_list(
+        assert!(!null_list_body(
             r#"{"retCode":10001,"result":{"list":null}}"#
         ));
-        assert!(!success_with_null_list(
-            r#"{"retCode":0,"result":{"list":[]}}"#
-        ));
+        assert!(!null_list_body(r#"{"retCode":0,"result":{"list":[]}}"#));
     }
 
     #[test]
