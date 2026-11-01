@@ -83,6 +83,8 @@ pub struct Job {
     failed_index: Option<usize>,
     /// A step took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// The symbol of an order this job cancels before placing its replacement.
+    replaces: Option<String>,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -723,6 +725,20 @@ impl MexcFutures {
                         bybit_slippage_tolerance_ticks: None,
                         implied_volatility: None,
                     };
+                    // Checked before the cancel: a replacement below the minimum would lose the order.
+                    let contract = cx
+                        .store
+                        .market(&o.symbol)
+                        .and_then(|m| m.contract_size)
+                        .unwrap_or(1.0);
+                    let left = match amount {
+                        Some(total) => {
+                            safe_cex_engine::num::left_of_total(total, o.filled / contract)?
+                        }
+                        None => opts.amount,
+                    };
+                    replacement_fits(cx, &o.symbol, left)
+                        .map_err(|error| format!("{error}; the order is unchanged"))?;
                     let mut replacement = self.placement(cx, opts)?;
                     if let Call::Place { amend, .. } = &mut replacement.call {
                         *amend = Some(AmendIntent {
@@ -868,6 +884,14 @@ impl MexcFutures {
             return;
         }
         if let Ok(steps) = steps {
+            let replaces = steps.iter().find_map(|step| match &step.call {
+                Call::Place {
+                    opts,
+                    amend: Some(_),
+                    ..
+                } => Some(opts.symbol.clone()),
+                _ => None,
+            });
             self.trading.queue.push_back(Job {
                 command,
                 steps,
@@ -876,6 +900,7 @@ impl MexcFutures {
                 total_orders,
                 failed_index: None,
                 effective: false,
+                replaces,
             });
             self.advance_trade(cx);
         }
@@ -1008,6 +1033,15 @@ impl MexcFutures {
     ) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
+            if job.effective
+                && job.ids.is_empty()
+                && let Some(symbol) = &job.replaces
+            {
+                error.message = format!(
+                    "{}; Your {symbol} order is gone: it was canceled and its replacement refused",
+                    error.message
+                );
+            }
             if (job.effective || !job.ids.is_empty())
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             {
@@ -1150,6 +1184,7 @@ impl MexcFutures {
             });
             self.account.revision += 1;
             self.apply_order(cx, order, Scope::Regular, self.account.revision);
+            replacement_fits(cx, &opts.symbol, opts.amount)?;
             self.placement(cx, opts).map(Some)
         })();
         match result {
@@ -1576,4 +1611,18 @@ fn write_failure(status: u16, body: &str, message: String, refused: bool) -> Ven
         500 | 501 | 9999 => error.outcome(Outcome::Unknown),
         _ => error,
     }
+}
+
+/// A replacement below the contract minimum would be refused or sized up by placement.
+fn replacement_fits(cx: &Cx<'_, Pending>, symbol: &str, native: f64) -> Result<(), String> {
+    let Some(market) = cx.store.market(symbol) else {
+        return Ok(());
+    };
+    let minimum = market.limits.amount.min / market.contract_size.unwrap_or(1.0);
+    if native < minimum {
+        return Err(format!(
+            "MEXC replacement of {native} is below the {minimum} contract minimum"
+        ));
+    }
+    Ok(())
 }

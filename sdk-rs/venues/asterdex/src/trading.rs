@@ -1183,6 +1183,17 @@ impl AsterDex {
             Some(total) => total - order.filled,
             None => order.remaining,
         };
+        // A replacement below the value minimum would be refused after the old order is gone.
+        let value = size * price.unwrap_or(order.price);
+        let minimum = self
+            .market_rules
+            .get(&order.symbol)
+            .map_or(0.0, |r| r.min_notional);
+        if !conditional && !order.reduce_only && value > 0.0 && value < minimum {
+            return Err(format!(
+                "Aster replacement worth {value} is below the {minimum} minimum; the order is unchanged"
+            ));
+        }
         // A stop that would trigger at once is refused after the old one is gone.
         if conditional
             && let Some(trigger) = price

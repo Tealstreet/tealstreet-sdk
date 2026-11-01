@@ -661,7 +661,7 @@ fn expired_login_signature_never_sends_its_stale_stamp() {
     let parked = Arc::new(AtomicBool::new(false));
     let mut h = Harness::private_gated(parked.clone());
     let (socket, attempt, result) = parked_login(&mut h, &parked);
-    let stale = format!(r#""timestamp":"{}""#, (h.now / 1000.0).floor());
+    let stale = format!(r#""timestamp":{}"#, (h.now / 1000.0).floor());
     h.now += 6_000.0;
     h.sent.clear();
     h.signs.clear();
@@ -682,7 +682,7 @@ fn prompt_login_signature_is_released_on_the_live_socket() {
     let parked = Arc::new(AtomicBool::new(false));
     let mut h = Harness::private_gated(parked.clone());
     let (socket, attempt, result) = parked_login(&mut h, &parked);
-    let stamp = format!(r#""timestamp":"{}""#, (h.now / 1000.0).floor());
+    let stamp = format!(r#""timestamp":{}"#, (h.now / 1000.0).floor());
     h.sent.clear();
     h.event(Event::Signed {
         attempt,

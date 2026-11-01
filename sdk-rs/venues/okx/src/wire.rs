@@ -275,21 +275,39 @@ pub struct AccountPush<'a> {
 /// A row the borrowed records cannot read, rewritten so they can: null fields dropped,
 /// numbers as text, JSON escapes resolved. Cold path: only after a row failed to parse.
 pub fn readable_rows(text: &str) -> Option<String> {
-    fn clean(row: &mut serde_json::Value) {
+    #[derive(Deserialize, serde::Serialize)]
+    #[serde(untagged)]
+    enum Json {
+        Null,
+        Bool(bool),
+        Int(i64),
+        Unsigned(u64),
+        Float(f64),
+        Text(String),
+        Array(Vec<Json>),
+        Object(std::collections::BTreeMap<String, Json>),
+    }
+    fn clean(row: &mut Json) {
         match row {
-            serde_json::Value::Array(rows) => rows.iter_mut().for_each(clean),
-            serde_json::Value::Object(fields) => {
-                fields.retain(|_, value| !value.is_null());
+            Json::Array(rows) => rows.iter_mut().for_each(clean),
+            Json::Object(fields) => {
+                fields.retain(|_, value| !matches!(value, Json::Null));
                 for value in fields.values_mut() {
-                    if let serde_json::Value::Number(number) = value {
-                        *value = serde_json::Value::String(number.to_string());
-                    }
+                    let text = match value {
+                        Json::Int(number) => number.to_string(),
+                        Json::Unsigned(number) => number.to_string(),
+                        Json::Float(number) => {
+                            serde_json::to_string(number).ok().unwrap_or_default()
+                        }
+                        _ => continue,
+                    };
+                    *value = Json::Text(text);
                 }
             }
             _ => {}
         }
     }
-    let mut rows = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    let mut rows = serde_json::from_str::<Json>(text).ok()?;
     clean(&mut rows);
     serde_json::to_string(&rows).ok()
 }

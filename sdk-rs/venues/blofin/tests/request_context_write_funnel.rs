@@ -1346,3 +1346,20 @@ fn a_code_zero_row_is_accepted_whatever_its_text_says() {
     );
     assert_eq!(succeeded(&h, 860), r#"["9"]"#);
 }
+
+// Live, 5 of 5: a partly filled order's cancel reads partially_canceled, and the replacement was lost.
+#[test]
+fn a_partly_filled_amend_still_replaces_after_partially_canceled() {
+    let mut h = Harness::with_secondary();
+    h.open_private();
+    h.seed();
+    seed_order(&mut h, "12", "");
+    command(&mut h, amend(7));
+    reply(&mut h, "cancel-batch-orders", 200, ACCEPTED_CANCEL);
+    let at = h.now + 350.0;
+    fire_until(&mut h, at);
+    let detail =
+        CANCELED_DETAIL.replace(r#""state":"canceled""#, r#""state":"partially_canceled""#);
+    let intents = reply(&mut h, "order-detail", 200, &detail);
+    managed(&h, &intents, "batch-orders");
+}

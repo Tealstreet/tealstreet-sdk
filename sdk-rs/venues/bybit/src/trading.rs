@@ -740,6 +740,9 @@ impl BybitLinear {
         }
         let mut sizes = Vec::new();
         let mut remaining = amount;
+        if remaining / max > 1000.0 {
+            return Err("Order exceeds the safe split bound".into());
+        }
         while max > 0.0 && remaining > max {
             sizes.push(max);
             remaining = num::adjust(remaining - max, p_amount);

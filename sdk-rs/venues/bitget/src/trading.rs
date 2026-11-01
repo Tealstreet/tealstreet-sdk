@@ -280,7 +280,6 @@ enum Effect {
 #[derive(Clone, Serialize)]
 #[serde(untagged)]
 enum Leverage {
-    Number(f64),
     Text(String),
 }
 
@@ -1284,7 +1283,7 @@ impl BitgetFutures {
                         PositionSide::Short => "short",
                     });
                 let mut p = self.classic(cx, symbol)?;
-                p.leverage = Some(Leverage::Number(leverage));
+                p.leverage = Some(Leverage::Text(num::format(leverage)));
                 let path = if self.account.uta {
                     p = Payload {
                         category: Some(self.product().to_uppercase()),
@@ -1350,6 +1349,7 @@ impl BitgetFutures {
                     };
                     // Isolated hedge names both sides' leverage (25200 otherwise).
                     if margin == MarginType::Isolated && cx.store.hedged() {
+                        p.leverage = None;
                         let setting = cx.store.setting(symbol);
                         let scalar = setting.map_or(1.0, |s| s.leverage);
                         p.long_leverage = Some(num::format(
@@ -1511,7 +1511,7 @@ impl BitgetFutures {
             }
             while left > 0.0 {
                 let size = left.min(max);
-                left = clean(left - size);
+                left = num::adjust(left - size, m.precision.amount);
                 let payload = self.normal_payload(cx, o, size)?;
                 if self.account.uta {
                     calls.push(Planned {
@@ -1833,6 +1833,10 @@ impl BitgetFutures {
             qty: (size > 0.0).then(|| num::format(size)),
             reduce_only: Some("yes"),
             client_oid: Some(mint(cx)?),
+            // Without it an isolated position is not found: 31008.
+            margin_mode: (cx.store.setting(&o.symbol).and_then(|s| s.margin_type)
+                == Some(MarginType::Isolated))
+            .then(|| margin_text(MarginType::Isolated)),
             ..Payload::default()
         };
         if o.kind == OrderType::TakeProfit {

@@ -52,6 +52,7 @@ fn local_with(positions: &str, symbol_config: &str) -> Harness {
     h.respond("/fapi/v1/openAlgoOrders", 200, STOP_LIMIT);
     let private = h.socket("/private/ws").unwrap();
     h.event(Event::WsOpened { socket: private });
+    h.answer_open_position_read();
     h.requests.clear();
     h
 }

@@ -722,7 +722,7 @@ impl Venue for BitunixFutures {
             Ok(m) => {
                 if matches!(s.feed, Feed::Private) {
                     // Bitunix answers {"op":"ping","pong":<ts>,"ping":<ts>}.
-                    if m.op == "ping" {
+                    if m.op == "pong" || (m.op == "ping" && m.pong) {
                         s.pong_observed = true;
                     }
                     self.private_message(cx, socket, &m);

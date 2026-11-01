@@ -459,11 +459,7 @@ fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
 }
 
 /// retCode 0 with `result.list` explicitly null: an empty page, on this read only.
-pub(crate) fn success_with_null_list(response: &Response<'_>) -> bool {
-    null_list_body(response.body)
-}
-
-fn null_list_body(body: &str) -> bool {
+pub(crate) fn success_with_null_list(body: &str) -> bool {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Envelope<'a> {
@@ -1199,6 +1195,11 @@ impl BybitLinear {
             return is_inverse_symbol(symbol);
         }
         is_linear(category, symbol) && (!self.variant.is_hyro() || symbol.ends_with("USDT"))
+    }
+
+    /// A REST row answers the category requested: spot rows carry it only at the top level.
+    fn read_row_trades(&self, category: &Option<Str<'_>>, symbol: &str) -> bool {
+        self.trades_row(category, symbol) || self.variant.is_spot() && present(category).is_none()
     }
 
     fn map_account_position(
@@ -2301,11 +2302,25 @@ impl BybitLinear {
                 } else {
                     OrderStatus::Canceled
                 };
+                let parent = mapped.orders.first().map(|order| order.id.clone());
                 for order in mapped.orders.drain(..) {
                     cx.store.upsert_order(Order {
                         status: final_status,
                         ..order
                     });
+                }
+                // A terminal row may not repeat its TP/SL; the legs do not outlive it anyway.
+                if let Some(parent) = parent {
+                    for suffix in ["__stop_loss", "__take_profit"] {
+                        let leg = format!("{parent}{suffix}");
+                        if cx
+                            .store
+                            .order(&leg)
+                            .is_some_and(|o| o.status == OrderStatus::Open)
+                        {
+                            cx.store.set_order_status(&leg, OrderStatus::Canceled);
+                        }
+                    }
                 }
             }
             "New" | "Untriggered" | "PartiallyFilled" => {
@@ -2443,7 +2458,7 @@ impl BybitLinear {
         let identity = rejected_identity(item);
         if let Some(identity) = &identity
             && let Some(symbol) = identity.symbol.as_deref().filter(|v| !v.is_empty())
-            && !self.trades_row(&identity.category.as_deref().map(Into::into), symbol)
+            && !self.read_row_trades(&identity.category.as_deref().map(Into::into), symbol)
         {
             return;
         }
@@ -2510,7 +2525,7 @@ impl BybitLinear {
                     }
                     return;
                 }
-                if !self.trades_row(&row.category, &row.symbol) {
+                if !self.read_row_trades(&row.category, &row.symbol) {
                     return;
                 }
                 let mapped = map_order(&row, cx.store, cx.now);
@@ -3395,12 +3410,14 @@ mod row_class_tests {
     #[test]
     fn a_null_list_counts_only_on_success() {
         let null = r#"{"retCode":0,"result":{"list":null}}"#;
-        assert!(null_list_body(null));
+        assert!(success_with_null_list(null));
         assert!(valid_snapshot_list(null, ""));
-        assert!(!null_list_body(
+        assert!(!success_with_null_list(
             r#"{"retCode":10001,"result":{"list":null}}"#
         ));
-        assert!(!null_list_body(r#"{"retCode":0,"result":{"list":[]}}"#));
+        assert!(!success_with_null_list(
+            r#"{"retCode":0,"result":{"list":[]}}"#
+        ));
     }
 
     #[test]

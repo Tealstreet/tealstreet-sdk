@@ -177,6 +177,8 @@ enum CancelProof {
 
 #[derive(Default)]
 pub struct TradingState {
+    /// MIN_NOTIONAL by symbol. Market limits carry no value minimum.
+    pub(crate) min_notional: HashMap<String, f64>,
     jobs: HashMap<CommandId, Job>,
     /// While an amendment plans its replacement: the original row's hedge side.
     amended_position_side: Option<&'static str>,
@@ -1792,6 +1794,20 @@ impl BinanceFutures {
             close: Some(order.close.unwrap_or(false)),
             stp_mode: None,
         };
+        // A replacement below the value minimum would be refused after the old order is gone.
+        let left = (replacement.amount - order.filled).max(0.0);
+        let value = left * replacement.price.unwrap_or(0.0);
+        let minimum = self
+            .trading
+            .min_notional
+            .get(&order.symbol)
+            .copied()
+            .unwrap_or(0.0);
+        if !order.reduce_only && value > 0.0 && value < minimum {
+            return Err(format!(
+                "Replacement worth {value} is below the {minimum} minimum; the order is unchanged"
+            ));
+        }
         // Validate before canceling; build the final payload after its cumulative fill is known.
         self.plan_place(cx, std::slice::from_ref(&replacement))?;
         let mut job = self.plan_cancel(std::slice::from_ref(&order));
@@ -2022,22 +2038,19 @@ impl BinanceFutures {
             if reduce_only {
                 params.set("reduceOnly", "true");
             }
-            let max = market.limits.amount.max;
-            let (lots, rest) = if amount > max && max > 0.0 {
-                (
-                    (amount / max).ceil() as usize,
-                    num::adjust(amount % max, p_amount),
-                )
-            } else {
-                (1, 0.0)
-            };
-            let lot_size = num::adjust((amount - rest) / lots as f64, p_amount);
-            let mut payloads: Vec<Params> = (0..lots)
-                .map(|_| with_quantity(&params, quantity_at, lot_size))
-                .collect();
-            if rest != 0.0 {
-                payloads.push(with_quantity(&params, quantity_at, rest));
+            if amount <= 0.0 {
+                return Err("Binance order quantity rounds to zero".into());
             }
+            if opts.kind == OrderType::Limit && price.is_none_or(|p| p <= 0.0) {
+                return Err("Binance order price rounds to zero".into());
+            }
+            let payloads = sized_payloads_at(
+                &params,
+                quantity_at,
+                amount,
+                market.limits.amount.max,
+                p_amount,
+            )?;
             if opts.client_order_id.is_some() && payloads.len() > 1 {
                 return Err(format!(
                     "Client order ID needs a single order; {} exceeds the maximum size",
@@ -2356,6 +2369,17 @@ fn positive_price(value: Option<f64>, precision: f64) -> Result<f64, String> {
 }
 
 fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Vec<Params>, String> {
+    let at = params.0.len();
+    sized_payloads_at(&params, at, amount, max, step)
+}
+
+fn sized_payloads_at(
+    params: &Params,
+    at: usize,
+    amount: f64,
+    max: f64,
+    step: f64,
+) -> Result<Vec<Params>, String> {
     let max = if max.is_finite() && max > 0.0 {
         num::adjust(max, step)
     } else {
@@ -2369,13 +2393,12 @@ fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Ve
         return Err("Binance order requires too many native lots".into());
     }
     let mut out = Vec::new();
-    let at = params.0.len();
     for _ in 0..count as usize {
-        out.push(with_quantity(&params, at, max));
+        out.push(with_quantity(params, at, max));
     }
     let rest = num::adjust(amount - count * max, step);
     if rest > 0.0 {
-        out.push(with_quantity(&params, at, rest));
+        out.push(with_quantity(params, at, rest));
     }
     Ok(out)
 }

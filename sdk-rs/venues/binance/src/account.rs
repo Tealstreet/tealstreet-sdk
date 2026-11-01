@@ -653,14 +653,20 @@ impl BinanceFutures {
     }
 
     fn private_ready(&mut self, cx: &mut Cx<'_, Pending>) {
-        // Order events while no stream was open were never delivered.
-        if self.account.resync_orders_on_open || self.account.has_opened {
-            self.account.resync_orders_on_open = false;
+        // Events while no stream was open were never delivered, the first open included:
+        // the startup snapshot was read before the stream subscribed.
+        self.account.resync_orders_on_open = false;
+        if !cx.frame_fed() {
             self.schedule_orders_refresh(cx);
-            // Position events in the gap were lost too; the risk poll would take up to its interval.
-            if !self.is_spot() {
+        }
+        // A snapshot from before the open still in flight proves nothing: repair after it.
+        if !self.is_spot() && !cx.frame_fed() {
+            if self.account.positions.is_none() {
                 self.account.last_risk_at = cx.now;
                 self.fetch_positions(cx);
+            } else {
+                self.account.pending_position_events = true;
+                self.schedule_position_repair(cx);
             }
         }
         self.account.has_opened = true;

@@ -171,6 +171,12 @@ pub enum Then {
     Closed(Box<closed::Request>),
 }
 
+impl Then {
+    fn reads_account_snapshot(&self) -> bool {
+        matches!(self, Self::Account(request) if request.is_snapshot_read())
+    }
+}
+
 pub struct Pending {
     category: Category,
     rest: Rest,
@@ -2932,13 +2938,14 @@ impl Venue for BybitLinear {
             self.on_options_response(cx, request, response);
             return;
         }
+        // A private snapshot with nothing in it can answer `list: null`.
+        if pending.then.reads_account_snapshot() && account::success_with_null_list(response.body) {
+            return self.on_response(cx, pending, response);
+        }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still
-        // requires its streamed list. A private snapshot with nothing in it can
-        // answer `list: null`.
+        // requires its streamed list.
         if matches!(pending.then, Then::Fees(_) | Then::RefreshMarkets(_))
-            || (matches!(&pending.then, Then::Account(read) if read.is_snapshot_read())
-                && account::success_with_null_list(&response))
             || (matches!(
                 pending.then,
                 Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
