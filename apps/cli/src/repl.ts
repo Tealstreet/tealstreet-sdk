@@ -2829,7 +2829,9 @@ export async function runSingleCommand(
   const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
   await processCommand(commandString, { drainFinalInFlight: true });
   await waitForTwapsStartedByCommand(twapsBeforeCommand);
-  await teardownOneShot(session.currentExchange);
+  const abandoned = chaseAbandonedByExit(session.currentExchange);
+  if (abandoned) adapter.printError(abandoned);
+  await teardownOneShot(session.currentExchange, abandoned ? 1 : 0);
 }
 
 /**
@@ -2910,9 +2912,12 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
         }
         const exchangeDuring = exchangeLines.slice(exchangeStart);
         const lateRejection = needsKey ? findKeyRejection(exchangeDuring.map((line) => line.text)) : undefined;
-        const summary = lateRejection
-          ? { ok: false, code: 'KEY_REJECTED' as const, error: lateRejection }
-          : summarizeOneShot(output.slice(commandStart), threw, exchangeDuring);
+        const abandoned = chaseAbandonedByExit(session.currentExchange);
+        const summary = abandoned
+          ? { ok: false, code: 'CHASE_ABANDONED' as const, error: abandoned }
+          : lateRejection
+            ? { ok: false, code: 'KEY_REJECTED' as const, error: lateRejection }
+            : summarizeOneShot(output.slice(commandStart), threw, exchangeDuring);
         output.push(...exchangeDuring);
         await emitJson(result(summary.ok, summary.code, summary.error));
         await teardownOneShot(session.currentExchange, summary.ok ? 0 : 1);
@@ -2938,6 +2943,13 @@ async function teardownOneShot(exchange: NonNullable<typeof session.currentExcha
     await flushCliSentry();
   }
   process.exit(exitCode);
+}
+
+/** A chase lives in this process, which exits now: its order stays with nothing managing it. */
+function chaseAbandonedByExit(exchange: NonNullable<typeof session.currentExchange>): string | undefined {
+  const running = (exchange.store as { activeChasers?: unknown[] }).activeChasers?.length ?? 0;
+  if (!running) return undefined;
+  return `A chase runs only while this process does, and this one-shot command is exiting: nothing is chasing now and its limit order may still be open. Check open orders, and chase from the interactive prompt.`;
 }
 
 async function waitForTwapsStartedByCommand(twapsBeforeCommand: Set<string>): Promise<void> {

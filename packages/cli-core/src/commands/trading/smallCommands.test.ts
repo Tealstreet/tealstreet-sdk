@@ -14,11 +14,7 @@ import { MoveCommand } from './MoveCommand';
 import { EchoCommand } from './EchoCommand';
 import { MarginCommand } from './MarginCommand';
 import { PositionCommand } from './PositionCommand';
-import {
-  LastPriceCommand,
-  MarkPriceCommand,
-  IndexPriceCommand,
-} from './PriceCommand';
+import { LastPriceCommand, MarkPriceCommand, IndexPriceCommand } from './PriceCommand';
 import type { CommandContext } from '../Command';
 import {
   PositionSide,
@@ -141,9 +137,7 @@ describe('LeverageCommand', () => {
     const adapter = makeAdapter();
     const r = await cmd.execute(ctx(['lev'], ex, adapter));
     expect(r.success).toBe(true);
-    expect(adapter.printInfo).toHaveBeenCalledWith(
-      expect.stringMatching(/No open position.*lev <n>/),
-    );
+    expect(adapter.printInfo).toHaveBeenCalledWith(expect.stringMatching(/No open position.*lev <n>/));
   });
 
   it('"lev <n>" calls setLeverage with the focused symbol', async () => {
@@ -296,19 +290,13 @@ describe('NukeCommand', () => {
     expect(ex.nuke).toHaveBeenCalledWith(3);
   });
 
-  it.each([
-    ['positions'],
-    ['pos'],
-  ])('"nuke %s" calls nukePositions(3)', async (variant) => {
+  it.each([['positions'], ['pos']])('"nuke %s" calls nukePositions(3)', async (variant) => {
     const ex = makeExchange();
     await cmd.execute(ctx(['nuke', variant], ex));
     expect(ex.nukePositions).toHaveBeenCalledWith(3);
   });
 
-  it.each([
-    ['orders'],
-    ['ord'],
-  ])('"nuke %s" calls nukeOrders()', async (variant) => {
+  it.each([['orders'], ['ord']])('"nuke %s" calls nukeOrders()', async (variant) => {
     const ex = makeExchange();
     await cmd.execute(ctx(['nuke', variant], ex));
     expect(ex.nukeOrders).toHaveBeenCalled();
@@ -359,16 +347,28 @@ describe('NukeCommand', () => {
     expect(r.error).toMatch(/does not support/);
   });
 
-  it('logs a warning when nuke promise rejects (still returns success synchronously)', async () => {
+  it('reports a nuke that did not finish flat as a failure', async () => {
     const ex = makeExchange();
-    (ex.nuke as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
+    (ex.nuke as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('still open'));
     const adapter = makeAdapter();
     const r = await cmd.execute(ctx(['nuke'], ex, adapter));
-    // nuke is fire-and-forget — execute returns success and the
-    // .catch() prints a warning asynchronously. Wait a microtask.
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
+    expect(adapter.printError).toHaveBeenCalledWith(expect.stringContaining('still open'));
+  });
+
+  it('returns only when the nuke has finished, so a one-shot cannot exit mid-close', async () => {
+    const ex = makeExchange();
+    let finish: (value?: unknown) => void = () => undefined;
+    (ex.nuke as ReturnType<typeof vi.fn>).mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    let returned = false;
+    const pending = cmd.execute(ctx(['nuke'], ex, makeAdapter())).then((result) => {
+      returned = true;
+      return result;
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(adapter.printWarning).toHaveBeenCalled();
+    expect(returned).toBe(false);
+    finish();
+    expect((await pending).success).toBe(true);
   });
 });
 
@@ -392,8 +392,7 @@ function order(o: Partial<Order> = {}): Order {
 function exchangeWithOrders(orders: Order[]): ExchangeLike {
   const ex = makeExchange();
   (ex.store as { orders: Order[] }).orders = orders;
-  (ex as unknown as { updateOrder: ReturnType<typeof vi.fn> }).updateOrder =
-    vi.fn().mockResolvedValue(undefined);
+  (ex as unknown as { updateOrder: ReturnType<typeof vi.fn> }).updateOrder = vi.fn().mockResolvedValue(undefined);
   return ex;
 }
 
@@ -409,9 +408,7 @@ describe('MoveCommand', () => {
     const r = await cmd.execute(ctx(['move'], ex, adapter));
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/Missing arguments/);
-    expect(adapter.printError).toHaveBeenCalledWith(
-      expect.stringMatching(/Usage: move/),
-    );
+    expect(adapter.printError).toHaveBeenCalledWith(expect.stringMatching(/Usage: move/));
   });
 
   it('errors when the exchange does not support order updates', async () => {
@@ -421,9 +418,7 @@ describe('MoveCommand', () => {
     const r = await cmd.execute(ctx(['move', 'order-abc', '50000'], ex, adapter));
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/updateOrder not supported/);
-    expect(adapter.printError).toHaveBeenCalledWith(
-      'This exchange does not support order updates',
-    );
+    expect(adapter.printError).toHaveBeenCalledWith('This exchange does not support order updates');
   });
 
   it('errors when no order matches the prefix', async () => {
@@ -442,16 +437,10 @@ describe('MoveCommand', () => {
     const r = await cmd.execute(ctx(['move', 'order-abc', '50000'], ex, adapter));
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/Ambiguous/);
-    expect(adapter.printError).toHaveBeenCalledWith(
-      expect.stringMatching(/Multiple orders match/),
-    );
+    expect(adapter.printError).toHaveBeenCalledWith(expect.stringMatching(/Multiple orders match/));
     // Both matches surfaced.
-    expect(adapter.printInfo).toHaveBeenCalledWith(
-      expect.stringContaining('order-abc-1111'),
-    );
-    expect(adapter.printInfo).toHaveBeenCalledWith(
-      expect.stringContaining('order-abc-2222'),
-    );
+    expect(adapter.printInfo).toHaveBeenCalledWith(expect.stringContaining('order-abc-1111'));
+    expect(adapter.printInfo).toHaveBeenCalledWith(expect.stringContaining('order-abc-2222'));
   });
 
   it('skips orders that are not Open + Limit', async () => {
@@ -525,9 +514,7 @@ describe('MoveCommand', () => {
     const r = await cmd.execute(ctx(['move', 'order-abc-1234', '49000'], ex, adapter));
     expect(r.success).toBe(true);
     expect(ex.updateOrder).not.toHaveBeenCalled();
-    expect(adapter.printInfo).toHaveBeenCalledWith(
-      'Order is already at this price',
-    );
+    expect(adapter.printInfo).toHaveBeenCalledWith('Order is already at this price');
   });
 
   it('surfaces updateOrder errors as command errors', async () => {
@@ -554,9 +541,7 @@ describe('EchoCommand', () => {
   it('echoes joined args back through print', async () => {
     const adapter = makeAdapter();
     const ex = makeExchange();
-    const r = await cmd.execute(
-      ctx(['echo', 'hello', 'world'], ex, adapter),
-    );
+    const r = await cmd.execute(ctx(['echo', 'hello', 'world'], ex, adapter));
     expect(r.success).toBe(true);
     expect(adapter.print).toHaveBeenCalledWith(['hello world']);
   });
@@ -632,9 +617,7 @@ describe('PositionCommand — `show` subcommand', () => {
     const ex = makeExchange({ positions: [] });
     const adapter = makeAdapter();
     await cmd.execute(ctx(['position', 'show', 'NOSYM'], ex, adapter, 'BTCUSDT'));
-    expect(adapter.printInfo).toHaveBeenCalledWith(
-      expect.stringMatching(/No open position/),
-    );
+    expect(adapter.printInfo).toHaveBeenCalledWith(expect.stringMatching(/No open position/));
   });
 });
 
@@ -706,9 +689,7 @@ describe('PriceCommand family', () => {
   });
 
   it('MarkPrice / IndexPrice resolve their own ticker fields', async () => {
-    const ex = exchangeWithTickers([
-      { symbol: 'BTCUSDT', last: 50_000, mark: 50_100, index: 50_050 },
-    ]);
+    const ex = exchangeWithTickers([{ symbol: 'BTCUSDT', last: 50_000, mark: 50_100, index: 50_050 }]);
     const adapter = makeAdapter();
     await new MarkPriceCommand().execute(ctx(['mp'], ex, adapter));
     await new IndexPriceCommand().execute(ctx(['ip'], ex, adapter));
@@ -723,9 +704,7 @@ describe('PriceCommand family', () => {
       { symbol: 'ETHUSDT', last: 3_000 },
     ]);
     const adapter = makeAdapter();
-    const r = await new LastPriceCommand().execute(
-      ctx(['lp', 'BTCUSDT,ETHUSDT'], ex, adapter),
-    );
+    const r = await new LastPriceCommand().execute(ctx(['lp', 'BTCUSDT,ETHUSDT'], ex, adapter));
     expect(r.success).toBe(true);
     const out = (adapter.print as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(out).toHaveLength(2);
@@ -742,9 +721,7 @@ describe('PriceCommand family', () => {
       { symbol: 'ETHUSDT', last: 3_000 /* no mark */ },
     ]);
     const adapter = makeAdapter();
-    await new MarkPriceCommand().execute(
-      ctx(['mp', 'BTCUSDT,ETHUSDT'], ex, adapter),
-    );
+    await new MarkPriceCommand().execute(ctx(['mp', 'BTCUSDT,ETHUSDT'], ex, adapter));
     const out = (adapter.print as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(out[0]).toMatch(/BTCUSDT @ 50100/);
     expect(out[1]).toMatch(/ETHUSDT was not found or is not loaded yet/);
@@ -757,9 +734,7 @@ describe('PriceCommand family', () => {
     // reach the "was not found" branch; it just disappears.
     const ex = exchangeWithTickers([{ symbol: 'BTCUSDT', last: 50_000 }]);
     const adapter = makeAdapter();
-    await new LastPriceCommand().execute(
-      ctx(['lp', 'BTCUSDT,DOGEUSDT'], ex, adapter),
-    );
+    await new LastPriceCommand().execute(ctx(['lp', 'BTCUSDT,DOGEUSDT'], ex, adapter));
     const out = (adapter.print as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(out).toHaveLength(1);
     expect(out[0]).toMatch(/BTCUSDT @ 50000/);
