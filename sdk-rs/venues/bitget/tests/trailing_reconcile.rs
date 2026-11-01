@@ -391,7 +391,8 @@ fn exact_documented_tpsl_pending_and_terminal_statuses_do_not_emit_executions() 
                 .store()
                 .orders()
                 .iter()
-                .all(|o| o.side == OrderSide::Sell && o.reduce_only)
+                // One-way: the row's side, as real captures show it (docs' example differs).
+                .all(|o| o.side == OrderSide::Buy && o.reduce_only)
         );
         assert!(
             h.engine
