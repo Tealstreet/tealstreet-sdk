@@ -247,6 +247,8 @@ struct Job {
     successes: usize,
     error: Option<VenueError>,
     continue_on_error: bool,
+    /// Every order was asked for: one refused fails the command, naming what was placed.
+    fails_on_refusal: bool,
     result: Option<String>,
     /// A refused replacement here leaves the position without its stop.
     replacing_stop: bool,
@@ -778,7 +780,9 @@ impl AsterDex {
         }
         let job = self.trading.jobs.remove(&id).expect("present");
         let _ = match job.error {
-            Some(mut error) if !job.continue_on_error || job.successes == 0 => {
+            Some(mut error)
+                if !job.continue_on_error || job.fails_on_refusal || job.successes == 0 =>
+            {
                 // A later rejection after a step took effect cannot mean nothing happened.
                 if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
                     error.outcome = None;
@@ -1251,6 +1255,7 @@ impl AsterDex {
         };
         let mut job = Job {
             continue_on_error: true,
+            fails_on_refusal: true,
             ..Job::default()
         };
         for opts in orders {

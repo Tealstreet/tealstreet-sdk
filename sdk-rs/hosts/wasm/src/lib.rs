@@ -1490,6 +1490,7 @@ impl WasmEngine {
                         .handle(now, Event::PollCeilingChanged { ceiling_ms });
                     Event::PollScaleChanged { scale }
                 }
+                safe_cex_engine::command::HostInput::NetworkRestored => Event::NetworkRestored,
             };
             self.inner.handle(now, event);
             Ok(self.flush())
@@ -1522,6 +1523,7 @@ impl WasmEngine {
                     .handle(now, Event::PollCeilingChanged { ceiling_ms });
                 Event::PollScaleChanged { scale }
             }
+            safe_cex_engine::command::HostInput::NetworkRestored => Event::NetworkRestored,
         };
         self.inner.handle(now, event);
         Ok(self.flush())

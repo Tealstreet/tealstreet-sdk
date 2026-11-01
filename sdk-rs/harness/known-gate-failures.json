@@ -36028,7 +36028,7 @@
     },
     {
       "venue": "kraken",
-      "tapeSha256": "d26bef6a5ecfd23453f61a4be24babb7f33421fb7f2acdee2a09aa851d1017fc",
+      "tapeSha256": "2bf4d2df43d6b7bdf10b45945bc01674367405b080fce9f0320eab288660e4ca",
       "tape": "sdk-rs/harness/tapes/kraken-private.jsonl",
       "diagnostics": [
         {
@@ -36075,7 +36075,6 @@
         {
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
-            "checkpoint 5 account.orders[3].clientOrderId",
             "checkpoint 6 account.orders[4].clientOrderId"
           ]
         },
@@ -36118,12 +36117,7 @@
             "checkpoint 3 account.orders[2]",
             "checkpoint 3 account.orders[3]",
             "checkpoint 4 account.orders[1].price",
-            "checkpoint 5 account.orders[2].id",
             "checkpoint 5 account.orders[2].price",
-            "checkpoint 5 account.orders[2].type",
-            "checkpoint 5 account.orders[3].id",
-            "checkpoint 5 account.orders[3].price",
-            "checkpoint 5 account.orders[3].type",
             "checkpoint 6 account.orders[2].id",
             "checkpoint 6 account.orders[2].price",
             "checkpoint 6 account.orders[2].status",
@@ -36195,9 +36189,7 @@
             "checkpoint 4 account.orders[3].takeProfitTrigger",
             "checkpoint 4 account.orders[3].trigger",
             "checkpoint 5 account.orders[1].trigger",
-            "checkpoint 5 account.orders[2].takeProfitTrigger",
             "checkpoint 5 account.orders[2].trigger",
-            "checkpoint 5 account.orders[3].stopLossTrigger",
             "checkpoint 5 account.orders[3].trigger",
             "checkpoint 6 account.orders[1].trigger",
             "checkpoint 6 account.orders[2].takeProfitTrigger",

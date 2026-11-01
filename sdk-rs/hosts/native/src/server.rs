@@ -456,6 +456,7 @@ impl AccountHandle {
                 scale,
                 ceiling_ms,
             },
+            Ok(HostInput::NetworkRestored) => Control::NetworkRestored,
             Err(_) => {
                 return Err(InputRefused {
                     notice: encode_notice(ServerNotice::Error {
@@ -552,6 +553,7 @@ enum Control {
         client: u64,
         command: Command,
     },
+    NetworkRestored,
     PollScaleChanged {
         client: u64,
         scale: f64,
@@ -674,6 +676,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         let _ = ready.send(self.join(client, outgoing, cancel, account_auth));
                     }
                     Some(Control::Command { client, command }) => self.command(client, command),
+                    Some(Control::NetworkRestored) => {
+                        self.host.turn(|host| {
+                            let now = (host.clock)();
+                            host.engine.handle(now, Event::NetworkRestored);
+                        });
+                    }
                     Some(Control::PollScaleChanged { client, scale, ceiling_ms }) => {
                         if self.peers.contains_key(&client) {
                             self.host.turn(|host| {
@@ -1667,6 +1675,7 @@ async fn connection(
                                 HostInput::PollScaleChanged { scale, ceiling_ms } => {
                                     Control::PollScaleChanged { client, scale, ceiling_ms }
                                 }
+                                HostInput::NetworkRestored => Control::NetworkRestored,
                             };
                             if account.commands.try_send(control).is_err() { break; }
                             continue;

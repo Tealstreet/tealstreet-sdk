@@ -469,7 +469,7 @@ export class EngineHost {
       onStage = options?.onStage;
       if (onStage !== undefined && typeof onStage !== 'function') throw new TypeError('Command stage observer must be a function');
     } catch (error) { return Promise.reject(error); }
-    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'networkRestored' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
@@ -678,6 +678,11 @@ export class EngineHost {
       if (this.disposed) break;
     }
     return closed;
+  }
+
+  redialWaitingSockets() {
+    this.assertHttpHandoffIdle();
+    if (!this.disposed) void this.command({ op: 'networkRestored' });
   }
 
   socketClosed(id, code) {

@@ -923,9 +923,10 @@ impl Venue for Lighter {
         self.public.open = true;
         self.public.supervisor.opened(cx);
         self.topic(cx, "subscribe", "market_stats/all");
-        self.ticker_topics = cx
-            .store
-            .markets()
+        // Displayed symbols first: the full list takes about a minute at this pace.
+        let mut markets: Vec<_> = cx.store.markets().iter().collect();
+        markets.sort_by_key(|market| !self.books.contains_key(&market.symbol));
+        self.ticker_topics = markets
             .iter()
             .map(|market| format!("ticker/{}", market.id))
             .collect();
@@ -1753,6 +1754,14 @@ impl Lighter {
                         "Lighter order book market not found",
                     );
                     return;
+                }
+                // A symbol opened while the paced list is still going goes next.
+                if let Some(market) = cx.store.market(&symbol) {
+                    let topic = format!("ticker/{}", market.id);
+                    if let Some(index) = self.ticker_topics.iter().position(|t| *t == topic) {
+                        self.ticker_topics.remove(index);
+                        self.ticker_topics.push_front(topic);
+                    }
                 }
                 let state = self.books.entry(symbol.clone()).or_default();
                 state.subscribers += 1;

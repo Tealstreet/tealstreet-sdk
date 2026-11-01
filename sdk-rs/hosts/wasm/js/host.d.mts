@@ -525,6 +525,8 @@ export class EngineHost {
   /** Abnormally close the open sockets of `channel` (all when omitted) so the
    * venue reconnects; returns how many were closed. */
   reconnectSockets(channel?: EngineSocketChannel): number;
+  /** Sockets waiting out plain backoff redial now; a venue-imposed floor still binds. */
+  redialWaitingSockets(): void;
   /** Undefined for an engine without `health()`. */
   health(): EngineHealth | undefined;
   /** Start this account's Rust algos on an `algos` engine build; the host then
