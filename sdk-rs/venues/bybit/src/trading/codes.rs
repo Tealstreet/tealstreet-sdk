@@ -123,8 +123,12 @@ pub(crate) const BYBIT: CodeTable = CodeTable {
             Verdict::Satisfied(SatisfiedIntent::Setting),
             Intent::Setting,
         ),
-        // TP/SL not modified: only on an attached TP/SL leg, which the codec
-        // narrows to Setting; a plain amend answered 34040 stays refused.
+        // Not modified: the order or attached TP/SL already holds what was asked.
+        only(
+            Key::Int(34040),
+            Verdict::Satisfied(SatisfiedIntent::Amend),
+            Intent::Amend,
+        ),
         only(
             Key::Int(34040),
             Verdict::Satisfied(SatisfiedIntent::Setting),
