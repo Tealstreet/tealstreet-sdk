@@ -2567,6 +2567,98 @@ async fn a_hyperliquid_fill_event_lowers_the_remainder_before_replacement() {
 }
 
 /// Placements land; fill lookups by order id answer with `fills`.
+/// Fills reads answer `failures` times with `kind`, then with no fills.
+fn fills_fail(port: &Rc<FakePort>, kind: ErrorKind, failures: u32) -> Rc<Cell<u32>> {
+    port.accept_placements();
+    let accept = RefCell::new(std::mem::replace(
+        &mut *port.responder.borrow_mut(),
+        Box::new(|_| Ok("null".into())),
+    ));
+    let reads = Rc::new(Cell::new(0));
+    let seen = reads.clone();
+    *port.responder.borrow_mut() = Box::new(move |command| match command {
+        Command::Query {
+            query: safe_cex_engine::engine::Query::Fills { .. },
+            ..
+        } => {
+            seen.set(seen.get() + 1);
+            if seen.get() <= failures {
+                Err(VenueError::new("too many requests").kind(kind))
+            } else {
+                Ok("[]".into())
+            }
+        }
+        other => (accept.borrow_mut())(other),
+    });
+    reads
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rate_limited_fills_read_after_a_cancel_is_tried_again_and_the_chase_goes_on() {
+    local(async {
+        // Fills tracked, and a cancel answer that hides fills: the two paths that read.
+        for venue in ["hyperliquid", "binance"] {
+            let port = FakePort::new(venue);
+            let reads = fills_fail(&port, ErrorKind::RateLimited, 2);
+            let (_factory, _cx) = start(&port, BUY_ONE);
+            settle(1100).await;
+            port.set_ticker(101.0, 101.5);
+            settle(10_000).await;
+            assert!(reads.get() >= 3, "{venue}");
+            assert_eq!(port.placements().len(), 2, "{venue} replaces its order");
+            assert!(port.completes().is_empty(), "{venue}");
+        }
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_fills_read_failing_past_its_bound_stops_and_says_why() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        let reads = fills_fail(&port, ErrorKind::Timeout, u32::MAX);
+        let (_factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.set_ticker(101.0, 101.5);
+        settle(10_000).await;
+        assert!(port.completes().is_empty(), "still inside the bound");
+        // The stop's own final read has the same bound before the completion.
+        settle(30_000).await;
+        assert!(reads.get() > 1);
+        assert_eq!(port.placements().len(), 1);
+        assert_eq!(
+            port.completes()[0]["stopReason"],
+            "Failed to reconcile fills after cancellation"
+        );
+        assert!(
+            port.errors()
+                .iter()
+                .any(|text| text.contains("too many requests"))
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_fills_read_stops_at_once() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        let reads = fills_fail(&port, ErrorKind::Rejected, u32::MAX);
+        // The cancel succeeded with the row still open, as the stream lags.
+        port.cancels_find_nothing.set(true);
+        let (_factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.set_ticker(101.0, 101.5);
+        settle(100).await;
+        // The requote's read and the completion's final read, one try each.
+        assert_eq!(reads.get(), 2);
+        assert_eq!(port.placements().len(), 1);
+        assert_eq!(port.completes().len(), 1);
+        assert_eq!(cancels_seen(&port), 1, "its cancel already succeeded");
+    })
+    .await;
+}
+
 fn accept_with_fills(port: &Rc<FakePort>, fills: Result<&'static str, &'static str>) {
     port.accept_placements();
     let accept = std::mem::replace(
