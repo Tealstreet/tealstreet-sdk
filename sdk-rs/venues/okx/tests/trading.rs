@@ -2134,3 +2134,118 @@ fn trailing_stop_sends_its_size_and_refuses_none() {
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("needs a size"))));
 }
+
+#[test]
+fn a_rejected_row_with_a_stored_copy_still_releases_the_fence() {
+    use safe_cex_engine::Response;
+    for malformed in [true, false] {
+        let mut e = trading_engine();
+        let out = place(
+            &mut e,
+            vec![order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000}"#,
+            )],
+        );
+        let Action::Http(write) = http(&out).clone() else {
+            unreachable!()
+        };
+        e.handle(
+            6.0,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status: 504,
+                    headers: "",
+                    body: "gateway timeout",
+                },
+            },
+        );
+        // The write's own reconciliation predates its failure; fail it so the retry reads after.
+        let read = prepared(&mut e, 6.0)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
+            .expect("an uncertain placement must reconcile");
+        let Action::Http(read) = read else {
+            unreachable!()
+        };
+        e.handle(
+            7.0,
+            Event::HttpResponse {
+                request: read.id,
+                response: Response {
+                    status: 500,
+                    headers: "",
+                    body: "internal error",
+                },
+            },
+        );
+        let retry = prepared(&mut e, 7.0)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::SetTimer {
+                    timer,
+                    at_ms: 5_007.0,
+                } => Some(timer),
+                _ => None,
+            })
+            .expect("retry timer");
+        e.handle(5_007.0, Event::TimerFired { timer: retry });
+        let mut reads: Vec<_> = prepared(&mut e, 5_007.0)
+            .into_iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
+            .collect();
+        assert!(!reads.is_empty(), "the retry reads orders again");
+        e.store_mut().upsert_order(safe_cex_engine::model::Order {
+            id: "maybe".into(),
+            parent_id: None,
+            status: safe_cex_engine::model::OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: safe_cex_engine::model::OrderType::Limit,
+            side: safe_cex_engine::model::OrderSide::Buy,
+            price: 38000.0,
+            amount: 1.0,
+            filled: 0.0,
+            remaining: 1.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        });
+        let mut first = malformed;
+        while let Some(read) = reads.pop() {
+            let body = if std::mem::take(&mut first) {
+                envelope(r#"{"instId":"BTC-USDT-SWAP","ordId":"maybe","sz":4}"#)
+            } else {
+                envelope("")
+            };
+            reply(&mut e, &read, &body, 5_008.0);
+            reads.extend(
+                prepared(&mut e, 5_008.0)
+                    .into_iter()
+                    .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders"))),
+            );
+        }
+        e.handle(
+            5_009.0,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 2,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let refused = prepared(&mut e, 5_009.0).iter().any(|a| {
+            matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { command: 2, error })
+                    if error.legacy_text().contains("uncertain")
+            )
+        });
+        // A row the store already holds is older than the uncertain write.
+        assert!(!refused);
+        assert!(e.store().loaded().orders);
+    }
+}
