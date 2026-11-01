@@ -29,6 +29,10 @@ fn ready(variant: Variant) -> Harness {
 }
 
 fn ready_with(options: Options) -> Harness {
+    ready_listing(options, EMPTY)
+}
+
+fn ready_listing(options: Options, open_orders: &str) -> Harness {
     let variant = options.variant;
     let mut h = Harness::started(options);
     if h.has_request("/v5/account/info") {
@@ -93,7 +97,7 @@ fn ready_with(options: Options) -> Harness {
                 ),
             );
         }
-        h.respond("/v5/order/realtime", 200, EMPTY);
+        h.respond("/v5/order/realtime", 200, open_orders);
         h.respond("/v5/position/list", 200, EMPTY);
         h.respond("/v5/account/wallet-balance", 200, WALLET);
         assert!(h.engine.store().loaded().orders);
@@ -115,6 +119,11 @@ fn ready_with(options: Options) -> Harness {
             h.respond("/v5/position/list", 200, EMPTY);
         }
         h.respond("/v5/account/wallet-balance", 200, WALLET);
+    }
+    if open_orders != EMPTY {
+        while h.has_request("/v5/order/realtime") {
+            h.respond("/v5/order/realtime", 200, open_orders);
+        }
     }
     h.requests.clear();
     h
@@ -4017,4 +4026,13 @@ fn amend_answered_order_not_modified_succeeds() {
         r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
     );
     assert!(h.result(2).unwrap().is_ok(), "{:?}", h.result(2));
+}
+
+#[test]
+fn a_spot_read_shows_rows_that_carry_no_category_of_their_own() {
+    let h = ready_listing(
+        options(Variant::Spot),
+        r#"{"retCode":0,"retMsg":"OK","result":{"category":"spot","nextPageCursor":"","list":[{"symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderId":"s1","orderStatus":"New","price":"100","qty":"1","leavesQty":"1","cumExecQty":"0","createdTime":"1671999000000"}]}}"#,
+    );
+    assert!(h.engine.store().order("s1").is_some());
 }
