@@ -1640,6 +1640,26 @@ fn a_duplicate_id_or_routing_code_is_never_called_refused() {
     }
 }
 
+// An unlisted code stays unknown, but the fence must not wait out the signature's expiry.
+#[test]
+fn an_answered_unknown_code_reads_orders_at_once() {
+    let mut e = rejection_engine(vec![]);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 71,
+            orders: vec![opts("rejected-caller")],
+        },
+    );
+    let create = writes(&a)[0].clone();
+    let a = respond(&mut e, &create, json!({"code":12345,"msg":"x","data":null}));
+    assert!(
+        a.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/g-orders/activeList"))),
+        "{a:?}"
+    );
+}
+
 // Live: this body was read as unknown and latched writes for 75 s.
 #[test]
 fn a_code_in_a_200_with_no_data_is_a_definite_refusal() {
@@ -3308,9 +3328,7 @@ fn the_venue_trimming_an_oversize_reduce_only_order_is_accepted() {
 
 #[test]
 fn listed_refusals_leave_no_uncertain_lock() {
-    for code in [
-        11011, 11041, 11043, 11044, 11048, 11150, 20004, 39999,
-    ] {
+    for code in [11011, 11041, 11043, 11044, 11048, 11150, 20004, 39999] {
         let mut e = engine();
         let a = command(
             &mut e,
