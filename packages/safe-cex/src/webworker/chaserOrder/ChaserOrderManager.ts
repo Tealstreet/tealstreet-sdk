@@ -946,6 +946,7 @@ export class ChaserOrderManager {
       filled: reconciledOverRest
         ? instance.filledSize
         : Math.max(instance.filledSize, this.bybitDemoPositionFill(instance)),
+      placed: orderIds.length > 0,
       stopReason,
     };
     try {
