@@ -1350,7 +1350,7 @@ fn a_failed_bracket_replacement_says_the_original_was_cancelled() {
     h.reply(r#"{"code":101204,"msg":"insufficient margin"}"#);
     let error = h.done[0].as_ref().unwrap_err();
     assert!(
-        error.starts_with("original bracket cancelled; replacement failed: BingX 101204"),
+        error.contains("position has no") && error.contains("BingX 101204"),
         "{error}"
     );
     assert_eq!(

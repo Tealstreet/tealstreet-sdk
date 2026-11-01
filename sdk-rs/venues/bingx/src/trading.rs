@@ -117,7 +117,7 @@ struct Job {
     steps: VecDeque<Step>,
     continue_on_error: bool,
     // A trigger move cancels before placing; a failed placement must say so.
-    replaces_cancelled: bool,
+    replaces_cancelled: Option<(String, OrderSide, OrderType)>,
 }
 struct Run {
     job: Job,
@@ -774,12 +774,13 @@ impl Trading {
                 .map(|error| error.message.clone())
                 .unwrap_or_else(|| "BingX order is already absent".into());
             if request.places_order()
-                && self
+                && let Some((symbol, side, kind)) = self
                     .jobs
                     .get(&request.command)
-                    .is_some_and(|run| run.job.replaces_cancelled)
+                    .and_then(|run| run.job.replaces_cancelled.as_ref())
             {
-                message = format!("original bracket cancelled; replacement failed: {message}");
+                let lost = safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, false);
+                message = format!("{lost}: {message}");
             }
             let native = envelope.as_ref().ok().map(|e| Native {
                 code: NativeCode::Int(e.code),
@@ -1287,7 +1288,7 @@ impl Trading {
             }
             let mut job = self.cancel(cx, &[id.into()])?;
             job.continue_on_error = false;
-            job.replaces_cancelled = true;
+            job.replaces_cancelled = Some((opts.symbol.clone(), opts.side, opts.kind));
             if let Some(Step {
                 call: Call::Cancel { absent_ok, .. },
                 ..
