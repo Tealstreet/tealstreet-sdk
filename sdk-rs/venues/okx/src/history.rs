@@ -43,6 +43,8 @@ pub struct Request {
     from: Option<f64>,
     to: Option<f64>,
     limit: usize,
+    /// A window with no limit: a full fills page flags incomplete, nothing truncates.
+    open_window: bool,
     pages: usize,
     rows_seen: usize,
     /// Rows committed before the page in flight; a failed page rolls back to it.
@@ -375,7 +377,9 @@ impl Request {
         let json = match &mut self.rows {
             Rows::Fills(rows) => {
                 rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                rows.truncate(self.limit);
+                if !self.open_window {
+                    rows.truncate(self.limit);
+                }
                 serde_json::to_string(rows)
             }
             Rows::Orders(rows) => {
@@ -424,6 +428,22 @@ impl Okx {
         let public = matches!(query, Query::PublicTrades { .. });
         let keyless = self.credentials.is_none() && !public;
         let empty_fills = matches!(&query, Query::Fills { symbol: None, .. });
+        let open_window = matches!(
+            &query,
+            Query::Fills {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | Query::OrderHistory {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | Query::Income {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            }
+        );
         let (endpoint, symbol, order_id, income_kind, from, to, limit, rows) = match query {
             Query::OrderByClientId { .. } => unreachable!(),
             Query::Fills {
@@ -537,6 +557,21 @@ impl Okx {
         };
         if let Some(local) = local {
             match local {
+                Ok(data) if open_window => {
+                    // No request was made, so the empty answer cannot cover the window.
+                    let mut completion =
+                        match ReadCompletion::from_context(cx, command, root.clone()) {
+                            Ok(completion) => completion,
+                            Err(error) => {
+                                let _ = cx.fail_context(&root, error.read_venue_error());
+                                return;
+                            }
+                        };
+                    completion.incomplete(
+                        "history is INCOMPLETE: OKX answered this window without a read",
+                    );
+                    let _ = completion.finish(cx, Ok(data.into()));
+                }
                 Ok(data) => {
                     let _ = cx.done_context(&root, data.into());
                 }
@@ -574,6 +609,7 @@ impl Okx {
                 from,
                 to,
                 limit,
+                open_window: open_window && matches!(rows, Rows::Fills(_)),
                 rows,
                 pages: 0,
                 rows_seen: 0,
@@ -683,6 +719,7 @@ impl Okx {
         };
         let read = Request {
             lookup: Some(client_order_id),
+            open_window: false,
             completion,
             selected,
             leg: None,
@@ -1158,6 +1195,12 @@ impl Okx {
                 r.endpoint = "/api/v5/trade/fills-history";
                 self.history_request(cx, r);
             } else {
+                // Each endpoint is read for one page; a full one may hide more rows.
+                if r.open_window && r.count >= r.limit {
+                    r.completion.incomplete(
+                        "history is INCOMPLETE: OKX fills read one page and it was full",
+                    );
+                }
                 r.finish(cx);
             }
             return;

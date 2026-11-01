@@ -195,7 +195,10 @@ impl Kucoin {
             );
             return;
         }
-        let limit = limit.unwrap_or(1000) as usize;
+        // A window with no limit walks to its start; no default may stop it.
+        let limit = limit.map_or(if from_ms.is_some() { usize::MAX } else { 1000 }, |limit| {
+            limit as usize
+        });
         if limit == 0 {
             let Ok(context) = cx.admit_http_command(local_read_policy()) else {
                 return;

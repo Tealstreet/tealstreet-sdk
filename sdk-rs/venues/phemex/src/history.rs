@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 const MAX_ROWS: u32 = 200;
+/// Pages of a window read with no limit; beyond them the rows are flagged incomplete.
+const MAX_WINDOW_PAGES: u32 = 50;
 
 #[derive(Default)]
 pub struct State {
@@ -34,6 +36,10 @@ pub struct Request {
     from: Option<f64>,
     to: Option<f64>,
     limit: usize,
+    /// A window with no limit walks `offset` until a short page.
+    open_window: bool,
+    offset: usize,
+    pages: u32,
     order_id: Option<String>,
     client_id: Option<String>,
     rows: Rows,
@@ -134,6 +140,31 @@ fn finish_rows<T: Serialize, P>(
     let _ = owner.finish_with(cx, Ok(()), |mut rows| {
         rows.sort_by(|a, b| time(b).total_cmp(&time(a)));
         rows.truncate(limit);
+        encode_rows(&rows)
+    });
+}
+
+fn accept_rows<T: Serialize, P>(
+    owner: &mut ReadHistoryRows<T>,
+    cx: &mut Cx<'_, P>,
+    leg: &Context,
+) -> bool {
+    let Ok(mut page) = owner.admit(cx, leg) else {
+        return false;
+    };
+    page.accept_page();
+    true
+}
+
+/// The owner keeps its accepted rows and emits the incomplete marker for the error.
+fn finish_partial<T: Serialize, P>(
+    owner: ReadHistoryRows<T>,
+    cx: &mut Cx<'_, P>,
+    error: VenueError,
+    time: impl Fn(&T) -> f64,
+) {
+    let _ = owner.finish_with(cx, Err(error), |mut rows| {
+        rows.sort_by(|a, b| time(b).total_cmp(&time(a)));
         encode_rows(&rows)
     });
 }
@@ -402,7 +433,13 @@ impl PhemexPerpetuals {
         };
         self.history.owners.insert(command, root.context().owner());
         self.history.active.insert(command);
-        let limit = limit.unwrap_or(100).clamp(1, MAX_ROWS) as usize;
+        let open_window =
+            limit.is_none() && from.is_some() && matches!(kind, Kind::Fills | Kind::Orders);
+        let limit = if open_window {
+            MAX_ROWS as usize
+        } else {
+            limit.unwrap_or(100).clamp(1, MAX_ROWS) as usize
+        };
         let request = Request {
             root,
             leg: None,
@@ -411,6 +448,9 @@ impl PhemexPerpetuals {
             from,
             to,
             limit,
+            open_window,
+            offset: 0,
+            pages: 1,
             order_id,
             client_id,
             rows,
@@ -457,7 +497,8 @@ impl PhemexPerpetuals {
             if let Some(to) = to {
                 query.push_str(&format!("&end={to:.0}"));
             }
-            query.push_str(&format!("&offset=0&limit={limit}"));
+            let offset = request.offset;
+            query.push_str(&format!("&offset={offset}&limit={limit}"));
         }
         let leg = match request.root.leg(
             cx,
@@ -584,7 +625,39 @@ impl PhemexPerpetuals {
             );
             return;
         }
+        if request.open_window && request.count >= MAX_ROWS as usize {
+            let leg = request.leg.take().expect("delivered page has a leg");
+            let accepted = match &mut request.rows {
+                Rows::Fills(owner) => accept_rows(owner, cx, leg.context()),
+                Rows::Orders(owner) => accept_rows(owner, cx, leg.context()),
+                _ => false,
+            };
+            let _ = cx.finish_http_context(leg.context());
+            if !accepted {
+                return;
+            }
+            if request.pages < MAX_WINDOW_PAGES {
+                request.pages += 1;
+                request.offset += request.count;
+                request.count = 0;
+                self.history_send(cx, request);
+                return;
+            }
+            self.retire_history(request.root.context().owner());
+            let budget = || VenueError::new("Phemex history page budget reached");
+            match request.rows {
+                Rows::Fills(owner) => finish_partial(*owner, cx, budget(), |row| row.timestamp),
+                Rows::Orders(owner) => finish_partial(*owner, cx, budget(), |row| row.created_time),
+                _ => {}
+            }
+            return;
+        }
         self.retire_history(request.root.context().owner());
+        let output_limit = if request.open_window {
+            usize::MAX
+        } else {
+            request.limit
+        };
         match request.rows {
             Rows::Lookup(rows) => {
                 #[derive(Serialize)]
@@ -613,14 +686,14 @@ impl PhemexPerpetuals {
                 *owner,
                 cx,
                 request.leg.as_ref().unwrap().context(),
-                request.limit,
+                output_limit,
                 |row| row.timestamp,
             ),
             Rows::Orders(owner) => finish_rows(
                 *owner,
                 cx,
                 request.leg.as_ref().unwrap().context(),
-                request.limit,
+                output_limit,
                 |row| row.created_time,
             ),
             Rows::Trades(owner) => finish_rows(

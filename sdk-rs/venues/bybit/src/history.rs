@@ -531,7 +531,13 @@ impl BybitLinear {
                 to_ms,
                 limit,
             } => {
-                let cap = limit.unwrap_or(1000) as usize;
+                // A window with no limit reads the whole window, as fills do.
+                let cap = limit.unwrap_or(if from_ms.is_some() { 0 } else { 1000 }) as usize;
+                let to_ms = if limit.is_none() {
+                    to_ms.or(from_ms.map(|_| now))
+                } else {
+                    to_ms
+                };
                 // The transaction log serves unified accounts only.
                 let mut params = vec![
                     ("accountType", "UNIFIED".to_owned()),
@@ -554,7 +560,11 @@ impl BybitLinear {
                     path: "/v5/account/transaction-log",
                     signed: true,
                     params,
-                    limit: (cap as u32).clamp(1, INCOME_PAGE_LIMIT),
+                    limit: if cap == 0 {
+                        INCOME_PAGE_LIMIT
+                    } else {
+                        (cap as u32).clamp(1, INCOME_PAGE_LIMIT)
+                    },
                     windows: windows(from_ms, to_ms),
                     window: (None, None),
                     stage_started: false,

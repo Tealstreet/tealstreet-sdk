@@ -526,7 +526,12 @@ impl BinanceFutures {
                 to_ms,
                 limit,
             } => {
-                let walk = match (from_ms, to_ms) {
+                // A start alone with no limit walks up to now, not one page from the start.
+                let open_end = limit.is_none().then(|| cx.now.floor());
+                let walk = match (
+                    from_ms,
+                    to_ms.or(open_end.filter(|end| from_ms.is_some_and(|from| *end > from))),
+                ) {
                     (Some(from), Some(to)) => {
                         Some(RangeWalk::new(from, to, MAX_WINDOW_MS, PAGE_LIMIT as usize))
                     }

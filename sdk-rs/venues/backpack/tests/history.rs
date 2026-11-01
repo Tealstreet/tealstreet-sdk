@@ -40,6 +40,31 @@ fn result(e: &mut Driver) -> Result<String, String> {
         .unwrap()
 }
 #[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let (mut e, _) = ready();
+    ask(
+        &mut e,
+        Query::Fills {
+            symbol: Some(SYMBOL.into()),
+            order_id: None,
+            from_ms: Some(1765805280000.0),
+            to_ms: Some(1765805340000.0),
+            limit: None,
+        },
+    );
+    let first = requests(&mut e).pop().unwrap();
+    assert!(first.url.contains("limit=1000"));
+    let rows = (0..1000)
+        .map(|n| format!(r#"{{"orderId":"123","symbol":"SOL_USDC_PERP","side":"Bid","price":"141","quantity":"2","fee":"-0.1","feeSymbol":"USDC","tradeId":{n},"timestamp":"2025-12-15T13:28:30.000Z","isMaker":false}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(&mut e, &first, 200, &format!("[{rows}]"));
+    let second = requests(&mut e)
+        .pop()
+        .expect("a second page beyond the default");
+    assert!(second.url.contains("offset=1000"));
+}
+#[test]
 fn fills_stream_into_execution_shape_with_millisecond_filters_and_seconds_output() {
     let (mut e, _) = ready();
     ask(

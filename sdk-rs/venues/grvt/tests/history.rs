@@ -1278,3 +1278,20 @@ fn client_lookup_says_placed_only_for_an_order_the_venue_took() {
         }
     }
 }
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut h = Harness::new(true);
+    h.query(fills(None, None));
+    let rows = (0..1000)
+        .map(|n| FILL.replace("9007199254740993-1", &format!("9007199254740993-{n}")))
+        .collect::<Vec<_>>()
+        .join(",");
+    h.reply(
+        "fill_history",
+        &format!(r#"{{"r":[{rows}],"n":"page-2"}}"#),
+        "",
+    );
+    let next = h.take("fill_history");
+    assert!(next.body.as_deref().unwrap().contains(r#""c":"page-2""#));
+}

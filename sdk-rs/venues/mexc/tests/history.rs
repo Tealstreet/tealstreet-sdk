@@ -673,3 +673,31 @@ fn owned_native_window_budget_resets_after_terminal_page_thousand() {
     assert_eq!(rows[0]["id"], "739113577038255616");
     assert_eq!(rows[1]["id"], "739113577038255618");
 }
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut e = ready();
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(1_699_000_000_000.0),
+            to_ms: Some(1_701_000_000_000.0),
+            limit: None,
+        },
+    );
+    let body = format!(
+        r#"{{"success":true,"code":0,"data":[{}]}}"#,
+        (0..100)
+            .map(|n| EXEC.replace(
+                "739113577038255616",
+                &(739113577038255616u64 + n).to_string()
+            ))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    response(&mut e, &r, &body);
+    let next = requests(&mut e).remove(0);
+    assert!(next.url.contains("page_num=2"), "{}", next.url);
+}

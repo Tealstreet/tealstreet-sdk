@@ -1185,3 +1185,28 @@ fn a_null_flags_field_does_not_drop_a_history_row() {
     let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(6).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
 }
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::Fills {
+            symbol: Some("BTC-USD-PERP".into()),
+            order_id: None,
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: Some(1_681_376_000_000.),
+            limit: None,
+        },
+    );
+    let rows = (0..100)
+        .map(|n| FILL.replace("fill-a", &format!("fill-{n}")))
+        .collect::<Vec<_>>()
+        .join(",");
+    h.reply(
+        "/fills?",
+        &format!(r#"{{"next":"page-2","results":[{rows}]}}"#),
+    );
+    assert!(h.pending.iter().any(|r| r.url.contains("cursor=page-2")));
+}

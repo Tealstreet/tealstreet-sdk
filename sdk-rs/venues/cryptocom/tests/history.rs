@@ -852,3 +852,34 @@ fn ranged_income_later_failure_preserves_native_session_pnl() {
             .all(|row| row["income"] == -0.0078 && row["category"] == "realized_pnl")
     );
 }
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut h = Harness::new();
+    h.load();
+    query(
+        &mut h,
+        Query::Fills {
+            symbol: Some("BTCUSD-PERP".into()),
+            order_id: None,
+            from_ms: Some(1609999999000.0),
+            to_ms: Some(1610000001000.0),
+            limit: None,
+        },
+    );
+    let rows: Vec<_> = (1..=100)
+        .map(|n| fill(n, 1610000000000000000 + n))
+        .collect();
+    h.reply(
+        "private/get-trades",
+        &format!(r#"{{"code":0,"result":{{"data":[{}]}}}}"#, rows.join(",")),
+    );
+    page_timer(&mut h);
+    assert!(
+        h.http("private/get-trades")
+            .body
+            .as_deref()
+            .unwrap()
+            .contains(r#""end_time":1610000000000000002"#)
+    );
+}

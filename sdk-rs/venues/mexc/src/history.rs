@@ -279,7 +279,10 @@ impl MexcFutures {
             Self::fail_local_read(cx, error);
             return;
         }
-        let limit = limit.unwrap_or(100) as usize;
+        // A window with no limit walks to its start; no default may stop it.
+        let limit = limit.map_or(if from.is_some() { usize::MAX } else { 100 }, |limit| {
+            limit as usize
+        });
         let (window_from, window_to) = match (from, to) {
             // Whole milliseconds keep newest-first window edges gap-free.
             (Some(a), None) => (Some(a), Some(cx.now.floor())),

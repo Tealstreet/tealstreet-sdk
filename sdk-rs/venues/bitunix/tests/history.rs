@@ -913,3 +913,40 @@ fn history_pages_sign_with_the_read_key() {
         "the read key signs history"
     );
 }
+
+#[test]
+fn window_fills_with_no_limit_flag_a_full_page() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::Query {
+            command: 1,
+            query: Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: Some(1700000000.0),
+                to_ms: Some(1700000010.0),
+                limit: None,
+            },
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.contains("limit=100"), "{}", r.url);
+    let rows = (0..100)
+        .map(|n| format!(r#"{{"tradeId":"t{n}","orderId":"one","symbol":"BTCUSDT","ctime":1700000001000,"side":"SELL","price":"100","qty":"0.1","fee":"0.002","marginCoin":"USDT"}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(
+        &mut e,
+        r.id,
+        &format!(r#"{{"code":0,"data":{{"tradeList":[{rows}]}}}}"#),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)),
+        "{actions:?}"
+    );
+}
