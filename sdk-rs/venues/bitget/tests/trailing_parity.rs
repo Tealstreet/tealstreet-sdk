@@ -795,3 +795,54 @@ fn uta_trailing_refused_400172_is_a_named_refusal() {
     assert!(error.contains("400172"), "{error}");
     assert_eq!(h.engine.store().orders().len(), 0);
 }
+
+// The edit cancelled the stop, and neither the replacement nor the rollback landed.
+#[test]
+fn an_edit_that_loses_its_stop_says_the_position_is_unprotected() {
+    let mut h = uta(false);
+    uta_native_trailing(&mut h, "distance", "5");
+    h.command(Command::AmendOrder {
+        command: 74,
+        id: "trail-1".into(),
+        price: Some(96.0),
+        amount: None,
+    });
+    ready(&mut h);
+    let (cancel, _) = body(&mut h, "/cancel-strategy-order");
+    h.reply(cancel, 200, r#"{"code":"00000","data":null}"#);
+    let refused = r#"{"code":"400172","msg":"refused","data":null}"#;
+    let (replace, _) = body(&mut h, "/place-strategy-order");
+    h.reply(replace, 200, refused);
+    let (rollback, _) = body(&mut h, "/place-strategy-order");
+    h.reply(rollback, 200, refused);
+    let error = h.done.last().unwrap().1.as_ref().unwrap_err().clone();
+    assert!(
+        error.contains("Your BTCUSDT stop is gone and your position is unprotected"),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_edit_whose_rollback_landed_does_not_say_the_stop_is_gone() {
+    let mut h = uta(false);
+    uta_native_trailing(&mut h, "distance", "5");
+    h.command(Command::AmendOrder {
+        command: 74,
+        id: "trail-1".into(),
+        price: Some(96.0),
+        amount: None,
+    });
+    ready(&mut h);
+    let (cancel, _) = body(&mut h, "/cancel-strategy-order");
+    h.reply(cancel, 200, r#"{"code":"00000","data":null}"#);
+    let (replace, _) = body(&mut h, "/place-strategy-order");
+    h.reply(
+        replace,
+        200,
+        r#"{"code":"400172","msg":"refused","data":null}"#,
+    );
+    let (rollback, _) = body(&mut h, "/place-strategy-order");
+    success(&mut h, rollback, "restored-trailing");
+    let error = h.done.last().unwrap().1.as_ref().unwrap_err().clone();
+    assert!(!error.contains("unprotected"), "{error}");
+}
