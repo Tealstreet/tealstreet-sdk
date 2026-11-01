@@ -577,15 +577,21 @@ impl Kucoin {
                     body: None,
                     call: Call::Write,
                 });
-                if symbol.is_empty() {
-                    steps.push_back(Step {
-                        receipt: None,
-                        method: Method::Delete,
-                        path: "/api/v1/stopOrders".into(),
-                        body: None,
-                        call: Call::Write,
-                    });
-                }
+                // The order endpoint leaves untriggered stops, which can still fire.
+                steps.push_back(Step {
+                    receipt: None,
+                    method: Method::Delete,
+                    path: if symbol.is_empty() {
+                        "/api/v1/stopOrders".into()
+                    } else {
+                        format!(
+                            "/api/v1/stopOrders?symbol={}",
+                            encode(&api_symbol(cx.store, &symbol))
+                        )
+                    },
+                    body: None,
+                    call: Call::Write,
+                });
             }
             Command::SetLeverage {
                 symbol, leverage, ..

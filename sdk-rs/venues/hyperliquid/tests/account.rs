@@ -1117,3 +1117,35 @@ fn a_fill_arms_an_order_read_because_partial_fills_send_no_update() {
         .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if at_ms < 3001.0));
     assert!(armed);
 }
+
+// Live, ZRO: 160 closing in five partial fills; the feed froze at 49.3 and later frames omit the coin.
+#[test]
+fn a_state_frame_that_omits_a_coin_closes_its_position() {
+    let (mut e, s) = ready("disabled");
+    let frame = |time: u64, rows: &str| {
+        format!(
+            r#"{{"channel":"clearinghouseState","data":{{"user":"x","dex":"","clearinghouseState":{{"assetPositions":[{rows}],"marginSummary":{{"accountValue":"1000","totalMarginUsed":"0","totalNtlPos":"0","totalRawUsd":"1000"}},"withdrawable":"1000","time":{time}}}}}}}"#
+        )
+    };
+    let row = |coin: &str, szi: &str| {
+        format!(
+            r#"{{"position":{{"coin":"{coin}","szi":"{szi}","entryPx":"100","positionValue":"100","unrealizedPnl":"0","liquidationPx":null,"marginUsed":"1","leverage":{{"type":"cross","value":10}}}}}}"#
+        )
+    };
+    let both = format!("{},{}", row("BTC", "49.3"), row("ETH", "2"));
+    message(&mut e, s, 3000.0, &frame(3000, &both));
+    assert!(
+        e.store()
+            .positions()
+            .iter()
+            .any(|p| p.symbol == "BTC-PERP" && p.contracts == 49.3)
+    );
+    message(&mut e, s, 4000.0, &frame(4000, &row("ETH", "2")));
+    let symbols: Vec<_> = e
+        .store()
+        .positions()
+        .iter()
+        .map(|p| p.symbol.as_str())
+        .collect();
+    assert_eq!(symbols, ["ETH-PERP"]);
+}

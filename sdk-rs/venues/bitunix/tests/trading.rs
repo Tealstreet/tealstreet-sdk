@@ -934,3 +934,45 @@ fn a_stale_tpsl_does_not_abort_cancel_all() {
     assert!(stale_answered);
     assert!(!failed);
 }
+
+// Live: this body came back while two of the batch's orders rested on the venue.
+#[test]
+fn a_refused_batch_stays_unknown_because_its_orders_may_rest() {
+    let (mut e, _) = startup();
+    let order = |client: &str| {
+        let mut o: safe_cex_engine::model::PlaceOrderOpts =
+            serde_json::from_value(serde_json::json!({
+                "symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":90000.0
+            }))
+            .unwrap();
+        o.client_order_id = Some(client.into());
+        o
+    };
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 77,
+            orders: vec![order("a"), order("b")],
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.ends_with("batch_order"));
+    e.handle(
+        2.0,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":20003,"data":null,"msg":"Insufficient balance"}"#,
+            },
+        },
+    );
+    let outcome = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.outcome),
+            _ => None,
+        });
+    assert_eq!(outcome, Some(Some(safe_cex_engine::Outcome::Unknown)));
+}

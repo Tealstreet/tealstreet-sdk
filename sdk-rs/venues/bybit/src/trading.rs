@@ -1111,6 +1111,10 @@ impl BybitLinear {
             });
             return Ok(job);
         }
+        // Inverse trading-stop has no size field; an amount-only body would carry nothing (10001).
+        if self.variant == crate::Variant::Inverse && price.is_none() {
+            return Err("Bybit inverse stop and take-profit sizes cannot be edited".into());
+        }
         // Missing mark (or inverse amount-only): TS updates the original leg directly.
         let level = if order.kind == OrderType::StopLoss {
             "stopLoss"
