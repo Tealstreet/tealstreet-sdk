@@ -566,6 +566,7 @@ impl Cryptocom {
         }
         self.account.order_rows = None;
         self.account.order_token = None;
+        cx.retried_failure("cryptocom.account:471", error);
         // 40101, past its one retry: this key will not be accepted.
         if error.contains("40101") && !cx.store.loaded().balance {
             cx.startup_failed(
@@ -576,7 +577,6 @@ impl Cryptocom {
             );
             return;
         }
-        cx.retried_failure("cryptocom.account:471", error);
         self.schedule_reconcile(cx);
     }
     pub(crate) fn account_item(

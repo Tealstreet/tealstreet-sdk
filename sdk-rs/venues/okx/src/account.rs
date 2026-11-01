@@ -978,11 +978,11 @@ impl Okx {
                 generation,
                 version,
                 equity,
-                // An account with nothing to report can answer no row at all.
-                risk_rows: 0 | 1,
+                risk_rows,
                 invalid: false,
                 ..
-            } => {
+            // No row at all must not hang a start; once loaded it keeps the last snapshot.
+            } if risk_rows == 1 || !cx.store.loaded().balance => {
                 if let Some(join) = &mut self.account.join
                     && join.generation == generation
                 {
