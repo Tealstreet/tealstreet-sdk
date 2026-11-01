@@ -1302,6 +1302,7 @@ pub enum HostInput {
         scale: f64,
         ceiling_ms: Option<f64>,
     },
+    NetworkRestored,
 }
 
 /// Decode startup subscriptions without compiling the trading/query parser.
@@ -1379,6 +1380,9 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
             books: control.books,
             candles: control.candles,
         }));
+    }
+    if header.op == "networkRestored" {
+        return Ok(HostInput::NetworkRestored);
     }
     #[cfg(feature = "polling-control")]
     if header.op == "setPollScale" {

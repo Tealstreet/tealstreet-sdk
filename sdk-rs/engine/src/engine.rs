@@ -844,6 +844,8 @@ pub enum Event<'a> {
     PollCeilingChanged {
         ceiling_ms: Option<f64>,
     },
+    /// The network came back: sockets waiting out backoff redial now.
+    NetworkRestored,
     WsOpened {
         socket: SocketId,
     },
@@ -1749,6 +1751,8 @@ struct IoCore {
     auth_failure_counted: bool,
     /// A refused key already ended this start.
     startup_refused: bool,
+    /// Socket reconnects waiting out plain backoff, with no venue-imposed floor.
+    socket_backoffs: Vec<TimerId>,
     /// The slot that signed the read being delivered.
     delivered_slot: Option<CredentialSlot>,
     /// Each retried read's latest Error time and digit-normalised text, by call site.
@@ -1923,6 +1927,7 @@ impl Default for IoCore {
             sockets: SocketRoles::default(),
             auth_failure_counted: false,
             startup_refused: false,
+            socket_backoffs: Vec::new(),
             delivered_slot: None,
             retried_failures: HashMap::new(),
             #[cfg(feature = "managed-sockets")]
@@ -2651,6 +2656,25 @@ impl<P> Cx<'_, P> {
             return delay_ms;
         }
         crate::backoff::jitter(delay_ms, u64::from_le_bytes(bytes))
+    }
+
+    pub(crate) fn note_socket_backoff(&mut self, timer: TimerId) {
+        let core = &mut self.io.core;
+        let timers = &core.timers;
+        core.socket_backoffs
+            .retain(|waiting| timers.contains_key(waiting));
+        core.socket_backoffs.push(timer);
+    }
+
+    /// The host rearms a timer id in place, so a due backoff fires as usual.
+    fn redial_waiting_sockets(&mut self) {
+        let now = self.now;
+        let core = &mut self.io.core;
+        for timer in std::mem::take(&mut core.socket_backoffs) {
+            if core.timers.contains_key(&timer) {
+                core.actions.push(Action::SetTimer { timer, at_ms: now });
+            }
+        }
     }
 
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
@@ -4990,6 +5014,7 @@ impl<V: Venue> Engine<V> {
                 polls.set_policy(now, Some(scale), ceiling, &mut sink);
                 self.venue.on_poll_scale(&mut cx, scale)
             }
+            Event::NetworkRestored => cx.redial_waiting_sockets(),
             Event::PollCeilingChanged { ceiling_ms } => {
                 let ceiling_ms = ceiling_ms.filter(|ms| ms.is_finite() && *ms > 0.);
                 let (polls, mut sink) = cx.io.polls();
