@@ -433,3 +433,23 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
             Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message.contains("Skipped malformed public discovery row"))));
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut private = private_with_catalogue(CATALOGUE);
+    let body = r#"{"code":"400003","msg":"KC-API-KEY not exists"}"#;
+    let mut failures = 0;
+    for request in std::mem::take(&mut private.reads) {
+        reply(&mut private.engine, request, body);
+        failures += safe_cex_engine::test_support::prepared_actions(&mut private.engine, 0.0)
+            .into_iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                )
+            })
+            .count();
+    }
+    assert_eq!(failures, 1);
+}
