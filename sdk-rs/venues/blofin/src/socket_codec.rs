@@ -119,6 +119,9 @@ impl Blofin {
             self.account.connection.socket = Some(epoch.socket());
         } else {
             self.public.socket = Some(epoch.socket());
+            if self.feed_refused_timer.is_none() && !self.feed_refused_noticed {
+                self.feed_refused_timer = Some(cx.set_timer(super::FEED_REFUSED_WAIT_MS));
+            }
         }
         match cx.set_socket_interests(feed, self.desired_interests(cx.store, private, None)) {
             Ok(_) => (),
@@ -341,6 +344,10 @@ impl Blofin {
         match event {
             LifecycleEvent::Opened(epoch) if private => self.private_open(cx, epoch.socket()),
             LifecycleEvent::Opened(_) => {
+                self.feed_refused_noticed = false;
+                if let Some(timer) = self.feed_refused_timer.take() {
+                    cx.clear_timer(timer);
+                }
                 cx.send_after_socket_interests(feed, "ping".into())?;
             }
             LifecycleEvent::Authenticated { first: true, .. } if private => self.private_ready(cx),
