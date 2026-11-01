@@ -7,7 +7,7 @@ use safe_cex_venue_bitget::{BitgetFutures, Options as NativeOptions, Product};
 type Options = FixtureOptions;
 
 // Bitget Classic contracts/tickers examples, reduced to the fields we consume.
-pub const CONTRACTS: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","symbolStatus":"normal","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"}]}"#;
+pub const CONTRACTS: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","symbolStatus":"normal","minTradeUSDT":"5","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"}]}"#;
 pub const TICKERS: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","bidPr":"99.9","askPr":"100.1","lastPr":"100","indexPrice":"99","changeUtc24h":"0.01","baseVolume":"1000","quoteVolume":"100000","fundingRate":"0.0001"}]}"#;
 
 pub struct Harness {
