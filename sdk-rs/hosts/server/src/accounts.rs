@@ -473,8 +473,9 @@ fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, St
         inputs.public_data_only = Some(true);
         inputs.has_key = false;
     }
-    let base_url = resolve::rest_base_url(venue, init.testnet.unwrap_or(false))
-        .map_err(|error| error.to_string())?;
+    let base_url = resolve::rest_base_url(venue, init.testnet.unwrap_or(false)).map_err(|_| {
+        format!("{venue} cannot run on the Hosted server. Turn Hosted off to use this account.")
+    })?;
     resolve::resolve_routing_plan(venue, &inputs, base_url, Provider::Tealstreet)
         .map_err(|error| error.to_string())
 }
@@ -502,7 +503,25 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         ]),
     };
     fields.insert("routing".into(), routing);
+    for field in ["key", "passphrase"] {
+        if let Some(Value::String(text)) = fields.get_mut(field) {
+            *text = fingerprint_digest(text);
+        }
+    }
     Value::Object(fields).to_string()
+}
+
+/// A fingerprint only compares credentials, so it keeps none: this digest is
+/// salted per process, and nothing outlives the process to compare against.
+fn fingerprint_digest(text: &str) -> String {
+    static SALT: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+    let salt = SALT.get_or_init(|| {
+        let mut salt = [0u8; 32];
+        getrandom::getrandom(&mut salt).expect("OS entropy");
+        salt
+    });
+    let digest = safe_cex_crypto::sha256(&[&salt[..], text.as_bytes()].concat());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 pub fn prepare(
@@ -1755,6 +1774,37 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_fingerprint_compares_credentials_without_keeping_them() {
+        let init = InitPayload {
+            account_name: "a".into(),
+            exchange_name: "okx".into(),
+            key: "account-key-text".into(),
+            passphrase: Some("account-passphrase-text".into()),
+            ..InitPayload::default()
+        };
+        let fingerprint = init.fingerprint();
+        assert!(!fingerprint.contains("account-key-text"));
+        assert!(!fingerprint.contains("account-passphrase-text"));
+        assert_eq!(fingerprint, init.clone().fingerprint());
+        let rotated = InitPayload {
+            passphrase: Some("other".into()),
+            ..init.clone()
+        };
+        assert_eq!(
+            differing_fields(&fingerprint, &rotated.fingerprint()),
+            ["passphrase"]
+        );
+        let rekeyed = InitPayload {
+            key: "other".into(),
+            ..init
+        };
+        assert_eq!(
+            differing_fields(&fingerprint, &rekeyed.fingerprint()),
+            ["key"]
+        );
+    }
+
+    #[test]
     fn differing_fields_name_only_the_fields_that_changed() {
         let a = InitPayload {
             account_name: "a".into(),
@@ -2191,6 +2241,20 @@ pub(crate) mod tests {
                 assert!(algos.try_recv().is_err(), "never disposed");
             })
             .await;
+    }
+
+    #[test]
+    fn a_venue_with_no_hosted_origin_is_refused_in_plain_words() {
+        let init = InitPayload {
+            account_name: "a".into(),
+            exchange_name: "asterdex".into(),
+            ..InitPayload::default()
+        };
+        let refusal = routing_plan(&init, true).unwrap_err();
+        assert_eq!(
+            refusal,
+            "asterdex cannot run on the Hosted server. Turn Hosted off to use this account."
+        );
     }
 
     #[test]

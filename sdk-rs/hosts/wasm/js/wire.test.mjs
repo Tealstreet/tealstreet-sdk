@@ -1040,6 +1040,7 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     isolatedBookSubscriptions: false,
     inverseClosedPositions: false,
     scheduleCancel: false,
+    orderHistoryNeedsSymbol: false,
     account: 'afterLoad',
     cancelAll: 'eachPlacedSymbol',
     leverageQuery: 'onMetadata',

@@ -58,7 +58,10 @@ fn encode_result(query: &Query, rows: Vec<Mapped>) -> Result<String, VenueError>
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-            rows.truncate(limit.unwrap_or(100).clamp(1, 100) as usize);
+            // No limit asks for the whole window; a cap here would close it as covered.
+            if let Some(limit) = limit {
+                rows.truncate((*limit).clamp(1, 100) as usize);
+            }
             serde_json::to_string(&rows)
         }
         Query::OrderHistory { .. } => {
@@ -831,10 +834,8 @@ impl Blofin {
         let (page_limit, enough) = match &request.query {
             Query::Fills { limit, .. } => {
                 let count = limit.unwrap_or(100).clamp(1, 100) as usize;
-                (
-                    count,
-                    request.history.accepted_len() + request.history.staged_len() >= count,
-                )
+                let seen = request.history.accepted_len() + request.history.staged_len();
+                (count, limit.is_some() && seen >= count)
             }
             Query::Income { .. } => (100, false),
             _ => (usize::MAX, true),

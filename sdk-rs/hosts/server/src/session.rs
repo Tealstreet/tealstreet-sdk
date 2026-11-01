@@ -1407,6 +1407,7 @@ fn notice_to_msg(
             let message = notice["error"]
                 .as_str()
                 .or(detail.as_str())
+                .or(detail["message"].as_str())
                 .unwrap_or("account startup failed");
             let _ = out.send(envelope::msg(name, "error", json!([message])));
         }
@@ -2762,6 +2763,20 @@ mod tests {
             sent.try_recv().unwrap();
             assert!(sent.try_recv().is_err(), "{event}");
         }
+    }
+
+    #[test]
+    fn a_failed_start_tells_the_client_the_venue_reason() {
+        let (out, mut sent, _) = Out::channel(16);
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let notice = json!({
+            "type": "startupFailed",
+            "detail": {"message": "API key does not exist", "kind": "authInvalid"},
+        });
+        notice_to_msg(&out, "acct", &notice, &pending);
+        sent.try_recv().unwrap();
+        let frame = sent.try_recv().unwrap();
+        assert!(frame.contains("API key does not exist"), "{frame}");
     }
 
     #[test]

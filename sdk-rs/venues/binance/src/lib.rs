@@ -1397,6 +1397,7 @@ impl Venue for BinanceFutures {
                 },
                 client_order_lookup: true,
                 account: safe_cex_engine::AccountLookup::Query,
+                order_history_needs_symbol: true,
                 ..safe_cex_engine::Capabilities::BASE
             },
             Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,

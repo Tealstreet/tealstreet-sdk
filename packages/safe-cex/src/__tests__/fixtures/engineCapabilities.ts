@@ -79,6 +79,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     publicCatalogueValidation: is('breakoutprop'),
     isolatedBookSubscriptions: is('asterdex'),
     scheduleCancel: is('hyperliquid'),
+    orderHistoryNeedsSymbol: is('binance', 'binancepm', 'phemex'),
     inverseClosedPositions: is('bybitinverse'),
     ...overrides,
   };

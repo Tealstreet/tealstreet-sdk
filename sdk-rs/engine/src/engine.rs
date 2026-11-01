@@ -3393,6 +3393,9 @@ impl PublicFeedWatch {
         self.attempts.remove(&socket);
     }
     fn is_due(&mut self, now: f64) -> bool {
+        if !now.is_finite() {
+            return false;
+        }
         if self.serial != self.seen_serial {
             self.seen_serial = self.serial;
             self.last_attempt = now;
