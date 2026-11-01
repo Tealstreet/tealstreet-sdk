@@ -1513,6 +1513,60 @@ fn unknown_context_and_public_only_fail_closed() {
     assert!(writes(&a).is_empty());
 }
 
+/// A fast user acts on the row before the placement is answered.
+#[test]
+fn a_cancel_or_amend_of_a_creating_row_says_it_is_still_being_placed() {
+    for amend in [false, true] {
+        let (mut e, socket) = authenticated("OneWay");
+        e.handle(
+            1000.,
+            Event::WsMessage {
+                socket,
+                text: r#"{"type":"snapshot","orders_p":[]}"#,
+            },
+        );
+        e.drain_actions().for_each(drop);
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 41,
+                orders: vec![opts("pending-caller")],
+            },
+        );
+        let creating = e
+            .store()
+            .orders()
+            .iter()
+            .find(|o| o.status == OrderStatus::Creating)
+            .unwrap()
+            .id
+            .clone();
+        let act = if amend {
+            Command::AmendOrder {
+                command: 42,
+                id: creating,
+                price: Some(101.0),
+                amount: None,
+            }
+        } else {
+            Command::CancelOrders {
+                command: 42,
+                ids: vec![creating],
+            }
+        };
+        let a = command(&mut e, act);
+        assert!(writes(&a).is_empty());
+        assert!(
+            a.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { command: 42, error })
+                    if error.message.contains("still being placed")
+            )),
+            "{a:?}"
+        );
+    }
+}
+
 #[test]
 fn cancel_all_waits_for_creating_order_and_cancels_native_ack_even_when_init() {
     for status in ["New", "Init"] {

@@ -488,7 +488,15 @@ pub(crate) fn valid_client(id: &str) -> bool {
             .chars()
             .any(|c| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
 }
+/// A row's id until its placement is answered: no venue call can name it.
+const CREATING_PREFIX: &str = "__phemex_creating_";
 fn native(id: &str) -> Result<&str, String> {
+    if id.starts_with(CREATING_PREFIX) {
+        return Err(
+            "This Phemex order is still being placed. Try again once it has a venue order ID, or use Cancel All, which waits for it"
+                .into(),
+        );
+    }
     let base = id
         .strip_suffix("__stop_loss")
         .or_else(|| id.strip_suffix("__take_profit"))
@@ -773,7 +781,7 @@ impl PhemexPerpetuals {
                     params.push(("pegPriceType", "TrailingStopPeg".into()));
                 }
                 let row = Order {
-                    id: format!("__phemex_creating_{id}"),
+                    id: format!("{CREATING_PREFIX}{id}"),
                     parent_id: None,
                     status: OrderStatus::Creating,
                     symbol: o.symbol.clone(),
