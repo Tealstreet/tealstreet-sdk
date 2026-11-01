@@ -581,7 +581,12 @@ async fn a_stop_keeps_cancelling_through_an_outage_past_60_s_and_the_row_stays_u
         settle(10_000).await;
         assert!(factory.book().active_chasers().is_empty());
         assert_eq!(completions(&port), 1);
-        assert!(warnings(&port).last().unwrap().contains("now cancelled"));
+        assert!(
+            warnings(&port)
+                .last()
+                .unwrap()
+                .contains("is cancelled; nothing filled")
+        );
         let done = cancels_seen(&port);
         settle(60_000).await;
         assert_eq!(cancels_seen(&port), done);
@@ -690,7 +695,7 @@ async fn a_retried_stop_whose_order_filled_offline_says_filled_once() {
 #[tokio::test(start_paused = true)]
 async fn a_retried_stop_that_cancelled_says_so_from_the_fills() {
     for (fills, end) in [
-        (Ok("[]"), "is now cancelled"),
+        (Ok("[]"), "is cancelled; nothing filled"),
         (Err("fills unavailable"), "its fills could not be read"),
     ] {
         local(async {
@@ -787,6 +792,61 @@ fn a_retrying_warning_and_the_message_that_ends_it_name_the_same_order() {
         ("Chase on BTCUSDT stopped with nothing filled.", vec![]),
     ] {
         assert_eq!(safe_cex_chaser::settled_orders(message), ids, "{message}");
+    }
+}
+
+/// Hosted, a long drop: something else cancelled the order (the dispose's own
+/// try, or the venue) while the cancel was retried, and nothing filled.
+#[tokio::test(start_paused = true)]
+async fn an_order_found_cancelled_while_its_cancel_retries_says_cancelled_nothing_filled() {
+    for found in ["row", "refusal"] {
+        local(async {
+            let port = FakePort::new("bybit");
+            accept_with_fills(&port, Ok("[]"));
+            let (factory, cx) = start(&port, BUY_ONE);
+            settle(1100).await;
+            let online = cancels_fail_until(&port, transport_down());
+            stop(&factory, &cx);
+            settle(30_000).await;
+            if found == "row" {
+                port.update_order("o1", |order| order.status = OrderStatus::Canceled);
+            } else {
+                let mut inner = std::mem::replace(
+                    &mut *port.responder.borrow_mut(),
+                    Box::new(|_| Ok("[]".into())),
+                );
+                *port.responder.borrow_mut() = Box::new(move |command| {
+                    if is_cancel(command) {
+                        Err(VenueError::new("Order does not exist")
+                            .kind(ErrorKind::Rejected)
+                            .outcome(Outcome::Rejected))
+                    } else {
+                        inner(command)
+                    }
+                });
+                online.set(true);
+                // The reconnect's reconcile shows it gone, and the venue refuses its cancel.
+                port.store
+                    .borrow_mut()
+                    .orders
+                    .iter_mut()
+                    .for_each(|order| order.status = OrderStatus::Canceled);
+            }
+            settle(15_000).await;
+            let warnings = warnings(&port);
+            assert_eq!(warnings.len(), 2, "{found}: {warnings:?}");
+            assert_eq!(
+                warnings[1], "\"Chaser stopped: BTCUSDT order o1 is cancelled; nothing filled\"",
+                "{found}"
+            );
+            assert!(port.errors().is_empty(), "{found}: {:?}", port.errors());
+            let [complete] = port.completes().try_into().unwrap();
+            assert_eq!(
+                complete["stopReason"], "User cancelled; order o1 is cancelled, nothing filled",
+                "{found}"
+            );
+        })
+        .await;
     }
 }
 
@@ -902,7 +962,10 @@ async fn a_requote_with_its_signer_gone_says_the_signer_is_offline() {
         let [complete] = port.completes().try_into().unwrap();
         assert_eq!(
             complete["stopReason"],
-            safe_cex_chaser::SIGNER_OFFLINE_STOP_REASON
+            format!(
+                "{}; order o1 is cancelled, nothing filled",
+                safe_cex_chaser::SIGNER_OFFLINE_STOP_REASON
+            )
         );
         assert_eq!(port.placements().len(), 1);
     })
