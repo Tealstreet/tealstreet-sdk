@@ -644,7 +644,7 @@ fn genuine_full_fill_during_cancel_suppresses_explicit_replacement_quantity() {
     let (mut e, socket) = ready_with_socket();
     parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
     e.drain_actions().for_each(drop);
-    let cancel = amend(&mut e, "parent", Some(2.5)).remove(0);
+    let cancel = amend(&mut e, "parent", Some(8.5)).remove(0);
     amend_fill(&mut e, socket, NOW + 11.0, 4.0);
     e.drain_actions().for_each(drop);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
@@ -722,14 +722,14 @@ fn own_cancel_event_keeps_replacement_but_full_fill_suppresses_it() {
 }
 
 #[test]
-fn explicit_amend_quantity_remains_verbatim_after_an_additional_fill() {
+fn an_explicit_total_comes_down_by_an_additional_fill() {
     let (mut e, socket) = ready_with_socket();
     parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
     e.drain_actions().for_each(drop);
-    let cancel = amend(&mut e, "parent", Some(2.5)).remove(0);
+    let cancel = amend(&mut e, "parent", Some(8.5)).remove(0);
     parent_update(&mut e, socket, NOW + 12.0, 7.0, "OPEN", false);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2.5");
+    assert_eq!(form(&requests(&mut e).remove(0))["size"], "1.5");
 }
 
 #[test]

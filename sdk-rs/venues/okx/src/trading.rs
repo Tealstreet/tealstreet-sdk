@@ -35,6 +35,12 @@ const SERIAL: SerialCall = SerialCall {
 pub(crate) const CODES: CodeTable = CodeTable {
     // Rows match first to last, so the exact codes below win over the 51xxx range.
     rows: &[
+        // Timed out or down, in the trading range: "does not mean that the request
+        // was successful or failed".
+        unknown(51149, ErrorKind::Timeout),
+        unknown(51054, ErrorKind::Timeout),
+        unknown(51412, ErrorKind::Timeout),
+        unknown(51767, ErrorKind::VenueUnavailable),
         refused(51000, ErrorKind::InvalidInput),
         // Documented definite refusals (docs-v5 "Error Code"): nothing was placed.
         refused(50002, ErrorKind::InvalidInput),
@@ -106,6 +112,13 @@ pub(crate) const CODES: CodeTable = CodeTable {
         (429, Verdict::Refused(ErrorKind::RateLimited)),
     ],
 };
+const fn unknown(code: i64, kind: ErrorKind) -> Row {
+    Row {
+        key: Key::Int(code),
+        verdict: Verdict::Unknown(Some(kind)),
+        only: None,
+    }
+}
 const fn refused(code: i64, kind: ErrorKind) -> Row {
     Row {
         key: Key::Int(code),
@@ -1748,5 +1761,28 @@ mod code_table_tests {
         for unproven in ["50001", "50004", "50013", "50026", "52000", "59999"] {
             assert_eq!(verdict(unproven), Verdict::Unknown(None), "{unproven}");
         }
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+    use safe_cex_engine::classify::Intent;
+
+    #[test]
+    fn a_timeout_in_the_trading_range_is_not_a_refusal() {
+        for code in ["51149", "51054", "51412", "51767"] {
+            assert!(
+                matches!(
+                    CODES.verdict(&native(code, ""), Intent::Place),
+                    Verdict::Unknown(_)
+                ),
+                "{code}"
+            );
+        }
+        assert!(matches!(
+            CODES.verdict(&native("51999", ""), Intent::Place),
+            Verdict::Refused(_)
+        ));
     }
 }

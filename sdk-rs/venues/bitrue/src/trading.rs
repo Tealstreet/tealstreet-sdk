@@ -1962,14 +1962,18 @@ impl Bitrue {
                     symbol: amend.order.symbol.clone(),
                     kind: amend.order.kind,
                     side: amend.order.side,
-                    amount: amend.amount.unwrap_or_else(|| {
-                        safe_cex_engine::num::adjust(
-                            amount - filled,
-                            cx.store
-                                .market(&amend.order.symbol)
-                                .map_or(0.0, |m| m.precision.amount),
-                        )
-                    }),
+                    amount: amend
+                        .amount
+                        .map(|total| safe_cex_engine::num::left_of_total(total, filled))
+                        .transpose()?
+                        .unwrap_or_else(|| {
+                            safe_cex_engine::num::adjust(
+                                amount - filled,
+                                cx.store
+                                    .market(&amend.order.symbol)
+                                    .map_or(0.0, |m| m.precision.amount),
+                            )
+                        }),
                     price: amend.price.or(Some(amend.order.price)),
                     trigger_price: None,
                     stop_loss: None,

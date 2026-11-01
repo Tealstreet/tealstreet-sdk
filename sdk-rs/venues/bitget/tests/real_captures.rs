@@ -364,3 +364,29 @@ fn an_unfilled_limit_losing_its_bracket_does_not() {
     let error = edit_bracket_of_limit_filled(0.0);
     assert!(!error.contains("unprotected"), "{error}");
 }
+
+#[test]
+fn a_price_amend_of_a_partly_filled_uta_order_places_what_is_left() {
+    let row = UTA_CLOSE
+        .replace(r#""cumExecQty":"0""#, r#""cumExecQty":"8""#)
+        .replace(r#""orderStatus":"new""#, r#""orderStatus":"partially_filled""#);
+    let orders = format!(r#"{{"code":"00000","data":{{"list":[{row}],"cursor":""}}}}"#);
+    let mut h = uta(true, NO_POSITIONS, &orders);
+    let id = "1500796226646327296";
+    assert_eq!(h.engine.store().order(id).unwrap().filled, 8.0);
+    h.command(Command::AmendOrder {
+        command: 7,
+        id: id.into(),
+        price: Some(90.0),
+        amount: None,
+    });
+    settle_settings(&mut h, true);
+    h.respond(
+        "/trade/cancel-order",
+        200,
+        &format!(r#"{{"code":"00000","data":{{"orderId":"{id}"}}}}"#),
+    );
+    settle_settings(&mut h, true);
+    let placed = body(&h.take("/trade/place-order"));
+    assert_eq!(placed["qty"], "10", "{placed}");
+}

@@ -30,6 +30,36 @@ pub(crate) const BYBIT: CodeTable = CodeTable {
         ),
         row(Key::Int(170001), Verdict::Unknown(None)),
         row(Key::Int(170007), Verdict::Unknown(None)),
+        // Timed out, busy or still processing (docs/v5/error): the order may stand.
+        row(Key::Int(170146), Verdict::Unknown(Some(ErrorKind::Timeout))),
+        row(Key::Int(170147), Verdict::Unknown(Some(ErrorKind::Timeout))),
+        row(Key::Int(170310), Verdict::Unknown(Some(ErrorKind::Timeout))),
+        row(Key::Int(170032), Verdict::Unknown(Some(ErrorKind::Network))),
+        row(
+            Key::Int(170234),
+            Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+        ),
+        row(
+            Key::Int(3400214),
+            Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+        ),
+        row(
+            Key::Int(177002),
+            Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+        ),
+        row(
+            Key::Int(180000),
+            Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+        ),
+        row(
+            Key::Int(500001),
+            Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+        ),
+        row(Key::Int(110079), Verdict::Unknown(None)),
+        row(Key::Int(170035), Verdict::Unknown(None)),
+        row(Key::Int(170212), Verdict::Unknown(None)),
+        // Duplicate clientOrderId: as 10014, the order may already exist.
+        row(Key::Int(170141), Verdict::Unknown(None)),
         // A recv-window or signature refusal permits one re-signed resend.
         row(
             Key::Int(10002),
@@ -198,4 +228,25 @@ fn balance_and_order_rule_codes_take_their_documented_kinds() {
             .status
             .contains(&(403, Verdict::Unknown(Some(ErrorKind::RateLimited))))
     );
+}
+
+#[cfg(test)]
+#[test]
+fn a_timeout_or_busy_answer_is_not_a_refusal() {
+    use safe_cex_engine::classify::{Native, NativeCode};
+    for code in [
+        170146, 170147, 170310, 170032, 170234, 3400214, 170141, 110079, 170035, 170212, 177002,
+        180000, 500001,
+    ] {
+        let native = Native {
+            code: NativeCode::Int(code),
+            message: "",
+        };
+        for intent in [Intent::Place, Intent::Cancel, Intent::Amend] {
+            assert!(
+                matches!(BYBIT.verdict(&native, intent), Verdict::Unknown(_)),
+                "{code}"
+            );
+        }
+    }
 }
