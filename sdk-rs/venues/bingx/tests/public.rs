@@ -57,7 +57,7 @@ fn seeded_with_socket() -> (Engine<Bingx>, SocketId) {
     let mut socket = respond(
         &mut engine,
         1.,
-        r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0","tradeMinQuantity":"0.0001","maxLongLeverage":125}]}"#,
     );
     socket = socket.or(respond(
         &mut engine,
@@ -70,6 +70,11 @@ fn seeded_with_socket() -> (Engine<Bingx>, SocketId) {
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#,
     ));
     (engine, socket.expect("public socket"))
+}
+#[test]
+fn the_minimum_order_size_comes_from_trade_min_quantity() {
+    let engine = seeded();
+    assert_eq!(engine.store().markets()[0].limits.amount.min, 0.0001);
 }
 #[test]
 fn seeds_decimal_precision_and_merges_ticker_sources() {

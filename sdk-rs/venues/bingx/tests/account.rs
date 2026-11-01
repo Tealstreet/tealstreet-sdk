@@ -3113,3 +3113,46 @@ fn a_failed_settings_refresh_leg_keeps_the_other_field() {
     assert_eq!(setting.leverage, 20.0);
     assert_eq!(setting.margin_type, Some(MarginType::Isolated));
 }
+
+// BX2: real rows send "" for what does not apply; the row must still show.
+#[test]
+fn an_open_order_with_blank_fields_shows() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    let read = h.take(ORDERS);
+    h.reply(
+        read.id,
+        200,
+        r#"{"code":0,"data":{"orders":[{"orderId":77,"symbol":"BTC-USDT","type":"LIMIT","side":"BUY","status":"NEW","origQty":"1","price":"60000","stopPrice":"","executedQty":"","closePosition":"","takeProfit":"","stopLoss":"","positionSide":"LONG"}]}}"#,
+    );
+    assert!(h.engine.store().order("77").is_some());
+}
+
+// BX6: a null list is an empty one.
+#[test]
+fn a_null_order_list_is_empty_not_a_failure() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    let read = h.take(ORDERS);
+    h.reply(read.id, 200, r#"{"code":0,"data":{"orders":null}}"#);
+    assert!(
+        h.logs.iter().all(|s| !s.contains("expected list")),
+        "{:?}",
+        h.logs
+    );
+    assert!(h.engine.store().loaded().orders);
+}
+
+// BX7: an unreadable order event may be a fill.
+#[test]
+fn an_unreadable_order_event_re_reads_orders() {
+    let mut h = Harness::ready();
+    h.message(
+        r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":1,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"FILLED","z":"not a number"}}"#,
+    );
+    assert!(
+        h.requests.iter().any(|r| r.url.contains(ORDERS)),
+        "{:?}",
+        h.logs
+    );
+}

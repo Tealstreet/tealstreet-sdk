@@ -290,6 +290,18 @@ fn time_in_force(text: &str) -> Option<TimeInForce> {
     })
 }
 
+/// A success whose list is null, which is how BingX answers an empty one.
+pub(crate) fn null_list(body: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(body).is_ok_and(|reply| {
+        let data = reply.get("data");
+        reply["code"] == 0
+            && (data.is_some_and(serde_json::Value::is_null)
+                || data
+                    .and_then(|data| data.get("orders"))
+                    .is_some_and(serde_json::Value::is_null))
+    })
+}
+
 /// A venue error is a failed snapshot, including errors transported as HTTP 200.
 fn response_error(response: Response<'_>, allow_missing_code: bool) -> Option<String> {
     if allow_missing_code
@@ -1499,6 +1511,15 @@ impl Account {
             return;
         }
         let Ok(event) = serde_json::from_str::<UserEvent<'_>>(text) else {
+            // An order event we cannot read may be a fill: only a fresh read shows what changed.
+            if text.contains("TRADE_UPDATE") {
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
+                    "BingX order event could not be read; re-reading orders",
+                );
+                self.reconcile_orders(cx, credentials);
+            }
             return;
         };
         if event.ping.is_some() {

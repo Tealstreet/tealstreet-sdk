@@ -465,7 +465,7 @@ fn full_position_stop_has_reconciled_quantity_and_close_flag_without_reduce_only
     }]);
     assert!(h.body().contains("\"closePosition\":\"true\""));
     assert!(h.body().contains("\"type\":\"STOP_MARKET\""));
-    assert!(h.body().contains("\"quantity\":2.0"));
+    assert!(h.body().contains("\"quantity\":2"));
     assert!(!h.body().contains("reduceOnly"));
 }
 #[test]
@@ -480,7 +480,7 @@ fn trailing_uses_position_size_and_fractional_callback() {
     }]);
     assert!(h.body().contains("\"symbol\":\"BTC-USDT\""));
     assert!(h.body().contains("\"priceRate\":0.05"));
-    assert!(h.body().contains("\"quantity\":2.0"));
+    assert!(h.body().contains("\"quantity\":2"));
     assert!(!h.body().contains("clientOrderId"));
 }
 #[test]
@@ -880,8 +880,8 @@ fn full_stop_quantity_comes_from_the_position_for_both_stop_families() {
             price: Some(90.0),
             ..opts()
         }]);
-        assert!(h.body().contains("\"quantity\":2.0"));
-        assert!(h.body().contains("\"stopPrice\":90.0"));
+        assert!(h.body().contains("\"quantity\":2"));
+        assert!(h.body().contains("\"stopPrice\":90"));
         assert!(h.body().contains("\"closePosition\":\"true\""));
         assert!(!h.body().contains("reduceOnly"));
     }
@@ -1618,7 +1618,7 @@ fn native_maximum_split_streams_every_lot_and_returns_every_accepted_id() {
             h.failures
         );
         let body: serde_json::Value = serde_json::from_str(h.body()).unwrap();
-        assert_eq!(body["quantity"], 10.0, "lot {lot}");
+        assert_eq!(body["quantity"].as_f64(), Some(10.0), "lot {lot}");
         assert!(
             h.done.is_empty(),
             "lot {lot}: the command is still streaming"

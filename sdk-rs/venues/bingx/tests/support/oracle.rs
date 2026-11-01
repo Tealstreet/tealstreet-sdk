@@ -12,13 +12,25 @@ pub struct Credentials {
     pub secret: String,
 }
 
-#[derive(Clone, Serialize)]
-#[serde(untagged)]
+#[derive(Clone)]
 enum Param {
     Text(String),
     Number(f64),
     Integer(u64),
     Boolean(bool),
+}
+
+impl Serialize for Param {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Text(text) => serializer.serialize_str(text),
+            Self::Number(_) => serde_json::value::RawValue::from_string(self.text())
+                .map_err(serde::ser::Error::custom)?
+                .serialize(serializer),
+            Self::Integer(value) => serializer.serialize_u64(*value),
+            Self::Boolean(value) => serializer.serialize_bool(*value),
+        }
+    }
 }
 
 impl Param {
