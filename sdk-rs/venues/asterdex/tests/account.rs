@@ -1189,6 +1189,26 @@ fn hedge_amend_keeps_the_order_rows_position_side() {
 }
 
 #[test]
+fn an_amend_whose_cancel_answer_is_unreadable_posts_no_replacement() {
+    for body in ["<html>ok</html>", "{}"] {
+        let mut h = H::new();
+        h.ws(order(10.0, "NEW", "0", 1));
+        h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 40,
+            id: "123".into(),
+            price: Some(105.0),
+            amount: None,
+        }));
+        let cancel = h.take("/order");
+        h.respond(cancel, body);
+        assert!(
+            result(&h, 40).as_ref().unwrap_err().contains("unreadable"),
+            "{body}"
+        );
+    }
+}
+
+#[test]
 fn rest_ahead_of_stream_does_not_consume_no_id_execution() {
     let mut h = H::new();
     // A genuine reconnect: the new epoch's open refreshes orders.

@@ -868,6 +868,20 @@ impl AsterDex {
                     self.request_refresh_orders(cx);
                 })
             }
+            // An amend's cancel leg must prove the order ended: a reply that says nothing
+            // readable leaves it maybe live, and a replacement could double it.
+            (
+                Call::Cancel {
+                    filled_at_amend: Some(_),
+                    ..
+                },
+                Ok(body),
+            ) if !serde_json::from_str::<CancelAck>(body).is_ok_and(|ack| ack.status.is_some()) => {
+                Err((
+                    0,
+                    "Aster cancel answer was unreadable; replacement was not submitted".into(),
+                ))
+            }
             (
                 Call::Cancel {
                     id,
