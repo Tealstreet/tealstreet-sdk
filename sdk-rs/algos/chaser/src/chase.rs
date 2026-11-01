@@ -136,6 +136,8 @@ struct State {
     /// Orders whose stop cancel the venue refused while the store still had them open.
     cancel_refused: Vec<(String, String, VenueError)>,
     outcome_told: bool,
+    /// A stop cancel ended without proof the order is gone.
+    order_may_be_open: bool,
     last_partial_fill_at: Option<Instant>,
 }
 
@@ -159,6 +161,11 @@ pub struct Chase {
     pub verify_fills: Cell<bool>,
     /// The symbol's position size when the watcher last looked.
     pub position_seen: Cell<Option<f64>>,
+    /// A placement is on the wire: its order may land, so nothing finishes the chase yet.
+    placing: Cell<bool>,
+    placing_ended: Notify,
+    /// Counts `set_current`: a replacement's row has not been seen yet.
+    placements: Cell<u32>,
     state: RefCell<State>,
 }
 
@@ -191,12 +198,37 @@ impl Chase {
             needs_reconcile: Cell::new(false),
             verify_fills: Cell::new(false),
             position_seen: Cell::new(None),
+            placing: Cell::new(false),
+            placing_ended: Notify::new(),
+            placements: Cell::new(0),
             state: RefCell::new(State {
                 remaining: options.size,
                 ..State::default()
             }),
             options,
         }
+    }
+
+    pub fn set_placing(&self, placing: bool) {
+        self.placing.set(placing);
+        if !placing {
+            self.placing_ended.notify_waiters();
+        }
+    }
+
+    pub fn is_placing(&self) -> bool {
+        self.placing.get()
+    }
+
+    /// Until no placement is on the wire and what landed is in `current`.
+    pub async fn placement_settled(&self) {
+        while self.placing.get() {
+            self.placing_ended.notified().await;
+        }
+    }
+
+    pub fn placements(&self) -> u32 {
+        self.placements.get()
     }
 
     pub fn mark_dirty(&self, change: Dirty) {
@@ -306,6 +338,14 @@ impl Chase {
         self.state.borrow_mut().outcome_told = true;
     }
 
+    pub fn note_order_may_be_open(&self) {
+        self.state.borrow_mut().order_may_be_open = true;
+    }
+
+    pub fn order_may_be_open(&self) -> bool {
+        self.state.borrow().order_may_be_open
+    }
+
     pub fn outcome_told(&self) -> bool {
         self.state.borrow().outcome_told
     }
@@ -325,6 +365,7 @@ impl Chase {
     }
 
     pub fn set_current(&self, ids: Vec<String>) {
+        self.placements.set(self.placements.get() + 1);
         let mut state = self.state.borrow_mut();
         for id in &ids {
             if !state.ever.contains(id) {

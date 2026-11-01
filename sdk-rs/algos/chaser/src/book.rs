@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use safe_cex_algos::executor::Instant;
@@ -30,6 +31,8 @@ const CANCEL_RETRY_MAX_MS: u64 = 10_000;
 /// for minutes; past this a cancel is tried again and fills count as unread.
 /// Longer than a hosted sign's 15 s, so an offline signer is reported as that.
 pub const ANSWER_BOUND_MS: u64 = 16_000;
+/// Ended chases remembered for `progress`, more than can wait on a slice timeout at once.
+const ENDED_KEPT: usize = 256;
 /// How an order whose cancel was retried ended.
 enum Settled {
     Filled(f64),
@@ -96,12 +99,18 @@ const FILL_TRACKED_VENUES: [&str; 3] = ["hyperliquid", "grvt", "bybitdemo"];
 pub struct Progress {
     pub remaining_size: f64,
     pub stopped: bool,
+    /// Finished: nothing of this chase is still working.
+    pub ended: bool,
+    /// Ended with a cancel that never proved its order gone.
+    pub order_may_be_open: bool,
 }
 
 /// The chases of one account: the TS `ChaserOrderManager`.
 pub struct ChaserBook {
     cx: AlgoCx,
     chases: RefCell<Vec<Rc<Chase>>>,
+    /// How recent chases ended, for a caller that waits on one (a TWAP slice).
+    ended: RefCell<VecDeque<(String, Progress)>>,
     client_ids: ClientIdMinter,
     next_id: Cell<u64>,
 }
@@ -132,6 +141,7 @@ impl ChaserBook {
         Rc::new(Self {
             cx,
             chases: RefCell::new(Vec::new()),
+            ended: RefCell::new(VecDeque::new()),
             client_ids: ClientIdMinter::default(),
             next_id: Cell::new(0),
         })
@@ -179,18 +189,28 @@ impl ChaserBook {
         ));
         self.chases.borrow_mut().push(chase.clone());
         let book = self.clone();
-        chase
-            .scope
-            .clone()
-            .spawn(async move { book.run(chase).await });
+        chase.scope.clone().spawn(async move {
+            book.clone().run(chase.clone()).await;
+            chase.scope.dispose();
+        });
         Ok(())
     }
 
     pub fn progress(&self, id: &str) -> Option<Progress> {
-        self.find(id).map(|chase| Progress {
-            remaining_size: chase.remaining(),
-            stopped: chase.is_stopped(),
-        })
+        self.find(id)
+            .map(|chase| Progress {
+                remaining_size: chase.remaining(),
+                stopped: chase.is_stopped(),
+                ended: false,
+                order_may_be_open: false,
+            })
+            .or_else(|| {
+                let ended = self.ended.borrow();
+                ended
+                    .iter()
+                    .find(|(ended, _)| ended == id)
+                    .map(|(_, progress)| *progress)
+            })
     }
 
     pub fn active_chasers(&self) -> Vec<ActiveChaser> {
@@ -510,6 +530,10 @@ impl ChaserBook {
             self.cleanup(chase).await;
             return;
         }
+        if chase.is_stopped() {
+            self.cleanup(chase).await;
+            return;
+        }
         self.spawn_watcher(&chase, changes);
         self.cx.sleep_ms(SETTLE_AFTER_PLACEMENT_MS).await;
         let mut last_check: Option<Instant> = None;
@@ -553,6 +577,7 @@ impl ChaserBook {
         chase.watch_scope.clone().spawn(async move {
             let mut seen = false;
             let mut missing = 0;
+            let mut placements = chase.placements();
             chase.position_seen.set(Some(book.position_contracts(&chase)));
             while let Some(change) = changes.recv().await {
                 if chase.is_stopped() {
@@ -577,6 +602,11 @@ impl ChaserBook {
                     }
                 }
                 if change.orders {
+                    if chase.placements() != placements {
+                        placements = chase.placements();
+                        seen = false;
+                        missing = 0;
+                    }
                     let orders = book.tracked_orders(&chase);
                     if orders.is_empty() {
                         if seen && !chase.pending_update() {
@@ -823,6 +853,9 @@ impl ChaserBook {
         }
         let ids = self.try_place_orders(chase).await;
         chase.set_current(ids);
+        if chase.is_stopped() {
+            return Ok(());
+        }
         self.cx.sleep_ms(SETTLE_AFTER_PLACEMENT_MS).await;
         Ok(())
     }
@@ -870,7 +903,15 @@ impl ChaserBook {
         Ok(filled)
     }
 
+    /// What landed, even after a STOP: the caller makes it current for cleanup to cancel.
     async fn try_place_orders(&self, chase: &Rc<Chase>) -> Vec<String> {
+        chase.set_placing(true);
+        let ids = self.place_until_resting(chase).await;
+        chase.set_placing(false);
+        ids
+    }
+
+    async fn place_until_resting(&self, chase: &Rc<Chase>) -> Vec<String> {
         let max_tries = if self.store().venue == "binance" {
             20
         } else {
@@ -977,17 +1018,7 @@ impl ChaserBook {
                 }
                 return Vec::new();
             }
-            if chase.is_stopped() {
-                if !ids.is_empty() {
-                    // STOP raced the placement: cancel what landed ourselves.
-                    chase.set_current(ids.clone());
-                    for id in &ids {
-                        self.cancel_until_settled(chase, id).await;
-                    }
-                }
-                return Vec::new();
-            }
-            if !ids.is_empty() {
+            if chase.is_stopped() || !ids.is_empty() {
                 return ids;
             }
             chase.bump_tick_distance();
@@ -1065,6 +1096,10 @@ impl ChaserBook {
     async fn cleanup(&self, chase: Rc<Chase>) {
         chase.watch_scope.dispose();
         chase.wake.notify_one();
+        // The supervisor cleans up itself once the placement answers, landed or not.
+        if chase.is_placing() {
+            return;
+        }
         for id in chase.current() {
             self.cancel_until_settled(&chase, &id).await;
         }
@@ -1078,11 +1113,14 @@ impl ChaserBook {
     async fn settle_once(&self, chase: Rc<Chase>) {
         chase.watch_scope.dispose();
         chase.wake.notify_one();
+        chase.placement_settled().await;
         for id in chase.take_current() {
             if !self.known_closed(&id) {
                 let symbol = self.order_symbol(&chase, &id);
-                if let Err(error) = self.cancel(&symbol, std::slice::from_ref(&id)).await {
-                    self.cancel_failed(&symbol, std::slice::from_ref(&id), &error);
+                if let Err(error) = self.cancel(&symbol, std::slice::from_ref(&id)).await
+                    && self.cancel_failed(&symbol, std::slice::from_ref(&id), &error)
+                {
+                    chase.note_order_may_be_open();
                 }
             }
         }
@@ -1148,6 +1186,7 @@ impl ChaserBook {
             if !cancel_retryable(&error) || elapsed >= CANCEL_RETRY_BOUND_MS {
                 // A refusal is often the order already filling: completion, with its fills, says which.
                 if cancel_retryable(&error) {
+                    chase.note_order_may_be_open();
                     self.cancel_failed(&symbol, std::slice::from_ref(&id.to_owned()), &error);
                     if retrying {
                         chase.note_outcome_told();
@@ -1242,6 +1281,7 @@ impl ChaserBook {
             && !filled.is_some_and(|filled| filled > 0.0)
             && self.cancel_failed(symbol, std::slice::from_ref(&id.to_owned()), error)
         {
+            chase.note_order_may_be_open();
             chase.note_outcome_told();
             return None;
         }
@@ -1295,8 +1335,8 @@ impl ChaserBook {
                 self.warn(&format!(
                     "Chaser stopped: {symbol} order {id} filled {order_filled} before its cancel got through"
                 ));
-            } else {
-                self.cancel_failed(&symbol, std::slice::from_ref(&id), &error);
+            } else if self.cancel_failed(&symbol, std::slice::from_ref(&id), &error) {
+                chase.note_order_may_be_open();
             }
         }
         let event = ChaserComplete {
@@ -1314,7 +1354,19 @@ impl ChaserBook {
             "chaser:complete",
             serde_json::to_string(&event).unwrap_or_default(),
         );
-        chase.scope.dispose();
+        let mut ended = self.ended.borrow_mut();
+        if ended.len() == ENDED_KEPT {
+            ended.pop_front();
+        }
+        ended.push_back((
+            chase.id.clone(),
+            Progress {
+                remaining_size: chase.remaining(),
+                stopped: true,
+                ended: true,
+                order_may_be_open: chase.order_may_be_open(),
+            },
+        ));
     }
 
     fn bybit_demo_position_fill(&self, chase: &Chase) -> f64 {

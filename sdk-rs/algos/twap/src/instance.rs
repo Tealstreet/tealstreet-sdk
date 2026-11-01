@@ -12,6 +12,8 @@ use serde_json::Map;
 
 /// The chaser a slice spawns gives up after this many reprices, as in TS.
 const SLICE_CHASER_MAX_ATTEMPTS: u32 = 1000;
+/// How often a timed-out slice looks whether its chase has settled.
+const SLICE_SETTLE_POLL_MS: f64 = 250.0;
 
 /// A slice placement awaiting [`TwapInstance::placement_settled`].
 #[derive(Clone, Debug)]
@@ -27,6 +29,8 @@ struct PendingSlice {
 struct SliceTimeout {
     due_at: f64,
     chaser_id: String,
+    /// The chase was told to stop: its remainder goes to market once it has settled.
+    market_when_settled: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -328,6 +332,7 @@ impl TwapInstance {
             self.slice_timeouts.push(SliceTimeout {
                 due_at: env.now_ms() + timeout_ms,
                 chaser_id,
+                market_when_settled: false,
             });
         }
         true
@@ -335,11 +340,38 @@ impl TwapInstance {
 
     fn fire_slice_timeout(
         &mut self,
-        chaser_id: &str,
+        timeout: SliceTimeout,
+        now: f64,
         view: &dyn TwapMarketView,
         effects: &mut Vec<TwapEffect>,
     ) {
-        let Some(chaser) = view.chaser(chaser_id) else {
+        let chaser = view.chaser(&timeout.chaser_id);
+        if timeout.market_when_settled {
+            match chaser {
+                Some(chaser) if !chaser.ended => self.slice_timeouts.push(SliceTimeout {
+                    due_at: now + SLICE_SETTLE_POLL_MS,
+                    ..timeout
+                }),
+                Some(chaser) if chaser.order_may_be_open => effects.push(TwapEffect::Log {
+                    message: format!(
+                        "TWAP {} slice remainder was not sent: its order may still be open",
+                        self.options.symbol()
+                    ),
+                }),
+                Some(chaser) if chaser.remaining_size > 0.0 => {
+                    self.place_slice_market(chaser.remaining_size, effects)
+                }
+                Some(_) => {}
+                None => effects.push(TwapEffect::Log {
+                    message: format!(
+                        "TWAP {} slice remainder was not sent: its chase's end is unknown",
+                        self.options.symbol()
+                    ),
+                }),
+            }
+            return;
+        }
+        let Some(chaser) = chaser.filter(|chaser| !chaser.ended) else {
             return;
         };
         if chaser.remaining_size <= 0.0 {
@@ -352,24 +384,33 @@ impl TwapInstance {
         };
         effects.push(TwapEffect::RemoveChaser {
             twap_id: self.id.clone(),
-            chaser_id: chaser_id.to_owned(),
+            chaser_id: timeout.chaser_id.clone(),
         });
         if action == SliceAction::Market {
-            // Best effort: the host ignores the outcome and the TWAP keeps going.
-            effects.push(TwapEffect::PlaceOrder {
-                twap_id: self.id.clone(),
-                settle_token: None,
-                request: TwapOrderRequest {
-                    symbol: self.options.symbol().to_owned(),
-                    side: self.options.side,
-                    kind: OrderKind::Market,
-                    price: None,
-                    amount: chaser.remaining_size,
-                    reduce_only: self.options.reduce_only,
-                    client_order_id: None,
-                },
+            // A market beside an order still being cancelled could overfill.
+            self.slice_timeouts.push(SliceTimeout {
+                due_at: now + SLICE_SETTLE_POLL_MS,
+                market_when_settled: true,
+                ..timeout
             });
         }
+    }
+
+    /// Best effort: the host ignores the outcome and the TWAP keeps going.
+    fn place_slice_market(&self, amount: f64, effects: &mut Vec<TwapEffect>) {
+        effects.push(TwapEffect::PlaceOrder {
+            twap_id: self.id.clone(),
+            settle_token: None,
+            request: TwapOrderRequest {
+                symbol: self.options.symbol().to_owned(),
+                side: self.options.side,
+                kind: OrderKind::Market,
+                price: None,
+                amount,
+                reduce_only: self.options.reduce_only,
+                client_order_id: None,
+            },
+        });
     }
 
     /// Fire every timer due at `env.now_ms()`, earliest first.
@@ -392,7 +433,7 @@ impl TwapInstance {
             match (timeout, slice_due) {
                 (Some((index, due_at)), slice) if slice.is_none_or(|slice| due_at <= slice) => {
                     let timeout = self.slice_timeouts.remove(index);
-                    self.fire_slice_timeout(&timeout.chaser_id, view, effects);
+                    self.fire_slice_timeout(timeout, now, view, effects);
                 }
                 (_, Some(_)) => {
                     self.slice_due_at = None;

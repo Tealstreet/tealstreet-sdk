@@ -512,6 +512,7 @@ fn start_chase(overrides: Value) -> (TwapBook, Env, View, String, String) {
         ChaserProgress {
             remaining_size: 0.2,
             stopped: false,
+            ..Default::default()
         },
     );
     (book, env, view, id, chasers[0].clone())
@@ -601,13 +602,15 @@ fn no_timeout_without_timeout_pct() {
 
 #[test]
 fn timeout_market_cancels_chaser_and_markets_the_remainder() {
-    let (mut book, mut env, view, _, chaser) =
+    let (mut book, mut env, mut view, _, chaser) =
         start_chase(json!({ "timeoutPct": 50, "timeoutAction": "market" }));
     env.advance(59_999.0);
     assert!(book.wake(&mut env, &view).is_empty());
     env.advance(1.0);
     let effects = book.wake(&mut env, &view);
-    assert_eq!(removed_chasers(&effects), vec![chaser]);
+    assert_eq!(removed_chasers(&effects), vec![chaser.clone()]);
+    assert!(market_amounts(&effects).is_empty(), "not beside its cancel");
+    let effects = settle_chaser(&mut book, &mut env, &mut view, &chaser, 0.2);
     let markets = placements(&effects);
     assert_eq!(markets.len(), 1);
     let (token, request) = markets[0];
@@ -616,6 +619,84 @@ fn timeout_market_cancels_chaser_and_markets_the_remainder() {
         (request.side, request.amount, request.reduce_only),
         (OrderSide::Buy, 0.2, false)
     );
+}
+
+/// The chase's cancel has settled with `remaining` left; the next poll sees it.
+fn settle_chaser(
+    book: &mut TwapBook,
+    env: &mut Env,
+    view: &mut View,
+    chaser: &str,
+    remaining: f64,
+) -> Vec<TwapEffect> {
+    view.chasers.insert(
+        chaser.to_owned(),
+        ChaserProgress {
+            remaining_size: remaining,
+            stopped: true,
+            ended: true,
+            order_may_be_open: false,
+        },
+    );
+    env.advance(250.0);
+    book.wake(env, view)
+}
+
+#[test]
+fn a_timed_out_slice_sends_no_market_while_its_cancel_still_retries() {
+    let (mut book, mut env, mut view, _, chaser) =
+        start_chase(json!({ "timeoutPct": 50, "timeoutAction": "market" }));
+    env.advance(60_000.0);
+    assert!(market_amounts(&book.wake(&mut env, &view)).is_empty());
+    view.chasers.insert(
+        chaser.clone(),
+        ChaserProgress {
+            remaining_size: 0.2,
+            stopped: true,
+            ..Default::default()
+        },
+    );
+    for _ in 0..40 {
+        env.advance(250.0);
+        assert!(market_amounts(&book.wake(&mut env, &view)).is_empty());
+    }
+    // A fill during the wait shrinks the market to what is really left.
+    let effects = settle_chaser(&mut book, &mut env, &mut view, &chaser, 0.05);
+    assert_eq!(market_amounts(&effects), vec![0.05]);
+}
+
+#[test]
+fn a_timed_out_slice_sends_no_market_if_its_order_may_still_be_open() {
+    let (mut book, mut env, mut view, _, chaser) =
+        start_chase(json!({ "timeoutPct": 50, "timeoutAction": "market" }));
+    env.advance(60_000.0);
+    book.wake(&mut env, &view);
+    view.chasers.insert(
+        chaser,
+        ChaserProgress {
+            remaining_size: 0.2,
+            stopped: true,
+            ended: true,
+            order_may_be_open: true,
+        },
+    );
+    env.advance(250.0);
+    let effects = book.wake(&mut env, &view);
+    assert!(market_amounts(&effects).is_empty());
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        TwapEffect::Log { message } if message.contains("may still be open")
+    )));
+}
+
+#[test]
+fn stopping_a_twap_drops_a_market_waiting_on_its_slice() {
+    let (mut book, mut env, mut view, id, chaser) =
+        start_chase(json!({ "timeoutPct": 50, "timeoutAction": "market" }));
+    env.advance(60_000.0);
+    book.wake(&mut env, &view);
+    book.handle("twap:stop", &json!(id), &mut env, &view);
+    assert!(settle_chaser(&mut book, &mut env, &mut view, &chaser, 0.2).is_empty());
 }
 
 #[test]
@@ -637,6 +718,7 @@ fn filled_chaser_needs_no_timeout_action() {
         ChaserProgress {
             remaining_size: 0.0,
             stopped: true,
+            ..Default::default()
         },
     );
     env.advance(60_000.0);
@@ -656,14 +738,17 @@ fn fail_action_market_applies_to_a_stopped_unfilled_chaser() {
     let (mut book, mut env, mut view, _, chaser) =
         start_chase(json!({ "timeoutPct": 50, "timeoutAction": "next", "failAction": "market" }));
     view.chasers.insert(
-        chaser,
+        chaser.clone(),
         ChaserProgress {
             remaining_size: 0.2,
             stopped: true,
+            ..Default::default()
         },
     );
     env.advance(60_000.0);
-    assert_eq!(market_amounts(&book.wake(&mut env, &view)), vec![0.2]);
+    assert!(market_amounts(&book.wake(&mut env, &view)).is_empty());
+    let effects = settle_chaser(&mut book, &mut env, &mut view, &chaser, 0.2);
+    assert_eq!(market_amounts(&effects), vec![0.2]);
 }
 
 #[test]
@@ -675,6 +760,7 @@ fn fail_action_next_skips_a_stopped_unfilled_chaser() {
         ChaserProgress {
             remaining_size: 0.2,
             stopped: true,
+            ..Default::default()
         },
     );
     env.advance(60_000.0);
@@ -694,10 +780,11 @@ fn terminate_cancels_pending_slice_timeouts() {
 
 #[test]
 fn reduce_only_reaches_the_fallback_market() {
-    let (mut book, mut env, view, _, _) =
+    let (mut book, mut env, mut view, _, chaser) =
         start_chase(json!({ "reduceOnly": true, "timeoutPct": 50 }));
     env.advance(60_000.0);
-    let effects = book.wake(&mut env, &view);
+    book.wake(&mut env, &view);
+    let effects = settle_chaser(&mut book, &mut env, &mut view, &chaser, 0.2);
     assert!(placements(&effects)[0].1.reduce_only);
 }
 
@@ -715,15 +802,19 @@ fn last_slice_timeout_still_fires_after_completion() {
         book.get(&id).is_none(),
         "a one-slice TWAP completes on its first slice"
     );
+    let chaser = chaser_ids(&view)[0].clone();
     view.chasers.insert(
-        chaser_ids(&view)[0].clone(),
+        chaser.clone(),
         ChaserProgress {
             remaining_size: 1.0,
             stopped: false,
+            ..Default::default()
         },
     );
     env.advance(300_000.0);
-    assert_eq!(market_amounts(&book.wake(&mut env, &view)), vec![1.0]);
+    assert!(market_amounts(&book.wake(&mut env, &view)).is_empty());
+    let effects = settle_chaser(&mut book, &mut env, &mut view, &chaser, 1.0);
+    assert_eq!(market_amounts(&effects), vec![1.0]);
     assert_eq!(book.wake_at(), None);
 }
 

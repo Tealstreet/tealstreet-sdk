@@ -33,6 +33,10 @@ struct FakePort {
     unanswered: RefCell<Option<Unanswered>>,
     /// Every cancel answers only after this long, like a sign waiting out its timeout.
     cancel_answer_ms: Cell<u64>,
+    /// Every placement answers, and its row lands, only after this long.
+    place_answer_ms: Cell<u64>,
+    /// A placement's row is not in the store when it answers.
+    rows_lag: Cell<bool>,
     /// Cancels answer done but leave the row as it was: Bybit 110001 for an
     /// order that filled unseen.
     cancels_find_nothing: Cell<bool>,
@@ -63,6 +67,8 @@ impl AccountPort for FakePort {
         }
         let delay = if is_cancel(&command) {
             self.cancel_answer_ms.get()
+        } else if matches!(command, Command::PlaceOrders { .. }) {
+            self.place_answer_ms.get()
         } else {
             0
         };
@@ -103,6 +109,8 @@ impl FakePort {
             }),
             unanswered: RefCell::new(None),
             cancel_answer_ms: Cell::new(0),
+            place_answer_ms: Cell::new(0),
+            rows_lag: Cell::new(false),
             cancels_find_nothing: Cell::new(false),
         })
     }
@@ -116,13 +124,15 @@ impl FakePort {
                 port.next_order.set(port.next_order.get() + 1);
                 let id = format!("o{}", port.next_order.get());
                 let opts = &orders[0];
-                port.store.borrow_mut().orders.push(order(
-                    &id,
-                    opts.price.unwrap(),
-                    opts.amount,
-                    0.0,
-                    OrderStatus::Open,
-                ));
+                if !port.rows_lag.get() {
+                    port.store.borrow_mut().orders.push(order(
+                        &id,
+                        opts.price.unwrap(),
+                        opts.amount,
+                        0.0,
+                        OrderStatus::Open,
+                    ));
+                }
                 return Ok(format!(r#"["{id}"]"#));
             }
             // A cancel acknowledgement closes the row, as the engine does.
@@ -1029,6 +1039,95 @@ async fn a_requote_cancel_waiting_out_the_sign_timeout_names_the_offline_signer(
             "{:?}",
             warnings(&port)
         );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_during_the_first_placement_cancels_what_lands_before_completing() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        port.place_answer_ms.set(2_000);
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(500).await;
+        stop(&factory, &cx);
+        settle(100).await;
+        assert_eq!(completions(&port), 0, "its order is still on the wire");
+        settle(2_000).await;
+        assert_eq!(port.cancels(), vec!["o1".to_string()]);
+        assert_eq!(completions(&port), 1);
+        assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_during_a_requote_placement_cancels_what_lands() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.place_answer_ms.set(2_000);
+        port.set_ticker(101.0, 101.5);
+        settle(500).await;
+        assert_eq!(port.cancels(), vec!["o1".to_string()]);
+        stop(&factory, &cx);
+        settle(2_000).await;
+        assert_eq!(port.cancels(), vec!["o1".to_string(), "o2".to_string()]);
+        assert_eq!(completions(&port), 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn nuke_and_dispose_wait_for_a_placement_on_the_wire_and_cancel_it() {
+    local(async {
+        for nuke in [true, false] {
+            let port = FakePort::new("bybit");
+            port.accept_placements();
+            port.place_answer_ms.set(2_000);
+            let (factory, _cx) = start(&port, BUY_ONE);
+            settle(500).await;
+            if nuke {
+                factory.book().stop_for_nuke("nuked").await;
+            } else {
+                factory.book().shutdown("disposed").await;
+            }
+            assert_eq!(port.placements().len(), 1);
+            assert!(
+                port.cancels().contains(&"o1".to_string()),
+                "landed and cancelled before the sweep went on"
+            );
+            assert_eq!(completions(&port), 1);
+        }
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_slow_replacement_row_does_not_read_as_the_order_leaving_the_book() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.update_order("o1", |_| {});
+        settle(10).await;
+        port.rows_lag.set(true);
+        port.set_ticker(101.0, 101.5);
+        settle(1200).await;
+        assert_eq!(port.placements().len(), 2);
+        for _ in 0..3 {
+            port.publish(Change {
+                orders: true,
+                ..Change::default()
+            });
+            settle(10).await;
+        }
+        assert!(!factory.book().active_chasers()[0].is_stopped);
+        assert_eq!(completions(&port), 0);
     })
     .await;
 }
