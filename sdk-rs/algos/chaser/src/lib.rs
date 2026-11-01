@@ -11,7 +11,7 @@ use std::rc::Rc;
 use safe_cex_algos::{AlgoCx, AlgoFactory};
 
 pub use book::{
-    ChaserBook, KEPT_ORDER_STOP_REASON, MAX_CHASES_PER_ACCOUNT, Progress,
+    ANSWER_BOUND_MS, ChaserBook, KEPT_ORDER_STOP_REASON, MAX_CHASES_PER_ACCOUNT, Progress,
     SIGNER_OFFLINE_STOP_REASON, UNCONFIRMED_ORDER_STOP_REASON, retrying_order, settled_orders,
 };
 pub use chase::{

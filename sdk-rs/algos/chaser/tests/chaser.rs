@@ -31,6 +31,8 @@ struct FakePort {
     capabilities: Cell<safe_cex_engine::Capabilities>,
     /// Commands sent into a dead link: never answered.
     unanswered: RefCell<Option<Unanswered>>,
+    /// Every cancel answers only after this long, like a sign waiting out its timeout.
+    cancel_answer_ms: Cell<u64>,
     /// Cancels answer done but leave the row as it was: Bybit 110001 for an
     /// order that filled unseen.
     cancels_find_nothing: Cell<bool>,
@@ -59,9 +61,17 @@ impl AccountPort for FakePort {
             self.commands.borrow_mut().push(command);
             return Box::pin(std::future::pending());
         }
+        let delay = if is_cancel(&command) {
+            self.cancel_answer_ms.get()
+        } else {
+            0
+        };
         let result = (self.responder.borrow_mut())(&command);
         self.commands.borrow_mut().push(command);
-        Box::pin(async move { result })
+        Box::pin(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            result
+        })
     }
     fn emit(&self, op: &str, data: String) {
         self.emitted.borrow_mut().push((op.into(), data));
@@ -92,6 +102,7 @@ impl FakePort {
                 ..safe_cex_engine::Capabilities::BASE
             }),
             unanswered: RefCell::new(None),
+            cancel_answer_ms: Cell::new(0),
             cancels_find_nothing: Cell::new(false),
         })
     }
@@ -968,6 +979,78 @@ async fn a_requote_with_its_signer_gone_says_the_signer_is_offline() {
             )
         );
         assert_eq!(port.placements().len(), 1);
+    })
+    .await;
+}
+
+/// The hosted sign fails only after its 15 s: the chaser must wait to hear that.
+#[tokio::test(start_paused = true)]
+async fn a_requote_cancel_waiting_out_the_sign_timeout_names_the_offline_signer() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok("[]"));
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let back = cancels_fail_until(
+            &port,
+            VenueError::new("Signing provider is unavailable")
+                .kind(ErrorKind::Internal)
+                .outcome(Outcome::NotSent),
+        );
+        port.cancel_answer_ms.set(15_000);
+        port.set_ticker(101.0, 101.5);
+        // The requote's own cancel, then the stop's first attempt.
+        settle(35_000).await;
+        let rows = factory.book().active_chasers();
+        assert!(
+            rows[0]
+                .stop_reason
+                .starts_with(safe_cex_chaser::SIGNER_OFFLINE_STOP_REASON),
+            "{}",
+            rows[0].stop_reason
+        );
+        assert!(
+            warnings(&port)[0].contains("the browser that signs for this account is offline"),
+            "{:?}",
+            warnings(&port)
+        );
+        // One holder: no cancel goes through and nothing ends until it returns.
+        assert_eq!(rows.len(), 1);
+        assert_eq!(completions(&port), 0);
+        port.cancel_answer_ms.set(0);
+        back.set(true);
+        settle(30_000).await;
+        assert_eq!(completions(&port), 1);
+        assert!(
+            warnings(&port)
+                .last()
+                .unwrap()
+                .contains("is cancelled; nothing filled"),
+            "{:?}",
+            warnings(&port)
+        );
+    })
+    .await;
+}
+
+/// The stop reason stays true when a later attempt's cancel goes through.
+#[tokio::test(start_paused = true)]
+async fn a_requote_cancel_that_later_succeeds_says_an_attempt_failed() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok("[]"));
+        let (_factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let back = cancels_fail_until(&port, transport_down());
+        port.set_ticker(101.0, 101.5);
+        settle(5_000).await;
+        back.set(true);
+        settle(15_000).await;
+        let [complete] = port.completes().try_into().unwrap();
+        assert_eq!(
+            complete["stopReason"],
+            "Stopped: a cancel attempt failed: HTTP transport request failed; order o1 is cancelled, nothing filled"
+        );
     })
     .await;
 }
