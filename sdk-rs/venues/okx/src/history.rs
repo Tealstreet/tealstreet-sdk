@@ -606,8 +606,11 @@ impl Okx {
         // Secondary GET snapshots may belong to another account. Their cached
         // client IDs cannot establish primary placement identity.
         else if self.options.read_credentials.is_none()
+            // A Creating row may be a send still in flight; only the venue can say it is placed.
             && let Some(order) = cx.store.orders().iter().find(|order| {
-                order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
+                order.symbol == symbol
+                    && order.status != OrderStatus::Creating
+                    && order.client_order_id.as_deref() == Some(&client_order_id)
             })
         {
             Some(found(order.clone(), None))
@@ -768,6 +771,10 @@ impl Okx {
                 || filled_native > amount
             {
                 return Err("Invalid OKX lookup order".into());
+            }
+            // A post-only reject also reads canceled; with nothing filled it cannot say it was placed.
+            if status == OrderStatus::Canceled && filled_native == 0.0 {
+                return Ok(UNKNOWN.into());
             }
             let kind = match row.ord_type {
                 "market" | "optimal_limit_ioc" => OrderType::Market,

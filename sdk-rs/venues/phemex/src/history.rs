@@ -40,6 +40,8 @@ pub struct Request {
     seen: HashSet<String>,
     count: usize,
     invalid: bool,
+    /// A lookup row that is no evidence of placement: Some(true) refused, Some(false) unclear.
+    unplaced: Option<bool>,
 }
 
 impl Request {
@@ -383,6 +385,7 @@ impl PhemexPerpetuals {
             seen: HashSet::new(),
             count: 0,
             invalid: false,
+            unplaced: None,
         };
         self.history_send(cx, request);
     }
@@ -561,7 +564,7 @@ impl PhemexPerpetuals {
                 let result = serde_json::to_string(&Lookup {
                     found: !rows.is_empty(),
                     order: rows.first(),
-                    definitive: rows.is_empty().then_some(true),
+                    definitive: rows.is_empty().then_some(request.unplaced.unwrap_or(true)),
                 });
                 match result.map_err(|error| error.to_string()) {
                     Ok(data) => {
@@ -665,8 +668,17 @@ fn decode(cx: &Cx<'_, Pending>, request: &mut Request, text: &str) -> Option<()>
                 return None;
             }
             let mut orders = row.orders(milliseconds(row.version()))?;
-            if let Rows::Lookup(rows) = &mut request.rows {
-                rows.push(orders.remove(0));
+            let order = orders.remove(0);
+            // A refusal or an unfilled expiry was never placed; an unfilled cancel cannot say.
+            let status = row.status.to_ascii_lowercase();
+            if order.filled == 0.0 && matches!(status.as_str(), "rejected" | "expired") {
+                request.unplaced = Some(true);
+            } else if order.filled == 0.0
+                && matches!(status.as_str(), "canceled" | "cancelled" | "deactivated")
+            {
+                request.unplaced = Some(false);
+            } else if let Rows::Lookup(rows) = &mut request.rows {
+                rows.push(order);
             }
         }
         Rows::Fills(_) => {

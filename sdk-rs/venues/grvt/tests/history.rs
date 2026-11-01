@@ -1251,3 +1251,30 @@ fn general_page_cap_returns_bounded_rows_with_one_owned_gap() {
     assert!(matches!(notices[1], Notice::CommandDone { .. }));
     assert!(h.requests.iter().all(|r| !r.url.ends_with("fill_history")));
 }
+#[test]
+fn client_lookup_says_placed_only_for_an_order_the_venue_took() {
+    for (status, traded, expected) in [
+        ("REJECTED", "0", Some(r#""definitive":true"#)),
+        ("CANCELLED", "0", Some(r#""definitive":false"#)),
+        ("CANCELLED", "2", None),
+    ] {
+        let mut h = Harness::new(true);
+        h.query(Query::OrderByClientId {
+            symbol: "BTC_USDT_PERP".into(),
+            client_order_id: "9223372036854775807".into(),
+        });
+        let r = h.take("/order");
+        let row = ORDER
+            .replace(r#""s":"FILLED""#, &format!(r#""s":"{status}""#))
+            .replace(r#""ts":["2"]"#, &format!(r#""ts":["{traded}"]"#));
+        h.respond(r, &format!(r#"{{"r":{row}}}"#), "");
+        let result = h.result().unwrap();
+        match expected {
+            Some(definitive) => {
+                assert!(result.contains(r#""found":false"#), "{status}: {result}");
+                assert!(result.contains(definitive), "{status}: {result}");
+            }
+            None => assert!(result.contains(r#""found":true"#), "{status}: {result}"),
+        }
+    }
+}
