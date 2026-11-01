@@ -978,7 +978,8 @@ impl Okx {
                 generation,
                 version,
                 equity,
-                risk_rows: 1,
+                // An account with nothing to report can answer no row at all.
+                risk_rows: 0 | 1,
                 invalid: false,
                 ..
             } => {
@@ -1254,6 +1255,23 @@ impl Okx {
     ) {
         retire(cx, request.page_context());
         if !self.account_request_current(&request) {
+            return;
+        }
+        // A key the config read passed can still be refused the risk or position read.
+        if matches!(request, Request::Balance { .. } | Request::Positions { .. })
+            && !cx.store.loaded().balance
+            && let Some(code) = error.venue_code.clone()
+            && code != "50113"
+            && let Some(kind) = rest_key_rejection(&code)
+        {
+            let read_key = self.options.read_credentials.is_some();
+            let which = if read_key {
+                "read-only API key"
+            } else {
+                "API key"
+            };
+            let refused = rejection(which, &code, &error.message, kind);
+            self.reject_startup(cx, refused, kind == ErrorKind::AuthInvalid && !read_key);
             return;
         }
         match request {

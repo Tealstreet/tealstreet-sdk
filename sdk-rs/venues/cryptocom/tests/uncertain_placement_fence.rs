@@ -350,3 +350,16 @@ fn a_census_whose_orders_leg_predates_a_lost_write_never_releases() {
         "the retry places once released"
     );
 }
+
+#[test]
+fn a_refused_key_fails_the_start_instead_of_polling() {
+    let mut h = Harness::new();
+    let refused = r#"{"code":40101,"message":"UNAUTHENTICATED"}"#;
+    h.reply("get-positions", refused);
+    advance(&mut h, 2_000.0);
+    h.reply("get-positions", refused);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}

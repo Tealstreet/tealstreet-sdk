@@ -702,6 +702,9 @@ impl Account {
             code::AUTH_REJECTED,
             "Paradex rejected the account credentials",
         );
+        if !cx.store.loaded().balance {
+            cx.startup_failed(auth_rejected_error());
+        }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.socket.is_none() && !self.supervisor.is_waiting() {
