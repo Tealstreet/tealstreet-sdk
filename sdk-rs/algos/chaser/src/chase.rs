@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use safe_cex_algos::executor::Instant;
 use safe_cex_algos::{AlgoStore, Scope};
 use safe_cex_engine::VenueError;
-use safe_cex_engine::model::{Order, OrderSide, PositionSide};
+use safe_cex_engine::model::{Order, OrderSide, OrderStatus, PositionSide};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
@@ -119,6 +119,16 @@ pub fn placement_filled(order: &Order) -> f64 {
     }
 }
 
+/// Closed means fully filled, whatever the row says: BloFin and Bitget close a
+/// row by status alone, leaving its fill at what it last showed.
+fn closed_filled(order: &Order, placed: Option<f64>) -> f64 {
+    let filled = placement_filled(order);
+    match placed {
+        Some(placed) if order.status == OrderStatus::Closed => filled.max(placed),
+        _ => filled,
+    }
+}
+
 #[derive(Default)]
 struct State {
     attempts: u32,
@@ -127,6 +137,8 @@ struct State {
     current: Vec<String>,
     ever: Vec<String>,
     filled_by: HashMap<String, f64>,
+    /// What each order was placed for, in placement units.
+    placed: HashMap<String, f64>,
     remaining: f64,
     min_tick_distance: u32,
     pending_update: bool,
@@ -293,13 +305,25 @@ impl Chase {
     /// raises: a row lagging behind a fill event must not restore the
     /// remainder, or the replacement overfills.
     pub fn subtract_filled_size(&self, order: &Order) {
-        let filled = placement_filled(order);
         let mut state = self.state.borrow_mut();
+        let filled = closed_filled(order, state.placed.get(&order.id).copied());
         if filled > state.filled_by.get(&order.id).copied().unwrap_or(0.0) {
             state.last_partial_fill_at = Some(Instant::now());
             state.filled_by.insert(order.id.clone(), filled);
         }
         self.finish_if_filled(&mut state, "Fully filled already");
+    }
+
+    pub fn note_placed(&self, order_id: &str, amount: f64) {
+        self.state
+            .borrow_mut()
+            .placed
+            .insert(order_id.to_owned(), amount);
+    }
+
+    /// The row's fill, the whole order once it is Closed (see [`closed_filled`]).
+    pub fn row_filled(&self, order: &Order) -> f64 {
+        closed_filled(order, self.state.borrow().placed.get(&order.id).copied())
     }
 
     /// An incremental fill event. Malformed amounts never grow the remainder.
