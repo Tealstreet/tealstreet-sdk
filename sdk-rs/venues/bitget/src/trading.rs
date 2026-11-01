@@ -1943,10 +1943,10 @@ impl BitgetFutures {
             } else {
                 parent.price
             });
-            opts.amount = amount.unwrap_or(parent.amount);
+            opts.amount = replacement_size(amount.unwrap_or(parent.amount), parent.filled, m)?;
         } else {
             opts.price = Some(next_price);
-            opts.amount = next_amount;
+            opts.amount = replacement_size(next_amount, order.filled, m)?;
         }
         let mut replacement = if standalone && self.account.uta {
             vec![]
@@ -3105,6 +3105,19 @@ fn uta_trigger(value: Option<StopTriggerType>) -> &'static str {
     } else {
         "mark"
     }
+}
+/// A cancel-and-replace order is new, so it carries only what is left of the total.
+/// A full-position stop's amount of 0 stays 0.
+fn replacement_size(total: f64, filled: f64, market: &Market) -> Result<f64, String> {
+    if filled <= 0.0 {
+        return Ok(total);
+    }
+    if total <= filled {
+        return Err(format!(
+            "Bitget amendment size must exceed the {filled} already filled"
+        ));
+    }
+    Ok(num::adjust(total - filled, market.precision.amount))
 }
 fn amend_remaining(order: &mut Order, inverse: bool) {
     let native = clean((order.amount - order.filled).max(0.0));
