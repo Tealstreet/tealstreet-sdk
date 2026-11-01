@@ -695,14 +695,15 @@ impl Venue for BitunixFutures {
             cx.send(socket, private_ping(cx.now));
             self.account.login_answered = false;
             self.login(cx, socket);
-            if cx.store.loaded().positions {
-                for axis in [
-                    account::Axis::Balance,
-                    account::Axis::Positions,
-                    account::Axis::Orders,
-                ] {
-                    self.read_axis(cx, axis);
-                }
+            // Events before this open were never delivered, the first open included. A read
+            // in flight may predate it: it is marked dirty and re-read once answered. A
+            // positions answer reads TP/SL.
+            for axis in [
+                account::Axis::Balance,
+                account::Axis::Positions,
+                account::Axis::Orders,
+            ] {
+                self.read_axis(cx, axis);
             }
         } else {
             cx.send(socket, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));

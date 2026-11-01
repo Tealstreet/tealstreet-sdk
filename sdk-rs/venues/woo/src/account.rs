@@ -154,6 +154,8 @@ pub struct Account {
     pause_until: f64,
     info_pending: bool,
     positions_pending: bool,
+    /// The stream became live while a read ran: repeat the reads once they settle.
+    read_again: bool,
     positions_guard: StaleGuard,
     orders: Option<OrdersJoin>,
     generation: u64,
@@ -712,8 +714,25 @@ impl Woo {
             return true;
         };
         cx.send(socket, text);
-        self.account_refresh(cx);
         true
+    }
+    /// Events before the subscriptions were never delivered, the first open included.
+    /// A read still running may predate the stream: read again after it settles.
+    pub(crate) fn socket_account_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.read_again = self.account.positions_pending
+            || self.account.orders.is_some()
+            || cx.now < self.account.pause_until;
+        self.account_refresh(cx);
+    }
+    pub(crate) fn account_read_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.read_again
+            && !self.account.positions_pending
+            && self.account.orders.is_none()
+            && cx.now >= self.account.pause_until
+        {
+            self.account.read_again = false;
+            self.account_refresh(cx);
+        }
     }
     pub(crate) fn account_close(&mut self, _cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
@@ -1875,6 +1894,7 @@ impl Woo {
         }
         if self.account.timer == Some(timer) {
             self.account.timer = Some(cx.set_poll_timer(2000.0));
+            self.account_read_again(cx);
             self.account.tick += 1;
             self.account
                 .terminal

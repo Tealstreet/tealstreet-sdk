@@ -258,6 +258,17 @@ impl Woo {
             LifecycleEvent::Ready { epoch, .. } if !self.private_feed(epoch.feed())? => {
                 self.sync_public_interests(cx);
             }
+            LifecycleEvent::Ready { epoch, .. } => {
+                let desired = self.desired_interests(cx.store, true);
+                let required: Vec<_> = desired.iter().map(|item| item.key.to_string()).collect();
+                let keys: Vec<_> = required.iter().map(String::as_str).collect();
+                cx.set_socket_interests_then(
+                    epoch.feed(),
+                    desired,
+                    &keys,
+                    Pending::SocketAccountReady,
+                )?;
+            }
             LifecycleEvent::Authenticated { epoch, first: true } => {
                 cx.send_after_socket_interests(epoch.feed(), r#"{"event":"ping"}"#.into())?;
             }

@@ -63,6 +63,7 @@ impl H {
         let socket = h.socket();
         h.event(Event::WsOpened { socket });
         h.reply("/openOrders", open_orders);
+        h.reply("/positionRisk", POSITION);
         h
     }
     /// The latest private socket: a reconnect opens a new one.

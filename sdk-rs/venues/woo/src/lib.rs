@@ -53,6 +53,8 @@ pub enum Pending {
         generation: u64,
     },
     SocketBookSeeds(Vec<(String, u64)>),
+    /// The private subscriptions are handed off: the stream now covers the account.
+    SocketAccountReady,
     Candles {
         command: CommandId,
         rows: Vec<Candle>,
@@ -599,6 +601,10 @@ impl Venue for Woo {
         epoch: safe_cex_engine::socket_lifecycle::Epoch,
         pending: Pending,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        if matches!(pending, Pending::SocketAccountReady) {
+            self.socket_account_ready(cx);
+            return Ok(());
+        }
         if self.public.feed != Some(epoch.feed())
             || !self.public.open
             || cx.socket_epoch(epoch.feed()) != Some(epoch)
@@ -705,7 +711,7 @@ impl Venue for Woo {
                     *bad = true;
                 }
             }
-            Pending::Depth { .. } | Pending::SocketBookSeeds(_) => (),
+            Pending::Depth { .. } | Pending::SocketBookSeeds(_) | Pending::SocketAccountReady => (),
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -726,6 +732,7 @@ impl Venue for Woo {
         };
         if let Pending::Account(request) = pending {
             self.account_response(cx, request, response);
+            self.account_read_again(cx);
             return;
         }
         if let Pending::Seed(read) = pending {
@@ -737,7 +744,7 @@ impl Venue for Woo {
             return;
         }
         match pending {
-            Pending::SocketBookSeeds(_) => (),
+            Pending::SocketBookSeeds(_) | Pending::SocketAccountReady => (),
             Pending::Identity(_) | Pending::History(_) | Pending::Trade(_) => unreachable!(),
             Pending::Account(_) => unreachable!(),
             Pending::Seed(_) => unreachable!(),
@@ -831,11 +838,14 @@ impl Venue for Woo {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::SocketBookSeeds(_) => (),
+            Pending::SocketBookSeeds(_) | Pending::SocketAccountReady => (),
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
-            Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, error);
+                self.account_read_again(cx);
+            }
             Pending::Seed(read) => self.seed_failed(cx, *read, error, true),
             #[cfg(test)]
             Pending::SigningProbe => (),
