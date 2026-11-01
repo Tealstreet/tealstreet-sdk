@@ -464,3 +464,14 @@ fn a_fill_tracked_chase_reports_its_rest_reconciled_fill_on_completion() {
     assert_eq!(complete["data"]["clientId"], "c1");
     assert_eq!(complete["data"]["filled"], 0.4);
 }
+
+#[test]
+fn a_failed_command_keeps_its_kind_for_the_chaser() {
+    let mut error = VenueError::new("HTTP transport request failed");
+    error.kind = Some(safe_cex_engine::ErrorKind::Network);
+    error.outcome = Some(safe_cex_engine::Outcome::Unknown);
+    let settled = completion_error(&error);
+    assert_eq!(settled.kind, Some(safe_cex_engine::ErrorKind::Network));
+    assert_eq!(settled.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(settled.message, "HTTP transport request failed");
+}

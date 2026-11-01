@@ -100,6 +100,68 @@ describe('a chase or TWAP stop', () => {
   });
 });
 
+describe('a stop the user was told might not have landed', () => {
+  it('ends with how the chase ended, even after NOT confirmed', () => {
+    const { rows, sent, told, watch } = setup();
+    rows.activeChasers = [chaser('c1')];
+    watch.observe('chaser:terminate', 'c1');
+    vi.advanceTimersByTime(60_000);
+    expect(told.at(-1)).toContain('NOT confirmed');
+    const resent = sent.length;
+    // The connection returns; the server replays the chase's end.
+    watch.chaseCompleted({ id: 'c1', symbol: 'BTCUSDT', size: 1, filled: 1 });
+    expect(told.at(-1)).toBe('Chase on BTCUSDT filled 1 before its stop took effect.');
+    vi.advanceTimersByTime(120_000);
+    expect(sent).toHaveLength(resent);
+    expect(told).toHaveLength(3);
+  });
+
+  it('says it stopped, and what filled, when the end comes during the retries', () => {
+    const { rows, told, watch, update } = setup();
+    rows.activeChasers = [chaser('c1')];
+    watch.observe('chaser:terminate', 'c1');
+    vi.advanceTimersByTime(15_000);
+    watch.chaseCompleted({ id: 'c1', symbol: 'BTCUSDT', size: 1, filled: 0.4 });
+    update({ activeChasers: [] });
+    vi.advanceTimersByTime(60_000);
+    expect(told).toEqual([
+      'Chase stop is not confirmed yet; retrying. It may still be running.',
+      'Chase on BTCUSDT stopped after filling 0.4 of 1.',
+    ]);
+  });
+
+  it('says the fill is unknown when the rows confirm it and no end follows', () => {
+    const { rows, told, watch, update } = setup();
+    rows.activeChasers = [chaser('c1')];
+    watch.observe('chaser:terminate', 'c1');
+    vi.advanceTimersByTime(60_000);
+    update({ activeChasers: [] });
+    vi.advanceTimersByTime(9_999);
+    expect(told).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(told.at(-1)).toContain('whether it filled is not known');
+  });
+
+  it('a stop confirmed before any warning says nothing of its end', () => {
+    const { rows, told, watch, update } = setup();
+    rows.activeChasers = [chaser('c1')];
+    watch.observe('chaser:terminate', 'c1');
+    update({ activeChasers: [] });
+    watch.chaseCompleted({ id: 'c1', symbol: 'BTCUSDT', size: 1, filled: 1 });
+    vi.advanceTimersByTime(120_000);
+    expect(told).toEqual([]);
+  });
+
+  it('a TWAP stop confirmed after the warning says so', () => {
+    const { rows, told, watch, update } = setup();
+    rows.activeTWAPs = [twap('t1', TwapStatus.Running)];
+    watch.observe('twap:stop', 't1');
+    vi.advanceTimersByTime(60_000);
+    update({ activeTWAPs: [] });
+    expect(told.at(-1)).toBe('TWAP stop is confirmed now.');
+  });
+});
+
 describe('a start, resume or pause', () => {
   it('is never sent again, and says so when not confirmed', () => {
     const { rows, sent, told, watch } = setup();
@@ -119,7 +181,7 @@ describe('a start, resume or pause', () => {
     watch.observe('chaser:start', { symbol: 'BTCUSDT', side: OrderSide.Buy });
     update({ activeChasers: [chaser('c1')] });
     watch.observe('chaser:start', { symbol: 'ETHUSDT', side: OrderSide.Sell });
-    watch.chaseCompleted('ETHUSDT');
+    watch.chaseCompleted({ symbol: 'ETHUSDT' });
     watch.observe('twap:start', { symbol: 'ETHUSDT' });
     update({ activeTWAPs: [twap('t1', TwapStatus.Running)] });
     vi.advanceTimersByTime(60_000);

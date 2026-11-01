@@ -767,6 +767,41 @@ async fn an_order_that_fills_while_its_cancel_waits_is_not_reported_open() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_stop_whose_cancel_the_venue_refused_because_it_filled_says_filled() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        // The venue filled it first: its refusal arrives with the fill.
+        let weak = Rc::downgrade(&port);
+        *port.responder.borrow_mut() = Box::new(move |command| match command {
+            Command::CancelOrders { .. } | Command::CancelOrdersWithSymbols { .. } => {
+                weak.upgrade().unwrap().update_order("o1", |order| {
+                    order.status = OrderStatus::Closed;
+                    order.filled = order.amount;
+                    order.remaining = 0.0;
+                });
+                Err(VenueError::new("order not exists or too late to cancel"))
+            }
+            _ => Ok("null".into()),
+        });
+        stop(&factory, &cx);
+        settle(100).await;
+        assert!(
+            warnings(&port).iter().any(|w| w.contains("o1")
+                && w.contains("filled")
+                && w.contains("before its cancel")),
+            "{:?}",
+            warnings(&port)
+        );
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+        assert_eq!(completions(&port), 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_order_still_open_when_its_cancel_is_refused_is_reported() {
     local(async {
         let port = FakePort::new("bybit");

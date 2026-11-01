@@ -4,7 +4,7 @@ use safe_cex_algos::projection::{self, Snapshot};
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoStore, Change, CommandFuture, Registry, Scope};
 use safe_cex_chaser::ActiveChaser;
 use safe_cex_engine::engine::{Command, CommandId, Fill, VenueAction};
-use safe_cex_engine::error::{Outcome, VenueError};
+use safe_cex_engine::error::{ErrorKind, Outcome, VenueError};
 use safe_cex_engine::model::OrderStatus;
 use safe_cex_native::{AccountHandle, Outgoing};
 use serde_json::Value;
@@ -69,7 +69,10 @@ struct Unheard {
     told: Vec<u64>,
     /// A parked session, or nobody at all, was not told.
     owed: bool,
-    data: String,
+    /// An error's message, for the stop notice; None for an outcome notice.
+    error: Option<String>,
+    /// The frame as sent, replayed as is.
+    frame: String,
 }
 
 /// Bound on settling chaser cancels before the engine is disposed anyway.
@@ -162,11 +165,22 @@ impl AccountPort for Port {
         if op == "error" {
             self.errors.set(self.errors.get() + 1);
             crate::state::Log::warn(&format!("algo error {}: {data}", self.name));
-            let holding = (self.broadcast)(Some(algo_error(&self.name, &data)));
-            self.keep_unheard(data, holding);
+            let frame = algo_error(&self.name, &data);
+            let holding = (self.broadcast)(Some(frame.clone()));
+            self.keep_unheard(Some(data), frame, holding);
             return;
         }
-        (self.emit)(algo_msg(&self.name, op, data));
+        let frame = algo_msg(&self.name, op, data);
+        if owed_on_rejoin(op) {
+            let mut holding = (self.broadcast)(None);
+            if let Some(signer) = &self.signer {
+                holding.live = vec![signer.socket()];
+            }
+            (self.emit)(frame.clone());
+            self.keep_unheard(None, frame, holding);
+            return;
+        }
+        (self.emit)(frame);
     }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         *self.handle.capabilities()
@@ -246,7 +260,7 @@ impl Port {
         error.sent.elapsed() < UNHEARD_TTL && (error.owed || !error.told.iter().all(heard))
     }
 
-    fn keep_unheard(&self, data: String, holding: Holding) {
+    fn keep_unheard(&self, error: Option<String>, frame: String, holding: Holding) {
         let mut unheard = self.unheard.borrow_mut();
         unheard.retain(|error| self.still_unheard(error));
         if unheard.len() == UNHEARD_ERRORS {
@@ -256,7 +270,8 @@ impl Port {
             sent: Instant::now(),
             owed: holding.parked || holding.live.is_empty(),
             told: holding.live,
-            data,
+            error,
+            frame,
         });
     }
 
@@ -266,7 +281,7 @@ impl Port {
             .borrow_mut()
             .drain(..)
             .filter(|error| self.still_unheard(error))
-            .map(|error| error.data)
+            .filter_map(|error| error.error)
             .collect()
     }
 
@@ -289,7 +304,7 @@ impl Port {
             error.told.retain(|socket| holding.live.contains(socket));
             error.told.push(joining);
             error.owed = holding.parked;
-            replay.push(error.data.clone());
+            replay.push(error.frame.clone());
         }
         replay
     }
@@ -313,21 +328,7 @@ impl Port {
         let Some(waiter) = self.pending.borrow_mut().remove(&id) else {
             return;
         };
-        let result = match (notice["result"].as_str(), notice["error"].as_str()) {
-            (Some(result), _) => Ok(result.to_owned()),
-            (None, Some(message)) => {
-                let mut error = VenueError::new(message);
-                error.outcome = match notice["detail"]["outcome"].as_str() {
-                    Some("unknown") => Some(Outcome::Unknown),
-                    Some("rejected") => Some(Outcome::Rejected),
-                    Some("notSent") => Some(Outcome::NotSent),
-                    _ => None,
-                };
-                Err(error)
-            }
-            (None, None) => Ok("null".into()),
-        };
-        let _ = waiter.send(result);
+        let _ = waiter.send(completion(notice));
     }
 }
 
@@ -709,9 +710,9 @@ pub async fn run(
                     published.clear();
                     publish(&mut published);
                     // What it stopped for while the browser was gone, once.
-                    for data in port.take_for_join() {
-                        crate::state::Log::info(&format!("algo error replayed {name}: {data}"));
-                        (port.emit)(algo_error(&name, &data));
+                    for frame in port.take_for_join() {
+                        crate::state::Log::info(&format!("algo notice replayed {name}: {frame}"));
+                        (port.emit)(frame);
                     }
                 }
                 Some(AlgoInput::Dispose { reason, stopped }) => break Some((reason, stopped)),
@@ -823,10 +824,86 @@ impl Drop for NukeReply {
     }
 }
 
+/// A command's completion as the chaser sees it. The kind travels too: the
+/// chaser retries a cancel only on a transport kind.
+fn completion(notice: &Value) -> Result<String, VenueError> {
+    match (notice["result"].as_str(), notice["error"].as_str()) {
+        (Some(result), _) => Ok(result.to_owned()),
+        (None, Some(message)) => {
+            let mut error = VenueError::new(message);
+            error.kind = notice["detail"]["kind"].as_str().and_then(error_kind);
+            error.outcome = match notice["detail"]["outcome"].as_str() {
+                Some("unknown") => Some(Outcome::Unknown),
+                Some("rejected") => Some(Outcome::Rejected),
+                Some("notSent") => Some(Outcome::NotSent),
+                _ => None,
+            };
+            Err(error)
+        }
+        (None, None) => Ok("null".into()),
+    }
+}
+
+/// A chase's end and its outcome warnings are owed to a page that was away, as errors are.
+fn owed_on_rejoin(op: &str) -> bool {
+    matches!(op, "warning" | "chaser:complete")
+}
+
+fn error_kind(kind: &str) -> Option<ErrorKind> {
+    Some(match kind {
+        "rejected" => ErrorKind::Rejected,
+        "invalidInput" => ErrorKind::InvalidInput,
+        "insufficientBalance" => ErrorKind::InsufficientBalance,
+        "authInvalid" => ErrorKind::AuthInvalid,
+        "authExpired" => ErrorKind::AuthExpired,
+        "authPermission" => ErrorKind::AuthPermission,
+        "rateLimited" => ErrorKind::RateLimited,
+        "network" => ErrorKind::Network,
+        "timeout" => ErrorKind::Timeout,
+        "venueUnavailable" => ErrorKind::VenueUnavailable,
+        "unsupported" => ErrorKind::Unsupported,
+        "internal" => ErrorKind::Internal,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_chase_end_and_its_warnings_are_replayed_to_a_page_that_was_away() {
+        assert!(owed_on_rejoin("chaser:complete"));
+        assert!(owed_on_rejoin("warning"));
+        assert!(!owed_on_rejoin("log"));
+        assert!(!owed_on_rejoin("twap:stateUpdate"));
+    }
+
+    #[test]
+    fn a_failed_command_keeps_its_kind_for_the_chaser() {
+        let notice = json!({"type":"done","command":7,"error":"HTTP transport request failed",
+            "detail":{"kind":"network","outcome":"unknown"}});
+        let error = completion(&notice).unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::Network));
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        for kind in [
+            ErrorKind::Rejected,
+            ErrorKind::InvalidInput,
+            ErrorKind::InsufficientBalance,
+            ErrorKind::AuthInvalid,
+            ErrorKind::AuthExpired,
+            ErrorKind::AuthPermission,
+            ErrorKind::RateLimited,
+            ErrorKind::Network,
+            ErrorKind::Timeout,
+            ErrorKind::VenueUnavailable,
+            ErrorKind::Unsupported,
+            ErrorKind::Internal,
+        ] {
+            assert_eq!(error_kind(kind.as_str()), Some(kind));
+        }
+    }
 
     #[test]
     fn the_audit_reads_ok_only_when_every_cancel_settled() {

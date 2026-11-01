@@ -987,7 +987,12 @@ impl ChaserBook {
             };
             let elapsed = started.elapsed().as_millis() as u64;
             if !cancel_retryable(&error) || elapsed >= CANCEL_RETRY_BOUND_MS {
-                self.cancel_failed(&symbol, std::slice::from_ref(&id.to_owned()), &error);
+                // A refusal is often the order already filling: completion, with its fills, says which.
+                if cancel_retryable(&error) {
+                    self.cancel_failed(&symbol, std::slice::from_ref(&id.to_owned()), &error);
+                } else {
+                    chase.note_cancel_refused(id, &symbol, error);
+                }
                 break;
             }
             if !retrying && !self.known_closed(id) {
@@ -1047,6 +1052,16 @@ impl ChaserBook {
                 .filled_size()
                 .max(self.bybit_demo_position_fill(chase))
         };
+        for (id, symbol, error) in chase.take_cancel_refused() {
+            let order_filled = chase.filled_by(&id);
+            if order_filled > 0.0 {
+                self.warn(&format!(
+                    "Chaser stopped: {symbol} order {id} filled {order_filled} before its cancel got through"
+                ));
+            } else {
+                self.cancel_failed(&symbol, std::slice::from_ref(&id), &error);
+            }
+        }
         let event = ChaserComplete {
             id: chase.id.clone(),
             client_id: chase.options.client_id.clone(),

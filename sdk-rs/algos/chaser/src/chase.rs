@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use safe_cex_algos::executor::Instant;
 use safe_cex_algos::{AlgoStore, Scope};
+use safe_cex_engine::VenueError;
 use safe_cex_engine::model::{Order, OrderSide, PositionSide};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -129,6 +130,8 @@ struct State {
     fresh_order: bool,
     complete_emitted: bool,
     cancels_claimed: Vec<String>,
+    /// Orders whose stop cancel the venue refused while the store still had them open.
+    cancel_refused: Vec<(String, String, VenueError)>,
     last_partial_fill_at: Option<Instant>,
 }
 
@@ -267,6 +270,29 @@ impl Chase {
             state.filled_by.insert(order_id.into(), total);
             self.finish_if_filled(&mut state, "Fully filled via REST check");
         }
+    }
+
+    pub fn filled_by(&self, order_id: &str) -> f64 {
+        self.state
+            .borrow()
+            .filled_by
+            .get(order_id)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// A stop cancel the venue refused: (order, symbol, refusal), told at completion.
+    pub fn note_cancel_refused(&self, order_id: &str, symbol: &str, error: VenueError) {
+        let mut state = self.state.borrow_mut();
+        if !state.cancel_refused.iter().any(|(id, ..)| id == order_id) {
+            state
+                .cancel_refused
+                .push((order_id.to_owned(), symbol.to_owned(), error));
+        }
+    }
+
+    pub fn take_cancel_refused(&self) -> Vec<(String, String, VenueError)> {
+        std::mem::take(&mut self.state.borrow_mut().cancel_refused)
     }
 
     pub fn claim_complete_emission(&self) -> bool {
