@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
 import type { CLISession, PromptConfig } from '../../../packages/cli-core/src/index';
+import { chaseAbandonedByExit } from './chaseAbandoned';
 import type { CommandContext } from '../../../packages/cli-core/src/commands/Command';
 import {
   executeCommand as cliExecuteCommand,
@@ -2829,7 +2830,7 @@ export async function runSingleCommand(
   const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
   await processCommand(commandString, { drainFinalInFlight: true });
   await waitForTwapsStartedByCommand(twapsBeforeCommand);
-  const abandoned = chaseAbandonedByExit(session.currentExchange);
+  const abandoned = chaseAbandonedByExit();
   if (abandoned) adapter.printError(abandoned);
   await teardownOneShot(session.currentExchange, abandoned ? 1 : 0);
 }
@@ -2912,7 +2913,7 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
         }
         const exchangeDuring = exchangeLines.slice(exchangeStart);
         const lateRejection = needsKey ? findKeyRejection(exchangeDuring.map((line) => line.text)) : undefined;
-        const abandoned = chaseAbandonedByExit(session.currentExchange);
+        const abandoned = chaseAbandonedByExit();
         const summary = abandoned
           ? { ok: false, code: 'CHASE_ABANDONED' as const, error: abandoned }
           : lateRejection
@@ -2943,13 +2944,6 @@ async function teardownOneShot(exchange: NonNullable<typeof session.currentExcha
     await flushCliSentry();
   }
   process.exit(exitCode);
-}
-
-/** A chase lives in this process, which exits now: its order stays with nothing managing it. */
-function chaseAbandonedByExit(exchange: NonNullable<typeof session.currentExchange>): string | undefined {
-  const running = (exchange.store as { activeChasers?: unknown[] }).activeChasers?.length ?? 0;
-  if (!running) return undefined;
-  return `A chase runs only while this process does, and this one-shot command is exiting: nothing is chasing now and its limit order may still be open. Check open orders, and chase from the interactive prompt.`;
 }
 
 async function waitForTwapsStartedByCommand(twapsBeforeCommand: Set<string>): Promise<void> {
