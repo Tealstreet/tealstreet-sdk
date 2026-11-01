@@ -147,6 +147,8 @@ pub struct Message<'a> {
     pub channel: Str<'a>,
     pub symbol: Str<'a>,
     pub op: Str<'a>,
+    /// The frame carries a `pong` field; Bitunix answers a ping with op `ping` and this.
+    pub pong: bool,
     pub data: Option<&'a serde_json::value::RawValue>,
     pub public: Option<PublicData<'a>>,
 }
@@ -176,6 +178,7 @@ impl<'de> Deserialize<'de> for Message<'de> {
             Channel,
             Symbol,
             Op,
+            Pong,
             Data,
             #[serde(other)]
             Other,
@@ -198,6 +201,7 @@ impl<'de> Deserialize<'de> for Message<'de> {
                         Field::Symbol => (4, "symbol"),
                         Field::Op => (8, "op"),
                         Field::Data => (16, "data"),
+                        Field::Pong => (32, "pong"),
                         Field::Other => (0, ""),
                     };
                     if seen & bit != 0 {
@@ -209,6 +213,10 @@ impl<'de> Deserialize<'de> for Message<'de> {
                         Field::Channel => message.channel = map.next_value::<Text<'de>>()?.0,
                         Field::Symbol => message.symbol = map.next_value::<Text<'de>>()?.0,
                         Field::Op => message.op = map.next_value::<Text<'de>>()?.0,
+                        Field::Pong => {
+                            map.next_value::<de::IgnoredAny>()?;
+                            message.pong = true;
+                        }
                         Field::Data => match message.ch.as_ref() {
                             "ticker" => {
                                 message.public =
