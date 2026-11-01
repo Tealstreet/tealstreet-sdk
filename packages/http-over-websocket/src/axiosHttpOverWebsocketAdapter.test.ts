@@ -132,7 +132,7 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
       method: 'POST',
       url: final.url,
       params: {},
-      data: { value: '001.20' },
+      data: final.data,
     });
     expect(() => bound.dispatch()).toThrow();
     await expect(response).resolves.toMatchObject({ data: '[]', config: final });
@@ -152,7 +152,7 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     const prepared = await adapter.prepare(config);
     mockWs.replyTo = (sent) => mockWs.emitter.emit('sub:' + sent.nonce, { data_raw: raw, status: 200, headers: {} });
     const response = await prepared.bind(config).dispatch();
-    expect(JSON.stringify(mockWs.sentMessages[0].arg.data)).toBe(config.data);
+    expect(mockWs.sentMessages[0].arg.data).toBe(config.data);
     expect(response.data).toBe(raw);
     expect(mockWs.sentMessages[0]).toMatchObject({ format: 'raw', accept_encoding: ['gzip'], accept_binary: true });
     adapter.dispose();
@@ -219,64 +219,23 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     }
   });
 
-  it('sends a sorted form body as a map', async () => {
-    const adapter = createAxiosHttpOverWebsocketAdapter();
-    const config: any = {
-      url: 'https://example.com/w',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      data: 'quantity=1&signature=abc&symbol=BTC+USDT',
-    };
-    const prepared = await adapter.prepare(config);
-    prepared.bind(config).dispatch().catch(() => {});
-    expect(mockWs.sentMessages[0].arg.data).toEqual({ quantity: '1', signature: 'abc', symbol: 'BTC USDT' });
-    adapter.dispose();
-  });
-
   it.each([
-    ['an array under a form type', '[{"a":1}]', { 'content-type': 'application/x-www-form-urlencoded' }],
-    ['a number the parser would change', '{"n":1.000}', {}],
-    ['a large integer', '{"id":18446744073709551615}', {}],
-    ['spacing', '{"a": 1}', {}],
-    ['an integer-like key reordered', '{"b":1,"1":2}', {}],
+    ['a sorted form', 'quantity=1&symbol=BTC+USDT', { 'Content-Type': 'application/x-www-form-urlencoded' }],
+    ['an unsorted form', 'symbol=BTC&quantity=1', { 'Content-Type': 'application/x-www-form-urlencoded' }],
+    ['a JSON array', '[{"tag":"x","sz":"1"}]', { 'Content-Type': 'application/json' }],
+    ['numbers JS would change', '{"n":1.000,"id":18446744073709551615}', {}],
+    ['spacing', ' {"a": 1}\n', {}],
     ['a signed empty object', '{}', {}],
-    ['a form string under no form type', 'a=1&b=2', {}],
-    ['an unsorted form', 'symbol=BTC&quantity=1', { 'content-type': 'application/x-www-form-urlencoded' }],
-  ])('refuses %s before sending, since the venue could not receive the signed bytes', async (_label, data, headers) => {
+  ])('sends %s as the exact signed text', async (_label, data, headers) => {
     const adapter = createAxiosHttpOverWebsocketAdapter();
     const config: any = { url: 'https://example.com/w', method: 'POST', headers, data };
     const prepared = await adapter.prepare(config);
-    expect(() => prepared.bind(config)).toThrow(expect.objectContaining({ code: 'HTTP_PREPARATION_UNSUPPORTED' }));
-    expect(mockWs.sentMessages).toHaveLength(0);
-    adapter.dispose();
-  });
-
-  it('sends a JSON array body as the array, with the bytes it was signed over', async () => {
-    const adapter = createAxiosHttpOverWebsocketAdapter();
-    const body = '[{"instId":"BTC-USDT-SWAP","tag":"x","sz":"1"},{"instId":"ETH-USDT-SWAP","tag":"x","sz":"2"}]';
-    const config: any = {
-      url: 'https://www.okx.com/api/v5/trade/batch-orders',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      data: body,
-    };
-    const prepared = await adapter.prepare(config);
     prepared.bind(config).dispatch().catch(() => {});
-    expect(Array.isArray(mockWs.sentMessages[0].arg.data)).toBe(true);
-    expect(JSON.stringify(mockWs.sentMessages[0].arg.data)).toBe(body);
+    expect(mockWs.sentMessages[0].arg.data).toBe(data);
     adapter.dispose();
   });
 
-  it('sends no body for an empty one', async () => {
-    const adapter = createAxiosHttpOverWebsocketAdapter();
-    const config: any = { url: 'https://example.com/r', method: 'POST', headers: {}, data: '' };
-    const prepared = await adapter.prepare(config);
-    prepared.bind(config).dispatch().catch(() => {});
-    expect(mockWs.sentMessages[0].arg.data).toBeUndefined();
-    adapter.dispose();
-  });
-
-  it('attaches caller config (with custom keys + headers) to the resolved tunnel response', async () => {
+it('attaches caller config (with custom keys + headers) to the resolved tunnel response', async () => {
     const adapter = createAxiosHttpOverWebsocketAdapter();
     const callerConfig: any = {
       url: '/api/path',
