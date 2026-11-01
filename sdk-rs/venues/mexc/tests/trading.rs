@@ -1575,3 +1575,77 @@ fn failures_after_an_effective_step_are_never_rejected_or_not_sent() {
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(error.outcome, None, "{error:?}");
 }
+
+fn amend_fixture() -> (TestEngine, safe_cex_engine::SocketId) {
+    let (mut e, socket, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.order","data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":10,"price":59000,"state":2}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    (e, socket)
+}
+
+#[test]
+fn an_amend_below_the_contract_minimum_is_refused_before_the_cancel() {
+    let (mut e, _) = amend_fixture();
+    e.handle(
+        300.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "one".into(),
+            price: None,
+            amount: Some(10.5),
+        }),
+    );
+    let actions = drained(&mut e);
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
+        "{actions:?}"
+    );
+    assert!(
+        format!("{actions:?}").contains("the order is unchanged"),
+        "{actions:?}"
+    );
+}
+
+#[test]
+fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
+    let (mut e, _) = amend_fixture();
+    e.handle(
+        300.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "one".into(),
+            price: Some(58000.0),
+            amount: None,
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &cancel,
+        400.0,
+        r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+    );
+    let read = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &read,
+        450.0,
+        r#"{"success":true,"code":0,"data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":59.5,"price":59000,"state":4}}"#,
+    );
+    let refused = failures(&mut e);
+    assert!(
+        refused
+            .iter()
+            .any(|f| f.message.contains("Your BTC_USDT order is gone")
+                || f.message.contains("Your BTCUSDT order is gone")),
+        "{refused:?}"
+    );
+}

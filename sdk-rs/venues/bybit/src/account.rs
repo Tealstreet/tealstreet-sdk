@@ -2297,11 +2297,25 @@ impl BybitLinear {
                 } else {
                     OrderStatus::Canceled
                 };
+                let parent = mapped.orders.first().map(|order| order.id.clone());
                 for order in mapped.orders.drain(..) {
                     cx.store.upsert_order(Order {
                         status: final_status,
                         ..order
                     });
+                }
+                // A terminal row may not repeat its TP/SL; the legs do not outlive it anyway.
+                if let Some(parent) = parent {
+                    for suffix in ["__stop_loss", "__take_profit"] {
+                        let leg = format!("{parent}{suffix}");
+                        if cx
+                            .store
+                            .order(&leg)
+                            .is_some_and(|o| o.status == OrderStatus::Open)
+                        {
+                            cx.store.set_order_status(&leg, OrderStatus::Canceled);
+                        }
+                    }
                 }
             }
             "New" | "Untriggered" | "PartiallyFilled" => {

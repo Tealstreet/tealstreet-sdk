@@ -1485,10 +1485,25 @@ fn price_wire(price: f64, amount_step: f64, spot: bool) -> Result<String, String
     if !price.is_finite() || price <= 0.0 {
         return Err("Invalid order price".into());
     }
-    let significant_step = 10f64.powi((price.log10().floor() as i32 - 4).min(0));
-    let significant = num::adjust(price, significant_step);
+    let significant = round_decimal(price, (4 - price.log10().floor() as i32).max(0));
     let decimals = (if spot { 8 } else { 6 }) - num::decimals(amount_step) as i32;
-    float_wire(num::adjust(significant, 10f64.powi(-decimals)))
+    float_wire(round_decimal(significant, decimals.max(0)))
+}
+
+/// Half-up on the decimal digits the user sees: binary rounding misses exact ties by a tick.
+fn round_decimal(value: f64, places: i32) -> f64 {
+    let text = format!("{value}");
+    let (whole, fraction) = text.split_once('.').unwrap_or((&text, ""));
+    let places = places as usize;
+    if fraction.len() <= places {
+        return value;
+    }
+    let digits = format!("{whole}{}", &fraction[..places]);
+    let Ok(kept) = digits.parse::<u128>() else {
+        return value;
+    };
+    let kept = kept + u128::from(fraction.as_bytes()[places] >= b'5');
+    format!("{kept}e-{places}").parse().unwrap_or(value)
 }
 
 /// Refused before any request was sent.
@@ -1504,6 +1519,17 @@ fn unproven(message: impl Into<String>) -> VenueError {
 #[cfg(test)]
 mod signing_tests {
     use super::*;
+    #[test]
+    fn price_ties_round_up_in_decimal() {
+        for (price, wire) in [
+            (1.00185, "1.0019"),
+            (1.00395, "1.004"),
+            (1.00805, "1.0081"),
+            (10.12345, "10.123"),
+        ] {
+            assert_eq!(price_wire(price, 0.1, false).unwrap(), wire, "{price}");
+        }
+    }
     #[test]
     fn schedule_encoding_hash_and_signature_match_independent_ts_vectors() {
         #[derive(serde::Deserialize)]

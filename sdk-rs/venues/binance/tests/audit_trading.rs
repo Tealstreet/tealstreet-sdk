@@ -920,3 +920,86 @@ fn amending_a_hedge_close_keeps_its_native_position_side() {
         replacement.url
     );
 }
+
+fn order_of(amount: f64) -> safe_cex_engine::model::PlaceOrderOpts {
+    serde_json::from_value(serde_json::json!({
+        "symbol": "BTCUSDT", "type": "market", "side": "buy", "amount": amount
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_quantity_rounding_to_zero_is_refused_and_a_split_sends_exactly_its_amount() {
+    let mut h = ready(Variant::UsdM);
+    let mut markets = h.engine.store().markets().to_vec();
+    let at = markets.iter().position(|m| m.symbol == "BTCUSDT").unwrap();
+    markets[at].precision.amount = 0.1;
+    markets[at].limits.amount.min = 0.1;
+    markets[at].limits.amount.max = 4.0;
+    h.engine.store_mut().set_markets(markets);
+    h.requests.clear();
+
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 70,
+        orders: vec![order_of(0.01)],
+    }));
+    assert!(
+        !h.requests.iter().any(|r| r.method == Method::Post),
+        "{:?}",
+        h.requests
+    );
+
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 71,
+        orders: vec![order_of(10.5)],
+    }));
+    let mut sizes = Vec::new();
+    for _ in 0..6 {
+        let Some(at) = h.requests.iter().position(|r| r.method == Method::Post) else {
+            break;
+        };
+        let r = h.requests.remove(at);
+        let text = format!("{} {}", r.url, r.body.clone().unwrap_or_default())
+            .replace("%22", "")
+            .replace("%3A", ":");
+        for rest in text.split("quantity").skip(1) {
+            let digits = rest.trim_start_matches(|c: char| !c.is_ascii_digit());
+            let end = digits
+                .find(|c: char| !c.is_ascii_digit() && c != '.')
+                .unwrap_or(digits.len());
+            sizes.push(digits[..end].to_owned());
+        }
+        h.reply(
+            r.id,
+            200,
+            "",
+            r#"[{"orderId":1},{"orderId":2},{"orderId":3}]"#,
+        );
+    }
+    assert_eq!(sizes, ["4", "4", "2.5"]);
+}
+
+#[test]
+fn an_amend_below_the_value_minimum_is_refused_before_the_cancel() {
+    let mut h = ready(Variant::UsdM);
+    let mut order = h.engine.store().order("12").unwrap().clone();
+    order.reduce_only = false;
+    h.engine.store_mut().upsert_order(order);
+    h.requests.clear();
+    h.event(Event::Command(Command::AmendOrder {
+        command: 80,
+        id: "12".into(),
+        price: Some(0.1),
+        amount: None,
+    }));
+    assert!(
+        !h.requests.iter().any(|r| r.method == Method::Delete),
+        "{:?}",
+        h.requests
+    );
+    assert!(
+        format!("{:?}", h.done).contains("the order is unchanged"),
+        "{:?}",
+        h.done
+    );
+}

@@ -1498,7 +1498,7 @@ impl BitgetFutures {
             }
             while left > 0.0 {
                 let size = left.min(max);
-                left = clean(left - size);
+                left = num::adjust(left - size, m.precision.amount);
                 let payload = self.normal_payload(cx, o, size)?;
                 if self.account.uta {
                     calls.push(Planned {
