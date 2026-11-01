@@ -3914,6 +3914,15 @@ fn a_position_stop_quantity_rounding_to_zero_is_refused() {
         "{:?}",
         h.paths()
     );
+    assert!(
+        h.result(1)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("below the BTCUSDT size step"),
+        "{:?}",
+        h.result(1)
+    );
 }
 
 // B3: one coin refusing leaves the other coins to be tried.
@@ -3938,5 +3947,74 @@ fn inverse_position_mode_tries_every_coin_past_a_refusal() {
         200,
         r#"{"retCode":10001,"retMsg":"refused"}"#,
     );
+    h.advance(250.0);
     assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
+}
+
+#[test]
+fn inverse_position_mode_paces_its_coins() {
+    let mut h = ready(Variant::Inverse);
+    let mut second = h.engine.store().markets()[0].clone();
+    second.base = "ZZZ".into();
+    second.symbol = "ZZZUSD".into();
+    second.id = "ZZZUSD".into();
+    let mut markets = h.engine.store().markets().to_vec();
+    markets.push(second);
+    h.engine.store_mut().set_markets(markets);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: None,
+    });
+    h.respond(
+        "/v5/position/switch-mode",
+        200,
+        r#"{"retCode":0,"result":{}}"#,
+    );
+    assert!(
+        !h.has_request("/v5/position/switch-mode"),
+        "{:?}",
+        h.paths()
+    );
+    h.advance(250.0);
+    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
+}
+
+// A cached mode Bybit just refused is re-read before the next order.
+#[test]
+fn a_refused_position_mode_is_forgotten() {
+    let mut h = ready(Variant::Demo);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    resolve_mode(&mut h, "BTCUSDT");
+    // The refused batch falls back to its single create, refused the same way.
+    while h.has_request("/v5/order/create") {
+        h.respond(
+            "/v5/order/create",
+            200,
+            r#"{"retCode":10001,"retMsg":"position idx not match position mode","result":{},"retExtInfo":{}}"#,
+        );
+    }
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(!h.has_request("/v5/order/create"), "{:?}", h.paths());
+    assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
+}
+
+// TS treats this as done.
+#[test]
+fn amend_answered_order_not_modified_succeeds() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+    h.command(Command::AmendOrder {
+        command: 2,
+        id: "parent".into(),
+        price: Some(100.0),
+        amount: None,
+    });
+    resolve_mode(&mut h, "BTCUSDT");
+    h.respond(
+        "/v5/order/amend",
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    assert!(h.result(2).unwrap().is_ok(), "{:?}", h.result(2));
 }
