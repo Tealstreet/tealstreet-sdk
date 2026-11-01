@@ -1197,6 +1197,11 @@ impl BybitLinear {
         is_linear(category, symbol) && (!self.variant.is_hyro() || symbol.ends_with("USDT"))
     }
 
+    /// A REST row answers the category requested: spot rows carry it only at the top level.
+    fn read_row_trades(&self, category: &Option<Str<'_>>, symbol: &str) -> bool {
+        self.trades_row(category, symbol) || self.variant.is_spot() && present(category).is_none()
+    }
+
     fn map_account_position(
         &self,
         row: &PositionRow<'_>,
@@ -2453,7 +2458,7 @@ impl BybitLinear {
         let identity = rejected_identity(item);
         if let Some(identity) = &identity
             && let Some(symbol) = identity.symbol.as_deref().filter(|v| !v.is_empty())
-            && !self.trades_row(&identity.category.as_deref().map(Into::into), symbol)
+            && !self.read_row_trades(&identity.category.as_deref().map(Into::into), symbol)
         {
             return;
         }
@@ -2520,7 +2525,7 @@ impl BybitLinear {
                     }
                     return;
                 }
-                if !self.trades_row(&row.category, &row.symbol) {
+                if !self.read_row_trades(&row.category, &row.symbol) {
                     return;
                 }
                 let mapped = map_order(&row, cx.store, cx.now);

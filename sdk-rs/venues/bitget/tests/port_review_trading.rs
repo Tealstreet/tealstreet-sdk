@@ -512,3 +512,47 @@ fn uta_isolated_hedge_writes_name_both_sides_leverage() {
     assert_eq!(payload["longLeverage"], "10");
     assert_eq!(payload["shortLeverage"], "11");
 }
+
+#[test]
+fn an_isolated_uta_stop_names_its_margin_mode_and_cross_stays_as_it_was() {
+    for (margin, expected) in [
+        (MarginType::Isolated, Some("isolated")),
+        (MarginType::Cross, None),
+    ] {
+        let mut h = leverage_fixture(true, true, margin);
+        h.command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![serde_json::from_value(serde_json::json!({
+                "symbol": "BTCUSDT", "type": "stop_market", "side": "sell", "amount": 0.5, "price": 50.0
+            }))
+            .unwrap()],
+        });
+        let request = h.take("/place-strategy-order");
+        let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload["marginMode"].as_str(), expected);
+    }
+}
+
+#[test]
+fn uta_isolated_hedge_margin_write_sends_side_leverage_and_cross_sends_plain() {
+    let mut h = leverage_fixture(true, true, MarginType::Cross);
+    h.command(Command::SetMarginType {
+        command: 2,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/set-leverage");
+    let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert!(payload.get("leverage").is_none());
+    assert_eq!(payload["longLeverage"], "10");
+
+    let mut h = leverage_fixture(true, true, MarginType::Isolated);
+    h.command(Command::SetMarginType {
+        command: 2,
+        symbol: "BTCUSDT".into(),
+        isolated: false,
+    });
+    let request = h.take("/set-leverage");
+    let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert!(payload.get("leverage").is_some() && payload.get("longLeverage").is_none());
+}
