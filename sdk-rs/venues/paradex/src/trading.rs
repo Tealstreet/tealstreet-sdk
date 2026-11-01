@@ -1121,9 +1121,6 @@ impl Trading {
                     } else {
                         code::ORDER_REJECTED
                     };
-                    // A failed entry fails the command, whose caller names it; a toast here doubles it.
-                    let level = if leg.is_some() { Level::Error } else { Level::Warn };
-                    cx.notice(level, code, message);
                     // A failed entry orphans its children; a failed child must not skip its
                     // sibling, or a rejected TP would leave the position without its SL.
                     if leg.is_none() {
@@ -1140,6 +1137,16 @@ impl Trading {
                         job.leg_refused = true;
                         job.errors.push(error);
                     }
+                    // Only when the command fails on this entry does its caller name it; a toast
+                    // would double that. Beside an accepted order, this line is the only report.
+                    let fails_command =
+                        leg.is_none() && job.results.is_empty() && job.operations.is_empty();
+                    let level = if fails_command {
+                        Level::Warn
+                    } else {
+                        Level::Error
+                    };
+                    cx.notice(level, code, message);
                 } else {
                     job.errors.push(error);
                     if !job.attempt_all || matches!(request.kind, Kind::Quotes(_)) {
