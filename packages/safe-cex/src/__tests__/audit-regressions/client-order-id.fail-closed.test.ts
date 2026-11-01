@@ -421,6 +421,40 @@ describe('mintClientOrderId', () => {
   });
 });
 
+describe('findOrderByClientOrderId answered from open orders', () => {
+  // Bitunix writes a Creating row with the caller's ID while its send is in flight.
+  it('never reads a Creating row as placed, from the store or a fetch', async () => {
+    const store = new DefaultStore();
+    store.update({ markets: [MARKET] });
+    const exchange = new RustEngineExchange('bitunix' as any, { key: 'key', secret: 'secret' }, store);
+    adoptEngineCapabilities(exchange);
+    const opts = order({ clientOrderId: 'caller-1' });
+    const row = {
+      ...opts,
+      id: 'creating:7:0',
+      price: 50_000,
+      status: OrderStatus.Creating,
+      filled: 0,
+      remaining: 1,
+      reduceOnly: false,
+      lastUpdate: 1,
+    };
+    exchange.store.update({ orders: [row] });
+    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([row]);
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, 'caller-1')).resolves.toEqual({
+      found: false,
+      definitive: false,
+    });
+    const acknowledged = { ...row, id: 'venue-9', status: OrderStatus.Open };
+    exchange.store.update({ orders: [acknowledged] });
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, 'caller-1')).resolves.toEqual({
+      found: true,
+      order: acknowledged,
+    });
+    exchange.dispose();
+  });
+});
+
 describe('findOrderByClientOrderId on a venue that refuses caller IDs', () => {
   beforeEach(() => {
     vi.spyOn(HyrotraderExchange.prototype, 'getBybitRestBaseUrl').mockReturnValue('https://simulator.test');

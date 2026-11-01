@@ -1750,8 +1750,10 @@ impl KucoinSpot {
                 symbol,
                 client_order_id,
             } => {
+                // A Creating row may be a send still in flight; only the venue can say it is placed.
                 if let Some(o) = cx.store.orders().iter().find(|o| {
                     o.symbol == symbol
+                        && o.status != OrderStatus::Creating
                         && !matches!(client_order_id.as_str(), "" | "0" | "undefined")
                         && (o.client_order_id.as_deref() == Some(&client_order_id)
                             || o.id == client_order_id)

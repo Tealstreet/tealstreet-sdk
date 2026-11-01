@@ -46,6 +46,7 @@ import {
   OrderBook,
   OrderHistoryOptions,
   OrderSide,
+  OrderStatus,
   OrderType,
   PlaceOrderOpts,
   Position,
@@ -1142,7 +1143,9 @@ export class BaseExchange implements Exchange {
     const notFound: ClientOrderLookup = { found: false, definitive: false };
     // A venue that refuses caller IDs never sent one; some (Hyperliquid) also write the store while fetching.
     if (!this.clientOrderIdRule) return notFound;
-    const matches = (order: Order) => order.symbol === symbol && orderCarriesClientOrderId(order, clientOrderId);
+    // A Creating row can be this app's own placeholder for a send still in flight; found means the venue has it.
+    const matches = (order: Order) =>
+      order.symbol === symbol && order.status !== OrderStatus.Creating && orderCarriesClientOrderId(order, clientOrderId);
     const inStore = this.store.orders.find(matches);
     if (inStore) return { found: true, order: inStore };
     const order = (await this.fetchOrders([symbol])).find(matches);
