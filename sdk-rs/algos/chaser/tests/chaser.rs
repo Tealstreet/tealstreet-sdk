@@ -447,6 +447,54 @@ async fn a_venue_without_symbol_cancel_requotes_by_id() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_chase_with_no_market_data_says_so_once_and_a_ticking_one_does_not() {
+    local(async {
+        let port = FakePort::new("blofin");
+        port.accept_placements();
+        let (_factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        for _ in 0..3 {
+            settle(20_000).await;
+            port.set_ticker(100.0, 100.5);
+        }
+        assert!(
+            warnings(&port)
+                .iter()
+                .all(|text| !text.contains("no market data"))
+        );
+        settle(100_000).await;
+        let told = warnings(&port)
+            .iter()
+            .filter(|text| text.contains("no market data"))
+            .count();
+        assert_eq!(told, 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_chase_keeps_its_row_until_its_completion_is_out() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        *port.unanswered.borrow_mut() =
+            Some(Box::new(|command| matches!(command, Command::Query { .. })));
+        let id = factory.book().active_chasers()[0].id.clone();
+        factory.book().remove(&id);
+        // Past the page's 3 s for a row gone alone, with the fills read still out.
+        settle(5_000).await;
+        assert!(port.completes().is_empty());
+        assert_eq!(factory.book().active_chasers().len(), 1);
+        settle(20_000).await;
+        assert_eq!(port.completes().len(), 1);
+        assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_refused_key_ends_the_chase_on_its_first_placement() {
     local(async {
         let port = FakePort::new("hyperliquid");
@@ -1968,6 +2016,39 @@ async fn a_post_only_refusal_steps_one_tick_further_and_retries() {
         let _chase = start(&port, BUY_ONE);
         settle(300).await;
         assert_eq!(port.placements(), vec![(100.0, 1.0), (99.5, 1.0)]);
+    })
+    .await;
+}
+
+/// Lighter: the placement answers with the client id; the row soon has the venue's.
+#[tokio::test(start_paused = true)]
+async fn a_chase_follows_its_order_to_the_venue_id_a_snapshot_shows() {
+    local(async {
+        let port = FakePort::new("lighter");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let mut native = order("n1", 100.0, 1.0, 0.0, OrderStatus::Open);
+        native.client_order_id = Some("o1".into());
+        for _ in 0..2 {
+            {
+                let mut store = port.store.borrow_mut();
+                store.orders = vec![native.clone()];
+                store.update_ids.orders += 1;
+            }
+            port.publish(Change {
+                orders: true,
+                ..Change::default()
+            });
+            settle(10).await;
+        }
+        settle(2_000).await;
+        assert!(port.completes().is_empty(), "{:?}", port.completes());
+        assert!(port.cancels().is_empty());
+        let id = factory.book().active_chasers()[0].id.clone();
+        factory.book().remove(&id);
+        settle(100).await;
+        assert_eq!(port.cancels(), vec!["n1".to_string()]);
     })
     .await;
 }

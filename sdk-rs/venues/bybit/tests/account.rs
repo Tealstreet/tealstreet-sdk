@@ -3965,6 +3965,46 @@ fn a_fills_start_with_no_end_walks_to_now_and_no_limit_reads_every_page() {
 }
 
 #[test]
+fn cancelling_an_attached_stop_alone_clears_it_on_its_parent() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    let id = h.engine.store().orders()[0].id.clone();
+    let mut leg = h.engine.store().order(&id).unwrap().clone();
+    leg.id = format!("{id}__stop_loss");
+    leg.parent_id = Some(id.clone());
+    leg.kind = OrderType::StopLoss;
+    h.engine.store_mut().upsert_order(leg.clone());
+    h.requests.clear();
+
+    h.command(Command::CancelOrders {
+        command: 61,
+        ids: vec![leg.id.clone()],
+    });
+    let amend = h.take("/v5/order/amend");
+    assert!(
+        body(&amend).contains(&format!(r#""orderId":"{id}""#)),
+        "{}",
+        body(&amend)
+    );
+    assert!(
+        body(&amend).contains(r#""stopLoss":"0""#),
+        "{}",
+        body(&amend)
+    );
+    h.reply(
+        amend.id,
+        200,
+        &format!(r#"{{"retCode":0,"retMsg":"OK","result":{{"orderId":"{id}","orderLinkId":""}},"retExtInfo":{{}},"time":1}}"#),
+    );
+    assert!(matches!(h.result(61), Some(Ok(_))), "{:?}", h.result(61));
+    assert!(h.engine.store().order(&leg.id).is_none());
+    assert!(h.engine.store().order(&id).is_some());
+}
+
+#[test]
 fn income_window_with_no_limit_is_not_capped_at_the_default() {
     let mut h = ready();
     h.command(Command::Query {

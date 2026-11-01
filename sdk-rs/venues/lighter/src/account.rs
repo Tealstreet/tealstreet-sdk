@@ -1873,7 +1873,8 @@ impl Lighter {
             remaining,
             reduce_only,
             close: None,
-            client_order_id: None,
+            // What the placement answered with: it names this row to whoever holds that id.
+            client_order_id: client_order_index(raw),
             time_in_force: tif,
             last_update: event_time(
                 wire.updated_at.as_ref().or(wire.timestamp.as_ref()),

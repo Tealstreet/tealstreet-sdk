@@ -1620,6 +1620,7 @@ fn a_real_rest_order_row_shows() {
         .order("2533274198957701")
         .expect("the order shows");
     assert_eq!(order.amount, 10.0);
+    assert_eq!(order.client_order_id.as_deref(), Some("179354719285865"));
 }
 
 // L1: a placement returns its client index; the store keys the row by the native one.

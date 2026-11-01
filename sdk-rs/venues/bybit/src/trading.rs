@@ -55,6 +55,10 @@ enum Call {
         ),
     },
     Amend,
+    /// Clears an attached TP/SL, a field of its parent, by amending the field to 0.
+    ClearAttachedLeg {
+        leg: String,
+    },
     Cancel {
         ids: Vec<String>,
     },
@@ -1300,6 +1304,36 @@ impl BybitLinear {
     fn plan_cancel(&self, orders: &[Order]) -> Job {
         let mut job = Job::default();
         let real: Vec<&Order> = orders.iter().filter(|o| !is_virtual(&o.id)).collect();
+        // A leg whose parent is cancelled too ends with it.
+        for leg in orders.iter().filter(|o| is_virtual(&o.id)) {
+            let Some(parent) = leg.parent_id.as_deref() else {
+                continue;
+            };
+            if real.iter().any(|order| order.id == parent) {
+                continue;
+            }
+            let field = if leg.id.ends_with(STOP_LOSS_SUFFIX) {
+                "stopLoss"
+            } else {
+                "takeProfit"
+            };
+            job.steps.push_back(Step {
+                delay_ms: 0.0,
+                requests: vec![Planned {
+                    receipts: Vec::new(),
+                    path: "/v5/order/amend",
+                    body: Body::new()
+                        .str("category", self.category_for(&leg.symbol).as_str())
+                        .str("symbol", &leg.symbol)
+                        .str("orderId", parent)
+                        .str(field, "0")
+                        .finish(),
+                    call: Call::ClearAttachedLeg {
+                        leg: leg.id.clone(),
+                    },
+                }],
+            });
+        }
         if !self.paths.batch_orders {
             for order in real {
                 let filter = self
