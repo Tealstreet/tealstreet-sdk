@@ -582,6 +582,50 @@ fn amend_cancels_then_places_the_replacement() {
     );
 }
 
+/// The stop drag: the cancel lands, the replacement is refused, the stop is gone.
+#[test]
+fn a_stop_whose_replacement_is_refused_says_the_stop_is_gone() {
+    let mut h = ready();
+    let id = "8389765519993909000";
+    let mut stop = h.engine.store().order(id).unwrap().clone();
+    stop.kind = OrderType::StopLoss;
+    stop.reduce_only = true;
+    stop.trigger_type = Some(safe_cex_engine::model::StopTriggerType::MarkPrice);
+    h.engine.store_mut().upsert_order(stop);
+    h.event(Event::Command(Command::AmendOrder {
+        command: 12,
+        id: id.into(),
+        price: Some(91000.0),
+        amount: None,
+    }));
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":8389765519993909000,"code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/fapi/v1/algoOrder");
+    assert_eq!(replacement.method, Method::Post);
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let (_, error) = h
+        .failures
+        .iter()
+        .find(|(id, _)| *id == 12)
+        .expect("a failure");
+    assert!(
+        error.message.contains("BTCUSDT") && error.message.contains("has no stop"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains("Order would immediately trigger"));
+}
+
 #[test]
 fn leverage_and_position_mode_update_the_settings_frame() {
     let mut h = ready();
