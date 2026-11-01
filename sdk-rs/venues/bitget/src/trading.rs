@@ -401,8 +401,22 @@ struct Reply<'a> {
     code: Number,
     #[serde(default)]
     msg: String,
-    #[serde(borrow)]
+    #[serde(borrow, default, deserialize_with = "reply_data")]
     data: Option<ReplyData<'a>>,
+}
+
+/// Settings writes answer with `"data":"success"`: a success with nothing to read.
+fn reply_data<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<ReplyData<'de>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Data<'a> {
+        Row(#[serde(borrow)] ReplyData<'a>),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Data::deserialize(d)? {
+        Data::Row(row) => Some(row),
+        Data::Other(_) => None,
+    })
 }
 
 impl BitgetFutures {
@@ -1192,7 +1206,7 @@ impl BitgetFutures {
                     });
                 let mut p = self.classic(cx, symbol)?;
                 p.leverage = Some(Leverage::Number(leverage));
-                let path = if self.account.uta && isolated_hedge {
+                let path = if self.account.uta {
                     p = Payload {
                         category: Some(self.product().to_uppercase()),
                         symbol: Some(symbol.clone()),
@@ -1704,7 +1718,8 @@ impl BitgetFutures {
             symbol: Some(o.symbol.clone()),
             kind: Some("tpsl"),
             side: Some(side_text(o.side)),
-            pos_side: cx.store.hedged().then_some(protected_side(o.side)),
+            // One-way too: Bitget refuses a tpsl without it, 40019.
+            pos_side: Some(protected_side(o.side)),
             tpsl_mode: Some(if size > 0.0 { "partial" } else { "full" }),
             qty: (size > 0.0).then(|| num::format(size)),
             reduce_only: Some("yes"),
@@ -2278,7 +2293,14 @@ impl BitgetFutures {
                     accepted: accepted.into_iter().collect(),
                     failures,
                 };
-            } else if (request.call.path == paths::BATCH_CANCEL || retained)
+            } else if request.call.path == paths::UTA_CANCEL_STRATEGY && data.is_none() {
+                // One strategy's cancel: a success code is its acknowledgement, data null.
+                for order in orders {
+                    self.trading.acknowledged.remove(&native_id(order));
+                }
+            } else if (request.call.path == paths::BATCH_CANCEL
+                || request.call.path == paths::CANCEL_PLAN
+                || retained)
                 && orders.iter().any(|o| !accepted.contains(&native_id(o)))
             {
                 unproven = true;

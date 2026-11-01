@@ -889,3 +889,47 @@ fn app_stop_payload_with_trigger_equal_to_price_places_protection() {
         "a distinct trigger stays rejected"
     );
 }
+#[test]
+fn a_stale_tpsl_does_not_abort_cancel_all() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 8,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let mut sent = requests(&mut e);
+    let mut failed = false;
+    let mut stale_answered = false;
+    while let Some(r) = sent.pop() {
+        let body = if r.url.contains("tpsl/cancel_order") {
+            stale_answered = true;
+            r#"{"code":20007,"msg":"Order not found. It may have been filled or canceled"}"#
+                .to_owned()
+        } else {
+            // Every remaining regular order is acknowledged by its ID.
+            let sent: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+            let rows: Vec<_> = sent["orderList"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|o| serde_json::json!({"orderId": o["orderId"]}))
+                .collect();
+            serde_json::json!({"code":0,"data":{"successList":rows,"failureList":[]}}).to_string()
+        };
+        reply(&mut e, r.id, &body);
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
+        failed |= actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })));
+        sent.extend(actions.into_iter().filter_map(|a| match a {
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get => Some(r),
+            _ => None,
+        }));
+    }
+    assert!(stale_answered);
+    assert!(!failed);
+}
