@@ -4,7 +4,7 @@ use std::rc::Rc;
 use safe_cex_algos::executor::Instant;
 use safe_cex_algos::{AlgoCx, AlgoStore, Change};
 use safe_cex_engine::engine::{Command, Query};
-use safe_cex_engine::error::{Outcome, VenueError};
+use safe_cex_engine::error::{ErrorKind, Outcome, VenueError};
 use safe_cex_engine::model::{
     CancelOrderRef, Order, OrderSide, OrderStatus, PlaceOrderOpts, RejectReason,
 };
@@ -21,6 +21,13 @@ pub const UNCONFIRMED_ORDER_STOP_REASON: &str = "Could not confirm order placeme
 const PRICE_CHECK_MIN_INTERVAL_MS: u64 = 50;
 /// After a send whose outcome is unknown.
 const LOST_PLACEMENT_CHECKS_MS: [u64; 4] = [1_000, 2_000, 4_000, 8_000];
+/// A stop's cancel goes on through a network or signing outage this long: past
+/// the 60 s a reconnect can take, up to a laptop waking from a short sleep.
+const CANCEL_RETRY_BOUND_MS: u64 = 600_000;
+const CANCEL_RETRY_MIN_MS: u64 = 1_000;
+const CANCEL_RETRY_MAX_MS: u64 = 10_000;
+/// Close All walks positions only, so it never reaches a stranded chase order.
+const CANCEL_WAY_OUT: &str = "Cancel it in Open Orders or use Nuke";
 /// Each chase runs its own supervisor, price checks and REST reconciles.
 pub const MAX_CHASES_PER_ACCOUNT: usize = 50;
 const MISSING_ORDER_CONFIRMATIONS: u32 = 2;
@@ -45,6 +52,19 @@ pub struct ChaserBook {
     chases: RefCell<Vec<Rc<Chase>>>,
     client_ids: ClientIdMinter,
     next_id: Cell<u64>,
+}
+
+/// Worth trying again: the request never reached a verdict from the venue.
+fn cancel_retryable(error: &VenueError) -> bool {
+    matches!(
+        error.kind,
+        Some(
+            ErrorKind::Network
+                | ErrorKind::Timeout
+                | ErrorKind::VenueUnavailable
+                | ErrorKind::RateLimited
+        )
+    ) || error.message.contains("Signing provider is unavailable")
 }
 
 impl ChaserBook {
@@ -156,7 +176,7 @@ impl ChaserBook {
     /// mid-flight and would leave its order live and untracked.
     pub async fn shutdown(self: &Rc<Self>, reason: &str) {
         for chase in self.stop_all(reason) {
-            self.cleanup(chase).await;
+            self.settle_once(chase).await;
         }
     }
 
@@ -173,7 +193,7 @@ impl ChaserBook {
             }
         }
         for chase in chases {
-            self.cleanup(chase).await;
+            self.settle_once(chase).await;
         }
         stopped
     }
@@ -245,7 +265,7 @@ impl ChaserBook {
             .collect();
         if !gone && !open.is_empty() {
             self.error(&format!(
-                "Chaser could not cancel {symbol} order {}: {}; it may still be open",
+                "Chaser could not cancel {symbol} order {}: {}; it may still be open. {CANCEL_WAY_OUT}",
                 open.join(", "),
                 error.message
             ));
@@ -582,6 +602,11 @@ impl ChaserBook {
         if !to_cancel.is_empty() {
             self.log(chase, "cancelling orders");
             if let Err(error) = self.cancel(&chase.options.symbol, &to_cancel).await {
+                // The stop's own cancel keeps trying; this chase places nothing more.
+                if cancel_retryable(&error) {
+                    chase.mark_complete("Failed to cancel orders");
+                    return Ok(());
+                }
                 let message = error.message.as_str();
                 let filled_or_gone = ["already canceled", "already filled", "never placed"]
                     .iter()
@@ -797,8 +822,9 @@ impl ChaserBook {
             if chase.is_stopped() {
                 if !ids.is_empty() {
                     // STOP raced the placement: cancel what landed ourselves.
-                    if let Err(error) = self.cancel(&chase.options.symbol, &ids).await {
-                        self.cancel_failed(&chase.options.symbol, &ids, &error);
+                    chase.set_current(ids.clone());
+                    for id in &ids {
+                        self.cancel_until_settled(chase, id).await;
                     }
                 }
                 return Vec::new();
@@ -876,27 +902,115 @@ impl ChaserBook {
         self.cx.spawn(async move { book.cleanup(chase).await });
     }
 
-    /// Detach, cancel every current id, then report `chaser:complete` once.
+    /// A stop that keeps cancelling through a retryable failure: the row stays,
+    /// stopped, until each order is settled, then `chaser:complete` once.
     async fn cleanup(&self, chase: Rc<Chase>) {
-        let owns_completion = chase.claim_complete_emission();
         chase.watch_scope.dispose();
         chase.wake.notify_one();
-        self.detach(&chase);
-        let ids = chase.take_current();
-        for id in &ids {
-            if self.known_closed(id) {
-                continue;
-            }
-            let symbol = self.store().order(id).map_or_else(
-                || chase.options.symbol.clone(),
-                |order| order.symbol.clone(),
-            );
-            if let Err(error) = self.cancel(&symbol, std::slice::from_ref(id)).await {
-                self.cancel_failed(&symbol, std::slice::from_ref(id), &error);
+        for id in chase.current() {
+            self.cancel_until_settled(&chase, &id).await;
+        }
+        // A cancel another task still retries finishes the chase from there.
+        if chase.current().is_empty() {
+            self.finish(chase).await;
+        }
+    }
+
+    /// The account is going away or being nuked, on a bound of its own: one try each.
+    async fn settle_once(&self, chase: Rc<Chase>) {
+        chase.watch_scope.dispose();
+        chase.wake.notify_one();
+        for id in chase.take_current() {
+            if !self.known_closed(&id) {
+                let symbol = self.order_symbol(&chase, &id);
+                if let Err(error) = self.cancel(&symbol, std::slice::from_ref(&id)).await {
+                    self.cancel_failed(&symbol, std::slice::from_ref(&id), &error);
+                }
             }
         }
-        if owns_completion {
+        self.finish(chase).await;
+    }
+
+    async fn finish(&self, chase: Rc<Chase>) {
+        self.detach(&chase);
+        if chase.claim_complete_emission() {
             self.emit_complete(&chase).await;
+        }
+    }
+
+    fn order_symbol(&self, chase: &Chase, id: &str) -> String {
+        self.store().order(id).map_or_else(
+            || chase.options.symbol.clone(),
+            |order| order.symbol.clone(),
+        )
+    }
+
+    /// One order of a stopped chase, until the venue answers or the bound passes.
+    /// A nuke or disposal that took the id over ends this.
+    async fn cancel_until_settled(&self, chase: &Chase, id: &str) {
+        if !chase.claim_cancel(id) {
+            return;
+        }
+        let symbol = self.order_symbol(chase, id);
+        let reason = chase.stop_reason();
+        let mut changes = self.cx.port.subscribe();
+        let started = Instant::now();
+        let mut delay = CANCEL_RETRY_MIN_MS;
+        let mut retrying = false;
+        while chase.current().iter().any(|current| current == id) {
+            if self.known_closed(id) {
+                if retrying {
+                    let filled = self
+                        .store()
+                        .order(id)
+                        .is_some_and(|order| order.status == OrderStatus::Closed);
+                    let end = if filled { "filled" } else { "cancelled" };
+                    self.warn(&format!(
+                        "Chaser stopped: {symbol} order {id} {end} before its cancel got through"
+                    ));
+                }
+                break;
+            }
+            let error = match self
+                .cancel(&symbol, std::slice::from_ref(&id.to_owned()))
+                .await
+            {
+                Ok(_) => {
+                    if retrying {
+                        self.warn(&format!(
+                            "Chaser stopped: {symbol} order {id} is now cancelled"
+                        ));
+                    }
+                    break;
+                }
+                Err(error) => error,
+            };
+            let elapsed = started.elapsed().as_millis() as u64;
+            if !cancel_retryable(&error) || elapsed >= CANCEL_RETRY_BOUND_MS {
+                self.cancel_failed(&symbol, std::slice::from_ref(&id.to_owned()), &error);
+                break;
+            }
+            if !retrying && !self.known_closed(id) {
+                retrying = true;
+                chase.mark_complete(&format!(
+                    "{reason}; retrying the cancel of order {id}. {CANCEL_WAY_OUT}"
+                ));
+                self.warn(&format!(
+                    "Chaser stopped, but {symbol} order {id} is still open: {}. Retrying the cancel; it can still fill until then. {CANCEL_WAY_OUT}",
+                    error.message
+                ));
+            }
+            // Traffic returning is the reconnect: try again at once after the minimum.
+            self.cx.sleep_ms(CANCEL_RETRY_MIN_MS).await;
+            let wait = delay.saturating_sub(CANCEL_RETRY_MIN_MS);
+            if wait > 0 {
+                let _ = safe_cex_algos::executor::timeout(wait, changes.recv()).await;
+            }
+            delay = (delay * 2).min(CANCEL_RETRY_MAX_MS);
+        }
+        chase.drop_current(id);
+        if retrying {
+            chase.mark_complete(&reason);
         }
     }
 

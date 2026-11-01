@@ -128,6 +128,7 @@ struct State {
     pending_update: bool,
     fresh_order: bool,
     complete_emitted: bool,
+    cancels_claimed: Vec<String>,
     last_partial_fill_at: Option<Instant>,
 }
 
@@ -286,6 +287,23 @@ impl Chase {
             }
         }
         state.current = ids;
+    }
+
+    /// True once per order, for the task that will cancel it.
+    pub fn claim_cancel(&self, id: &str) -> bool {
+        let mut state = self.state.borrow_mut();
+        let claimed = state.cancels_claimed.iter().any(|other| other == id);
+        if !claimed {
+            state.cancels_claimed.push(id.to_owned());
+        }
+        !claimed
+    }
+
+    pub fn drop_current(&self, id: &str) {
+        self.state
+            .borrow_mut()
+            .current
+            .retain(|current| current != id);
     }
 
     pub fn take_current(&self) -> Vec<String> {
