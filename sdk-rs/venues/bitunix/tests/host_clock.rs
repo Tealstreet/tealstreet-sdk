@@ -90,5 +90,5 @@ fn first_authenticated_rest_and_private_login_use_the_supplied_engine_time() {
         })
         .expect("private open signs login immediately");
     let value: serde_json::Value = serde_json::from_str(&login).unwrap();
-    assert_eq!(value["args"][0]["timestamp"], "1760000009876");
+    assert_eq!(value["args"][0]["timestamp"], 1760000009876u64);
 }

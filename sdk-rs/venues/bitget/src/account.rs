@@ -130,6 +130,7 @@ pub struct Account {
     balance_in_flight: bool,
     orders_in_flight: bool,
     orders_dirty: bool,
+    mode_read: bool,
     positions_timer: Option<TimerId>,
     balance_timer: Option<TimerId>,
     orders_timer: Option<TimerId>,
@@ -743,6 +744,14 @@ impl BitgetFutures {
                 }
                 self.account.positions_in_flight = false;
                 let mut rows = self.merge_positions(cx, rows, started);
+                // Classic reads its mode per symbol, so a flat account never learned it.
+                if !self.account.uta && !self.account.mode_read && rows.is_empty() {
+                    self.account.mode_read = true;
+                    let any = cx.store.markets().first().map(|m| m.symbol.clone());
+                    if let Some(symbol) = any {
+                        self.refresh_settings(cx, Some(&symbol));
+                    }
+                }
                 self.coherent_position_modes(cx, &mut rows, &mut skipped, true);
                 for p in &rows {
                     if !self
@@ -1989,6 +1998,15 @@ impl BitgetFutures {
                                     .terminal
                                     .insert(order.id.clone(), cx.now + 10_000.0);
                                 self.account.opened.remove(&order.id);
+                                // A first sight of a terminal row (a post-only that crossed) still shows.
+                                if cx.store.order(&order.id).is_none()
+                                    && order
+                                        .extra
+                                        .as_ref()
+                                        .is_some_and(|e| e.reject_reason.is_some())
+                                {
+                                    cx.store.upsert_order(order.clone());
+                                }
                                 cx.store.set_order_status(&order.id, order.status);
                                 self.end_preset_children(cx, &order.id);
                                 if let Some(reason) =

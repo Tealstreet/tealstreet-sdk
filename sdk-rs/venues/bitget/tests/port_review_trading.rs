@@ -492,3 +492,23 @@ fn uta_margin_change_preserves_long_leverage_after_side_writes_and_short_stream_
         }
     }
 }
+
+#[test]
+fn uta_isolated_hedge_writes_name_both_sides_leverage() {
+    let mut h = leverage_fixture(true, true, MarginType::Isolated);
+    let payload = set_leverage(&mut h, Some(PositionSide::Short), 25.0);
+    assert_eq!(payload["marginMode"], "isolated");
+    assert_eq!(payload["longLeverage"], "10");
+    assert_eq!(payload["shortLeverage"], "25");
+
+    let mut h = leverage_fixture(true, true, MarginType::Cross);
+    h.command(Command::SetMarginType {
+        command: 2,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/set-leverage");
+    let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["longLeverage"], "10");
+    assert_eq!(payload["shortLeverage"], "11");
+}

@@ -437,7 +437,10 @@ impl BinanceFutures {
     }
 
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
-        if self.is_spot() || (self.is_inverse() && !matches!(read, Read::PublicTrades { .. })) {
+        if self.is_spot()
+            || (self.is_inverse()
+                && !matches!(read, Read::PublicTrades { .. } | Read::Fills { .. }))
+        {
             if matches!(
                 read,
                 Read::OrderByClientId { .. } | Read::PublicTrades { .. }
@@ -476,8 +479,10 @@ impl BinanceFutures {
                     Self::answer(cx, "[]".into());
                     return;
                 };
+                // A start alone reads only its first 7 days; an old one answers empty.
                 let windows = match (from_ms, to_ms) {
                     (Some(from), Some(to)) => split(from, to),
+                    (Some(from), None) if order_id.is_none() => split(from, cx.now),
                     _ => VecDeque::from([(from_ms, to_ms)]),
                 };
                 if self.begin(cx, command, signed, |completion| InFlight::Fills {

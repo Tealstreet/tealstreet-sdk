@@ -310,6 +310,39 @@ fn a_stale_position_snapshot_cannot_overwrite_a_newer_stream_event() {
     assert!(h.engine.store().positions().is_empty());
 }
 
+fn conditional(trigger: f64, price: Option<f64>) -> PlaceOrderOpts {
+    let mut opts = limit(OrderSide::Buy, 0.012, 90000.0);
+    opts.kind = OrderType::Conditional;
+    opts.trigger_price = Some(trigger);
+    opts.price = price;
+    opts
+}
+
+// Live: /fapi/v1/order answered STOP_MARKET with -4120, use the Algo Order API.
+#[test]
+fn a_conditional_goes_to_the_algo_endpoint_in_both_forms() {
+    let mut h = ready();
+    let mark = h.engine.store().ticker("BTCUSDT").unwrap().mark;
+    for (command, trigger, price, kind) in [
+        (7, mark * 1.1, None, "STOP_MARKET"),
+        (8, mark * 1.1, Some(mark * 1.2), "STOP"),
+        (9, mark * 0.9, None, "TAKE_PROFIT_MARKET"),
+        (10, mark * 0.9, Some(mark * 0.8), "TAKE_PROFIT"),
+    ] {
+        place(&mut h, command, vec![conditional(trigger, price)]);
+        assert!(!h.has_request("/fapi/v1/order?"));
+        let sent = h.take("/fapi/v1/algoOrder");
+        let q = query_of(&sent.url);
+        let get = |name: &str| q.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+        assert_eq!(get("type"), Some(kind));
+        assert_eq!(get("algoType"), Some("CONDITIONAL"));
+        assert!(get("triggerPrice").is_some());
+        assert_eq!(get("price").is_some(), price.is_some());
+        assert_eq!(get("timeInForce").is_some(), price.is_some());
+        h.reply(sent.id, 200, "", r#"{"algoId":1,"clientAlgoId":"x"}"#);
+    }
+}
+
 #[test]
 fn places_regular_orders_then_bracket_stops_in_sequence() {
     let mut h = ready();
@@ -1737,4 +1770,29 @@ fn a_refused_key_ends_the_start_with_the_reason() {
     assert_eq!(h.startup_failures.len(), 1, "{:?}", h.startup_failures);
     let message = &h.startup_failures[0].message;
     assert!(message.contains("Invalid API-key"), "{message}");
+}
+
+// Live: a 90 day start with no end answered empty while 7 days answered 16 rows.
+#[test]
+fn a_fills_start_with_no_end_walks_every_seven_day_window_to_now() {
+    let mut h = ready();
+    let now = h.now;
+    h.event(Event::Command(Command::Query {
+        command: 42,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(now - 15.0 * 86_400_000.0),
+            to_ms: None,
+            limit: None,
+        },
+    }));
+    let mut windows = 0;
+    while h.has_request("/fapi/v1/userTrades") {
+        let page = h.take("/fapi/v1/userTrades");
+        assert!(page.url.contains("endTime="), "{}", page.url);
+        windows += 1;
+        h.reply(page.id, 200, "", "[]");
+    }
+    assert_eq!(windows, 3);
 }

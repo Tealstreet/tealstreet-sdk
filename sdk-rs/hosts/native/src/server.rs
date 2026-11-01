@@ -654,26 +654,40 @@ impl<V: Venue, T: Transport> Account<V, T> {
         inbox: &mut mpsc::Receiver<Control>,
         shutdown: &mut watch::Receiver<bool>,
     ) {
+        #[cfg(feature = "address-nonce")]
         self.host.turn(|host| {
-            let now = (host.clock)();
-            #[cfg(feature = "address-nonce")]
             if !host.engine.has_started()
-                && let Err(error) = host.engine.initialize_address_nonce(now)
+                && let Err(error) = host.engine.initialize_address_nonce((host.clock)())
             {
                 host.terminal = Some(error);
-                return;
             }
-            host.engine.start(now);
         });
+        // A remote signer answers its address over the socket that is still joining:
+        // start once it has, or the engine seals an unbound identity for good. The
+        // loop keeps running meanwhile, holding commands until then.
+        let mut unstarted = true;
+        let mut held_commands = Vec::new();
         self.execute();
         let mut flush = tokio::time::interval(self.config.flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
+            // Polled on every wake, the flush tick at the least.
+            if unstarted && self.host.address_setup_settled() {
+                unstarted = false;
+                self.host.turn(|host| host.engine.start((host.clock)()));
+                for (client, command) in held_commands.drain(..) {
+                    self.command(client, command);
+                }
+                self.execute();
+            }
             tokio::select! {
                 _ = shutdown.changed() => break,
                 control = inbox.recv() => match control {
                     Some(Control::Join { client, outgoing, cancel, account_auth, ready }) => {
                         let _ = ready.send(self.join(client, outgoing, cancel, account_auth));
+                    }
+                    Some(Control::Command { client, command }) if unstarted => {
+                        held_commands.push((client, command));
                     }
                     Some(Control::Command { client, command }) => self.command(client, command),
                     Some(Control::NetworkRestored) => {

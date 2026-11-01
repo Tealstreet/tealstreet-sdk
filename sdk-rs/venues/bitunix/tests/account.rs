@@ -910,12 +910,21 @@ fn private_heartbeat_preserves_legacy_silent_sessions() {
         })
         .unwrap();
     e.handle(at, Event::WsOpened { socket });
-    let timer = e
-        .drain_actions()
-        .find_map(|a| match a {
+    e.handle(
+        at,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let timer = actions
+        .into_iter()
+        .filter_map(|a| match a {
             Action::SetTimer { timer, .. } => Some(timer),
             _ => None,
         })
+        .next_back()
         .unwrap();
     e.handle(50_000.0, Event::TimerFired { timer });
     assert!(

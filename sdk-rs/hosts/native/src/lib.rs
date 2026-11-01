@@ -242,6 +242,16 @@ impl<V: Venue, T: Transport> Host<V, T> {
         self.engine.poll_address_setup((self.clock)(), cx);
         self.engine.address_nonce_setup_ready()
     }
+    /// Whether any address setup has settled; true at once with none to do.
+    pub(crate) fn address_setup_settled(&mut self) -> bool {
+        #[cfg(feature = "address-nonce")]
+        if !self.engine.has_started() {
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            return self.poll_address_setup(&mut cx);
+        }
+        true
+    }
+
     /// Feed live configuration alongside transport completions.
     pub fn event_sender(&self) -> Events {
         self.events.clone()
