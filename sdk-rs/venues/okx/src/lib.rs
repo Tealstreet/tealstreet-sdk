@@ -78,9 +78,7 @@ struct BookState {
 }
 
 pub enum Pending {
-    SocketRefresh {
-        reopened: bool,
-    },
+    SocketRefresh,
     Account(account::Request),
     History(Box<history::Request>),
     Closed(Box<closed::Request>),
@@ -870,8 +868,8 @@ impl Venue for Okx {
         _epoch: safe_cex_engine::socket_lifecycle::Epoch,
         pending: Pending,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
-        if let Pending::SocketRefresh { reopened } = pending {
-            self.socket_account_ready(cx, reopened);
+        if let Pending::SocketRefresh = pending {
+            self.socket_account_ready(cx);
         }
         Ok(())
     }
