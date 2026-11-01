@@ -169,6 +169,60 @@ fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str, at: f6
     }
 }
 
+/// Answers only reads already out; a later re-read, a fresh venue read, stays unanswered.
+fn complete_inflight(
+    e: &mut Engine<Okx>,
+    requests: Vec<Action>,
+    orders: &str,
+    at: f64,
+) -> Vec<Action> {
+    let mut later = Vec::new();
+    let mut requests = requests;
+    while let Some(a) = requests.pop() {
+        let Action::Http(r) = &a else {
+            continue;
+        };
+        let paged = r.url.contains("account-position-risk")
+            || r.url.contains("/positions?")
+            || r.url.contains("orders-pending");
+        if !paged {
+            continue;
+        }
+        let body = if r.url.contains("account-position-risk") {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else if r.url.contains("/positions?") {
+            envelope(POSITION)
+        } else {
+            envelope(orders)
+        };
+        reply(e, &a, &body, at);
+        later.extend(prepared(e, at));
+    }
+    later
+}
+
+// A startup read running when the stream subscribed may have missed what it delivered.
+#[test]
+fn a_startup_read_in_flight_at_the_subscribe_is_read_again() {
+    let (mut e, _, _, pending) = startup();
+    let mut requests = pending;
+    let mut reads = 0;
+    while let Some(a) = requests.pop() {
+        let Action::Http(r) = &a else {
+            continue;
+        };
+        reads += usize::from(r.url.contains("/positions?"));
+        let body = if r.url.contains("/positions?") {
+            envelope(POSITION)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &a, &body, 5.0);
+        requests.extend(prepared(&mut e, 5.0));
+    }
+    assert_eq!(reads, 2);
+}
+
 #[test]
 fn authenticates_two_sockets_and_maps_contract_units_and_balance() {
     let (mut e, _, _, pending) = startup();
@@ -202,7 +256,7 @@ fn terminal_push_wins_over_delayed_snapshot_and_fills_dedupe() {
     let frame = format!(r#"{{"arg":{{"channel":"orders"}},"data":[{filled}]}}"#);
     ws(&mut e, private, &frame);
     ws(&mut e, private, &frame);
-    complete(&mut e, pending, ORDER, 5.0);
+    complete_inflight(&mut e, pending, ORDER, 5.0);
     assert_eq!(e.store().orders().len(), 1);
     assert_eq!(
         e.store().orders()[0].status,
@@ -237,7 +291,7 @@ fn position_tombstone_and_new_equity_win_over_inflight_rest() {
         private,
         r#"{"arg":{"channel":"account"},"data":[{"totalEq":"6000"}]}"#,
     );
-    complete(&mut e, pending, "", 5.0);
+    complete_inflight(&mut e, pending, "", 5.0);
     assert!(e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
 }
