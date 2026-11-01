@@ -6,8 +6,22 @@ import { TwapStatus } from '../../webworker/twap/TwapStatus';
 const STOP_RESEND_MS = 5_000;
 const NOT_CONFIRMED_MS = 15_000;
 const STOP_GIVE_UP_MS = 60_000;
+/** After a stop the user was told was uncertain is confirmed, the chase's own end has this long to say how it ended. */
+const OUTCOME_WAIT_MS = 10_000;
 
 type Rows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
+
+/** The `chaser:complete` fields this reads. */
+export type ChaseEnd = { id?: string; symbol?: string; size?: number; filled?: number };
+
+/** A stop the user was told was uncertain: they are owed how it ended. */
+type Owed = { label: string; done?: () => void };
+
+const chaseOutcome = ({ symbol, size, filled = 0 }: ChaseEnd) => {
+  if (!(filled > 0)) return `Chase on ${symbol} stopped with nothing filled.`;
+  if (size !== undefined && filled >= size) return `Chase on ${symbol} filled ${filled} before its stop took effect.`;
+  return `Chase on ${symbol} stopped after filling ${filled}${size !== undefined ? ` of ${size}` : ''}.`;
+};
 
 type AlgoWatchHost = {
   rows: () => Rows;
@@ -85,10 +99,44 @@ export class AlgoControlWatch {
   private readonly completedChaseSymbols = new Set<string>();
 
   /** A chase can finish between two row updates, leaving no row to see. */
-  chaseCompleted(symbol: string) {
-    this.completedChaseSymbols.add(symbol);
-    for (const check of [...this.checks]) check();
-    this.completedChaseSymbols.delete(symbol);
+  chaseCompleted(event: ChaseEnd) {
+    if (event.symbol) {
+      this.completedChaseSymbols.add(event.symbol);
+      for (const check of [...this.checks]) check();
+      this.completedChaseSymbols.delete(event.symbol);
+    }
+    const owed = event.id === undefined ? undefined : this.owed.get(event.id);
+    if (!owed || event.id === undefined) return;
+    this.settle(event.id);
+    this.host.tell(chaseOutcome(event));
+  }
+
+  private readonly owed = new Map<string, Owed>();
+
+  private owe(id: string, label: string) {
+    if (!this.owed.has(id)) this.owed.set(id, { label });
+  }
+
+  private settle(id: string) {
+    this.owed.get(id)?.done?.();
+    this.owed.delete(id);
+  }
+
+  /** The stop landed after the user was told it might not: say how it ended. */
+  private confirmedLate(id: string) {
+    const owed = this.owed.get(id);
+    if (!owed) return;
+    if (owed.label !== 'Chase') {
+      this.settle(id);
+      this.host.tell(`${owed.label} stop is confirmed now.`);
+      return;
+    }
+    // A chase says how it ended in its own completion; a confirmation alone cannot.
+    const timer = setTimeout(() => {
+      this.settle(id);
+      this.host.tell('Chase stop is confirmed, but whether it filled is not known: check Positions and Open Orders.');
+    }, OUTCOME_WAIT_MS);
+    owed.done = () => clearTimeout(timer);
   }
 
   private readonly checks = new Set<() => void>();
@@ -132,7 +180,13 @@ export class AlgoControlWatch {
     if (this.stopping.has(id)) return;
     this.stopping.add(id);
     const timers: Array<[number, () => void]> = [
-      [NOT_CONFIRMED_MS, () => this.host.tell(`${label} stop is not confirmed yet; retrying. It may still be running.`)],
+      [
+        NOT_CONFIRMED_MS,
+        () => {
+          this.owe(id, label);
+          this.host.tell(`${label} stop is not confirmed yet; retrying. It may still be running.`);
+        },
+      ],
     ];
     for (let at = STOP_RESEND_MS; at < STOP_GIVE_UP_MS; at += STOP_RESEND_MS) {
       timers.push([
@@ -152,20 +206,33 @@ export class AlgoControlWatch {
       () => {
         stop();
         this.stopping.delete(id);
+        this.owe(id, label);
         this.host.tell(
           `${label} stop was NOT confirmed after ${STOP_GIVE_UP_MS / 1000}s. It may still be running: check it and stop it again.`,
         );
+        // Sent no more, but still watched: the user is told how it ends when the connection returns.
+        const owed = this.owed.get(id);
+        const unwatch = this.watch((rows) => {
+          const done = confirmed(rows);
+          if (done) this.confirmedLate(id);
+          return done;
+        }, []);
+        if (owed) owed.done = unwatch;
       },
     ]);
     const stop = this.watch((rows) => {
       const done = confirmed(rows);
-      if (done) this.stopping.delete(id);
+      if (done) {
+        this.stopping.delete(id);
+        this.confirmedLate(id);
+      }
       return done;
     }, timers);
   }
 
   dispose() {
     for (const stop of [...this.watches]) stop();
+    for (const id of [...this.owed.keys()]) this.settle(id);
     this.stopping.clear();
   }
 }

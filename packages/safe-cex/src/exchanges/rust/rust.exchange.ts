@@ -109,7 +109,7 @@ import {
   withReplacementClientOrderId,
 } from '../clientOrderId';
 import { isKeylessRemoteSigned } from '../hostedSigningVenues';
-import { AlgoControlWatch } from './algoControlWatch';
+import { AlgoControlWatch, type ChaseEnd } from './algoControlWatch';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
@@ -870,8 +870,8 @@ export class RustEngineExchange extends BaseExchange {
     });
     this.algoControlWatch = watch;
     for (const op of ALGO_CONTROL_OPS) this.on(op, (data: unknown) => watch.observe(op, data));
-    this.on('chaser:complete', (event?: { symbol?: string }) => {
-      if (event?.symbol) watch.chaseCompleted(event.symbol);
+    this.on('chaser:complete', (event?: ChaseEnd) => {
+      if (event) watch.chaseCompleted(event);
     });
   }
 

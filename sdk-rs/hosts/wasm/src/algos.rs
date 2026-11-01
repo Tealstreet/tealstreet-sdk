@@ -156,8 +156,10 @@ impl Port {
 
 /// What the server's settle rebuilds from a done notice: the message (or the
 /// partial-batch JSON) and the outcome.
+/// The kind travels too: the chaser retries a cancel only on a transport kind.
 fn completion_error(error: &VenueError) -> VenueError {
     let mut settled = VenueError::new(error.legacy_text());
+    settled.kind = error.kind;
     settled.outcome = error.outcome;
     settled
 }
