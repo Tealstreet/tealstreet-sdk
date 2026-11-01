@@ -589,6 +589,27 @@ fn placed() -> (Engine<Hyperliquid>, SocketId) {
     (e, s)
 }
 #[test]
+fn an_order_the_store_has_lost_is_cancelled_by_its_id_and_symbol() {
+    let (mut e, _) = placed();
+    let symbol = e.store().order("101").unwrap().symbol.clone();
+    e.store_mut().remove_orders(&["101"]);
+    e.handle(
+        5000.0,
+        Event::Command(Command::CancelOrdersWithSymbols {
+            command: 2,
+            orders: vec![safe_cex_engine::model::CancelOrderRef {
+                id: "101".into(),
+                symbol,
+            }],
+        }),
+    );
+    let r = take_http(&mut e);
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(p["action"]["cancels"][0]["a"], 10001);
+    assert_eq!(p["action"]["cancels"][0]["o"], 101);
+}
+
+#[test]
 fn cancel_uses_the_same_shifted_native_asset_id_and_removes_acknowledged_order() {
     let (mut e, _) = placed();
     assert!(e.store().order("101").is_some());

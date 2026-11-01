@@ -1213,6 +1213,19 @@ impl BitgetFutures {
                     job.calls.push_back(call.clone());
                 }
             }
+            // An order the store has lost is still cancelled by its id and symbol.
+            Command::CancelOrdersWithSymbols { orders, .. } => {
+                let orders: Vec<_> = orders
+                    .iter()
+                    .map(|order| {
+                        cx.store
+                            .order(&order.id)
+                            .cloned()
+                            .unwrap_or_else(|| order.limit_stand_in())
+                    })
+                    .collect();
+                job.calls = self.cancel_calls(cx, &orders, true)?.into();
+            }
             Command::CancelSymbolOrders { symbol, .. } => {
                 let orders: Vec<_> = cx
                     .store
@@ -3132,6 +3145,7 @@ fn command_id(command: &Command) -> Option<u32> {
     match command {
         Command::PlaceOrders { command, .. }
         | Command::CancelOrders { command, .. }
+        | Command::CancelOrdersWithSymbols { command, .. }
         | Command::CancelSymbolOrders { command, .. }
         | Command::AmendOrder { command, .. }
         | Command::SetLeverage { command, .. }

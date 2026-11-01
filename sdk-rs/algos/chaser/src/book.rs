@@ -486,9 +486,18 @@ impl ChaserBook {
                 symbol: symbol.into(),
             })
             .collect();
+        // A row the store lost (a stale snapshot, a reconnect) still rests at the
+        // venue: name it by symbol, or a by-id cancel is refused as unknown.
+        let unlisted = ids.iter().any(|id| self.store().order(id).is_none());
         let capabilities = self.cx.port.capabilities();
-        self.command(|command| safe_cex_algos::cancel_command(&capabilities, command, orders))
-            .await
+        self.command(|command| {
+            if unlisted {
+                Command::CancelOrdersWithSymbols { command, orders }
+            } else {
+                safe_cex_algos::cancel_command(&capabilities, command, orders)
+            }
+        })
+        .await
     }
 
     /// The venue's fills for `ids`, applied; a fill the account had not shown
