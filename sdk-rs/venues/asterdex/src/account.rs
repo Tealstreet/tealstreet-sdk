@@ -49,6 +49,8 @@ pub struct AccountState {
     /// An uncertain write wants a read that starts after it; the in-flight
     /// one predates it, so its completion starts the fresh read at once.
     orders_requery: bool,
+    /// As `orders_requery`, for a position read that predates the private stream.
+    positions_requery: bool,
     balance_in_flight: bool,
     position_version: u64,
     mode_version: u64,
@@ -930,6 +932,9 @@ impl AsterDex {
                 {
                     self.account.positions_timer = Some(cx.set_timer(1_000.0));
                 }
+                if std::mem::take(&mut self.account.positions_requery) {
+                    self.refresh_positions(cx);
+                }
             }
             Request::Orders { version, rows } => {
                 self.account.orders_in_flight = false;
@@ -1015,8 +1020,14 @@ impl AsterDex {
                 self.account.socket = Some(epoch.socket());
                 self.account.key_failures = 0;
                 cx.send(epoch.socket(), r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
-                // The only resync on reopen; balances and positions follow the poll.
-                self.request_refresh_orders(cx);
+                // Events before this open were never delivered, the first open included;
+                // a read still in flight may predate it, so it is followed by another.
+                self.reconcile_orders(cx);
+                if self.account.positions_in_flight {
+                    self.account.positions_requery = true;
+                } else {
+                    self.refresh_positions(cx);
+                }
             }
             LifecycleEvent::Ping(epoch) => {
                 cx.send(epoch.socket(), r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#)

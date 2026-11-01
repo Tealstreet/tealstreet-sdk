@@ -211,6 +211,8 @@ pub struct Account {
     positions_busy: bool,
     balance_busy: bool,
     margins_busy: bool,
+    /// The stream became live while a read ran: repeat the reads once all settle.
+    read_again: bool,
     native: HashMap<String, NativeOrder>,
     amend_fences: HashMap<String, AmendFence>,
     order_versions: HashMap<String, OrderVersion>,
@@ -270,6 +272,7 @@ impl Account {
             positions_busy: false,
             balance_busy: false,
             margins_busy: false,
+            read_again: false,
             native: HashMap::new(),
             amend_fences: HashMap::new(),
             order_versions: HashMap::new(),
@@ -793,6 +796,21 @@ impl Account {
         // Hosts answer RFC6455 pings; the server's SBE heartbeat proves idle liveness.
         self.send_auth(cx);
     }
+    /// Events before the last subscribe ack were never delivered, the first open
+    /// included. A read still running may predate the stream: repeat it afterwards.
+    fn private_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.read_again = true;
+        self.account_read_again(cx);
+    }
+    fn account_read_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.read_again
+            && !(self.margins_busy || self.positions_busy || self.balance_busy || self.orders_busy)
+        {
+            self.read_again = false;
+            self.positions(cx, false);
+            self.orders(cx, false);
+        }
+    }
     fn disconnect(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(socket) = self.socket.take() {
             cx.close(socket);
@@ -888,6 +906,9 @@ impl Account {
                 if channel == Some(expected.as_str()) {
                     self.subscriptions.remove(&id);
                     self.supervisor.received(cx.now);
+                    if self.subscriptions.is_empty() {
+                        self.private_ready(cx);
+                    }
                 }
             }
             return;
@@ -1268,6 +1289,10 @@ impl Account {
             return;
         }
         if self.orders_busy {
+            // A cycle dropped here would never arm its next poll.
+            if cycle && self.poll.is_none() {
+                self.poll = Some(cx.set_poll_timer(POLL_MS));
+            }
             return;
         }
         let Some(token) = cx.store.begin_orders_snapshot() else {
@@ -1441,6 +1466,7 @@ impl Account {
             // Already retired when the response failed through `on_failed`.
             let _ = cx.finish_http_context(&context);
         }
+        self.account_read_again(cx);
     }
     fn apply_response(
         &mut self,
@@ -1773,6 +1799,7 @@ impl Account {
             Request::Balance { cycle, .. } => self.balance_ended(cx, cycle),
             Request::Orders { cycle, .. } => self.orders_ended(cx, cycle),
         }
+        self.account_read_again(cx);
     }
     fn margins_ended(&mut self, cx: &mut Cx<'_, Pending>, boot: bool) {
         self.margins_busy = false;
