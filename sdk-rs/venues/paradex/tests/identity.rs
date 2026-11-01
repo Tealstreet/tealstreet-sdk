@@ -80,6 +80,9 @@ fn result(actions: Vec<Action>, command_id: u32, rejected: bool) -> Result<Strin
                 );
                 errors += 1;
             }
+            // The rig's public socket stays silent, so this notice is true here.
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
             Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
                 level: safe_cex_engine::Level::Error,
                 ..
