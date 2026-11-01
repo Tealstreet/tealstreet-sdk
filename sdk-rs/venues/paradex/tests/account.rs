@@ -1649,3 +1649,14 @@ fn the_user_s_own_cancel_is_not_logged_as_a_rejection() {
         Action::Notice(safe_cex_engine::Notice::Event(event))
             if event.message.contains("order rejected"))));
 }
+
+#[test]
+fn a_refused_key_fails_the_start_instead_of_waiting() {
+    let (mut h, _) = seed();
+    let auth = h.take("/auth/");
+    h.respond(auth, 401, r#"{"error":"INVALID_TOKEN"}"#);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}

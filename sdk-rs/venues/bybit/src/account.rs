@@ -286,6 +286,13 @@ pub struct AccountState {
     pub held_mode: Option<bool>,
 }
 
+impl Request {
+    /// A full private snapshot read, where no rows means no rows.
+    pub(crate) fn is_snapshot_read(&self) -> bool {
+        matches!(self, Self::Orders { .. } | Self::Positions { .. })
+    }
+}
+
 impl AccountState {
     fn mark_orders_stale(&mut self) {
         self.orders_stale = true;
@@ -451,6 +458,24 @@ fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
         })
 }
 
+/// retCode 0 with `result.list` explicitly null: an empty page, on this read only.
+pub(crate) fn success_with_null_list(body: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Envelope<'a> {
+        ret_code: i64,
+        #[serde(borrow)]
+        result: Result<'a>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Result<'a> {
+        #[serde(borrow)]
+        list: &'a serde_json::value::RawValue,
+    }
+    serde_json::from_str::<Envelope<'_>>(body)
+        .is_ok_and(|envelope| envelope.ret_code == 0 && envelope.result.list.get() == "null")
+}
+
 pub(crate) fn valid_snapshot_list(body: &str, cursor: &str) -> bool {
     #[derive(serde::Deserialize)]
     struct Envelope {
@@ -459,7 +484,7 @@ pub(crate) fn valid_snapshot_list(body: &str, cursor: &str) -> bool {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct List {
-        list: Vec<serde::de::IgnoredAny>,
+        list: Option<Vec<serde::de::IgnoredAny>>,
         #[serde(default)]
         next_page_cursor: Option<String>,
     }
@@ -499,7 +524,8 @@ pub fn order_type(text: &str) -> Option<OrderType> {
     Some(match text {
         "Limit" => OrderType::Limit,
         "Market" => OrderType::Market,
-        "Stop" | "StopLoss" | "PartialStopLoss" => OrderType::StopLoss,
+        // MmRateClose closes the position when margin use reaches a set rate.
+        "Stop" | "StopLoss" | "PartialStopLoss" | "MmRateClose" => OrderType::StopLoss,
         "TakeProfit" | "PartialTakeProfit" => OrderType::TakeProfit,
         "TrailingStop" => OrderType::TrailingStopLoss,
         _ => return None,
@@ -599,7 +625,10 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         .flatten();
     let is_stop = stop_order_type.is_some_and(|t| t != "UNKNOWN") || from_create_type.is_some();
     let trigger_price = present(&o.trigger_price);
-    let spot_tpsl = stop_order_type == Some("tpslOrder");
+    let spot_tpsl = matches!(
+        stop_order_type,
+        Some("tpslOrder" | "OcoOrder" | "BidirectionalTpslOrder")
+    );
     let last = store.ticker(&o.symbol).map_or(0.0, |ticker| ticker.last);
     let unpriced_tpsl = spot_tpsl && o.trigger_direction.is_none() && last <= 0.0;
     let spot_tpsl_kind = spot_tpsl.then(|| {
@@ -2027,14 +2056,26 @@ impl BybitLinear {
                 if self.variant.is_hyro() {
                     return;
                 }
-                if let Ok(frame) = serde_json::from_str::<TopicFrame<ExecutionRow>>(text) {
-                    let rows: Vec<_> = frame
-                        .data
-                        .iter()
-                        .filter(|r| self.trades_row(&r.category, &r.symbol))
-                        .collect();
-                    for row in rows {
-                        on_execution(cx, row, &mut self.account);
+                // One bad row must not cost the frame's other fills.
+                if let Ok(frame) =
+                    serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
+                {
+                    for item in &frame.data {
+                        match serde_json::from_str::<ExecutionRow>(item.get()) {
+                            Ok(row) => {
+                                if self.trades_row(&row.category, &row.symbol) {
+                                    on_execution(cx, &row, &mut self.account);
+                                }
+                            }
+                            Err(_) => {
+                                self.account.mark_orders_stale();
+                                row_skipped(
+                                    cx,
+                                    Level::Warn,
+                                    "Bybit malformed execution row; its order is re-read",
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -3335,5 +3376,35 @@ mod tests {
             );
             assert!(mapped.notional > 0.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod row_class_tests {
+    use super::*;
+
+    #[test]
+    fn documented_stop_order_types_map() {
+        assert_eq!(order_type("MmRateClose"), Some(OrderType::StopLoss));
+    }
+
+    #[test]
+    fn a_null_list_counts_only_on_success() {
+        let null = r#"{"retCode":0,"result":{"list":null}}"#;
+        assert!(success_with_null_list(null));
+        assert!(valid_snapshot_list(null, ""));
+        assert!(!success_with_null_list(
+            r#"{"retCode":10001,"result":{"list":null}}"#
+        ));
+        assert!(!success_with_null_list(
+            r#"{"retCode":0,"result":{"list":[]}}"#
+        ));
+    }
+
+    #[test]
+    fn a_wallet_with_null_coins_still_decodes() {
+        let row: crate::wire::WalletAccount<'_> =
+            serde_json::from_str(r#"{"accountType":"UNIFIED","coin":null}"#).unwrap();
+        assert!(row.coin.is_empty());
     }
 }

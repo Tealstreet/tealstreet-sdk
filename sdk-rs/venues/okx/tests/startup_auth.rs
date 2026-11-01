@@ -512,3 +512,51 @@ fn only_current_documented_key_or_passphrase_socket_codes_end_startup() {
         assert_eq!(rig.deactivated, 0);
     }
 }
+
+fn to_account_reads(engine: &mut Engine<Okx>, rig: &mut Rig) -> Vec<Action> {
+    let config = to_config(engine, rig);
+    respond(
+        engine,
+        &config,
+        200,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        2.,
+    );
+    rig.take(engine, 2.)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade")))
+        .collect()
+}
+
+#[test]
+fn a_key_refused_the_risk_read_fails_startup_instead_of_polling() {
+    let mut engine = crate::support::engine(keyed());
+    let mut rig = Rig::default();
+    let risk = to_account_reads(&mut engine, &mut rig)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("account-position-risk")))
+        .expect("the risk read");
+    respond(
+        &mut engine,
+        &risk,
+        200,
+        r#"{"code":"50110","msg":"Your IP is not included in your API key's whitelist","data":[]}"#,
+        3.,
+    );
+    rig.take(&mut engine, 3.);
+    assert_eq!(rig.failures.len(), 1, "{:?}", rig.failures);
+}
+
+#[test]
+fn an_empty_risk_read_does_not_hang_startup() {
+    let mut engine = crate::support::engine(keyed());
+    let mut rig = Rig::default();
+    let mut pending = to_account_reads(&mut engine, &mut rig);
+    while let Some(a) = pending.pop() {
+        reply(&mut engine, &a, &envelope(""), 3.);
+        pending.extend(rig.take(&mut engine, 3.).into_iter().filter(|a| {
+            matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade"))
+        }));
+    }
+    assert!(engine.store().loaded().balance);
+}

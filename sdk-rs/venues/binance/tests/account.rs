@@ -1454,7 +1454,10 @@ fn a_skipped_position_row_holds_the_startup_snapshot_while_the_catalogue_is_part
     h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
     h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
     h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
-    advance_to_position_read(&mut h, &format!("[{malformed}]"));
+    // A failed position read is tried again within seconds, not at the next interval.
+    advance_with_account_replies(&mut h, 5_000.0);
+    h.respond("/fapi/v3/positionRisk", 200, &format!("[{malformed}]"));
+    h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
     assert!(h.engine.store().loaded().positions);
     assert_eq!(
         h.errors,

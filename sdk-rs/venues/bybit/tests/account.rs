@@ -348,6 +348,20 @@ fn fills_in(h: &mut Harness) -> u32 {
 }
 
 #[test]
+fn a_malformed_execution_row_costs_only_itself() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    h.engine.take_frame(h.now);
+    let frame = execution_frame("0.001", "97000");
+    let frame = frame.replacen(r#""data":["#, r#""data":[{"category":7},"#, 1);
+    h.message("/v5/private", &frame);
+    assert_eq!(fills_in(&mut h), 1);
+}
+
+#[test]
 fn order_and_execution_frames_drive_the_lifecycle_and_report_each_execution() {
     let mut h = ready();
     let id = "5cf98598-39a7-459e-97bf-76ca765ee020";
@@ -3128,7 +3142,36 @@ fn a_rejected_row_on_another_market_releases_the_fence() {
         h.reply(
             read.id,
             200,
-            r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[{"symbol":"ETHUSDT","orderId":"mm","stopOrderType":"MmRateClose"}]}}"#,
+            r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[{"symbol":"ETHUSDT","orderId":"mm","stopOrderType":"NotARealType"}]}}"#,
+        );
+    }
+    place(
+        &mut h,
+        32,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    h.take("/v5/order/create-batch");
+}
+
+#[test]
+fn a_null_order_list_is_an_empty_read_and_releases_the_fence() {
+    let mut h = ready();
+    place(
+        &mut h,
+        31,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let first = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: first,
+        error: "connection reset",
+    });
+    while h.has_request("/v5/order/realtime") {
+        let read = h.take("/v5/order/realtime");
+        h.reply(
+            read.id,
+            200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":null}}"#,
         );
     }
     place(

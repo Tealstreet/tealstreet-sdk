@@ -111,7 +111,11 @@ fn none<T>() -> Option<T> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListResult<T> {
-    #[serde(default = "Vec::new")]
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "null_is_empty",
+        bound(deserialize = "T: Deserialize<'de>")
+    )]
     pub list: Vec<T>,
     #[serde(default)]
     pub next_page_cursor: Option<String>,
@@ -1034,8 +1038,17 @@ pub struct WalletAccount<'a> {
     pub total_initial_margin: Opt<'a>,
     #[serde(borrow, default)]
     pub total_maintenance_margin: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "null_is_empty")]
     pub coin: Vec<WalletCoin<'a>>,
+}
+
+/// An account with no coins answers `coin: null`.
+fn null_is_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Deserialize)]

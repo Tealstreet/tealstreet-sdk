@@ -2259,3 +2259,12 @@ fn incremental_price_overflow_keeps_the_same_quantity_correction_eligible() {
         "corrected suffix uses the last proven q1/value1 exactly once"
     );
 }
+
+#[test]
+fn a_pre_tp_sl_order_shows_like_a_normal_one() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"pre_tp_sl","orderId":"123","orderType":"limit","side":"buy","size":"1","price":"60000","filledSize":"0","state":"live"}]}"#);
+    assert!(h.e.store().order("123").is_some());
+}
