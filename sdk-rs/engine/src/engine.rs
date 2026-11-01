@@ -948,6 +948,8 @@ struct Incoming {
 /// How much of a streamed envelope is quoted to report a response without its array.
 const STREAM_PREVIEW_BYTES: usize = 512;
 
+const REFUSED_KEY_POLL_MS: f64 = 300_000.;
+
 struct PollTimer {
     logical: TimerId,
     default_interval_ms: f64,
@@ -1024,6 +1026,8 @@ fn observe_account_auth<V: Venue>(
 struct Polls {
     scale: Option<f64>,
     ceiling_ms: Option<f64>,
+    /// A key refused at start: polls cannot succeed, so they keep this distance.
+    refused_floor_ms: f64,
     /// A venue registers only a few polls, kept in registration order.
     entries: Vec<PollTimer>,
 }
@@ -1415,7 +1419,11 @@ impl Polls {
         {
             return None;
         }
-        let at = (now + interval.max(bounds.minimum_interval_ms)).max(bounds.not_before_ms);
+        let at = (now
+            + interval
+                .max(bounds.minimum_interval_ms)
+                .max(self.refused_floor_ms))
+        .max(bounds.not_before_ms);
         at.is_finite().then_some(at)
     }
 
@@ -1487,6 +1495,16 @@ impl Polls {
             .iter()
             .position(|poll| poll.physical == Some(physical))?;
         Some(self.entries.remove(index).logical)
+    }
+
+    fn hold_off_refused(&mut self, now: f64, sink: &mut TimerSink<'_>) {
+        self.refused_floor_ms = REFUSED_KEY_POLL_MS;
+        for index in 0..self.entries.len() {
+            if let Some(physical) = self.entries[index].physical.take() {
+                sink.clear(physical);
+            }
+            self.arm(now, index, sink);
+        }
     }
 
     fn set_policy(
@@ -2840,6 +2858,9 @@ impl<P> Cx<'_, P> {
             &error.message,
         );
         self.startup_failed(error.clone());
+        let now = self.now;
+        let (polls, mut sink) = self.io.polls();
+        polls.hold_off_refused(now, &mut sink);
         true
     }
 
