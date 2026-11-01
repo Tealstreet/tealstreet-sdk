@@ -168,8 +168,11 @@ impl Hyperliquid {
             client_order_id,
         } = &query
         {
+            // A Creating row may be a send still in flight; only the venue can say it is placed.
             let cached = cx.store.orders().iter().position(|o| {
-                o.symbol == *symbol && o.client_order_id.as_deref() == Some(client_order_id)
+                o.symbol == *symbol
+                    && o.status != safe_cex_engine::model::OrderStatus::Creating
+                    && o.client_order_id.as_deref() == Some(client_order_id)
             });
             if cached.is_some()
                 || !crate::account::valid_cloid(client_order_id)

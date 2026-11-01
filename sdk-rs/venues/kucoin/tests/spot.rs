@@ -787,6 +787,28 @@ fn lookup_is_open_only_nondefinitive_and_does_not_mutate_store() {
     assert_eq!(h.done(2).unwrap()["order"]["id"], "order-1");
 }
 #[test]
+fn a_creating_row_is_never_found_without_the_venue() {
+    let mut h = H::new(true);
+    let mut creating = h.e.store().orders()[0].clone();
+    creating.status = safe_cex_engine::model::OrderStatus::Creating;
+    h.e.store_mut().set_orders(vec![creating]);
+    h.command(Command::Query {
+        command: 1,
+        query: Query::OrderByClientId {
+            symbol: "BTC-USDT".into(),
+            client_order_id: "caller-1".into(),
+        },
+    });
+    h.reply(
+        "/active/page",
+        r#"{"code":"200000","data":{"totalPage":1,"items":[]}}"#,
+    );
+    assert_eq!(
+        h.done(1).unwrap(),
+        json!({"found":false,"definitive":false})
+    );
+}
+#[test]
 fn historical_fills_match_hf_base_units_and_ms_timestamp() {
     let mut h = H::new(true);
     h.command(Command::Query {
