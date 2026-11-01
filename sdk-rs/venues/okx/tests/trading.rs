@@ -2249,3 +2249,59 @@ fn a_rejected_row_with_a_stored_copy_still_releases_the_fence() {
         assert!(e.store().loaded().orders);
     }
 }
+
+// deaws2's run: 51008 on the large chunk while the small one rests.
+#[test]
+fn a_refused_chunk_reports_the_sibling_that_rests() {
+    let mut e = trading_engine();
+    let mut markets = e.store().markets().to_vec();
+    markets[0].precision.amount = 0.1;
+    markets[0].limits.amount.max = 12.0;
+    e.store_mut().set_markets(markets);
+    let out = place(
+        &mut e,
+        vec![order(
+            r#"{"symbol":"BTCUSDT","type":"market","side":"buy","amount":12.1}"#,
+        )],
+    );
+    reply(
+        &mut e,
+        http(&out),
+        r#"{"code":"2","msg":"Bulk operation partially succeeded","data":[{"ordId":"","sCode":"51008","sMsg":"Order failed. Insufficient USDT margin in account"},{"ordId":"77","sCode":"0","sMsg":""}]}"#,
+        6.0,
+    );
+    let out = prepared(&mut e, 6.0);
+    let failed = out.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.clone()),
+        _ => None,
+    });
+    assert_eq!(failed.unwrap().partial.unwrap().order_ids, ["77"]);
+}
+
+#[test]
+fn a_gone_cancel_row_asks_for_a_read_because_its_frame_may_never_come() {
+    let mut e = trading_engine();
+    e.store_mut()
+        .upsert_order(stored("1", safe_cex_engine::model::OrderType::Limit));
+    e.store_mut()
+        .upsert_order(stored("2", safe_cex_engine::model::OrderType::Limit));
+    e.handle(
+        5.0,
+        Event::Command(Command::CancelOrders {
+            command: 2,
+            ids: vec!["1".into(), "2".into()],
+        }),
+    );
+    let out = prepared(&mut e, 5.0);
+    reply(
+        &mut e,
+        http(&out),
+        r#"{"code":"2","msg":"Bulk operation partially succeeded","data":[{"ordId":"1","sCode":"51400","sMsg":"Order cancellation failed as the order has been filled, canceled or does not exist."},{"ordId":"2","sCode":"0","sMsg":""}]}"#,
+        6.0,
+    );
+    let out = prepared(&mut e, 6.0);
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
+    );
+}
