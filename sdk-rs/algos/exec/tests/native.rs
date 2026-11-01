@@ -433,6 +433,8 @@ async fn cli_twap_starts_exactly_one_real_shared_schedule_and_list_stop_use_it()
         assert_eq!(book.active_chasers().len(),1);
         assert_eq!(book.active_chasers()[0].origin.as_deref(),Some("cli"));
         exec.handle("exec",r#"{"symbol":"BTCUSDT","command":"chase cancel keep"}"#,&cx).unwrap();
+        // The row goes with the completion, once the chase's final read has answered.
+        for _ in 0..8 {tokio::task::yield_now().await;}
         assert!(book.active_chasers().is_empty());
         assert_eq!(port.commands.borrow().len(),1,"cancel keep does not cancel the resting order");
         book.shutdown("test cleanup").await;cx.scope.dispose();
