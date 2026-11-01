@@ -342,6 +342,8 @@ pub struct OpenOrder<'a> {
     pub time_in_force: Option<Str<'a>>,
     #[serde(borrow, default)]
     pub client_order_id: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub position_side: Option<Str<'a>>,
 }
 
 /// One `/fapi/v1/openAlgoOrders` row.
@@ -349,6 +351,8 @@ pub struct OpenOrder<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct OpenAlgoOrder<'a> {
     pub algo_id: Id,
+    #[serde(borrow, default)]
+    pub position_side: Option<Str<'a>>,
     #[serde(borrow)]
     pub symbol: Str<'a>,
     #[serde(borrow)]
@@ -398,6 +402,8 @@ pub struct OrderUpdateEvent<'a> {
 #[derive(Deserialize)]
 pub struct OrderUpdate<'a> {
     pub i: Id,
+    #[serde(borrow, default)]
+    pub ps: Option<Str<'a>>,
     #[serde(borrow)]
     pub s: Str<'a>,
     #[serde(rename = "S", borrow)]
@@ -451,6 +457,8 @@ pub struct AlgoUpdateEvent<'a> {
 #[derive(Deserialize)]
 pub struct AlgoUpdate<'a> {
     pub aid: Id,
+    #[serde(borrow, default)]
+    pub ps: Option<Str<'a>>,
     #[serde(borrow)]
     pub s: Str<'a>,
     #[serde(rename = "S", borrow)]
@@ -629,6 +637,8 @@ pub struct PmBalance<'a> {
 pub struct PmConditionalOrder<'a> {
     #[serde(default)]
     pub strategy_id: Option<Id>,
+    #[serde(borrow, default)]
+    pub position_side: Option<Str<'a>>,
     #[serde(borrow)]
     pub new_client_strategy_id: Str<'a>,
     #[serde(borrow)]
@@ -660,6 +670,8 @@ pub struct ConditionalUpdateEvent<'a> {
 pub struct ConditionalUpdate<'a> {
     #[serde(default)]
     pub si: Option<Id>,
+    #[serde(borrow, default)]
+    pub ps: Option<Str<'a>>,
     #[serde(borrow)]
     pub s: Str<'a>,
     /// newClientStrategyId.

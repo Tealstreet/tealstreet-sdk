@@ -148,6 +148,7 @@ struct Amendment {
     id: String,
     target_total: f64,
     replacement: PlaceOrderOpts,
+    position_side: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -177,6 +178,8 @@ enum CancelProof {
 #[derive(Default)]
 pub struct TradingState {
     jobs: HashMap<CommandId, Job>,
+    /// While an amendment plans its replacement: the original row's hedge side.
+    amended_position_side: Option<&'static str>,
     #[cfg(test)]
     id_generator: Option<fn() -> Result<String, String>>,
 }
@@ -566,7 +569,9 @@ impl BinanceFutures {
             } else {
                 amendment.target_total - filled
             };
+            self.trading.amended_position_side = amendment.position_side;
             let plan = self.plan_place(cx, std::slice::from_ref(&amendment.replacement));
+            self.trading.amended_position_side = None;
             if let Some(job) = self.trading.jobs.get_mut(&command) {
                 match plan {
                     Ok(plan) => job.steps.extend(plan.steps),
@@ -965,6 +970,9 @@ impl BinanceFutures {
                         format!("Cancellation was not confirmed: {message}"),
                     ))
                 } else {
+                    if let Some(proof) = &proof {
+                        self.note_unknown_cancel_proof(cx, proof);
+                    }
                     match proof {
                         Some(CancelProof::One(target)) => {
                             self.mark_captured_canceled(cx, &[target], false);
@@ -1792,6 +1800,7 @@ impl BinanceFutures {
             id: id.to_owned(),
             target_total,
             replacement,
+            position_side: self.order_position_side(id),
         });
         Ok(job)
     }
@@ -1806,6 +1815,9 @@ impl BinanceFutures {
             .store
             .market(&symbol)
             .ok_or_else(|| format!("Market {symbol} not found"))?;
+        if self.account.leverage_brackets_unread {
+            return Err("Binance leverage limits have not loaded yet; try again shortly".into());
+        }
         let leverage = input
             .max(market.limits.leverage.min)
             .min(market.limits.leverage.max);
@@ -1834,6 +1846,9 @@ impl BinanceFutures {
     ) -> &'static str {
         if !cx.store.hedged() {
             return "BOTH";
+        }
+        if let Some(position_side) = self.trading.amended_position_side {
+            return position_side;
         }
         let closes = is_algo(kind) || reduce;
         match (side, closes) {
@@ -2511,6 +2526,37 @@ impl BinanceFutures {
         }
     }
 
+    fn note_unknown_cancel_proof(&mut self, cx: &mut Cx<'_, Pending>, proof: &CancelProof) {
+        let (targets, strategy) = match proof {
+            CancelProof::One(target) => (std::slice::from_ref(target), false),
+            CancelProof::Algo(target) | CancelProof::Strategy(target) => {
+                (std::slice::from_ref(target), true)
+            }
+            CancelProof::Batch(targets)
+            | CancelProof::CoinAll(targets)
+            | CancelProof::SpotAll { targets, .. } => (targets.as_slice(), false),
+            CancelProof::SymbolAll { targets, strategy } => (targets.as_slice(), *strategy),
+        };
+        self.note_unknown_cancel_targets(cx, targets, strategy);
+    }
+
+    fn note_unknown_cancel_targets(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        targets: &[CancelTarget],
+        strategy: bool,
+    ) {
+        let rows: Vec<_> = targets
+            .iter()
+            .filter_map(|target| {
+                target
+                    .native
+                    .map(|native| (target.id.clone(), target.symbol.clone(), native, strategy))
+            })
+            .collect();
+        self.note_unknown_cancels(cx, rows);
+    }
+
     fn mark_captured_canceled(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -2683,6 +2729,7 @@ impl BinanceFutures {
                     )
                 });
                 let mut seen = std::collections::HashSet::new();
+                let mut unknown_rows = 0;
                 for row in rows {
                     match row {
                         CancelRow::Order(ack) => {
@@ -2706,14 +2753,27 @@ impl BinanceFutures {
                                 error.get_or_insert_with(|| invalid().unwrap());
                             }
                         }
+                        // As for a single cancel: the order looks gone, and it must
+                        // not stop the batches and algo cancels still to send.
+                        CancelRow::Error { code, .. } if code == UNKNOWN_ORDER && !mismatched => {
+                            unknown_rows += 1;
+                        }
                         CancelRow::Error { code, msg } => {
                             *unproven |= item_unknown(code);
                             error.get_or_insert((code, msg));
                         }
                     }
                 }
-                if seen.len() != targets.len() && error.is_none() {
+                if seen.len() + unknown_rows != targets.len() && error.is_none() {
                     return invalid();
+                }
+                if error.is_none() && unknown_rows > 0 {
+                    let gone: Vec<_> = targets
+                        .into_iter()
+                        .filter(|target| target.native.is_none_or(|native| !seen.contains(&native)))
+                        .collect();
+                    self.note_unknown_cancel_targets(cx, &gone, false);
+                    self.mark_captured_canceled(cx, &gone, false);
                 }
                 return error;
             }
