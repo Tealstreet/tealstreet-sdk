@@ -808,10 +808,23 @@ impl Kucoin {
                 self.account_issue(cx, request);
                 return;
             }
-            cx.retried_failure(
-                "kucoin.account:773",
-                format!("KuCoin private read failed: {}", request.path(cx.store)),
-            );
+            let path = request.path(cx.store);
+            match envelope.as_ref() {
+                Ok(e) if e.code == crate::wire::IP_REFUSED => cx.retried_failure_error(
+                    "kucoin.account:773",
+                    &safe_cex_engine::VenueError::new(format!(
+                        "KuCoin private read failed: {path}: {} ({})",
+                        e.msg, e.code
+                    ))
+                    .venue_code(e.code)
+                    .venue_message(e.msg)
+                    .ip_whitelist_refused(),
+                ),
+                _ => cx.retried_failure(
+                    "kucoin.account:773",
+                    format!("KuCoin private read failed: {path}"),
+                ),
+            }
             if let Read::Margin(symbol) | Read::Leverage(symbol) = &request.read {
                 self.account.metadata.remove(symbol);
             }

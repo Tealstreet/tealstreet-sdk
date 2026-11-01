@@ -262,6 +262,98 @@ impl From<&String> for VenueError {
     }
 }
 
+/// What a refusal naming the API key's IP whitelist tells the user to do.
+pub const IP_WHITELIST_HINT: &str = "The API key's IP whitelist does not include this server: add the new Tealstreet IPs to the key on the exchange";
+/// For a key refusal whose text leaves the cause open (bad key, IP or permissions).
+pub const IP_WHITELIST_MAYBE_HINT: &str =
+    "If the API key has an IP whitelist, add the new Tealstreet IPs to it";
+const IP_WHITELIST_WORDS: [&str; 10] = [
+    "whitelist",
+    "white list",
+    "allowlist",
+    "allow list",
+    "bound ip",
+    "unmatched ip",
+    "ip not allowed",
+    "ip is not allowed",
+    "ip restriction",
+    "invalid ip",
+];
+
+/// How plainly `text` blames the API key's IP whitelist, if it does.
+fn ip_whitelist_refusal(text: &str, auth_kind: bool) -> Option<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    // The site already says it (Bybit's own hint, GRVT, Bitget's WS login).
+    if lower.contains("tealstreet ip") {
+        return None;
+    }
+    if !lower
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| word == "ip")
+    {
+        return None;
+    }
+    let named = IP_WHITELIST_WORDS.iter().any(|word| lower.contains(word));
+    // "Bad API key, API secret or incorrect IP whitelist" names no single cause.
+    if named && !lower.contains(" or ") {
+        Some(IP_WHITELIST_HINT)
+    } else if named || auth_kind {
+        Some(IP_WHITELIST_MAYBE_HINT)
+    } else {
+        None
+    }
+}
+
+fn is_auth(kind: Option<ErrorKind>) -> bool {
+    matches!(
+        kind,
+        Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+    )
+}
+
+fn with_hint(message: &str, hint: &str) -> String {
+    let message = message.trim_end().trim_end_matches('.');
+    format!("{message}. {hint}")
+}
+
+/// `message` with the IP whitelist hint when it blames the key's IP whitelist,
+/// and whether it names that as the cause, for a notice that has only text.
+pub fn ip_whitelist_text(message: &str, kind: Option<ErrorKind>) -> Option<(String, bool)> {
+    let hint = ip_whitelist_refusal(message, is_auth(kind))?;
+    Some((with_hint(message, hint), hint == IP_WHITELIST_HINT))
+}
+
+impl VenueError {
+    /// The venue's code for an IP the key's whitelist excludes, whatever its text says.
+    pub fn ip_whitelist_refused(mut self) -> Self {
+        self.kind = Some(ErrorKind::AuthPermission);
+        if !self.message.to_ascii_lowercase().contains("tealstreet ip") {
+            self.message = with_hint(&self.message, IP_WHITELIST_HINT);
+        }
+        self
+    }
+
+    /// A refusal blaming the key's IP whitelist says to add the new IPs, and
+    /// one that names it as the cause is an auth permission refusal, whatever
+    /// the site classified: retrying cannot pass it.
+    pub fn with_ip_whitelist_hint(mut self) -> Self {
+        let auth = is_auth(self.kind);
+        let hint = ip_whitelist_refusal(&self.message, auth).or_else(|| {
+            self.venue_message
+                .as_deref()
+                .and_then(|venue| ip_whitelist_refusal(venue, auth))
+                .filter(|_| !self.message.to_ascii_lowercase().contains("tealstreet ip"))
+        });
+        if let Some(hint) = hint {
+            if hint == IP_WHITELIST_HINT && !auth {
+                self.kind = Some(ErrorKind::AuthPermission);
+            }
+            self.message = with_hint(&self.message, hint);
+        }
+        self
+    }
+}
+
 impl fmt::Display for VenueError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)
@@ -273,6 +365,95 @@ impl std::error::Error for VenueError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Venue refusals naming the key's IP whitelist, as the venues word them.
+    const NAMED: [&str; 9] = [
+        "Unmatched IP, please check your API key's bound IP addresses.",
+        "Your IP is not included in your API key's IP whitelist",
+        "Current IP does not match the bound IP",
+        "Invalid IP",
+        "Ip not in whitelist",
+        "Request IP is not whitelisted",
+        "The IP address is not in the API whitelist",
+        "IP_ILLEGAL: IP address not whitelisted",
+        "403 IP is not whitelisted",
+    ];
+
+    #[test]
+    fn a_refusal_naming_the_ip_whitelist_says_to_add_the_new_ips() {
+        for text in NAMED {
+            let error = VenueError::new(format!("Venue rejected the order: {text}"))
+                .kind(ErrorKind::Rejected)
+                .with_ip_whitelist_hint();
+            assert!(
+                error.message.ends_with(IP_WHITELIST_HINT),
+                "{}",
+                error.message
+            );
+            assert!(
+                error.message.contains(text.trim_end_matches('.')),
+                "{}",
+                error.message
+            );
+            assert_eq!(error.kind, Some(ErrorKind::AuthPermission), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_key_refusal_that_leaves_the_cause_open_only_suggests_the_whitelist() {
+        for text in [
+            "Invalid API-key, IP, or permissions for action.",
+            "Bad API key, API secret or incorrect IP whitelist.",
+        ] {
+            let error = VenueError::new(text)
+                .kind(ErrorKind::AuthInvalid)
+                .with_ip_whitelist_hint();
+            assert!(
+                error.message.ends_with(IP_WHITELIST_MAYBE_HINT),
+                "{}",
+                error.message
+            );
+            assert_eq!(error.kind, Some(ErrorKind::AuthInvalid), "{text}");
+        }
+    }
+
+    #[test]
+    fn other_failures_and_a_site_that_already_says_it_are_left_alone() {
+        for (text, kind) in [
+            (
+                "Way too much request weight used; IP banned until 1700000000000",
+                ErrorKind::RateLimited,
+            ),
+            ("Too many requests from this IP", ErrorKind::RateLimited),
+            ("Order price 10010.5 out of range", ErrorKind::Rejected),
+            ("API key is invalid.", ErrorKind::AuthInvalid),
+            (
+                "Bybit refused this API key from this IP address: the key is restricted to other IPs. Add the current Tealstreet IPs to the key's IP allowlist on Bybit, or create a new key",
+                ErrorKind::AuthPermission,
+            ),
+        ] {
+            let error = VenueError::new(text).kind(kind).with_ip_whitelist_hint();
+            assert_eq!(error.message, text);
+            assert_eq!(error.kind, Some(kind));
+        }
+    }
+
+    #[test]
+    fn the_venue_message_counts_and_the_hint_is_added_once() {
+        let error = VenueError::new("Bitunix account read failed: code 10004")
+            .venue_message("The current ip is not in the apikey ip whitelist")
+            .with_ip_whitelist_hint();
+        assert!(
+            error.message.ends_with(IP_WHITELIST_HINT),
+            "{}",
+            error.message
+        );
+        assert_eq!(error.clone().with_ip_whitelist_hint(), error);
+        let coded = VenueError::new("KuCoin rejected the order (400006)").ip_whitelist_refused();
+        assert_eq!(coded.kind, Some(ErrorKind::AuthPermission));
+        assert_eq!(coded.clone().ip_whitelist_refused(), coded);
+        assert_eq!(coded.clone().with_ip_whitelist_hint(), coded);
+    }
 
     #[test]
     fn builder_approval_details_are_optional_and_keep_the_legacy_text() {

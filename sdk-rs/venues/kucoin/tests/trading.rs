@@ -1099,6 +1099,13 @@ fn write_failures_are_classified_without_changing_their_text() {
             rejected(ErrorKind::AuthPermission),
             "KuCoin API Error 400007: Access denied (HTTP 200)",
         ),
+        // An IP the key's whitelist excludes, at any 4xx: what to do, as an auth refusal.
+        (
+            400,
+            r#"{"code":"400006","msg":"The requested IP address is not in the API whitelist"}"#,
+            rejected(ErrorKind::AuthPermission),
+            "KuCoin API Error 400006: The requested IP address is not in the API whitelist (HTTP 400). The API key's IP whitelist does not include this server: add the new Tealstreet IPs to the key on the exchange",
+        ),
         (
             200,
             r#"{"code":"999999","msg":"new"}"#,

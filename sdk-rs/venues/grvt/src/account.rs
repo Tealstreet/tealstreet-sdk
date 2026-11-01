@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
+/// GRVT 1008: the request IP is not in the API key's whitelist.
+const IP_NOT_WHITELISTED: &str = "GRVT IP is not whitelisted. Please re-add your API key and whitelist every Tealstreet IP listed in the API key form.";
+
 const AUTH: &str = "/auth/api_key/login";
 const SUMMARY: &str = "/lite/v1/aggregated_account_summary";
 const POSITIONS: &str = "/lite/v1/positions";
@@ -1082,6 +1085,14 @@ impl Grvt {
     }
     /// `code` is `auth.rejected` only when GRVT refused the credentials.
     fn fail_authentication(&mut self, cx: &mut Cx<'_, Pending>, code: &'static str) {
+        self.fail_authentication_with(cx, code, "GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
+    }
+    fn fail_authentication_with(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        code: &'static str,
+        message: &str,
+    ) {
         self.cancel_pong_ping(cx);
         self.account.authentication_failed = true;
         self.account.authenticated = false;
@@ -1094,7 +1105,7 @@ impl Grvt {
             cx.clear_timer(timer);
         }
         self.retire_login_session(cx);
-        cx.notice(Level::Error, code,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
+        cx.notice(Level::Error, code, message);
     }
     fn refresh_stream_session(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.login_pending || self.account.authentication_failed {
@@ -1953,14 +1964,18 @@ impl Grvt {
             Request::Login => {
                 self.account.login_pending = false;
                 let refused = error.contains("(HTTP 401") || error.contains("(HTTP 403");
-                self.fail_authentication(
-                    cx,
-                    if refused {
-                        code::AUTH_REJECTED
-                    } else {
-                        code::STREAM_UNAVAILABLE
-                    },
-                );
+                if refused && error.contains(", code 1008)") {
+                    self.fail_authentication_with(cx, code::AUTH_REJECTED, IP_NOT_WHITELISTED);
+                } else {
+                    self.fail_authentication(
+                        cx,
+                        if refused {
+                            code::AUTH_REJECTED
+                        } else {
+                            code::STREAM_UNAVAILABLE
+                        },
+                    );
+                }
                 self.fail_waiting(cx);
             }
             Request::Summary => {
@@ -2045,9 +2060,7 @@ impl Grvt {
             return true;
         }
         if code == "1008" {
-            cx.notice(Level::Error, code::AUTH_REJECTED,
-                "GRVT IP is not whitelisted. Please re-add your API key and whitelist every Tealstreet IP listed in the API key form.",
-            );
+            cx.notice(Level::Error, code::AUTH_REJECTED, IP_NOT_WHITELISTED);
             return true;
         }
         if !code.is_empty() && code != "0" {

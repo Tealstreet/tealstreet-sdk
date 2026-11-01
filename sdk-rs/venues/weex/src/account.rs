@@ -605,7 +605,11 @@ impl WeexFutures {
             return;
         }
         if response.status >= 400 {
-            self.account_failed(cx, request, &format!("HTTP {}", response.status));
+            let detail = refusal_text(response.body).map_or_else(
+                || format!("HTTP {}", response.status),
+                |text| format!("HTTP {}: {text}", response.status),
+            );
+            self.account_failed(cx, request, &detail);
             return;
         }
         if matches!(request.kind, Kind::Normal | Kind::Algo) && request.page_rows == 100 {
@@ -1176,6 +1180,25 @@ impl WeexFutures {
             _ => safe_cex_engine::AuthOutcome::accepted_list(response, ArrayAt::Root),
         }
     }
+}
+
+/// The venue's code and words from a refused read, never the rest of the body.
+fn refusal_text(body: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Refusal<'a> {
+        #[serde(borrow)]
+        code: Option<&'a serde_json::value::RawValue>,
+        #[serde(default)]
+        msg: String,
+    }
+    let refusal = serde_json::from_str::<Refusal<'_>>(body).ok()?;
+    if refusal.msg.is_empty() {
+        return None;
+    }
+    Some(match refusal.code {
+        Some(code) => format!("{} ({})", refusal.msg, code.get().trim_matches('"')),
+        None => refusal.msg,
+    })
 }
 
 #[cfg(test)]

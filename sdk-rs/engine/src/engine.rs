@@ -2688,6 +2688,16 @@ impl<P> Cx<'_, P> {
 
     #[inline]
     pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
+        let message = message.into();
+        // A read the key's IP whitelist refuses is shown at the retried-failure pace.
+        let level = if level == Level::Warn
+            && code == log_code::REQUEST_FAILED
+            && crate::error::ip_whitelist_text(&message, None).is_some_and(|(_, named)| named)
+        {
+            self.retried_failure_level("ip.whitelist", &message)
+        } else {
+            level
+        };
         self.core().notice(level, code, message)
     }
 
@@ -2699,7 +2709,7 @@ impl<P> Cx<'_, P> {
     pub fn retried_failure(&mut self, site: &'static str, message: impl Into<String>) {
         let message = message.into();
         let level = self.retried_failure_level(site, &message);
-        self.notice(level, log_code::REQUEST_FAILED, message);
+        self.core().notice(level, log_code::REQUEST_FAILED, message);
     }
 
     /// [`Self::retried_failure`] for a classified read failure, carrying the
@@ -2794,7 +2804,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
-        let error = error.into();
+        let error = error.into().with_ip_whitelist_hint();
         count_auth_failure(&mut self.io.core, Some(&error));
         self.io
             .core
@@ -3003,10 +3013,27 @@ impl crate::engine::CoreCx<'_> {
     pub fn event(
         &mut self,
         level: Level,
-        code: &'static str,
+        mut code: &'static str,
         message: impl Into<String>,
-        fields: Vec<(&'static str, Value)>,
+        mut fields: Vec<(&'static str, Value)>,
     ) {
+        let mut message = message.into();
+        if level >= Level::Warn {
+            let kind = fields.iter().find_map(|(name, value)| match (name, value) {
+                (&"kind", Value::Str(kind)) => auth_kind(kind),
+                _ => None,
+            });
+            if let Some((hinted, named)) = crate::error::ip_whitelist_text(&message, kind) {
+                message = hinted;
+                // A read the key's IP whitelist refuses is the account's auth failure.
+                // A site that classified the failure itself keeps its code.
+                let classified = fields.iter().any(|(name, _)| *name == "kind");
+                if named && code == log_code::REQUEST_FAILED && !classified {
+                    code = log_code::AUTH_REJECTED;
+                    fields.push(("kind", ErrorKind::AuthPermission.as_str().into()));
+                }
+            }
+        }
         // A rejection often also arrives as an auth-kind failure or `deactivate`.
         if code == log_code::AUTH_REJECTED {
             count_auth_failure(self.io.core, None);
@@ -3018,7 +3045,7 @@ impl crate::engine::CoreCx<'_> {
             LogEvent {
                 level,
                 code,
-                message: message.into(),
+                message,
                 fields,
             },
         );
@@ -3178,6 +3205,7 @@ impl crate::engine::CoreCx<'_> {
         let notice = match result {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
+                let error = error.with_ip_whitelist_hint();
                 if credential_evidence {
                     count_auth_failure(self.io.core, Some(&error));
                 }
@@ -6628,6 +6656,16 @@ fn count_auth_failure(io: &mut IoCore, error: Option<&VenueError>) {
 }
 
 #[inline(never)]
+fn auth_kind(kind: &str) -> Option<ErrorKind> {
+    [
+        ErrorKind::AuthInvalid,
+        ErrorKind::AuthExpired,
+        ErrorKind::AuthPermission,
+    ]
+    .into_iter()
+    .find(|auth| auth.as_str() == kind)
+}
+
 fn push_event(
     actions: &mut Vec<Action>,
     health: &mut Health,

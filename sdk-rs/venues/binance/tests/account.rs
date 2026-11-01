@@ -1209,6 +1209,15 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
             Some(&Err(error.message.clone())),
             "text is unchanged"
         );
+        // -2015 may be the key's IP whitelist, so the user is told what to check.
+        assert_eq!(
+            error
+                .message
+                .ends_with(safe_cex_engine::error::IP_WHITELIST_MAYBE_HINT),
+            code == Some("-2015"),
+            "{}",
+            error.message
+        );
         if status >= 500 {
             assert_eq!(
                 error.message,
