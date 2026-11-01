@@ -299,7 +299,10 @@ const start = (ctx: Worker, shared = false) => {
     // markets/tickers on top. Seeding AFTER start() would race and could wipe
     // freshly-loaded markets when the main-thread store is empty (cold load,
     // no IndexedDB cache, default-demo, etc.).
-    exchangeWorker.store.update(payload.data.store);
+    // A fresh worker runs no algos: chase and TWAP rows in the seed belong to
+    // algos that died with the worker before it, and would show as running.
+    const { activeChasers: _deadChasers, activeTWAPs: _deadTwaps, ...seed } = payload.data.store ?? {};
+    exchangeWorker.store.update(seed);
 
     failedWorker = undefined;
     const started = await exchangeWorker.start();

@@ -349,3 +349,29 @@ describe('a start that fails outright', () => {
     expect(exchangeWorkers[ACCOUNT]?.exchange?.isDisposed).toBe(false);
   });
 });
+
+describe('a re-init seeded with the page store', () => {
+  it('takes no chase or TWAP rows: the algos that ran them died with the old worker', async () => {
+    const { messages, send } = context();
+    const ghost = {
+      id: 'c1',
+      symbol: 'BTCUSDT',
+      size: 0.001,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      attempts: 1,
+      isStopped: false,
+      stopReason: '',
+    };
+    void send({
+      ...init,
+      data: { ...init.data, store: { activeChasers: [ghost], activeTWAPs: [{ id: 't1', symbol: 'BTCUSDT' }] } },
+    });
+    loads = true;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(exchangeWorkers[ACCOUNT].store.activeChasers).toEqual([]);
+    expect(exchangeWorkers[ACCOUNT].store.activeTWAPs).toEqual([]);
+    const posted = messages.filter((message) => message.op === 'store');
+    expect(posted.some((message) => (message.data?.activeChasers?.length ?? 0) > 0)).toBe(false);
+  });
+});
