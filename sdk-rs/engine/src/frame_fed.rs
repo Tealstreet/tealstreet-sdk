@@ -32,6 +32,10 @@ pub fn is_write(command: &Command) -> bool {
             | Command::SetLeverage { .. }
             | Command::SetMarginType { .. }
             | Command::SetPositionMode { .. }
+            | Command::Venue {
+                action: crate::VenueAction::SetAccountTier { .. },
+                ..
+            }
     )
 }
 
@@ -47,5 +51,22 @@ pub fn refusal(command: &Command, markets_loaded: bool) -> Option<&'static str> 
             ..
         } => None,
         _ => Some(DATA_SOURCE_ONLY),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_page_engine_sets_its_own_account_tier() {
+        let set_tier = Command::Venue {
+            command: 1,
+            action: crate::VenueAction::SetAccountTier {
+                tier: "premium".into(),
+            },
+        };
+        assert_eq!(refusal(&set_tier, true), None);
+        assert_eq!(refusal(&set_tier, false), Some(MARKETS_NOT_LOADED));
     }
 }
