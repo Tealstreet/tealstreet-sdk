@@ -103,6 +103,10 @@ pub struct Account {
     settings_barriers: HashMap<String, SettingBarrier>,
     asset_retry: HashSet<String>,
     asset_retry_timer: Option<TimerId>,
+    /// The next queued read is a fence reconcile.
+    fence_read: bool,
+    orders_retry_timer: Option<TimerId>,
+    pub(crate) builder_read_at: f64,
     state_time: HashMap<String, f64>,
     position_time: HashMap<String, f64>,
     snapshot_time: HashMap<String, f64>,
@@ -239,12 +243,18 @@ impl Hyperliquid {
             Request::State { .. } | Request::Spot { .. } => 2,
             _ => 20,
         };
-        self.account.reads.push_back(QueuedRead {
+        let read = QueuedRead {
             body,
             request: ReadContinuation::Account(request),
             streamed,
             weight,
-        });
+        };
+        // A read an uncertain placement waits on goes ahead of routine refreshes.
+        if std::mem::take(&mut self.account.fence_read) {
+            self.account.reads.push_front(read);
+        } else {
+            self.account.reads.push_back(read);
+        }
         self.pump_reads(cx);
     }
     pub(crate) fn history_read(
@@ -412,8 +422,11 @@ impl Hyperliquid {
             return;
         }
         // Partial discovery may start real account reads, not an empty snapshot.
-        if self.spot || !self.core_discovery_incomplete || self.options.public_data_only {
+        // A keyed account's own reads load it: empty here would read as no open orders.
+        if self.options.public_data_only || self.user().is_none() {
             cx.store.set_orders(Vec::new());
+        }
+        if self.spot || !self.core_discovery_incomplete || self.options.public_data_only {
             cx.store.set_positions(Vec::new());
         }
         if self.options.public_data_only {
@@ -499,6 +512,7 @@ impl Hyperliquid {
             user: &'a str,
             builder: &'a str,
         }
+        self.account.builder_read_at = cx.now;
         let b = self.builder();
         self.read_body(
             cx,
@@ -595,7 +609,9 @@ impl Hyperliquid {
                     self.account.orders_refresh_due.insert(dex);
                 }
             } else {
+                self.account.fence_read = true;
                 self.refresh_orders_scope(cx, &dex);
+                self.account.fence_read = false;
             }
         }
     }
@@ -1097,6 +1113,9 @@ impl Hyperliquid {
             Request::Orders { dex, .. } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
                 self.refresh_owed_orders(cx, &dex);
+                if !cx.store.loaded().orders && self.account.orders_retry_timer.is_none() {
+                    self.account.orders_retry_timer = Some(cx.set_timer(5000.0));
+                }
             }
             Request::Spot { .. } => self.account.spot_inflight = false,
             Request::Asset { symbol, .. } => {
@@ -1114,6 +1133,10 @@ impl Hyperliquid {
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.orders_retry_timer == Some(timer) {
+            self.account.orders_retry_timer = None;
+            self.refresh_orders(cx);
+        }
         if self.account.asset_retry_timer == Some(timer) {
             self.account.asset_retry_timer = None;
             for symbol in std::mem::take(&mut self.account.asset_retry) {
@@ -2429,6 +2452,7 @@ pub(crate) fn terminal(status: &str) -> bool {
     status == "filled"
         || status == "canceled"
         || status == "rejected"
+        || status == "scheduledCancel"
         || status.ends_with("Canceled")
         || status.ends_with("Rejected")
 }
