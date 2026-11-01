@@ -575,6 +575,7 @@ impl Lighter {
             return;
         }
         self.trading.queue.push_back(Job {
+            nonce_retries: 0,
             preflight,
             plan: None,
             slot: None,
