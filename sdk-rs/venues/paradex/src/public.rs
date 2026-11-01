@@ -1583,7 +1583,7 @@ impl Paradex {
                         return None;
                     };
                     let _ = cx.fail_context(&context, interval.unsupported("Paradex"));
-                } else if cx.store.market(&symbol).is_none() {
+                } else if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
                     let Ok(context) = cx.admit_http_command(Policy {
                         operation: Operation::Read,
                         credential: None,

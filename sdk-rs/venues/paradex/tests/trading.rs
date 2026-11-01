@@ -486,6 +486,57 @@ fn a_mixed_native_batch_returns_correlated_successes_and_reports_missing_clients
         if message.contains("second") && message.contains("outside price bands"))));
 }
 
+fn rejection_level(h: &Harness) -> safe_cex_engine::Level {
+    h.actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.message.contains("placement failed for client IDs") =>
+            {
+                Some(event.level)
+            }
+            _ => None,
+        })
+        .expect("the rejection is logged")
+}
+
+#[test]
+fn a_lone_rejected_entry_leaves_its_toast_to_the_failed_command() {
+    let mut h = private();
+    place(&mut h, 74, vec![opts(OrderType::Market)]);
+    let only = h.take("/orders");
+    h.respond(
+        only,
+        400,
+        r#"{"error":"REJECTED","message":"entry refused"}"#,
+    );
+    assert!(h.result(74).unwrap_err().contains("entry refused"));
+    assert_eq!(rejection_level(&h), safe_cex_engine::Level::Warn);
+}
+
+#[test]
+fn a_rejected_last_entry_beside_an_accepted_one_still_reports_itself() {
+    let mut h = private();
+    let mut second = opts(OrderType::Market);
+    second.client_order_id = Some("second".into());
+    place(&mut h, 75, vec![opts(OrderType::Market), second]);
+    let first = h.take("/orders");
+    let accepted: Payload = serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
+    let body = format!(
+        r#"{{"id":"one","client_id":"{}"}}"#,
+        accepted.client_id.unwrap()
+    );
+    h.respond(first, 200, &body);
+    let second = h.take("/orders");
+    h.respond(
+        second,
+        400,
+        r#"{"error":"REJECTED","message":"second refused"}"#,
+    );
+    assert_eq!(h.result(75), Ok("[\"one\"]"));
+    assert_eq!(rejection_level(&h), safe_cex_engine::Level::Error);
+}
+
 #[test]
 fn all_failed_placements_still_attempt_every_independent_order_and_return_an_error() {
     let mut h = private();
