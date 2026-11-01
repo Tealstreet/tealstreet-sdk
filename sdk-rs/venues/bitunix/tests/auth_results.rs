@@ -996,3 +996,21 @@ fn a_refused_key_ends_the_start_with_the_reason() {
         Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
     )));
 }
+
+#[test]
+fn a_refused_read_key_does_not_end_the_start() {
+    let (mut e, actions) = started(true);
+    let r = http(&actions, "get_pending_positions");
+    let failed = answer(
+        &mut e,
+        &r,
+        100.0,
+        200,
+        "",
+        r#"{"code":10004,"msg":"IP refused"}"#,
+    );
+    assert!(!failed.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}
