@@ -51,18 +51,12 @@ import type { CallableMethodsInWorker, EngineSnapshot, ExchangeCapabilities, Wor
 import type { BaseWebSocket } from '../base.ws';
 import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
+import type { ChaseEnd } from './algoControlWatch';
 import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
 
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
-import {
-  claimWriteTiming,
-  emitWriteTiming,
-  runWithWriteTiming,
-  TIMED_WRITE_METHODS,
-  WriteTiming,
-} from '../../writeTiming';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
@@ -78,9 +72,16 @@ import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
-import { stopAccountAlgos as stopLocalAccountAlgos } from '../../webworker/stopAccountAlgos';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
+import { stopAccountAlgos as stopLocalAccountAlgos } from '../../webworker/stopAccountAlgos';
+import {
+  claimWriteTiming,
+  emitWriteTiming,
+  runWithWriteTiming,
+  TIMED_WRITE_METHODS,
+  WriteTiming,
+} from '../../writeTiming';
 import { isAsterDEXStpMode, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
 import {
   BaseExchange,
@@ -109,16 +110,14 @@ import {
   withReplacementClientOrderId,
 } from '../clientOrderId';
 import { isKeylessRemoteSigned } from '../hostedSigningVenues';
-import { AlgoControlWatch, type ChaseEnd } from './algoControlWatch';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
+import { AlgoControlWatch } from './algoControlWatch';
 import { mapAsterDEXSignerSetup } from './asterdexSignerSetup';
-import { mapHyperliquidSignerSetup } from './hyperliquidSignerSetup';
-import { mapParadexSignerSetup } from './paradexSignerSetup';
 import { assertBetaAccount, BETA_VENUES, isBetaVenue } from './betaVenues';
 import {
   deriveBridgeConstruction,
@@ -128,9 +127,11 @@ import {
   deriveSignerSetupPolicy,
 } from './construction';
 import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigning } from './delegatedSignerSetup';
+import { mapHyperliquidSignerSetup } from './hyperliquidSignerSetup';
 import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
 import { mapMEXCSignerSetup } from './mexcSignerSetup';
+import { mapParadexSignerSetup } from './paradexSignerSetup';
 import {
   IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
   inProcessPortPair,
@@ -341,7 +342,6 @@ const FRAME_FED_WRITES: ReadonlySet<string> = new Set([
   'scheduleCancel',
 ]);
 
-
 /**
  * The hosted server answers `fetchOrders`/`fetchPositions` with its engine's
  * snapshot frame, so the rows come from the same FrameApplier as the worker's,
@@ -398,6 +398,8 @@ const SOCKET_HEALTH_SYNC_MS = 5_000;
  * `FrameApplier`, so the worker shell (chasers, TWAP, CLI, post-processors)
  * reads the same store it always has. Trading methods are engine commands.
  */
+const VALIDATE_ACCOUNT_TIMEOUT_MS = 45_000;
+
 export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private readonly defaultHistoricalPositions = (this as BaseExchange).fetchHistoricalPositions;
@@ -712,8 +714,10 @@ export class RustEngineExchange extends BaseExchange {
     assertBetaAccount(exchangeName, options);
     const accountOptions = options;
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
-    const lighterL1Address = deriveSignerSetupMapping(exchangeName) === 'lighter'
-      && typeof options.key === 'string' ? options.key.match(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/)?.[0] : undefined;
+    const lighterL1Address =
+      deriveSignerSetupMapping(exchangeName) === 'lighter' && typeof options.key === 'string'
+        ? options.key.match(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/)?.[0]
+        : undefined;
     if (options.localSigner !== undefined && !bridgeConstruction.dispatchSigning) {
       const message = 'Local signer setup is not supported for this Rust venue yet';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
@@ -728,16 +732,18 @@ export class RustEngineExchange extends BaseExchange {
     const hyperliquidAccount = options.key;
     let hyperliquidSetup: ExchangeOptions | undefined;
     if (bridgeConstruction.dispatchSigning && !delegated && hyperliquid) {
-      try { hyperliquidSetup = mapHyperliquidSignerSetup(options); }
-      catch (error) {
+      try {
+        hyperliquidSetup = mapHyperliquidSignerSetup(options);
+      } catch (error) {
         if (!(error instanceof ExchangeError)) throw error;
         setupError = error;
       }
     }
     let paradexSetup: ExchangeOptions | undefined;
     if (bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'paradex') {
-      try { paradexSetup = mapParadexSignerSetup(options); }
-      catch (error) {
+      try {
+        paradexSetup = mapParadexSignerSetup(options);
+      } catch (error) {
         if (!(error instanceof ExchangeError)) throw error;
         setupError = error;
       }
@@ -768,15 +774,21 @@ export class RustEngineExchange extends BaseExchange {
                   options.omniKeySeed || undefined,
                 )
               : new LocalSignerSetup(
-                  hyperliquidSetup ?? paradexSetup
-                    ?? (deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options),
+                  hyperliquidSetup ??
+                    paradexSetup ??
+                    (deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options),
                   deriveSignerSetupPolicy(exchangeName),
                 )
         : undefined;
     const signingMode = signerSetup
-      ? derivePublicMode(exchangeName, options, undefined, hyperliquid
-        ? { key: Boolean(hyperliquidAccount), secret: signerSetup.credentialPresence.secret }
-        : signerSetup.credentialPresence)
+      ? derivePublicMode(
+          exchangeName,
+          options,
+          undefined,
+          hyperliquid
+            ? { key: Boolean(hyperliquidAccount), secret: signerSetup.credentialPresence.secret }
+            : signerSetup.credentialPresence,
+        )
       : undefined;
     if (
       signingMode &&
@@ -1070,12 +1082,10 @@ export class RustEngineExchange extends BaseExchange {
    * settings, so the hold the engine keeps over the source's frames can clear.
    */
   private refreshSourceSettings = (symbol: unknown) => {
-    void this.refreshAccountSettings(typeof symbol === 'string' ? symbol : undefined).catch(
-      (error: unknown) => {
-        const reason = error instanceof Error ? error.message : String(error);
-        this.log(`${this.name} could not ask its data source to re-read settings: ${reason}`, LogSeverity.Warning);
-      },
-    );
+    void this.refreshAccountSettings(typeof symbol === 'string' ? symbol : undefined).catch((error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.log(`${this.name} could not ask its data source to re-read settings: ${reason}`, LogSeverity.Warning);
+    });
   };
 
   /** Data source: re-read the settings a frame-fed engine changed, for one symbol or the account. */
@@ -1101,7 +1111,8 @@ export class RustEngineExchange extends BaseExchange {
     samples.push(written - this.engineNow());
     if (samples.length > SOURCE_CLOCK_SAMPLES) samples.shift();
     const offset = Math.round(Math.max(...samples));
-    if (this.sourceClockOffset !== undefined && Math.abs(offset - this.sourceClockOffset) < SOURCE_CLOCK_STEP_MS) return;
+    if (this.sourceClockOffset !== undefined && Math.abs(offset - this.sourceClockOffset) < SOURCE_CLOCK_STEP_MS)
+      return;
     this.sourceClockOffset = offset;
     host.setSourceClockOffset(offset);
   };
@@ -1277,11 +1288,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
     }
     assertEngineAccountRouting(options, this.name);
-    if (
-      !this.isPublicDataOnly &&
-      !this.signerSetup?.primaryComplete &&
-      isKeylessRemoteSigned(this.name, options)
-    ) {
+    if (!this.isPublicDataOnly && !this.signerSetup?.primaryComplete && isKeylessRemoteSigned(this.name, options)) {
       throw new ExchangeError('Delegated signing is unsupported in this build', {
         message: 'Delegated signing is unsupported in this build',
         kind: 'unsupported',
@@ -1372,8 +1379,7 @@ export class RustEngineExchange extends BaseExchange {
           payloadSigner: this.delegatedIntent?.payloadSigner ?? Boolean(options.payloadSigner),
           apiKeyIndexPresent: Boolean(options.apiKeyIndex),
         },
-        remoteSigning:
-          this.delegatedIntent !== undefined || Boolean(options.remoteSigner || options.payloadSigner),
+        remoteSigning: this.delegatedIntent !== undefined || Boolean(options.remoteSigner || options.payloadSigner),
         extra: { kucoinBroker: options.extra?.kucoinBroker },
         hyrotrader: {
           mode: options.extra?.hyrotraderMode,
@@ -1394,8 +1400,7 @@ export class RustEngineExchange extends BaseExchange {
         apiKeyIndex: parseLighterApiKeyIndex(options.apiKeyIndex)?.toString() ?? options.apiKeyIndex,
         lighterL1Address: this.lighterL1Address,
         lighterRemoteSigner: Boolean(options.remoteSigner),
-        lighterSignerProvider: (options.extra as { lighterSignerProvider?: string } | undefined)
-          ?.lighterSignerProvider,
+        lighterSignerProvider: (options.extra as { lighterSignerProvider?: string } | undefined)?.lighterSignerProvider,
         lighterIntegratorAccountIndex: options.extra?.lighterIntegratorAccountIndex,
         lighterStopSlippagePct: options.extra?.lighterStopSlippagePct,
         vault,
@@ -1835,7 +1840,8 @@ export class RustEngineExchange extends BaseExchange {
       this.log(`Symbol metadata for ${symbol} was not refreshed: the engine has not started`, LogSeverity.Warning);
       return;
     }
-    const readsLeverage = capabilities.leverageQuery === 'onMetadata' || capabilities.leverageQuery === 'onReadAndMetadata';
+    const readsLeverage =
+      capabilities.leverageQuery === 'onMetadata' || capabilities.leverageQuery === 'onReadAndMetadata';
     if (capabilities.maxLeverage !== 'query' && !readsLeverage) return;
     // Refreshed on every symbol selection, and a read can refuse routinely (portfolio margin).
     try {
@@ -1958,7 +1964,8 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.size) {
       for (const { symbol, interval, candle } of read(() => this.applier.candles(frame))) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
-          if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.has(listener)) this.dispatchFrameEvent(() => listener(candle));
+          if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.has(listener))
+            this.dispatchFrameEvent(() => listener(candle));
         });
       }
     }
@@ -2105,7 +2112,15 @@ export class RustEngineExchange extends BaseExchange {
       };
       this.emitter.on('error', onError);
       const unsubscribe = this.store.subscribe(loaded);
-      const timeout = setTimeout(() => finish({ error: 'Timed out validating the account' }), 15_000);
+      // This covers the engine's load and a full startup, so it says nothing about the key.
+      const timeout = setTimeout(
+        () =>
+          finish({
+            error: 'The exchange did not finish loading in time, so the key was not checked. Please try again.',
+            kind: 'timeout',
+          }),
+        VALIDATE_ACCOUNT_TIMEOUT_MS,
+      );
       loaded();
       if (!settled)
         this.start().then(
@@ -2283,7 +2298,12 @@ export class RustEngineExchange extends BaseExchange {
     const descriptors = orders.map(({ id, symbol, type }) => ({ id, symbol, type }));
     if (this.capabilityRecord?.cancelWithSymbols) {
       await this.writeCommand(timing, { op: 'cancelOrdersWithSymbols', orders: descriptors });
-    } else await this.writeCommand(timing, { op: 'cancelOrders', ids: orders.map((order) => order.id), orders: descriptors });
+    } else
+      await this.writeCommand(timing, {
+        op: 'cancelOrders',
+        ids: orders.map((order) => order.id),
+        orders: descriptors,
+      });
   };
 
   cancelSymbolOrders = async (symbol: string) => {
@@ -2388,13 +2408,22 @@ export class RustEngineExchange extends BaseExchange {
       }
       if (!failures.size) break;
     }
-    const open = new Set((await this.fetchPositions()).filter((position) => position.contracts !== 0).map((position) => `${position.symbol}:${position.side}`));
+    const open = new Set(
+      (await this.fetchPositions())
+        .filter((position) => position.contracts !== 0)
+        .map((position) => `${position.symbol}:${position.side}`),
+    );
     for (const key of failures.keys()) if (!open.has(key)) failures.delete(key);
     const failed = [...failures.values(), ...unusable];
     if (!failed.length) return;
     const unknown = failed.find(({ error }) => (error as { outcome?: unknown })?.outcome === 'unknown');
     const details = (unknown ?? failed[0]).error;
-    throw Object.assign(new Error(`Nuke could not close ${failed.map(({ symbol, error }) => `${symbol}: ${errorMessage(error)}`).join('; ')}`), details instanceof Error ? { ...details } : {});
+    throw Object.assign(
+      new Error(
+        `Nuke could not close ${failed.map(({ symbol, error }) => `${symbol}: ${errorMessage(error)}`).join('; ')}`,
+      ),
+      details instanceof Error ? { ...details } : {},
+    );
   };
 
   /** The reduce-only market close; undefined for a flat position, throws on an unusable one. */
@@ -2431,10 +2460,16 @@ export class RustEngineExchange extends BaseExchange {
     const ids = new Map<string, string[]>();
     for (const { symbol, id } of this.store.orders) ids.set(symbol, [...(ids.get(symbol) ?? []), id]);
     const orders = [...ids].map(([symbol, list]) => `${symbol}: ${list.join(', ')}`).join('; ');
-    const positions = this.store.positions.filter((position) => position.contracts !== 0).map((position) => position.symbol).join(', ');
+    const positions = this.store.positions
+      .filter((position) => position.contracts !== 0)
+      .map((position) => position.symbol)
+      .join(', ');
     // Unloaded rows are not "none": the failure may be that they never loaded.
     const list = (rows: string, loaded: boolean) => rows || (loaded ? 'none' : 'unknown, not loaded');
-    this.log(`Nuke incomplete. Open orders: ${list(orders, this.store.loaded.orders)}. Open positions: ${list(positions, this.store.loaded.positions)}.`, LogSeverity.Error);
+    this.log(
+      `Nuke incomplete. Open orders: ${list(orders, this.store.loaded.orders)}. Open positions: ${list(positions, this.store.loaded.positions)}.`,
+      LogSeverity.Error,
+    );
   };
 
   /** Engine health counters; undefined before the engine starts or after disposal. */
@@ -2464,7 +2499,9 @@ export class RustEngineExchange extends BaseExchange {
   private cancelEachPlacedSymbol = async () => {
     // Frames can lag placement ACKs. Keep attempted scopes for this account's
     // lifetime, including uncertain/rejected outcomes and races with later places.
-    await this.cancelEachSymbol(new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]));
+    await this.cancelEachSymbol(
+      new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]),
+    );
   };
 
   private cancelEachSymbol = async (symbols: Set<string>) => {
@@ -2545,8 +2582,7 @@ export class RustEngineExchange extends BaseExchange {
   /** A mirror's sections load from the worker's frames; it never starts its own engine. */
   private untilWorkerData = (flag: number, label: string): Promise<void> =>
     new Promise<void>((resolve, reject) => {
-      const loaded = () =>
-        LOADED_SECTIONS.every(([section, key]) => !(flag & section) || this.store.loaded[key]);
+      const loaded = () => LOADED_SECTIONS.every(([section, key]) => !(flag & section) || this.store.loaded[key]);
       if (loaded()) return resolve();
       const finish = (error?: Error) => {
         clearTimeout(timeout);
