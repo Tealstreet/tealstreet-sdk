@@ -31,6 +31,9 @@ struct FakePort {
     capabilities: Cell<safe_cex_engine::Capabilities>,
     /// Commands sent into a dead link: never answered.
     unanswered: RefCell<Option<Unanswered>>,
+    /// Cancels answer done but leave the row as it was: Bybit 110001 for an
+    /// order that filled unseen.
+    cancels_find_nothing: Cell<bool>,
 }
 
 impl AccountPort for FakePort {
@@ -89,6 +92,7 @@ impl FakePort {
                 ..safe_cex_engine::Capabilities::BASE
             }),
             unanswered: RefCell::new(None),
+            cancels_find_nothing: Cell::new(false),
         })
     }
 
@@ -109,6 +113,24 @@ impl FakePort {
                     OrderStatus::Open,
                 ));
                 return Ok(format!(r#"["{id}"]"#));
+            }
+            // A cancel acknowledgement closes the row, as the engine does.
+            let cancelled = match command {
+                Command::CancelOrders { ids, .. } => ids.clone(),
+                Command::CancelOrdersWithSymbols { orders, .. } => {
+                    orders.iter().map(|order| order.id.clone()).collect()
+                }
+                _ => Vec::new(),
+            };
+            if !port.cancels_find_nothing.get() {
+                let mut store = port.store.borrow_mut();
+                for order in store
+                    .orders
+                    .iter_mut()
+                    .filter(|order| cancelled.contains(&order.id))
+                {
+                    order.status = OrderStatus::Canceled;
+                }
             }
             Ok("null".into())
         });
@@ -1284,6 +1306,114 @@ async fn the_length_condition_stops_and_cancels() {
         assert_eq!(port.completes()[0]["stopReason"], "Terminated by length condition");
         assert_eq!(port.cancels(), vec!["o1".to_string()]);
         assert_eq!(port.placements().len(), 1);
+    })
+    .await;
+}
+
+fn long(contracts: f64) -> Position {
+    Position {
+        id: "p".into(),
+        symbol: "BTCUSDT".into(),
+        side: PositionSide::Long,
+        entry_price: 100.0,
+        notional: 100.0 * contracts,
+        leverage: 1.0,
+        margin_type: None,
+        position_mode: None,
+        unrealized_pnl: 0.0,
+        realized_pnl: None,
+        contracts,
+        liquidation_price: 0.0,
+        margin_size: None,
+        last_update: None,
+    }
+}
+
+/// The LOCAL drop: o1 filled at the venue while the socket was down, so no fill
+/// event came. The reconnect's REST reconcile shows the position but the order
+/// row stays as it was, and Bybit answers a cancel of the filled order as done.
+fn filled_during_the_drop(port: &Rc<FakePort>) {
+    port.cancels_find_nothing.set(true);
+    port.store.borrow_mut().positions.push(long(1.0));
+    port.publish(Change {
+        positions: true,
+        ..Change::default()
+    });
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_chase_whose_order_filled_during_a_drop_never_places_again() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":1}]"#));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        filled_during_the_drop(&port);
+        settle(1000).await;
+        // The market moves away: a requote would cancel o1 and place again.
+        port.set_ticker(101.0, 101.5);
+        settle(5_000).await;
+        assert_eq!(
+            port.placements().len(),
+            1,
+            "a second order would double the position"
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_requote_whose_cancelled_order_cannot_be_confirmed_places_nothing() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Err("fills unavailable"));
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        // The venue answers the cancel as done, and the row does not say why.
+        port.cancels_find_nothing.set(true);
+        port.set_ticker(101.0, 101.5);
+        settle(5_000).await;
+        assert_eq!(
+            port.placements().len(),
+            1,
+            "no order while the last is unconfirmed"
+        );
+        assert!(factory.book().active_chasers().is_empty());
+        assert!(
+            port.errors()
+                .iter()
+                .any(|e| e.contains("stopped before replacing order o1")
+                    && e.contains("Check Positions")),
+            "{:?}",
+            port.errors()
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_chase_whose_order_filled_during_a_drop_ends_with_the_fill() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":1}]"#));
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        filled_during_the_drop(&port);
+        settle(15_000).await;
+        assert!(
+            factory.book().active_chasers().is_empty(),
+            "the chase is over"
+        );
+        assert_eq!(port.placements().len(), 1);
+        let [complete] = port.completes().try_into().unwrap();
+        assert_eq!(complete["filled"], 1.0);
+        assert!(
+            warnings(&port)
+                .iter()
+                .any(|w| w.contains("o1") && w.contains("filled 1")),
+            "{:?}",
+            warnings(&port)
+        );
     })
     .await;
 }

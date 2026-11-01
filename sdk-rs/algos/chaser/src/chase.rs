@@ -154,6 +154,11 @@ pub struct Chase {
     pub dirty: Cell<Dirty>,
     /// A feed rejoin lost fill events; reconcile before the next replacement.
     pub needs_reconcile: Cell<bool>,
+    /// The position moved with no fill to explain it: a fill the stream missed
+    /// may sit behind an order row that still reads open.
+    pub verify_fills: Cell<bool>,
+    /// The symbol's position size when the watcher last looked.
+    pub position_seen: Cell<Option<f64>>,
     state: RefCell<State>,
 }
 
@@ -184,6 +189,8 @@ impl Chase {
             wake: Notify::new(),
             dirty: Cell::new(Dirty::default()),
             needs_reconcile: Cell::new(false),
+            verify_fills: Cell::new(false),
+            position_seen: Cell::new(None),
             state: RefCell::new(State {
                 remaining: options.size,
                 ..State::default()

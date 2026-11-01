@@ -433,6 +433,33 @@ impl ChaserBook {
             .await
     }
 
+    /// The venue's fills for `ids`, applied; a fill the account had not shown
+    /// is told, since no fill event announced it.
+    async fn confirm_fills(&self, chase: &Chase, ids: &[String]) -> Result<(), String> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        for (id, filled) in self.filled_quantities(ids).await? {
+            if filled > chase.filled_by(&id) {
+                chase.set_filled_amount(&id, filled);
+                self.warn(&format!(
+                    "Chaser for {}: order {id} filled {filled}; its fill was missed and found at the venue",
+                    chase.options.symbol
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn position_contracts(&self, chase: &Chase) -> f64 {
+        self.store()
+            .positions
+            .iter()
+            .filter(|position| position.symbol == chase.options.symbol)
+            .map(|position| position.contracts.abs())
+            .sum()
+    }
+
     /// A cancel that got no answer in time is a timeout, tried again like a lost link.
     async fn bounded_cancel(&self, symbol: &str, ids: &[String]) -> Result<String, VenueError> {
         safe_cex_algos::executor::timeout(ANSWER_BOUND_MS, self.cancel(symbol, ids))
@@ -509,6 +536,7 @@ impl ChaserBook {
         chase.watch_scope.clone().spawn(async move {
             let mut seen = false;
             let mut missing = 0;
+            chase.position_seen.set(Some(book.position_contracts(&chase)));
             while let Some(change) = changes.recv().await {
                 if chase.is_stopped() {
                     chase.wake.notify_one();
@@ -523,6 +551,12 @@ impl ChaserBook {
                         current.contains(&fill.order_id) && fill.symbol == chase.options.symbol
                     }) {
                         chase.add_fill_amount(&fill.order_id, fill.amount);
+                    }
+                }
+                if change.positions || change.resync {
+                    let contracts = book.position_contracts(&chase);
+                    if chase.position_seen.replace(Some(contracts)) != Some(contracts) {
+                        chase.verify_fills.set(true);
                     }
                 }
                 if change.orders {
@@ -574,6 +608,18 @@ impl ChaserBook {
     }
 
     async fn run_price_check(&self, chase: &Rc<Chase>) {
+        if chase.verify_fills.replace(false) {
+            let current = chase.current();
+            if let Err(error) = self.confirm_fills(chase, &current).await {
+                self.log(
+                    chase,
+                    &format!("fills check after a position change failed: {error}"),
+                );
+            }
+            if chase.is_stopped() {
+                return;
+            }
+        }
         if chase.options.terminate.is_some() {
             let last = self
                 .store()
@@ -697,6 +743,27 @@ impl ChaserBook {
                     chase,
                     &format!("resync fill reconcile unavailable: {error}"),
                 ),
+            }
+            if chase.is_stopped() {
+                return Ok(());
+            }
+        }
+        // A cancel the venue answers as done (Bybit 110001) may be an order that
+        // filled unseen: only the venue's fills tell, and none, no replacement.
+        let unconfirmed: Vec<String> = to_cancel
+            .iter()
+            .filter(|id| !self.known_closed(id))
+            .cloned()
+            .collect();
+        if !fill_tracked && !unconfirmed.is_empty() {
+            if let Err(error) = self.confirm_fills(chase, &unconfirmed).await {
+                chase.mark_complete("Could not confirm the order before replacing it");
+                self.error(&format!(
+                    "Chaser for {} stopped before replacing order {}: whether it filled could not be read ({error}). Check Positions and Open Orders",
+                    chase.options.symbol,
+                    unconfirmed.join(", ")
+                ));
+                return Ok(());
             }
             if chase.is_stopped() {
                 return Ok(());
