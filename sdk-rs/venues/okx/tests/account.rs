@@ -1099,3 +1099,46 @@ fn market_maker_and_liquidity_program_orders_keep_their_ord_id() {
         assert_eq!(o.client_order_id.as_deref(), Some("caller123"), "{kind}");
     }
 }
+
+// Real order: the parent's effective arrives first on the business socket.
+#[test]
+fn triggered_order_row_survives_its_parent_algo_going_effective() {
+    let (mut e, private, business, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    ws(
+        &mut e,
+        business,
+        r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT-SWAP","algoId":"algo9","ordId":"900","ordType":"trigger","state":"effective","side":"buy","sz":"4","triggerPx":"39000","triggerPxType":"last","ordPx":"39000"}]}"#,
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"900","algoId":"algo9","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"39000"}]}"#,
+    );
+    assert!(e.store().order("900").is_some());
+}
+
+#[test]
+fn a_failed_algo_is_reported_once_and_ends() {
+    for state in ["order_failed", "partially_failed"] {
+        let (mut e, _, business, pending) = startup();
+        complete(&mut e, pending, "", 5.0);
+        let row = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo5","ordType":"conditional","state":"live","side":"sell","sz":"4","slTriggerPx":"36000","slOrdPx":"-1","reduceOnly":"true"}"#;
+        let frame = |row: &str| format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{row}]}}"#);
+        ws(&mut e, business, &frame(row));
+        actions(&mut e);
+        let failed = row.replace("\"live\"", &format!("\"{state}\""));
+        ws(&mut e, business, &frame(&failed));
+        ws(&mut e, business, &frame(&failed));
+        let notices = actions(&mut e)
+            .iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.level == Level::Error && event.message.contains("algo5")))
+            .count();
+        assert_eq!(notices, 1, "{state}");
+        assert_eq!(
+            e.store().order("algo5_sl").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Canceled,
+            "{state}"
+        );
+    }
+}

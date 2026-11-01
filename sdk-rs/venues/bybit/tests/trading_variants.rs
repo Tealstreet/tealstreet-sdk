@@ -2777,7 +2777,7 @@ fn managed_documented_tpsl_noop_code_retains_success() {
 }
 
 #[test]
-fn managed_tpsl_noop_code_cannot_authorize_an_unrelated_amend_or_publish_a_new_value() {
+fn managed_not_modified_amend_succeeds_and_publishes_no_new_value() {
     for attached in [false, true] {
         let mut h = ready(Variant::Demo);
         h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
@@ -2802,11 +2802,7 @@ fn managed_tpsl_noop_code_cannot_authorize_an_unrelated_amend_or_publish_a_new_v
             r#"{"retCode":34040,"retMsg":"not modified"}"#,
         );
         assert_eq!(h.engine.store().order(&before.id), Some(&before));
-        if attached {
-            assert_eq!(h.result(106), Some(&Ok("[]".into())));
-        } else {
-            assert!(h.result(106).unwrap().is_err());
-        }
+        assert_eq!(h.result(106), Some(&Ok("[]".into())));
         assert!(!h.unknown.contains(&106));
         assert!(!h.has_request("/v5/order/amend"));
     }
@@ -3839,4 +3835,108 @@ fn brazil_limit_ack_publishes_locally_but_plain_linear_waits_for_the_stream() {
             "site {site:?}"
         );
     }
+}
+
+// B3: a named inverse symbol switches alone.
+#[test]
+fn inverse_position_mode_switches_a_named_symbol_alone() {
+    let mut h = ready(Variant::Inverse);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: Some("BTCUSD".into()),
+    });
+    let request = h.take("/v5/position/switch-mode");
+    assert_eq!(
+        body(&request),
+        r#"{"category":"inverse","symbol":"BTCUSD","mode":3}"#
+    );
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{}}"#);
+    assert_eq!(h.result(1), Some(&Ok("[]".into())));
+}
+
+// B4: retCode 0, but symbols with open orders or positions kept the old mode.
+#[test]
+fn a_partial_position_mode_switch_reports_what_bybit_said() {
+    let mut h = ready(Variant::Demo);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: None,
+    });
+    h.respond(
+        "/v5/position/switch-mode",
+        200,
+        r#"{"retCode":0,"retMsg":"Partial symbols switched successfully, excluding symbols with open orders or positions.","result":{}}"#,
+    );
+    assert!(
+        h.command_errors
+            .iter()
+            .any(|(command, message)| *command == 1 && message.starts_with("Partial symbols")),
+        "{:?}",
+        h.command_errors
+    );
+}
+
+// B7: dropping reduceOnly could open a position the caller asked only to reduce.
+#[test]
+fn a_reduce_only_conditional_stays_reduce_only() {
+    let mut h = ready(Variant::Demo);
+    let mut opts = order("BTCUSDT", 1.0);
+    opts.kind = OrderType::Conditional;
+    opts.trigger_price = Some(70000.0);
+    opts.reduce_only = Some(true);
+    place(&mut h, 1, vec![opts]);
+    resolve_mode(&mut h, "BTCUSDT");
+    let create = h.take("/v5/order/create");
+    assert!(
+        body(&create).contains("\"reduceOnly\":true"),
+        "{}",
+        body(&create)
+    );
+}
+
+// B6: tpslMode Full closes the whole position; only an explicit zero asks for it.
+#[test]
+fn a_position_stop_quantity_rounding_to_zero_is_refused() {
+    let mut h = ready(Variant::Demo);
+    h.message(
+        "/v5/private",
+        r#"{"topic":"position","data":[{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"3","avgPrice":"50000","markPrice":"51000","positionValue":"153000","leverage":"10","unrealisedPnl":"300","curRealisedPnl":"0","positionIM":"30"}]}"#,
+    );
+    let mut opts = order("BTCUSDT", 0.000_000_001);
+    opts.kind = OrderType::StopLoss;
+    opts.side = OrderSide::Sell;
+    opts.price = Some(40000.0);
+    place(&mut h, 1, vec![opts]);
+    assert!(
+        !h.has_request("/v5/position/trading-stop"),
+        "{:?}",
+        h.paths()
+    );
+}
+
+// B3: one coin refusing leaves the other coins to be tried.
+#[test]
+fn inverse_position_mode_tries_every_coin_past_a_refusal() {
+    let mut h = ready(Variant::Inverse);
+    let mut second = h.engine.store().markets()[0].clone();
+    second.base = "ZZZ".into();
+    second.symbol = "ZZZUSD".into();
+    second.id = "ZZZUSD".into();
+    h.engine.store_mut().update_markets(|_| {});
+    let mut markets = h.engine.store().markets().to_vec();
+    markets.push(second);
+    h.engine.store_mut().set_markets(markets);
+    h.command(Command::SetPositionMode {
+        command: 1,
+        hedged: true,
+        symbol: None,
+    });
+    h.respond(
+        "/v5/position/switch-mode",
+        200,
+        r#"{"retCode":10001,"retMsg":"refused"}"#,
+    );
+    assert!(h.has_request("/v5/position/switch-mode"), "{:?}", h.paths());
 }

@@ -24,6 +24,12 @@ const RECONCILE_INTERVAL_MS: f64 = 5_000.0;
 /// wallet come from them; REST re-reads them only this often as a safety
 /// reconcile (TS polled every tick).
 const SAFETY_RECONCILE_MS: f64 = 60_000.0;
+/// /v5/position/list lags the private stream: a read issued this soon after a
+/// symbol's frame may omit it, so the frame wins (TS merges for the same 1 s).
+const POSITION_FRAME_GUARD_MS: f64 = 1_000.0;
+/// How long the per-tick position read outlives the last open position, so a
+/// lagging read that wrongly showed flat is repaired before the safety reconcile.
+const POSITION_READ_TAIL_MS: f64 = 30_000.0;
 /// Consecutive Hyro reads the private stream may overtake before one is admitted.
 const HYRO_OVERTAKEN_READS: u8 = 2;
 const FILL_REPAIR_GRACE_MS: f64 = 8_000.0;
@@ -163,6 +169,7 @@ struct PositionsJoin {
     /// Position-event count when the reads were issued; a newer stream event
     /// makes the snapshot stale.
     version: u32,
+    issued_at: f64,
     pending: usize,
     rows: Vec<MappedPosition>,
     failed: bool,
@@ -248,6 +255,9 @@ pub struct AccountState {
     tick_timer: Option<TimerId>,
     partial_stop_refresh: Option<TimerId>,
     position_version: u32,
+    /// When each symbol's latest position frame landed.
+    position_frames_at: HashMap<String, f64>,
+    last_open_position_at: f64,
     /// Bumped by acknowledged leverage and mode writes only, unlike `position_version`.
     pub(crate) settings_version: u32,
     positions_generation: u32,
@@ -1647,6 +1657,7 @@ impl BybitLinear {
             legs: Vec::new(),
             generation,
             version: self.account.position_version,
+            issued_at: cx.now,
             pending: coins.len(),
             rows: Vec::new(),
             failed: false,
@@ -1853,13 +1864,17 @@ impl BybitLinear {
         let reconcile = self.account_reads_due(now);
         // Position unrealized PnL is venue-reported and the position topic may push
         // only on position changes, so an open position keeps its per-tick read.
-        if reconcile
-            || cx
-                .store
-                .positions()
-                .iter()
-                .any(|position| position.contracts > 0.0)
+        if cx
+            .store
+            .positions()
+            .iter()
+            .any(|position| position.contracts > 0.0)
         {
+            self.account.last_open_position_at = now;
+        }
+        let recently_open = self.account.last_open_position_at > 0.0
+            && now - self.account.last_open_position_at < POSITION_READ_TAIL_MS;
+        if reconcile || recently_open {
             self.fetch_positions(cx);
         }
         if reconcile {
@@ -2317,6 +2332,12 @@ impl BybitLinear {
                     position_leverage(s, &position);
                     s.margin_type = Some(margin_type);
                 });
+            }
+            self.account
+                .position_frames_at
+                .insert(position.symbol.clone(), cx.now);
+            if position.contracts > 0.0 {
+                self.account.last_open_position_at = cx.now;
             }
             cx.store.upsert_position(position);
             if self.category == Category::Option {
@@ -2993,10 +3014,18 @@ impl BybitLinear {
             // A stream event landed after these reads went out; it is newer.
             return;
         }
+        // Issued too soon after a symbol's frame: this read cannot speak for it.
+        let frames = &mut self.account.position_frames_at;
+        frames.retain(|_, at| join.issued_at - *at < POSITION_FRAME_GUARD_MS);
+        let frame_guarded = frames.clone();
+        let frame_guarded = |symbol: &str| frame_guarded.contains_key(symbol);
         let mut best = best_positions(
             join.rows
                 .into_iter()
-                .filter(|r| !join.rejected.conflicts(&r.position.symbol))
+                .filter(|r| {
+                    !join.rejected.conflicts(&r.position.symbol)
+                        && !frame_guarded(&r.position.symbol)
+                })
                 .collect(),
         );
         // Unknown neighbors cannot prove a same-symbol mode transition. Keep
@@ -3034,6 +3063,7 @@ impl BybitLinear {
             .filter(|row| {
                 cx.store.position(&row.position_id).is_some_and(|position| {
                     !self.owns_symbol(&position.symbol)
+                        || frame_guarded(&position.symbol)
                         || (join.rejected.holds(&position.symbol)
                             && !best.iter().any(|r| r.position.id == position.id))
                 })
@@ -3055,6 +3085,7 @@ impl BybitLinear {
         cx.store.update_positions(|position| {
             if (spot || Category::for_symbol(&position.symbol) == category)
                 && !join.rejected.holds(&position.symbol)
+                && !frame_guarded(&position.symbol)
             {
                 position.contracts = 0.0;
             }

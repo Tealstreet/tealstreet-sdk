@@ -258,6 +258,13 @@ async fn send(
     )
 }
 
+fn idle_dropped(socket: u64, user: Option<&str>) -> String {
+    format!(
+        "idle socket dropped: socket {socket} user {}",
+        user.unwrap_or("none")
+    )
+}
+
 async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
     app.metrics.connections.fetch_add(1, Ordering::Relaxed);
     let (mut sink, mut stream) = socket.split();
@@ -266,6 +273,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
         .token
         .as_ref()
         .map(|(_, expires_at_ms)| *expires_at_ms);
+    let user = identity.user.clone();
     let mut session = Session::new(app.registry.clone(), app.metrics.clone(), identity, out);
     let mut loaded = session.take_loaded();
     session.open().await;
@@ -329,7 +337,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
             }
             _ = keepalive.tick() => {
                 if last_seen.elapsed() > idle {
-                    Log::warn("idle socket dropped");
+                    Log::warn(&idle_dropped(session.socket, user.as_deref()));
                     break;
                 }
                 if !send(&mut sink, Message::Ping(Vec::new().into())).await { break }
@@ -343,6 +351,18 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_idle_drop_names_its_socket_and_user() {
+        assert_eq!(
+            idle_dropped(7, Some("u1")),
+            "idle socket dropped: socket 7 user u1"
+        );
+        assert_eq!(
+            idle_dropped(8, None),
+            "idle socket dropped: socket 8 user none"
+        );
+    }
 
     #[test]
     fn only_cloudflare_peers_may_name_the_client() {

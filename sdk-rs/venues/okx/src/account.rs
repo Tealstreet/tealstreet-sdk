@@ -85,10 +85,20 @@ fn lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     })
 }
 
+/// `after` pages by the id its endpoint lists: a triggered order on orders-pending
+/// also carries its parent algoId, which is not a position in that list.
+fn page_cursor<'a>(kind: usize, ord_id: &'a str, algo_id: &'a str) -> &'a str {
+    if kind == 0 || algo_id.is_empty() {
+        ord_id
+    } else {
+        algo_id
+    }
+}
+
 fn terminal_state(state: &str) -> bool {
     matches!(
         state,
-        "filled" | "canceled" | "mmp_canceled" | "order_failed" | "effective"
+        "filled" | "canceled" | "mmp_canceled" | "order_failed" | "partially_failed" | "effective"
     )
 }
 
@@ -684,6 +694,7 @@ impl Okx {
                 }
             },
             Request::Orders {
+                kind,
                 product,
                 rows,
                 margins,
@@ -694,11 +705,7 @@ impl Okx {
             } => match serde_json::from_str::<OrderRow<'_>>(item) {
                 Ok(o) => {
                     *page_count += 1;
-                    *cursor = if o.algo_id.is_empty() {
-                        o.ord_id.into()
-                    } else {
-                        o.algo_id.into()
-                    };
+                    *cursor = page_cursor(*kind, o.ord_id, o.algo_id).into();
                     if !self.account_scope(*product, o.inst_id, o.inst_type) {
                         *invalid = true;
                         return;
@@ -725,13 +732,9 @@ impl Okx {
                 Err(_) => {
                     *page_count += 1;
                     let row = serde_json::from_str::<RowIdentity>(item).unwrap_or_default();
-                    let id = if row.algo_id.is_empty() {
-                        &row.ord_id
-                    } else {
-                        &row.algo_id
-                    };
+                    let id = page_cursor(*kind, &row.ord_id, &row.algo_id);
                     if !id.is_empty() {
-                        cursor.clone_from(id);
+                        *cursor = id.to_owned();
                     }
                     if !self.account_scope(*product, &row.inst_id, &row.inst_type) {
                         *invalid = true;
@@ -1788,17 +1791,28 @@ impl Okx {
                     }
                     // Finality protects order state, not execution delivery order.
                     self.execution(cx, &row);
-                    let terminal = matches!(
-                        row.state,
-                        "filled" | "canceled" | "mmp_canceled" | "order_failed"
-                    );
+                    let failed = matches!(row.state, "order_failed" | "partially_failed");
+                    let terminal =
+                        failed || matches!(row.state, "filled" | "canceled" | "mmp_canceled");
                     let triggered = row.state == "effective";
-                    let native_id = if row.algo_id.is_empty() {
-                        row.ord_id
-                    } else {
-                        row.algo_id
-                    };
+                    // A triggered order's row carries its parent's algoId but is its own
+                    // order: filed under the parent, the parent's final state would drop it.
+                    let algo_row = matches!(
+                        row.ord_type,
+                        "trigger" | "conditional" | "oco" | "move_order_stop"
+                    );
+                    let native_id = if algo_row { row.algo_id } else { row.ord_id };
                     self.trading.acknowledged.remove(native_id);
+                    if failed && !self.account.order_final(native_id) {
+                        cx.notice(
+                            Level::Error,
+                            code::ORDER_REJECTED,
+                            &format!(
+                                "OKX {} order {native_id} on {} failed (state {}, code {})",
+                                row.ord_type, row.inst_id, row.state, row.fail_code
+                            ),
+                        );
+                    }
                     if !terminal
                         && !triggered
                         && self
