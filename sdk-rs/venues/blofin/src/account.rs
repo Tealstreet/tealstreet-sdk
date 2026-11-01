@@ -201,8 +201,7 @@ pub enum Request {
         positions: SnapshotBuilder<String, Position>,
         used: f64,
         upnl: f64,
-        available: f64,
-        frozen: f64,
+        wallet: f64,
         positions_revision: u64,
         balance_revision: u64,
         failed: bool,
@@ -1170,16 +1169,9 @@ impl Blofin {
                 }
                 Err(_) => self.reject_position(cx, positions, failed, item),
             },
-            Request::Balance {
-                available,
-                frozen,
-                failed,
-                ..
-            } => match serde_json::from_str::<AssetRow>(item) {
-                Ok(b) => {
-                    *available += b.available.0;
-                    *frozen += b.frozen;
-                }
+            Request::Balance { wallet, failed, .. } => match serde_json::from_str::<AssetRow>(item)
+            {
+                Ok(b) => *wallet += b.balance.0,
                 Err(_) => *failed = true,
             },
             Request::Orders {
@@ -1472,8 +1464,7 @@ impl Blofin {
                     positions,
                     used,
                     upnl,
-                    available: 0.0,
-                    frozen: 0.0,
+                    wallet: 0.0,
                     positions_revision,
                     balance_revision,
                     failed: false,
@@ -1484,8 +1475,7 @@ impl Blofin {
                 positions,
                 used,
                 upnl,
-                available,
-                frozen,
+                wallet,
                 positions_revision,
                 balance_revision,
                 failed: false,
@@ -1501,8 +1491,8 @@ impl Blofin {
                     cx.store.set_balance(Balance {
                         used,
                         upnl,
-                        free: clean(clean(round_usd(available) + round_usd(frozen)) - used),
-                        total: clean(clean(round_usd(available) + round_usd(frozen)) - upnl),
+                        free: clean(clean(round_usd(wallet) + upnl) - used),
+                        total: round_usd(wallet),
                     });
                 }
             }

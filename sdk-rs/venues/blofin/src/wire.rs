@@ -310,10 +310,8 @@ pub struct PositionRow<'a> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetRow {
-    pub available: Number,
-    /// Null when nothing is frozen.
-    #[serde(default, deserialize_with = "safe_cex_engine::de::number_or_zero")]
-    pub frozen: f64,
+    /// Wallet balance: holds position margin, leaves out unrealized PnL.
+    pub balance: Number,
 }
 
 #[derive(Deserialize)]
@@ -376,15 +374,4 @@ pub fn nullable_number<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Err
 
 fn nullable_attachments<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Attachment<'de>>, D::Error> {
     Ok(Option::<Vec<Attachment<'de>>>::deserialize(d)?.unwrap_or_default())
-}
-
-#[cfg(test)]
-mod asset_tests {
-    use super::*;
-
-    #[test]
-    fn a_null_frozen_keeps_the_balance_row() {
-        let row: AssetRow = serde_json::from_str(r#"{"available":"10","frozen":null}"#).unwrap();
-        assert_eq!(row.frozen, 0.0);
-    }
 }

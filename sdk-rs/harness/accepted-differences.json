@@ -7661,6 +7661,32 @@
           "evidence": "sdk-rs/harness/fixtures/bingx-public.jsonl.gz /quote/contracts: 0G-USDT has tradeMinQuantity 8.807 and tradeMinLimit 0; tradeMinLimit is 0 on all rows."
         }
       ]
+    },
+    {
+      "venue": "blofin",
+      "tape": "sdk-rs/harness/tapes/blofin-private.jsonl",
+      "tapeSha256": "94dd6921a0c3e5f3ac734348ba5a423018cb36ab7f61bdfc42521fe091a3e795",
+      "diagnostics": [
+        {
+          "failures": [
+            "checkpoint 0 account.balance.free: ts=1009.28 rust=1009.78",
+            "checkpoint 0 account.balance.total: ts=1009.5 rust=1010",
+            "checkpoint 1 account.balance.free: ts=1009.28 rust=1009.78",
+            "checkpoint 1 account.balance.total: ts=1009.5 rust=1010",
+            "checkpoint 2 account.balance.free: ts=1009.28 rust=1009.78",
+            "checkpoint 2 account.balance.total: ts=1009.5 rust=1010",
+            "checkpoint 3 account.balance.free: ts=1009.28 rust=1009.78",
+            "checkpoint 3 account.balance.total: ts=1009.5 rust=1010",
+            "checkpoint 4 account.balance.free: ts=1009.28 rust=1009.78",
+            "checkpoint 4 account.balance.total: ts=1009.5 rust=1010",
+            "checkpoint 5 account.balance.free: ts=1009.28 rust=1009.78",
+            "checkpoint 5 account.balance.total: ts=1009.5 rust=1010"
+          ],
+          "category": "rust-better",
+          "rationale": "BloFin REST balance is the wallet: it holds position margin and leaves out unrealized PnL. TS adds available and frozen, low by the margin with a position open, and subtracts PnL again.",
+          "evidence": "Live /api/v1/asset/balances with a position open: balance 68.3127, available 67.8972, initial margin 0.4155 (deaws2); venues/blofin/tests/account.rs."
+        }
+      ]
     }
   ]
 }
