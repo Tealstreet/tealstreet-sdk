@@ -235,6 +235,7 @@ fn type_text(kind: OrderType) -> &'static str {
         OrderType::StopLoss => "STOP_MARKET",
         OrderType::TakeProfit => "TAKE_PROFIT_MARKET",
         OrderType::TrailingStopLoss => "TRAILING_STOP_MARKET",
+        // Sent only by format_conditional, which chooses the native type.
         OrderType::Conditional => "STOP_MARKET",
     }
 }
@@ -251,7 +252,10 @@ fn tif_text(tif: TimeInForce) -> &'static str {
 fn is_algo(kind: OrderType) -> bool {
     matches!(
         kind,
-        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+        OrderType::StopLoss
+            | OrderType::TakeProfit
+            | OrderType::TrailingStopLoss
+            | OrderType::Conditional
     )
 }
 
@@ -1850,7 +1854,8 @@ impl BinanceFutures {
         if let Some(position_side) = self.trading.amended_position_side {
             return position_side;
         }
-        let closes = is_algo(kind) || reduce;
+        // A conditional may open; only its reduce flag closes.
+        let closes = (is_algo(kind) && kind != OrderType::Conditional) || reduce;
         match (side, closes) {
             (OrderSide::Buy, false) | (OrderSide::Sell, true) => "LONG",
             (OrderSide::Sell, false) | (OrderSide::Buy, true) => "SHORT",
@@ -1859,6 +1864,75 @@ impl BinanceFutures {
 
     /// Payloads for one order: regular orders (split above the market's max
     /// size) and algo orders (the order itself if a stop, plus attached TP/SL).
+    /// USD-M refuses conditionals on the order endpoint (-4120). STOP fires as the price
+    /// moves toward the trigger on the order's side, TAKE_PROFIT the other way.
+    fn format_conditional(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Params, String> {
+        let market = cx
+            .store
+            .market(&opts.symbol)
+            .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        let trigger = opts
+            .trigger_price
+            .filter(|trigger| *trigger > 0.0)
+            .map(|trigger| num::adjust(trigger, market.precision.price))
+            .ok_or_else(|| format!("Trigger price is required for {} conditionals", opts.symbol))?;
+        let ticker = cx
+            .store
+            .ticker(&opts.symbol)
+            .ok_or_else(|| format!("Ticker {} not found", opts.symbol))?;
+        let reference = if working_type(opts) == "MARK_PRICE" {
+            ticker.mark
+        } else {
+            ticker.last
+        };
+        let stop = match opts.side {
+            OrderSide::Buy => trigger >= reference,
+            OrderSide::Sell => trigger <= reference,
+        };
+        let limit = opts
+            .price
+            .filter(|price| *price > 0.0)
+            .map(|price| num::adjust(price, market.precision.price));
+        let amount = num::adjust(opts.amount, market.precision.amount);
+        if amount <= 0.0 {
+            return Err("Binance conditional orders require a positive quantity".into());
+        }
+        let mut params = Params::default();
+        params.set("algoType", "CONDITIONAL");
+        params.set("symbol", opts.symbol.clone());
+        params.set(
+            "positionSide",
+            self.position_side(cx, opts.side, opts.kind, opts.reduce_only == Some(true)),
+        );
+        params.set("side", side_text(opts.side));
+        params.set(
+            "type",
+            match (stop, limit.is_some()) {
+                (true, false) => "STOP_MARKET",
+                (true, true) => "STOP",
+                (false, false) => "TAKE_PROFIT_MARKET",
+                (false, true) => "TAKE_PROFIT",
+            },
+        );
+        params.set("quantity", number(amount));
+        params.set("triggerPrice", number(trigger));
+        if let Some(limit) = limit {
+            params.set("price", number(limit));
+            let tif = opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel);
+            params.set("timeInForce", tif_text(tif));
+        }
+        if !cx.store.hedged() && opts.reduce_only == Some(true) {
+            params.set("reduceOnly", "true");
+        }
+        params.set("workingType", working_type(opts));
+        params.set("clientAlgoId", self.generated_id(cx)?);
+        Ok(params)
+    }
+
     fn format_order(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1870,6 +1944,9 @@ impl BinanceFutures {
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
         if opts.kind == OrderType::TrailingStopLoss {
             return Ok((Vec::new(), vec![self.format_trailing(cx, opts)?]));
+        }
+        if opts.kind == OrderType::Conditional {
+            return Ok((Vec::new(), vec![self.format_conditional(cx, opts)?]));
         }
         let mut regular = Vec::new();
         let mut algo = Vec::new();
