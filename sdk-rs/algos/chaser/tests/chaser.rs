@@ -17,6 +17,9 @@ use tokio::task::LocalSet;
 
 type Responder = Box<dyn FnMut(&Command) -> Result<String, VenueError>>;
 
+/// Which commands go into a dead link.
+type Unanswered = Box<dyn Fn(&Command) -> bool>;
+
 struct FakePort {
     store: RefCell<AlgoStore>,
     subscribers: RefCell<Vec<mpsc::UnboundedSender<Change>>>,
@@ -26,6 +29,8 @@ struct FakePort {
     next_id: Cell<CommandId>,
     next_order: Cell<u32>,
     capabilities: Cell<safe_cex_engine::Capabilities>,
+    /// Commands sent into a dead link: never answered.
+    unanswered: RefCell<Option<Unanswered>>,
 }
 
 impl AccountPort for FakePort {
@@ -42,6 +47,15 @@ impl AccountPort for FakePort {
         self.next_id.get()
     }
     fn command(&self, command: Command) -> CommandFuture {
+        if self
+            .unanswered
+            .borrow()
+            .as_ref()
+            .is_some_and(|dead| dead(&command))
+        {
+            self.commands.borrow_mut().push(command);
+            return Box::pin(std::future::pending());
+        }
         let result = (self.responder.borrow_mut())(&command);
         self.commands.borrow_mut().push(command);
         Box::pin(async move { result })
@@ -74,6 +88,7 @@ impl FakePort {
                 cancel_with_symbols: true,
                 ..safe_cex_engine::Capabilities::BASE
             }),
+            unanswered: RefCell::new(None),
         })
     }
 
@@ -825,6 +840,109 @@ async fn a_requote_cancel_lost_to_an_outage_stops_the_chase_and_keeps_cancelling
         online.set(true);
         settle(10_000).await;
         assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+/// No STOP: a requote's cancel lost to the outage stops the chase, and the
+/// order fills offline before the venue answers the cancel as done.
+#[tokio::test(start_paused = true)]
+async fn a_requote_cancel_retried_through_an_outage_ends_with_one_final_from_the_fills() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":1}]"#));
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = cancels_fail_until(&port, transport_down());
+        port.set_ticker(101.0, 101.5);
+        settle(30_000).await;
+        assert_eq!(warnings(&port).len(), 1, "{:?}", warnings(&port));
+        online.set(true);
+        settle(10_000).await;
+        assert!(factory.book().active_chasers().is_empty());
+        let warnings = warnings(&port);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(
+            warnings[1].contains("o1") && warnings[1].contains("filled 1 before its cancel"),
+            "{warnings:?}"
+        );
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+        let [complete] = port.completes().try_into().unwrap();
+        assert_eq!(complete["filled"], 1.0);
+        assert_eq!(complete["outcomeTold"], true);
+    })
+    .await;
+}
+
+fn is_cancel(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::CancelOrders { .. } | Command::CancelOrdersWithSymbols { .. }
+    )
+}
+
+/// The live LOCAL run: the cancel sent as the link came back went into a dead
+/// connection and never answered; the order had filled during the drop.
+#[tokio::test(start_paused = true)]
+async fn a_cancel_lost_in_a_dead_link_is_tried_again_and_ends_with_the_fill() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":1}]"#));
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = cancels_fail_until(&port, transport_down());
+        port.set_ticker(101.0, 101.5);
+        settle(30_000).await;
+        // The first cancel after the link returns goes into the dead connection.
+        let first = Rc::new(Cell::new(true));
+        let link = first.clone();
+        *port.unanswered.borrow_mut() = Some(Box::new(move |command| {
+            is_cancel(command) && link.replace(false)
+        }));
+        online.set(true);
+        settle(40_000).await;
+        assert!(!first.get(), "a cancel went into the dead link");
+        assert!(factory.book().active_chasers().is_empty());
+        let warnings = warnings(&port);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(
+            warnings[1].contains("filled 1 before its cancel"),
+            "{warnings:?}"
+        );
+        assert_eq!(completions(&port), 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_fills_read_that_never_answers_still_ends_with_one_final() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = cancels_fail_until(&port, transport_down());
+        *port.unanswered.borrow_mut() = Some(Box::new(|command| {
+            matches!(
+                command,
+                Command::Query {
+                    query: safe_cex_engine::engine::Query::Fills { .. },
+                    ..
+                }
+            )
+        }));
+        stop(&factory, &cx);
+        settle(30_000).await;
+        online.set(true);
+        settle(30_000).await;
+        assert!(factory.book().active_chasers().is_empty());
+        let warnings = warnings(&port);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(
+            warnings[1].contains("its fills could not be read"),
+            "{warnings:?}"
+        );
+        assert_eq!(completions(&port), 1);
     })
     .await;
 }

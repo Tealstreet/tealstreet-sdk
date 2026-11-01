@@ -10,6 +10,11 @@ use std::collections::HashMap;
 
 const WALL: f64 = 1_700_000_000_000.0;
 
+thread_local! {
+    /// Cancels fail as a lost transport while set: the browser is offline.
+    static CANCELS_DOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 struct TestVenue {
     commands: Rc<RefCell<Vec<Command>>>,
     next_order: u32,
@@ -22,6 +27,18 @@ impl Venue for TestVenue {
     fn start(&mut self, _: &mut Cx<'_, ()>) {}
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+        if let Some(bid) = text.strip_prefix("ticker ") {
+            let bid: f64 = bid.parse().unwrap();
+            cx.store.set_tickers(vec![Ticker {
+                id: "BTCUSDT".into(),
+                symbol: "BTCUSDT".into(),
+                bid,
+                ask: bid + 0.5,
+                last: bid,
+                ..Ticker::default()
+            }]);
+            return;
+        }
         let Some(id) = text.strip_prefix("fill ") else {
             return;
         };
@@ -79,6 +96,15 @@ impl Venue for TestVenue {
                     ids.push(order_id);
                 }
                 cx.done(*id, serde_json::to_string(&ids).unwrap());
+            }
+            Command::CancelOrders { command: id, ids } if CANCELS_DOWN.get() => {
+                let _ = ids;
+                cx.fail(
+                    *id,
+                    VenueError::new("HTTP transport request failed")
+                        .kind(safe_cex_engine::ErrorKind::Network)
+                        .outcome(safe_cex_engine::Outcome::Unknown),
+                );
             }
             Command::CancelOrders { command: id, ids } => {
                 for order_id in ids {
@@ -474,4 +500,45 @@ fn a_failed_command_keeps_its_kind_for_the_chaser() {
     assert_eq!(settled.kind, Some(safe_cex_engine::ErrorKind::Network));
     assert_eq!(settled.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert_eq!(settled.message, "HTTP transport request failed");
+}
+
+/// LOCAL, no STOP: a requote's cancel is lost to the outage, the order fills
+/// at the venue meanwhile, and the store has not caught up at the reconnect.
+#[test]
+fn a_requote_cancel_retried_through_an_outage_ends_with_the_fill() {
+    let (mut engine, _commands, rest_fills) = engine_on("bybit");
+    engine.algo_start("acct", 0.0, WALL).unwrap();
+    engine.algo_op("chaser:start", BUY_ONE, 0.0, WALL).unwrap();
+    engine.algo_advance(1100.0, WALL + 1100.0);
+    emits(&mut engine);
+    CANCELS_DOWN.set(true);
+    engine.ws_message(1.0, "ticker 101", 1200.0).unwrap();
+    let mut now = 1200.0;
+    let mut seen = Vec::new();
+    let mut step = |engine: &mut WasmEngine, until: f64, seen: &mut Vec<Value>| {
+        while now < until {
+            let _ = engine.take_frame_with(now, false, <[u8]>::to_vec);
+            engine.algo_advance(now, WALL + now);
+            seen.extend(emits(engine));
+            now += 250.0;
+        }
+    };
+    step(&mut engine, 30_000.0, &mut seen);
+    let warnings = |seen: &[Value]| -> Vec<String> {
+        seen.iter()
+            .filter(|emit| emit["op"] == "warning")
+            .map(|emit| emit["data"].as_str().unwrap_or_default().to_owned())
+            .collect()
+    };
+    assert_eq!(warnings(&seen).len(), 1, "{seen:?}");
+    rest_fills.borrow_mut().insert("o1".into(), 1.0);
+    CANCELS_DOWN.set(false);
+    step(&mut engine, 45_000.0, &mut seen);
+    let told = warnings(&seen);
+    assert_eq!(told.len(), 2, "{told:?}");
+    assert!(told[1].contains("filled 1 before its cancel"), "{told:?}");
+    assert!(
+        seen.iter().any(|emit| emit["op"] == "chaser:complete"),
+        "{seen:?}"
+    );
 }
