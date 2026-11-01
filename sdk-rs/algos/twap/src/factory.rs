@@ -370,6 +370,14 @@ impl TwapMarketView for CxView<'_> {
         self.chasers.start_with_id(self.cx, request)
     }
 
+    fn amount_step(&self, symbol: &str) -> Option<f64> {
+        let store = self.cx.port.store();
+        store
+            .markets
+            .get(symbol)
+            .map(|market| market.precision.amount)
+    }
+
     /// As the chaser's: only the account's markets, never an order the venue would split.
     fn client_order_id(&self, request: &TwapOrderRequest) -> Option<String> {
         let store = self.cx.port.store();

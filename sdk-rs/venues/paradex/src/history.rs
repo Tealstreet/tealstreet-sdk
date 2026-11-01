@@ -145,6 +145,9 @@ fn stall_message(reason: Stall) -> String {
 fn encode_rows(rows: &[Output]) -> Result<String, VenueError> {
     serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string()))
 }
+fn nullable_flags<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    Ok(Option::<Vec<String>>::deserialize(d)?.unwrap_or_default())
+}
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct Row {
@@ -166,6 +169,7 @@ struct Row {
     realized_funding: String,
     liquidity: String,
     cancel_reason: String,
+    #[serde(deserialize_with = "nullable_flags")]
     flags: Vec<String>,
     #[serde(deserialize_with = "scalar")]
     created_at: String,

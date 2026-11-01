@@ -53,9 +53,13 @@ struct View {
     client_id: Option<String>,
     started: std::cell::RefCell<Vec<safe_cex_algo_twap::ChaserRequest>>,
     refuse_chasers: std::cell::Cell<bool>,
+    step: Option<f64>,
 }
 
 impl TwapMarketView for View {
+    fn amount_step(&self, _symbol: &str) -> Option<f64> {
+        self.step
+    }
     fn start_chaser(&self, request: &safe_cex_algo_twap::ChaserRequest) -> Result<(), String> {
         if self.refuse_chasers.get() {
             return Err("chaser refused".to_owned());
@@ -697,6 +701,34 @@ fn stopping_a_twap_drops_a_market_waiting_on_its_slice() {
     book.wake(&mut env, &view);
     book.handle("twap:stop", &json!(id), &mut env, &view);
     assert!(settle_chaser(&mut book, &mut env, &mut view, &chaser, 0.2).is_empty());
+}
+
+#[test]
+fn slices_stay_on_the_market_step_and_sum_to_the_size() {
+    let (mut env, mut view) = (Env::new(), View::default());
+    view.step = Some(0.001);
+    let mut book = TwapBook::new("test-account");
+    let (id, mut effects) = start(
+        &mut book,
+        &mut env,
+        &view,
+        json!({ "size": 0.01, "ordersCount": 4, "randomnessPercentage": 0 }),
+    );
+    let mut sent = Vec::new();
+    for _ in 0..4 {
+        sent.extend(market_amounts(&effects));
+        let token = placements(&effects)[0].0.unwrap();
+        book.placement_settled(&id, token, Ok(vec!["o".into()]), &mut env);
+        env.advance(150_000.0);
+        effects = book.wake(&mut env, &view);
+    }
+    assert_eq!(sent.len(), 4, "{sent:?}");
+    assert!((sent.iter().sum::<f64>() - 0.01).abs() < 1e-9, "{sent:?}");
+    assert!(
+        sent.iter()
+            .all(|size| ((size / 0.001).round() - size / 0.001).abs() < 1e-9),
+        "{sent:?}"
+    );
 }
 
 #[test]

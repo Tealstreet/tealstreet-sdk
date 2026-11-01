@@ -65,6 +65,10 @@ pub trait TwapMarketView {
     fn client_order_id(&self, _request: &TwapOrderRequest) -> Option<String> {
         None
     }
+    /// The market's amount step: a slice the venue would round up overfills.
+    fn amount_step(&self, _symbol: &str) -> Option<f64> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
