@@ -261,7 +261,7 @@ describe('managed engine through real HOW preparation', () => {
       intent: 'primary' as const,
     };
     const prepared = await routed.prepareHttp!(original);
-    expect(() => prepared.bind({ ...original, body: '[{"a":1}]' })).toThrow(HttpPreparationError);
+    expect(() => prepared.bind({ ...original, body: '{"a": 1}' })).toThrow(HttpPreparationError);
     expect(state.sent).toHaveLength(0);
     routed.dispose!();
   });
