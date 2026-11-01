@@ -259,3 +259,68 @@ fn stable_public_traffic_resets_backoff() {
     h.event(Event::WsClosed { socket, code: 1006 });
     assert!((750.0..=1_000.0).contains(&retry_delay(&h, &before)));
 }
+
+/// Tickers per connection for a catalogue of `markets`, after every socket opens.
+fn ticker_channels(markets: usize, fixed_public_sockets: bool) -> Vec<Vec<String>> {
+    let mut h = Harness::started(Options {
+        public_data_only: true,
+        fixed_public_sockets,
+        ..Options::default()
+    });
+    let row = |i: usize| {
+        format!(
+            r#"{{"symbol":"C{i}USDT","baseCoin":"C{i}","quoteCoin":"USDT","symbolStatus":"normal","minTradeUSDT":"5","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"}}"#
+        )
+    };
+    let ticker = |i: usize| {
+        format!(
+            r#"{{"symbol":"C{i}USDT","bidPr":"99.9","askPr":"100.1","lastPr":"100","indexPrice":"99","changeUtc24h":"0.01","baseVolume":"1000","quoteVolume":"100000","fundingRate":"0.0001"}}"#
+        )
+    };
+    let body = |rows: Vec<String>| format!(r#"{{"code":"00000","data":[{}]}}"#, rows.join(","));
+    h.respond("/contracts", 200, &body((0..markets).map(row).collect()));
+    h.respond("/tickers", 200, &body((0..markets).map(ticker).collect()));
+    let sockets: Vec<_> = h
+        .socket_contexts
+        .iter()
+        .filter(|(_, url, _)| url == "wss://ws.bitget.com/v2/ws/public")
+        .map(|(socket, _, _)| *socket)
+        .collect();
+    sockets
+        .into_iter()
+        .map(|socket| {
+            h.sent.clear();
+            h.event(Event::WsOpened { socket });
+            h.sent
+                .iter()
+                .filter(|(sent, _)| *sent == socket)
+                .filter_map(|(_, text)| serde_json::from_str::<serde_json::Value>(text).ok())
+                .flat_map(|frame| frame["args"].as_array().cloned().unwrap_or_default())
+                .filter(|arg| arg["channel"] == "ticker")
+                .map(|arg| arg["instId"].as_str().unwrap().to_owned())
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn public_sockets_follow_the_market_count_and_cover_every_market_once() {
+    for (markets, sockets) in [(2, 3), (240, 3), (241, 4), (868, 11), (1200, 15)] {
+        let channels = ticker_channels(markets, false);
+        assert_eq!(channels.len(), sockets, "{markets} markets");
+        assert!(
+            channels.iter().all(|symbols| symbols.len() <= 100),
+            "{markets} markets"
+        );
+        let mut all: Vec<_> = channels.concat();
+        all.sort();
+        all.dedup();
+        assert_eq!(all.len(), markets, "every market once");
+        assert_eq!(channels.concat().len(), markets, "every market once");
+    }
+}
+
+#[test]
+fn a_server_keeps_three_public_sockets_at_any_market_count() {
+    assert_eq!(ticker_channels(868, true).len(), 3);
+}
