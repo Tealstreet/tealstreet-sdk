@@ -102,6 +102,9 @@ pub(crate) struct Account {
     /// A reconcile snapshot was requested while another was in flight.
     reconcile_owed: bool,
     uncertainty_generation: u64,
+    /// Symbols of this census's rejected rows that could be an uncertain write:
+    /// no stored copy proves them older. Empty text: the row names no market.
+    census_unproven: Vec<String>,
     reporting_started: f64,
     startup_executions: VecDeque<Execution>,
     account_busy: bool,
@@ -787,6 +790,7 @@ impl Blofin {
             return;
         };
         self.account.orders_busy = true;
+        self.account.census_unproven.clear();
         let reconcile = std::mem::take(&mut self.account.reconcile_owed);
         self.orders_page(
             cx,
@@ -1319,7 +1323,18 @@ impl Blofin {
             }
         }
         ids.extend([order_id, algo_id].into_iter().filter(|id| !id.is_empty()));
-        let level = skip_level(ids.iter().any(|id| cx.store.order(id).is_some()));
+        let stored = ids.iter().any(|id| cx.store.order(id).is_some());
+        if !stored {
+            match row.inst_id.as_deref().filter(|id| !id.is_empty()) {
+                // A market this account cannot trade cannot hold its placement.
+                Some(inst_id) => self
+                    .account
+                    .census_unproven
+                    .extend(cx.store.market_by_id(inst_id).map(|m| m.symbol.clone())),
+                None => self.account.census_unproven.push(String::new()),
+            }
+        }
+        let level = skip_level(stored);
         let message = format!("BloFin skipped malformed order row {cursor}");
         log_skip(cx, &mut self.account.order_skips, &cursor, level, message);
         for id in ids {
@@ -1701,12 +1716,12 @@ impl Blofin {
                     });
                     if committed {
                         // The last page's token cannot freshen a pre-mark first page.
-                        if clean
-                            && reconcile
+                        if reconcile
                             && uncertainty_generation == self.account.uncertainty_generation
                         {
-                            self.account.reconcile_owed = false;
-                            cx.orders_reconciled_since(None, read_epoch);
+                            let unproven = std::mem::take(&mut self.account.census_unproven);
+                            self.account.reconcile_owed = !unproven.is_empty();
+                            cx.orders_reconciled_except(&unproven, read_epoch);
                         } else if reconcile {
                             self.account.reconcile_owed = true;
                         }

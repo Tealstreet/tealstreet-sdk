@@ -2034,7 +2034,7 @@ fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
 
     let btc = POSITION.replace("\"positions\":\"4\"", "\"positions\":\"5\"");
     let bad_eth = eth.replace("\"positions\":\"4\"", "\"positions\":null");
-    let bad_order = order("b", "61000").replace("\"size\":\"1\"", "\"size\":null");
+    let bad_order = order("b", "61000").replace("\"size\":\"1\"", "\"filledSize\":null");
     for round in 0..2 {
         let logs = poll(
             &mut h,
@@ -2089,7 +2089,7 @@ fn kept_attached_tpsl_leg_is_not_duplicated_by_its_parent() {
     };
     poll_lists(&mut h, 10_000.0, POSITION, parent, tpsl);
     assert_eq!(legs(&h), ["T1__take_profit"]);
-    let bad = tpsl.replace("\"size\":\"1\"", "\"size\":null");
+    let bad = tpsl.replace("\"size\":\"1\"", "\"filledSize\":null");
     let logs = poll_lists(&mut h, 20_000.0, POSITION, parent, &bad);
     assert!(
         logs.iter()
@@ -2106,7 +2106,7 @@ fn row_report_order_aliases_rearm_on_decode_even_when_the_read_cannot_commit() {
     let mut h = Harness::new();
     h.seed();
     let bad = ["order-alias", "tpsl-alias", "algo-alias"]
-        .map(|id| format!(r#"{{"instId":"BTC-USDT","orderId":"{id}","size":null}}"#))
+        .map(|id| format!(r#"{{"instId":"BTC-USDT","orderId":"{id}","filledSize":null}}"#))
         .join(",");
     let skips = |logs: Vec<String>| {
         logs.into_iter()
@@ -2125,7 +2125,7 @@ fn row_report_order_aliases_rearm_on_decode_even_when_the_read_cannot_commit() {
         &mut h,
         30_000.0,
         POSITION,
-        &format!("{decoded},{{\"size\":null}}"),
+        &format!("{decoded},{{\"filledSize\":null}}"),
     );
     assert_eq!(skips(poll(&mut h, 40_000.0, POSITION, &bad)), expected);
     assert!(h.e.store().orders().is_empty());
