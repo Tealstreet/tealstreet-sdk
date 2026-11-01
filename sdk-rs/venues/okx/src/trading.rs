@@ -36,6 +36,13 @@ pub(crate) const CODES: CodeTable = CodeTable {
     // Rows match first to last, so the exact codes below win over the 51xxx range.
     rows: &[
         refused(51000, ErrorKind::InvalidInput),
+        // Documented definite refusals (docs-v5 "Error Code"): nothing was placed.
+        refused(50002, ErrorKind::InvalidInput),
+        refused(50006, ErrorKind::InvalidInput),
+        refused(50009, ErrorKind::AuthPermission),
+        refused(50027, ErrorKind::AuthPermission),
+        refused(54000, ErrorKind::Rejected),
+        refused(59000, ErrorKind::Rejected),
         // Balance and margin refusals (place, amend, and account-wide).
         refused(51008, ErrorKind::InsufficientBalance),
         refused(51119, ErrorKind::InsufficientBalance),
@@ -217,6 +224,23 @@ struct Cancel<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     algo_id: Option<&'a str>,
 }
+/// The id a cancel request named.
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct Requested {
+    ord_id: String,
+    algo_id: String,
+}
+impl Requested {
+    fn id(&self) -> &str {
+        if self.algo_id.is_empty() {
+            &self.ord_id
+        } else {
+            &self.algo_id
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Ack<'a> {
@@ -1183,9 +1207,13 @@ impl Okx {
         if acks.iter().any(|ack| ack.s_code == "50004") {
             return self.unproven(cx, request, "OKX 50004: write execution status is unknown");
         }
+        // A cancel with an explicit sCode 0 need not name its order; anything else must.
         if step.expected > 0
             && acks.iter().any(|ack| {
-                matches!(ack.s_code, "" | "0") && ack.ord_id.is_empty() && ack.algo_id.is_empty()
+                matches!(ack.s_code, "" | "0")
+                    && ack.ord_id.is_empty()
+                    && ack.algo_id.is_empty()
+                    && (step.collect_ids || ack.s_code.is_empty())
             })
         {
             return self.unproven(
@@ -1230,14 +1258,19 @@ impl Okx {
         }
         // Record the call's fact before any continuation or terminal.
         let recorded = if expected > 0 {
+            // A cancel row may answer with no id: the request named it.
+            let requested: Vec<Requested> = serde_json::from_str(&step.body).unwrap_or_default();
             let items: Vec<_> = acks
                 .iter()
-                .map(|ack| {
+                .enumerate()
+                .map(|(index, ack)| {
                     if matches!(ack.s_code, "" | "0") {
-                        BatchItem::Accepted(if ack.algo_id.is_empty() {
+                        BatchItem::Accepted(if !ack.algo_id.is_empty() {
+                            ack.algo_id
+                        } else if !ack.ord_id.is_empty() {
                             ack.ord_id
                         } else {
-                            ack.algo_id
+                            requested.get(index).map_or("", Requested::id)
                         })
                     } else {
                         BatchItem::Native(native(ack.s_code, ack.s_msg))
