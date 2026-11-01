@@ -1700,3 +1700,19 @@ fn listen_key_requests_present_only_the_key_on_livenet_and_sign_on_testnet() {
         assert_eq!(create.url.contains("timestamp="), testnet, "{}", create.url);
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let refused = r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#;
+    let mut h = Harness::started(credentials());
+    h.expect_startup_failure = true;
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    h.respond("/fapi/v1/listenKey", 401, refused);
+    h.respond("/fapi/v3/account", 401, refused);
+    assert_eq!(h.startup_failures.len(), 1, "{:?}", h.startup_failures);
+    let message = &h.startup_failures[0].message;
+    assert!(message.contains("Invalid API-key"), "{message}");
+}

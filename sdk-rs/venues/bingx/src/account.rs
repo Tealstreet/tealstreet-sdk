@@ -312,6 +312,24 @@ fn response_error(response: Response<'_>, allow_missing_code: bool) -> Option<St
     None
 }
 
+/// A body naming one of BingX's key refusals, typed for the start to report.
+pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::VenueError> {
+    #[derive(serde::Deserialize)]
+    struct Evidence<'a> {
+        code: i64,
+        #[serde(borrow, default)]
+        msg: std::borrow::Cow<'a, str>,
+    }
+    let evidence: Evidence<'_> = serde_json::from_str(response.body).ok()?;
+    crate::trading::KEY_REFUSALS
+        .contains(&evidence.code)
+        .then(|| {
+            safe_cex_engine::VenueError::new(format!("BingX refused the API key: {}", evidence.msg))
+                .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+                .venue_code(evidence.code.to_string())
+                .venue_message(evidence.msg.to_string())
+        })
+}
 impl Account {
     pub(crate) fn with_slots(slots: Slots<Identity>) -> Self {
         Self {
@@ -1106,6 +1124,9 @@ impl Account {
             request,
             Request::ListenKey { .. } | Request::Keepalive { .. }
         );
+        if let Some(error) = key_refusal(&response) {
+            cx.startup_read_refused(&error);
+        }
         if let Some(error) = response_error(response, is_key) {
             if matches!(request, Request::Keepalive { .. })
                 && (response.status == 404 || {
