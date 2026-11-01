@@ -1037,10 +1037,11 @@ impl MexcFutures {
                 && job.ids.is_empty()
                 && let Some(symbol) = &job.replaces
             {
-                error.message = format!(
-                    "{}; Your {symbol} order is gone: it was canceled and its replacement refused",
-                    error.message
+                let gone = safe_cex_engine::error::order_gone_text(
+                    symbol,
+                    error.outcome == Some(Outcome::Unknown),
                 );
+                error.message = format!("{}; {gone}", error.message);
             }
             if (job.effective || !job.ids.is_empty())
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))

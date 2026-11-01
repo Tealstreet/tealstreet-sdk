@@ -3271,6 +3271,26 @@ fn a_cancel_of_a_gone_order_settles_and_never_replaces() {
 }
 
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, _) = authenticated("OneWay");
+    e.store_mut().upsert_order(order("old"));
+    let cancel = amend_old(&mut e);
+    let a = respond(
+        &mut e,
+        &cancel,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+    );
+    let replacement = &writes(&a)[0];
+    let a = raw(
+        &mut e,
+        replacement,
+        r#"{"code":11001,"msg":"TE_NO_ENOUGH_AVAILABLE_BALANCE","data":null}"#,
+    );
+    let error = done(&a).unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}
+
+#[test]
 fn a_batch_gone_row_with_null_identity_resolves_by_position() {
     let (mut e, _) = authenticated("OneWay");
     for id in ["one", "two"] {

@@ -569,6 +569,31 @@ describe('Rust native current-account reads', () => {
     }
   });
 
+  it.each([
+    [true, 0],
+    [false, 1],
+  ])('with the host owning placement failures %s, a refusal is reported %i times here', async (owned, reports) => {
+    const r = fixture();
+    await r.start();
+    (r.exchange as any).options = { ...r.exchange.options, callerReportsPlacementFailures: owned };
+    (r.exchange as any).host.command = vi.fn().mockRejectedValue(new Error('Insufficient margin'));
+    const error = vi.fn();
+    r.exchange.on('error', error);
+    await expect(
+      r.exchange.placeOrders([{ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Market, amount: 1 }]),
+    ).rejects.toThrow('Insufficient margin');
+    expect(error).toHaveBeenCalledTimes(reports);
+  });
+
+  it('forces an algo error past the gates that drop errors on a down stream', async () => {
+    const r = fixture();
+    await r.start();
+    const error = vi.fn();
+    r.exchange.on('error', error);
+    (r.exchange as any).receiveAlgoEmit('error', 'Chaser failed to place orders after 3 tries');
+    expect(error).toHaveBeenCalledWith('Chaser failed to place orders after 3 tries', { forceToast: true });
+  });
+
   it('names a cause shared by both nuke legs once', async () => {
     const r = fixture();
     await r.start();

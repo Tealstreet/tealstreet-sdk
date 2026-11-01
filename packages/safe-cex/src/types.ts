@@ -140,6 +140,8 @@ export type ExchangeOptions = {
   /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
   readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
+  /** The host names a refused placement itself, so the exchange does not also report it. */
+  readonly callerReportsPlacementFailures?: boolean;
   /**
    * A main-thread instance paired with a worker that owns the account. Its reads
    * and trading go to the worker, waiting for the bridge; it never runs an engine.

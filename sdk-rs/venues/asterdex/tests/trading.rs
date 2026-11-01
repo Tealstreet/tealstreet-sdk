@@ -1205,3 +1205,26 @@ fn an_amend_below_the_value_minimum_is_refused_before_the_cancel() {
         h.done
     );
 }
+
+#[test]
+fn a_refused_limit_replacement_says_the_order_is_gone() {
+    let mut h = Harness::new();
+    h.engine
+        .store_mut()
+        .set_orders(vec![order("283194212", OrderType::Limit)]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(9200.04),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+    let place = h.take(Method::Post);
+    h.reply(
+        place,
+        r#"{"code":-2022,"msg":"ReduceOnly Order is rejected."}"#,
+    );
+    let message = h.result(1).as_ref().unwrap_err();
+    assert!(message.contains("order is gone"), "{message}");
+}

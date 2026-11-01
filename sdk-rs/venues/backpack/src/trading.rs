@@ -1200,12 +1200,31 @@ impl Backpack {
             Err(e) => {
                 if let Some(managed) = &request.managed {
                     if recorded {
-                        let _ = cx.fail_plan(&managed.plan, VenueError::new(e));
+                        // An amend's cancel landed but its remainder cannot be re-placed.
+                        let gone = match &request.step {
+                            Step::Cancel { id, .. }
+                                if self
+                                    .trading
+                                    .jobs
+                                    .get(&request.command)
+                                    .is_some_and(|job| job.amendment.is_some()) =>
+                            {
+                                cx.store.order(id).map(|o| {
+                                    safe_cex_engine::error::order_gone_text(&o.symbol, false)
+                                })
+                            }
+                            _ => None,
+                        };
+                        let error = VenueError::new(e);
+                        let _ = match &gone {
+                            Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
+                            None => cx.fail_plan(&managed.plan, error),
+                        };
                         return;
                     }
-                    let fact = if (200..300).contains(&response.status)
-                        && !refused_in_body(response.body)
-                    {
+                    let unproven =
+                        (200..300).contains(&response.status) && !refused_in_body(response.body);
+                    let fact = if unproven {
                         cx.http_write_unproven(&managed.context, &e)
                     } else {
                         native_failure(cx, &managed.context, response.body, &e)
@@ -1214,7 +1233,12 @@ impl Backpack {
                         let _ = cx.fail_plan(&managed.plan, error.venue_error());
                         return;
                     }
-                    self.managed_trade_failed(cx, request, VenueError::new(e), true);
+                    let error = if unproven {
+                        VenueError::new(e).outcome(Outcome::Unknown)
+                    } else {
+                        VenueError::new(e)
+                    };
+                    self.managed_trade_failed(cx, request, error, true);
                     return;
                 }
                 let error = if !(200..300).contains(&response.status) {
@@ -1288,7 +1312,26 @@ impl Backpack {
             }
         }
         if !optional {
-            let _ = cx.fail_plan(&managed.plan, error);
+            // The amend's cancel landed and nothing replaced it.
+            let gone = match &request.step {
+                Step::Place { order, .. }
+                    if self
+                        .trading
+                        .jobs
+                        .get(&request.command)
+                        .is_some_and(|job| job.amendment.is_some() && job.ids.is_empty()) =>
+                {
+                    Some(safe_cex_engine::error::order_gone_text(
+                        &order.symbol,
+                        error.outcome == Some(Outcome::Unknown),
+                    ))
+                }
+                _ => None,
+            };
+            let _ = match &gone {
+                Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
+                None => cx.fail_plan(&managed.plan, error),
+            };
             return;
         }
         let settled = if data {

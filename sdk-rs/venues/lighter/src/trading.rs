@@ -1208,6 +1208,7 @@ impl Lighter {
                     } else {
                         error
                     };
+                    let error = self.note_replacement_lost(&submission.effect, error);
                     if unknown {
                         let _ = cx.http_write_unproven(&context, &error.message);
                     } else if !self.trade_refusal(cx, &context, code.unwrap(), &error.message) {
@@ -1350,6 +1351,7 @@ impl Lighter {
                 let error = uncertain(format!(
                     "Uncertain Lighter transaction result: {error}; check open orders before retrying"
                 ));
+                let error = self.note_replacement_lost(&s.effect, error);
                 self.trade_finish(cx, error.kind(ErrorKind::Network));
             }
         }
@@ -1417,6 +1419,24 @@ impl Lighter {
             }
         }
     }
+    /// An amend's replacement failed after its cancel landed: the order no longer rests.
+    fn note_replacement_lost(&self, effect: &Effect, mut error: VenueError) -> VenueError {
+        if matches!(effect, Effect::Place)
+            && let Some(job) = self.trading.active.as_ref()
+            && job.effective
+            && job.ids.is_empty()
+            && let Some(old) = &job.amend
+        {
+            let unknown = error.outcome == Some(Outcome::Unknown);
+            error.message = format!(
+                "{}: {}",
+                safe_cex_engine::error::order_gone_text(&old.symbol, unknown),
+                error.message
+            );
+        }
+        error
+    }
+
     fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, error: impl Into<VenueError>) {
         if let Some(wait) = self.trading.position_wait.take() {
             self.trading.retired_snapshot = Some(wait.serial);

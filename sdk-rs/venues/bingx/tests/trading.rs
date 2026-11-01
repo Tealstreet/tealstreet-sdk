@@ -1732,3 +1732,17 @@ fn an_order_below_the_venue_minimum_value_is_refused_here_but_a_close_is_not() {
     h.place(vec![cheap_limit(true)]);
     assert_eq!(h.requests.len(), 1, "{:?}", h.failures);
 }
+
+#[test]
+fn a_limit_replace_that_cancels_and_refuses_says_the_order_is_gone() {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"FAILED"}}"#);
+    let error = h.done[0].as_ref().unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}
