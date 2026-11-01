@@ -300,6 +300,8 @@ const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
 ]);
 const NUKE_CLOSE_RETRIES = 3;
 const NUKE_CLOSE_RETRY_MS = 100;
+const NUKE_FLAT_ROUNDS = 3;
+const NUKE_FLAT_SETTLE_MS = 2_000;
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode'] as const;
 /**
@@ -2013,10 +2015,16 @@ export class RustEngineExchange extends BaseExchange {
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
     this.emitter.emit('engine-event', event);
     if (event.level === 'error')
-      this.emitAndLogError(event.code === 'ws.public_unavailable' ? `${exchangeMetadata[this.name]?.prettyName ?? this.name}: ${event.message}` : event.message, undefined, {
-        engineEvent: event,
-        classified: engineEventClassified(event),
-      });
+      this.emitAndLogError(
+        event.code === 'ws.public_unavailable'
+          ? `${exchangeMetadata[this.name]?.prettyName ?? this.name}: ${event.message}`
+          : event.message,
+        undefined,
+        {
+          engineEvent: event,
+          classified: engineEventClassified(event),
+        },
+      );
     else if (event.level !== 'debug')
       this.log(event.message, event.level === 'warn' ? LogSeverity.Warning : LogSeverity.Info, event);
   };
@@ -2349,16 +2357,9 @@ export class RustEngineExchange extends BaseExchange {
     let failure: unknown;
     try {
       const stopped = await this.stopAlgosForNuke();
-      try {
-        await this.closeAllPositions();
-      } catch (error) {
-        this.reportCommandError(error);
-        failed = true;
-        failure = error;
-      }
-      if (cancelOrders) {
+      const leg = async (run: () => Promise<void>) => {
         try {
-          await this.cancelAllOrders();
+          await run();
         } catch (error) {
           this.reportCommandError(error);
           // Both legs failed: the final error names each.
@@ -2367,7 +2368,10 @@ export class RustEngineExchange extends BaseExchange {
           } else failure = error;
           failed = true;
         }
-      }
+      };
+      // Orders first: a market close otherwise fills against the user's own resting bid.
+      if (cancelOrders) await leg(() => this.cancelAllOrders());
+      await leg(() => this.closeUntilFlat());
       if (failed) {
         this.logNukeRemainder();
         throw failure;
@@ -2376,6 +2380,32 @@ export class RustEngineExchange extends BaseExchange {
     } finally {
       this.isNuking = false;
     }
+  };
+
+  /** What still needs closing; a position that cannot be sized counts as open. */
+  private positionsStillOpen = async (): Promise<Position[]> =>
+    (await this.fetchPositions()).filter((position) => {
+      try {
+        return Boolean(this.nukeCloseOrder(position));
+      } catch {
+        return true;
+      }
+    });
+
+  /** A close can succeed and leave a position (a fill against a resting order), so flat is read, not assumed. */
+  private closeUntilFlat = async (): Promise<void> => {
+    for (let round = 0; round < NUKE_FLAT_ROUNDS; round += 1) {
+      await this.closeAllPositions();
+      const settleBy = Date.now() + NUKE_FLAT_SETTLE_MS;
+      while (Date.now() < settleBy && !this.isDisposed && (await this.positionsStillOpen()).length) {
+        await new Promise((resolve) => setTimeout(resolve, NUKE_CLOSE_RETRY_MS));
+      }
+      if (this.isDisposed || !(await this.positionsStillOpen()).length) return;
+    }
+    const left = await this.positionsStillOpen();
+    throw new Error(
+      `Nuke did not leave the account flat: ${left.map((p) => `${p.symbol} ${p.side} ${p.contracts}`).join(', ')} still open`,
+    );
   };
 
   /**
