@@ -2105,6 +2105,8 @@ fn answer_amend_read(e: &mut Engine<Probe>, actions: &[Action], body: &str) -> V
     assert!(matches!(e.claim_http(NOW, permit), Ok(Claim::Released(_))));
     let (status, reply) = if body.is_empty() {
         (500, "down")
+    } else if body == "429" {
+        (429, "null")
     } else {
         (200, body)
     };
@@ -2221,4 +2223,34 @@ fn a_failed_read_refuses_the_amend_and_cancels_nothing() {
         result[0].as_ref().unwrap_err().outcome,
         Some(Outcome::NotSent)
     );
+}
+
+// Live: the read refused on 429 when the budget had room again a moment later.
+#[test]
+fn a_rate_limited_read_waits_and_retries_within_its_bound() {
+    let (mut e, socket) = boot();
+    seed_order(&mut e, socket);
+    let actions = command(
+        &mut e,
+        NOW,
+        Command::AmendOrder {
+            command: OWNER,
+            id: "9".into(),
+            price: Some(85.),
+            amount: None,
+        },
+    );
+    let actions = answer_amend_read(&mut e, &actions, "429");
+    assert!(results(&actions, OWNER).is_empty(), "still waiting");
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1_000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("a retry within the bound");
+    e.handle(NOW + 1_000.0, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = unchanged_amend_read(&mut e, &actions);
+    native_release(&mut e, &actions);
 }

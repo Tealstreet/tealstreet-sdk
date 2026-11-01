@@ -74,6 +74,8 @@ pub(crate) struct Account {
     summary_pending: bool,
     orders_pending: bool,
     positions_pending: bool,
+    orders_again: bool,
+    positions_again: bool,
     leverage_pending: bool,
     authenticated: bool,
     authentication_failed: bool,
@@ -1075,6 +1077,9 @@ impl Grvt {
                 .expect("serialize subscription"),
             );
         }
+        // A startup read still running may predate the stream: read again when it settles.
+        self.account.orders_again = self.account.orders_pending;
+        self.account.positions_again = self.account.positions_pending;
         self.refresh_orders(cx);
         self.refresh_positions(cx);
     }
@@ -1634,6 +1639,9 @@ impl Grvt {
                 mut positions,
             } => {
                 self.account.positions_pending = false;
+                if std::mem::take(&mut self.account.positions_again) {
+                    self.refresh_positions(cx);
+                }
                 if revision == self.account.positions_revision {
                     let mut seen: HashSet<_> = rows.iter().map(|p| p.position.id.clone()).collect();
                     rearm_skips(
@@ -1713,6 +1721,9 @@ impl Grvt {
                 orders: mut snapshot,
             } => {
                 self.account.orders_pending = false;
+                if std::mem::take(&mut self.account.orders_again) {
+                    self.refresh_orders(cx);
+                }
                 if revision == self.account.orders_revision {
                     rearm_skips(
                         &mut self.account.skip_logged,
@@ -1996,10 +2007,16 @@ impl Grvt {
             }
             Request::Positions { .. } => {
                 self.account.positions_pending = false;
+                if std::mem::take(&mut self.account.positions_again) {
+                    self.refresh_positions(cx);
+                }
                 cx.store.set_positions(cx.store.positions().to_vec());
             }
             Request::Orders { .. } => {
                 self.account.orders_pending = false;
+                if std::mem::take(&mut self.account.orders_again) {
+                    self.refresh_orders(cx);
+                }
                 cx.store.set_orders(cx.store.orders().to_vec());
             }
             Request::Leverage { command, .. } => {

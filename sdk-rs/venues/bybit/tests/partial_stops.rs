@@ -431,7 +431,7 @@ fn a_replacement_quantity_rounding_to_zero_is_refused_not_turned_into_full() {
 }
 
 #[test]
-fn partial_amount_only_replaces_shared_family_but_inverse_keeps_its_distinct_fallback() {
+fn partial_amount_only_replaces_shared_family_but_inverse_refuses() {
     for profile in PROFILES {
         let mut h = ready(profile);
         seed(
@@ -444,26 +444,19 @@ fn partial_amount_only_replaces_shared_family_but_inverse_keeps_its_distinct_fal
             true,
         );
         amend(&mut h, None, Some(9.234));
-        let request = if profile.variant == Variant::Inverse {
-            assert!(!h.has_request(profile.cancel_path()));
-            let request = h.take("/v5/position/trading-stop");
-            serde_json::from_str::<StopWrite>(body(&request)).unwrap()
-        } else {
-            replacement(&mut h, profile)
-        };
+        // Live: inverse sent a body with no fields and got 10001; nothing is sent now.
         if profile.variant == Variant::Inverse {
-            assert!(request.tpsl_mode.is_none());
-            assert!(request.stop_loss.is_none());
-            assert!(request.sl_size.is_none());
-            assert!(request.sl_trigger_by.is_none());
-        } else {
-            assert_eq!(request.stop_loss.as_deref(), Some("90"));
-            assert_eq!(
-                request.sl_size.as_deref(),
-                Some(if profile.inverse() { "9" } else { "9.234" })
-            );
-            assert_eq!(request.sl_trigger_by.as_deref(), Some("LastPrice"));
+            assert!(!h.has_request("/v5/position/trading-stop"));
+            assert!(h.result(91).unwrap().is_err());
+            continue;
         }
+        let request = replacement(&mut h, profile);
+        assert_eq!(request.stop_loss.as_deref(), Some("90"));
+        assert_eq!(
+            request.sl_size.as_deref(),
+            Some(if profile.inverse() { "9" } else { "9.234" })
+        );
+        assert_eq!(request.sl_trigger_by.as_deref(), Some("LastPrice"));
     }
 }
 
@@ -771,6 +764,10 @@ fn partial_fallback_preserves_optional_raw_size_and_does_not_switch_to_full() {
             }
             h.engine.store_mut().set_tickers(tickers);
             amend(&mut h, price, amount);
+            if profile.variant == Variant::Inverse && price.is_none() {
+                assert!(!h.has_request("/v5/position/trading-stop"));
+                continue;
+            }
             let request = h.take("/v5/position/trading-stop");
             let request: StopWrite = serde_json::from_str(body(&request)).unwrap();
             assert_eq!(request.stop_loss.as_deref(), level);
