@@ -37,6 +37,9 @@ const POSITION_REPAIR_THROTTLE_MS: f64 = 10_000.0;
 /// Order events trigger a full REST order snapshot this long after the last one.
 const ORDERS_REFRESH_DEBOUNCE_MS: f64 = 10_000.0;
 const ORDERS_RETRY_MS: f64 = 15_000.0;
+/// -2011 is no proof the order is gone. Snapshots still listing the row this many
+/// times (one refresh debounce apart, past any read lag) mean the order is live.
+const UNKNOWN_CANCEL_RELISTINGS: u8 = 2;
 /// Retain execution identities across reconnects without an unbounded event log.
 const DERIVATIVE_EXECUTION_WINDOW: usize = 16_384;
 const SPOT_EXECUTION_WINDOW: usize = 16_384;
@@ -82,6 +85,14 @@ struct PositionsJoin {
     skipped: SnapshotCoverage<String>,
     configs: Option<Vec<(String, MarketSetting)>>,
     failed: bool,
+}
+
+/// A row whose cancel answered -2011, keyed as the snapshot lists it.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum CancelledRow {
+    Native(String, u64),
+    Strategy(String, u64),
+    Algo(String),
 }
 
 struct OrdersJoin {
@@ -148,6 +159,15 @@ pub struct AccountState {
     terminal_algo_ids: HashSet<String>,
     /// Orders whose native type executes at a limit price once triggered.
     pub(crate) limit_stops: HashSet<String>,
+    /// The native hedge side of open rows; `reduceOnly` alone does not prove it.
+    order_position_sides: HashMap<String, &'static str>,
+    /// Rows a -2011 marked gone, with how many later snapshots still listed them.
+    unknown_order_cancels: HashMap<CancelledRow, u8>,
+    position_mode_retry: bool,
+    leverage_brackets_retry: bool,
+    last_settings_retry_at: f64,
+    /// Until read, every market's maximum leverage is the catalogue's placeholder 1x.
+    pub(crate) leverage_brackets_unread: bool,
     strategy_client_native: HashMap<(String, String), u64>,
     terminal_strategies: HashSet<(String, u64)>,
     pm_order_owners: HashMap<String, PmOrderOwner>,
@@ -381,6 +401,7 @@ impl BinanceFutures {
         if self.is_spot() {
             return;
         }
+        self.account.leverage_brackets_unread = true;
         self.background_signed_read(
             cx,
             self.paths.leverage_bracket,
@@ -677,6 +698,7 @@ impl BinanceFutures {
         if self.background_paused(now) {
             return;
         }
+        self.retry_failed_settings_reads(cx);
         if now - self.account.last_risk_at >= POSITION_RISK_INTERVAL_MS {
             self.account.last_risk_at = now;
             self.fetch_positions(cx);
@@ -690,6 +712,28 @@ impl BinanceFutures {
         {
             self.account.last_account_at = now;
             self.fetch_account(cx);
+        }
+    }
+
+    /// Position mode and leverage limits are read once at start; a failure must
+    /// not leave hedge orders refused or leverage clamped until a reload.
+    fn retry_failed_settings_reads(&mut self, cx: &mut Cx<'_, Pending>) {
+        let due = cx.now - self.account.last_settings_retry_at >= ORDERS_RETRY_MS;
+        if !due || !(self.account.position_mode_retry || self.account.leverage_brackets_retry) {
+            return;
+        }
+        self.account.last_settings_retry_at = cx.now;
+        if std::mem::take(&mut self.account.position_mode_retry) {
+            self.background_signed_read(
+                cx,
+                self.paths.position_mode,
+                Query::new(),
+                None,
+                Pending::Account(Request::PositionMode),
+            );
+        }
+        if std::mem::take(&mut self.account.leverage_brackets_retry) {
+            self.request_leverage_brackets(cx);
         }
     }
 
@@ -769,8 +813,13 @@ impl BinanceFutures {
                 }
                 self.finish_orders(cx);
             }
-            Request::LeverageBrackets(_) | Request::PositionMode => {
+            Request::LeverageBrackets(_) => {
                 cx.retried_failure_error("binance.account:649", &prefixed(error, "Binance: "));
+                self.account.leverage_brackets_retry = true;
+            }
+            Request::PositionMode => {
+                cx.retried_failure_error("binance.account:649", &prefixed(error, "Binance: "));
+                self.account.position_mode_retry = true;
             }
         }
     }
@@ -966,6 +1015,7 @@ impl BinanceFutures {
         let body = response.body;
         match request {
             Request::LeverageBrackets(max_by_symbol) => {
+                self.account.leverage_brackets_unread = false;
                 cx.store.update_markets(|market| {
                     if let Some(max) = max_by_symbol.get(&market.symbol) {
                         market.limits.leverage.max = *max;
@@ -999,8 +1049,13 @@ impl BinanceFutures {
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_REFRESH_MS));
             }
             Request::PositionMode => {
-                if let Ok(mode) = serde_json::from_str::<PositionModeBody>(body) {
-                    cx.store.set_hedged(mode.dual_side_position);
+                match serde_json::from_str::<PositionModeBody>(body) {
+                    Ok(mode) => cx.store.set_hedged(mode.dual_side_position),
+                    Err(error) => self.account_request_failed(
+                        cx,
+                        Request::PositionMode,
+                        VenueError::new(error.to_string()),
+                    ),
                 }
             }
             Request::PositionRisk {
@@ -1114,6 +1169,7 @@ impl BinanceFutures {
                 let mut native_orders = Vec::new();
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
+                let mut position_sides = Vec::new();
                 let client_keyed = self.options.portfolio_margin || self.is_spot();
                 let spot = self.is_spot();
                 let parsed = json::each::<OpenOrder>(body, |o| {
@@ -1127,6 +1183,7 @@ impl BinanceFutures {
                         return;
                     };
                     limit_stops.push((id.clone(), executes_at_limit(&o.kind, spot)));
+                    position_sides.push((id.clone(), o.position_side.clone()));
                     if client_keyed
                         && (!matches!(o.side.as_ref(), "BUY" | "SELL")
                             || [&o.price, &o.orig_qty, &o.executed_qty]
@@ -1176,6 +1233,9 @@ impl BinanceFutures {
                     });
                 });
                 self.note_limit_stops(limit_stops);
+                for (id, position_side) in position_sides {
+                    self.note_position_side(&id, position_side.as_deref());
+                }
                 if self.is_inverse() {
                     for order in &mut orders {
                         order.extra = Some(OrderExtra {
@@ -1204,6 +1264,7 @@ impl BinanceFutures {
                 let mut native_strategies = Vec::new();
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
+                let mut position_sides = Vec::new();
                 let parsed = json::each::<PmConditionalOrder>(body, |o| {
                     let id = o.new_client_strategy_id.as_ref();
                     let Some(kind) = order_type(&o.strategy_type) else {
@@ -1213,6 +1274,7 @@ impl BinanceFutures {
                         return;
                     };
                     limit_stops.push((id.to_owned(), executes_at_limit(&o.strategy_type, false)));
+                    position_sides.push((id.to_owned(), o.position_side.clone()));
                     if !matches!(o.side.as_ref(), "BUY" | "SELL")
                         || [&o.price, &o.orig_qty, &o.stop_price]
                             .iter()
@@ -1259,6 +1321,9 @@ impl BinanceFutures {
                     });
                 });
                 self.note_limit_stops(limit_stops);
+                for (id, position_side) in position_sides {
+                    self.note_position_side(&id, position_side.as_deref());
+                }
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
@@ -1278,6 +1343,7 @@ impl BinanceFutures {
                 let mut orders = Vec::new();
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
+                let mut position_sides = Vec::new();
                 let parsed = json::each::<OpenAlgoOrder>(body, |o| {
                     let Some(kind) = order_type(&o.order_type) else {
                         let id = o.algo_id.to_string();
@@ -1285,6 +1351,7 @@ impl BinanceFutures {
                         rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
+                    position_sides.push((o.algo_id.to_string(), o.position_side.clone()));
                     limit_stops.push((
                         o.algo_id.to_string(),
                         executes_at_limit(&o.order_type, false),
@@ -1313,6 +1380,9 @@ impl BinanceFutures {
                     });
                 });
                 self.note_limit_stops(limit_stops);
+                for (id, position_side) in position_sides {
+                    self.note_position_side(&id, position_side.as_deref());
+                }
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
@@ -1455,6 +1525,7 @@ impl BinanceFutures {
             self.schedule_orders_refresh(cx);
             return;
         }
+        self.believe_relisted_unknown_cancels(&join);
         if join
             .native_orders
             .iter()
@@ -1588,6 +1659,100 @@ impl BinanceFutures {
             // Published and fully mapped: this read may resolve an uncertain placement.
             cx.orders_reconciled_since(None, join.epoch);
         }
+        self.account
+            .order_position_sides
+            .retain(|id, _| cx.store.order(id).is_some());
+    }
+
+    /// Counts this fresh snapshot against rows a -2011 marked gone: one no longer
+    /// listed is settled, and one that stays listed is live, so it stops poisoning
+    /// every snapshot and comes back.
+    fn believe_relisted_unknown_cancels(&mut self, join: &OrdersJoin) {
+        let account = &mut self.account;
+        if account.unknown_order_cancels.is_empty() {
+            return;
+        }
+        let listed: HashSet<CancelledRow> = join
+            .native_orders
+            .iter()
+            .map(|(symbol, _, native, _)| CancelledRow::Native(symbol.clone(), *native))
+            .chain(
+                join.native_strategies
+                    .iter()
+                    .map(|(symbol, _, native)| CancelledRow::Strategy(symbol.clone(), *native)),
+            )
+            .chain(
+                join.algo
+                    .iter()
+                    .flatten()
+                    .map(|order| CancelledRow::Algo(order.id.clone())),
+            )
+            .collect();
+        account
+            .unknown_order_cancels
+            .retain(|row, _| listed.contains(row));
+        let mut live = Vec::new();
+        for (row, relistings) in &mut account.unknown_order_cancels {
+            *relistings += 1;
+            if *relistings >= UNKNOWN_CANCEL_RELISTINGS {
+                live.push(row.clone());
+            }
+        }
+        for row in live {
+            account.unknown_order_cancels.remove(&row);
+            match row {
+                CancelledRow::Native(symbol, native) => {
+                    let key = (symbol, native);
+                    account.unquantified_cancels.remove(&key);
+                    if let Some(execution) = account.native_executed.get_mut(&key) {
+                        execution.1 = false;
+                    }
+                }
+                CancelledRow::Strategy(symbol, native) => {
+                    account.terminal_strategies.remove(&(symbol, native));
+                }
+                CancelledRow::Algo(id) => {
+                    account.terminal_algo_ids.remove(&id);
+                }
+            }
+        }
+    }
+
+    /// A -2011 cancel: the rows look gone, but only a snapshot can say so.
+    pub(crate) fn note_unknown_cancels(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rows: impl IntoIterator<Item = (String, String, u64, bool)>,
+    ) {
+        let portfolio_margin = self.options.portfolio_margin;
+        for (id, symbol, native, strategy) in rows {
+            let row = match (strategy, portfolio_margin) {
+                (false, _) => CancelledRow::Native(symbol, native),
+                (true, true) => CancelledRow::Strategy(symbol, native),
+                (true, false) => CancelledRow::Algo(id),
+            };
+            self.account.unknown_order_cancels.insert(row, 0);
+        }
+        self.schedule_orders_refresh(cx);
+    }
+
+    fn note_position_side(&mut self, id: &str, position_side: Option<&str>) {
+        match position_side {
+            Some("LONG") => {
+                self.account.order_position_sides.insert(id.to_owned(), "LONG");
+            }
+            Some("SHORT") => {
+                self.account.order_position_sides.insert(id.to_owned(), "SHORT");
+            }
+            Some(_) => {
+                self.account.order_position_sides.remove(id);
+            }
+            None => {}
+        }
+    }
+
+    pub(crate) fn order_position_side(&self, id: &str) -> Option<&'static str> {
+        self.account.order_position_sides.get(id).copied()
     }
 
     /// Keeps the last known state of listed orders that could not be mapped.
@@ -1859,6 +2024,7 @@ impl BinanceFutures {
         if let Some(native) = o.ot.as_deref().or(o.o.as_deref()) {
             self.note_limit_stops([(id.clone(), executes_at_limit(native, false))]);
         }
+        self.note_position_side(&id, o.ps.as_deref());
         if status == "NEW" && kind.is_none() {
             return;
         }
@@ -2116,6 +2282,7 @@ impl BinanceFutures {
                     return;
                 };
                 self.note_limit_stops([(id.clone(), executes_at_limit(&o.st, false))]);
+                self.note_position_side(&id, o.ps.as_deref());
                 let price = opt(&o.p);
                 let amount = opt(&o.q);
                 cx.store.upsert_order(Order {
@@ -2173,6 +2340,7 @@ impl BinanceFutures {
                     return;
                 };
                 self.note_limit_stops([(id.clone(), executes_at_limit(&o.o, false))]);
+                self.note_position_side(&id, o.ps.as_deref());
                 let amount = opt(&o.q);
                 cx.store.upsert_order(Order {
                     id,
