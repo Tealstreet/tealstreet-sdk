@@ -1869,7 +1869,7 @@ impl Blofin {
                         row.is_some_and(|row| {
                             row.inst_id == target.inst_id
                                 && row.order_id == target.id
-                                && row.state == "canceled"
+                                && matches!(row.state.as_ref(), "canceled" | "partially_canceled")
                                 && row.filled_size.parse::<f64>().ok().is_some_and(|filled| {
                                     filled.is_finite()
                                         && filled >= 0.0

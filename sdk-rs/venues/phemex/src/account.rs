@@ -109,6 +109,8 @@ struct Reconcile {
     abandoned: bool,
     /// clOrdIDs of unknown-outcome placements, tagged with the generation that owes their read.
     lost: Vec<(String, u64)>,
+    /// Partly filled snapshot rows the active list must confirm, or they are gone.
+    unconfirmed: Vec<String>,
     /// Lost placements a later cancel-all must still cancel if the read reveals them.
     cancel: Vec<(String, u64)>,
 }
@@ -1514,9 +1516,32 @@ impl PhemexPerpetuals {
                     for order in mapped {
                         cx.store.upsert_order(order);
                     }
+                    // A terminal row may not repeat its TP/SL; the legs do not outlive it anyway.
+                    if row.terminal() {
+                        for suffix in ["__stop_loss", "__take_profit"] {
+                            let leg = format!("{}{suffix}", row.order_id);
+                            if cx
+                                .store
+                                .order(&leg)
+                                .is_some_and(|o| o.status == OrderStatus::Open)
+                            {
+                                cx.store.set_order_status(&leg, OrderStatus::Canceled);
+                            }
+                        }
+                    }
                 }
             }
             if safe_snapshot {
+                // Execution events share the frame: a later Filled ends an earlier partial row,
+                // and the newest row of an order wins.
+                let mut newest = HashSet::new();
+                staged.reverse();
+                staged.retain(|order: &Order| {
+                    !self.account.terminals.contains_key(&order.id)
+                        && newest.insert(order.id.clone())
+                });
+                staged.reverse();
+                self.note_unconfirmed_snapshot_rows(cx, &staged);
                 let active: HashSet<_> = staged.iter().map(|o| o.id.as_str()).collect();
                 self.account.order_versions.retain(|id, _| {
                     active.contains(id.as_str()) || self.account.terminals.contains_key(id)
@@ -1535,6 +1560,7 @@ impl PhemexPerpetuals {
                     cx.store.set_orders(cx.store.orders().to_vec());
                 }
                 self.account.snapshot = true;
+                self.orders_reconcile(cx);
             }
             let owed: Vec<_> = self
                 .account
@@ -1626,6 +1652,21 @@ impl PhemexPerpetuals {
     ) {
         self.note_uncertain_orders(symbols, lost, not_before);
         self.orders_reconcile(cx);
+    }
+    /// Only partly filled rows: a resting order with no execution needs no read per symbol.
+    fn note_unconfirmed_snapshot_rows(&mut self, cx: &Cx<'_, Pending>, staged: &[Order]) {
+        if cx.frame_fed() {
+            return;
+        }
+        for order in staged.iter().filter(|order| order.filled > 0.0) {
+            let entry = self
+                .account
+                .reconcile
+                .entry(order.symbol.clone())
+                .or_default();
+            entry.generation += 1;
+            entry.unconfirmed.push(order.id.clone());
+        }
     }
     pub(crate) fn note_uncertain_orders(
         &mut self,
@@ -1895,6 +1936,7 @@ impl PhemexPerpetuals {
         };
         let mut complete = true;
         let mut published = Vec::new();
+        let mut listed = HashSet::new();
         for raw in rows {
             let Ok(row) = serde_json::from_str::<OrderRow<'_>>(raw.get()) else {
                 cx.notice(
@@ -1911,6 +1953,7 @@ impl PhemexPerpetuals {
             if row.symbol.to_ascii_uppercase() != read.symbol || row.terminal() {
                 continue;
             }
+            listed.insert(row.order_id.to_string());
             if row.unrecognized() {
                 cx.notice(
                     Level::Warn,
@@ -1996,6 +2039,12 @@ impl PhemexPerpetuals {
         if let Some(entry) = self.account.reconcile.get_mut(&symbol) {
             entry.reading = false;
             entry.failures = 0;
+            let unconfirmed = std::mem::take(&mut entry.unconfirmed);
+            for id in unconfirmed.iter().filter(|id| !listed.contains(*id)) {
+                let version = self.account.order_versions.get(id).copied().unwrap_or(0);
+                self.account.remember_terminal(id.clone(), version);
+                cx.store.remove_orders(&[id.as_str()]);
+            }
         }
         if !self.trading.placing(&symbol) {
             cx.orders_reconciled(Some(&symbol));

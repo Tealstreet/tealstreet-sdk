@@ -1856,7 +1856,7 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
             limit: None,
         },
     });
-    for page in 0..20 {
+    for page in 0..200 {
         let rows: Vec<String> = (page * 50..page * 50 + 50)
             .map(|i| format!(r#"{{"orderId":"o{i}","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderStatus":"Cancelled","qty":"1","cumExecQty":"0","price":"100","createdTime":"{}"}}"#, 1672000000000u64 + i as u64))
             .collect();
@@ -1872,7 +1872,7 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
     let rows =
         serde_json::from_str::<Vec<serde_json::Value>>(h.result(35).unwrap().as_ref().unwrap())
             .unwrap();
-    assert_eq!(rows.len(), 1000);
+    assert_eq!(rows.len(), 10_000);
     assert!(h.logs.iter().any(|m| m.contains("page limit")));
     let (index, event) = h
         .notices
@@ -1938,10 +1938,10 @@ fn windowed_fill_request_sequence_is_pinned() {
     assert_eq!(
         sent,
         [
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=50",
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=50&cursor=c1",
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670790400001&endTime=1671395200000&limit=50",
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670704000000&endTime=1670790400000&limit=50",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=100",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=100&cursor=c1",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670790400001&endTime=1671395200000&limit=100",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670704000000&endTime=1670790400000&limit=100",
         ]
     );
 }
@@ -2815,7 +2815,7 @@ fn owned_history_cursor_and_bounded_budget_refusals_stay_strict_after_rows() {
                 command: 804,
                 query,
             });
-            let budget = if kind == 1 { 20 } else { 10 };
+            let budget = if kind == 1 { 200 } else { 100 };
             let cursors: Vec<String> = match mode {
                 0 => vec!["same".into(), "same".into()],
                 1 => vec!["a".into(), "b".into(), "a".into()],
@@ -2905,7 +2905,7 @@ fn owned_history_window_recovery_preserves_first_incomplete_cause() {
             limit: None,
         },
     });
-    for page in 0..20 {
+    for page in 0..200 {
         h.respond(
             "/v5/order/history",
             200,
@@ -2924,7 +2924,7 @@ fn owned_history_window_recovery_preserves_first_incomplete_cause() {
         serde_json::from_str::<Vec<serde_json::Value>>(result)
             .unwrap()
             .len(),
-        20
+        200
     );
     let markers = owned_history_markers(&h, 807);
     assert_eq!(markers.len(), 1);
@@ -3852,4 +3852,114 @@ fn inactive_position_legs_are_ignored() {
     );
     assert!(!h.engine.store().hedged());
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 50.0);
+}
+
+#[test]
+fn a_cancel_batch_in_a_rest_outage_is_bounded_per_command() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    h.command(Command::CancelOrders {
+        command: 14,
+        ids: vec![ORDER_ID.into()],
+    });
+    let mut sent = 0;
+    for _ in 0..600 {
+        while h.has_request("/v5/order/cancel-batch") {
+            sent += 1;
+            h.respond("/v5/order/cancel-batch", 503, "Service Unavailable");
+        }
+        h.advance(1_000.0);
+    }
+    assert!((1..=2).contains(&sent), "{sent} sends");
+}
+
+#[test]
+fn an_order_past_the_split_bound_is_refused_without_a_request() {
+    let mut h = ready();
+    let max = h
+        .engine
+        .store()
+        .market("BTCUSDT")
+        .unwrap()
+        .limits
+        .amount
+        .max;
+    let order = serde_json::from_value(serde_json::json!({
+        "symbol": "BTCUSDT", "type": "market", "side": "buy", "amount": max * 2000.0
+    }))
+    .unwrap();
+    h.engine.handle(
+        h.now,
+        safe_cex_engine::Event::Command(safe_cex_engine::Command::PlaceOrders {
+            command: 77,
+            orders: vec![order],
+        }),
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("safe split bound")),
+        "{actions:?}"
+    );
+}
+
+#[test]
+fn preset_legs_end_when_a_terminal_row_does_not_repeat_them() {
+    let id = "fd4300ae-7847-404e-b947-b46980a4d140";
+    let frame = |status: &str| {
+        let frame = order_frame(status, "0", "0.002", "EC_NoError");
+        let at = frame.find(r#""orderId":""#).unwrap() + 11;
+        let end = at + frame[at..].find('"').unwrap();
+        format!("{}{id}{}", &frame[..at], &frame[end..])
+    };
+    let mut h = ready();
+    h.message("/v5/private", &frame("New"));
+    let mut leg = h.engine.store().order(id).unwrap().clone();
+    leg.id = format!("{id}__stop_loss");
+    leg.parent_id = Some(id.into());
+    leg.kind = OrderType::StopLoss;
+    leg.status = OrderStatus::Open;
+    h.engine.store_mut().upsert_order(leg);
+    h.message("/v5/private", &frame("Cancelled"));
+    assert_eq!(
+        h.engine
+            .store()
+            .order(&format!("{id}__stop_loss"))
+            .unwrap()
+            .status,
+        OrderStatus::Canceled
+    );
+}
+
+#[test]
+fn a_fills_start_with_no_end_walks_to_now_and_no_limit_reads_every_page() {
+    let mut h = ready();
+    let from = h.now - 15.0 * 86_400_000.0;
+    h.command(Command::Query {
+        command: 36,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(from),
+            to_ms: None,
+            limit: None,
+        },
+    });
+    let mut windows = 0;
+    while h.has_request("/v5/execution/list") {
+        let request = h.take("/v5/execution/list");
+        assert!(request.url.contains("endTime="), "{}", request.url);
+        windows += 1;
+        h.reply(
+            request.id,
+            200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"","list":[]}}"#,
+        );
+    }
+    assert_eq!(windows, 3);
+    assert!(h.result(36).unwrap().is_ok());
 }

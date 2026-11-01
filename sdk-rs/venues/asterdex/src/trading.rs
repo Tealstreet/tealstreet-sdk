@@ -242,6 +242,8 @@ struct Job {
     successes: usize,
     error: Option<VenueError>,
     continue_on_error: bool,
+    /// Every order was asked for: one refused fails the command, naming what was placed.
+    fails_on_refusal: bool,
     result: Option<String>,
     /// A refused replacement here leaves the position without its stop.
     replacing_stop: Option<(String, OrderSide, OrderType)>,
@@ -773,7 +775,9 @@ impl AsterDex {
         }
         let job = self.trading.jobs.remove(&id).expect("present");
         let _ = match job.error {
-            Some(mut error) if !job.continue_on_error || job.successes == 0 => {
+            Some(mut error)
+                if !job.continue_on_error || job.fails_on_refusal || job.successes == 0 =>
+            {
                 // A later rejection after a step took effect cannot mean nothing happened.
                 if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
                     error.outcome = None;
@@ -1181,6 +1185,17 @@ impl AsterDex {
             Some(total) => total - order.filled,
             None => order.remaining,
         };
+        // A replacement below the value minimum would be refused after the old order is gone.
+        let value = size * price.unwrap_or(order.price);
+        let minimum = self
+            .market_rules
+            .get(&order.symbol)
+            .map_or(0.0, |r| r.min_notional);
+        if !conditional && !order.reduce_only && value > 0.0 && value < minimum {
+            return Err(format!(
+                "Aster replacement worth {value} is below the {minimum} minimum; the order is unchanged"
+            ));
+        }
         // A stop that would trigger at once is refused after the old one is gone.
         if conditional
             && let Some(trigger) = price
@@ -1253,6 +1268,7 @@ impl AsterDex {
         };
         let mut job = Job {
             continue_on_error: true,
+            fails_on_refusal: true,
             ..Job::default()
         };
         for opts in orders {

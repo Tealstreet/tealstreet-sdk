@@ -589,7 +589,7 @@ fn isolated_hedge_leverage_sends_short_after_long_is_accepted() {
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     for path in [
         "orders-pending",
@@ -658,7 +658,7 @@ fn editing_inline_virtual_protection_preserves_parent_remainder_despite_child_am
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"12","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","filledSize":"4","price":"60000","state":"partially_filled","tpTriggerPrice":"65000","slTriggerPrice":"55000"}]}"#);
     for path in [
@@ -933,7 +933,7 @@ fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
     );
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     for path in [
         "orders-pending",
@@ -1437,7 +1437,7 @@ fn closed_position_restores_account_margin_default_before_next_order() {
                 );
                 h.reply(
                     "balances",
-                    r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+                    r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
                 );
             } else {
                 h.ws(&format!(
@@ -1605,7 +1605,7 @@ fn margin_type_change_warns_while_orders_are_open() {
         h.reply("account/positions", r#"{"code":"0","data":[]}"#);
         h.reply(
             "balances",
-            r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"0"}]}"#,
+            r#"{"code":"0","data":[{"currency":"USDT","balance":"1000","available":"1000","frozen":"0"}]}"#,
         );
         for path in [
             "orders-pending",

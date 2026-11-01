@@ -201,8 +201,7 @@ pub enum Request {
         positions: SnapshotBuilder<String, Position>,
         used: f64,
         upnl: f64,
-        available: f64,
-        frozen: f64,
+        wallet: f64,
         positions_revision: u64,
         balance_revision: u64,
         failed: bool,
@@ -846,7 +845,7 @@ impl Blofin {
         let filled = clean(o.filled_size.0 * m.contract_size.unwrap_or(1.0));
         let status = match o.state.as_ref() {
             "filled" | "effective" => OrderStatus::Closed,
-            "canceled" | "order_failed" => OrderStatus::Canceled,
+            "canceled" | "partially_canceled" | "order_failed" => OrderStatus::Canceled,
             _ => OrderStatus::Open,
         };
         let base = Order {
@@ -1170,16 +1169,9 @@ impl Blofin {
                 }
                 Err(_) => self.reject_position(cx, positions, failed, item),
             },
-            Request::Balance {
-                available,
-                frozen,
-                failed,
-                ..
-            } => match serde_json::from_str::<AssetRow>(item) {
-                Ok(b) => {
-                    *available += b.available.0;
-                    *frozen += b.frozen;
-                }
+            Request::Balance { wallet, failed, .. } => match serde_json::from_str::<AssetRow>(item)
+            {
+                Ok(b) => *wallet += b.balance.0,
                 Err(_) => *failed = true,
             },
             Request::Orders {
@@ -1198,7 +1190,11 @@ impl Blofin {
                     if (o.inst_type.is_empty() || o.inst_type.eq_ignore_ascii_case("SWAP"))
                         && !matches!(
                             o.state.as_ref(),
-                            "filled" | "effective" | "canceled" | "order_failed"
+                            "filled"
+                                | "effective"
+                                | "canceled"
+                                | "partially_canceled"
+                                | "order_failed"
                         )
                         && cx.store.market_by_id(&o.inst_id).is_none()
                     {
@@ -1472,8 +1468,7 @@ impl Blofin {
                     positions,
                     used,
                     upnl,
-                    available: 0.0,
-                    frozen: 0.0,
+                    wallet: 0.0,
                     positions_revision,
                     balance_revision,
                     failed: false,
@@ -1484,8 +1479,7 @@ impl Blofin {
                 positions,
                 used,
                 upnl,
-                available,
-                frozen,
+                wallet,
                 positions_revision,
                 balance_revision,
                 failed: false,
@@ -1501,8 +1495,8 @@ impl Blofin {
                     cx.store.set_balance(Balance {
                         used,
                         upnl,
-                        free: clean(clean(round_usd(available) + round_usd(frozen)) - used),
-                        total: clean(clean(round_usd(available) + round_usd(frozen)) - upnl),
+                        free: clean(clean(round_usd(wallet) + upnl) - used),
+                        total: round_usd(wallet),
                     });
                 }
             }

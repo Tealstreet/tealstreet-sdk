@@ -65,6 +65,18 @@ pub enum Pending {
     },
 }
 
+impl Pending {
+    fn reads_account_list(&self) -> bool {
+        matches!(
+            self,
+            Self::Account {
+                request: account::Request::Orders(_) | account::Request::Positions { .. },
+                ..
+            }
+        )
+    }
+}
+
 pub enum Discovered {
     Markets(Vec<Market>),
     Tickers(Vec<Ticker>),
@@ -837,6 +849,9 @@ impl Venue for BitgetFutures {
                             {
                                 safe_cex_engine::startup::skipped_row(cx);
                             } else {
+                                self.trading
+                                    .min_order_value
+                                    .insert(row.symbol.to_string(), row.min_trade_usdt.get());
                                 let mut mapped = market(&row);
                                 if self.inverse() {
                                     if row.min_lever.get() == 0.0 {
@@ -1038,13 +1053,7 @@ impl Venue for BitgetFutures {
         let refused = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
             .ok()
             .is_some_and(|e| e.code.0.is_some_and(|code| code != 0.0));
-        let empty_account_list = matches!(
-            &pending,
-            Pending::Account {
-                request: account::Request::Orders(_) | account::Request::Positions { .. },
-                ..
-            }
-        ) && wire::null_list(response.body);
+        let empty_account_list = pending.reads_account_list() && wire::null_list(response.body);
         let empty_history =
             matches!(&pending, Pending::History(_)) && wire::null_history(response.body);
         if refused || empty_account_list || empty_history {

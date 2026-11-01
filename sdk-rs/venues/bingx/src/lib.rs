@@ -763,45 +763,49 @@ impl Venue for Bingx {
                 if rows.len() == rows.capacity() {
                     rows.reserve_exact(128)
                 }
-                let market = serde_json::from_str::<Contract<'_>>(item).map(|m| Market {
-                    id: m.symbol.to_string(),
-                    symbol: m.symbol.replace('-', ""),
-                    pretty_symbol: None,
-                    base: m.asset.into_owned(),
-                    quote: m.currency.into_owned(),
-                    active: m.status == 1.,
-                    precision: Precision {
-                        amount: 10f64.powi(m.quantity_precision as i32).recip(),
-                        price: 10f64.powi(m.price_precision as i32).recip(),
-                    },
-                    limits: Limits {
-                        amount: MinMax {
-                            // tradeMinLimit is 0 on every live contract.
-                            min: if m.trade_min_quantity > 0. {
-                                m.trade_min_quantity
-                            } else {
-                                m.trade_min_limit
-                            },
-                            max: f64::INFINITY,
+                let market = serde_json::from_str::<Contract<'_>>(item).map(|m| {
+                    self.trading
+                        .set_min_order_value(&m.symbol, m.trade_min_usdt);
+                    Market {
+                        id: m.symbol.to_string(),
+                        symbol: m.symbol.replace('-', ""),
+                        pretty_symbol: None,
+                        base: m.asset.into_owned(),
+                        quote: m.currency.into_owned(),
+                        active: m.status == 1.,
+                        precision: Precision {
+                            amount: 10f64.powi(m.quantity_precision as i32).recip(),
+                            price: 10f64.powi(m.price_precision as i32).recip(),
                         },
-                        leverage: MinMax {
-                            min: 1.,
-                            max: if m.max_long_leverage > 0. {
-                                m.max_long_leverage
-                            } else {
-                                100.
+                        limits: Limits {
+                            amount: MinMax {
+                                // tradeMinLimit is 0 on every live contract.
+                                min: if m.trade_min_quantity > 0. {
+                                    m.trade_min_quantity
+                                } else {
+                                    m.trade_min_limit
+                                },
+                                max: f64::INFINITY,
                             },
+                            leverage: MinMax {
+                                min: 1.,
+                                max: if m.max_long_leverage > 0. {
+                                    m.max_long_leverage
+                                } else {
+                                    100.
+                                },
+                            },
+                            price: None,
                         },
-                        price: None,
-                    },
-                    contract_size: None,
-                    is_expiring: None,
-                    is_inverse: None,
-                    is_spot: None,
-                    is_perpetual: None,
-                    is_read_only: None,
-                    taker_fee: None,
-                    maker_fee: None,
+                        contract_size: None,
+                        is_expiring: None,
+                        is_inverse: None,
+                        is_spot: None,
+                        is_perpetual: None,
+                        is_read_only: None,
+                        taker_fee: None,
+                        maker_fee: None,
+                    }
                 });
                 match market {
                     Ok(market) if market.precision.is_tradable() => rows.push(market),

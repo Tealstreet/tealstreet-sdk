@@ -53,6 +53,7 @@ fn ready() -> Harness {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
     }
+    h.answer_open_position_read();
     h
 }
 
@@ -198,6 +199,7 @@ fn ready_from(mut h: Harness) -> Harness {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
     }
+    h.answer_open_position_read();
     h
 }
 
@@ -308,6 +310,39 @@ fn a_stale_position_snapshot_cannot_overwrite_a_newer_stream_event() {
     let close = update.replace(r#""pa":"0.015""#, r#""pa":"0""#);
     h.message("/private/ws", &close);
     assert!(h.engine.store().positions().is_empty());
+}
+
+fn conditional(trigger: f64, price: Option<f64>) -> PlaceOrderOpts {
+    let mut opts = limit(OrderSide::Buy, 0.012, 90000.0);
+    opts.kind = OrderType::Conditional;
+    opts.trigger_price = Some(trigger);
+    opts.price = price;
+    opts
+}
+
+// Live: /fapi/v1/order answered STOP_MARKET with -4120, use the Algo Order API.
+#[test]
+fn a_conditional_goes_to_the_algo_endpoint_in_both_forms() {
+    let mut h = ready();
+    let mark = h.engine.store().ticker("BTCUSDT").unwrap().mark;
+    for (command, trigger, price, kind) in [
+        (7, mark * 1.1, None, "STOP_MARKET"),
+        (8, mark * 1.1, Some(mark * 1.2), "STOP"),
+        (9, mark * 0.9, None, "TAKE_PROFIT_MARKET"),
+        (10, mark * 0.9, Some(mark * 0.8), "TAKE_PROFIT"),
+    ] {
+        place(&mut h, command, vec![conditional(trigger, price)]);
+        assert!(!h.has_request("/fapi/v1/order?"));
+        let sent = h.take("/fapi/v1/algoOrder");
+        let q = query_of(&sent.url);
+        let get = |name: &str| q.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+        assert_eq!(get("type"), Some(kind));
+        assert_eq!(get("algoType"), Some("CONDITIONAL"));
+        assert!(get("triggerPrice").is_some());
+        assert_eq!(get("price").is_some(), price.is_some());
+        assert_eq!(get("timeInForce").is_some(), price.is_some());
+        h.reply(sent.id, 200, "", r#"{"algoId":1,"clientAlgoId":"x"}"#);
+    }
 }
 
 #[test]
@@ -676,6 +711,25 @@ fn an_expired_listen_key_reconnects_with_a_new_one() {
     assert!(
         h.has_request("/fapi/v1/openOrders"),
         "reconnect resyncs orders"
+    );
+}
+
+#[test]
+fn a_reopened_private_stream_reads_positions_at_once() {
+    let mut h = ready();
+    let private = h.socket("/private/ws").unwrap();
+    h.requests.clear();
+    h.event(Event::WsClosed {
+        socket: private,
+        code: 1006,
+    });
+    h.advance(1_000.0);
+    h.respond("/fapi/v1/listenKey", 200, r#"{"listenKey":"fresh"}"#);
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsOpened { socket });
+    assert!(
+        h.has_request("/fapi/v3/positionRisk"),
+        "the gap lost position events"
     );
 }
 
@@ -1433,6 +1487,9 @@ fn risk_row(side: &str, amount: &str) -> String {
 #[test]
 fn a_skipped_position_row_with_no_stored_leg_is_an_error_logged_once_until_it_maps() {
     let mut h = ready();
+    h.advance(10_000.0);
+    h.respond("/fapi/v1/openOrders", 200, OPEN_ORDERS);
+    h.respond("/fapi/v1/openAlgoOrders", 200, OPEN_ALGO_ORDERS);
     let malformed = risk_row("SHORT", "-0.050").replace(r#""entryPrice":"95000.0","#, "");
     let message = "Binance skipped malformed positionRisk row BTCUSDT:short";
     advance_to_position_read(
@@ -1762,4 +1819,38 @@ fn a_refused_key_ends_the_start_with_the_reason() {
     assert_eq!(h.startup_failures.len(), 1, "{:?}", h.startup_failures);
     let message = &h.startup_failures[0].message;
     assert!(message.contains("Invalid API-key"), "{message}");
+}
+
+// Live: a 90 day start with no end answered empty while 7 days answered 16 rows.
+#[test]
+fn a_fills_start_with_no_end_walks_every_seven_day_window_to_now() {
+    let mut h = ready();
+    let now = h.now;
+    h.event(Event::Command(Command::Query {
+        command: 42,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(now - 15.0 * 86_400_000.0),
+            to_ms: None,
+            limit: None,
+        },
+    }));
+    let mut windows = 0;
+    while h.has_request("/fapi/v1/userTrades") {
+        let page = h.take("/fapi/v1/userTrades");
+        assert!(page.url.contains("endTime="), "{}", page.url);
+        windows += 1;
+        h.reply(page.id, 200, "", "[]");
+    }
+    assert_eq!(windows, 3);
+}
+
+// Live, 1 attempt in 5: a fill between the REST snapshot and the subscribe stayed lost for 75 s.
+#[test]
+fn the_first_private_open_reads_orders_and_positions() {
+    let mut h = ready();
+    assert_eq!(h.answered_count("ositionRisk"), 2, "startup, then the open");
+    h.advance(10_000.0);
+    assert!(h.has_request("/fapi/v1/openOrders"));
 }

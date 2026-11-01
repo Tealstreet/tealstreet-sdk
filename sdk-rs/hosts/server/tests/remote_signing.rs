@@ -134,3 +134,90 @@ async fn a_keyless_hyperliquid_engine_binds_its_agent_through_the_link() {
         json!({ "toSign": ACCOUNT, "outputFormat": "hyperliquid-address" })
     );
 }
+
+struct NoIo;
+impl safe_cex_native::Transport for NoIo {
+    fn connect(
+        &self,
+        _: safe_cex_engine::SocketId,
+        _: String,
+        _: safe_cex_native::Events,
+    ) -> mpsc::UnboundedSender<String> {
+        mpsc::unbounded_channel().0
+    }
+    fn request(&self, _: safe_cex_engine::HttpRequest, _: safe_cex_native::Events) {}
+}
+
+/// The server's host starts the engine only once the browser has answered the
+/// address, or it seals an unbound identity and refuses every order as unsupported.
+#[tokio::test]
+async fn a_hosted_hyperliquid_account_starts_after_its_address_is_answered() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (sender, mut frames) = mpsc::unbounded_channel::<String>();
+            let link = SignerLink::new(SOCKET, Arc::new(move |frame| sender.send(frame).is_ok()));
+            let answering = Arc::downgrade(&link);
+            tokio::spawn(async move {
+                let (provider, identities) = device();
+                let account = Account {
+                    key: Some(ACCOUNT.into()),
+                    ..Account::default()
+                };
+                while let Some(frame) = frames.recv().await {
+                    // The browser's round trip, longer than the host's first turn.
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    let request = serde_json::from_str::<Value>(&frame).unwrap()["d"].clone();
+                    let signature = hosted_wallet::sign(
+                        "hyperliquid",
+                        &identities,
+                        &account,
+                        &provider,
+                        request["wsAuth"]["toSign"].as_str().unwrap(),
+                        request["wsAuth"]["outputFormat"].as_str().unwrap(),
+                        0.,
+                    )
+                    .unwrap();
+                    if let Some(link) = answering.upgrade() {
+                        link.resolve(
+                            SOCKET,
+                            json!({ "id": request["id"], "wsAuthSignature": signature }),
+                        );
+                    }
+                }
+            });
+            let init = InitPayload {
+                account_name: "main".into(),
+                exchange_name: "hyperliquid".into(),
+                key: ACCOUNT.into(),
+                ..InitPayload::default()
+            };
+            let options = engine_options(&init, false).to_string();
+            let remote =
+                remote_account(link.clone(), "hyperliquid", Some("main".into()), &options).unwrap();
+            let (handle, _task) = safe_cex_native::spawn_venue_account(
+                "hyperliquid",
+                &remote.options_json,
+                NoIo,
+                Some(remote.provider.clone()),
+                safe_cex_native::ServerConfig::default(),
+            )
+            .unwrap();
+            let mut client = handle.join(1, true).await.unwrap();
+            assert!(handle.command(
+                1,
+                safe_cex_engine::Command::CancelSymbolOrders {
+                    command: 9,
+                    symbol: "BTC".into(),
+                },
+            ));
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            while let Ok(frame) = client.outgoing.try_recv() {
+                let text = format!("{frame:?}");
+                assert!(
+                    !text.contains("Signing operation is not supported"),
+                    "{text}"
+                );
+            }
+        })
+        .await;
+}

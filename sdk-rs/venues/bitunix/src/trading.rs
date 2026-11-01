@@ -1252,8 +1252,11 @@ impl BitunixFutures {
                                         && r.status == OrderStatus::Open
                                 })
                                 .find(|r| {
+                                    // Only a full-position pair shares one modify; a separate
+                                    // order on the position would be copied onto this one.
                                     self.account.native.get(&r.id).is_some_and(|meta| {
-                                        !meta.attached
+                                        full && meta.full_position
+                                            && !meta.attached
                                             && !n.position_id.is_empty()
                                             && meta.position_id == n.position_id
                                     })

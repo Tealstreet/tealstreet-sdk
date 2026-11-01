@@ -64,6 +64,10 @@ fn spot_and_inverse_history_report_unsupported_before_auth_without_io() {
                     limit: None,
                 },
             ] {
+                // COIN-M reads fills; see inverse_fills_read_the_coin_m_trade_list.
+                if variant == Variant::CoinM && matches!(query, Query::Fills { .. }) {
+                    continue;
+                }
                 h.event(Event::Command(Command::Query { command: 1, query }));
                 let result = &h.done.last().unwrap().1;
                 assert!(

@@ -559,3 +559,25 @@ fn a_refused_signature_still_refuses_the_private_socket() {
     );
     assert!(h.closed.contains(&socket));
 }
+
+#[test]
+fn a_restored_network_redials_a_socket_waiting_out_backoff() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    for _ in 0..3 {
+        let waiting = h.close(h.socket());
+        assert!(waiting > 0.0);
+        h.wait(waiting);
+    }
+    let _ = socket;
+    let sockets = h.sockets.len();
+    let waiting = h.close(h.socket());
+    assert!(waiting > 500.0, "{waiting}");
+    h.event(Event::NetworkRestored);
+    h.wait(0.0);
+    assert_eq!(
+        h.sockets.len(),
+        sockets + 1,
+        "redials without the {waiting} ms"
+    );
+}

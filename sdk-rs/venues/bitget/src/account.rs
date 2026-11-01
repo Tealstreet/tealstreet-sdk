@@ -130,6 +130,7 @@ pub struct Account {
     balance_in_flight: bool,
     orders_in_flight: bool,
     orders_dirty: bool,
+    mode_read: bool,
     positions_timer: Option<TimerId>,
     balance_timer: Option<TimerId>,
     orders_timer: Option<TimerId>,
@@ -743,6 +744,14 @@ impl BitgetFutures {
                 }
                 self.account.positions_in_flight = false;
                 let mut rows = self.merge_positions(cx, rows, started);
+                // Classic reads its mode per symbol, so a flat account never learned it.
+                if !self.account.uta && !self.account.mode_read && rows.is_empty() {
+                    self.account.mode_read = true;
+                    let any = cx.store.markets().first().map(|m| m.symbol.clone());
+                    if let Some(symbol) = any {
+                        self.refresh_settings(cx, Some(&symbol));
+                    }
+                }
                 self.coherent_position_modes(cx, &mut rows, &mut skipped, true);
                 for p in &rows {
                     if !self
@@ -1531,11 +1540,26 @@ impl BitgetFutures {
         } else {
             for current in cx.store.orders() {
                 if current.status == OrderStatus::Open
+                    && !is_preset_child(current)
                     && !rows.iter().any(|r| r.id == current.id)
                     && ((is_algo(current.kind)
                         && !(self.account.uta && current.kind == OrderType::TrailingStopLoss))
                         || self.account.opened.contains_key(&current.id)
                         || self.order_revision(&current.id) > stream_revision)
+                {
+                    rows.push(current.clone());
+                }
+            }
+            // A preset leg exists only on its parent: a read without the parent proves it gone.
+            for current in cx.store.orders() {
+                let parent_stays = current
+                    .parent_id
+                    .as_ref()
+                    .is_some_and(|parent| rows.iter().any(|r| r.id == *parent));
+                if is_preset_child(current)
+                    && current.status == OrderStatus::Open
+                    && parent_stays
+                    && !rows.iter().any(|r| r.id == current.id)
                 {
                     rows.push(current.clone());
                 }
@@ -1974,7 +1998,17 @@ impl BitgetFutures {
                                     .terminal
                                     .insert(order.id.clone(), cx.now + 10_000.0);
                                 self.account.opened.remove(&order.id);
+                                // A first sight of a terminal row (a post-only that crossed) still shows.
+                                if cx.store.order(&order.id).is_none()
+                                    && order
+                                        .extra
+                                        .as_ref()
+                                        .is_some_and(|e| e.reject_reason.is_some())
+                                {
+                                    cx.store.upsert_order(order.clone());
+                                }
                                 cx.store.set_order_status(&order.id, order.status);
+                                self.end_preset_children(cx, &order.id);
                                 if let Some(reason) =
                                     order.extra.as_ref().and_then(|extra| extra.reject_reason)
                                 {
@@ -2233,6 +2267,23 @@ impl BitgetFutures {
                 order.status = OrderStatus::Canceled;
             }
         });
+        self.end_preset_children(cx, id);
+    }
+
+    /// TP/SL legs preset on an order do not outlive it on the venue.
+    fn end_preset_children(&mut self, cx: &mut Cx<'_, Pending>, parent: &str) {
+        let children: Vec<_> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|o| is_preset_child(o) && o.parent_id.as_deref() == Some(parent))
+            .map(|o| o.id.clone())
+            .collect();
+        for id in children {
+            self.account.terminal.insert(id.clone(), cx.now + 10_000.0);
+            self.account.opened.remove(&id);
+            cx.store.set_order_status(&id, OrderStatus::Canceled);
+        }
     }
 
     /// A complete order read for an Unknown write. One already in flight may
@@ -2835,6 +2886,11 @@ fn order_row_symbol(store: &safe_cex_engine::Store, item: &str) -> String {
     }
     let row = serde_json::from_str::<Row<'_>>(item).ok();
     safe_cex_engine::coverage::fence_symbol(store, row.as_ref().map(|row| row.symbol))
+}
+
+/// A leg mapped from a limit row's preset TP/SL, unlike a strategy order's legs, which set a trigger.
+fn is_preset_child(order: &Order) -> bool {
+    order.parent_id.is_some() && order.trigger_type.is_none()
 }
 
 fn order_row_id(item: &str) -> Option<String> {

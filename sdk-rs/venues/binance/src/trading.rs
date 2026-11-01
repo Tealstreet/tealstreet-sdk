@@ -188,6 +188,8 @@ enum CancelProof {
 
 #[derive(Default)]
 pub struct TradingState {
+    /// MIN_NOTIONAL by symbol. Market limits carry no value minimum.
+    pub(crate) min_notional: HashMap<String, f64>,
     jobs: HashMap<CommandId, Job>,
     /// While an amendment plans its replacement: the original row's hedge side.
     amended_position_side: Option<&'static str>,
@@ -246,6 +248,7 @@ fn type_text(kind: OrderType) -> &'static str {
         OrderType::StopLoss => "STOP_MARKET",
         OrderType::TakeProfit => "TAKE_PROFIT_MARKET",
         OrderType::TrailingStopLoss => "TRAILING_STOP_MARKET",
+        // Sent only by format_conditional, which chooses the native type.
         OrderType::Conditional => "STOP_MARKET",
     }
 }
@@ -262,7 +265,10 @@ fn tif_text(tif: TimeInForce) -> &'static str {
 fn is_algo(kind: OrderType) -> bool {
     matches!(
         kind,
-        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+        OrderType::StopLoss
+            | OrderType::TakeProfit
+            | OrderType::TrailingStopLoss
+            | OrderType::Conditional
     )
 }
 
@@ -1830,6 +1836,20 @@ impl BinanceFutures {
             close: Some(order.close.unwrap_or(false)),
             stp_mode: None,
         };
+        // A replacement below the value minimum would be refused after the old order is gone.
+        let left = (replacement.amount - order.filled).max(0.0);
+        let value = left * replacement.price.unwrap_or(0.0);
+        let minimum = self
+            .trading
+            .min_notional
+            .get(&order.symbol)
+            .copied()
+            .unwrap_or(0.0);
+        if !order.reduce_only && value > 0.0 && value < minimum {
+            return Err(format!(
+                "Replacement worth {value} is below the {minimum} minimum; the order is unchanged"
+            ));
+        }
         // Validate before canceling; build the final payload after its cumulative fill is known.
         self.plan_place(cx, std::slice::from_ref(&replacement))?;
         let mut job = self.plan_cancel(std::slice::from_ref(&order));
@@ -1892,7 +1912,8 @@ impl BinanceFutures {
         if let Some(position_side) = self.trading.amended_position_side {
             return position_side;
         }
-        let closes = is_algo(kind) || reduce;
+        // A conditional may open; only its reduce flag closes.
+        let closes = (is_algo(kind) && kind != OrderType::Conditional) || reduce;
         match (side, closes) {
             (OrderSide::Buy, false) | (OrderSide::Sell, true) => "LONG",
             (OrderSide::Sell, false) | (OrderSide::Buy, true) => "SHORT",
@@ -1901,6 +1922,75 @@ impl BinanceFutures {
 
     /// Payloads for one order: regular orders (split above the market's max
     /// size) and algo orders (the order itself if a stop, plus attached TP/SL).
+    /// USD-M refuses conditionals on the order endpoint (-4120). STOP fires as the price
+    /// moves toward the trigger on the order's side, TAKE_PROFIT the other way.
+    fn format_conditional(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Params, String> {
+        let market = cx
+            .store
+            .market(&opts.symbol)
+            .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        let trigger = opts
+            .trigger_price
+            .filter(|trigger| *trigger > 0.0)
+            .map(|trigger| num::adjust(trigger, market.precision.price))
+            .ok_or_else(|| format!("Trigger price is required for {} conditionals", opts.symbol))?;
+        let ticker = cx
+            .store
+            .ticker(&opts.symbol)
+            .ok_or_else(|| format!("Ticker {} not found", opts.symbol))?;
+        let reference = if working_type(opts) == "MARK_PRICE" {
+            ticker.mark
+        } else {
+            ticker.last
+        };
+        let stop = match opts.side {
+            OrderSide::Buy => trigger >= reference,
+            OrderSide::Sell => trigger <= reference,
+        };
+        let limit = opts
+            .price
+            .filter(|price| *price > 0.0)
+            .map(|price| num::adjust(price, market.precision.price));
+        let amount = num::adjust(opts.amount, market.precision.amount);
+        if amount <= 0.0 {
+            return Err("Binance conditional orders require a positive quantity".into());
+        }
+        let mut params = Params::default();
+        params.set("algoType", "CONDITIONAL");
+        params.set("symbol", opts.symbol.clone());
+        params.set(
+            "positionSide",
+            self.position_side(cx, opts.side, opts.kind, opts.reduce_only == Some(true)),
+        );
+        params.set("side", side_text(opts.side));
+        params.set(
+            "type",
+            match (stop, limit.is_some()) {
+                (true, false) => "STOP_MARKET",
+                (true, true) => "STOP",
+                (false, false) => "TAKE_PROFIT_MARKET",
+                (false, true) => "TAKE_PROFIT",
+            },
+        );
+        params.set("quantity", number(amount));
+        params.set("triggerPrice", number(trigger));
+        if let Some(limit) = limit {
+            params.set("price", number(limit));
+            let tif = opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel);
+            params.set("timeInForce", tif_text(tif));
+        }
+        if !cx.store.hedged() && opts.reduce_only == Some(true) {
+            params.set("reduceOnly", "true");
+        }
+        params.set("workingType", working_type(opts));
+        params.set("clientAlgoId", self.generated_id(cx)?);
+        Ok(params)
+    }
+
     fn format_order(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1912,6 +2002,9 @@ impl BinanceFutures {
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
         if opts.kind == OrderType::TrailingStopLoss {
             return Ok((Vec::new(), vec![self.format_trailing(cx, opts)?]));
+        }
+        if opts.kind == OrderType::Conditional {
+            return Ok((Vec::new(), vec![self.format_conditional(cx, opts)?]));
         }
         let mut regular = Vec::new();
         let mut algo = Vec::new();
@@ -1987,22 +2080,19 @@ impl BinanceFutures {
             if reduce_only {
                 params.set("reduceOnly", "true");
             }
-            let max = market.limits.amount.max;
-            let (lots, rest) = if amount > max && max > 0.0 {
-                (
-                    (amount / max).ceil() as usize,
-                    num::adjust(amount % max, p_amount),
-                )
-            } else {
-                (1, 0.0)
-            };
-            let lot_size = num::adjust((amount - rest) / lots as f64, p_amount);
-            let mut payloads: Vec<Params> = (0..lots)
-                .map(|_| with_quantity(&params, quantity_at, lot_size))
-                .collect();
-            if rest != 0.0 {
-                payloads.push(with_quantity(&params, quantity_at, rest));
+            if amount <= 0.0 {
+                return Err("Binance order quantity rounds to zero".into());
             }
+            if opts.kind == OrderType::Limit && price.is_none_or(|p| p <= 0.0) {
+                return Err("Binance order price rounds to zero".into());
+            }
+            let payloads = sized_payloads_at(
+                &params,
+                quantity_at,
+                amount,
+                market.limits.amount.max,
+                p_amount,
+            )?;
             if opts.client_order_id.is_some() && payloads.len() > 1 {
                 return Err(format!(
                     "Client order ID needs a single order; {} exceeds the maximum size",
@@ -2321,6 +2411,17 @@ fn positive_price(value: Option<f64>, precision: f64) -> Result<f64, String> {
 }
 
 fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Vec<Params>, String> {
+    let at = params.0.len();
+    sized_payloads_at(&params, at, amount, max, step)
+}
+
+fn sized_payloads_at(
+    params: &Params,
+    at: usize,
+    amount: f64,
+    max: f64,
+    step: f64,
+) -> Result<Vec<Params>, String> {
     let max = if max.is_finite() && max > 0.0 {
         num::adjust(max, step)
     } else {
@@ -2334,13 +2435,12 @@ fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Ve
         return Err("Binance order requires too many native lots".into());
     }
     let mut out = Vec::new();
-    let at = params.0.len();
     for _ in 0..count as usize {
-        out.push(with_quantity(&params, at, max));
+        out.push(with_quantity(params, at, max));
     }
     let rest = num::adjust(amount - count * max, step);
     if rest > 0.0 {
-        out.push(with_quantity(&params, at, rest));
+        out.push(with_quantity(params, at, rest));
     }
     Ok(out)
 }

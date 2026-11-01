@@ -275,3 +275,51 @@ fn background_notifications_cannot_supersede_owned_preflight_or_approve_it_after
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("get_pending_positions")))
     );
 }
+
+// Legacy capture: a position frame moves nothing itself; it asks for the REST read.
+#[test]
+fn a_real_position_frame_after_login_reads_the_positions_into_the_store() {
+    let (mut e, socket) = startup();
+    e.handle(
+        1.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"nonce":"n","result":true}}"#,
+        },
+    );
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
+    e.handle(
+        100.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"ch":"position","ts":1743869177067,"data":{"event":"OPEN","marginMode":"CROSS","positionId":"93365513147542397","positionMode":"HEDGE","side":"LONG","leverage":"20","margin":"4.1341","ctime":"2025-04-05T16:06:17.047000000Z","qty":"0.001","entryValue":"82.682","symbol":"BTCUSDT","realizedPNL":"-0.0496092","funding":"0","fee":"-0.0496092","unrealizedPNL":"0"}}"#,
+        },
+    );
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
+    let (timer, at) = timer(&actions);
+    e.handle(at, Event::TimerFired { timer });
+    let request = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("get_pending_positions") => Some(r),
+            _ => None,
+        })
+        .expect("the frame asks for the read");
+    e.handle(
+        at + 1.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":0,"data":[{"positionId":"93365513147542397","symbol":"BTCUSDT","qty":"0.001","entryValue":"82.682","side":"BUY","positionMode":"HEDGE","marginMode":"CROSS","leverage":20,"unrealizedPNL":"0","margin":"4.1341","liqPrice":"1"}]}"#,
+            },
+        },
+    );
+    let position = e.store().positions().iter().find(|p| p.symbol == "BTCUSDT");
+    assert_eq!(position.expect("row reaches the store").contracts, 0.001);
+}

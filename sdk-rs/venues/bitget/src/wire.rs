@@ -36,6 +36,8 @@ pub struct Contract<'a> {
     pub size_multiplier: Number,
     #[serde(default)]
     pub min_trade_num: Number,
+    #[serde(default, rename = "minTradeUSDT")]
+    pub min_trade_usdt: Number,
     #[serde(default)]
     pub max_order_qty: Number,
     #[serde(default)]
@@ -973,7 +975,7 @@ pub fn null_history(body: &str) -> bool {
     };
     envelope.code.0 == Some(0.0)
         && envelope.data.is_none_or(|lists| {
-            ["fillList", "entrustedList"]
+            ["fillList", "entrustedList", "list"]
                 .iter()
                 .any(|name| lists.get(name).is_some_and(|list| list.get() == "null"))
         })

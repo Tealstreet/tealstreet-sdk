@@ -264,7 +264,7 @@ fn hedged_isolated() -> Harness {
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     for path in [
         "orders-pending",
@@ -292,7 +292,7 @@ fn hedged_isolated() -> Harness {
             &mut h,
             "balances",
             200,
-            r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+            r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
         );
     }
     command(&mut h, mode(81, true));
@@ -1345,4 +1345,21 @@ fn a_code_zero_row_is_accepted_whatever_its_text_says() {
         r#"{"code":"0","msg":"","data":[{"orderId":"9","code":"0","msg":"Order placed successfully"}]}"#,
     );
     assert_eq!(succeeded(&h, 860), r#"["9"]"#);
+}
+
+// Live, 5 of 5: a partly filled order's cancel reads partially_canceled, and the replacement was lost.
+#[test]
+fn a_partly_filled_amend_still_replaces_after_partially_canceled() {
+    let mut h = Harness::with_secondary();
+    h.open_private();
+    h.seed();
+    seed_order(&mut h, "12", "");
+    command(&mut h, amend(7));
+    reply(&mut h, "cancel-batch-orders", 200, ACCEPTED_CANCEL);
+    let at = h.now + 350.0;
+    fire_until(&mut h, at);
+    let detail =
+        CANCELED_DETAIL.replace(r#""state":"canceled""#, r#""state":"partially_canceled""#);
+    let intents = reply(&mut h, "order-detail", 200, &detail);
+    managed(&h, &intents, "batch-orders");
 }

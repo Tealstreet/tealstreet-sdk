@@ -286,7 +286,7 @@ fn trailing_and_v1_stp_fail_before_write() {
     assert!(h.result(2).is_err());
 }
 #[test]
-fn individual_batch_failure_continues_and_returns_successful_ids() {
+fn a_refused_order_fails_the_command_and_names_the_placed_one() {
     let mut h = Harness::new();
     h.command(Command::PlaceOrders {
         command: 1,
@@ -299,7 +299,9 @@ fn individual_batch_failure_continues_and_returns_successful_ids() {
     h.reply(first, r#"{"code":-2010,"msg":"insufficient margin"}"#);
     let second = h.take(Method::Post);
     h.reply(second, r#"{"orderId":22542179}"#);
-    assert_eq!(h.result(1).as_ref().unwrap(), "[\"22542179\"]");
+    assert!(h.result(1).is_err());
+    let error = &h.failures.last().unwrap().1;
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["22542179"]);
 }
 #[test]
 fn cancel_unknown_is_idempotent_and_does_not_replace_filled_status() {
@@ -532,7 +534,7 @@ fn malformed_ack_is_not_success_and_ambiguous_write_is_never_retried() {
 }
 
 #[test]
-fn per_item_validation_failure_preserves_other_valid_batch_orders() {
+fn a_locally_invalid_order_still_sends_the_valid_one_and_names_it() {
     let mut h = Harness::new();
     let mut invalid = limit();
     invalid["symbol"] = json!("UNKNOWN");
@@ -545,7 +547,9 @@ fn per_item_validation_failure_preserves_other_valid_batch_orders() {
     });
     let valid = h.take(Method::Post);
     h.reply(valid, r#"{"orderId":22542179}"#);
-    assert_eq!(h.result(1).as_ref().unwrap(), "[\"22542179\"]");
+    assert!(h.result(1).is_err());
+    let error = &h.failures.last().unwrap().1;
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["22542179"]);
 }
 
 #[test]
@@ -1164,4 +1168,40 @@ fn live_1000_refusals_are_not_an_uncertain_placement() {
             "{message} left a fence"
         );
     }
+}
+
+#[test]
+fn an_amend_below_the_value_minimum_is_refused_before_the_cancel() {
+    let mut h = Harness::new();
+    h.engine.start(1700000000000.0);
+    h.collect();
+    let index = h
+        .requests
+        .iter()
+        .position(|r| r.url.ends_with("/exchangeInfo"))
+        .unwrap();
+    let info = h.requests.remove(index);
+    h.reply(info, r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"2"},{"filterType":"MIN_NOTIONAL","notional":"5"}]}]}"#);
+    let index = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("/positionSide/dual"))
+        .unwrap();
+    let mode = h.requests.remove(index);
+    h.reply(mode, r#"{"dualSidePosition":false}"#);
+    let mut resting = order("283194212", OrderType::Limit);
+    resting.reduce_only = false;
+    h.engine.store_mut().set_orders(vec![resting]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(0.1),
+        amount: None,
+    });
+    assert!(!h.requests.iter().any(|r| r.method == Method::Delete));
+    assert!(
+        format!("{:?}", h.done).contains("the order is unchanged"),
+        "{:?}",
+        h.done
+    );
 }

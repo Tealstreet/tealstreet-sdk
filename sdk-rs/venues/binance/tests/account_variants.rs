@@ -2,7 +2,7 @@
 use support::Options;
 mod support;
 use safe_cex_engine::model::{Balance, CurrencyBalance, MarginType, OrderStatus};
-use safe_cex_engine::{Event, Method};
+use safe_cex_engine::{Command, Event, Method, Query};
 use safe_cex_venue_binance::Variant;
 use support::Harness;
 
@@ -289,6 +289,7 @@ fn inverse_with(extra_catalogue_rows: &str, position_risk: &str) -> Harness {
     h.respond("/dapi/v1/openOrders",200,r#"[{"symbol":"BTCUSD_PERP","orderId":12,"clientOrderId":"native","price":"9000","origQty":"5","executedQty":"2","type":"LIMIT","side":"BUY"}]"#);
     let private = h.socket("/ws/coin-key").unwrap();
     h.event(Event::WsOpened { socket: private });
+    h.answer_open_position_read();
     h
 }
 #[test]
@@ -690,4 +691,33 @@ fn inverse_delivery_position_excluded_from_complete_catalogue_does_not_block_per
     let positions = h.engine.store().positions();
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].notional, 400.0);
+}
+
+// Row from Binance's COIN-M account trade list documentation.
+#[test]
+fn inverse_fills_read_the_coin_m_trade_list() {
+    let mut h = inverse();
+    h.event(Event::Command(Command::Query {
+        command: 41,
+        query: Query::Fills {
+            symbol: Some("BTCUSD_PERP".into()),
+            order_id: Some("28".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1000),
+        },
+    }));
+    let trades = h.take("/dapi/v1/userTrades");
+    assert!(trades.url.contains("orderId=28"));
+    h.reply(
+        trades.id,
+        200,
+        "",
+        r#"[{"symbol":"BTCUSD_PERP","id":6,"orderId":28,"pair":"BTCUSD","side":"SELL","price":"8800","qty":"1","realizedPnl":"0","marginAsset":"BTC","baseQty":"0.01136364","commission":"0.00000454","commissionAsset":"BTC","time":1590743483586,"positionSide":"BOTH","buyer":false,"maker":false}]"#,
+    );
+    let answer = h.result(41).unwrap().as_ref().unwrap();
+    assert!(answer.contains("28"), "{answer}");
+    let rows: serde_json::Value = serde_json::from_str(answer).unwrap();
+    assert_eq!(rows[0]["orderId"], "28", "{answer}");
+    assert_eq!(rows[0]["qty"], 1.0, "{answer}");
 }

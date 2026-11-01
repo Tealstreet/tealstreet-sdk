@@ -95,6 +95,7 @@ impl Urls {
 pub struct MarketRule {
     pub tick_size: f64,
     pub max_algo_orders: Option<u32>,
+    pub min_notional: f64,
 }
 
 pub enum Pending {
@@ -795,6 +796,9 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
     let lot = find("LOT_SIZE");
     let price = 10f64.powi(-row.price_precision);
     let rule = MarketRule {
+        min_notional: find("MIN_NOTIONAL")
+            .and_then(|filter| filter.notional.as_deref())
+            .map_or(0.0, num::parse),
         tick_size: find("PRICE_FILTER")
             .and_then(|filter| filter.tick_size.as_deref())
             .map(num::parse)

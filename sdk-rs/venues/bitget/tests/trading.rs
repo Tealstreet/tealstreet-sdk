@@ -517,7 +517,7 @@ fn setting_commands_update_store_only_after_ack_and_failures_preserve_settings()
         side: None,
     });
     let (request, p) = body(&mut h, "/set-leverage");
-    assert_eq!(p["leverage"].as_f64(), Some(125.0));
+    assert_eq!(p["leverage"], "125");
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 20.0);
     h.reply(request, 200, r#"{"code":"00000","data":{}}"#);
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 125.0);
@@ -1346,4 +1346,124 @@ fn an_unproven_batch_row_beside_an_accepted_one_is_partial_unknown() {
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{}", error.message);
     let partial = error.partial.as_deref().expect("the accepted id is kept");
     assert_eq!(partial.order_ids, ["9"]);
+}
+
+#[test]
+fn a_symbol_cancel_finding_an_order_gone_succeeds() {
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    let placed = h.take("/batch-place-order");
+    batch_success(&mut h, placed.id, &["ack-only"]);
+    h.engine.store_mut().set_orders(vec![]);
+    h.command(Command::CancelSymbolOrders {
+        command: 2,
+        symbol: "BTCUSDT".into(),
+    });
+    let cancel = h.take("/batch-cancel-orders");
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"code":"25204","msg":"Order does not exist"}"#,
+    );
+    assert!(
+        h.done.iter().any(|(id, r)| *id == 2 && r.is_ok()),
+        "{:?}",
+        h.done
+    );
+}
+
+#[test]
+fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
+    let mut h = Harness::classic();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "1".into(),
+        price: Some(95.0),
+        amount: None,
+    });
+    h.respond(
+        "/modify-order",
+        200,
+        r#"{"code":"40017","msg":"cannot modify","data":null}"#,
+    );
+    let (request, _) = body(&mut h, "/batch-cancel-orders");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","data":{"successList":[{"orderId":"1"}],"failureList":[]}}"#,
+    );
+    let (request, _) = body(&mut h, "/batch-place-order");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"45110","msg":"less than the minimum amount 5 USDT"}"#,
+    );
+    let error = h.done[0].1.clone().unwrap_err();
+    assert!(error.contains("Your BTCUSDT order is gone"), "{error}");
+}
+
+#[test]
+fn an_amend_below_the_venue_minimum_value_is_refused_before_any_cancel() {
+    let mut h = Harness::classic();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "1".into(),
+        price: Some(1.0),
+        amount: None,
+    });
+    let error = h.done[0].1.clone().unwrap_err();
+    assert!(error.contains("the order is unchanged"), "{error}");
+    assert!(!h.requests.iter().any(|r| r.url.contains("cancel")));
+}
+
+#[test]
+fn an_amend_finding_its_order_gone_does_not_place_the_replacement() {
+    let mut h = Harness::classic();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "1".into(),
+        price: Some(95.0),
+        amount: None,
+    });
+    h.respond(
+        "/modify-order",
+        200,
+        r#"{"code":"40017","msg":"cannot modify","data":null}"#,
+    );
+    let (request, _) = body(&mut h, "/batch-cancel-orders");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"25204","msg":"Order does not exist"}"#,
+    );
+    assert!(h.done[0].1.is_err());
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/batch-place-order"))
+    );
+}
+
+#[test]
+fn split_remainder_stays_on_the_lot_step() {
+    let mut h = Harness::classic();
+    let mut market = h.engine.store().market("BTCUSDT").unwrap().clone();
+    market.precision.amount = 0.1;
+    market.limits.amount.min = 0.1;
+    market.limits.amount.max = 72000.0;
+    h.engine.store_mut().set_markets(vec![market]);
+    place(
+        &mut h,
+        vec![
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":180000.05,"price":90.0}),
+        ],
+    );
+    let (_, payload) = body(&mut h, "/batch-place-order");
+    let sizes: Vec<_> = payload["orderList"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["size"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(sizes, ["72000", "72000", "36000.1"]);
 }

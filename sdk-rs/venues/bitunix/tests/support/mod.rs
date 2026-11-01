@@ -123,7 +123,23 @@ pub fn startup_with_engine(e: TestEngine) -> (TestEngine, SocketId) {
     startup_serving(e, PAIRS, TICKERS)
 }
 /// `startup_with_engine` over a caller's pairs and tickers.
-pub fn startup_serving(mut e: TestEngine, pairs: &str, tickers: &str) -> (TestEngine, SocketId) {
+pub fn startup_serving(e: TestEngine, pairs: &str, tickers: &str) -> (TestEngine, SocketId) {
+    let (e, socket, _, _) = startup_recording(e, pairs, tickers);
+    (e, socket)
+}
+/// Startup, also returning the socket frames sent and the timers still armed.
+pub fn startup_recording(
+    mut e: TestEngine,
+    pairs: &str,
+    tickers: &str,
+) -> (
+    TestEngine,
+    SocketId,
+    Vec<String>,
+    Vec<(safe_cex_engine::TimerId, f64)>,
+) {
+    let mut sent = Vec::new();
+    let mut armed = Vec::new();
     let mut now = -1000.0;
     e.start(now);
     let mut private = None;
@@ -173,7 +189,12 @@ pub fn startup_serving(mut e: TestEngine, pairs: &str, tickers: &str) -> (TestEn
                     );
                 }
                 Action::SetTimer { timer, at_ms } if at_ms == 0.0 => repairs.push((timer, at_ms)),
-                Action::ClearTimer { timer } => repairs.retain(|(pending, _)| *pending != timer),
+                Action::SetTimer { timer, at_ms } => armed.push((timer, at_ms)),
+                Action::ClearTimer { timer } => {
+                    repairs.retain(|(pending, _)| *pending != timer);
+                    armed.retain(|(pending, _)| *pending != timer);
+                }
+                Action::WsSend { text, .. } => sent.push(text),
                 _ => {}
             }
         }
@@ -182,5 +203,5 @@ pub fn startup_serving(mut e: TestEngine, pairs: &str, tickers: &str) -> (TestEn
         e.store().loaded().orders,
         "startup must settle both order endpoints"
     );
-    (e, private.unwrap())
+    (e, private.unwrap(), sent, armed)
 }

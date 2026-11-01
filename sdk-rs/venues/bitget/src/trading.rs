@@ -120,6 +120,8 @@ const fn refused(code: i64, kind: ErrorKind) -> Row {
 
 #[derive(Default)]
 pub struct Trading {
+    /// minTradeUSDT by symbol. Market limits carry no value minimum.
+    pub(crate) min_order_value: HashMap<String, f64>,
     acknowledged: HashMap<String, (String, Planned)>,
     /// Commands behind the active job, each a Preflight parked with no I/O.
     queue: VecDeque<Queued>,
@@ -182,6 +184,8 @@ struct Job {
     effective: bool,
     /// The symbol of a stop this amend cancels before replacing it.
     replaces_stop: Option<(String, OrderSide, OrderType)>,
+    /// The symbol of a plain order this job cancels before placing its replacement.
+    replaces_order: Option<String>,
 }
 
 pub struct Request {
@@ -276,7 +280,6 @@ enum Effect {
 #[derive(Clone, Serialize)]
 #[serde(untagged)]
 enum Leverage {
-    Number(f64),
     Text(String),
 }
 
@@ -290,6 +293,10 @@ struct CancelId {
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Payload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    long_leverage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    short_leverage: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     trailing_stop_params: Option<Vec<TrailingParams>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -546,7 +553,7 @@ impl BitgetFutures {
                 if o.kind == OrderType::Conditional
                     || (o.trigger_price.is_some() && !o.redundant_protective_trigger())
                 {
-                    return Err("Bitget opening conditional orders are unsupported".into());
+                    return Err("Bitget conditional orders are unsupported".into());
                 }
                 if !o.amount.is_finite() || o.amount < 0.0 {
                     return Err("invalid Bitget order amount".into());
@@ -638,6 +645,7 @@ impl BitgetFutures {
             ids: vec![],
             effective: false,
             replaces_stop: None,
+            replaces_order: None,
         };
         self.drive(cx, job, At::Entry);
     }
@@ -919,6 +927,21 @@ impl BitgetFutures {
             job.note = Some(match job.note.take() {
                 Some(note) => format!("{stop}; {note}"),
                 None => stop,
+            });
+        }
+        if job.effective
+            && job.ids.is_empty()
+            && let Some(symbol) = &job.replaces_order
+        {
+            let state = if error.outcome == Some(Outcome::Unknown) {
+                "may be gone: check Open Orders"
+            } else {
+                "is gone: it was canceled and its replacement refused"
+            };
+            let order = format!("Your {symbol} order {state}");
+            job.note = Some(match job.note.take() {
+                Some(note) => format!("{order}; {note}"),
+                None => order,
             });
         }
         if (job.effective || !job.ids.is_empty())
@@ -1260,7 +1283,7 @@ impl BitgetFutures {
                         PositionSide::Short => "short",
                     });
                 let mut p = self.classic(cx, symbol)?;
-                p.leverage = Some(Leverage::Number(leverage));
+                p.leverage = Some(Leverage::Text(num::format(leverage)));
                 let path = if self.account.uta {
                     p = Payload {
                         category: Some(self.product().to_uppercase()),
@@ -1270,6 +1293,25 @@ impl BitgetFutures {
                         pos_side: side_text,
                         ..Payload::default()
                     };
+                    // Isolated hedge names both sides' leverage (25200 otherwise).
+                    if isolated_hedge {
+                        let setting = cx.store.setting(symbol);
+                        let held = |kept: Option<f64>| num::format(kept.unwrap_or(leverage));
+                        let (long, short) = if requested_side == PositionSide::Long {
+                            (
+                                num::format(leverage),
+                                held(setting.and_then(|s| s.sell_leverage)),
+                            )
+                        } else {
+                            (
+                                held(setting.and_then(|s| s.buy_leverage)),
+                                num::format(leverage),
+                            )
+                        };
+                        p.margin_mode = Some(margin_text(MarginType::Isolated));
+                        p.long_leverage = Some(long);
+                        p.short_leverage = Some(short);
+                    }
                     paths::UTA_SET_LEVERAGE
                 } else {
                     p.hold_side = side_text;
@@ -1305,6 +1347,18 @@ impl BitgetFutures {
                         ))),
                         ..Payload::default()
                     };
+                    // Isolated hedge names both sides' leverage (25200 otherwise).
+                    if margin == MarginType::Isolated && cx.store.hedged() {
+                        p.leverage = None;
+                        let setting = cx.store.setting(symbol);
+                        let scalar = setting.map_or(1.0, |s| s.leverage);
+                        p.long_leverage = Some(num::format(
+                            setting.and_then(|s| s.buy_leverage).unwrap_or(scalar),
+                        ));
+                        p.short_leverage = Some(num::format(
+                            setting.and_then(|s| s.sell_leverage).unwrap_or(scalar),
+                        ));
+                    }
                     paths::UTA_SET_LEVERAGE
                 } else {
                     paths::SET_MARGIN
@@ -1457,7 +1511,7 @@ impl BitgetFutures {
             }
             while left > 0.0 {
                 let size = left.min(max);
-                left = clean(left - size);
+                left = num::adjust(left - size, m.precision.amount);
                 let payload = self.normal_payload(cx, o, size)?;
                 if self.account.uta {
                     calls.push(Planned {
@@ -1779,6 +1833,10 @@ impl BitgetFutures {
             qty: (size > 0.0).then(|| num::format(size)),
             reduce_only: Some("yes"),
             client_oid: Some(mint(cx)?),
+            // Without it an isolated position is not found: 31008.
+            margin_mode: (cx.store.setting(&o.symbol).and_then(|s| s.margin_type)
+                == Some(MarginType::Isolated))
+            .then(|| margin_text(MarginType::Isolated)),
             ..Payload::default()
         };
         if o.kind == OrderType::TakeProfit {
@@ -2003,6 +2061,19 @@ impl BitgetFutures {
             opts.price = Some(next_price);
             opts.amount = replacement_size(next_amount, order.filled, m)?;
         }
+        // Checked before the cancel: an amend must not cost the order its place on the book.
+        let replacement_value = opts.amount * opts.price.unwrap_or(0.0);
+        let min_value = self
+            .trading
+            .min_order_value
+            .get(&order.symbol)
+            .copied()
+            .unwrap_or(0.0);
+        if !standalone && replacement_value > 0.0 && replacement_value < min_value {
+            return Err(format!(
+                "Bitget amendment would leave {replacement_value} USDT, below the {min_value} USDT minimum; the order is unchanged"
+            ));
+        }
         let mut replacement = if standalone && self.account.uta {
             vec![]
         } else {
@@ -2059,6 +2130,16 @@ impl BitgetFutures {
                 effect: Effect::Place { expected: 1 },
             });
         }
+        // A resting limit's bracket protects nothing until the limit has filled.
+        if linked.iter().any(|o| is_algo(o.kind)) && attached.is_none_or(|limit| limit.filled > 0.0)
+        {
+            job.replaces_stop = linked
+                .iter()
+                .find(|o| is_algo(o.kind))
+                .map(|stop| (stop.symbol.clone(), stop.side, stop.kind));
+        } else {
+            job.replaces_order = Some(order.symbol.clone());
+        }
         let mut fallback: VecDeque<_> = self.cancel_calls(cx, &linked, false)?.into();
         fallback.extend(replacement);
         if !standalone
@@ -2091,15 +2172,6 @@ impl BitgetFutures {
             });
             job.fallback = Some(fallback);
         } else {
-            // A resting limit's bracket protects nothing until the limit has filled.
-            if linked.iter().any(|o| is_algo(o.kind))
-                && attached.is_none_or(|limit| limit.filled > 0.0)
-            {
-                job.replaces_stop = linked
-                    .iter()
-                    .find(|o| is_algo(o.kind))
-                    .map(|stop| (stop.symbol.clone(), stop.side, stop.kind));
-            }
             job.calls = fallback;
         }
         Ok(())
@@ -2289,6 +2361,22 @@ impl BitgetFutures {
             )),
             Err(error) => Some(error.clone()),
         };
+        // 25204 means the order is gone, which is what a cancel wants. Not an amend's cancel:
+        // gone may mean filled, and its replacement must not then be placed.
+        let is_replacing = job.replaces_stop.is_some() || job.replaces_order.is_some();
+        let gone = !is_replacing
+            && matches!(request.call.effect, Effect::Cancel { .. })
+            && parsed
+                .as_ref()
+                .is_ok_and(|reply| reply.code.0 == Some(25204.0));
+        if gone {
+            error = None;
+            if let Effect::Cancel { orders, .. } = &request.call.effect {
+                for order in orders {
+                    self.trading.acknowledged.remove(&native_id(order));
+                }
+            }
+        }
         if let Effect::Cancel { idempotent_missing: true, .. } = &request.call.effect
             && parsed.as_ref().is_ok_and(|reply| reply.msg == "Failed to stop the strategy because the corresponding strategy ID could not be found") { error = None; }
         let mut answer = if error.is_none() {
@@ -2310,6 +2398,7 @@ impl BitgetFutures {
         // A 2xx success answer that does not account for every order.
         let mut unproven = false;
         if error.is_none()
+            && !gone
             && let Effect::Cancel { orders, .. } = &request.call.effect
         {
             let data = parsed.as_ref().ok().and_then(|r| r.data.as_ref());
