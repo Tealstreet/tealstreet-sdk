@@ -227,13 +227,13 @@ pub struct OrderRow<'a> {
     pub inst_id: Str<'a>,
     #[serde(borrow, default)]
     pub inst_type: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub order_id: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub ord_id: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub tpsl_id: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub algo_id: Str<'a>,
     #[serde(borrow, default)]
     pub order_category: Str<'a>,
@@ -257,7 +257,8 @@ pub struct OrderRow<'a> {
     pub sl_trigger_price_type: Str<'a>,
     #[serde(default)]
     pub price: Number,
-    #[serde(default)]
+    // A full-position TP/SL (sent with size -1) reads back with a null size: amount 0.
+    #[serde(default, deserialize_with = "nullable_number")]
     pub size: Number,
     #[serde(default)]
     pub filled_size: Number,
@@ -365,9 +366,9 @@ pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Number>
     Ok(safe_cex_engine::de::lenient_optional_number(d)?.map(Number))
 }
 
-// Optional prices use zero as the existing "no attached protection" sentinel.
-// Required financial fields deliberately continue to reject JSON null.
-fn nullable_number<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
+// Optional prices use zero as the existing "no attached protection" sentinel, and
+// size zero means the whole position. Other financial fields still reject JSON null.
+pub fn nullable_number<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
     Ok(Option::<Number>::deserialize(d)?.unwrap_or_default())
 }
 

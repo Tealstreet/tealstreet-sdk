@@ -1447,7 +1447,7 @@ fn trading_failures_are_classified_without_changing_their_text() {
         ),
         (
             200,
-            r#"{"code":"0","msg":"","data":[{"orderId":"9","code":"0","msg":"Order placed successfully"}]}"#,
+            r#"{"code":"0","msg":"","data":[{"orderId":"9","msg":"Order placed successfully"}]}"#,
             Some(ErrorKind::Internal),
             Some(Outcome::Unknown),
         ),

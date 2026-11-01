@@ -1059,6 +1059,9 @@ impl Venue for Hyperliquid {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, store: &safe_cex_engine::Store, symbol: &str) -> bool {
+        !self.spot && store.market(symbol).is_none_or(|m| m.is_spot != Some(true))
+    }
 
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.reconcile_order_scopes(cx, symbols);

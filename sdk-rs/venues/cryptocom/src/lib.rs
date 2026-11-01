@@ -515,6 +515,9 @@ impl Venue for Cryptocom {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
     /// The engine asks once per uncertain seal and re-asks while fenced; the fresh
     /// order read reports through `orders_reconciled`.
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {

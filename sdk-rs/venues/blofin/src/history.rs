@@ -163,7 +163,7 @@ struct Row<'a> {
     price: Number,
     #[serde(default)]
     average_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     size: Number,
     #[serde(default)]
     filled_size: Number,

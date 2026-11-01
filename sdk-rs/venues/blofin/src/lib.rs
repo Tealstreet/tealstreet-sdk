@@ -546,6 +546,9 @@ impl Venue for Blofin {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
 
     fn guard_pending_placements(&self) -> bool {
         true
