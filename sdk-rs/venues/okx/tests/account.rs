@@ -205,12 +205,22 @@ fn complete_inflight(
 #[test]
 fn a_startup_read_in_flight_at_the_subscribe_is_read_again() {
     let (mut e, _, _, pending) = startup();
-    let later = complete_inflight(&mut e, pending, ORDER, 5.0);
-    assert!(
-        later
-            .iter()
-            .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
-    );
+    let mut requests = pending;
+    let mut reads = 0;
+    while let Some(a) = requests.pop() {
+        let Action::Http(r) = &a else {
+            continue;
+        };
+        reads += usize::from(r.url.contains("/positions?"));
+        let body = if r.url.contains("/positions?") {
+            envelope(POSITION)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &a, &body, 5.0);
+        requests.extend(prepared(&mut e, 5.0));
+    }
+    assert_eq!(reads, 2);
 }
 
 #[test]
