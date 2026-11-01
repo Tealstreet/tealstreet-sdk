@@ -99,6 +99,7 @@ async fn health(State(app): State<Arc<App>>) -> Response {
         "connections": connections,
         "accounts": app.registry.account_count(),
         "engineThreads": app.registry.threads().thread_count(),
+        "accountStartPanics": app.registry.threads().panics(),
         "inits": inits,
         "disposes": disposes,
     });

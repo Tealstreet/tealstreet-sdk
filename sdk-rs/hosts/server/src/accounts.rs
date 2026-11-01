@@ -264,6 +264,11 @@ impl Account {
             (live.outbox)(text);
         }
     }
+
+    /// Signing and the proxy token follow this socket, which already holds the account.
+    pub fn sign_through_socket(&self, id: u64, outbox: Outbox, token: Option<(String, u64)>) {
+        self.hold(id, Live { outbox, token });
+    }
 }
 
 /// How an account's algo host reaches its sockets, without a cycle back to it.
@@ -665,7 +670,8 @@ impl Registry {
         let replaced = self.accounts.lock().unwrap().insert(key, account.clone());
         if let Some(replaced) = replaced {
             // A concurrent init of the same name won the race; the later build stands.
-            Self::stop(&replaced, "account replaced by a newer init", None);
+            // Its holders go too, so the losing socket stops calling a stopped account.
+            self.dispose_for(&replaced, "account replaced by a newer init", None);
         }
         Ok(account)
     }
@@ -1761,6 +1767,70 @@ pub(crate) mod tests {
             ["enableSpotMarkets"]
         );
         assert!(differing_fields(&a.fingerprint(), &a.fingerprint()).is_empty());
+    }
+
+    pub(crate) fn signing_holder(account: &Account) -> Option<u64> {
+        account.holders.lock().unwrap().signing
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn algo_replies_reach_every_live_holder() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let account = held_account_running_algos(link, String::new());
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let seen = Arc::new(Mutex::new(Vec::new()));
+                for id in [8, 9] {
+                    let seen = seen.clone();
+                    hold_live(
+                        &account,
+                        id,
+                        Arc::new(move |frame| {
+                            seen.lock().unwrap().push((id, frame));
+                            true
+                        }),
+                    );
+                }
+                account
+                    .algos
+                    .as_ref()
+                    .unwrap()
+                    .send(crate::algos::AlgoInput::Joined)
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let seen = seen.lock().unwrap();
+                for id in [8, 9] {
+                    assert!(
+                        seen.iter()
+                            .any(|(holder, frame)| *holder == id
+                                && frame.contains(r#""op":"store""#)),
+                        "holder {id}: {seen:?}"
+                    );
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn the_loser_of_an_init_race_no_longer_holds_the_stopped_account() {
+        let registry = registry();
+        let init = init_frame("");
+        let out = || -> Outbox { Arc::new(|_| true) };
+        let (first, second) = tokio::join!(
+            registry.obtain("u", &init, true, 1, None, out()),
+            registry.obtain("u", &init, true, 2, None, out()),
+        );
+        let (first, second) = (first.unwrap(), second.unwrap());
+        assert!(!Arc::ptr_eq(&first, &second), "both built");
+        assert_eq!(
+            [registry.holds(&first, 1), registry.holds(&second, 2)]
+                .iter()
+                .filter(|held| **held)
+                .count(),
+            1
+        );
+        assert_eq!(registry.account_count(), 1);
     }
 
     #[test]

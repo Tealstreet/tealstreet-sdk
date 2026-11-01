@@ -237,8 +237,8 @@ impl AccountPort for Port {
             self.keep_unheard(None, replay, holding, retrying, op == "chaser:complete");
             return;
         }
-        let frame = algo_msg(&self.name, op, data);
-        (self.emit)(frame);
+        // Every tab on the account, not only the one that signs.
+        (self.broadcast)(Some(algo_msg(&self.name, op, data)));
     }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         *self.handle.capabilities()
@@ -623,7 +623,7 @@ async fn sync_balance_info(
         };
         if sent.as_ref() != Some(&info) || tick.is_multiple_of(BALANCE_INFO_RESEND_TICKS) {
             let rows = serde_json::json!({ "balance": { "info": info } });
-            (port.emit)(crate::envelope::msg(&name, "store", rows));
+            (port.broadcast)(Some(crate::envelope::msg(&name, "store", rows)));
             sent = Some(info);
         }
     }
@@ -709,7 +709,7 @@ pub async fn run(
         });
         let text = rows.to_string();
         if *published != text {
-            (port.emit)(crate::envelope::msg(&name, "store", rows));
+            (port.broadcast)(Some(crate::envelope::msg(&name, "store", rows)));
             *published = text;
         }
     };
