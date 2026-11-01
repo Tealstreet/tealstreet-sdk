@@ -874,6 +874,12 @@ impl Blofin {
             extra: Some(OrderExtra {
                 remaining_native: Some(clean(o.size.0 - o.filled_size.0)),
                 filled_in_placement_units: Some(o.filled_size.0),
+                // The venue accepts a reduce-only with no position, then cancels it silently.
+                reject_reason: (o.state == "canceled"
+                    && o.reduce_only.0
+                    && o.filled_size.0 == 0.0
+                    && !cx.store.positions().iter().any(|p| p.symbol == m.symbol))
+                .then_some(safe_cex_engine::model::RejectReason::ReduceOnly),
                 ..OrderExtra::default()
             }),
         };

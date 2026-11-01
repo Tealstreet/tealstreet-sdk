@@ -975,6 +975,15 @@ impl Venue for BitgetFutures {
                     Discovered::Markets(rows) => rows.is_empty(),
                     Discovered::Tickers(rows) => rows.is_empty(),
                 };
+                // A product with no contracts cannot appear by retrying.
+                if empty && !tickers && self.inverse() {
+                    let _ = cx.finish_http_context(&context);
+                    cx.startup_failed(
+                        safe_cex_engine::VenueError::new("Bitget lists no inverse contracts")
+                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
+                    );
+                    return;
+                }
                 if empty {
                     let _ = cx.finish_http_context(&context);
                     let message = if tickers {

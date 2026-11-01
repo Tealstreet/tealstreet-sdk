@@ -460,6 +460,7 @@ impl Venue for PhemexPerpetuals {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             client_order_lookup: true,
             account: safe_cex_engine::AccountLookup::Query,
+            order_history_needs_symbol: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }

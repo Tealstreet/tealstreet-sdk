@@ -37,7 +37,7 @@ function record(extra = {}) {
     stpControls: false, bybitExecutionControls: false, rejectClientSlippage: false,
     finiteCommandNumbers: false, finiteHistoryBounds: false, rejectOrderHistoryFilters: false,
     publicCatalogueValidation: false, isolatedBookSubscriptions: false,
-    inverseClosedPositions: false, scheduleCancel: false, ...extra,
+    inverseClosedPositions: false, scheduleCancel: false, orderHistoryNeedsSymbol: false, ...extra,
   };
 }
 

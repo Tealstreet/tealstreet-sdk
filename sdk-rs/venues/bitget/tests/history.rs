@@ -426,3 +426,26 @@ fn windowed_fill_request_sequence_is_pinned() {
         ]
     );
 }
+
+// Live: a range ending one past a window edge left a final window with start equal to end: 20001.
+#[test]
+fn a_one_millisecond_final_window_still_has_a_start_before_its_end() {
+    let mut h = Harness::classic();
+    let end = 30.0 * 86_400_000.0;
+    query(
+        &mut h,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: Some(0.0),
+            to_ms: Some(end),
+            limit: Some(100),
+        },
+    );
+    let r = h.take("/order/fills");
+    h.reply(r.id, 200, r#"{"code":"00000","data":{"fillList":[]}}"#);
+    h.timer_after(100.0);
+    let r = h.take("/order/fills");
+    assert!(r.url.contains("startTime=2592000000"));
+    assert!(r.url.contains("endTime=2592000001"), "{}", r.url);
+}

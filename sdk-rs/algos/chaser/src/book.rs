@@ -356,6 +356,8 @@ impl ChaserBook {
             "already filled",
             "never placed",
             "not exist",
+            // The engine holds no such row: the cancel succeeded or the order finished.
+            "Order not found",
         ]
         .iter()
         .any(|phrase| error.message.contains(phrase));
