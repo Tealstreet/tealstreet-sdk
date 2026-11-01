@@ -387,7 +387,7 @@ const untilAborted = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> =
     );
   });
 
-/** Reports a proxy-authorization failure once per streak; a proxy-accepted response ends it. */
+/** Reports a relay or proxy-authorization failure once per streak; an accepted response ends it. */
 interface ProxyAuthorizationNotice {
   failed(message: string): void;
   accepted(): void;
@@ -407,6 +407,13 @@ const readBody = async (body: HttpResponse['body']): Promise<Uint8Array> => {
 };
 
 const PROXY_AUTHORIZATION_MISSING = 'Tealstreet proxy authorization missing';
+
+// Hyperliquid's public API is CORS-open. Its account traffic takes the tunnel,
+// but market data must not wait on it: the TS adapter read it from a public-only instance.
+const DIRECT_PUBLIC_READS: ReadonlySet<ExchangeName> = new Set(['hyperliquid', 'hyperliquidspot']);
+
+const relayFailed = (exchange: ExchangeName, error: Error) =>
+  `[${exchange}] The connection to the Tealstreet relay failed (${error.message}); this account's requests through it are not sent until it reconnects`;
 
 const httpTransport = (
   exchange: ExchangeName,
@@ -512,12 +519,15 @@ const httpTransport = (
         return result;
       } catch (error) {
         cancel();
+        if (error instanceof TradeTunnelTimeoutError) proxyAuthorization?.failed(relayFailed(exchange, error));
         if (intent !== undefined && error instanceof TradeTunnelTimeoutError)
           throw new HttpPreparationError('timedOut');
         throw error;
       }
     };
     const wrap = (response: HttpResponse): HttpResponse => {
+      // An answer through the relay ends a relay outage's one notice.
+      if (adapter) proxyAuthorization?.accepted();
       if (response.body instanceof Uint8Array) {
         cleanup();
         return response;
@@ -733,6 +743,9 @@ const httpTransport = (
                   )
                   .then(wrap)
                   .catch((error) => {
+                    // No answer through the relay, and nobody called it off: the relay is down.
+                    if (adapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
+                      proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
                     cancel();
                     throw error;
                   });
@@ -753,6 +766,9 @@ const httpTransport = (
           reason.includes(PROXY_AUTHORIZATION_MISSING) ? reason : `[${exchange}] ${PROXY_AUTHORIZATION_MISSING}: ${reason}`,
         );
       }
+      // The relay never prepared it, and nobody called it off: the relay is down.
+      if (adapter && !prepared && !disposed && !request.signal?.aborted)
+        proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
       if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw new HttpPreparationError('timedOut');
       throw error;
     }
@@ -888,6 +904,8 @@ export const createEngineTransport = (
               ? publicCorsHttp
               : intent === 'secondary'
                 ? readHttp
+                : intent === 'public' && DIRECT_PUBLIC_READS.has(exchange)
+                  ? directHttp
                 : intent === 'public' &&
                     readHttp &&
                     !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
