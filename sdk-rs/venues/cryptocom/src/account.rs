@@ -65,6 +65,8 @@ pub struct Request {
 
 #[derive(Default)]
 pub struct Account {
+    /// The start already failed on a refused key; reads go on in case it is restored.
+    pub(crate) start_refused: bool,
     active_read: Option<safe_cex_engine::request_context::Context>,
     pub timer: Option<TimerId>,
     pub busy: bool,
@@ -568,14 +570,16 @@ impl Cryptocom {
         self.account.order_token = None;
         cx.retried_failure("cryptocom.account:471", error);
         // 40101, past its one retry: this key will not be accepted.
-        if error.contains("40101") && !cx.store.loaded().balance {
+        if error.contains("40101")
+            && !cx.store.loaded().balance
+            && !std::mem::replace(&mut self.account.start_refused, true)
+        {
             cx.startup_failed(
                 safe_cex_engine::VenueError::new(format!(
                     "Crypto.com refused the API key: {error}"
                 ))
                 .kind(safe_cex_engine::ErrorKind::AuthInvalid),
             );
-            return;
         }
         self.schedule_reconcile(cx);
     }
