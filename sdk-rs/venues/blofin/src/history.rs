@@ -753,7 +753,7 @@ impl Blofin {
                     },
                     status: match row.state.as_ref() {
                         "live" | "partially_filled" => OrderStatus::Open,
-                        "canceled" | "cancelled" => OrderStatus::Canceled,
+                        "canceled" | "cancelled" | "partially_canceled" => OrderStatus::Canceled,
                         _ => OrderStatus::Closed,
                     },
                     price: nonzero(row.price.0),
