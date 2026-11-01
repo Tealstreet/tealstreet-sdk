@@ -584,8 +584,22 @@ async fn a_dispose_settles_a_running_chase_well_inside_its_deadline() {
                     stopped: None,
                 })
                 .unwrap();
-            let complete = algos.next("chaser:complete", |_| true).await;
-            assert!(first(&complete["data"])["stopReason"].is_string());
+            // The stop itself is told as an error; a settled one adds no "may rest".
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let text = algos.out.recv().await.expect("algo host alive");
+                    assert!(
+                        !text.contains("may rest") && !text.contains("may still"),
+                        "{text}"
+                    );
+                    let message: Value = serde_json::from_str(&text).unwrap();
+                    if message["d"]["op"] == "chaser:complete" {
+                        return;
+                    }
+                }
+            })
+            .await
+            .expect("the drain reported its chase inside its deadline");
         })
         .await;
 }
