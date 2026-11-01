@@ -1969,3 +1969,18 @@ fn a_partial_snapshot_row_the_active_list_has_stays() {
     response(&mut e, 10.0, list.id, 200, &body);
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
 }
+
+// deaws2's rows: same execSeq and transactTimeNs, PartiallyFilled first.
+#[test]
+fn a_real_partial_then_filled_snapshot_pair_loads_no_order() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let rows = r#"{"action":"New","execStatus":"TakerFill","ordStatus":"PartiallyFilled","ordType":"Market","orderID":"22415e50-29f7-4abf-9d68-f6ff1fbe46ad","orderQty":"14.4","execID":"8e23d83f-8f5b-5242-9ad5-651451c40cab","execQty":"4","execPriceRp":"1.2508","cumQty":"4","leavesQty":"10.4","execSeq":70812280657,"transactTimeNs":1793558364391933088,"symbol":"BTCUSDT","posSide":"Merged","timeInForce":"ImmediateOrCancel"},{"action":"New","execStatus":"TakerFill","ordStatus":"Filled","ordType":"Market","orderID":"22415e50-29f7-4abf-9d68-f6ff1fbe46ad","orderQty":"14.4","execID":"b2406367-02b1-5b14-8b21-6e0b6781b1d4","execQty":"10.4","execPriceRp":"1.251","cumQty":"14.4","leavesQty":"0","execSeq":70812280657,"transactTimeNs":1793558364391933088,"symbol":"BTCUSDT","posSide":"Merged","timeInForce":"ImmediateOrCancel"}"#;
+    push_orders(&mut e, s, "snapshot", 1, rows);
+    assert!(
+        e.store()
+            .order("22415e50-29f7-4abf-9d68-f6ff1fbe46ad")
+            .is_none()
+    );
+}

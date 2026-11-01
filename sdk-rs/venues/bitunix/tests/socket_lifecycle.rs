@@ -128,7 +128,7 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
                 now,
                 Event::WsMessage {
                     socket,
-                    text: r#"{"op":"pong"}"#,
+                    text: r#"{"op":"ping","pong":1793559951,"ping":1793559951}"#,
                 },
             );
             assert!(
@@ -159,7 +159,7 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
             now,
             Event::WsMessage {
                 socket,
-                text: r#"{"op":"pong"}"#,
+                text: r#"{"op":"ping","pong":1793559951,"ping":1793559951}"#,
             },
         );
         safe_cex_engine::test_support::prepared_now(&mut e)
@@ -310,14 +310,14 @@ fn private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic() {
                 .iter()
                 .any(|a| matches!(a, Action::WsClose { .. } | Action::WsConnect { .. }))
         );
-        pings += actions.iter().filter(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text == r#"{"op":"ping"}"#)).count();
+        pings += actions.iter().filter(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.starts_with(r#"{"op":"ping","ping":"#))).count();
     }
     assert_eq!(pings, 4);
     e.handle(
         opened + 60_000.0,
         Event::WsMessage {
             socket,
-            text: r#"{"op":"pong"}"#,
+            text: r#"{"op":"ping","pong":1793559951,"ping":1793559951}"#,
         },
     );
     safe_cex_engine::test_support::prepared_now(&mut e)
@@ -349,7 +349,7 @@ fn private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic() {
     // A replacement epoch resets the pong gate without resetting retry state.
     let (_, actions) = fire_watch(&mut e, watch, deadline + 60_000.0);
     assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
-    assert!(actions.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == fresh && text == r#"{"op":"ping"}"#)));
+    assert!(actions.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == fresh && text.starts_with(r#"{"op":"ping","ping":"#))));
 }
 
 #[test]

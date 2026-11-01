@@ -264,7 +264,7 @@ fn hedged_isolated() -> Harness {
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     for path in [
         "orders-pending",
@@ -292,7 +292,7 @@ fn hedged_isolated() -> Harness {
             &mut h,
             "balances",
             200,
-            r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+            r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
         );
     }
     command(&mut h, mode(81, true));

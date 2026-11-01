@@ -345,6 +345,12 @@ impl BitunixFutures {
                 45_000.0
             },
             ping_interval_ms: Some(15_000.0),
+            // The venue closes private sockets at 22-30 s; a socket that long is no fault to back off.
+            stable_ms: if matches!(feed, Feed::Private) {
+                10_000.0
+            } else {
+                Config::default().stable_ms
+            },
             ..Config::default()
         });
         supervisor.connecting(cx);
@@ -496,6 +502,11 @@ impl BitunixFutures {
         }
         Ok(())
     }
+}
+/// Bitunix ignores a bare op; only this form draws a reply.
+fn private_ping(now: f64) -> String {
+    let seconds = (now / 1_000.0) as u64;
+    format!(r#"{{"op":"ping","ping":{seconds}}}"#)
 }
 fn topic_frame(topic: &str, subscribe: bool) -> String {
     format!(
@@ -679,7 +690,7 @@ impl Venue for BitunixFutures {
             }
         }
         if matches!(s.feed, Feed::Private) {
-            cx.send(socket, r#"{"op":"ping"}"#);
+            cx.send(socket, private_ping(cx.now));
             self.login(cx, socket);
             if cx.store.loaded().positions {
                 for axis in [
@@ -707,7 +718,8 @@ impl Venue for BitunixFutures {
         match serde_json::from_str::<Message<'_>>(text) {
             Ok(m) => {
                 if matches!(s.feed, Feed::Private) {
-                    if m.op == "pong" {
+                    // Bitunix answers {"op":"ping","pong":<ts>,"ping":<ts>}.
+                    if m.op == "ping" {
                         s.pong_observed = true;
                     }
                     self.private_message(cx, socket, &m);
@@ -1148,7 +1160,7 @@ impl Venue for BitunixFutures {
                 }
                 SocketTick::Ping if s.active && s.opened => {
                     if matches!(s.feed, Feed::Private) {
-                        cx.send(s.id, r#"{"op":"ping"}"#);
+                        cx.send(s.id, private_ping(cx.now));
                     } else {
                         cx.send(s.id, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
                     }

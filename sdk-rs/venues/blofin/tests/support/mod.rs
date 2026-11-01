@@ -349,7 +349,7 @@ impl Harness {
         );
         self.reply(
             "balances",
-            r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#,
+            r#"{"code":"0","data":[{"currency":"USDT","balance":"1010","available":"1000","frozen":"10"}]}"#,
         );
         for path in [
             "orders-pending",

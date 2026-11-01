@@ -3902,7 +3902,7 @@
     },
     {
       "venue": "blofin",
-      "tapeSha256": "49e81c65dcf195ba822ba367cf2c7ccd7de4b346259b11919583895ededfccaa",
+      "tapeSha256": "94dd6921a0c3e5f3ac734348ba5a423018cb36ab7f61bdfc42521fe091a3e795",
       "tape": "sdk-rs/harness/tapes/blofin-private.jsonl",
       "diagnostics": [
         {
