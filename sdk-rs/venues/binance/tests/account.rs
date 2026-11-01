@@ -636,6 +636,25 @@ fn an_expired_listen_key_reconnects_with_a_new_one() {
 }
 
 #[test]
+fn a_reopened_private_stream_reads_positions_at_once() {
+    let mut h = ready();
+    let private = h.socket("/private/ws").unwrap();
+    h.requests.clear();
+    h.event(Event::WsClosed {
+        socket: private,
+        code: 1006,
+    });
+    h.advance(1_000.0);
+    h.respond("/fapi/v1/listenKey", 200, r#"{"listenKey":"fresh"}"#);
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsOpened { socket });
+    assert!(
+        h.has_request("/fapi/v2/positionRisk") || h.has_request("/fapi/v3/positionRisk"),
+        "the gap lost position events"
+    );
+}
+
+#[test]
 fn income_over_a_range_walks_every_page() {
     let mut h = ready();
     h.event(Event::Command(Command::Query {

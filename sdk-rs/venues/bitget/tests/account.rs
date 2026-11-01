@@ -974,3 +974,61 @@ fn an_unknown_symbol_is_refused_before_any_request() {
     let (_, result) = h.done.iter().find(|(id, _)| *id == 85).unwrap();
     assert!(result.as_ref().unwrap_err().contains("unknown market"));
 }
+
+fn preset_parent() -> serde_json::Value {
+    let mut row = ordinary_row("1");
+    row["orderType"] = serde_json::json!("limit");
+    row["presetStopSurplusPrice"] = serde_json::json!("120");
+    row["presetStopLossPrice"] = serde_json::json!("80");
+    row
+}
+fn open_legs(h: &Harness) -> usize {
+    ["1__stop_loss", "1__take_profit"]
+        .into_iter()
+        .filter(|id| {
+            h.engine
+                .store()
+                .order(id)
+                .is_some_and(|o| format!("{:?}", o.status) == "Open")
+        })
+        .count()
+}
+
+#[test]
+fn preset_legs_end_when_another_session_cancels_their_parent() {
+    let mut h = Harness::classic();
+    let message = |row: serde_json::Value| {
+        serde_json::json!({"arg":{"channel":"orders"},"data":[row]}).to_string()
+    };
+    h.private_message(&message(preset_parent()));
+    assert_eq!(open_legs(&h), 2, "{:?}", h.logs);
+    // The venue's terminal row need not repeat the presets.
+    let mut canceled = ordinary_row("1");
+    canceled["status"] = serde_json::json!("canceled");
+    canceled["orderStatus"] = serde_json::json!("canceled");
+    h.private_message(&message(canceled));
+    assert_eq!(open_legs(&h), 0, "{:?}", h.logs);
+}
+
+#[test]
+fn a_venue_read_without_the_parent_proves_its_preset_legs_gone() {
+    let mut h = Harness::classic();
+    h.private_message(
+        &serde_json::json!({"arg":{"channel":"orders"},"data":[preset_parent()]}).to_string(),
+    );
+    assert_eq!(open_legs(&h), 2, "{:?}", h.logs);
+    h.timer_after(500.0);
+    let listed = serde_json::json!({"code":"00000","data":{"entrustedList":[preset_parent()]}});
+    h.orders(&listed.to_string());
+    // Past the stream's grace on a just-opened row; another order's event starts a fresh read.
+    h.timer_after(100.0);
+    h.timer_after(1400.0);
+    h.timer_after(3000.0);
+    h.private_message(
+        &serde_json::json!({"arg":{"channel":"orders"},"data":[ordinary_row("2")]}).to_string(),
+    );
+    h.timer_after(500.0);
+    h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
+    assert_eq!(open_legs(&h), 0, "{:?}", h.logs);
+    assert!(h.engine.store().order("1").is_none());
+}

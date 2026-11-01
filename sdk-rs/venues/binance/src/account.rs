@@ -657,6 +657,11 @@ impl BinanceFutures {
         if self.account.resync_orders_on_open || self.account.has_opened {
             self.account.resync_orders_on_open = false;
             self.schedule_orders_refresh(cx);
+            // Position events in the gap were lost too; the risk poll would take up to its interval.
+            if !self.is_spot() {
+                self.account.last_risk_at = cx.now;
+                self.fetch_positions(cx);
+            }
         }
         self.account.has_opened = true;
     }

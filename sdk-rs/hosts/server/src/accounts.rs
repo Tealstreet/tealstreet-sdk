@@ -211,9 +211,9 @@ impl Account {
     fn sign_through(&self, holders: &mut Holders, id: u64, live: &Live) {
         holders.signing = Some(id);
         self.held.store(true, Ordering::Relaxed);
+        self.token.set(live.token.clone());
         if let Some(link) = &self.link {
             link.attach(id, live.outbox.clone());
-            self.token.set(live.token.clone());
         }
     }
 
@@ -706,7 +706,8 @@ impl Registry {
             public_only,
             "private accounts sign remotely"
         );
-        proxy_token.set(if public_only { None } else { token });
+        // Public-only reads on a proxied venue need the proxy too.
+        proxy_token.set(token);
         let tokens = proxy_token.provider();
         let config = self.engine_config.clone();
         let algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>> = Arc::default();
@@ -2276,6 +2277,31 @@ pub(crate) mod tests {
         placed.record(["NEW-USDT-SWAP", "M2"]);
         assert!(placed.symbols().contains(&"NEW-USDT-SWAP".to_owned()));
         assert!(!placed.symbols().contains(&"M2".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn a_public_only_account_carries_and_follows_its_socket_token() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let token = |name: &str| Some((name.to_owned(), now_ms() + 60_000));
+                let account = registry
+                    .obtain(
+                        "u",
+                        &init_frame(""),
+                        true,
+                        1,
+                        token("first"),
+                        Arc::new(|_| true),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(account.token.provider()().await.unwrap(), "first");
+                account.sign_through_socket(2, Arc::new(|_| true), token("second"));
+                assert_eq!(account.token.provider()().await.unwrap(), "second");
+                registry.dispose(&account);
+            })
+            .await;
     }
 
     #[tokio::test]

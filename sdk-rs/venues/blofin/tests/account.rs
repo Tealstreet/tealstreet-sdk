@@ -43,7 +43,7 @@ fn startup_authenticates_and_loads_account_atomically() {
     let b = h.e.store().balance();
     assert_eq!(
         (b.used, b.free, b.total, b.upnl),
-        (0.72, 1009.28, 1009.5, 0.5)
+        (0.72, 1009.78, 1010.0, 0.5)
     );
     let p = &h.e.store().positions()[0];
     assert_eq!(p.contracts, 0.004);
@@ -140,7 +140,7 @@ fn stale_balance_snapshot_cannot_overwrite_newer_account_push() {
     h.ws(r#"{"arg":{"channel":"account"},"data":{"totalEquity":"1234"}}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"10","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"10","available":"10","frozen":"0"}]}"#,
     );
     assert_eq!(h.e.store().balance().total, 1234.0);
 }
@@ -162,16 +162,17 @@ fn login_waits_for_valid_global_modes_before_initial_snapshot() {
     assert!(!h.e.store().loaded().positions);
     assert!(h.pending.is_empty());
 }
+// Live body with a position open: available has dropped by its initial margin.
 #[test]
-fn collateral_rounds_available_and_frozen_separately() {
+fn the_rest_total_is_the_wallet_balance_not_available_plus_frozen() {
     let mut h = Harness::new();
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"0.005","frozen":"0.005"}]}"#,
+        r#"{"code":"0","msg":"success","data":[{"currency":"USDT","balance":"68.312724595757791826","available":"67.897153550202236228","frozen":"0.000000000000000065","bonus":"0"}]}"#,
     );
-    assert_eq!(h.e.store().balance().total, 0.02);
+    assert_eq!(h.e.store().balance().total, 68.31);
 }
 #[test]
 fn inline_protection_fallback_only_covers_remaining_limit_quantity() {
@@ -380,8 +381,7 @@ fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
 // BAD-USDT is skipped as malformed (zero leverage cap); ETH-USD is deliberately
 // filtered (inverse); MISSING-USDT is not listed at all.
 const PARTIAL_INSTRUMENTS: &str = r#"{"code":"0","data":[{"instId":"BTC-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BTC","quoteCurrency":"USDT","state":"live","contractValue":"0.001","minSize":"0.1","lotSize":"0.1","tickSize":"0.1","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"150"},{"instId":"BAD-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BAD","quoteCurrency":"USDT","state":"live","contractValue":"1","minSize":"1","lotSize":"1","tickSize":"0.01","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"0"},{"instId":"ETH-USD","instType":"SWAP","contractType":"inverse","baseCurrency":"ETH","quoteCurrency":"USD","state":"live","contractValue":"1","minSize":"1","lotSize":"1","tickSize":"0.01","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"50"}]}"#;
-const BALANCES: &str =
-    r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#;
+const BALANCES: &str = r#"{"code":"0","data":[{"currency":"USDT","balance":"1010","available":"1000","frozen":"10"}]}"#;
 const WORKING: &str = r#"{"instId":"BTC-USDT","instType":"SWAP","orderCategory":"normal","orderId":"working","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}"#;
 
 #[test]
@@ -668,7 +668,7 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
         }
         for r in reads {
             let body = if r.url.contains("balances") {
-                r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#
+                r#"{"code":"0","data":[{"currency":"USDT","balance":"1010","available":"1000","frozen":"10"}]}"#
             } else {
                 r#"{"code":"0","data":[]}"#
             };
@@ -812,7 +812,7 @@ fn startup_rest_partial_seeds_history_but_later_rest_cannot_consume_stream_fills
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"currency":"USDT","balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     let snapshot = |qty, average| {
         format!(
@@ -1974,7 +1974,7 @@ fn poll_lists(h: &mut Harness, at: f64, positions: &str, orders: &str, tpsl: &st
     if h.pending.iter().any(|r| r.url.contains("balances")) {
         h.reply(
             "balances",
-            r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#,
+            r#"{"code":"0","data":[{"currency":"USDT","balance":"1010","available":"1000","frozen":"10"}]}"#,
         );
     }
     h.reply(

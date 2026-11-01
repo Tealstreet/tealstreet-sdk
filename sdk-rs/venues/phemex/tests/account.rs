@@ -1893,3 +1893,94 @@ fn row_report_stale_slice_does_not_rearm_but_a_current_clean_slice_does() {
     let actions = row_report_cycle(&mut e, &actions, NOW + 10_000., BTC, &bad);
     assert_eq!(row_report_skips(&actions), expected);
 }
+
+// Row shape from deaws2's soak: a market buy of 14.4, a partial event then Filled.
+fn execution(status: &str, cum: &str, leaves: &str, time: u64) -> String {
+    order(status, time)
+        .replace(r#""ordType":"Limit""#, r#""ordType":"Market""#)
+        .replace(r#""orderQty":"0.3""#, r#""orderQty":"14.4""#)
+        .replace(r#""cumQty":"0""#, &format!(r#""cumQty":"{cum}""#))
+        .replace(
+            r#""leavesQty":"0.3""#,
+            &format!(r#""leavesQty":"{leaves}""#),
+        )
+}
+
+#[test]
+fn a_snapshot_with_a_later_filled_row_does_not_load_the_partial_as_open() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let rows = format!(
+        "{},{}",
+        execution("PartiallyFilled", "4", "10.4", 1_700_000_000_000_000_001),
+        execution("Filled", "14.4", "0", 1_700_000_000_000_000_002)
+    );
+    push_orders(&mut e, s, "snapshot", 1, &rows);
+    assert!(e.store().order("one").is_none());
+}
+
+#[test]
+fn a_partial_snapshot_row_the_active_list_lacks_is_dropped() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let _: Vec<_> = e.drain_actions().collect();
+    let rows = execution("PartiallyFilled", "4", "10.4", 1_700_000_000_000_000_001);
+    push_orders(&mut e, s, "snapshot", 1, &rows);
+    assert!(e.store().order("one").is_some());
+    let a: Vec<_> = e.drain_actions().collect();
+    let list = requests(&a)
+        .into_iter()
+        .find(|r| r.url.contains("/g-orders/activeList"))
+        .expect("the row is checked");
+    response(
+        &mut e,
+        10.0,
+        list.id,
+        200,
+        r#"{"code":10002,"msg":"OM_ORDER_NOT_FOUND","data":null}"#,
+    );
+    assert!(e.store().order("one").is_none());
+    push_orders(
+        &mut e,
+        s,
+        "incremental",
+        2,
+        &execution("PartiallyFilled", "4", "10.4", 1_700_000_000_000_000_001),
+    );
+    assert!(e.store().order("one").is_none(), "cannot come back");
+}
+
+#[test]
+fn a_partial_snapshot_row_the_active_list_has_stays() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let _: Vec<_> = e.drain_actions().collect();
+    let rows = execution("PartiallyFilled", "4", "10.4", 1_700_000_000_000_000_001);
+    push_orders(&mut e, s, "snapshot", 1, &rows);
+    let a: Vec<_> = e.drain_actions().collect();
+    let list = requests(&a)
+        .into_iter()
+        .find(|r| r.url.contains("/g-orders/activeList"))
+        .expect("the row is checked");
+    let body = format!(r#"{{"code":0,"data":[{rows}]}}"#);
+    response(&mut e, 10.0, list.id, 200, &body);
+    assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+}
+
+// deaws2's rows: same execSeq and transactTimeNs, PartiallyFilled first.
+#[test]
+fn a_real_partial_then_filled_snapshot_pair_loads_no_order() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let rows = r#"{"action":"New","execStatus":"TakerFill","ordStatus":"PartiallyFilled","ordType":"Market","orderID":"22415e50-29f7-4abf-9d68-f6ff1fbe46ad","orderQty":"14.4","execID":"8e23d83f-8f5b-5242-9ad5-651451c40cab","execQty":"4","execPriceRp":"1.2508","cumQty":"4","leavesQty":"10.4","execSeq":70812280657,"transactTimeNs":1793558364391933088,"symbol":"BTCUSDT","posSide":"Merged","timeInForce":"ImmediateOrCancel"},{"action":"New","execStatus":"TakerFill","ordStatus":"Filled","ordType":"Market","orderID":"22415e50-29f7-4abf-9d68-f6ff1fbe46ad","orderQty":"14.4","execID":"b2406367-02b1-5b14-8b21-6e0b6781b1d4","execQty":"10.4","execPriceRp":"1.251","cumQty":"14.4","leavesQty":"0","execSeq":70812280657,"transactTimeNs":1793558364391933088,"symbol":"BTCUSDT","posSide":"Merged","timeInForce":"ImmediateOrCancel"}"#;
+    push_orders(&mut e, s, "snapshot", 1, rows);
+    assert!(
+        e.store()
+            .order("22415e50-29f7-4abf-9d68-f6ff1fbe46ad")
+            .is_none()
+    );
+}

@@ -3853,3 +3853,25 @@ fn inactive_position_legs_are_ignored() {
     assert!(!h.engine.store().hedged());
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 50.0);
 }
+
+#[test]
+fn a_cancel_batch_in_a_rest_outage_is_bounded_per_command() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    h.command(Command::CancelOrders {
+        command: 14,
+        ids: vec![ORDER_ID.into()],
+    });
+    let mut sent = 0;
+    for _ in 0..600 {
+        while h.has_request("/v5/order/cancel-batch") {
+            sent += 1;
+            h.respond("/v5/order/cancel-batch", 503, "Service Unavailable");
+        }
+        h.advance(1_000.0);
+    }
+    assert!((1..=2).contains(&sent), "{sent} sends");
+}
