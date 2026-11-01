@@ -738,6 +738,12 @@ fn an_unknown_placement_fences_retries_until_a_fresh_reconcile() {
 #[test]
 fn a_rejected_row_on_another_market_releases_the_fence() {
     let (mut e, _) = startup();
+    let mut markets = e.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETHUSDT".into();
+    eth.symbol = "ETHUSDT".into();
+    markets.push(eth);
+    e.store_mut().set_markets(markets);
     let place = |command: u32| {
         Command::PlaceOrders {
         command,
@@ -765,10 +771,13 @@ fn a_rejected_row_on_another_market_releases_the_fence() {
         .collect();
     assert_eq!(fresh.len(), 2);
     for request in &fresh {
+        let malformed = ORDERS
+            .replace("BTCUSDT", "ETHUSDT")
+            .replace(r#""qty":"3""#, r#""qty":"-3""#);
         let body = if request.url.contains("/tpsl/") {
             TPSL
         } else {
-            r#"{"code":0,"data":{"orderList":[{"orderId":"77","symbol":"ETHUSDT"}]}}"#
+            malformed.as_str()
         };
         answer(&mut e, 2400.0, request, body);
     }

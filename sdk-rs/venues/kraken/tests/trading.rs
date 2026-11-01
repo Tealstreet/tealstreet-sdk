@@ -1495,7 +1495,7 @@ fn beta_a_rejected_row_on_another_market_releases_the_fence() {
         &mut e,
         &fresh,
         200,
-        r#"{"result":"success","openOrders":[{"order_id":"77","symbol":"PF_SOLUSD"}]}"#,
+        r#"{"result":"success","openOrders":[{"order_id":"77","symbol":"PF_ETHUSD"}]}"#,
     );
     command(
         &mut e,
