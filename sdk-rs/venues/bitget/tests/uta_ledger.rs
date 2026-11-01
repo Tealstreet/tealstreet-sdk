@@ -183,7 +183,6 @@ fn malformed_rows_lists_and_business_failures_never_become_partial_success() {
     }
     invalid.extend([
         r#"{"code":"00000","data":{}}"#.into(),
-        r#"{"code":"00000","data":{"list":null}}"#.into(),
         r#"{"code":"00000","data":{"list":[],"cursor":{}}}"#.into(),
         r#"{"code":"429","msg":"rate limited","data":null}"#.into(),
     ]);
@@ -347,5 +346,21 @@ fn late_uta_signal_promotes_income_and_failed_later_page_discards_partial_result
             .iter()
             .filter(|(id, _)| *id == 42)
             .all(|(_, r)| r.is_err())
+    );
+}
+
+#[test]
+fn a_null_list_with_a_null_cursor_is_an_empty_last_page() {
+    let mut h = uta();
+    query(&mut h, None, None);
+    h.respond(
+        "/financial-records",
+        200,
+        r#"{"code":"00000","data":{"list":null,"cursor":null}}"#,
+    );
+    assert!(
+        h.done.iter().any(|(id, r)| *id == 42 && r.is_ok()),
+        "the end-of-pages marker failed the query: {:?}",
+        h.done
     );
 }
