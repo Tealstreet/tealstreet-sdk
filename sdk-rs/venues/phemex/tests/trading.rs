@@ -3358,17 +3358,26 @@ fn a_refused_key_ends_the_start_with_the_reason() {
         .unwrap();
     a.extend(raw(&mut e, &ticker, DAILY));
     let mut failures = 0;
+    let mut next_poll = f64::INFINITY;
     for r in requests(&a)
         .iter()
         .filter(|r| r.url.contains("accountPositions"))
     {
         let answered = raw(&mut e, r, r#"{"code":401,"msg":"401 Unauthorized"}"#);
+        next_poll = answered
+            .iter()
+            .filter_map(|x| match x {
+                Action::SetTimer { at_ms, .. } => Some(*at_ms),
+                _ => None,
+            })
+            .fold(next_poll, f64::min);
         failures += answered
             .iter()
             .filter(|x| matches!(x, Action::Notice(Notice::StartupFailed { .. })))
             .count();
     }
     assert_eq!(failures, 1, "named once, not a hang");
+    assert!(next_poll >= 300_000.0, "{next_poll}");
 }
 
 #[test]

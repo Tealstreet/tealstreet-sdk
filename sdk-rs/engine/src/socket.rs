@@ -348,7 +348,11 @@ impl Supervisor {
         self.failures = self.failures.saturating_add(1);
         let delay = cx.jittered(nominal).max(minimum_ms.max(0.0));
         self.phase = Phase::Waiting;
-        self.retry = Some(cx.set_timer(delay));
+        let timer = cx.set_timer(delay);
+        self.retry = Some(timer);
+        if minimum_ms <= 0.0 {
+            cx.note_socket_backoff(timer);
+        }
     }
 
     /// Reconnect at once without counting a failure: the venue refused this
