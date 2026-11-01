@@ -1631,3 +1631,21 @@ fn one_malformed_margin_row_keeps_its_stored_leverage_while_valid_peers_commit()
     }
     assert!(!logs.iter().any(|l| l.contains("-3")));
 }
+
+#[test]
+fn the_user_s_own_cancel_is_not_logged_as_a_rejection() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    h.now += 5_000.;
+    h.actions.clear();
+    let row = ORDER
+        .replace(
+            "\"instruction\":\"GTC\"",
+            "\"instruction\":\"GTC\",\"cancel_reason\":\"USER_CANCELED\"",
+        )
+        .replace("1700000000000", "1700000005000");
+    order_update(&mut h, socket, &row);
+    assert!(!h.actions.iter().any(|a| matches!(a,
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message.contains("order rejected"))));
+}
