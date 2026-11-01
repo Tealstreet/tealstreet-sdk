@@ -980,6 +980,11 @@ impl Venue for PhemexPerpetuals {
         response: Response<'_>,
     ) {
         self.settle_retired_trading(cx);
+        if matches!(pending, Pending::Account(_))
+            && let Some(error) = account::key_refusal(&response)
+        {
+            cx.startup_read_refused(&error);
+        }
         match pending {
             Pending::Income(read) => {
                 if read.validate_delivery(cx).is_ok() {

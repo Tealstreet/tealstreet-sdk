@@ -1729,6 +1729,8 @@ struct IoCore {
     sockets: SocketRoles,
     /// One rejection often arrives as an auth-kind failure plus `deactivate`.
     auth_failure_counted: bool,
+    /// A refused key already ended this start.
+    startup_refused: bool,
     /// Each retried read's latest Error time and digit-normalised text, by call site.
     retried_failures: HashMap<&'static str, (f64, String)>,
     #[cfg(feature = "managed-sockets")]
@@ -1900,6 +1902,7 @@ impl Default for IoCore {
             health: Health::default(),
             sockets: SocketRoles::default(),
             auth_failure_counted: false,
+            startup_refused: false,
             retried_failures: HashMap::new(),
             #[cfg(feature = "managed-sockets")]
             socket_driver: Default::default(),
@@ -2809,6 +2812,28 @@ impl<P> Cx<'_, P> {
     #[inline]
     pub fn command_error(&mut self, command: CommandId, message: impl Into<String>) {
         self.core().command_error(command, message)
+    }
+
+    /// A private read the venue refused over the key, before the account
+    /// loaded: ends the start once with that reason instead of retrying unseen.
+    pub fn startup_read_refused(&mut self, error: &VenueError) {
+        let loaded = self.store.loaded();
+        let refused = matches!(
+            error.kind,
+            Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+        );
+        if !refused
+            || loaded.balance && loaded.orders && loaded.positions
+            || std::mem::replace(&mut self.io.core.startup_refused, true)
+        {
+            return;
+        }
+        self.notice(
+            Level::Error,
+            log_code::for_startup_error(error),
+            &error.message,
+        );
+        self.startup_failed(error.clone());
     }
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
