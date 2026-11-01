@@ -495,6 +495,41 @@ async fn a_chase_keeps_its_row_until_its_completion_is_out() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_refused_key_ends_the_chase_on_its_first_placement() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        let tries = Rc::new(std::cell::Cell::new(0));
+        let seen = tries.clone();
+        *port.responder.borrow_mut() = Box::new(move |command| match command {
+            Command::PlaceOrders { .. } => {
+                seen.set(seen.get() + 1);
+                Err(VenueError::new("User or API Wallet does not exist")
+                    .kind(ErrorKind::AuthInvalid)
+                    .outcome(Outcome::NotSent))
+            }
+            _ => Ok("[]".into()),
+        });
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(30_000).await;
+        assert_eq!(tries.get(), 1);
+        assert!(
+            port.errors()
+                .iter()
+                .any(|error| error.contains("does not exist"))
+        );
+        assert_eq!(port.completes().len(), 1);
+        assert!(
+            factory
+                .book()
+                .active_chasers()
+                .iter()
+                .all(|chaser| chaser.is_stopped)
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_refused_requote_cancel_stops_the_chase_visibly_and_places_nothing_more() {
     local(async {
         let port = FakePort::new("bybit");
