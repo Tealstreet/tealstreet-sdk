@@ -22,6 +22,8 @@ use std::collections::{HashMap, VecDeque};
 const BATCH_LIMIT: usize = 10;
 /// Pacing between batches, inside the per-second order limits.
 const PLACE_BATCH_DELAY_MS: f64 = 1_200.0;
+/// Inverse mode switches are one call per coin; unpaced, 10006 hit at coin 13 of 22.
+const MODE_SWITCH_DELAY_MS: f64 = 250.0;
 const CANCEL_BATCH_DELAY_MS: f64 = 1_000.0;
 const CANCEL_BATCH_LIMIT: usize = 10;
 const AGREEMENT_CODES: [i64; 2] = [110_123, 110_125];
@@ -428,14 +430,14 @@ impl BybitLinear {
                         continue_on_error: true,
                         ..Job::default()
                     };
-                    for coin in coins {
+                    for (index, coin) in coins.into_iter().enumerate() {
                         let body = Body::new()
                             .str("category", self.paths.category)
                             .str("coin", &coin)
                             .int("mode", if hedged { 3 } else { 0 })
                             .finish();
                         job.steps.push_back(Step {
-                            delay_ms: 0.0,
+                            delay_ms: if index > 0 { MODE_SWITCH_DELAY_MS } else { 0.0 },
                             requests: vec![Planned {
                                 receipts: Vec::new(),
                                 path: "/v5/position/switch-mode",
@@ -943,7 +945,12 @@ impl BybitLinear {
         let amount = num::adjust(opts.amount, market.precision.amount);
         // tpslMode Full closes the whole position: only an explicit zero may ask for it.
         if opts.amount != 0.0 && amount == 0.0 {
-            return Err("Stop quantity rounds to zero for this market".into());
+            return Err(format!(
+                "Stop size {} is below the {} size step of {}",
+                number(opts.amount),
+                opts.symbol,
+                number(market.precision.amount)
+            ));
         }
         let partial = amount != 0.0;
         let mut body = Body::new()
@@ -1036,7 +1043,12 @@ impl BybitLinear {
             let requested = amount.unwrap_or(order.amount);
             let amount = num::adjust(requested, market.precision.amount);
             if requested != 0.0 && amount == 0.0 {
-                return Err("Stop quantity rounds to zero for this market".into());
+                return Err(format!(
+                    "Stop size {} is below the {} size step of {}",
+                    number(requested),
+                    order.symbol,
+                    number(market.precision.amount)
+                ));
             }
             if !amount.is_finite() || amount < 0.0 {
                 return Err(

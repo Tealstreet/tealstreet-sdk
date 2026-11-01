@@ -3769,3 +3769,15 @@ fn a_lagging_position_read_cannot_flatten_a_fresh_frame_and_reads_continue_after
     h.advance(POLL_MS);
     assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
 }
+
+// A real frame after a mode switch: the Inactive legs must not teach the wrong mode.
+#[test]
+fn inactive_position_legs_are_ignored() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        r#"{"topic":"position","data":[{"symbol":"BTCUSDT","positionIdx":0,"size":"0","leverage":"50","positionStatus":"Normal","seq":836543325545},{"symbol":"BTCUSDT","positionIdx":1,"size":"0","leverage":"10","positionStatus":"Inactive","seq":-1},{"symbol":"BTCUSDT","positionIdx":2,"size":"0","leverage":"10","positionStatus":"Inactive","seq":-1}]}"#,
+    );
+    assert!(!h.engine.store().hedged());
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 50.0);
+}
