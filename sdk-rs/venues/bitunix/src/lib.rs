@@ -345,6 +345,7 @@ impl BitunixFutures {
                 45_000.0
             },
             ping_interval_ms: Some(15_000.0),
+            auth_timeout_ms: matches!(feed, Feed::Private).then_some(LOGIN_ANSWER_MS),
             // The venue closes private sockets at 22-30 s; a socket that long is no fault to back off.
             stable_ms: if matches!(feed, Feed::Private) {
                 10_000.0
@@ -503,6 +504,7 @@ impl BitunixFutures {
         Ok(())
     }
 }
+const LOGIN_ANSWER_MS: f64 = 10_000.0;
 /// Bitunix ignores a bare op; only this form draws a reply.
 fn private_ping(now: f64) -> String {
     let seconds = (now / 1_000.0) as u64;
@@ -691,6 +693,7 @@ impl Venue for BitunixFutures {
         }
         if matches!(s.feed, Feed::Private) {
             cx.send(socket, private_ping(cx.now));
+            self.account.login_answered = false;
             self.login(cx, socket);
             if cx.store.loaded().positions {
                 for axis in [
@@ -1155,6 +1158,13 @@ impl Venue for BitunixFutures {
                     s.pong_observed = false;
                 }
                 SocketTick::TimedOut(_) => {
+                    if matches!(s.feed, Feed::Private) && !self.account.login_answered {
+                        cx.notice(
+                            Level::Error,
+                            code::AUTH_REJECTED,
+                            "Bitunix did not answer the private socket login",
+                        );
+                    }
                     cx.close(s.id);
                     self.retire(cx, i, true);
                 }

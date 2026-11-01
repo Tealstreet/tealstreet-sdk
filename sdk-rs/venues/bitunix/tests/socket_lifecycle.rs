@@ -153,6 +153,15 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
                 .for_each(drop);
             now += 1.0;
         }
+        if feed == "private" {
+            e.handle(
+                now,
+                Event::WsMessage {
+                    socket,
+                    text: r#"{"op":"login","data":{"result":true}}"#,
+                },
+            );
+        }
         // Real traffic after a stable epoch resets only this feed.
         now += 31_000.0;
         e.handle(
@@ -298,8 +307,23 @@ fn private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic() {
     let (mut e, sockets) = ready();
     let original = sockets.iter().find(|(f, _)| f == "private").unwrap().1;
     let mut now = 1.0;
-    let (socket, mut watch) = reopen(&mut e, original, "private", &mut now);
+    let (socket, _) = reopen(&mut e, original, "private", &mut now);
     let opened = now;
+    e.handle(
+        now,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
+    let mut watch = timers(&actions)
+        .into_iter()
+        .find(|(_, at)| *at == now + 5000.0)
+        .unwrap()
+        .0;
     let mut pings = 0;
     // More than 45 seconds without any pong must remain compatible and ping.
     for elapsed in (5000..=60_000).step_by(5000) {
@@ -342,10 +366,17 @@ fn private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic() {
     let deadline = timers(&actions)[0].1;
     let fresh = reconnect(&mut e, timer, deadline, "private", true);
     e.handle(deadline, Event::WsOpened { socket: fresh });
+    e.handle(
+        deadline,
+        Event::WsMessage {
+            socket: fresh,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
     let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()
         .collect();
-    watch = timers(&actions)[0].0;
+    watch = timers(&actions).last().unwrap().0;
     // A replacement epoch resets the pong gate without resetting retry state.
     let (_, actions) = fire_watch(&mut e, watch, deadline + 60_000.0);
     assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
