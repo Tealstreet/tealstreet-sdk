@@ -138,6 +138,7 @@ fn the_corpus_covers_every_recorded_case_with_its_production_path() {
 fn a_rejected_key_on_the_usdm_account_read_is_classified_auth_invalid() {
     let fixture = &corpus()["usdm-account-bogus-key"];
     let mut h = Harness::started(keyed(Variant::UsdM, false));
+    h.expect_startup_failure = true;
     h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
     h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
     h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
@@ -151,6 +152,7 @@ fn a_rejected_key_on_the_usdm_account_read_is_classified_auth_invalid() {
 fn a_rejected_key_on_the_portfolio_margin_balance_read_is_classified_auth_invalid() {
     let fixture = &corpus()["pm-account-bogus-key"];
     let mut h = Harness::started(keyed(Variant::UsdM, true));
+    h.expect_startup_failure = true;
     h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
     h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
     h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);

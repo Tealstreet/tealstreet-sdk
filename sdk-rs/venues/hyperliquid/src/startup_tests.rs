@@ -331,7 +331,7 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
     let req = http(&actions, "spotClearinghouseState");
     assert!(!e.store().loaded().balance);
     assert!(e.store().loaded().positions);
-    assert!(e.store().loaded().orders);
+    assert!(!e.store().loaded().orders, "only a real read loads orders");
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -739,3 +739,73 @@ fn market_found_by_a_discovery_retry_gets_a_seeded_setting() {
 
 #[path = "order_read_epoch_tests.rs"]
 mod order_read_epoch;
+
+#[test]
+fn scheduled_cancel_is_terminal() {
+    assert!(crate::account::terminal("scheduledCancel"));
+}
+
+#[test]
+fn a_failed_startup_orders_read_stays_unloaded_and_retries() {
+    let mut e = connect(false, true);
+    let mut orders = None;
+    for _ in 0..12 {
+        let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            if let Action::Http(r) = action {
+                let body = r.body.clone().unwrap_or_default();
+                if body.contains("frontendOpenOrders") {
+                    orders = Some(r);
+                    continue;
+                }
+                let answer = if body.contains("metaAndAssetCtxs") {
+                    tuple(UNIVERSE, GOOD)
+                } else if body.contains("perpDexs") {
+                    "[null]".to_owned()
+                } else if body.contains("userAbstraction") {
+                    "\"disabled\"".to_owned()
+                } else if body.contains("maxBuilderFee") {
+                    "30".to_owned()
+                } else if body.contains("userFees") {
+                    r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#.to_owned()
+                } else {
+                    continue;
+                };
+                reply(&mut e, &r, 1000.0, &answer);
+            }
+        }
+    }
+    let read = orders.expect("orders read");
+    assert!(!e.store().loaded().orders, "no read has answered yet");
+    e.handle(
+        1000.0,
+        Event::HttpResponse {
+            request: read.id,
+            response: Response {
+                status: 500,
+                headers: "",
+                body: "down",
+            },
+        },
+    );
+    assert!(!e.store().loaded().orders, "a failed read proves nothing");
+    let timer = prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 6000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("a retry timer");
+    e.handle(6000.0, Event::TimerFired { timer });
+    assert!(
+        prepared_now(&mut e)
+            .into_iter()
+            .any(|a| matches!(a, Action::Http(r) if r.body.as_deref().is_some_and(|b| b.contains("frontendOpenOrders"))))
+    );
+}

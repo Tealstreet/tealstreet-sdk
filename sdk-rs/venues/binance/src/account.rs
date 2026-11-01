@@ -756,6 +756,7 @@ impl BinanceFutures {
         request: Request,
         error: VenueError,
     ) {
+        cx.startup_read_refused(&error);
         match request {
             Request::ListenKey => {
                 let error = prefixed(error, "Binance user data stream unavailable: ");

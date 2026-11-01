@@ -1241,23 +1241,95 @@ async fn a_row_trailing_its_cancel_answer_does_not_end_the_chase_on_an_unreadabl
 #[tokio::test(start_paused = true)]
 async fn lot_venues_compare_fills_in_lots() {
     local(async {
-        let port = FakePort::new("kucoin");
-        port.store
-            .borrow_mut()
-            .markets
-            .get_mut("BTCUSDT")
-            .unwrap()
-            .contract_size = Some(0.001);
-        // 0.0004 BTC of a 1 lot order: not filled, and not the whole of it.
-        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":0.0004}]"#));
-        let _chase = start(&port, BUY_ONE);
+        for venue in ["kucoin", "mexc", "blofin", "okx", "bitrue"] {
+            let port = FakePort::new(venue);
+            port.store
+                .borrow_mut()
+                .markets
+                .get_mut("BTCUSDT")
+                .unwrap()
+                .contract_size = Some(0.001);
+            // 0.0004 BTC of a 1 lot order: not filled, and not the whole of it.
+            accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":0.0004}]"#));
+            let _chase = start(&port, BUY_ONE);
+            settle(1100).await;
+            port.cancels_find_nothing.set(true);
+            port.set_ticker(101.0, 101.5);
+            settle(1_500).await;
+            let placements = port.placements();
+            assert_eq!(placements.len(), 2, "{:?}", port.errors());
+            assert!((placements[1].1 - 0.6).abs() < 1e-9, "{placements:?}");
+        }
+    })
+    .await;
+}
+
+/// BloFin and Bitget close a filled row by status alone: its `filled` stays 0.
+#[tokio::test(start_paused = true)]
+async fn a_row_closed_by_status_alone_counts_as_filled() {
+    local(async {
+        let port = FakePort::new("blofin");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
         settle(1100).await;
-        port.cancels_find_nothing.set(true);
-        port.set_ticker(101.0, 101.5);
-        settle(1_500).await;
-        let placements = port.placements();
-        assert_eq!(placements.len(), 2, "{:?}", port.errors());
-        assert!((placements[1].1 - 0.6).abs() < 1e-9, "{placements:?}");
+        port.update_order("o1", |row| row.status = OrderStatus::Closed);
+        settle(100).await;
+        assert!(factory.book().active_chasers().is_empty());
+        assert_eq!(port.completes()[0]["filled"], 1.0);
+        assert_eq!(port.completes()[0]["stopReason"], "Completed");
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_racing_a_status_only_close_still_reports_the_fill() {
+    local(async {
+        let port = FakePort::new("bitget");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        stop(&factory, &cx);
+        port.update_order("o1", |row| row.status = OrderStatus::Closed);
+        settle(100).await;
+        assert_eq!(port.completes()[0]["filled"], 1.0);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn failing_to_place_says_what_the_venue_answered() {
+    local(async {
+        let port = FakePort::new("blofin");
+        *port.responder.borrow_mut() =
+            Box::new(|_| Err(VenueError::new("post only would cross").outcome(Outcome::Rejected)));
+        let _chase = start(&port, BUY_ONE);
+        settle(5_000).await;
+        assert!(
+            port.errors()
+                .iter()
+                .any(|e| e.contains("after 10 tries: post only would cross")),
+            "{:?}",
+            port.errors()
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cancel_answered_not_exist_does_not_say_may_still_be_open() {
+    local(async {
+        let port = FakePort::new("bitunix");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let _closed = cancels_fail_until(
+            &port,
+            VenueError::new("Order not exist").outcome(Outcome::Rejected),
+        );
+        stop(&factory, &cx);
+        settle(100).await;
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+        assert_eq!(completions(&port), 1);
     })
     .await;
 }

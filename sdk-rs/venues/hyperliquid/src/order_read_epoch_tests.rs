@@ -192,6 +192,14 @@ impl Venue for WeightedReads {
                 self.inner.check_builder(cx);
             }
             self.inner.refresh_orders(cx);
+        } else if matches!(&command, Command::SetTickerSymbols { symbols } if symbols == &["queue_builders"])
+        {
+            for _ in 0..60 {
+                self.inner.check_builder(cx);
+            }
+        } else if matches!(&command, Command::SetTickerSymbols { symbols } if symbols == &["builder_unapproved"])
+        {
+            self.inner.account.builder_approved = Some(false);
         } else {
             self.inner.on_command(cx, command);
         }
@@ -378,4 +386,91 @@ fn perps_queued_census_cannot_release_a_newer_uncertain_placement() {
 #[test]
 fn spot_queued_census_cannot_release_a_newer_uncertain_placement() {
     queued_census_retains_its_creation_epoch(true);
+}
+
+fn symbols(engine: &mut Engine<WeightedReads>, now: f64, name: &str) -> Vec<Action> {
+    engine.handle(
+        now,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec![name.to_owned()],
+        }),
+    );
+    prepared_now(engine)
+}
+
+#[test]
+fn a_fence_read_goes_ahead_of_queued_routine_reads() {
+    let mut engine = bootstrap(false);
+    let actions = symbols(&mut engine, 2000., "queue_builders");
+    let (timer, at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 60_000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("budget spent, reads queued");
+    for action in actions {
+        if let Action::Http(request) = action {
+            reply(&mut engine, &request, 2000., "30");
+        }
+    }
+    let actions = place(&mut engine, 3000., 101, false);
+    let write = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        3400.,
+        Event::HttpFailed {
+            request: write.id,
+            error: "placement reply lost",
+        },
+    );
+    prepared_now(&mut engine);
+    engine.handle(at, Event::TimerFired { timer });
+    let first = prepared_now(&mut engine)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(kind(&r)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(first, "frontendOpenOrders");
+}
+
+#[test]
+fn a_placement_re_reads_a_stale_unapproved_builder_without_waiting() {
+    let mut engine = bootstrap(false);
+    symbols(&mut engine, 2000., "builder_unapproved");
+    let builder_read = |actions: &[Action]| {
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/info") && kind(r) == "maxBuilderFee"))
+    };
+    let placed = |actions: &[Action]| {
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    };
+    let actions = place(&mut engine, 120_000., 101, false);
+    assert!(builder_read(&actions), "stale: re-read");
+    assert!(placed(&actions), "the order is not held for it");
+    for action in actions {
+        if let Action::Http(request) = action {
+            if request.url.ends_with("/info") {
+                reply(&mut engine, &request, 120_001., "30");
+            } else {
+                reply(
+                    &mut engine,
+                    &request,
+                    120_001.,
+                    r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":5}}]}}}"#,
+                );
+            }
+        }
+    }
+    assert_eq!(engine.venue().inner.account.builder_approved, Some(true));
 }

@@ -125,6 +125,29 @@ struct OrdersPage<'a> {
     #[serde(borrow)]
     rows: Vec<&'a RawValue>,
 }
+/// A read refused over the key: HTTP or body 401 or 403.
+pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::VenueError> {
+    #[derive(Deserialize)]
+    struct Evidence<'a> {
+        #[serde(default)]
+        code: Option<i64>,
+        #[serde(borrow, default)]
+        msg: std::borrow::Cow<'a, str>,
+    }
+    let evidence = serde_json::from_str::<Evidence<'_>>(response.body).ok();
+    let code = evidence.as_ref().and_then(|e| e.code);
+    if !matches!(response.status, 401 | 403) && !matches!(code, Some(401 | 403)) {
+        return None;
+    }
+    let detail = evidence
+        .as_ref()
+        .map_or(String::new(), |e| e.msg.to_string());
+    Some(
+        safe_cex_engine::VenueError::new(format!("Phemex refused the API key: {detail}"))
+            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+            .venue_message(detail),
+    )
+}
 #[derive(Default)]
 pub struct State {
     started: bool,
@@ -810,6 +833,46 @@ impl PhemexPerpetuals {
             request.positions.push(position);
         }
     }
+    /// A symbol-scoped position read: the row's context, or at least its mode
+    /// when a never-traded row carries no usable leverage.
+    pub(crate) fn install_symbol_mode(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        body: &str,
+    ) {
+        #[derive(Deserialize)]
+        struct Positions<'a> {
+            #[serde(borrow)]
+            data: PositionsData<'a>,
+        }
+        #[derive(Deserialize)]
+        struct PositionsData<'a> {
+            #[serde(borrow)]
+            positions: Vec<PositionRow<'a>>,
+        }
+        let Ok(parsed) = serde_json::from_str::<Positions<'_>>(body) else {
+            return;
+        };
+        let Some(row) = parsed
+            .data
+            .positions
+            .iter()
+            .find(|row| row.symbol.eq_ignore_ascii_case(symbol))
+        else {
+            return;
+        };
+        if let Some((context, _)) = row.map(cx.store, self.account.context(symbol)) {
+            self.account.install_context(cx, symbol, context, false);
+        } else if let Some(mode) = match row.pos_mode.as_ref() {
+            "Hedged" => Some(PositionMode::Hedged),
+            "OneWay" => Some(PositionMode::Oneway),
+            _ => None,
+        } {
+            self.account
+                .apply_settings(symbol, None, None, None, Some(mode));
+        }
+    }
     pub(crate) fn account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1466,6 +1529,7 @@ impl PhemexPerpetuals {
                 self.account.uncertainty_overflow = false;
             }
             self.account.order_revision += 1;
+            self.wake_replacements(cx);
             if snapshot {
                 if !safe_snapshot {
                     cx.store.set_orders(cx.store.orders().to_vec());

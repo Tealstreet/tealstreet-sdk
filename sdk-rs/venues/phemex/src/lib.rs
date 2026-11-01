@@ -59,6 +59,7 @@ pub enum Pending {
     Orders(read_owners::Background<account::OrdersRead>),
     Repair(trading::RepairRequest),
     PlannedTrade(trading::PlannedRequest),
+    SymbolMode(Box<trading::SymbolModeRead>),
     History(history::Request),
     Income(income::Request),
     PublicTrades(Box<public_trades::Read>),
@@ -387,6 +388,7 @@ impl PhemexPerpetuals {
             Pending::PlannedTrade(read) => {
                 self.planned_trade_failed(cx, read, safe_cex_engine::VenueError::new(error))
             }
+            Pending::SymbolMode(read) => self.symbol_mode_failed(cx, *read, error),
             Pending::History(r) => self.history_failed(cx, r, error),
             Pending::PublicTrades(read) => {
                 self.public_trades_failed(cx, *read, safe_cex_engine::VenueError::new(error));
@@ -785,6 +787,13 @@ impl Venue for PhemexPerpetuals {
         {
             return;
         }
+        if let Pending::SymbolMode(read) = &p
+            && cx
+                .validate_preflight_delivery(&read.preflight, &read.context)
+                .is_err()
+        {
+            return;
+        }
         if let Pending::Repair(request) = p {
             self.repair_response(cx, request, r);
             return;
@@ -897,6 +906,7 @@ impl Venue for PhemexPerpetuals {
             Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
             Pending::Repair(_) => unreachable!("handled before native envelope"),
             Pending::PlannedTrade(_) => unreachable!("handled before native envelope"),
+            Pending::SymbolMode(read) => self.symbol_mode_response(cx, *read, r.body),
             Pending::History(p) => self.history_response(cx, p, r),
             Pending::PublicTrades(read) => self.public_trades_response(cx, *read, r),
             Pending::Income(p) => self.income_response(cx, p, r),
@@ -970,6 +980,11 @@ impl Venue for PhemexPerpetuals {
         response: Response<'_>,
     ) {
         self.settle_retired_trading(cx);
+        if matches!(pending, Pending::Account(_))
+            && let Some(error) = account::key_refusal(&response)
+        {
+            cx.startup_read_refused(&error);
+        }
         match pending {
             Pending::Income(read) => {
                 if read.validate_delivery(cx).is_ok() {
@@ -1062,6 +1077,21 @@ impl Venue for PhemexPerpetuals {
     ) {
         self.retire_history(owner);
         self.retire_income(owner);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_condition_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::ConditionOwner,
+        _: safe_cex_engine::VenueError,
+    ) {
+        self.replacement_wait_expired(cx, owner);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_trading(cx);

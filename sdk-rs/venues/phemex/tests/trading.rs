@@ -1100,13 +1100,15 @@ fn accepted_init_cancel_never_replaces_or_tombstones_before_private_finality() {
         json!({"code":0,"data":{"orderID":"old","ordStatus":"Init","execStatus":"Init","bizError":0,"cumQtyRq":"0"}}),
     );
     assert!(writes(&a).is_empty());
-    assert!(done(&a).is_err());
     assert_eq!(
         e.store().order("old").unwrap().status,
         OrderStatus::Canceling
     );
     ws_orders(&mut e, socket, vec![live_row("old")]);
     assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+    let a = expire_replacement_wait(&mut e, &a);
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).unwrap_err().contains("replacement was not sent"));
 }
 
 #[test]
@@ -2210,8 +2212,12 @@ fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_re
         },
     );
     assert!(writes(&a).is_empty());
+    let read = symbol_read(&a, "ETHUSDT");
+    let a = respond(&mut e, &read, no_positions());
+    assert!(writes(&a).is_empty());
     assert!(done(&a).is_err());
-    let mut order = opts("no-unknown-margin");
+    // A placement needs only the mode, which the ACK proved.
+    let mut order = opts("known-mode");
     order.symbol = "ETHUSDT".into();
     let a = command(
         &mut e,
@@ -2220,7 +2226,12 @@ fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_re
             orders: vec![order],
         },
     );
-    assert!(writes(&a).is_empty());
+    assert_eq!(p(&writes(&a)[0], "posSide"), Some("Long".into()));
+    let a = respond(
+        &mut e,
+        &writes(&a)[0],
+        json!({"code":11001,"msg":"TE_NO_ENOUGH_AVAILABLE_BALANCE","data":null}),
+    );
     assert!(done(&a).is_err());
 
     let a = command(
@@ -2985,4 +2996,333 @@ fn a_fenced_second_group_does_not_block_the_first_late_cancel() {
         e.store().order("short").map(|o| o.status),
         Some(OrderStatus::Open)
     );
+}
+
+fn symbol_read(actions: &[Action], symbol: &str) -> HttpRequest {
+    requests(actions)
+        .into_iter()
+        .find(|r| r.url.contains("accountPositions") && r.url.contains(&format!("symbol={symbol}")))
+        .expect("symbol-scoped position read")
+}
+
+fn no_positions() -> Value {
+    json!({"code":0,"data":{"account":{"currency":"USDT","accountBalanceRv":"1000","totalUsedBalanceRv":"0"},"positions":[]}})
+}
+
+fn expire_replacement_wait(
+    e: &mut Engine<PhemexPerpetuals>,
+    ack_actions: &[Action],
+) -> Vec<Action> {
+    let timer = ack_actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1001. + 10_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("replacement wait timer");
+    e.handle(11_001., Event::TimerFired { timer });
+    e.drain_actions().collect()
+}
+
+// deaws2's live bodies, with ids and symbol set to this file's fixture.
+fn pending_cancel_ack(id: &str) -> Value {
+    json!({"bizError":0,"orderID":id,"clOrdID":"Tealstreet_4a86ff282c174761bf4c","symbol":"BTCUSDT","side":"Buy","actionTimeNs":1793543575978142420_u64,"transactTimeNs":1793543575978142420_u64,"orderType":"Limit","priceRp":"1.0649","orderQtyRq":"1","displayQtyRq":"0","timeInForce":"GoodTillCancel","closedPnlRv":"0","closedSizeRq":"0","cumQtyRq":"0","cumValueRv":"0","leavesQtyRq":"1","leavesValueRv":"1.0649","stopDirection":"UNSPECIFIED","stopPxRp":"0","trigger":"UNSPECIFIED","pegOffsetValueRp":"0","pegOffsetProportionRr":"0","execStatus":"PendingCancel","pegPriceType":"UNSPECIFIED","ordStatus":"New","execInst":"None","takeProfitRp":"0","stopLossRp":"0","slPxRp":"0","tpPxRp":"0"})
+}
+fn stop_cancel_ack(id: &str) -> Value {
+    json!({"bizError":0,"orderID":id,"clOrdID":"Tealstreet_4a86ff282c174761bf4c","symbol":"BTCUSDT","side":"Sell","actionTimeNs":1793543575978142420_u64,"transactTimeNs":1793543575978142420_u64,"orderType":"Stop","priceRp":"0","orderQtyRq":"1","displayQtyRq":"0","timeInForce":"ImmediateOrCancel","closedPnlRv":"0","closedSizeRq":"0","cumQtyRq":"0","cumValueRv":"0","leavesQtyRq":"0","leavesValueRv":"0","stopDirection":"Falling","stopPxRp":"1.0647","trigger":"ByMarkPrice","pegOffsetValueRp":"0","pegOffsetProportionRr":"0","execStatus":"Canceled","pegPriceType":"UNSPECIFIED","ordStatus":"Deactivated","execInst":"CloseOnTrigger","takeProfitRp":"0","stopLossRp":"0","slPxRp":"0","tpPxRp":"0"})
+}
+const GONE_ROW: &str = r#"{"bizError":10002,"orderID":null,"clOrdID":null,"symbol":null,"side":null,"actionTimeNs":0,"transactTimeNs":0,"orderType":null,"priceRp":null,"orderQtyRq":null,"execStatus":null,"ordStatus":null,"execInst":null}"#;
+
+fn canceled_row(id: &str) -> Value {
+    json!({"orderID":id,"symbol":"BTCUSDT","side":"Buy","posSide":"Merged","ordType":"Limit","ordStatus":"Canceled","orderQty":"0.1","cumQty":"0","leavesQty":"0","priceRp":"69000"})
+}
+
+fn amend_old(e: &mut Engine<PhemexPerpetuals>) -> HttpRequest {
+    let a = command(
+        e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        },
+    );
+    writes(&a)[0].clone()
+}
+
+#[test]
+fn a_pending_cancel_ack_is_accepted_and_the_replacement_waits_for_the_socket() {
+    let (mut e, socket) = authenticated("OneWay");
+    let mut old = order("old");
+    old.time_in_force = Some(TimeInForce::GoodTillCancel);
+    e.store_mut().upsert_order(old);
+    let cancel = amend_old(&mut e);
+    let a = respond(
+        &mut e,
+        &cancel,
+        json!({"code":0,"msg":"","data":pending_cancel_ack("old")}),
+    );
+    assert!(
+        writes(&a).is_empty(),
+        "no replacement before the socket says Canceled"
+    );
+    assert!(
+        !a.iter()
+            .any(|x| matches!(x, Action::Notice(Notice::CommandFailed { .. })))
+    );
+    let text = json!({"type":"incremental","timestamp":2_000_000_000_u64,"orders_p":[canceled_row("old")]}).to_string();
+    e.handle(
+        1002.,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    let replacement = &writes(&a)[0];
+    assert_eq!(p(replacement, "priceRp"), Some("67900".into()));
+    assert_eq!(p(replacement, "orderQtyRq"), Some("0.1".into()));
+}
+
+#[test]
+fn a_socket_frame_that_beats_the_ack_does_not_make_it_unknown() {
+    let (mut e, socket) = authenticated("OneWay");
+    let mut old = order("old");
+    old.time_in_force = Some(TimeInForce::GoodTillCancel);
+    e.store_mut().upsert_order(old);
+    let cancel = amend_old(&mut e);
+    ws_orders(&mut e, socket, vec![canceled_row("old")]);
+    let a = respond(
+        &mut e,
+        &cancel,
+        json!({"code":0,"msg":"","data":pending_cancel_ack("old")}),
+    );
+    assert_eq!(p(&writes(&a)[0], "priceRp"), Some("67900".into()));
+}
+
+#[test]
+fn a_moved_partial_stop_keeps_its_quantity_after_a_deactivated_ack() {
+    let (mut e, socket) = authenticated("OneWay");
+    // A stop row: leavesQtyRq 0 with orderQtyRq 1, as the socket sends it.
+    ws_orders(
+        &mut e,
+        socket,
+        vec![
+            json!({"orderID":"old","symbol":"BTCUSDT","side":"Sell","posSide":"Merged","orderType":"Stop","ordStatus":"Untriggered","orderQtyRq":"0.5","cumQtyRq":"0","leavesQtyRq":"0","priceRp":"0","stopPxRp":"68000","stopDirection":"Falling","trigger":"ByMarkPrice","execInst":"CloseOnTrigger"}),
+        ],
+    );
+    let cancel = amend_old(&mut e);
+    let a = respond(
+        &mut e,
+        &cancel,
+        json!({"code":0,"msg":"","data":stop_cancel_ack("old")}),
+    );
+    let replacement = &writes(&a)[0];
+    assert_eq!(
+        p(replacement, "orderQtyRq"),
+        Some("0.5".into()),
+        "a partial stop must not become a full close"
+    );
+    assert_eq!(p(replacement, "stopPxRp"), Some("67900".into()));
+}
+
+#[test]
+fn a_cancel_of_a_gone_order_settles_and_never_replaces() {
+    let (mut e, _) = authenticated("OneWay");
+    e.store_mut().upsert_order(order("old"));
+    let a = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 1,
+            ids: vec!["old".into()],
+        },
+    );
+    let a = raw(
+        &mut e,
+        &writes(&a)[0],
+        r#"{"code":10002,"msg":"OM_ORDER_NOT_FOUND","data":null}"#,
+    );
+    assert!(done(&a).is_ok());
+    assert!(e.store().order("old").is_none());
+
+    let (mut e, _) = authenticated("OneWay");
+    e.store_mut().upsert_order(order("old"));
+    let cancel = amend_old(&mut e);
+    let a = raw(
+        &mut e,
+        &cancel,
+        r#"{"code":10002,"msg":"OM_ORDER_NOT_FOUND","data":null}"#,
+    );
+    assert!(writes(&a).is_empty(), "it may have filled");
+    assert!(done(&a).unwrap_err().contains("replacement was not sent"));
+}
+
+#[test]
+fn a_batch_gone_row_with_null_identity_resolves_by_position() {
+    let (mut e, _) = authenticated("OneWay");
+    for id in ["one", "two"] {
+        e.store_mut().upsert_order(order(id));
+    }
+    let a = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 1,
+            ids: vec!["one".into(), "two".into()],
+        },
+    );
+    let r = &writes(&a)[0];
+    let order_ids = p(r, "orderID").unwrap();
+    let ids: Vec<_> = order_ids.split(',').collect();
+    let body = format!(
+        r#"{{"code":0,"msg":"","data":[{},{GONE_ROW}]}}"#,
+        pending_cancel_ack(ids[0])
+    );
+    let a = raw(&mut e, r, &body);
+    assert!(done(&a).is_ok());
+    assert_eq!(
+        e.store().order(ids[0]).unwrap().status,
+        OrderStatus::Canceling
+    );
+    assert!(e.store().order(ids[1]).is_none());
+}
+
+#[test]
+fn the_venue_trimming_an_oversize_reduce_only_order_is_accepted() {
+    for (kind, price, tif) in [
+        (OrderType::Limit, Some(1.4405), "GoodTillCancel"),
+        (OrderType::Market, None, "ImmediateOrCancel"),
+    ] {
+        let mut e = engine();
+        let mut o = opts("");
+        o.kind = kind;
+        o.price = price;
+        o.amount = 0.5;
+        o.reduce_only = Some(true);
+        o.time_in_force = None;
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![o],
+            },
+        );
+        let r = &writes(&a)[0];
+        let body = json!({"code":0,"msg":"","data":{"bizError":0,"orderID":"trimmed","clOrdID":p(r,"clOrdID"),"symbol":"BTCUSDT","side":"Buy","orderType":p(r,"ordType"),"priceRp":"1.4405","orderQtyRq":"0.1","leavesQtyRq":"0.1","timeInForce":tif,"ordStatus":"New","execStatus":"New"}});
+        let a = respond(&mut e, r, body);
+        assert!(done(&a).is_ok(), "{a:?}");
+    }
+}
+
+#[test]
+fn listed_refusals_leave_no_uncertain_lock() {
+    for code in [
+        11011, 11041, 11043, 11044, 11048, 11085, 11150, 20004, 39999,
+    ] {
+        let mut e = engine();
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts("first")],
+            },
+        );
+        let body = format!(r#"{{"code":{code},"msg":"TE_REDUCE_ONLY_ABORT","data":null}}"#);
+        let a = raw(&mut e, &writes(&a)[0], &body);
+        assert_ne!(
+            failure(&a).outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{code}"
+        );
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 2,
+                orders: vec![opts("second")],
+            },
+        );
+        assert_eq!(writes(&a).len(), 1, "{code}: no lock after a refusal");
+    }
+}
+
+#[test]
+fn a_never_touched_symbol_reads_its_mode_then_trades() {
+    let mut e = engine();
+    let mut markets = e.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETHUSDT".into();
+    eth.symbol = "ETHUSDT".into();
+    eth.base = "ETH".into();
+    markets.push(eth);
+    e.store_mut().set_markets(markets);
+    let mut o = opts("eth");
+    o.symbol = "ETHUSDT".into();
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![o],
+        },
+    );
+    assert!(writes(&a).is_empty());
+    let read = symbol_read(&a, "ETHUSDT");
+    let a = respond(
+        &mut e,
+        &read,
+        json!({"code":0,"data":{"account":{"currency":"USDT","accountBalanceRv":"1000","totalUsedBalanceRv":"0"},"positions":[{"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Long","size":"0","leverageRr":"-10","crossMargin":true}]}}),
+    );
+    assert_eq!(p(&writes(&a)[0], "posSide"), Some("Long".into()));
+}
+
+#[test]
+fn a_failed_mode_read_says_so_and_sends_nothing() {
+    let mut e = engine();
+    let mut markets = e.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETHUSDT".into();
+    eth.symbol = "ETHUSDT".into();
+    eth.base = "ETH".into();
+    markets.push(eth);
+    e.store_mut().set_markets(markets);
+    let mut o = opts("eth");
+    o.symbol = "ETHUSDT".into();
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![o],
+        },
+    );
+    let read = symbol_read(&a, "ETHUSDT");
+    let a = raw(&mut e, &read, r#"{"code":39999,"msg":"bad","data":null}"#);
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).unwrap_err().contains("position mode of ETHUSDT"));
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut e = support::prepared_engine(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    });
+    e.start(0.);
+    let a: Vec<_> = e.drain_actions().collect();
+    let mut a = raw(&mut e, &requests(&a)[0], PRODUCTS);
+    let ticker = requests(&a)
+        .into_iter()
+        .find(|r| r.url.contains("24hr/all"))
+        .unwrap();
+    a.extend(raw(&mut e, &ticker, DAILY));
+    let mut failures = 0;
+    for r in requests(&a)
+        .iter()
+        .filter(|r| r.url.contains("accountPositions"))
+    {
+        let answered = raw(&mut e, r, r#"{"code":401,"msg":"401 Unauthorized"}"#);
+        failures += answered
+            .iter()
+            .filter(|x| matches!(x, Action::Notice(Notice::StartupFailed { .. })))
+            .count();
+    }
+    assert_eq!(failures, 1, "named once, not a hang");
 }

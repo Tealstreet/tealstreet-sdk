@@ -63,6 +63,9 @@ pub struct Harness {
     pub done: Vec<(u32, Result<String, String>)>,
     /// Structured detail of failed commands.
     pub failures: Vec<(u32, safe_cex_engine::VenueError)>,
+    /// Startup failures a test expects; any other panics.
+    pub expect_startup_failure: bool,
+    pub startup_failures: Vec<safe_cex_engine::VenueError>,
     pub logs: Vec<String>,
     /// Logs at `Level::Error`, also present in `logs`.
     pub errors: Vec<String>,
@@ -137,6 +140,8 @@ impl Harness {
             timers: Vec::new(),
             done: Vec::new(),
             failures: Vec::new(),
+            expect_startup_failure: false,
+            startup_failures: Vec::new(),
             logs: Vec::new(),
             errors: Vec::new(),
             command_errors: Vec::new(),
@@ -284,7 +289,11 @@ impl Harness {
                     self.failures.push((command, error));
                 }
                 Action::Notice(Notice::StartupFailed { error }) => {
-                    panic!("unexpected Binance startup failure: {error}")
+                    assert!(
+                        self.expect_startup_failure,
+                        "unexpected Binance startup failure: {error}"
+                    );
+                    self.startup_failures.push(error);
                 }
                 Action::Notice(Notice::Event(event)) => {
                     if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE {

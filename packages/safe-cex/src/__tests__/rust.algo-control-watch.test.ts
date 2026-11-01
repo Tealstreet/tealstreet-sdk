@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { OrderSide } from '../../types';
-import { TwapStatus } from '../../webworker/twap/TwapStatus';
-import { AlgoControlWatch } from './algoControlWatch';
+import { OrderSide } from '../types';
+import { TwapStatus } from '../webworker/twap/TwapStatus';
+import { AlgoControlWatch } from '../exchanges/rust/algoControlWatch';
 
 const chaser = (id: string, isStopped = false) => ({ id, symbol: 'BTCUSDT', side: OrderSide.Buy, isStopped }) as never;
 const twap = (id: string, status: TwapStatus) => ({ id, status }) as never;
