@@ -695,7 +695,11 @@ impl Okx {
                     m.precision.price,
                     false,
                 )?));
-                p.close_fraction = Some("1");
+                // OKX refuses closeFraction here with 50014 "sz can not be empty".
+                if size <= 0.0 {
+                    return Err("OKX trailing stop needs a size".into());
+                }
+                p.sz = Some(num::format(size));
             }
             _ => {}
         }
@@ -1278,8 +1282,16 @@ impl Okx {
             let error = VenueError::new(message).outcome(Outcome::Unknown);
             return self.end(cx, request.command, Some(&request), error, true);
         }
+        // An all-refused envelope (code 1) continues only when every row says its order
+        // is already gone: the sibling cancels still have live orders to reach.
+        let only_gone_rows = acks
+            .iter()
+            .filter(|a| !matches!(a.s_code, "" | "0"))
+            .all(|a| matches!(a.s_code, "51400" | "51401" | "51402"));
         if envelope.code != "0"
-            && !(continue_cancel_errors && envelope.code == "2" && !errors.is_empty())
+            && !(continue_cancel_errors
+                && (envelope.code == "2" || (envelope.code == "1" && only_gone_rows))
+                && !errors.is_empty())
         {
             let error = if errors.is_empty() {
                 let error = format!("OKX {}: {}", envelope.code, envelope.msg);
