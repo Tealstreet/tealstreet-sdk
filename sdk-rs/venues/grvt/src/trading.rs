@@ -1418,10 +1418,17 @@ impl Grvt {
             && request.plan.created.is_empty()
         {
             let unknown = outcome == Outcome::Unknown;
-            format!(
-                "{}: {message}",
+            let gone = if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                safe_cex_engine::error::stop_gone_text(
+                    &order.symbol,
+                    order.side,
+                    order.kind,
+                    unknown,
+                )
+            } else {
                 safe_cex_engine::error::order_gone_text(&order.symbol, unknown)
-            )
+            };
+            format!("{gone}: {message}")
         } else {
             message
         };

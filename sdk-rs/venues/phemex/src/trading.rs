@@ -63,15 +63,21 @@ struct Job {
     live: Option<Request>,
     /// Set while a replacement waits for its accepted cancel to end.
     cancel_wait: Option<safe_cex_engine::request_context::ConditionWait>,
-    /// An amend's symbol, once its cancel is proven and its replacement is issued.
-    replacing: Option<String>,
+    /// The amended order, once its cancel is proven and its replacement is issued.
+    replacing: Option<(String, OrderSide, OrderType)>,
 }
 impl Job {
     fn gone_note(&self, unknown: bool) -> Option<String> {
         self.replacing
-            .as_deref()
+            .as_ref()
             .filter(|_| self.ids.is_empty())
-            .map(|symbol| safe_cex_engine::error::order_gone_text(symbol, unknown))
+            .map(|(symbol, side, kind)| {
+                if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                    safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown)
+                } else {
+                    safe_cex_engine::error::order_gone_text(symbol, unknown)
+                }
+            })
     }
 }
 /// One symbol-scoped position read ahead of a command that needs its mode.
@@ -231,6 +237,9 @@ struct Step {
 struct Guard {
     id: String,
     symbol: String,
+    /// The amended order's own, which a virtual leg does not share with its parent.
+    side: OrderSide,
+    kind: OrderType,
     amount: f64,
     filled: f64,
 }
@@ -1073,6 +1082,8 @@ impl PhemexPerpetuals {
             step.replacement = Some(Guard {
                 id: base.clone(),
                 symbol: parent.symbol.clone(),
+                side: child.side,
+                kind: child.kind,
                 amount: parent.amount,
                 filled: parent.filled,
             });
@@ -1707,7 +1718,7 @@ impl PhemexPerpetuals {
             return;
         }
         if let Some(guard) = &step.replacement {
-            job.replacing = Some(guard.symbol.clone());
+            job.replacing = Some((guard.symbol.clone(), guard.side, guard.kind));
         }
         let Some(slot) = job.slot.take() else {
             return;

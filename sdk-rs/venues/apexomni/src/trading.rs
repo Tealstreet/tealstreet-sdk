@@ -67,8 +67,8 @@ struct Job {
     preflight: Preflight,
     plan: Option<Plan>,
     amending: bool,
-    /// An amend's symbol: its replacement's refusal leaves the order gone.
-    replaces: Option<String>,
+    /// The amended order: its replacement's refusal leaves it gone.
+    replaces: Option<Replaced>,
 }
 pub struct Request {
     command: CommandId,
@@ -86,8 +86,18 @@ struct LateTrade {
     cancel_ids: Vec<String>,
     clients: Vec<String>,
 }
+/// The order an amend asked for: a virtual leg's own kind and closing side, not its parent's.
+type Replaced = (String, OrderSide, OrderType);
+fn gone_text((symbol, side, kind): &Replaced, unknown: bool) -> String {
+    if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+        safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown)
+    } else {
+        safe_cex_engine::error::order_gone_text(symbol, unknown)
+    }
+}
 struct Amendment {
     id: String,
+    replaced: Replaced,
     order: PlaceOrderOpts,
     total_amount: f64,
     baseline_filled: f64,
@@ -846,7 +856,9 @@ impl ApexOmni {
                         .store
                         .order(parent_id(&id))
                         .expect("replacement validated parent");
-                    job.replaces = Some(parent.symbol.clone());
+                    let amended = cx.store.order(&id).expect("replacement validated target");
+                    let replaced = (amended.symbol.clone(), amended.side, amended.kind);
+                    job.replaces = Some(replaced.clone());
                     prepared.push_back(Step::Write(
                         sign::Request::form(
                             "/v3/delete-order",
@@ -859,6 +871,7 @@ impl ApexOmni {
                     prepared.extend(replacement);
                     self.trading.amendment = Some(Amendment {
                         id: parent.id.clone(),
+                        replaced,
                         order,
                         total_amount: parent.amount,
                         baseline_filled: parent.filled,
@@ -1103,8 +1116,8 @@ impl ApexOmni {
             .active
             .as_ref()
             .filter(|job| matches!(delivery.accepted, Accepted::Place) && job.ids.is_empty())
-            .and_then(|job| job.replaces.as_deref())
-            .map(|symbol| safe_cex_engine::error::order_gone_text(symbol, unknown));
+            .and_then(|job| job.replaces.as_ref())
+            .map(|replaced| gone_text(replaced, unknown));
         match gone {
             Some(gone) => cx.fail_plan_noted(&delivery.plan, error, &gone),
             None => cx.fail_plan(&delivery.plan, error),
@@ -1371,10 +1384,7 @@ impl ApexOmni {
                         }
                         Err(error) => {
                             // The cancel landed: a replacement that cannot be built is refused.
-                            let gone = safe_cex_engine::error::order_gone_text(
-                                &amendment.order.symbol,
-                                false,
-                            );
+                            let gone = gone_text(&amendment.replaced, false);
                             let _ = cx.fail_plan_noted(&delivery.plan, error, &gone);
                             return;
                         }

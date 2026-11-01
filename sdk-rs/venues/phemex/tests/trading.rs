@@ -3291,6 +3291,35 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
 }
 
 #[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    let (mut e, _) = authenticated("OneWay");
+    let mut stop = order("old");
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.reduce_only = true;
+    stop.trigger_type = Some(StopTriggerType::MarkPrice);
+    stop.time_in_force = Some(TimeInForce::GoodTillCancel);
+    e.store_mut().upsert_order(stop);
+    let cancel = amend_old(&mut e);
+    let a = respond(
+        &mut e,
+        &cancel,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+    );
+    let replacement = &writes(&a)[0];
+    let a = raw(
+        &mut e,
+        replacement,
+        r#"{"code":11001,"msg":"TE_NO_ENOUGH_AVAILABLE_BALANCE","data":null}"#,
+    );
+    let error = done(&a).unwrap_err();
+    assert!(
+        error.contains("Your BTCUSDT long position has no stop"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_batch_gone_row_with_null_identity_resolves_by_position() {
     let (mut e, _) = authenticated("OneWay");
     for id in ["one", "two"] {
