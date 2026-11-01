@@ -26,8 +26,8 @@ const CALL_MS: u32 = 20_000;
 const DETECTION_MS: u32 = 10_000;
 const DETECTION: &str = "Bitget account detection did not complete";
 
-/// Bitget's native write codes: 40009 earns the one fresh resend, 40010, 40725
-/// and 45001 prove nothing, the read side's key refusals keep their auth kind
+/// Bitget's native write codes: 40009 earns the one fresh resend; 40010, 40725,
+/// 45001 and the system, upgrade, busy and timeout codes prove nothing; the read side's key refusals keep their auth kind
 /// (pinned by account::write_and_read_key_refusals_agree), and any other code is
 /// a pre-execution refusal.
 pub(crate) const CODES: CodeTable = CodeTable {
@@ -66,6 +66,26 @@ pub(crate) const CODES: CodeTable = CodeTable {
         Row {
             key: Key::Int(40010),
             verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40015),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40200),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40604),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(50008),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
             only: None,
         },
         Row {
@@ -3395,6 +3415,25 @@ mod code_table_tests {
                 assert_eq!(row.key, Key::Int(40009), "{row:?}");
             }
             assert!(!matches!(row.verdict, Verdict::Satisfied(_)), "{row:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+
+    #[test]
+    fn a_system_busy_or_timeout_answer_is_not_a_refusal() {
+        for code in [40015, 40200, 40604, 50008] {
+            let answer = Native {
+                code: NativeCode::Int(code),
+                message: "",
+            };
+            assert!(
+                matches!(CODES.verdict(&answer, Intent::Place), Verdict::Unknown(_)),
+                "{code}"
+            );
         }
     }
 }
