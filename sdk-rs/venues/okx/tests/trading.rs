@@ -2122,16 +2122,14 @@ fn trade_entry_refusals_keep_text_kind_and_not_sent() {
 #[test]
 fn trailing_stop_sends_its_size_and_refuses_none() {
     let mut e = trading_engine();
-    let sized =
-        r#"{"symbol":"BTCUSDT","type":"trailing_stop_loss","side":"sell","amount":1,"price":100}"#;
+    let sized = r#"{"symbol":"BTCUSDT","type":"trailing_stop_market","side":"sell","amount":1,"price":100}"#;
     let out = place(&mut e, vec![order(sized)]);
     let request = http(&out);
     assert!(body(request).contains("\"sz\""));
     assert!(!body(request).contains("closeFraction"));
 
     let mut e = trading_engine();
-    let unsized_stop =
-        r#"{"symbol":"BTCUSDT","type":"trailing_stop_loss","side":"sell","amount":0,"price":100}"#;
+    let unsized_stop = r#"{"symbol":"BTCUSDT","type":"trailing_stop_market","side":"sell","amount":0,"price":100}"#;
     let out = place(&mut e, vec![order(unsized_stop)]);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("needs a size"))));

@@ -1121,10 +1121,7 @@ impl Okx {
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         };
         // A refused envelope with no failing rows is one whole native failure.
-        if !matches!(envelope.code, "0" | "2")
-            && acks
-                .iter()
-                .all(|a| matches!(a.s_code, "" | "0") && a.s_msg.is_empty())
+        if !matches!(envelope.code, "0" | "2") && acks.iter().all(|a| matches!(a.s_code, "" | "0"))
         {
             let message = format!("OKX {}: {}", envelope.code, envelope.msg);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
@@ -1156,7 +1153,7 @@ impl Okx {
             };
             self.account.revision += 1;
             for (ack, identity) in acks.iter().zip(identities) {
-                if (!ack.s_code.is_empty() && ack.s_code != "0") || !ack.s_msg.is_empty() {
+                if !ack.s_code.is_empty() && ack.s_code != "0" {
                     continue;
                 }
                 let id = if ack.algo_id.is_empty() {
@@ -1204,7 +1201,7 @@ impl Okx {
             && acks.len() == step.expected
             && acks.iter().all(|ack| {
                 if ack.s_code.is_empty() || ack.s_code == "0" {
-                    (!ack.ord_id.is_empty() || !ack.algo_id.is_empty()) && ack.s_msg.is_empty()
+                    !ack.ord_id.is_empty() || !ack.algo_id.is_empty()
                 } else {
                     // 51xxx are explicit trading-rule rejections; transport/server
                     // timeout codes do not prove that the venue rejected a write.
@@ -1216,14 +1213,12 @@ impl Okx {
         }
         let failed = acks
             .iter()
-            .filter(|a| (!a.s_code.is_empty() && a.s_code != "0") || !a.s_msg.is_empty());
+            .filter(|a| !a.s_code.is_empty() && a.s_code != "0");
         let first_code = failed.clone().next().map(|a| a.s_code);
         // Only 51xxx proves a refused leg, and an accepted leg means something happened.
         let definitive = failed.clone().all(|a| a.s_code.starts_with("51"))
             && !acks.iter().any(|a| {
-                matches!(a.s_code, "" | "0")
-                    && a.s_msg.is_empty()
-                    && (!a.ord_id.is_empty() || !a.algo_id.is_empty())
+                matches!(a.s_code, "" | "0") && (!a.ord_id.is_empty() || !a.algo_id.is_empty())
             });
         let errors: Vec<_> = failed
             .map(|a| format!("{} (code {})", a.s_msg, a.s_code))
@@ -1238,7 +1233,7 @@ impl Okx {
             let items: Vec<_> = acks
                 .iter()
                 .map(|ack| {
-                    if matches!(ack.s_code, "" | "0") && ack.s_msg.is_empty() {
+                    if matches!(ack.s_code, "" | "0") {
                         BatchItem::Accepted(if ack.algo_id.is_empty() {
                             ack.ord_id
                         } else {
