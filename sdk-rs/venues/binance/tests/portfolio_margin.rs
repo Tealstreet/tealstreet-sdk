@@ -46,6 +46,7 @@ fn ready_with(open_orders: &str) -> Harness {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
     }
+    h.answer_open_position_read();
     h
 }
 

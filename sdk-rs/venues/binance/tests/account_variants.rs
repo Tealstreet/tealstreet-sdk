@@ -289,6 +289,7 @@ fn inverse_with(extra_catalogue_rows: &str, position_risk: &str) -> Harness {
     h.respond("/dapi/v1/openOrders",200,r#"[{"symbol":"BTCUSD_PERP","orderId":12,"clientOrderId":"native","price":"9000","origQty":"5","executedQty":"2","type":"LIMIT","side":"BUY"}]"#);
     let private = h.socket("/ws/coin-key").unwrap();
     h.event(Event::WsOpened { socket: private });
+    h.answer_open_position_read();
     h
 }
 #[test]

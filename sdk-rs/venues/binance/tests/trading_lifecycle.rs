@@ -53,6 +53,7 @@ fn ready(variant: Variant) -> Harness {
         .socket(if spot { "ws-api/v3" } else { "/ws/coin-key" })
         .unwrap();
     h.event(Event::WsOpened { socket });
+    h.answer_open_position_read();
     if spot {
         h.message(
             "ws-api/v3",
