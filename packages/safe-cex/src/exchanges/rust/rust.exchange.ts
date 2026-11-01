@@ -1698,6 +1698,7 @@ export class RustEngineExchange extends BaseExchange {
           this.startupFailure = error;
           for (const wake of this.startupWaiters) wake();
           this.emitAndLogError(error);
+          markErrorReported(error);
           this.dispose();
         },
         sharedFeed.policy,
@@ -1975,6 +1976,7 @@ export class RustEngineExchange extends BaseExchange {
     if (sharedFailure) {
       const failure = sharedFailure;
       this.dispatchFrameEvent(() => this.emitAndLogError(failure));
+      markErrorReported(failure);
       this.dispose();
     } else {
       // Forward the catalog before a subscription can synchronously produce data.

@@ -31,6 +31,8 @@ const CANCEL_RETRY_MAX_MS: u64 = 10_000;
 /// for minutes; past this a cancel is tried again and fills count as unread.
 /// Longer than a hosted sign's 15 s, so an offline signer is reported as that.
 pub const ANSWER_BOUND_MS: u64 = 16_000;
+/// A chase with no ticker change this long says so: it cannot re-quote without one.
+const NO_MARKET_DATA_MS: u64 = 30_000;
 /// Ended chases remembered for `progress`, more than can wait on a slice timeout at once.
 const ENDED_KEPT: usize = 256;
 /// How an order whose cancel was retried ended.
@@ -252,11 +254,12 @@ impl ChaserBook {
         chase.mark_complete(KEPT_ORDER_STOP_REASON);
         chase.take_current();
         chase.watch_scope.dispose();
-        self.detach(&chase);
         if chase.claim_complete_emission() {
             let book = self.clone();
-            self.cx
-                .spawn(async move { book.emit_complete(&chase).await });
+            self.cx.spawn(async move {
+                book.emit_complete(&chase).await;
+                book.detach(&chase);
+            });
         }
     }
 
@@ -626,6 +629,7 @@ impl ChaserBook {
         chase: &Rc<Chase>,
         mut changes: tokio::sync::mpsc::UnboundedReceiver<Change>,
     ) {
+        self.spawn_market_data_watch(chase);
         let book = self.clone();
         let chase = chase.clone();
         let fill_tracked = self.fill_tracked();
@@ -638,6 +642,9 @@ impl ChaserBook {
                 if chase.is_stopped() {
                     chase.wake.notify_one();
                     return;
+                }
+                if change.tickers {
+                    chase.tickers_seen.set(chase.tickers_seen.get() + 1);
                 }
                 if change.resync {
                     chase.needs_reconcile.set(true);
@@ -688,6 +695,34 @@ impl ChaserBook {
                     return;
                 }
                 chase.mark_dirty(Dirty { orders: change.orders, positions: change.positions, tickers: change.tickers });
+            }
+        });
+    }
+
+    /// A resting chase re-quotes only on a ticker change, so a dead feed would leave
+    /// it sitting in silence. Told once per silence.
+    fn spawn_market_data_watch(self: &Rc<Self>, chase: &Rc<Chase>) {
+        let book = self.clone();
+        let watched = chase.clone();
+        chase.watch_scope.clone().spawn(async move {
+            let mut told = false;
+            loop {
+                let seen = watched.tickers_seen.get();
+                book.cx.sleep_ms(NO_MARKET_DATA_MS).await;
+                if watched.is_stopped() {
+                    return;
+                }
+                if watched.tickers_seen.get() != seen {
+                    told = false;
+                } else if !told {
+                    told = true;
+                    book.warn(&format!(
+                        "Chaser for {} has had no market data update for {} s and re-quotes only when one arrives. \
+                         If the market is not just quiet, check your connection or stop the chase.",
+                        watched.options.symbol,
+                        NO_MARKET_DATA_MS / 1000
+                    ));
+                }
             }
         });
     }
@@ -1318,9 +1353,11 @@ impl ChaserBook {
     }
 
     async fn finish(&self, chase: Rc<Chase>) {
-        self.detach(&chase);
+        // The row stays until the completion is out: the page reads a row gone
+        // alone as a chase that died, and the final fills read can take seconds.
         if chase.claim_complete_emission() {
             self.emit_complete(&chase).await;
+            self.detach(&chase);
         }
     }
 
