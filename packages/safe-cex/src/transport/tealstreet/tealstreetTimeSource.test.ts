@@ -15,13 +15,16 @@ describe('tealstreetTimeSource', () => {
     expect(getTealstreetTimeEndpoint()).toMatch(/\/api\/time$/);
   });
 
-  it('uses the configured public endpoint instead of the Vercel route', async () => {
+  // Vercel still carries NEXT_PUBLIC_TIME_API_ORIGIN=https://time.tealstreet.io; the
+  // web must not follow it, or that AWS-hosted service can never be retired.
+  it('ignores a bare origin and stays on the same-origin edge route', async () => {
     process.env.NEXT_PUBLIC_TIME_API_ORIGIN = 'https://time.tealstreet.io///';
     vi.mocked(axios.get).mockResolvedValue({ data: { time: new Date().toISOString(), unixMs: Date.now() } });
 
     await tealstreetTimeSource();
 
-    expect(axios.get).toHaveBeenCalledWith('https://time.tealstreet.io/v1/time', { timeout: 5000 });
+    expect(vi.mocked(axios.get).mock.calls[0][0]).toMatch(/\/api\/time$/);
+    expect(vi.mocked(axios.get).mock.calls[0][0]).not.toContain('time.tealstreet.io');
   });
 
   // The native app has no usable same-origin, so it names the edge route outright.
