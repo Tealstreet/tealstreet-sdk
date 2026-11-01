@@ -257,3 +257,14 @@ fn accepted_credentials_still_commit_good_balance_peers_and_report_bad_rows() {
     assert_eq!(e.store().balance().total, 42.0);
     assert!(a.iter().any(|a| matches!(a, Action::Notice(Notice::Event(e)) if e.code == safe_cex_engine::log::code::ROW_SKIPPED)));
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let (mut e, a) = started(false);
+    let r = http(&a, "/balance");
+    let answered = reply(&mut e, &r, 200, r#"{"code":"40012","msg":"opaque"}"#);
+    assert!(answered.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}

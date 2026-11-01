@@ -1239,3 +1239,32 @@ fn snapshot_token_invalid_order_ack_does_not_invalidate_valid_identity_does() {
         );
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_after_its_one_retry() {
+    let mut h = Harness::new();
+    let mut failures = 0;
+    for _ in 0..2 {
+        let r = h.http("get-positions");
+        h.actions.clear();
+        h.event(Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 401,
+                headers: "",
+                body: r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist."}"#,
+            },
+        });
+        failures += h
+            .actions
+            .iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                )
+            })
+            .count();
+    }
+    assert_eq!(failures, 1);
+}

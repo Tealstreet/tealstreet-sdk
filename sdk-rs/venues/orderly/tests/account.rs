@@ -1563,3 +1563,33 @@ fn ws_admission_sparse_terminal_retains_its_separate_execution_stamp_gate() {
     assert_eq!(order.price, 50000.0);
     assert!(fill_amounts(&mut e).is_empty());
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    use safe_cex_engine::Notice;
+    let mut e = engine(options());
+    e.start(1000.0);
+    let mut output = vec![];
+    for _ in 0..4 {
+        let r = requests(&mut e).pop().unwrap();
+        if r.url.ends_with("/v1/public/info") {
+            reply(&mut e, &r, 200, MARKETS);
+        } else if r.url.ends_with("/v1/public/futures") {
+            reply(&mut e, &r, 200, TICKERS);
+        } else {
+            reply(
+                &mut e,
+                &r,
+                401,
+                r#"{"success":false,"message":"validation failed"}"#,
+            );
+            output = actions(&mut e);
+            break;
+        }
+    }
+    assert!(
+        output
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::StartupFailed { .. })))
+    );
+}

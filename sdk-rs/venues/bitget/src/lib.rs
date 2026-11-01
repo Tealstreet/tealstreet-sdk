@@ -1045,9 +1045,16 @@ impl Venue for BitgetFutures {
                 ..
             }
         ) && wire::null_list(response.body);
-        if refused || empty_account_list {
+        let empty_history =
+            matches!(&pending, Pending::History(_)) && wire::null_history(response.body);
+        if refused || empty_account_list || empty_history {
             self.on_response(cx, pending, response);
         } else {
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("Bitget response has no expected list: {}", response.body),
+            );
             self.on_request_failed(
                 cx,
                 pending,

@@ -697,11 +697,13 @@ impl Account {
         for queued in self.queue.drain(..) {
             self.failed.push((queued.pending, auth_rejected_error()));
         }
-        cx.notice(
-            Level::Error,
-            code::AUTH_REJECTED,
-            "Paradex rejected the account credentials",
-        );
+        if !cx.startup_read_refused(&auth_rejected_error()) {
+            cx.notice(
+                Level::Error,
+                code::AUTH_REJECTED,
+                "Paradex rejected the account credentials",
+            );
+        }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.socket.is_none() && !self.supervisor.is_waiting() {
