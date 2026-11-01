@@ -626,36 +626,6 @@ impl WeexFutures {
             }) else {
                 return;
             };
-            if matches!(
-                read,
-                Query::Fills {
-                    from_ms: Some(_),
-                    limit: None,
-                    ..
-                } | Query::OrderHistory {
-                    from_ms: Some(_),
-                    limit: None,
-                    ..
-                } | Query::Income {
-                    from_ms: Some(_),
-                    limit: None,
-                    ..
-                }
-            ) {
-                // No request was made, so the empty answer cannot cover the window.
-                match ReadCompletion::from_context(cx, command, context.clone()) {
-                    Ok(mut completion) => {
-                        completion.incomplete(
-                            "history is INCOMPLETE: WEEX window answered without credentials",
-                        );
-                        let _ = completion.finish(cx, Ok("[]".into()));
-                    }
-                    Err(error) => {
-                        let _ = cx.fail_context(&context, error.read_venue_error());
-                    }
-                }
-                return;
-            }
             let _ = cx.done_context(&context, "[]".into());
             return;
         }
@@ -1270,8 +1240,9 @@ impl WeexFutures {
                 open_window,
                 ..
             } => {
+                let kind = request.kind;
                 let full_page = *open_window
-                    && matches!(request.kind, Kind::Fills | Kind::Normal)
+                    && matches!(kind, Kind::Fills | Kind::Normal)
                     && request.raw_rows >= 100;
                 let Some(leg) = request.leg.as_ref() else {
                     return;

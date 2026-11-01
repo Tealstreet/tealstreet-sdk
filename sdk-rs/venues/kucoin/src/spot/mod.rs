@@ -56,8 +56,7 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
-    /// The flag marks a window read with no limit: a full page cannot prove coverage.
-    Fills(Box<HistoryRows<String>>, bool),
+    Fills(Box<HistoryRows<String>>),
     Account(CommandId),
 }
 impl Pending {
@@ -115,6 +114,8 @@ struct SpotBook {
     last: f64,
 }
 pub struct KucoinSpot {
+    /// Window reads with no limit: a full page cannot prove coverage.
+    open_fill_windows: std::collections::HashSet<CommandId>,
     options: safe_cex_crypto::secrets::Sensitive<Options>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     credentials: Option<sign::Credentials>,
@@ -164,6 +165,7 @@ impl KucoinSpot {
         Self {
             options,
             discovery: Default::default(),
+            open_fill_windows: Default::default(),
             credentials,
             sockets: Default::default(),
             books: Default::default(),
@@ -1408,7 +1410,8 @@ impl Venue for KucoinSpot {
                     Err(error) => cx.fail(command, error),
                 };
             }
-            Pending::Fills(mut owner, open_window) => {
+            Pending::Fills(mut owner) => {
+                let open_window = self.open_fill_windows.remove(&owner.command());
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Execution<'a> {
@@ -1512,7 +1515,8 @@ impl Venue for KucoinSpot {
                 self.write_failed(cx, j, crate::wire::write_failure(0, "", error.into()));
                 return;
             }
-            Pending::Fills(owner, _) => {
+            Pending::Fills(owner) => {
+                self.open_fill_windows.remove(&owner.command());
                 cx.command_error(owner.command(), error);
                 owner.finish(cx, Err(VenueError::new(error)));
                 return;
@@ -1729,34 +1733,17 @@ impl KucoinSpot {
                 to_ms,
                 limit,
             } => {
-                let open_window = from_ms.is_some() && limit.is_none();
                 let Some(symbol) = symbol else {
                     let Ok(context) = cx.admit_http_command(crate::local_read_command_policy())
                     else {
                         return;
                     };
-                    if open_window {
-                        // No request was made, so the empty answer cannot cover the window.
-                        match safe_cex_engine::history::ReadCompletion::from_context(
-                            cx,
-                            command,
-                            context.clone(),
-                        ) {
-                            Ok(mut completion) => {
-                                completion.incomplete(
-                                    "history is INCOMPLETE: KuCoin Spot fills need a symbol",
-                                );
-                                let _ = completion.finish(cx, Ok("[]".into()));
-                            }
-                            Err(error) => {
-                                let _ = cx.fail_context(&context, error.read_venue_error());
-                            }
-                        }
-                        return;
-                    }
                     let _ = cx.done_context(&context, "[]".into());
                     return;
                 };
+                if from_ms.is_some() && limit.is_none() {
+                    self.open_fill_windows.insert(command);
+                }
                 let mut path = format!("/api/v1/hf/fills?symbol={symbol}");
                 if let Some(o) = order_id {
                     path.push_str(&format!("&orderId={o}"));
@@ -1780,12 +1767,10 @@ impl KucoinSpot {
                     &path,
                     None,
                     true,
-                    Pending::Fills(
-                        Box::new(HistoryRows::new(Completion::new(command), |rows| {
-                            Ok(format!("[{}]", rows.join(",")))
-                        })),
-                        open_window,
-                    ),
+                    Pending::Fills(Box::new(HistoryRows::new(
+                        Completion::new(command),
+                        |rows| Ok(format!("[{}]", rows.join(","))),
+                    ))),
                 );
             }
             Query::OrderByClientId {

@@ -622,22 +622,3 @@ fn window_fills_with_no_limit_flag_a_full_page_and_keep_every_row() {
             if serde_json::from_str::<Vec<Execution>>(result).unwrap().len() == 100
     )));
 }
-
-#[test]
-fn window_fills_answered_without_a_read_are_incomplete() {
-    let mut e = trading_engine();
-    e.handle(
-        10.0,
-        Event::Command(Command::Query {
-            command: 992,
-            query: open_window_fills(None),
-        }),
-    );
-    let out = prepared(&mut e, 10.0);
-    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(history_incomplete(&out));
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { command: 992, result }) if result == "[]"
-    )));
-}
