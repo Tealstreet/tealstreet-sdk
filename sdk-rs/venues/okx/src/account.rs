@@ -1807,7 +1807,7 @@ impl Okx {
                         cx.notice(
                             Level::Error,
                             code::ORDER_REJECTED,
-                            &format!(
+                            format!(
                                 "OKX {} order {native_id} on {} failed (state {}, code {})",
                                 row.ord_type, row.inst_id, row.state, row.fail_code
                             ),
