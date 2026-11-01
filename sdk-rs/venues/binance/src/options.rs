@@ -494,11 +494,18 @@ impl BinanceFutures {
             self.options_failed(cx, request, "Expired option read");
             return;
         }
+        let refused = crate::account::venue_error(&response)
+            .filter(|(code, _)| *code == -2015)
+            .map(|(_, message)| message.to_owned());
         let result = crate::account::venue_error(&response).map_or_else(
             || self.publish_options(cx, &mut request, response.body),
             |(_, message)| Err(error(message)),
         );
         self.option_state.busy.remove(&request.kind);
+        // A refused key ends the start; polling it would never load the account.
+        if let Some(message) = refused {
+            cx.startup_read_refused(&VenueError::new(message).kind(ErrorKind::AuthInvalid));
+        }
         let _ = cx.finish_http_context(&request.context);
         match result {
             Err(error) => cx.notice(Level::Warn, "REQUEST_FAILED", error.message),

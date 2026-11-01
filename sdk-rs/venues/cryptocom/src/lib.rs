@@ -582,6 +582,13 @@ impl Venue for Cryptocom {
                     );
                     cx.close(socket);
                     self.on_close(cx, socket, 1008);
+                    cx.startup_read_refused(
+                        &safe_cex_engine::VenueError::new(format!(
+                            "Crypto.com private login rejected: {}",
+                            envelope.message
+                        ))
+                        .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                    );
                 } else if !self.sockets[channel].authenticated {
                     self.sockets[channel].authenticated = true;
                     self.sockets[channel].supervisor.authenticated(cx);

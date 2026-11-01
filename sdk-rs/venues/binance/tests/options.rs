@@ -694,3 +694,15 @@ fn advertised_option_commands_cross_the_compiled_json_ingress() {
         }
     }
 }
+
+#[test]
+fn a_refused_key_fails_the_start_instead_of_polling() {
+    let mut h = started(true);
+    h.expect_startup_failure = true;
+    h.respond(
+        "/eapi/v1/marginAccount",
+        401,
+        r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}"#,
+    );
+    assert_eq!(h.startup_failures.len(), 1, "{:?}", h.startup_failures);
+}
