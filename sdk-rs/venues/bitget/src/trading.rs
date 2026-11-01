@@ -1337,6 +1337,7 @@ impl BitgetFutures {
                     };
                     // Isolated hedge names both sides' leverage (25200 otherwise).
                     if margin == MarginType::Isolated && cx.store.hedged() {
+                        p.leverage = None;
                         let setting = cx.store.setting(symbol);
                         let scalar = setting.map_or(1.0, |s| s.leverage);
                         p.long_leverage = Some(num::format(
@@ -1820,6 +1821,10 @@ impl BitgetFutures {
             qty: (size > 0.0).then(|| num::format(size)),
             reduce_only: Some("yes"),
             client_oid: Some(mint(cx)?),
+            // Without it an isolated position is not found: 31008.
+            margin_mode: (cx.store.setting(&o.symbol).and_then(|s| s.margin_type)
+                == Some(MarginType::Isolated))
+            .then(|| margin_text(MarginType::Isolated)),
             ..Payload::default()
         };
         if o.kind == OrderType::TakeProfit {

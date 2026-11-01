@@ -1856,7 +1856,7 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
             limit: None,
         },
     });
-    for page in 0..20 {
+    for page in 0..200 {
         let rows: Vec<String> = (page * 50..page * 50 + 50)
             .map(|i| format!(r#"{{"orderId":"o{i}","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderStatus":"Cancelled","qty":"1","cumExecQty":"0","price":"100","createdTime":"{}"}}"#, 1672000000000u64 + i as u64))
             .collect();
@@ -1872,7 +1872,7 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
     let rows =
         serde_json::from_str::<Vec<serde_json::Value>>(h.result(35).unwrap().as_ref().unwrap())
             .unwrap();
-    assert_eq!(rows.len(), 1000);
+    assert_eq!(rows.len(), 10_000);
     assert!(h.logs.iter().any(|m| m.contains("page limit")));
     let (index, event) = h
         .notices
@@ -1938,10 +1938,10 @@ fn windowed_fill_request_sequence_is_pinned() {
     assert_eq!(
         sent,
         [
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=50",
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=50&cursor=c1",
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670790400001&endTime=1671395200000&limit=50",
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670704000000&endTime=1670790400000&limit=50",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=100",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=100&cursor=c1",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670790400001&endTime=1671395200000&limit=100",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670704000000&endTime=1670790400000&limit=100",
         ]
     );
 }
@@ -2815,7 +2815,7 @@ fn owned_history_cursor_and_bounded_budget_refusals_stay_strict_after_rows() {
                 command: 804,
                 query,
             });
-            let budget = if kind == 1 { 20 } else { 10 };
+            let budget = if kind == 1 { 200 } else { 100 };
             let cursors: Vec<String> = match mode {
                 0 => vec!["same".into(), "same".into()],
                 1 => vec!["a".into(), "b".into(), "a".into()],
@@ -2905,7 +2905,7 @@ fn owned_history_window_recovery_preserves_first_incomplete_cause() {
             limit: None,
         },
     });
-    for page in 0..20 {
+    for page in 0..200 {
         h.respond(
             "/v5/order/history",
             200,
@@ -2924,7 +2924,7 @@ fn owned_history_window_recovery_preserves_first_incomplete_cause() {
         serde_json::from_str::<Vec<serde_json::Value>>(result)
             .unwrap()
             .len(),
-        20
+        200
     );
     let markers = owned_history_markers(&h, 807);
     assert_eq!(markers.len(), 1);
@@ -3933,4 +3933,33 @@ fn preset_legs_end_when_a_terminal_row_does_not_repeat_them() {
             .status,
         OrderStatus::Canceled
     );
+}
+
+#[test]
+fn a_fills_start_with_no_end_walks_to_now_and_no_limit_reads_every_page() {
+    let mut h = ready();
+    let from = h.now - 15.0 * 86_400_000.0;
+    h.command(Command::Query {
+        command: 36,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(from),
+            to_ms: None,
+            limit: None,
+        },
+    });
+    let mut windows = 0;
+    while h.has_request("/v5/execution/list") {
+        let request = h.take("/v5/execution/list");
+        assert!(request.url.contains("endTime="), "{}", request.url);
+        windows += 1;
+        h.reply(
+            request.id,
+            200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"","list":[]}}"#,
+        );
+    }
+    assert_eq!(windows, 3);
+    assert!(h.result(36).unwrap().is_ok());
 }
