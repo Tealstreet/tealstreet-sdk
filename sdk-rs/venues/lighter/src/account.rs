@@ -116,6 +116,10 @@ pub struct Account {
     pub identity: Option<safe_cex_engine::signing::Identity>,
     setting_epochs: HashMap<String, u64>,
     pub records: HashMap<String, Order>,
+    lookup_failed: bool,
+    lookup_retry: Option<TimerId>,
+    /// Client order index to native order index, as rows report them.
+    pub(crate) client_orders: HashMap<String, String>,
     connection: Connection,
     started: bool,
     revision: u64,
@@ -202,8 +206,13 @@ impl Status<'_> {
 }
 #[derive(Deserialize)]
 struct AccountWire<'a> {
-    #[serde(default, borrow, alias = "account_index", alias = "accountIndex")]
+    // Real rows carry both names; an alias would refuse them as a duplicate field.
+    #[serde(default, borrow)]
     index: Option<Atom<'a>>,
+    #[serde(default, borrow)]
+    account_index: Option<Atom<'a>>,
+    #[serde(default, borrow, rename = "accountIndex")]
+    account_index_camel: Option<Atom<'a>>,
     #[serde(default, borrow)]
     positions: Option<&'a RawValue>,
     #[serde(default)]
@@ -214,6 +223,14 @@ struct AccountWire<'a> {
     cross_asset_value: Option<Num>,
     #[serde(default, alias = "availableBalance")]
     available_balance: Option<Num>,
+}
+impl<'a> AccountWire<'a> {
+    fn identity(&self) -> Option<&Atom<'a>> {
+        self.index
+            .as_ref()
+            .or(self.account_index.as_ref())
+            .or(self.account_index_camel.as_ref())
+    }
 }
 #[derive(Default, Deserialize)]
 struct PositionWire<'a> {
@@ -257,8 +274,10 @@ struct PositionWire<'a> {
     allocated_margin: Option<Num>,
     #[serde(default, alias = "maintenanceMarginFraction")]
     maintenance_margin_fraction: Option<Num>,
-    #[serde(default, alias = "updatedAt", alias = "timestamp")]
+    #[serde(default, alias = "updatedAt")]
     updated_at: Option<Num>,
+    #[serde(default)]
+    timestamp: Option<Num>,
     #[serde(default)]
     transaction_time: Option<Num>,
 }
@@ -273,10 +292,11 @@ pub(crate) struct OrderWire<'a> {
         borrow,
         alias = "marketId",
         alias = "marketIndex",
-        alias = "MarketIndex"
+        alias = "MarketIndex",
+        alias = "market_index"
     )]
     market_id: Atom<'a>,
-    #[serde(default, borrow, alias = "marketSymbol")]
+    #[serde(default, borrow, alias = "marketSymbol", alias = "market_symbol")]
     symbol: Cow<'a, str>,
     #[serde(
         default,
@@ -350,8 +370,10 @@ pub(crate) struct OrderWire<'a> {
     remaining_quote_amount: Option<Num>,
     #[serde(default, alias = "quoteAmount")]
     quote_amount: Option<Num>,
-    #[serde(default, alias = "updatedAt", alias = "timestamp")]
+    #[serde(default, alias = "updatedAt")]
     updated_at: Option<Num>,
+    #[serde(default)]
+    timestamp: Option<Num>,
     #[serde(default)]
     transaction_time: Option<Num>,
 }
@@ -732,7 +754,12 @@ impl Lighter {
                 address: false,
             });
         }
-        if key_index && let Some(key) = self.options.api_key_index.as_deref().and_then(index) {
+        // The key index names a stranger's account when a selector is present.
+        let selected = index(app).is_some() || !addresses.is_empty();
+        if key_index
+            && !selected
+            && let Some(key) = self.options.api_key_index.as_deref().and_then(index)
+        {
             candidates.push_back(Lookup {
                 by: "index",
                 value: key.to_string(),
@@ -747,6 +774,15 @@ impl Lighter {
             });
         }
         candidates
+    }
+    /// A placement answers with its client index; rows name the native one.
+    pub(crate) fn note_client_order(&mut self, client: &str, native: &str) {
+        if self.account.client_orders.len() >= 1_000 {
+            self.account.client_orders.clear();
+        }
+        self.account
+            .client_orders
+            .insert(client.to_owned(), native.to_owned());
     }
     fn next_lookup(&mut self, cx: &mut Cx<'_, Pending>, mut candidates: VecDeque<Lookup>) {
         if let Some(candidate) = candidates.pop_front() {
@@ -766,6 +802,13 @@ impl Lighter {
                 },
                 None,
             );
+        } else if std::mem::take(&mut self.account.lookup_failed) {
+            // No lookup was answered, so nothing says the account is absent.
+            cx.retried_failure(
+                "lighter.account:lookup",
+                "Lighter account lookup failed; retrying",
+            );
+            self.account.lookup_retry = Some(cx.set_timer(5_000.0));
         } else {
             cx.notice(
                 Level::Error,
@@ -1133,6 +1176,11 @@ impl Lighter {
         );
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.lookup_retry == Some(timer) {
+            self.account.lookup_retry = None;
+            self.next_lookup(cx, self.lookup_candidates());
+            return true;
+        }
         match self.account.connection.supervisor.on_timer(cx, timer) {
             Tick::Unhandled => {}
             Tick::Reconnect => {
@@ -1378,7 +1426,7 @@ impl Lighter {
         cx: &mut Cx<'_, Pending>,
         wire: AccountWire<'_>,
     ) -> Result<Snapshot, String> {
-        if let Some(identity) = wire.index.as_ref()
+        if let Some(identity) = wire.identity()
             && index(&identity.0) != self.account.account_index
         {
             return Err("Lighter account snapshot belongs to another account".into());
@@ -1540,9 +1588,10 @@ impl Lighter {
         match self.map_order_row(cx, raw, market_hint, true) {
             Ok(order) => {
                 // A snapshot row proves a grouped leg by its own client order index.
-                if order.is_some()
+                if let Some(order) = &order
                     && let Some(client_index) = client_order_index(raw)
                 {
+                    self.note_client_order(&client_index, &order.id);
                     self.trade_group_observed(cx, &client_index);
                 }
                 return orders.extend(order);
@@ -1810,8 +1859,11 @@ impl Lighter {
             close: None,
             client_order_id: None,
             time_in_force: tif,
-            last_update: event_time(wire.updated_at.as_ref(), wire.transaction_time.as_ref())
-                .unwrap_or(cx.now),
+            last_update: event_time(
+                wire.updated_at.as_ref().or(wire.timestamp.as_ref()),
+                wire.transaction_time.as_ref(),
+            )
+            .unwrap_or(cx.now),
             trigger_type: None,
             take_profit: None,
             stop_loss: None,
@@ -1852,7 +1904,7 @@ impl Lighter {
                 if found.is_none()
                     && let Ok(wire) = serde_json::from_str::<AccountWire<'_>>(item)
                 {
-                    *found = wire.index.and_then(|n| index(&n.0));
+                    *found = wire.identity().and_then(|n| index(&n.0));
                 }
             }
             Request::Snapshot { account, valid, .. } => {
@@ -2125,12 +2177,12 @@ impl Lighter {
                     serde_json::from_str::<Legacy<'_>>(response.body)
                         .ok()
                         .and_then(|l| l.data)
-                        .and_then(|a| a.index)
-                        .and_then(|a| index(&a.0))
+                        .and_then(|a| a.identity().and_then(|n| index(&n.0)))
                 };
                 if ok && let Some(index) = found {
                     self.identity_ready(cx, index);
                 } else {
+                    self.account.lookup_failed |= !ok && !(400..500).contains(&response.status);
                     self.next_lookup(cx, candidates);
                 }
             }
@@ -2277,7 +2329,10 @@ impl Lighter {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
             Request::Backfill { run, .. } => self.backfill_failed(cx, run, error.into()),
-            Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
+            Request::Lookup { candidates, .. } => {
+                self.account.lookup_failed = true;
+                self.next_lookup(cx, candidates);
+            }
             Request::Snapshot { serial, .. } => {
                 self.account.snapshot_inflight = false;
                 self.trade_account_ready(cx, serial, false);
@@ -2426,11 +2481,12 @@ impl Lighter {
         }
         if let Some(raw) = payload.positions {
             let result = each_row(raw, |wire: PositionWire<'_>, hint| {
-                let time = event_time(wire.updated_at.as_ref(), wire.transaction_time.as_ref())
-                    .or_else(|| {
-                        event_time(frame.timestamp.as_ref(), frame.transaction_time.as_ref())
-                    })
-                    .unwrap_or(cx.now);
+                let time = event_time(
+                    wire.updated_at.as_ref().or(wire.timestamp.as_ref()),
+                    wire.transaction_time.as_ref(),
+                )
+                .or_else(|| event_time(frame.timestamp.as_ref(), frame.transaction_time.as_ref()))
+                .unwrap_or(cx.now);
                 let explicit_zero = wire.size.as_ref().is_some_and(|n| n.0 == 0.0);
                 if let Some((position, symbol, leverage, margin)) =
                     self.position_row(cx, wire, hint)
