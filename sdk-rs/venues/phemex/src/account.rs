@@ -111,11 +111,16 @@ struct Reconcile {
     lost: Vec<(String, u64)>,
     /// Partly filled snapshot rows the active list must confirm, or they are gone.
     unconfirmed: Vec<String>,
+    /// Long-resting limit rows the periodic read checks; absent from a short list, they are gone.
+    resting: Vec<String>,
     /// Lost placements a later cancel-all must still cancel if the read reveals them.
     cancel: Vec<(String, u64)>,
 }
 /// Reads with rows this engine cannot map before giving up on a symbol.
 const INCOMPLETE_READS: u32 = 3;
+const RESTING_ROWS_READ_MS: f64 = 60_000.;
+/// The list's page size is unverified; a list this long may be cut, so absence proves nothing.
+const RESTING_LIST_MAX_ROWS: usize = 20;
 #[derive(Deserialize)]
 struct OrdersEnvelope<'a> {
     code: i64,
@@ -186,6 +191,9 @@ pub struct State {
     uncertainty_overflow: bool,
     reconcile: HashMap<String, Reconcile>,
     reconcile_timer: Option<TimerId>,
+    resting_timer: Option<TimerId>,
+    /// Limit rows open at the last periodic tick: only these are old enough to check.
+    resting_seen: HashSet<String>,
     /// `{currency}:{symbol}` (or `{currency}:` for an unreadable row) of skips already logged.
     skip_logged: RowReports<String>,
     /// Frame-fed: the data source's unknown-outcome clOrdIDs and fill uncertainty.
@@ -492,6 +500,9 @@ impl PhemexPerpetuals {
         cx.store.set_hedged(true);
         self.account_cycle(cx);
         self.account_connect(cx);
+        if !cx.frame_fed() && self.account.resting_timer.is_none() {
+            self.account.resting_timer = Some(cx.set_timer(RESTING_ROWS_READ_MS));
+        }
     }
     pub(crate) fn account_write(&mut self, _cx: &mut Cx<'_, Pending>) {
         self.account.write_revision += 1;
@@ -1810,6 +1821,37 @@ impl PhemexPerpetuals {
             self.cancel_late(cx, symbol, late);
         }
     }
+    /// Whether an untriggered stop is listed is unverified, so only plain limit rows are checked.
+    fn read_resting_rows(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.resting_timer = Some(cx.set_timer(RESTING_ROWS_READ_MS));
+        if cx.frame_fed() || !self.account.orders_ready() {
+            self.account.resting_seen.clear();
+            return;
+        }
+        let open: Vec<(String, String)> = (cx.store.orders().iter())
+            .filter(|order| {
+                order.kind == OrderType::Limit
+                    && order.status == OrderStatus::Open
+                    && order.parent_id.is_none()
+            })
+            .map(|order| (order.symbol.clone(), order.id.clone()))
+            .collect();
+        for (symbol, id) in &open {
+            if !self.account.resting_seen.contains(id) {
+                continue;
+            }
+            let entry = self.account.reconcile.entry(symbol.clone()).or_default();
+            if entry.reading || entry.abandoned {
+                continue;
+            }
+            if entry.resting.is_empty() {
+                entry.generation += 1;
+            }
+            entry.resting.push(id.clone());
+        }
+        self.account.resting_seen = open.into_iter().map(|(_, id)| id).collect();
+        self.orders_reconcile(cx);
+    }
     pub(crate) fn reconcile_uncertain_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         self.settle_retired_trading(cx);
         if self.account.reconcile_timer.is_none() {
@@ -1937,6 +1979,7 @@ impl PhemexPerpetuals {
         let mut complete = true;
         let mut published = Vec::new();
         let mut listed = HashSet::new();
+        let list_len = rows.len();
         for raw in rows {
             let Ok(row) = serde_json::from_str::<OrderRow<'_>>(raw.get()) else {
                 cx.notice(
@@ -2039,8 +2082,12 @@ impl PhemexPerpetuals {
         if let Some(entry) = self.account.reconcile.get_mut(&symbol) {
             entry.reading = false;
             entry.failures = 0;
-            let unconfirmed = std::mem::take(&mut entry.unconfirmed);
-            for id in unconfirmed.iter().filter(|id| !listed.contains(*id)) {
+            let mut gone = std::mem::take(&mut entry.unconfirmed);
+            let resting = std::mem::take(&mut entry.resting);
+            if list_len < RESTING_LIST_MAX_ROWS {
+                gone.extend(resting);
+            }
+            for id in gone.iter().filter(|id| !listed.contains(*id)) {
                 let version = self.account.order_versions.get(id).copied().unwrap_or(0);
                 self.account.remember_terminal(id.clone(), version);
                 cx.store.remove_orders(&[id.as_str()]);
@@ -2148,6 +2195,10 @@ impl PhemexPerpetuals {
         if self.account.refresh == Some(timer) {
             self.account.refresh = None;
             self.account_cycle(cx);
+            return true;
+        }
+        if self.account.resting_timer == Some(timer) {
+            self.read_resting_rows(cx);
             return true;
         }
         if self.account.deadline == Some(timer) {

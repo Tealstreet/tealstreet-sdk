@@ -1952,6 +1952,99 @@ fn a_partial_snapshot_row_the_active_list_lacks_is_dropped() {
     assert!(e.store().order("one").is_none(), "cannot come back");
 }
 
+/// A row seen at one 60 s tick and read at the next; returns that read.
+fn resting_read(rows: &str) -> (Engine<PhemexPerpetuals>, Option<HttpRequest>) {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let _: Vec<_> = e.drain_actions().collect();
+    push_orders(&mut e, s, "snapshot", 1, rows);
+    let _: Vec<_> = e.drain_actions().collect();
+    e.handle(
+        NOW + 60_000.,
+        Event::TimerFired {
+            timer: timer(&a, NOW + 60_000.),
+        },
+    );
+    let first: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !requests(&first)
+            .iter()
+            .any(|r| r.url.contains("/g-orders/activeList")),
+        "a row first seen at this tick is not checked yet"
+    );
+    e.handle(
+        NOW + 120_000.,
+        Event::TimerFired {
+            timer: timer(&first, NOW + 120_000.),
+        },
+    );
+    let second: Vec<_> = e.drain_actions().collect();
+    let read = requests(&second)
+        .into_iter()
+        .find(|r| r.url.contains("/g-orders/activeList"));
+    (e, read)
+}
+
+#[test]
+fn the_periodic_read_removes_a_resting_row_the_list_lacks() {
+    let (mut e, read) = resting_read(&order("New", 1_700_000_000_000_000_001));
+    assert!(e.store().order("one").is_some());
+    let body = r#"{"code":10002,"msg":"OM_ORDER_NOT_FOUND","data":null}"#;
+    response(
+        &mut e,
+        NOW + 120_010.,
+        read.expect("one read").id,
+        200,
+        body,
+    );
+    assert!(e.store().order("one").is_none());
+}
+
+#[test]
+fn the_periodic_read_keeps_a_listed_row() {
+    let rows = order("New", 1_700_000_000_000_000_001);
+    let (mut e, read) = resting_read(&rows);
+    let body = format!(r#"{{"code":0,"data":[{rows}]}}"#);
+    response(
+        &mut e,
+        NOW + 120_010.,
+        read.expect("one read").id,
+        200,
+        &body,
+    );
+    assert!(e.store().order("one").is_some());
+}
+
+#[test]
+fn the_periodic_read_proves_nothing_from_a_possibly_cut_list() {
+    let (mut e, read) = resting_read(&order("New", 1_700_000_000_000_000_001));
+    let other = order("New", 1_700_000_000_000_000_002)
+        .replace(r#""orderID":"one""#, r#""orderID":"other""#);
+    let body = format!(r#"{{"code":0,"data":[{}]}}"#, vec![other; 20].join(","));
+    response(
+        &mut e,
+        NOW + 120_010.,
+        read.expect("one read").id,
+        200,
+        &body,
+    );
+    assert!(e.store().order("one").is_some());
+}
+
+#[test]
+fn the_periodic_read_never_touches_a_stop() {
+    let stop = order("Untriggered", 1_700_000_000_000_000_001)
+        .replace(r#""ordType":"Limit""#, r#""ordType":"Stop""#)
+        .replace(
+            r#""priceRp":"69000""#,
+            r#""priceRp":"0","stopPxRp":"68000""#,
+        );
+    let (e, read) = resting_read(&stop);
+    assert!(e.store().order("one").is_some());
+    assert!(read.is_none(), "no read for a symbol with only a stop");
+}
+
 #[test]
 fn a_partial_snapshot_row_the_active_list_has_stays() {
     let (mut e, a, s) = started();
