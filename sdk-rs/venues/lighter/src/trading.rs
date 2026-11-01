@@ -974,6 +974,10 @@ impl Lighter {
         }
     }
 
+    pub(crate) fn trade_running(&self) -> bool {
+        self.trading.active.is_some()
+    }
+
     pub(crate) fn trade_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
