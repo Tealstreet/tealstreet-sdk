@@ -206,6 +206,7 @@ impl Lighter {
             }
         }
         if let Some(client_index) = client_index {
+            self.note_client_order(client_index, id);
             self.trade_group_observed(cx, client_index);
         }
     }
@@ -335,6 +336,12 @@ impl Lighter {
             Command::CancelOrders { command, ids } => {
                 let mut steps = VecDeque::new();
                 for id in ids {
+                    // The ID a placement returned is its client index.
+                    let id = if cx.store.order(&id).is_some() {
+                        id
+                    } else {
+                        self.account.client_orders.get(&id).cloned().unwrap_or(id)
+                    };
                     if self.group_pending(&id) {
                         refuse(
                             cx,
@@ -644,7 +651,7 @@ impl Lighter {
                 // Frame-fed positions are the data source's; there is no read to wait for.
                 self.trade_finish(
                     cx,
-                    not_sent("No open position available for this Lighter reduce-only limit order"),
+                    not_sent("No open position available for this Lighter reduce-only order"),
                 );
             } else {
                 if let Some(Step::Position { requested, .. }) =
@@ -1465,7 +1472,8 @@ impl Lighter {
         let mut steps = VecDeque::new();
         let mut batched = Vec::new();
         for opts in orders {
-            if opts.kind == OrderType::Limit
+            // The venue accepts a reduce-only with no position, then silently drops it.
+            if matches!(opts.kind, OrderType::Limit | OrderType::Market)
                 && opts.reduce_only.unwrap_or(false)
                 && !has_position(cx, &opts.symbol, opts.side)
             {

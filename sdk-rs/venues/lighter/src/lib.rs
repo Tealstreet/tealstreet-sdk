@@ -119,6 +119,7 @@ pub struct MarketMeta {
     pub maintenance_margin_fraction: f64,
     pub initial_last_price: f64,
 }
+const TICKER_TOPICS_PER_SECOND: usize = 2;
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
@@ -178,6 +179,8 @@ pub struct Lighter {
     ticker_revision: u64,
     ticker_sources: HashMap<String, u64>,
     ticker_in_flight: bool,
+    ticker_topics: std::collections::VecDeque<String>,
+    ticker_pace: Option<TimerId>,
     startup: safe_cex_engine::startup::Backoff<bool>,
     poll: Option<TimerId>,
 }
@@ -203,6 +206,8 @@ impl Lighter {
             ticker_revision: 0,
             ticker_sources: HashMap::new(),
             ticker_in_flight: false,
+            ticker_topics: Default::default(),
+            ticker_pace: None,
             startup: Default::default(),
             poll: None,
         }
@@ -293,6 +298,19 @@ impl Lighter {
             ),
         );
         self.public.open = false;
+    }
+    /// The venue closes a socket sending too many messages (30009): at most
+    /// 120 ticker subscribes a minute, leaving room for the rest of its traffic.
+    fn pace_ticker_topics(&mut self, cx: &mut Cx<'_, Pending>) {
+        for _ in 0..TICKER_TOPICS_PER_SECOND {
+            let Some(channel) = self.ticker_topics.pop_front() else {
+                return;
+            };
+            self.topic(cx, "subscribe", &channel);
+        }
+        if !self.ticker_topics.is_empty() {
+            self.ticker_pace = Some(cx.set_timer(1_000.0));
+        }
     }
     fn topic(&self, cx: &mut Cx<'_, Pending>, op: &str, channel: &str) {
         if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
@@ -905,9 +923,13 @@ impl Venue for Lighter {
         self.public.open = true;
         self.public.supervisor.opened(cx);
         self.topic(cx, "subscribe", "market_stats/all");
-        for market in cx.store.markets().to_vec() {
-            self.topic(cx, "subscribe", &format!("ticker/{}", market.id));
-        }
+        self.ticker_topics = cx
+            .store
+            .markets()
+            .iter()
+            .map(|market| format!("ticker/{}", market.id))
+            .collect();
+        self.pace_ticker_topics(cx);
         let symbols: Vec<_> = self
             .books
             .iter()
@@ -1059,6 +1081,7 @@ impl Venue for Lighter {
         }
         self.public.socket = None;
         self.public.open = false;
+        self.ticker_topics.clear();
         for (symbol, state) in &mut self.books {
             state.waiting = true;
             state.revision += 1;
@@ -1603,6 +1626,11 @@ impl Venue for Lighter {
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_trades(cx);
+        if self.ticker_pace == Some(timer) {
+            self.ticker_pace = None;
+            self.pace_ticker_topics(cx);
+            return;
+        }
         if let Some(markets) = self.startup.on_timer(timer) {
             if markets {
                 self.markets(cx, false);

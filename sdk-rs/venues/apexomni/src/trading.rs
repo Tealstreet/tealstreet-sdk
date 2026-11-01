@@ -1459,6 +1459,7 @@ fn strict_code(code: &crate::Code) -> Option<i64> {
 
 /// A failed ApeX Omni delivery: transport, a gateway status or a coded reply.
 /// No ApeX code table is documented, so other codes stay unclassified.
+const INVALID_CREDENTIAL: i64 = 10002;
 pub(crate) fn failure(code: Option<i64>, status: u16, message: String) -> VenueError {
     let error = VenueError::new(message);
     let error = match (code, status) {
@@ -1468,6 +1469,10 @@ pub(crate) fn failure(code: Option<i64>, status: u16, message: String) -> VenueE
             .outcome(Outcome::Rejected),
         (None, 403) => error
             .kind(ErrorKind::AuthPermission)
+            .outcome(Outcome::Rejected),
+        // "Api credential is invalid": the key will not start working on a retry.
+        (Some(INVALID_CREDENTIAL), _) => error
+            .kind(ErrorKind::AuthInvalid)
             .outcome(Outcome::Rejected),
         (Some(429), _) | (None, 429) => error
             .kind(ErrorKind::RateLimited)

@@ -1945,3 +1945,58 @@ fn a_price_only_amend_of_a_partly_filled_order_sends_what_is_left() {
     let wire: Value = serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
     assert_eq!(wire["action"]["orders"][0]["s"], "6");
 }
+
+// deaws2's live bodies.
+fn statuses_reply(row: &str) -> String {
+    format!(
+        r#"{{"status":"ok","response":{{"type":"order","data":{{"statuses":[{{"error":"{row}"}}]}}}}}}"#
+    )
+}
+
+#[test]
+fn a_refused_parent_answering_one_row_for_a_bracket_is_a_refusal() {
+    let (_, actions) = native_two_row_reply(&statuses_reply(
+        "Order must have minimum value of $10. asset=1",
+    ));
+    let result = results(&actions, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert_ne!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+    assert!(error.message.contains("minimum value"));
+}
+
+#[test]
+fn live_row_refusals_with_a_suffix_are_refusals() {
+    for row in [
+        "Insufficient margin to place order. asset=1",
+        "Post only order would have immediately matched, bbo was 2270.4@2270.5. asset=1",
+        "Reduce only order would increase position. asset=1",
+    ] {
+        let (mut e, _) = boot();
+        let actions = command(&mut e, NOW, place(OWNER));
+        let request = native_release(&mut e, &actions);
+        respond(&mut e, NOW + 1., &request, 200, &statuses_reply(row));
+        let actions: Vec<_> = e.drain_actions().collect();
+        let result = results(&actions, OWNER);
+        let error = result[0].as_ref().unwrap_err();
+        assert_ne!(error.outcome, Some(Outcome::Unknown), "{row}: {error:?}");
+    }
+}
+
+#[test]
+fn live_top_level_refusals_are_refusals() {
+    for row in [
+        "User or API Wallet 0x2dd8000000000000000000000000000000000000 does not exist.",
+        "Cannot switch leverage type with open position.",
+    ] {
+        let (mut e, _) = boot();
+        let actions = command(&mut e, NOW, place(OWNER));
+        let request = native_release(&mut e, &actions);
+        let body = format!(r#"{{"status":"err","response":"{row}"}}"#);
+        respond(&mut e, NOW + 1., &request, 200, &body);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let result = results(&actions, OWNER);
+        let error = result[0].as_ref().unwrap_err();
+        assert_ne!(error.outcome, Some(Outcome::Unknown), "{row}: {error:?}");
+        assert_ne!(error.kind, Some(ErrorKind::Internal), "{row}: {error:?}");
+    }
+}

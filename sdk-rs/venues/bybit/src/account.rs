@@ -2305,6 +2305,10 @@ impl BybitLinear {
             .filter(|r| self.trades_row(&r.category, &r.symbol))
             .collect();
         for row in rows {
+            // The legs a mode switch left behind: their mode and leverage are stale.
+            if present(&row.position_status) == Some("Inactive") {
+                continue;
+            }
             // A malformed supplied Greek is not an authoritative zero. Validate
             // before changing either the position or its exact-ID metadata.
             if self.category == Category::Option && !valid_position_greeks(row) {

@@ -1013,8 +1013,10 @@ impl Hyperliquid {
                     })
             }
             Effect::Place(records) => {
+                // A refused parent answers one error row for all its legs.
                 kind == "order"
-                    && statuses.len() == records.len()
+                    && (statuses.len() == records.len()
+                        || matches!(statuses.as_slice(), [Status::Error { .. }]))
                     && (request.order_reply != OrderReply::Attached
                         || matches!(
                             statuses.first(),

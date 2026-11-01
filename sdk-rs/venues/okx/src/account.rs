@@ -226,6 +226,9 @@ pub struct AccountState {
     unlisted_logged: HashSet<String>,
     /// `position:`/`order:`/`coin:` + identity (empty when unreadable) of skips already logged.
     skip_logged: HashSet<String>,
+    /// Symbols of this census's rejected rows that could be an uncertain write:
+    /// no stored copy proves them older. Empty text: the row names no market.
+    census_unproven: Vec<String>,
     account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
@@ -446,6 +449,7 @@ impl Okx {
         if include_orders && !self.account.orders_in_flight {
             self.account.orders_in_flight = true;
             self.account.orders_generation += 1;
+            self.account.census_unproven.clear();
             let generation = self.account.orders_generation;
             self.orders_page(
                 cx,
@@ -609,6 +613,7 @@ impl Okx {
         if !self.account_delivery_current(cx, request) {
             return;
         }
+        let (mut readable_position, mut readable_order) = (None, None);
         match request {
             Request::Config { .. } | Request::Leverage { .. } | Request::LeverageRefresh { .. } => {
             }
@@ -648,7 +653,17 @@ impl Okx {
                 rows,
                 invalid,
                 ..
-            } => match serde_json::from_str::<PositionRow<'_>>(item) {
+            } => match serde_json::from_str::<PositionRow<'_>>(
+                readable_position
+                    .get_or_insert_with(|| {
+                        serde_json::from_str::<PositionRow<'_>>(item)
+                            .is_err()
+                            .then(|| readable_rows(item))
+                            .flatten()
+                    })
+                    .as_deref()
+                    .unwrap_or(item),
+            ) {
                 Ok(p) => {
                     if !self.account_scope(*product, p.inst_id, p.inst_type) {
                         *invalid = true;
@@ -702,7 +717,17 @@ impl Okx {
                 cursor,
                 invalid,
                 ..
-            } => match serde_json::from_str::<OrderRow<'_>>(item) {
+            } => match serde_json::from_str::<OrderRow<'_>>(
+                readable_order
+                    .get_or_insert_with(|| {
+                        serde_json::from_str::<OrderRow<'_>>(item)
+                            .is_err()
+                            .then(|| readable_rows(item))
+                            .flatten()
+                    })
+                    .as_deref()
+                    .unwrap_or(item),
+            ) {
                 Ok(o) => {
                     *page_count += 1;
                     *cursor = page_cursor(*kind, o.ord_id, o.algo_id).into();
@@ -713,7 +738,7 @@ impl Okx {
                     if o.inst_id.is_empty()
                         || (cx.store.market_by_id(o.inst_id).is_some() && !valid_order(&o))
                     {
-                        self.reject_order(cx, rows, o.ord_id, o.algo_id);
+                        self.reject_order(cx, rows, o.inst_id, o.ord_id, o.algo_id);
                         return;
                     }
                     if cx.store.market_by_id(o.inst_id).is_none() && !terminal_state(o.state) {
@@ -747,7 +772,7 @@ impl Okx {
                         }
                         return;
                     }
-                    self.reject_order(cx, rows, &row.ord_id, &row.algo_id);
+                    self.reject_order(cx, rows, &row.inst_id, &row.ord_id, &row.algo_id);
                 }
             },
         }
@@ -795,6 +820,7 @@ impl Okx {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         rows: &mut SnapshotBuilder<String, Order>,
+        inst_id: &str,
         ord_id: &str,
         algo_id: &str,
     ) {
@@ -802,6 +828,19 @@ impl Okx {
             .into_iter()
             .filter(|id| !id.is_empty())
             .collect();
+        let stored = ids.iter().any(|id| {
+            ORDER_SUFFIXES
+                .iter()
+                .any(|suffix| cx.store.order(&format!("{id}{suffix}")).is_some())
+        });
+        if !stored {
+            if inst_id.is_empty() {
+                self.account.census_unproven.push(String::new());
+            } else if let Some(market) = cx.store.market_by_id(inst_id) {
+                // A market this account cannot trade cannot hold its placement.
+                self.account.census_unproven.push(market.symbol.clone());
+            }
+        }
         let Some(first) = ids.first() else {
             let message = "OKX skipped order row without an id";
             self.log_skip(cx, "order:".into(), Level::Warn, message);
@@ -1099,9 +1138,13 @@ impl Okx {
                     }
                 }
                 cx.store.set_orders(rows);
-                // A rejected row may be an uncertain placement; it proves nothing.
+                // A rejected row may be an uncertain placement only if nothing stored proves
+                // it older; that symbol stays fenced, and the rest of the census still counts.
                 if clean {
                     cx.orders_reconciled_since(None, epoch);
+                } else {
+                    let unproven = std::mem::take(&mut self.account.census_unproven);
+                    cx.orders_reconciled_except(&unproven, epoch);
                 }
                 self.trading
                     .acknowledged
@@ -1777,7 +1820,12 @@ impl Okx {
         };
         match message.arg.channel {
             "orders" | "orders-algo" | "algo-advance" => {
-                let _ = json::each::<OrderRow<'_>>(data.get(), |row| {
+                let readable = serde_json::from_str::<Vec<OrderRow<'_>>>(data.get())
+                    .is_err()
+                    .then(|| readable_rows(data.get()))
+                    .flatten();
+                let rows = readable.as_deref().unwrap_or(data.get());
+                let _ = json::each::<OrderRow<'_>>(rows, |row| {
                     if cx.store.market_by_id(row.inst_id).is_none() {
                         cx.notice(
                             Level::Warn,
@@ -1865,8 +1913,13 @@ impl Okx {
             }
             "positions" => {
                 let mut valid = false;
+                let readable = serde_json::from_str::<Vec<PositionRow<'_>>>(data.get())
+                    .is_err()
+                    .then(|| readable_rows(data.get()))
+                    .flatten();
+                let rows = readable.as_deref().unwrap_or(data.get());
                 let _ =
-                    json::each::<PositionRow<'_>>(data.get(), |row| {
+                    json::each::<PositionRow<'_>>(rows, |row| {
                         if let Some((p, risk)) = self.position(cx, &row) {
                             valid = true;
                             self.account.revision += 1;

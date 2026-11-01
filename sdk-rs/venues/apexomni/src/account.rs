@@ -1112,6 +1112,11 @@ impl ApexOmni {
         context: &Context,
         error: VenueError,
     ) {
+        let refused = error.venue_code.as_deref() == Some("10002");
+        if refused {
+            cx.startup_read_refused(&error);
+            cx.deactivate();
+        }
         let generation = match request {
             Request::Identity => {
                 let _ = cx.fail_context(context, error);

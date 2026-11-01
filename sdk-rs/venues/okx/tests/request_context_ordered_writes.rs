@@ -1364,3 +1364,51 @@ fn a_refused_row_still_fails_whatever_its_message() {
         Action::Notice(Notice::CommandFailed { command: OWNER, .. })
     )));
 }
+
+#[test]
+fn a_cancel_success_without_an_id_is_a_success() {
+    let mut engine = trading_engine();
+    engine.store_mut().upsert_order(Order {
+        kind: OrderType::StopLoss,
+        ..stored("202_sl")
+    });
+    engine.handle(
+        5.,
+        Event::Command(Command::CancelOrders {
+            command: OWNER,
+            ids: vec!["202_sl".into()],
+        }),
+    );
+    let first = prepared(&mut engine, 5.);
+    reply(
+        &mut engine,
+        post(&first),
+        r#"{"code":"0","msg":"","data":[{"algoId":"","sCode":"0","sMsg":""}]}"#,
+        6.,
+    );
+    let output = prepared(&mut engine, 6.);
+    assert!(output.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { command: OWNER, .. })
+    )));
+}
+
+#[test]
+fn a_documented_refusal_is_rejected_not_unknown() {
+    for code in [54000, 59000, 50002, 50006, 50009, 50027] {
+        let mut engine = trading_engine();
+        place(&mut engine, vec![order(1)]);
+        let output = prepared(&mut engine, 5.);
+        reply(
+            &mut engine,
+            post(&output),
+            &format!(r#"{{"code":"{code}","msg":"refused","data":[]}}"#),
+            6.,
+        );
+        let output = prepared(&mut engine, 6.);
+        assert!(output.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: OWNER, error }) if error.outcome == Some(safe_cex_engine::Outcome::Rejected)
+        )), "{code}");
+    }
+}
