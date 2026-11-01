@@ -1076,7 +1076,19 @@ impl Trading {
                 }
                 job.results.extend(ids);
             }
-            Err(error) => {
+            Err(mut error) => {
+                if matches!(
+                    request.kind,
+                    Kind::Place {
+                        leg: Some(STOP_REPLACEMENT),
+                        ..
+                    }
+                ) {
+                    error.message = format!(
+                        "The old stop was canceled and its replacement refused, so this position has no stop: {}",
+                        error.message
+                    );
+                }
                 if let Kind::Place { leg, expected, .. } = &request.kind {
                     let next_leg = match job.operations.front().map(|op| &op.kind) {
                         Some(Kind::Place {
@@ -1324,6 +1336,9 @@ impl Trading {
         {
             return Err("Paradex amendment size or price invalid".into());
         }
+        if trigger {
+            return replace_trigger(cx, account, order, id, size, price, trigger_price);
+        }
         if id.is_empty() {
             return Err("Cannot sign a Paradex amendment without an order ID".into());
         }
@@ -1367,6 +1382,66 @@ impl Trading {
         }]))
     }
 }
+/// The venue answers ORDER_IS_NOT_OPEN to editing an untriggered stop: cancel, then place anew.
+fn replace_trigger(
+    cx: &Cx<'_, Pending>,
+    account: &Account,
+    order: &safe_cex_engine::model::Order,
+    id: &str,
+    size: f64,
+    price: f64,
+    trigger_price: Option<f64>,
+) -> Result<VecDeque<Operation>, String> {
+    let opts = PlaceOrderOpts {
+        symbol: order.symbol.clone(),
+        kind: order.kind,
+        side: order.side,
+        amount: size,
+        price: if order.kind == OrderType::Conditional {
+            Some(price)
+        } else {
+            trigger_price
+        },
+        trigger_price,
+        reduce_only: Some(order.reduce_only),
+        trigger_type: order.trigger_type,
+        sl_trigger_type: order.trigger_type,
+        tp_trigger_type: order.trigger_type,
+        max_slippage_pct: None,
+        stop_loss: None,
+        take_profit: None,
+        time_in_force: None,
+        client_order_id: None,
+        close: None,
+        stp_mode: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
+        implied_volatility: None,
+    };
+    let mut operations = place_operations(
+        std::slice::from_ref(&opts),
+        cx,
+        account,
+        &HashMap::new(),
+        &HashMap::new(),
+        false,
+    )?;
+    for operation in &mut operations {
+        if let Kind::Place { leg, .. } = &mut operation.kind {
+            *leg = Some(STOP_REPLACEMENT);
+        }
+    }
+    operations.push_front(Operation {
+        receipts: Vec::new(),
+        hash: None,
+        method: Method::Delete,
+        path: format!("/orders/{}", encode(id)),
+        body: None,
+        kind: Kind::Cancel(vec![id.to_owned()]),
+    });
+    Ok(operations)
+}
+const STOP_REPLACEMENT: &str = "stop replacement";
 #[derive(Serialize)]
 struct Modify {
     id: String,

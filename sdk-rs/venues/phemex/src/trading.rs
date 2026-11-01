@@ -1950,7 +1950,9 @@ impl PhemexPerpetuals {
                 // A code in a 200 with no order data is a definite refusal (11038 latched writes
                 // for 75 s when read as uncertain); with order data it stays unknown.
                 let call = &request.call;
+                // A duplicate id or a routing failure: the first send may be live.
                 if matches!(call, Call::Place { .. })
+                    && !matches!(code, 11085 | 11107)
                     && env.data.as_ref().is_none_or(|data| data.get() == "null")
                 {
                     request
