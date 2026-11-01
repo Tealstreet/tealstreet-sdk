@@ -566,6 +566,30 @@ async fn a_joining_socket_sees_the_running_chases_again() {
         .await;
 }
 
+/// A drain reads the cancel's answer: it ends at once and reports the chase,
+/// not after its whole deadline with its cancels called unsettled.
+#[tokio::test]
+async fn a_dispose_settles_a_running_chase_well_inside_its_deadline() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("chaser:start", web_chase(None));
+            algos
+                .next("store", |data| !active_chasers(data).is_empty())
+                .await;
+            algos
+                .inbox
+                .send(AlgoInput::Dispose {
+                    reason: "the server is restarting".into(),
+                    stopped: None,
+                })
+                .unwrap();
+            let complete = algos.next("chaser:complete", |_| true).await;
+            assert!(first(&complete["data"])["stopReason"].is_string());
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn disposing_for_no_browser_stops_the_chases_and_says_why() {
     LocalSet::new()

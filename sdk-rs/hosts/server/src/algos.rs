@@ -875,7 +875,45 @@ pub async fn run(
         twap.placements_settled().await;
         book.shutdown(reason).await;
     };
-    let deadline_passed = tokio::time::timeout(SHUTDOWN_DEADLINE, settling)
+    // The main loop has ended, so the cancels' answers and the rows they close
+    // must still be read here, or every drain waits out its deadline.
+    let pumped = async {
+        tokio::pin!(settling);
+        let mut feed_open = true;
+        loop {
+            tokio::select! {
+                biased;
+                () = &mut settling => break,
+                batch = feed.next(), if feed_open => {
+                    let Some(batch) = batch else {
+                        feed_open = false;
+                        continue;
+                    };
+                    for notice in &batch.notices {
+                        port.settle(notice);
+                    }
+                    if batch.rejoined {
+                        port.client.set(feed.client());
+                        for (_, waiter) in port.pending.borrow_mut().drain() {
+                            let mut error =
+                                VenueError::new("algo feed rejoined; command outcome unknown");
+                            error.outcome = Some(Outcome::Unknown);
+                            let _ = waiter.send(Err(error));
+                        }
+                    }
+                    if (batch.frames > 0 || batch.rejoined)
+                        && let Some(snapshot) = handle.read(projection::project).await
+                    {
+                        let change = port.apply(snapshot, batch.fills, batch.rejoined);
+                        port.subscribers
+                            .borrow_mut()
+                            .retain(|tx| tx.send(change.clone()).is_ok());
+                    }
+                }
+            }
+        }
+    };
+    let deadline_passed = tokio::time::timeout(SHUTDOWN_DEADLINE, pumped)
         .await
         .is_err();
     if deadline_passed {
