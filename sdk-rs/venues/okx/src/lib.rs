@@ -1384,7 +1384,6 @@ impl Venue for Okx {
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
                 account::retire(cx, page.as_ref());
-                self.account_read_again(cx);
             }
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, *request, response),
