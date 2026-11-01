@@ -45,7 +45,8 @@ describe('a chase or TWAP stop', () => {
     vi.advanceTimersByTime(120_000);
     expect(sent).toHaveLength(1);
     expect(told).toEqual([]);
-    expect(listeners.size).toBe(0);
+    // Only the tracker of running chases stays subscribed.
+    expect(listeners.size).toBe(1);
   });
 
   it('a second click during the retries adds no second watch, and a later stop watches again', () => {
@@ -172,6 +173,43 @@ describe('a stop the user was told might not have landed', () => {
     vi.advanceTimersByTime(60_000);
     update({ activeTWAPs: [] });
     expect(told.at(-1)).toBe('TWAP stop is confirmed now.');
+  });
+});
+
+describe('a running chase whose engine went away', () => {
+  const running = (id: string) => ({ ...(chaser(id) as object), currentOrderIds: ['o1'] }) as never;
+
+  it('is told when its row goes and no completion follows, naming its order', () => {
+    const { told, update } = setup();
+    update({ activeChasers: [running('c1')] });
+    update({ activeChasers: [] });
+    vi.advanceTimersByTime(2_999);
+    expect(told).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(told).toHaveLength(1);
+    expect(told[0]).toContain('Chase on BTCUSDT ended without a result');
+    expect(told[0]).toContain('order o1 may still be open, or may have filled');
+    expect(told[0]).toContain('check Positions and Open Orders');
+  });
+
+  it('says nothing when the completion comes with the row, either way round', () => {
+    const { told, watch, update } = setup();
+    update({ activeChasers: [running('c1'), running('c2')] });
+    update({ activeChasers: [running('c2')] });
+    watch.chaseCompleted({ id: 'c1', symbol: 'BTCUSDT', size: 1, filled: 1 });
+    watch.chaseCompleted({ id: 'c2', symbol: 'BTCUSDT', size: 1, filled: 1 });
+    update({ activeChasers: [] });
+    vi.advanceTimersByTime(10_000);
+    expect(told).toEqual([]);
+  });
+
+  it('says nothing when the row comes straight back', () => {
+    const { told, update } = setup();
+    update({ activeChasers: [running('c1')] });
+    update({ activeChasers: [] });
+    update({ activeChasers: [running('c1')] });
+    vi.advanceTimersByTime(10_000);
+    expect(told).toEqual([]);
   });
 });
 

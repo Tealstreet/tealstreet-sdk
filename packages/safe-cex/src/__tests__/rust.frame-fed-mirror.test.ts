@@ -351,7 +351,10 @@ describe('frame-fed main-thread mirror', () => {
       store.update({ activeChasers: [] });
       await vi.advanceTimersByTimeAsync(120_000);
       expect(bridged).toHaveLength(2);
-      expect(errors).toEqual([]);
+      // The user was told NOT confirmed, so the late confirmation says what is known.
+      expect(errors).toEqual([
+        'Chase stop is confirmed, but whether it filled is not known: check Positions and Open Orders.',
+      ]);
     } finally {
       vi.useRealTimers();
     }

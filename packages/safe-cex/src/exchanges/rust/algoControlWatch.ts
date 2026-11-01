@@ -8,6 +8,8 @@ const NOT_CONFIRMED_MS = 15_000;
 const STOP_GIVE_UP_MS = 60_000;
 /** After a stop the user was told was uncertain is confirmed, the chase's own end has this long to say how it ended. */
 const OUTCOME_WAIT_MS = 10_000;
+/** A chase's row and its completion arrive together; past this, a row gone alone is a chase that died. */
+const UNENDED_CHASE_MS = 3_000;
 
 type Rows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
 
@@ -21,6 +23,15 @@ const chaseOutcome = ({ symbol, size, filled = 0 }: ChaseEnd) => {
   if (!(filled > 0)) return `Chase on ${symbol} stopped with nothing filled.`;
   if (size !== undefined && filled >= size) return `Chase on ${symbol} filled ${filled} before its stop took effect.`;
   return `Chase on ${symbol} stopped after filling ${filled}${size !== undefined ? ` of ${size}` : ''}.`;
+};
+
+/** A running chase lost with its engine: no completion will ever say how it ended. */
+const unendedChase = (chase: ActiveChaser) => {
+  const orders = chase.currentOrderIds?.length ? `order ${chase.currentOrderIds.join(', ')}` : 'order';
+  return (
+    `Chase on ${chase.symbol} ended without a result: its account reloaded or its engine restarted while it ran. ` +
+    `Its ${orders} may still be open, or may have filled: check Positions and Open Orders.`
+  );
 };
 
 type AlgoWatchHost = {
@@ -51,7 +62,38 @@ export class AlgoControlWatch {
   private readonly watches = new Set<() => void>();
   private resending = false;
 
-  constructor(private readonly host: AlgoWatchHost) {}
+  /** Chases the rows show running, and those whose completion came. */
+  private running = new Map<string, ActiveChaser>();
+  private readonly ended = new Set<string>();
+  private readonly unended = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly stopTracking: () => void;
+
+  constructor(private readonly host: AlgoWatchHost) {
+    this.stopTracking = host.subscribe(() => this.trackChases());
+    this.trackChases();
+  }
+
+  /** A chase whose row goes with no completion died with its engine: say so, naming its order. */
+  private trackChases() {
+    const rows = new Map(this.host.rows().activeChasers.map((chase) => [chase.id, chase]));
+    for (const [id, chase] of this.running) {
+      if (rows.has(id) || this.unended.has(id)) continue;
+      if (this.ended.delete(id) || this.owed.has(id)) continue;
+      this.unended.set(
+        id,
+        setTimeout(() => {
+          this.unended.delete(id);
+          if (!this.ended.delete(id)) this.host.tell(unendedChase(chase));
+        }, UNENDED_CHASE_MS),
+      );
+    }
+    for (const id of rows.keys()) {
+      const timer = this.unended.get(id);
+      if (timer !== undefined) clearTimeout(timer);
+      this.unended.delete(id);
+    }
+    this.running = rows;
+  }
 
   /** The op just went out; call for every chaser or TWAP control op. */
   observe(op: string, data: unknown) {
@@ -100,6 +142,12 @@ export class AlgoControlWatch {
 
   /** A chase can finish between two row updates, leaving no row to see. */
   chaseCompleted(event: ChaseEnd) {
+    if (event.id !== undefined) {
+      const timer = this.unended.get(event.id);
+      if (timer !== undefined) clearTimeout(timer);
+      this.unended.delete(event.id);
+      if (this.running.has(event.id)) this.ended.add(event.id);
+    }
     if (event.symbol) {
       this.completedChaseSymbols.add(event.symbol);
       for (const check of [...this.checks]) check();
@@ -232,6 +280,9 @@ export class AlgoControlWatch {
   }
 
   dispose() {
+    this.stopTracking();
+    this.unended.forEach(clearTimeout);
+    this.unended.clear();
     for (const stop of [...this.watches]) stop();
     for (const id of [...this.owed.keys()]) this.settle(id);
     this.stopping.clear();
