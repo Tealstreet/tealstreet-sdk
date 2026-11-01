@@ -949,7 +949,7 @@ impl MexcFutures {
         let refreshed=match step.call.clone() {
             Call::Place {mut opts,amend,..}=>{
                 let amount=if let Some(amend)=amend {match cx.store.order(&amend.id) {
-                    Some(o) if o.status!=OrderStatus::Closed => {opts.amount=amend.amount.unwrap_or_else(||o.extra.as_ref().and_then(|e|e.remaining_native).unwrap_or(o.remaining/cx.store.market(&o.symbol).and_then(|m|m.contract_size).unwrap_or(1.0)));Ok(())},
+                    Some(o) if o.status!=OrderStatus::Closed => {let contract=cx.store.market(&o.symbol).and_then(|m|m.contract_size).unwrap_or(1.0);amend.amount.map(|total|safe_cex_engine::num::left_of_total(total,o.filled/contract)).transpose().map(|left|{opts.amount=left.unwrap_or_else(||o.extra.as_ref().and_then(|e|e.remaining_native).unwrap_or(o.remaining/contract));})},
                     _=>Err("MEXC original order filled or disappeared during amend".to_owned()),
                 }}else{Ok(())};
                 amount.and_then(|_|self.placement(cx,opts))
@@ -1132,7 +1132,16 @@ impl MexcFutures {
                 opts.tp_trigger_type = extra.tp_trigger_type.or(opts.tp_trigger_type);
                 opts.sl_trigger_type = extra.sl_trigger_type.or(opts.sl_trigger_type);
             }
-            opts.amount = intent.amount.unwrap_or_else(|| {
+            let contract = cx
+                .store
+                .market(&order.symbol)
+                .and_then(|m| m.contract_size)
+                .unwrap_or(1.0);
+            let left = intent
+                .amount
+                .map(|total| safe_cex_engine::num::left_of_total(total, order.filled / contract))
+                .transpose()?;
+            opts.amount = left.unwrap_or_else(|| {
                 order
                     .extra
                     .as_ref()

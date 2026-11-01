@@ -431,12 +431,22 @@ impl Lighter {
                     refuse(cx, not_sent("Lighter order is not open for amendment"));
                     return;
                 }
+                let left = match amount
+                    .map(|total| safe_cex_engine::num::left_of_total(total, old.filled))
+                    .transpose()
+                {
+                    Ok(left) => left,
+                    Err(error) => {
+                        refuse(cx, not_sent(error));
+                        return;
+                    }
+                };
                 let kind = protective_kind(cx, &old, price.unwrap_or(old.price));
                 let opts = PlaceOrderOpts {
                     symbol: old.symbol.clone(),
                     kind,
                     side: old.side,
-                    amount: amount.unwrap_or(old.remaining),
+                    amount: left.unwrap_or(old.remaining),
                     price: Some(price.unwrap_or(old.price)),
                     trigger_price: None,
                     stop_loss: None,

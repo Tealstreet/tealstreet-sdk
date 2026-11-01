@@ -826,7 +826,7 @@ fn isolated_hedged_placement_uses_the_target_sides_leverage() {
 
 #[test]
 fn cancel_replace_waits_for_terminal_proof_and_subtracts_intervening_fills() {
-    for (amount, expected) in [(None, "2"), (Some(9.0), "5")] {
+    for (amount, expected) in [(None, "2"), (Some(9.0), "1")] {
         let mut h = Harness::new();
         h.set_order("old", OrderType::Limit, 6.0);
         h.command(Command::AmendOrder {

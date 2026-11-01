@@ -136,8 +136,8 @@ fn margin_mode_change_signs_current_five_x_from_percent_position() {
 }
 
 #[test]
-fn price_amend_recreates_only_unfilled_quantity_and_explicit_size_stays_requested() {
-    for (amount, expected) in [(None, 1250), (Some(0.5), 500)] {
+fn an_amend_recreates_only_what_is_left_of_the_total() {
+    for (amount, expected) in [(None, 1250), (Some(1.25), 500)] {
         let (mut e, _) = ready_unattributed();
         e.store_mut().update_order("42", |order| {
             order.amount = 2.0;
