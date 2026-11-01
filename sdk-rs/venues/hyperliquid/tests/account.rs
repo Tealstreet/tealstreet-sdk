@@ -1050,3 +1050,42 @@ fn unified_spot_state_publishes_spot_holdings_as_coins() {
     // Valued at mark (100), as collateral is, not the mid that allMids moved to 110.
     assert_eq!(btc.notional, 50.0);
 }
+
+#[test]
+fn a_real_trigger_row_with_a_null_tif_stays_visible() {
+    let (mut e, s) = ready("disabled");
+    let row = r#"{"coin":"BTC","oid":77,"side":"A","limitPx":"1920.0","triggerPx":"1929.0","isTrigger":true,"isPositionTpsl":false,"reduceOnly":true,"orderType":"Stop Market","origSz":"0.005","sz":"0.005","tif":null,"cloid":null,"timestamp":1793547192000}"#;
+    let (_, _) = reconnect(&mut e, s, 40000.0);
+    let requests = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let orders = format!("[{row}]");
+    for r in requests {
+        let body = if kind(&r) == "frontendOpenOrders" {
+            orders.as_str()
+        } else {
+            STATE
+        };
+        e.handle(
+            40001.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+    let order = e.store().order("77").expect("the stop shows");
+    assert_eq!(order.kind, safe_cex_engine::model::OrderType::StopLoss);
+    assert_eq!(order.amount, 0.005);
+}
