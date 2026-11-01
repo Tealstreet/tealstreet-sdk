@@ -132,7 +132,7 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
       method: 'POST',
       url: final.url,
       params: {},
-      data: final.data,
+      data: { value: '001.20' },
     });
     expect(() => bound.dispatch()).toThrow();
     await expect(response).resolves.toMatchObject({ data: '[]', config: final });
@@ -140,20 +140,20 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     adapter.dispose();
   });
 
-  it('managed default adapters preserve large integer and decimal request and response bytes', async () => {
+  it('managed bodies reach the tunnel as the map it takes, and response bytes stay raw', async () => {
     const adapter = createAxiosHttpOverWebsocketAdapter();
+    const raw = ' {"id":18446744073709551615,"n":1.000}\n';
     const config: any = {
       url: 'https://example.com/read?x=%2B+%20',
       method: 'POST',
       headers: {},
-      data: ' {"id":18446744073709551615,"n":1.000}\n',
+      data: '{"b":"1.000","a":{"c":[1,2.5]}}',
     };
     const prepared = await adapter.prepare(config);
-    mockWs.replyTo = (sent) =>
-      mockWs.emitter.emit('sub:' + sent.nonce, { data_raw: config.data, status: 200, headers: {} });
+    mockWs.replyTo = (sent) => mockWs.emitter.emit('sub:' + sent.nonce, { data_raw: raw, status: 200, headers: {} });
     const response = await prepared.bind(config).dispatch();
-    expect(mockWs.sentMessages[0].arg.data).toBe(config.data);
-    expect(response.data).toBe(config.data);
+    expect(JSON.stringify(mockWs.sentMessages[0].arg.data)).toBe(config.data);
+    expect(response.data).toBe(raw);
     expect(mockWs.sentMessages[0]).toMatchObject({ format: 'raw', accept_encoding: ['gzip'], accept_binary: true });
     adapter.dispose();
   });
@@ -217,6 +217,47 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
       adapter.dispose();
       vi.useRealTimers();
     }
+  });
+
+  it('sends a sorted form body as a map', async () => {
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const config: any = {
+      url: 'https://example.com/w',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      data: 'quantity=1&signature=abc&symbol=BTC+USDT',
+    };
+    const prepared = await adapter.prepare(config);
+    prepared.bind(config).dispatch().catch(() => {});
+    expect(mockWs.sentMessages[0].arg.data).toEqual({ quantity: '1', signature: 'abc', symbol: 'BTC USDT' });
+    adapter.dispose();
+  });
+
+  it.each([
+    ['a JSON array', '[{"a":1}]', {}],
+    ['a number the parser would change', '{"n":1.000}', {}],
+    ['a large integer', '{"id":18446744073709551615}', {}],
+    ['spacing', '{"a": 1}', {}],
+    ['an integer-like key reordered', '{"b":1,"1":2}', {}],
+    ['a signed empty object', '{}', {}],
+    ['a form string under no form type', 'a=1&b=2', {}],
+    ['an unsorted form', 'symbol=BTC&quantity=1', { 'content-type': 'application/x-www-form-urlencoded' }],
+  ])('refuses %s before sending, since the venue could not receive the signed bytes', async (_label, data, headers) => {
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const config: any = { url: 'https://example.com/w', method: 'POST', headers, data };
+    const prepared = await adapter.prepare(config);
+    expect(() => prepared.bind(config)).toThrow(expect.objectContaining({ code: 'HTTP_PREPARATION_UNSUPPORTED' }));
+    expect(mockWs.sentMessages).toHaveLength(0);
+    adapter.dispose();
+  });
+
+  it('sends no body for an empty one', async () => {
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const config: any = { url: 'https://example.com/r', method: 'POST', headers: {}, data: '' };
+    const prepared = await adapter.prepare(config);
+    prepared.bind(config).dispatch().catch(() => {});
+    expect(mockWs.sentMessages[0].arg.data).toBeUndefined();
+    adapter.dispose();
   });
 
   it('attaches caller config (with custom keys + headers) to the resolved tunnel response', async () => {

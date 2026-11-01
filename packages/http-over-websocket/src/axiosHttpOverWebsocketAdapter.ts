@@ -679,7 +679,7 @@ const createAxiosHttpOverWebsocketAdapter = (
 
             const data = legacy
               ? parseWebsocketData(customParser || JSON.parse, websocketRequest)
-              : websocketRequest.data;
+              : managedTunnelBody(websocketRequest);
             const framePacket = {
               type: 'rpc.http',
               rpc_version: TRADE_TUNNEL_RPC_VERSION,
@@ -822,6 +822,44 @@ const createAxiosHttpOverWebsocketAdapter = (
     },
   });
 };
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * tradetunnel takes `arg.data` as a map and serializes it again (JSON in order, a form
+ * with its keys sorted), so a signed body travels as an object only when those bytes
+ * come back identical. Anything else is refused here, before it is sent.
+ */
+function managedTunnelBody(websocketRequest: { data?: unknown; headers: Record<string, string> }) {
+  const body = websocketRequest.data;
+  if (body === undefined || body === '') return undefined;
+  const contentType = Object.entries(websocketRequest.headers).find(
+    ([key]) => key.toLowerCase() === 'content-type',
+  )?.[1];
+  let parsed: Record<string, unknown> | undefined;
+  let serialized: string | undefined;
+  if (typeof body === 'string' && contentType?.includes('application/x-www-form-urlencoded')) {
+    parsed = Object.fromEntries(new URLSearchParams(body));
+    const sorted = Object.keys(parsed).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    serialized = new URLSearchParams(sorted.map((key) => [key, parsed![key] as string])).toString();
+  } else if (typeof body === 'string') {
+    try {
+      const value: unknown = JSON.parse(body);
+      if (isPlainObject(value)) {
+        parsed = value;
+        serialized = JSON.stringify(value);
+      }
+    } catch {
+      // Not JSON: refused below.
+    }
+  }
+  // An empty map sends no body at all, so it cannot match a signed `{}` either.
+  if (!parsed || serialized !== body || Object.keys(parsed).length === 0) {
+    throw new TradeTunnelPreparationError('HTTP_PREPARATION_UNSUPPORTED');
+  }
+  return parsed;
+}
 
 function parseWebsocketData(parser: (str: string) => any, websocketRequest: any) {
   let rawData = websocketRequest.data;
