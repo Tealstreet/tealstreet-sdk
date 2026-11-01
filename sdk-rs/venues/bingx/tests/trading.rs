@@ -35,6 +35,7 @@ struct TestVenue {
 impl Venue for TestVenue {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.trading.set_min_order_value("BTC-USDT", 2.0);
         cx.store.set_markets(vec![market()]);
         cx.store.set_tickers(vec![Ticker {
             id: "BTC-USDT".into(),
@@ -1707,4 +1708,27 @@ fn signature_refused_cancel_replace_has_no_outcome_and_no_resend() {
         r#"{"code":100001,"msg":"Signature verification failed"}"#,
         Some(safe_cex_engine::ErrorKind::AuthInvalid),
     );
+}
+
+fn cheap_limit(reduce_only: bool) -> PlaceOrderOpts {
+    serde_json::from_value(serde_json::json!({
+        "symbol": "BTCUSDT", "type": "limit", "side": "sell", "amount": 1.0, "price": 1.0, "reduceOnly": reduce_only
+    }))
+    .unwrap()
+}
+
+#[test]
+fn an_order_below_the_venue_minimum_value_is_refused_here_but_a_close_is_not() {
+    let mut h = Harness::new(None);
+    h.place(vec![cheap_limit(false)]);
+    assert!(h.requests.is_empty());
+    assert!(
+        format!("{:?}", (&h.failures, &h.done)).contains("below the BingX minimum of 2 USDT"),
+        "{:?}",
+        (&h.failures, &h.done)
+    );
+
+    let mut h = Harness::new(None);
+    h.place(vec![cheap_limit(true)]);
+    assert_eq!(h.requests.len(), 1, "{:?}", h.failures);
 }

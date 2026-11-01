@@ -144,6 +144,8 @@ pub struct Trading {
     pending_observed: HashMap<String, (String, String, bool, String)>,
     /// Frame-fed: the data source knows the position mode (VENUE_STATE).
     mode_known: bool,
+    /// tradeMinUSDT by contract id. Market limits carry no value minimum.
+    min_order_value: HashMap<String, f64>,
 }
 
 #[derive(Deserialize)]
@@ -920,6 +922,10 @@ impl Trading {
         Ok(job)
     }
 
+    pub fn set_min_order_value(&mut self, id: &str, value: f64) {
+        self.min_order_value.insert(id.to_owned(), value);
+    }
+
     fn format(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Vec<Step>, String> {
         let market = cx
             .store
@@ -1023,6 +1029,14 @@ impl Trading {
         };
         if price.is_some_and(|p| !p.is_finite() || p <= 0.0) {
             return Err("Order price rounds to zero".into());
+        }
+        // Closes stay out: nothing says the venue holds a reduce to this, and a stuck close is worse.
+        let min_value = self.min_order_value.get(&market.id).copied().unwrap_or(0.0);
+        let reference = price.or_else(|| cx.store.ticker(&o.symbol).map(|t| t.last));
+        if !closing && reference.is_some_and(|p| p > 0.0 && amount * p < min_value) {
+            return Err(format!(
+                "Order value is below the BingX minimum of {min_value} USDT"
+            ));
         }
         let kind = match o.kind {
             OrderType::Market => "MARKET",
