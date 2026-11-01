@@ -56,8 +56,6 @@ pub enum Pending {
         failed: bool,
     },
 }
-const FEED_REFUSED_WAIT_MS: f64 = 20_000.0;
-const FEED_REFUSED_NOTICE: &str = "BloFin live WebSocket connection failed to establish. Historical candles may still load, but live charts and order books will not update. Check your network, VPN, firewall, or browser extensions, then reload Tealstreet.";
 #[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
@@ -82,9 +80,6 @@ pub struct Blofin {
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
-    /// Armed while the public feed has not opened; a browser sees a 403 upgrade only as silence.
-    feed_refused_timer: Option<TimerId>,
-    feed_refused_noticed: bool,
     startup: PublicRetries,
     // Instrument ids rejected as malformed; owned exposure there holds the snapshot.
     malformed_markets: HashSet<String>,
@@ -163,8 +158,6 @@ impl Blofin {
             account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
-            feed_refused_timer: None,
-            feed_refused_noticed: false,
             startup: Default::default(),
             malformed_markets: HashSet::new(),
             reread_stalls: 0,
@@ -1044,12 +1037,6 @@ impl Venue for Blofin {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.feed_refused_timer == Some(timer) {
-            self.feed_refused_timer = None;
-            self.feed_refused_noticed = true;
-            cx.notice(Level::Error, code::WS_DISCONNECTED, FEED_REFUSED_NOTICE);
-            return;
-        }
         if let Some(read) = self.startup.on_timer(timer) {
             if read == DiscoveryRead::Markets {
                 self.start(cx);

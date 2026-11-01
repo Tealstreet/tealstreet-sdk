@@ -1394,7 +1394,7 @@ fn feed_refused_notices(h: &mut Harness) -> usize {
     }
     h.collect_at(20_000.);
     format!("{:?}", h.actions)
-        .matches("live WebSocket connection failed")
+        .matches("Live WebSocket connection failed")
         .count()
 }
 
@@ -1411,4 +1411,20 @@ fn a_public_feed_that_opens_says_nothing() {
     h.handle(1., Event::WsOpened { socket });
     h.collect();
     assert_eq!(feed_refused_notices(&mut h), 0);
+}
+
+#[test]
+fn an_outage_says_so_only_once() {
+    let mut h = Harness::new();
+    let socket = public(&h);
+    assert_eq!(feed_refused_notices(&mut h), 1);
+    h.actions.clear();
+    h.handle(20_001., Event::WsClosed { socket, code: 1006 });
+    h.collect_at(20_001.);
+    assert_eq!(
+        format!("{:?}", h.actions)
+            .matches("Live WebSocket connection failed")
+            .count(),
+        0
+    );
 }

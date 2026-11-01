@@ -159,6 +159,8 @@ pub mod code {
     // Not counted. Hosts and apps match these codes, never message text.
     /// A socket dropped and the venue is reconnecting it.
     pub const WS_DISCONNECTED: &str = "ws.disconnected";
+    /// A public socket has not opened in 20 s; a browser sees a refused upgrade only as this.
+    pub const PUBLIC_FEED_UNAVAILABLE: &str = "ws.public_unavailable";
     /// A private or user-data stream could not be established or kept alive.
     pub const STREAM_UNAVAILABLE: &str = "stream.unavailable";
     /// A frame or response could not be decoded and was ignored.
