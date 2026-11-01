@@ -109,6 +109,8 @@ struct OrderBatch {
     markets: VecDeque<String>,
     orders: Vec<Order>,
 }
+const STREAMED_POLL_MS: f64 = 5_000.0;
+const RATE_LIMITED_POLL_HOLD_MS: f64 = 30_000.0;
 #[derive(Default)]
 pub struct Account {
     pub account_index: Option<u64>,
@@ -137,6 +139,8 @@ pub struct Account {
     orders_again: bool,
     batch: Option<OrderBatch>,
     sync: Option<TimerId>,
+    polls_held_until: f64,
+    polled_at: f64,
     heal: Option<TimerId>,
     seen_fills: HashSet<String>,
     fill_queue: VecDeque<String>,
@@ -1209,8 +1213,20 @@ impl Lighter {
         }
         if self.account.sync == Some(timer) {
             self.account.sync = Some(cx.set_poll_timer(2_000.0));
-            self.refresh_account(cx);
-            self.refresh_orders(cx);
+            // Two reads every 2 s fill Lighter's budget, and a close then gets refused.
+            let cadence = if self.account.connection.open {
+                STREAMED_POLL_MS
+            } else {
+                0.0
+            };
+            if !self.trade_running()
+                && cx.now >= self.account.polls_held_until
+                && cx.now - self.account.polled_at >= cadence
+            {
+                self.account.polled_at = cx.now;
+                self.refresh_account(cx);
+                self.refresh_orders(cx);
+            }
             self.refresh_limits(cx);
             return true;
         }
@@ -2109,6 +2125,9 @@ impl Lighter {
         response: Response<'_>,
     ) {
         let status = serde_json::from_str::<Status<'_>>(response.body).ok();
+        if matches!(response.status, 405 | 429) {
+            self.account.polls_held_until = cx.now + RATE_LIMITED_POLL_HOLD_MS;
+        }
         let ok = (200..300).contains(&response.status)
             && (status.as_ref().is_some_and(Status::valid)
                 || response.body.trim_start().starts_with('['));

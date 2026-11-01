@@ -65,6 +65,18 @@ pub enum Pending {
     },
 }
 
+impl Pending {
+    fn reads_account_list(&self) -> bool {
+        matches!(
+            self,
+            Self::Account {
+                request: account::Request::Orders(_) | account::Request::Positions { .. },
+                ..
+            }
+        )
+    }
+}
+
 pub enum Discovered {
     Markets(Vec<Market>),
     Tickers(Vec<Ticker>),
@@ -963,6 +975,15 @@ impl Venue for BitgetFutures {
                     Discovered::Markets(rows) => rows.is_empty(),
                     Discovered::Tickers(rows) => rows.is_empty(),
                 };
+                // A product with no contracts cannot appear by retrying.
+                if empty && !tickers && self.inverse() {
+                    let _ = cx.finish_http_context(&context);
+                    cx.startup_failed(
+                        safe_cex_engine::VenueError::new("Bitget lists no inverse contracts")
+                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
+                    );
+                    return;
+                }
                 if empty {
                     let _ = cx.finish_http_context(&context);
                     let message = if tickers {
@@ -1041,13 +1062,7 @@ impl Venue for BitgetFutures {
         let refused = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
             .ok()
             .is_some_and(|e| e.code.0.is_some_and(|code| code != 0.0));
-        let empty_account_list = matches!(
-            &pending,
-            Pending::Account {
-                request: account::Request::Orders(_) | account::Request::Positions { .. },
-                ..
-            }
-        ) && wire::null_list(response.body);
+        let empty_account_list = pending.reads_account_list() && wire::null_list(response.body);
         let empty_history =
             matches!(&pending, Pending::History(_)) && wire::null_history(response.body);
         if refused || empty_account_list || empty_history {

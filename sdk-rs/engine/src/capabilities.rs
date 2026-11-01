@@ -57,6 +57,8 @@ pub struct Capabilities {
     pub inverse_closed_positions: bool,
     /// Signed account-wide absolute cancellation scheduling (Hyperliquid perps).
     pub schedule_cancel: bool,
+    /// Order history answers only per symbol; a no-symbol read proves nothing.
+    pub order_history_needs_symbol: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -186,6 +188,7 @@ impl Capabilities {
         isolated_book_subscriptions: false,
         inverse_closed_positions: false,
         schedule_cancel: false,
+        order_history_needs_symbol: false,
     };
 
     /// No history axis: fills, orders and income are all unavailable.
@@ -233,6 +236,7 @@ impl Capabilities {
             self.isolated_book_subscriptions,
             self.inverse_closed_positions,
             self.schedule_cancel,
+            self.order_history_needs_symbol,
         ]
         .iter()
         .enumerate()
@@ -303,6 +307,7 @@ mod tests {
             isolated_book_subscriptions: true,
             inverse_closed_positions: true,
             schedule_cancel: true,
+            order_history_needs_symbol: true,
             ..Capabilities::NO_HISTORY
         };
         let mut w = FrameWriter::new(vec![], 0.0);
@@ -313,7 +318,7 @@ mod tests {
         assert_eq!(payload.len(), 8);
         assert_eq!(
             u32::from_le_bytes(payload[..4].try_into().unwrap()),
-            (0x1ff << 16) | (1 << 25)
+            (0x1ff << 16) | (3 << 25)
         );
         assert_eq!(
             u32::from_le_bytes(payload[4..].try_into().unwrap()),

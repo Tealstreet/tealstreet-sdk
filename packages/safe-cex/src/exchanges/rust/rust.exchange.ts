@@ -2013,7 +2013,7 @@ export class RustEngineExchange extends BaseExchange {
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
     this.emitter.emit('engine-event', event);
     if (event.level === 'error')
-      this.emitAndLogError(event.message, undefined, {
+      this.emitAndLogError(event.code === 'ws.public_unavailable' ? `${exchangeMetadata[this.name]?.prettyName ?? this.name}: ${event.message}` : event.message, undefined, {
         engineEvent: event,
         classified: engineEventClassified(event),
       });

@@ -274,6 +274,35 @@ fn partial_drag_cancels_before_replacing_and_projects_raw_price_without_changing
 }
 
 #[test]
+fn a_refused_replacement_names_the_lost_stop() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "IndexPrice",
+        false,
+        true,
+    );
+    amend(&mut h, Some(100.0), None);
+    let cancel = h.take(profile.cancel_path());
+    h.reply(cancel.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+    let replacement = h.take("/v5/position/trading-stop");
+    h.reply(
+        replacement.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"StopLoss would trigger immediately","result":{}}"#,
+    );
+    let error = h.result(91).unwrap().as_ref().unwrap_err();
+    assert!(
+        error.contains(profile.symbol()) && error.contains("long position has no stop"),
+        "{error}"
+    );
+}
+
+#[test]
 fn partial_same_kind_keeps_supported_trigger_and_uses_destination_defaults_otherwise() {
     for profile in PROFILES {
         for kind in ["StopLoss", "TakeProfit"] {
@@ -402,7 +431,7 @@ fn a_replacement_quantity_rounding_to_zero_is_refused_not_turned_into_full() {
 }
 
 #[test]
-fn partial_amount_only_replaces_shared_family_but_inverse_keeps_its_distinct_fallback() {
+fn partial_amount_only_replaces_shared_family_but_inverse_refuses() {
     for profile in PROFILES {
         let mut h = ready(profile);
         seed(
@@ -415,26 +444,19 @@ fn partial_amount_only_replaces_shared_family_but_inverse_keeps_its_distinct_fal
             true,
         );
         amend(&mut h, None, Some(9.234));
-        let request = if profile.variant == Variant::Inverse {
-            assert!(!h.has_request(profile.cancel_path()));
-            let request = h.take("/v5/position/trading-stop");
-            serde_json::from_str::<StopWrite>(body(&request)).unwrap()
-        } else {
-            replacement(&mut h, profile)
-        };
+        // Live: inverse sent a body with no fields and got 10001; nothing is sent now.
         if profile.variant == Variant::Inverse {
-            assert!(request.tpsl_mode.is_none());
-            assert!(request.stop_loss.is_none());
-            assert!(request.sl_size.is_none());
-            assert!(request.sl_trigger_by.is_none());
-        } else {
-            assert_eq!(request.stop_loss.as_deref(), Some("90"));
-            assert_eq!(
-                request.sl_size.as_deref(),
-                Some(if profile.inverse() { "9" } else { "9.234" })
-            );
-            assert_eq!(request.sl_trigger_by.as_deref(), Some("LastPrice"));
+            assert!(!h.has_request("/v5/position/trading-stop"));
+            assert!(h.result(91).unwrap().is_err());
+            continue;
         }
+        let request = replacement(&mut h, profile);
+        assert_eq!(request.stop_loss.as_deref(), Some("90"));
+        assert_eq!(
+            request.sl_size.as_deref(),
+            Some(if profile.inverse() { "9" } else { "9.234" })
+        );
+        assert_eq!(request.sl_trigger_by.as_deref(), Some("LastPrice"));
     }
 }
 
@@ -742,6 +764,10 @@ fn partial_fallback_preserves_optional_raw_size_and_does_not_switch_to_full() {
             }
             h.engine.store_mut().set_tickers(tickers);
             amend(&mut h, price, amount);
+            if profile.variant == Variant::Inverse && price.is_none() {
+                assert!(!h.has_request("/v5/position/trading-stop"));
+                continue;
+            }
             let request = h.take("/v5/position/trading-stop");
             let request: StopWrite = serde_json::from_str(body(&request)).unwrap();
             assert_eq!(request.stop_loss.as_deref(), level);

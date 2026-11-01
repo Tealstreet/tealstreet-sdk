@@ -1378,3 +1378,53 @@ fn a_pending_removal_followed_by_renewal_restores_the_book_subscription() {
         "renewal must survive the pending removal: {live:?}"
     );
 }
+
+fn feed_refused_notices(h: &mut Harness) -> usize {
+    let timers: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms >= 20_000. => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    h.actions.clear();
+    for timer in timers {
+        h.handle(20_000., Event::TimerFired { timer });
+    }
+    h.collect_at(20_000.);
+    format!("{:?}", h.actions)
+        .matches("Live WebSocket connection failed")
+        .count()
+}
+
+#[test]
+fn a_public_feed_that_never_opens_says_so_once() {
+    let mut h = Harness::new();
+    assert_eq!(feed_refused_notices(&mut h), 1);
+}
+
+#[test]
+fn a_public_feed_that_opens_says_nothing() {
+    let mut h = Harness::new();
+    let socket = public(&h);
+    h.handle(1., Event::WsOpened { socket });
+    h.collect();
+    assert_eq!(feed_refused_notices(&mut h), 0);
+}
+
+#[test]
+fn an_outage_says_so_only_once() {
+    let mut h = Harness::new();
+    let socket = public(&h);
+    assert_eq!(feed_refused_notices(&mut h), 1);
+    h.actions.clear();
+    h.handle(20_001., Event::WsClosed { socket, code: 1006 });
+    h.collect_at(20_001.);
+    assert_eq!(
+        format!("{:?}", h.actions)
+            .matches("Live WebSocket connection failed")
+            .count(),
+        0
+    );
+}

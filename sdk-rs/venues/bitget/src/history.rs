@@ -56,6 +56,18 @@ enum Row {
     Income(Income),
     Trade(Trade),
 }
+fn oldest_kept(now: f64) -> f64 {
+    now - 90.0 * DAY + 60_000.0
+}
+fn query_from(query: &Query) -> Option<f64> {
+    match query {
+        Query::Fills { from_ms, .. }
+        | Query::OrderHistory { from_ms, .. }
+        | Query::Income { from_ms, .. } => *from_ms,
+        _ => None,
+    }
+}
+
 impl Row {
     fn identity(&self) -> String {
         match self {
@@ -281,15 +293,24 @@ impl BitgetFutures {
         if matches!((from,to),(Some(a),Some(b)) if a>b) {
             return Err("invalid Bitget history range");
         }
+        // Older than 90 days the venue refuses the whole read (40934); its data ends there.
+        let from = from.map(|a| if public { a } else { a.max(oldest_kept(now)) });
         if let (Some(a), Some(b)) = (from, to) {
-            paging::windows(a, b, 30.0 * DAY - 1.0, WindowOrder::OldestFirst, 1000)
-                .map(|windows| {
-                    windows
-                        .into_iter()
-                        .map(|(a, b)| (Some(a), Some(b)))
-                        .collect()
-                })
-                .ok_or("Bitget history range exceeds 1000 windows")
+            paging::windows(
+                a,
+                b.max(a + 1.0),
+                30.0 * DAY - 1.0,
+                WindowOrder::OldestFirst,
+                1000,
+            )
+            .map(|windows| {
+                // The venue refuses a start equal to its end (20001).
+                windows
+                    .into_iter()
+                    .map(|(a, b)| (Some(a), Some(if a == b { b + 1.0 } else { b })))
+                    .collect()
+            })
+            .ok_or("Bitget history range exceeds 1000 windows")
         } else {
             Ok(VecDeque::from([(from, to)]))
         }
@@ -323,13 +344,17 @@ impl BitgetFutures {
                 return;
             }
         };
-        let completion = match ReadCompletion::from_context(cx, command, root.clone()) {
+        let mut completion = match ReadCompletion::from_context(cx, command, root.clone()) {
             Ok(completion) => completion,
             Err(error) => {
                 let _ = cx.fail_context(&root, error.read_venue_error());
                 return;
             }
         };
+        if !public && query_from(&query).is_some_and(|from| from < oldest_kept(cx.now)) {
+            completion
+                .incomplete("Bitget keeps 90 days; the older part of this range was not read");
+        }
         let window = windows.pop_front().expect("one window");
         let request = Request {
             leg: None,

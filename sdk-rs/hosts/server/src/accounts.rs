@@ -473,8 +473,9 @@ fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, St
         inputs.public_data_only = Some(true);
         inputs.has_key = false;
     }
-    let base_url = resolve::rest_base_url(venue, init.testnet.unwrap_or(false))
-        .map_err(|error| error.to_string())?;
+    let base_url = resolve::rest_base_url(venue, init.testnet.unwrap_or(false)).map_err(|_| {
+        format!("{venue} cannot run on the Hosted server. Turn Hosted off to use this account.")
+    })?;
     resolve::resolve_routing_plan(venue, &inputs, base_url, Provider::Tealstreet)
         .map_err(|error| error.to_string())
 }
@@ -2240,6 +2241,20 @@ pub(crate) mod tests {
                 assert!(algos.try_recv().is_err(), "never disposed");
             })
             .await;
+    }
+
+    #[test]
+    fn a_venue_with_no_hosted_origin_is_refused_in_plain_words() {
+        let init = InitPayload {
+            account_name: "a".into(),
+            exchange_name: "asterdex".into(),
+            ..InitPayload::default()
+        };
+        let refusal = routing_plan(&init, true).unwrap_err();
+        assert_eq!(
+            refusal,
+            "asterdex cannot run on the Hosted server. Turn Hosted off to use this account."
+        );
     }
 
     #[test]

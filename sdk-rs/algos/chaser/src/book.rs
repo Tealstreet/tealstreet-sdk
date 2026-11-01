@@ -356,6 +356,8 @@ impl ChaserBook {
             "already filled",
             "never placed",
             "not exist",
+            // The engine holds no such row: the cancel succeeded or the order finished.
+            "Order not found",
         ]
         .iter()
         .any(|phrase| error.message.contains(phrase));
@@ -486,9 +488,18 @@ impl ChaserBook {
                 symbol: symbol.into(),
             })
             .collect();
+        // A row the store lost (a stale snapshot, a reconnect) still rests at the
+        // venue: name it by symbol, or a by-id cancel is refused as unknown.
+        let unlisted = ids.iter().any(|id| self.store().order(id).is_none());
         let capabilities = self.cx.port.capabilities();
-        self.command(|command| safe_cex_algos::cancel_command(&capabilities, command, orders))
-            .await
+        self.command(|command| {
+            if unlisted {
+                Command::CancelOrdersWithSymbols { command, orders }
+            } else {
+                safe_cex_algos::cancel_command(&capabilities, command, orders)
+            }
+        })
+        .await
     }
 
     /// The venue's fills for `ids`, applied; a fill the account had not shown
@@ -1109,6 +1120,22 @@ impl ChaserBook {
             };
             if let Err(error) = &placed {
                 last_refusal = Some(error.message.clone());
+                // A refused key stays refused: another try only repeats the request.
+                if ids.is_empty()
+                    && !lost
+                    && matches!(
+                        error.kind,
+                        Some(ErrorKind::AuthInvalid | ErrorKind::AuthPermission)
+                    )
+                {
+                    self.error(&format!(
+                        "Chaser for {} stopped: the venue refused this account's key: {}",
+                        chase.options.symbol, error.message
+                    ));
+                    chase.mark_complete("The venue refused this account's key");
+                    self.check_and_mark_if_complete(chase);
+                    return Vec::new();
+                }
             }
             let mut unconfirmed = lost;
             if let Some(client_order_id) = client_order_id.as_deref()

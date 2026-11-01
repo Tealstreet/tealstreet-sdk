@@ -356,13 +356,13 @@ fn edit_bracket_of_limit_filled(filled: f64) -> String {
 #[test]
 fn a_partly_filled_limit_losing_its_bracket_says_the_position_is_unprotected() {
     let error = edit_bracket_of_limit_filled(0.5);
-    assert!(error.contains("Your BTCUSDT stop is gone"), "{error}");
+    assert!(error.contains("position has no stop"), "{error}");
 }
 
 #[test]
 fn an_unfilled_limit_losing_its_bracket_does_not() {
     let error = edit_bracket_of_limit_filled(0.0);
-    assert!(!error.contains("unprotected"), "{error}");
+    assert!(!error.contains("has no stop"), "{error}");
 }
 
 #[test]

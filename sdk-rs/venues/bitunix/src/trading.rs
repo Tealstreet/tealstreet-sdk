@@ -1921,12 +1921,26 @@ impl BitunixFutures {
             message: "",
         });
         let mut refused = false;
-        let grant = match cx.classify_write(
-            &request.context,
-            &codes::BITUNIX,
-            native.as_ref(),
-            error.message.clone(),
-        ) {
+        // Live: a batch answered 20003 with its orders resting. Only 10007's signature refusal,
+        // which the venue resends past, proves a batch sent nothing.
+        let batch_unproven = matches!(request.step.call, Call::Place { batch: true, .. })
+            && code.is_some_and(|code| code != 10007);
+        let mut error = error;
+        if batch_unproven {
+            error = error.outcome(Outcome::Unknown);
+        }
+        let classified = if batch_unproven {
+            Err(())
+        } else {
+            cx.classify_write(
+                &request.context,
+                &codes::BITUNIX,
+                native.as_ref(),
+                error.message.clone(),
+            )
+            .map_err(|_| ())
+        };
+        let grant = match classified {
             Ok(fact) => {
                 refused = fact.verdict().is_refusal();
                 cx.http_write_fact(

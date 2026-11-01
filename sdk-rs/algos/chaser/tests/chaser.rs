@@ -447,6 +447,41 @@ async fn a_venue_without_symbol_cancel_requotes_by_id() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_refused_key_ends_the_chase_on_its_first_placement() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        let tries = Rc::new(std::cell::Cell::new(0));
+        let seen = tries.clone();
+        *port.responder.borrow_mut() = Box::new(move |command| match command {
+            Command::PlaceOrders { .. } => {
+                seen.set(seen.get() + 1);
+                Err(VenueError::new("User or API Wallet does not exist")
+                    .kind(ErrorKind::AuthInvalid)
+                    .outcome(Outcome::NotSent))
+            }
+            _ => Ok("[]".into()),
+        });
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(30_000).await;
+        assert_eq!(tries.get(), 1);
+        assert!(
+            port.errors()
+                .iter()
+                .any(|error| error.contains("does not exist"))
+        );
+        assert_eq!(port.completes().len(), 1);
+        assert!(
+            factory
+                .book()
+                .active_chasers()
+                .iter()
+                .all(|chaser| chaser.is_stopped)
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_refused_requote_cancel_stops_the_chase_visibly_and_places_nothing_more() {
     local(async {
         let port = FakePort::new("bybit");
@@ -1486,6 +1521,30 @@ async fn hyperliquid_counts_a_row_fill_and_its_fill_event_once() {
                 .unwrap()
                 .remaining_size,
             0.6
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_with_no_store_row_cancels_by_symbol_on_a_by_id_venue() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.without_symbol_cancel();
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.store.borrow_mut().orders.clear();
+        stop(&factory, &cx);
+        settle(100).await;
+        let commands = port.commands.borrow();
+        assert!(
+            commands.iter().any(|c| matches!(
+                c,
+                Command::CancelOrdersWithSymbols { orders, .. }
+                    if orders[0].id == "o1" && orders[0].symbol == "BTCUSDT"
+            )),
+            "{commands:?}"
         );
     })
     .await;

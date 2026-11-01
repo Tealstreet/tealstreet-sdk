@@ -792,6 +792,12 @@ fn encode_query(
     rows: Vec<HistoryRow>,
 ) -> Result<String, VenueError> {
     let limit = match query {
+        // A window with no limit asks for all of it; a default here would close it as covered.
+        Query::Fills {
+            limit,
+            from_ms: Some(_),
+            ..
+        } => limit.map(|n| n.clamp(1, 500) as usize),
         Query::Fills { limit, .. } => Some(limit.unwrap_or(50).clamp(1, 500) as usize),
         Query::OrderHistory { limit, .. }
         | Query::Income { limit, .. }

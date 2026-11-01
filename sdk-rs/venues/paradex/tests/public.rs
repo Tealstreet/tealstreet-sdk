@@ -12,7 +12,10 @@ fn sequential_streamed_market_seed_filters_options_spot_and_inactive() {
     let m = h.e.store().market(BTC).unwrap();
     assert_eq!(m.precision.amount, 0.00001);
     assert_eq!(m.precision.price, 0.1);
-    assert_eq!(m.limits.amount.min, 10.);
+    assert_eq!(
+        m.limits.amount.min, 0.,
+        "min_notional is dollars, not a size"
+    );
     assert_eq!(m.limits.leverage.max, 50.);
     assert_eq!(
         h.e.store()

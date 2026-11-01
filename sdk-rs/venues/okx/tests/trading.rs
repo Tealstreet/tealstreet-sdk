@@ -463,6 +463,52 @@ fn replacement_never_runs_after_cancellation_rejection() {
     assert_eq!(e.store().order("91_sl").unwrap().status, OrderStatus::Open);
 }
 
+/// The cancel landed and the replacement was refused: the stop is gone.
+#[test]
+fn a_stop_whose_replacement_is_refused_is_gone_and_says_so() {
+    use safe_cex_engine::model::*;
+    let mut e = trading_engine();
+    e.store_mut()
+        .upsert_order(stored("91_sl", OrderType::StopLoss));
+    e.handle(
+        5.0,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "91_sl".into(),
+            price: Some(37000.0),
+            amount: None,
+        }),
+    );
+    let out = prepared(&mut e, 5.0);
+    reply(
+        &mut e,
+        http(&out),
+        &envelope(r#"{"algoId":"91","sCode":"0","sMsg":""}"#),
+        6.0,
+    );
+    let out = prepared(&mut e, 6.0);
+    assert!(matches!(http(&out), Action::Http(r) if r.url.ends_with("/order-algo")));
+    reply(
+        &mut e,
+        http(&out),
+        r#"{"code":"1","msg":"","data":[{"algoId":"","sCode":"51277","sMsg":"TP trigger price cannot be lower than the last price"}]}"#,
+        7.0,
+    );
+    let out = prepared(&mut e, 7.0);
+    let error = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("a failure");
+    assert!(error.message.contains("has no stop"), "{}", error.message);
+    assert_eq!(
+        e.store().order("91_sl").unwrap().status,
+        OrderStatus::Canceled
+    );
+}
+
 #[test]
 fn terminal_ws_status_survives_a_late_amend_error() {
     use safe_cex_engine::model::*;
