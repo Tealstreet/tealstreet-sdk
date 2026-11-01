@@ -126,6 +126,7 @@ pub(crate) struct Public {
     subscriptions: HashMap<u64, Subscription>,
     retries: Vec<(TimerId, String, u8)>,
     seed_retry: safe_cex_engine::startup::Backoff<bool>,
+    failed_market_reads: u32,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     pub(crate) books: HashMap<String, BookState>,
     pub(crate) price_bands: HashMap<String, f64>,
@@ -957,6 +958,7 @@ impl Paradex {
                 invalid: false,
             } => {
                 self.public.seed_retry.succeeded(cx, &true);
+                self.public.failed_market_reads = 0;
                 self.public.price_bands = bands;
                 self.account.excluded_perps = excluded;
                 cx.store.set_markets(rows);
@@ -1083,6 +1085,16 @@ impl Paradex {
             seed @ (Request::Markets { .. } | Request::Tickers { .. }) => {
                 let markets = matches!(seed, Request::Markets { .. });
                 cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
+                if markets {
+                    self.public.failed_market_reads += 1;
+                    if self.public.failed_market_reads == 2 {
+                        cx.notice(
+                            safe_cex_engine::Level::Error,
+                            code::REQUEST_FAILED,
+                            "Paradex market list is unavailable; retrying",
+                        );
+                    }
+                }
                 self.public.seed_retry.failed(cx, markets);
             }
             request @ Request::Candles { .. } => {
