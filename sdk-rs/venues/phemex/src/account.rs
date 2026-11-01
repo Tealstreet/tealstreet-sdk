@@ -810,6 +810,46 @@ impl PhemexPerpetuals {
             request.positions.push(position);
         }
     }
+    /// A symbol-scoped position read: the row's context, or at least its mode
+    /// when a never-traded row carries no usable leverage.
+    pub(crate) fn install_symbol_mode(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        body: &str,
+    ) {
+        #[derive(Deserialize)]
+        struct Positions<'a> {
+            #[serde(borrow)]
+            data: PositionsData<'a>,
+        }
+        #[derive(Deserialize)]
+        struct PositionsData<'a> {
+            #[serde(borrow)]
+            positions: Vec<PositionRow<'a>>,
+        }
+        let Ok(parsed) = serde_json::from_str::<Positions<'_>>(body) else {
+            return;
+        };
+        let Some(row) = parsed
+            .data
+            .positions
+            .iter()
+            .find(|row| row.symbol.eq_ignore_ascii_case(symbol))
+        else {
+            return;
+        };
+        if let Some((context, _)) = row.map(cx.store, self.account.context(symbol)) {
+            self.account.install_context(cx, symbol, context, false);
+        } else if let Some(mode) = match row.pos_mode.as_ref() {
+            "Hedged" => Some(PositionMode::Hedged),
+            "OneWay" => Some(PositionMode::Oneway),
+            _ => None,
+        } {
+            self.account
+                .apply_settings(symbol, None, None, None, Some(mode));
+        }
+    }
     pub(crate) fn account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1466,6 +1506,7 @@ impl PhemexPerpetuals {
                 self.account.uncertainty_overflow = false;
             }
             self.account.order_revision += 1;
+            self.wake_replacements(cx);
             if snapshot {
                 if !safe_snapshot {
                     cx.store.set_orders(cx.store.orders().to_vec());
