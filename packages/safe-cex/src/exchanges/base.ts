@@ -15,7 +15,7 @@ import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
-import { classifiedError, deserializeCommandError, exchangeErrorTags } from '../commandOutcome';
+import { classifiedError, deserializeCommandError, exchangeErrorTags, markErrorReported } from '../commandOutcome';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
@@ -2203,7 +2203,10 @@ export class BaseExchange implements Exchange {
   /** Pre-flight reject: emit first (toast pipeline), then throw. See src/exchanges/CLAUDE.md. */
   protected rejectPreflight(message: string): never {
     this.emitAndLogError(message);
-    throw new Error(message);
+    // Marked so a page forwarding this call to its worker does not report it again.
+    const error = new Error(message);
+    markErrorReported(error);
+    throw error;
   }
 
   // if multiple child WS they will all send reconnect messages, try and only emit once...
