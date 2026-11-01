@@ -430,6 +430,17 @@ impl Chase {
             .retain(|current| current != id);
     }
 
+    /// The venue now shows this order under its own id.
+    pub fn adopt_venue_id(&self, placed: &str, venue_id: &str) {
+        let mut state = self.state.borrow_mut();
+        if let Some(id) = state.current.iter_mut().find(|id| *id == placed) {
+            *id = venue_id.to_owned();
+        }
+        if !state.ever.iter().any(|id| id == venue_id) {
+            state.ever.push(venue_id.to_owned());
+        }
+    }
+
     pub fn take_current(&self) -> Vec<String> {
         std::mem::take(&mut self.state.borrow_mut().current)
     }

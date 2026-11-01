@@ -385,6 +385,29 @@ impl ChaserBook {
         FILL_TRACKED_VENUES.contains(&self.store().venue.as_str())
     }
 
+    /// A venue that answers a placement with its client id (Lighter) later shows
+    /// the order under its own id; the chase follows it there.
+    fn adopt_venue_ids(&self, chase: &Chase) {
+        let adopted: Vec<(String, String)> = {
+            let store = self.store();
+            chase
+                .current()
+                .into_iter()
+                .filter_map(|placed| {
+                    let row = store.orders.iter().find(|order| {
+                        order.symbol == chase.options.symbol
+                            && order.id != placed
+                            && order.client_order_id.as_deref() == Some(placed.as_str())
+                    })?;
+                    Some((placed, row.id.clone()))
+                })
+                .collect()
+        };
+        for (placed, venue_id) in adopted {
+            chase.adopt_venue_id(&placed, &venue_id);
+        }
+    }
+
     fn tracked_orders(&self, chase: &Chase) -> Vec<Order> {
         let current = chase.current();
         self.store()
@@ -634,6 +657,7 @@ impl ChaserBook {
                     }
                 }
                 if change.orders {
+                    book.adopt_venue_ids(&chase);
                     book.apply_replaced_fills(&chase);
                     if chase.placements() != placements {
                         placements = chase.placements();
