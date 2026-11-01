@@ -331,8 +331,13 @@ impl Session {
         {
             // Resumed (or repeated) with what it was built from: a fresh snapshot only.
             self.resnapshot(&init.account_name).await;
-            if let Some(link) = &self.joined[&init.account_name].account.link {
-                link.attach(self.socket, self.outbox());
+            let account = self.joined[&init.account_name].account.clone();
+            if account.link.is_some() {
+                account.sign_through_socket(
+                    self.socket,
+                    self.outbox(),
+                    self.identity.token.clone(),
+                );
             }
             return Ok(());
         }
@@ -532,6 +537,17 @@ impl Session {
                     "this account stopped and is restarting; reload if it does not return",
                     Some("notSent"),
                 );
+            } else if ["chaser:", "twap:"]
+                .iter()
+                .any(|prefix| msg.op.starts_with(prefix))
+            {
+                self.send(envelope::error(
+                    Some(&name),
+                    &format!(
+                        "{} was not run: this account is not connected yet. Try again once it has loaded",
+                        msg.op
+                    ),
+                ));
             }
             return;
         }
@@ -1632,6 +1648,64 @@ mod tests {
                     .expect("a call in the gap is answered");
                 assert!(reply.contains("n1") && reply.contains("stopped"), "{reply}");
                 assert!(reply.contains("notSent"), "{reply}");
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn an_algo_op_on_an_unjoined_account_is_answered() {
+        let registry = crate::accounts::tests::registry();
+        let (out, mut sent, _) = Out::channel(64);
+        let identity = Identity {
+            user: Some("u".into()),
+            token: Some(("t".into(), u64::MAX)),
+            resume_from: None,
+            resumable: true,
+        };
+        let mut session = Session::new(registry, Arc::new(Metrics::default()), identity, out);
+        session
+            .handle(r#"{"t":"msg","d":{"op":"chaser:start","accountName":"acct","data":{}}}"#)
+            .await
+            .ok();
+        let mut frames = Vec::new();
+        while let Ok(frame) = sent.try_recv() {
+            frames.push(frame);
+        }
+        assert!(
+            frames
+                .iter()
+                .any(|f| f.contains("chaser:start was not run") && f.contains("acct")),
+            "{frames:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_repeated_init_moves_signing_with_the_holders_record() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account =
+                    crate::accounts::tests::held_account_running_algos(link, init.fingerprint());
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                let (mut session, _sent) = sign_silent_session(registry);
+                assert!(session.init(init.clone()).await.is_ok());
+                settle().await;
+                crate::accounts::tests::hold_live(&account, u64::MAX - 1, Arc::new(|_| true));
+                assert!(session.init(init).await.is_ok());
+                settle().await;
+                assert_eq!(
+                    crate::accounts::tests::signing_holder(&account),
+                    Some(session.socket)
+                );
             })
             .await;
     }
