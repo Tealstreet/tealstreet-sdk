@@ -26,6 +26,7 @@ const market: Market = {
 };
 const sources: ControlledEngine[] = [];
 let trapStartup = false;
+let refuseStartup = false;
 /** Engines built next link the Rust algos; their `exec` is held, never answered. */
 let algosBuild = false;
 class ControlledEngine implements WasmEngineLike {
@@ -69,6 +70,18 @@ class ControlledEngine implements WasmEngineLike {
   start = () => {
     if (trapStartup) throw new WebAssembly.RuntimeError('startup panic');
     this.started = true;
+    if (refuseStartup) {
+      return JSON.stringify([
+        {
+          op: 'startupFailed',
+          detail: {
+            message: 'Invalid API-key, IP, or permissions for action',
+            kind: 'authInvalid',
+            venueCode: '-2015',
+          },
+        },
+      ]);
+    }
     return '[]';
   };
   command = (json: string) => {
@@ -203,6 +216,7 @@ beforeEach(() => {
   setTwapLockManager(null);
   vi.useFakeTimers();
   trapStartup = false;
+  refuseStartup = false;
   algosBuild = false;
   sources.length = 0;
   vi.spyOn(virtualClock, 'start').mockResolvedValue();
@@ -796,6 +810,18 @@ describe('Rust worker engine ownership', () => {
     expect(sources).toHaveLength(2);
     await first.send({ op: 'dispose' });
     await second.send({ op: 'dispose' });
+  });
+
+  it('reports a key the venue refused during start, through the worker catch', async () => {
+    refuseStartup = true;
+    const { worker, messages } = createWorker();
+    expect(await start(worker)).toBe(false);
+    const errors = messages.filter((m) => m.op === 'error');
+    const startup = errors.find((m) => m.data[1]?.sentryData?.tags?.worker_error_phase === 'startup');
+    expect(startup?.data[0]).toContain('Invalid API-key');
+    expect(startup?.data[1].sendToSentry).toBe(true);
+    expect(startup?.data[1].classified).toMatchObject({ kind: 'authInvalid' });
+    await worker.dispose();
   });
 
   it('does not reconstruct a startup panic and reports its startup failure', async () => {
