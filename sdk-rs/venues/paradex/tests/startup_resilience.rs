@@ -39,8 +39,9 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 action,
                 Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     level: safe_cex_engine::Level::Error,
+                    code,
                     ..
-                }))
+                })) if *code != "request.failed"
             )),
             "public retry must not invalidate account credentials: {actions:?}"
         );
@@ -216,4 +217,57 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
         assert!(engine.store().loaded().markets);
         assert_eq!(engine.store().markets().len(), 2);
     }
+}
+
+fn market_read_notices(failures: usize) -> Vec<safe_cex_engine::LogEvent> {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Paradex::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    engine.start(0.0);
+    let mut now = 0.0;
+    let mut events = Vec::new();
+    for _ in 0..failures {
+        let id = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r.id),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            now,
+            Event::HttpFailed {
+                request: id,
+                error: "timed out",
+            },
+        );
+        let mut timer = None;
+        for action in engine.drain_actions() {
+            match action {
+                Action::Notice(safe_cex_engine::Notice::Event(event)) => events.push(event),
+                Action::SetTimer { timer: t, at_ms } => timer = Some((t, at_ms)),
+                _ => {}
+            }
+        }
+        let (timer, at) = timer.expect("the read retries");
+        now = at;
+        engine.handle(now, Event::TimerFired { timer });
+    }
+    events
+}
+
+#[test]
+fn the_second_failed_market_read_says_so_once_and_keeps_retrying() {
+    let errors = |failures| {
+        market_read_notices(failures)
+            .into_iter()
+            .filter(|e| e.level == safe_cex_engine::Level::Error)
+            .map(|e| e.message)
+            .collect::<Vec<_>>()
+    };
+    assert!(errors(1).is_empty());
+    let errors = errors(4);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("market list") && errors[0].contains("retrying"));
 }
