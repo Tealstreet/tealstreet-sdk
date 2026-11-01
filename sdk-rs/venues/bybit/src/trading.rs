@@ -46,7 +46,14 @@ enum Call {
         fallback: Vec<(String, Vec<OrderIdentityReceipt>)>,
     },
     TradingStop,
-    PartialStop,
+    PartialStop {
+        /// The stop its cancel removed, named if this write then fails.
+        stop: (
+            String,
+            safe_cex_engine::model::OrderSide,
+            safe_cex_engine::model::OrderType,
+        ),
+    },
     Amend,
     Cancel {
         ids: Vec<String>,
@@ -1102,7 +1109,9 @@ impl BybitLinear {
                     receipts: Vec::new(),
                     path: "/v5/position/trading-stop",
                     body,
-                    call: Call::PartialStop,
+                    call: Call::PartialStop {
+                        stop: (order.symbol.clone(), order.side, order.kind),
+                    },
                 }],
             });
             return Ok(job);

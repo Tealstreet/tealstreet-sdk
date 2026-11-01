@@ -362,6 +362,35 @@ impl fmt::Display for VenueError {
 
 impl std::error::Error for VenueError {}
 
+/// What a stop's edit cost: its cancel landed and nothing replaced it. One text for
+/// every venue, because a vanished stop is what the user must act on.
+pub fn stop_gone_text(
+    symbol: &str,
+    side: crate::model::OrderSide,
+    kind: crate::model::OrderType,
+    unknown: bool,
+) -> String {
+    use crate::model::{OrderSide, OrderType};
+    let position = match side {
+        OrderSide::Sell => "long",
+        OrderSide::Buy => "short",
+    };
+    let order = if kind == OrderType::TakeProfit {
+        "take profit"
+    } else {
+        "stop"
+    };
+    if unknown {
+        format!(
+            "Your {symbol} {position} position may have no {order}: the old {order} was canceled and its replacement's outcome is unknown. Check Open Orders"
+        )
+    } else {
+        format!(
+            "Your {symbol} {position} position has no {order}: the old {order} was canceled and its replacement refused"
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -583,6 +612,19 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&error).unwrap(),
             r#"{"message":"Too many requests","kind":"rateLimited","outcome":"notSent","venueCode":"10006","venueMessage":"Too many visits","retryAfterMs":1000.0}"#
+        );
+    }
+
+    #[test]
+    fn a_vanished_stop_names_its_symbol_and_position() {
+        use crate::model::{OrderSide, OrderType};
+        assert_eq!(
+            super::stop_gone_text("BTCUSDT", OrderSide::Sell, OrderType::StopLoss, false),
+            "Your BTCUSDT long position has no stop: the old stop was canceled and its replacement refused"
+        );
+        assert!(
+            super::stop_gone_text("ETHUSDT", OrderSide::Buy, OrderType::TakeProfit, true)
+                .starts_with("Your ETHUSDT short position may have no take profit")
         );
     }
 }

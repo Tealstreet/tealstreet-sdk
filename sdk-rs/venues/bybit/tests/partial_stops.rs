@@ -274,6 +274,35 @@ fn partial_drag_cancels_before_replacing_and_projects_raw_price_without_changing
 }
 
 #[test]
+fn a_refused_replacement_names_the_lost_stop() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "IndexPrice",
+        false,
+        true,
+    );
+    amend(&mut h, Some(100.0), None);
+    let cancel = h.take(profile.cancel_path());
+    h.reply(cancel.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+    let replacement = h.take("/v5/position/trading-stop");
+    h.reply(
+        replacement.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"StopLoss would trigger immediately","result":{}}"#,
+    );
+    let error = h.result(91).unwrap().as_ref().unwrap_err();
+    assert!(
+        error.contains(profile.symbol()) && error.contains("long position has no stop"),
+        "{error}"
+    );
+}
+
+#[test]
 fn partial_same_kind_keeps_supported_trigger_and_uses_destination_defaults_otherwise() {
     for profile in PROFILES {
         for kind in ["StopLoss", "TakeProfit"] {
