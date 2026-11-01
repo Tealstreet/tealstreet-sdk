@@ -20,13 +20,27 @@ impl Credentials {
     }
 }
 
-#[derive(Clone, Serialize)]
-#[serde(untagged)]
+#[derive(Clone)]
 enum Param {
     Text(String),
     Number(f64),
     Integer(u64),
     Boolean(bool),
+}
+
+/// A number goes on the wire as the same text the signature covers: serde would
+/// write 1.0 where the signed query says 1.
+impl Serialize for Param {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Text(text) => serializer.serialize_str(text),
+            Self::Number(_) => serde_json::value::RawValue::from_string(self.text())
+                .map_err(serde::ser::Error::custom)?
+                .serialize(serializer),
+            Self::Integer(value) => serializer.serialize_u64(*value),
+            Self::Boolean(value) => serializer.serialize_bool(*value),
+        }
+    }
 }
 
 impl Param {
@@ -132,4 +146,24 @@ impl Params {
 /// Listen-key requests carry only the API key; every other path is signed.
 pub fn signs(path: &str) -> bool {
     path != "/openApi/user/auth/userDataStream"
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+
+    #[test]
+    fn a_post_body_carries_the_numbers_the_signature_covers() {
+        let params = Params::new()
+            .num("quantity", 1.0)
+            .num("price", 0.0000001)
+            .integer("timestamp", 1_700_000_000_000);
+        let signed = params.query();
+        let (_, _, body) = params.render(Method::Post, "/x", Vec::new());
+        assert_eq!(
+            body.as_deref(),
+            Some(r#"{"price":0.0000001,"quantity":1,"timestamp":1700000000000}"#)
+        );
+        assert_eq!(signed, "price=0.0000001&quantity=1&timestamp=1700000000000");
+    }
 }

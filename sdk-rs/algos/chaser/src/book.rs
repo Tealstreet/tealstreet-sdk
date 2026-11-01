@@ -609,9 +609,9 @@ impl ChaserBook {
                     chase.needs_reconcile.set(true);
                 }
                 if fill_tracked {
-                    let current = chase.current();
+                    let ever = chase.ever();
                     for fill in change.fills.iter().filter(|fill| {
-                        current.contains(&fill.order_id) && fill.symbol == chase.options.symbol
+                        ever.contains(&fill.order_id) && fill.symbol == chase.options.symbol
                     }) {
                         chase.add_fill_amount(&fill.order_id, fill.amount);
                     }
@@ -623,6 +623,7 @@ impl ChaserBook {
                     }
                 }
                 if change.orders {
+                    book.apply_replaced_fills(&chase);
                     if chase.placements() != placements {
                         placements = chase.placements();
                         seen = false;
@@ -654,6 +655,19 @@ impl ChaserBook {
                 chase.mark_dirty(Dirty { orders: change.orders, positions: change.positions, tickers: change.tickers });
             }
         });
+    }
+
+    /// A fill landing on an order already replaced still comes off what is left.
+    fn apply_replaced_fills(&self, chase: &Chase) {
+        let (ever, current) = (chase.ever(), chase.current());
+        let store = self.store();
+        for order in store
+            .orders
+            .iter()
+            .filter(|order| ever.contains(&order.id) && !current.contains(&order.id))
+        {
+            chase.subtract_filled_size(order);
+        }
     }
 
     /// Returns true when the chase is over (all filled or stopped).
@@ -732,12 +746,27 @@ impl ChaserBook {
             return Ok(());
         }
         let done = self.apply_order_fill_state(chase, &orders);
-        if chase.take_fresh_order()
-            && orders
-                .iter()
-                .all(|order| order.status == OrderStatus::Canceled)
-        {
-            chase.bump_tick_distance();
+        let all_canceled = orders
+            .iter()
+            .all(|order| order.status == OrderStatus::Canceled);
+        if chase.take_fresh_order() {
+            if all_canceled {
+                chase.bump_tick_distance();
+            }
+        } else if all_canceled && !done {
+            let rejected = orders.iter().any(|order| {
+                order.extra.as_ref().and_then(|extra| extra.reject_reason)
+                    == Some(RejectReason::PostOnly)
+            });
+            // Not this chase's cancel, or the row would be replaced: Cancel All or the venue.
+            if !rejected {
+                chase.mark_complete("Its order was cancelled outside the chase");
+                self.warn(&format!(
+                    "Chaser for {} stopped: its order was cancelled outside the chase",
+                    chase.options.symbol
+                ));
+                return Ok(());
+            }
         }
         if done {
             return Ok(());
@@ -907,17 +936,54 @@ impl ChaserBook {
             })
     }
 
+    /// Every order of the chase in one read: its orders can number hundreds.
+    async fn chase_fills(
+        &self,
+        chase: &Chase,
+        ids: &[String],
+    ) -> Result<Vec<(String, f64)>, String> {
+        let read = async {
+            let query = Query::Fills {
+                symbol: Some(chase.options.symbol.clone()),
+                order_id: None,
+                from_ms: Some(chase.started_ms - FILLS_FROM_MARGIN_MS),
+                to_ms: None,
+                limit: Some(1000),
+            };
+            let result = self
+                .command(|command| Command::Query { command, query })
+                .await
+                .map_err(|error| error.message)?;
+            let rows: Vec<Execution> =
+                serde_json::from_str(&result).map_err(|error| error.to_string())?;
+            let unit = self.base_per_placement_unit(chase);
+            Ok(ids
+                .iter()
+                .map(|id| {
+                    let total: f64 = rows
+                        .iter()
+                        .filter(|row| &row.order_id == id)
+                        .map(|row| row.qty)
+                        .sum();
+                    (id.clone(), total / unit)
+                })
+                .collect())
+        };
+        safe_cex_algos::executor::timeout(ANSWER_BOUND_MS, read)
+            .await
+            .unwrap_or_else(|_| {
+                Err(format!(
+                    "fills read got no answer in {} s",
+                    ANSWER_BOUND_MS / 1000
+                ))
+            })
+    }
+
     async fn read_filled_quantities(
         &self,
         chase: &Chase,
         ids: &[String],
     ) -> Result<Vec<(String, f64)>, String> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Execution {
-            order_id: String,
-            qty: f64,
-        }
         let mut filled = Vec::new();
         for id in ids {
             let query = Query::Fills {
@@ -1033,7 +1099,13 @@ impl ChaserBook {
                     Ok(ids) => (ids, false),
                     Err(_) => (Vec::new(), true),
                 },
-                Err(error) => (Vec::new(), error.outcome == Some(Outcome::Unknown)),
+                // A split order refused part way: the parts that landed rest.
+                Err(error) => match &error.partial {
+                    Some(partial) if !partial.order_ids.is_empty() => {
+                        (partial.order_ids.clone(), false)
+                    }
+                    _ => (Vec::new(), error.outcome == Some(Outcome::Unknown)),
+                },
             };
             if let Err(error) = &placed {
                 last_refusal = Some(error.message.clone());
@@ -1378,23 +1450,28 @@ impl ChaserBook {
         for (id, filled) in rows {
             chase.set_filled_amount(&id, filled);
         }
+        // A fill during the final cancel, or a row gone from the store, shows only at the venue.
         let mut reconciled = false;
-        if chase.options.client_id.is_some()
-            && !ids.is_empty()
-            && self.fill_tracked()
-            && let Ok(filled) = self.filled_quantities(chase, &ids).await
-        {
-            for (id, amount) in filled {
-                chase.set_filled_amount(&id, amount);
+        if !ids.is_empty() && chase.remaining() > 0.0 {
+            let read = if self.fill_tracked() {
+                self.filled_quantities(chase, &ids).await
+            } else {
+                self.chase_fills(chase, &ids).await
+            };
+            match read {
+                Ok(filled) => {
+                    for (id, amount) in filled {
+                        chase.set_filled_amount(&id, amount);
+                    }
+                    reconciled = true;
+                }
+                Err(error) => self.log(chase, &format!("final fills read failed: {error}")),
             }
-            reconciled = true;
         }
-        let filled = if reconciled {
+        let filled = if reconciled && self.fill_tracked() {
             chase.filled_size()
         } else {
-            chase
-                .filled_size()
-                .max(self.bybit_demo_position_fill(chase))
+            chase.filled_size().max(self.position_fill(chase))
         };
         for (id, symbol, error) in chase.take_cancel_refused() {
             let order_filled = chase.filled_by(&id);
@@ -1436,12 +1513,14 @@ impl ChaserBook {
         ));
     }
 
-    fn bybit_demo_position_fill(&self, chase: &Chase) -> f64 {
+    /// What the position grew by since the chase started, as the web's fallback.
+    /// Lot venues are left out: their positions and placements differ in unit.
+    fn position_fill(&self, chase: &Chase) -> f64 {
         let store = self.store();
         let Some(target) = chase.target_position_contracts else {
             return 0.0;
         };
-        if store.venue != "bybitdemo" {
+        if amounts_in_lots(&store.venue) {
             return 0.0;
         }
         let side = chase.options.entry_side();
@@ -1452,6 +1531,14 @@ impl ChaserBook {
             .map_or(0.0, |position| position.contracts.abs());
         (contracts - (target - chase.options.size)).clamp(0.0, chase.options.size)
     }
+}
+
+/// One row of a fills read.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Execution {
+    order_id: String,
+    qty: f64,
 }
 
 /// The `ClientOrderLookup` answer: `{found: true, order}` or `{found: false, definitive}`.

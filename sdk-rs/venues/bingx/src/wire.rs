@@ -23,6 +23,8 @@ pub struct Contract<'a> {
     pub price_precision: f64,
     #[serde(deserialize_with = "number")]
     pub trade_min_limit: f64,
+    #[serde(default, deserialize_with = "safe_cex_engine::de::number_or_zero")]
+    pub trade_min_quantity: f64,
     #[serde(default, deserialize_with = "number")]
     pub max_long_leverage: f64,
 }

@@ -100,6 +100,22 @@ impl TwapInstance {
         std::mem::take(&mut self.state_changed)
     }
 
+    /// `size` floored to the market's step; the rest rides on the next slice.
+    fn whole_steps(&mut self, size: f64, view: &dyn TwapMarketView) -> f64 {
+        let Some(step) = view
+            .amount_step(self.options.symbol())
+            .filter(|step| step.is_finite() && *step > 0.0)
+        else {
+            return size;
+        };
+        let steps = (size / step + 1e-9).floor();
+        let whole = multiply(steps, step);
+        if let Some(next) = self.state.orders_sizes.first_mut() {
+            *next = add(*next, subtract(size, whole));
+        }
+        whole
+    }
+
     fn set_status(&mut self, status: TwapStatus) {
         self.state.status = status;
         self.state_changed = true;
@@ -123,6 +139,7 @@ impl TwapInstance {
         }
         let order_size =
             (!self.state.orders_sizes.is_empty()).then(|| self.state.orders_sizes.remove(0));
+        let order_size = order_size.map(|size| self.whole_steps(size, view));
         let randomness = self.options.randomness_percentage;
         let rand = multiply(
             lodash_random(-randomness, randomness, env.random_unit()),

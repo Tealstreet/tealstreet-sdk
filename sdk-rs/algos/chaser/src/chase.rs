@@ -137,6 +137,8 @@ struct State {
     current: Vec<String>,
     ever: Vec<String>,
     filled_by: HashMap<String, f64>,
+    /// Fill events per order: the same fills a row's `filled` reports.
+    event_fills: HashMap<String, f64>,
     /// What each order was placed for, in placement units.
     placed: HashMap<String, f64>,
     remaining: f64,
@@ -333,7 +335,11 @@ impl Chase {
         }
         let mut state = self.state.borrow_mut();
         state.last_partial_fill_at = Some(Instant::now());
-        *state.filled_by.entry(order_id.into()).or_default() += amount;
+        let events = state.event_fills.entry(order_id.into()).or_default();
+        *events += amount;
+        let events = *events;
+        let filled = state.filled_by.entry(order_id.into()).or_default();
+        *filled = filled.max(events);
         self.finish_if_filled(&mut state, "Fully filled via fill events");
     }
 

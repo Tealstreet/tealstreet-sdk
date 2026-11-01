@@ -186,7 +186,7 @@ struct Data<'a> {
     #[serde(default, borrow)]
     replace_result: Cow<'a, str>,
     #[serde(default)]
-    failed: Vec<serde::de::IgnoredAny>,
+    failed: Option<Vec<serde::de::IgnoredAny>>,
 }
 impl Data<'_> {
     fn has_order_claim(&self) -> bool {
@@ -1565,7 +1565,11 @@ fn decode(call: &Call, data: &Data<'_>, absent: bool) -> Result<Vec<String>, Ven
                     "BingX cancellation acknowledgement identifies another order",
                 ));
             }
-            if !data.failed.is_empty() {
+            if data
+                .failed
+                .as_ref()
+                .is_some_and(|failed| !failed.is_empty())
+            {
                 return Err(unknown(
                     "BingX cancel response reports failed cancellations",
                 ));
@@ -1702,5 +1706,14 @@ pub(crate) fn evidence(
         for id in ids {
             evidence.order_id(&id);
         }
+    }
+}
+
+#[cfg(test)]
+mod reply_tests {
+    #[test]
+    fn a_cancel_all_with_a_null_failed_list_reads() {
+        let data: super::Data<'_> = serde_json::from_str(r#"{"failed":null}"#).unwrap();
+        assert!(data.failed.is_none());
     }
 }

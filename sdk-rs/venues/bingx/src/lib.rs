@@ -776,7 +776,12 @@ impl Venue for Bingx {
                     },
                     limits: Limits {
                         amount: MinMax {
-                            min: m.trade_min_limit,
+                            // tradeMinLimit is 0 on every live contract.
+                            min: if m.trade_min_quantity > 0. {
+                                m.trade_min_quantity
+                            } else {
+                                m.trade_min_limit
+                            },
                             max: f64::INFINITY,
                         },
                         leverage: MinMax {
@@ -1096,6 +1101,16 @@ impl Venue for Bingx {
                 }
             }
             Pending::History(request) => self.history.on_stream_error(cx, request, response),
+            pending
+                if matches!(
+                    pending,
+                    Pending::Account(
+                        account::Request::OpenOrders { .. } | account::Request::Positions { .. }
+                    )
+                ) && account::null_list(response.body) =>
+            {
+                self.on_response(cx, pending, response);
+            }
             pending => {
                 if matches!(pending, Pending::Account(_))
                     && let Some(error) = account::key_refusal(&response)

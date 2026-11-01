@@ -1,6 +1,7 @@
 //! Private REST and stream records. IDs use integer visitors to preserve all bits.
 use crate::wire::{Str, number};
 pub use safe_cex_engine::de::optional_number;
+use safe_cex_engine::de::{number_or_zero, optional_number_or_blank};
 use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 use std::fmt;
@@ -24,8 +25,28 @@ pub fn identifier<'de, D: Deserializer<'de>>(d: D) -> Result<Str<'de>, D::Error>
         fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<Self::Value, E> {
             Ok(Cow::Owned(n.to_string()))
         }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Cow::Borrowed(""))
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Cow::Borrowed(""))
+        }
     }
     d.deserialize_any(Id)
+}
+
+/// Real rows send "" for a protection that is not set.
+fn protection<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Protection>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Field {
+        Set(Protection),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Field::deserialize(d)? {
+        Field::Set(protection) => Some(protection),
+        Field::Other(_) => None,
+    })
 }
 
 pub fn boolean<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
@@ -34,12 +55,14 @@ pub fn boolean<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     enum Bool<'a> {
         Bare(bool),
         Text(#[serde(borrow)] Str<'a>),
+        Null(()),
     }
     match Bool::deserialize(d)? {
         Bool::Bare(b) => Ok(b),
+        Bool::Null(()) => Ok(false),
         Bool::Text(s) => match s.as_ref() {
             "true" => Ok(true),
-            "false" => Ok(false),
+            "false" | "" => Ok(false),
             _ => Err(serde::de::Error::custom("invalid boolean")),
         },
     }
@@ -173,25 +196,25 @@ pub struct NativeOrder<'a> {
         default,
         alias = "origQty",
         alias = "q",
-        deserialize_with = "optional_number"
+        deserialize_with = "optional_number_or_blank"
     )]
     pub quantity: Option<f64>,
-    #[serde(default, alias = "p", deserialize_with = "number")]
+    #[serde(default, alias = "p", deserialize_with = "number_or_zero")]
     pub price: f64,
-    #[serde(default, alias = "sp", deserialize_with = "number")]
+    #[serde(default, alias = "sp", deserialize_with = "number_or_zero")]
     pub stop_price: f64,
     #[serde(
         default,
         alias = "executedQty",
         alias = "z",
-        deserialize_with = "optional_number"
+        deserialize_with = "optional_number_or_blank"
     )]
     pub filled: Option<f64>,
-    #[serde(default, alias = "l", deserialize_with = "number")]
+    #[serde(default, alias = "l", deserialize_with = "number_or_zero")]
     pub last_quantity: f64,
-    #[serde(default, alias = "L", deserialize_with = "number")]
+    #[serde(default, alias = "L", deserialize_with = "number_or_zero")]
     pub last_price: f64,
-    #[serde(default, alias = "ap", deserialize_with = "number")]
+    #[serde(default, alias = "ap", deserialize_with = "number_or_zero")]
     pub avg_price: f64,
     #[serde(default, alias = "R", alias = "ro", deserialize_with = "boolean")]
     pub reduce_only: bool,
@@ -205,15 +228,15 @@ pub struct NativeOrder<'a> {
     pub time_in_force: Option<Str<'a>>,
     #[serde(default, borrow, alias = "wt")]
     pub working_type: Option<Str<'a>>,
-    #[serde(default, borrow, alias = "ps")]
+    #[serde(default, borrow, alias = "ps", deserialize_with = "identifier")]
     pub position_side: Str<'a>,
     #[serde(default, borrow, alias = "t", deserialize_with = "identifier")]
     pub trade_id: Str<'a>,
-    #[serde(default, alias = "T", deserialize_with = "number")]
+    #[serde(default, alias = "T", deserialize_with = "number_or_zero")]
     pub time: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "protection")]
     pub take_profit: Option<Protection>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "protection")]
     pub stop_loss: Option<Protection>,
 }
 
@@ -230,10 +253,7 @@ impl NativeOrder<'_> {
         ids.all(|id| id == first).then_some(first)
     }
     pub fn complete_metadata(&self) -> bool {
-        self.quantity.is_some()
-            && self.filled.is_some()
-            && self.time_in_force.is_some()
-            && !self.position_side.is_empty()
+        self.quantity.is_some() && self.filled.is_some() && !self.position_side.is_empty()
     }
 }
 
@@ -342,4 +362,18 @@ pub struct MarginMode<'a> {
 pub struct PositionIntent<'a> {
     #[serde(default, borrow)]
     pub s: Str<'a>,
+}
+
+#[cfg(test)]
+mod native_order_tests {
+    use super::*;
+
+    #[test]
+    fn a_row_without_time_in_force_is_complete() {
+        let row: NativeOrder<'_> = serde_json::from_str(
+            r#"{"orderId":1,"symbol":"BTC-USDT","type":"LIMIT","side":"BUY","origQty":"1","executedQty":"0","positionSide":"LONG"}"#,
+        )
+        .unwrap();
+        assert!(row.complete_metadata());
+    }
 }

@@ -18,8 +18,28 @@ pub(super) const SERIAL: SerialCall = SerialCall {
 
 // BingX Swap V2 common error codes: https://bingx-api.github.io/docs/#/en-us/swapV2/base-info.html
 // 100001 is signature refusal; 80014 invalid parameter; 80016 order does not exist.
+const fn refused(code: i64, kind: ErrorKind) -> Row {
+    Row {
+        key: Key::Int(code),
+        verdict: Verdict::Refused(kind),
+        only: None,
+    }
+}
+
 pub(super) const TABLE: CodeTable = CodeTable {
     rows: &[
+        // Trading-rule refusals: nothing was placed.
+        refused(101205, ErrorKind::Rejected),
+        refused(101211, ErrorKind::InvalidInput),
+        refused(101212, ErrorKind::InsufficientBalance),
+        refused(101215, ErrorKind::Rejected),
+        refused(101253, ErrorKind::InsufficientBalance),
+        refused(101290, ErrorKind::Rejected),
+        refused(101400, ErrorKind::InvalidInput),
+        refused(109400, ErrorKind::InvalidInput),
+        refused(109421, ErrorKind::InvalidInput),
+        refused(110422, ErrorKind::Rejected),
+        refused(110425, ErrorKind::Rejected),
         Row {
             key: Key::Int(100001),
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
@@ -191,6 +211,24 @@ impl Entry {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn documented_trading_rule_refusals_are_definite() {
+        use super::TABLE;
+        use safe_cex_engine::classify::{Intent, Native, NativeCode, Verdict};
+        for code in [
+            101205, 101211, 101212, 101215, 101253, 101290, 101400, 109400, 109421, 110422, 110425,
+        ] {
+            let native = Native {
+                code: NativeCode::Int(code),
+                message: "",
+            };
+            assert!(
+                matches!(TABLE.verdict(&native, Intent::Place), Verdict::Refused(_)),
+                "{code}"
+            );
+        }
+    }
+
     #[test]
     fn bingx_table_is_well_formed() {
         safe_cex_engine::classify::assert_table(&super::TABLE);
