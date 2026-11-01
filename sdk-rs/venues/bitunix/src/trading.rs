@@ -1791,6 +1791,13 @@ impl BitunixFutures {
         cx.store.invalidate_order_snapshots();
         let data = match error::response_data(&response, true) {
             Ok(data) => data,
+            // A stale TP/SL: filled or canceled already. The reconcile below settles which.
+            Err(error)
+                if request.step.path == CANCEL_TPSL
+                    && error.venue_code.as_deref() == Some("20007") =>
+            {
+                "null"
+            }
             Err(error) => return self.write_refused(cx, request, &response, error),
         };
         let accepted = match &request.step.call {
