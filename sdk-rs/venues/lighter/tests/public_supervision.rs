@@ -290,3 +290,45 @@ fn suppressed_public_feed_is_not_supervised() {
         assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
     }
 }
+
+#[test]
+fn paced_ticker_subscribes_reach_every_market_and_a_displayed_symbol_goes_next() {
+    let mut meta: serde_json::Value = serde_json::from_str(META).unwrap();
+    let template = meta["order_book_details"][0].clone();
+    let rows = meta["order_book_details"].as_array_mut().unwrap();
+    rows.clear();
+    for id in 0..9 {
+        let mut row = template.clone();
+        row["market_id"] = id.into();
+        row["symbol"] = format!("M{id}").into();
+        rows.push(row);
+    }
+    let (mut e, _, mut timers) = ready_tracked_meta(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        &meta.to_string(),
+    );
+    let tickers = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } if text.contains("ticker/") => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    // Whatever went out at open, the rest follow on the timer.
+    e.handle(
+        NOW,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "M8".into(),
+        }),
+    );
+    let mut seen = tickers(&drain_at(&mut e, &mut timers, NOW));
+    seen.extend(tickers(&advance(&mut e, &mut timers, NOW + 1_000.0)));
+    assert!(seen[0].contains("ticker/8"), "{seen:?}");
+    seen.extend(tickers(&advance(&mut e, &mut timers, NOW + 10_000.0)));
+    assert_eq!(seen.len(), 7, "{seen:?}");
+}
