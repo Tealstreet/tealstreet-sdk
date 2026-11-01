@@ -107,6 +107,7 @@ fn ready_reads(
     );
     let private = h.socket(socket(variant)).unwrap();
     h.event(Event::WsOpened { socket: private });
+    h.answer_open_position_read();
     h
 }
 fn amend(h: &mut Harness, variant: Variant, command: u32, amount: Option<f64>) {

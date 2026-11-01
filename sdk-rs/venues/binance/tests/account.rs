@@ -53,6 +53,7 @@ fn ready() -> Harness {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
     }
+    h.answer_open_position_read();
     h
 }
 
@@ -198,6 +199,7 @@ fn ready_from(mut h: Harness) -> Harness {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
     }
+    h.answer_open_position_read();
     h
 }
 
@@ -682,7 +684,7 @@ fn a_reopened_private_stream_reads_positions_at_once() {
     let socket = h.socket("/private/ws").unwrap();
     h.event(Event::WsOpened { socket });
     assert!(
-        h.has_request("/fapi/v2/positionRisk") || h.has_request("/fapi/v3/positionRisk"),
+        h.has_request("/fapi/v3/positionRisk"),
         "the gap lost position events"
     );
 }
@@ -1441,6 +1443,9 @@ fn risk_row(side: &str, amount: &str) -> String {
 #[test]
 fn a_skipped_position_row_with_no_stored_leg_is_an_error_logged_once_until_it_maps() {
     let mut h = ready();
+    h.advance(10_000.0);
+    h.respond("/fapi/v1/openOrders", 200, OPEN_ORDERS);
+    h.respond("/fapi/v1/openAlgoOrders", 200, OPEN_ALGO_ORDERS);
     let malformed = risk_row("SHORT", "-0.050").replace(r#""entryPrice":"95000.0","#, "");
     let message = "Binance skipped malformed positionRisk row BTCUSDT:short";
     advance_to_position_read(
@@ -1795,4 +1800,13 @@ fn a_fills_start_with_no_end_walks_every_seven_day_window_to_now() {
         h.reply(page.id, 200, "", "[]");
     }
     assert_eq!(windows, 3);
+}
+
+// Live, 1 attempt in 5: a fill between the REST snapshot and the subscribe stayed lost for 75 s.
+#[test]
+fn the_first_private_open_reads_orders_and_positions() {
+    let mut h = ready();
+    assert_eq!(h.answered_count("ositionRisk"), 2, "startup, then the open");
+    h.advance(10_000.0);
+    assert!(h.has_request("/fapi/v1/openOrders"));
 }

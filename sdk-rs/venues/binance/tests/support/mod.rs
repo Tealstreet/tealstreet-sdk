@@ -53,6 +53,8 @@ pub const BOOK_TICKERS: &str = r#"[{"symbol":"BTCUSDT","bidPrice":"99.9","askPri
 pub const PREMIUM: &str = r#"[{"symbol":"BTCUSDT","markPrice":"100","indexPrice":"100","lastFundingRate":"0.0001","nextFundingTime":1700000000000}]"#;
 
 pub struct Harness {
+    /// The latest body answered per path, to repeat for the first open's position read.
+    answered: Vec<(String, String)>,
     pub engine: Engine<BinanceFutures>,
     pub now: f64,
     pub requests: Vec<HttpRequest>,
@@ -138,6 +140,7 @@ impl Harness {
             sent: Vec::new(),
             closed: Vec::new(),
             timers: Vec::new(),
+            answered: Vec::new(),
             done: Vec::new(),
             failures: Vec::new(),
             expect_startup_failure: false,
@@ -375,8 +378,33 @@ impl Harness {
     }
 
     pub fn respond(&mut self, path: &str, status: u16, body: &str) {
+        self.answered.push((path.to_owned(), body.to_owned()));
         let request = self.take(path).id;
         self.reply(request, status, "", body);
+    }
+
+    pub fn answered_count(&self, fragment: &str) -> usize {
+        self.answered
+            .iter()
+            .filter(|(path, _)| path.contains(fragment))
+            .count()
+    }
+
+    /// A private open re-reads positions; startup answers it with what it answered before.
+    pub fn answer_open_position_read(&mut self) {
+        for fragment in ["ositionRisk", "symbolConfig"] {
+            let answer = self
+                .answered
+                .iter()
+                .rev()
+                .find(|(path, _)| path.contains(fragment))
+                .cloned();
+            if let Some((path, body)) = answer
+                && self.has_request(&path)
+            {
+                self.respond(&path, 200, &body);
+            }
+        }
     }
 
     pub fn message(&mut self, path: &str, text: &str) {
