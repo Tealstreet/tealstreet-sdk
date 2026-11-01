@@ -155,3 +155,32 @@ fn a_leverage_read_that_never_answers_fails_at_its_window() {
 fn an_auth_refusal_fails_a_waiting_leverage_read_typed() {
     auth_refusal_fails_it_typed(fetch_leverage(85), 85, "/account/margin");
 }
+
+#[test]
+fn a_refused_auth_ends_the_start_with_the_reason() {
+    let mut h = Harness::keyed(
+        Options {
+            paradex_address: Some("0x0123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Options::default()
+        },
+        STARK_KEY,
+    );
+    h.reply("/markets", MARKETS);
+    h.reply("summary", TICKERS);
+    h.reply(
+        "/system/config",
+        r#"{"starknet_chain_id":"PRIVATE_SN_PARACLEAR_MAINNET"}"#,
+    );
+    let auth = h.take("/auth/");
+    h.actions.clear();
+    h.respond(
+        auth,
+        401,
+        r#"{"error":"INVALID_SIGNATURE","message":"bad"}"#,
+    );
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        safe_cex_engine::Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}

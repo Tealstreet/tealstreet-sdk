@@ -1647,3 +1647,31 @@ fn a_size_amend_of_a_partly_filled_order_treats_the_size_as_the_new_total() {
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     assert_eq!(p[0]["size"], "5");
 }
+
+// deaws2's live body.
+#[test]
+fn a_partly_succeeded_batch_with_an_already_gone_row_is_done() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    seed_order(&mut h, "1000171264712", "");
+    seed_order(&mut h, "1000171264711", "");
+    h.handle(
+        1.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    h.collect();
+    h.reply("cancel-batch-orders", r#"{"code":"2","msg":"Batch operation partially succeeded.","data":[{"orderId":"1000171264712","clientOrderId":"","msg":"Cancel failed as the order has been filled, triggered, canceled or does not exist.","code":"1000"},{"orderId":"1000171264711","clientOrderId":"x","msg":"Order canceled","code":"0"}]}"#);
+    assert!(
+        !done(&h),
+        "{:?}",
+        h.actions
+            .iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+            .count()
+    );
+    assert!(h.e.store().order("1000171264712").is_none());
+}

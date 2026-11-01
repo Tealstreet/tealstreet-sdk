@@ -816,8 +816,9 @@ impl PhemexPerpetuals {
                 .ok_or(
                     "Phemex cancel requires a cached order to resolve symbol and position side",
                 )?;
+            // Already over: a terminal row must not stop the live ones being canceled.
             if !active(o) {
-                return Err("Phemex cannot cancel a terminal order".into());
+                continue;
             }
             let m = cx
                 .store

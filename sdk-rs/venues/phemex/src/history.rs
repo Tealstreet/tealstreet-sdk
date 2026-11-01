@@ -78,6 +78,38 @@ enum Rows {
     Lookup(Vec<safe_cex_engine::model::Order>),
 }
 
+/// The venue answers `{"code":0,"data":{"rows":[...]}}`; a bare array also reads.
+const HISTORY_ROWS: ArrayAt =
+    ArrayAt::Envelope(&[&["data", "rows"], &["data", "list"], &["data"], &[]]);
+/// The row array of a whole or stream-emptied history body.
+fn history_rows(body: &str) -> Option<&str> {
+    use serde_json::value::RawValue;
+    #[derive(Deserialize)]
+    struct Page<'a> {
+        #[serde(default)]
+        code: i64,
+        #[serde(borrow)]
+        data: &'a RawValue,
+    }
+    #[derive(Deserialize)]
+    struct Rows<'a> {
+        #[serde(borrow, default)]
+        rows: Option<&'a RawValue>,
+        #[serde(borrow, default)]
+        list: Option<&'a RawValue>,
+    }
+    if body.trim_start().starts_with('[') {
+        return Some(body);
+    }
+    let page = serde_json::from_str::<Page<'_>>(body)
+        .ok()
+        .filter(|p| p.code == 0)?;
+    if page.data.get().trim_start().starts_with('[') {
+        return Some(page.data.get());
+    }
+    let rows = serde_json::from_str::<Rows<'_>>(page.data.get()).ok()?;
+    rows.rows.or(rows.list).map(RawValue::get)
+}
 fn encode_rows<T: Serialize>(rows: &[T]) -> Result<String, VenueError> {
     serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
 }
@@ -405,9 +437,9 @@ impl PhemexPerpetuals {
             return;
         }
         let (path, at) = match request.rows {
-            Rows::Lookup(_) => ("/api-data/g-futures/orders/by-order-id", ArrayAt::Root),
-            Rows::Fills(_) => ("/api-data/g-futures/trades", ArrayAt::Root),
-            Rows::Orders(_) => ("/api-data/g-futures/orders", ArrayAt::Root),
+            Rows::Lookup(_) => ("/api-data/g-futures/orders/by-order-id", HISTORY_ROWS),
+            Rows::Fills(_) => ("/api-data/g-futures/trades", HISTORY_ROWS),
+            Rows::Orders(_) => ("/api-data/g-futures/orders", HISTORY_ROWS),
             Rows::Trades(_) => ("/md/v2/trade", ArrayAt::Path(&["result", "trades_p"])),
         };
         let native_symbol = &request.native_symbol;
@@ -537,10 +569,12 @@ impl PhemexPerpetuals {
                     .is_ok()
                 })
         } else {
-            safe_cex_engine::json::each::<&serde_json::value::RawValue>(response.body, |row| {
-                self.history_item(cx, &mut request, row.get())
+            history_rows(response.body).is_some_and(|rows| {
+                safe_cex_engine::json::each::<&serde_json::value::RawValue>(rows, |row| {
+                    self.history_item(cx, &mut request, row.get())
+                })
+                .is_ok()
             })
-            .is_ok()
         };
         if !parsed || request.invalid {
             self.history_failed(

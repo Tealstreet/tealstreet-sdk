@@ -1554,7 +1554,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 
 /// A refused write answer, classified by HTTP status and WOO's documented
 /// error codes. 408/5xx and malformed answers do not prove a refusal.
-fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
+pub(crate) fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
     #[derive(Deserialize)]
     struct Code {
         code: Option<i64>,

@@ -1342,6 +1342,7 @@ impl Okx {
             };
             return self.end(cx, request.command, Some(&request), error, false);
         }
+        let failed_rows = !errors.is_empty();
         if !errors.is_empty() {
             if !continue_cancel_errors {
                 let error = refused(rejection(errors.join("; "), first_code, response.status));
@@ -1351,20 +1352,26 @@ impl Okx {
                 cx.command_error(request.command, error);
             }
         }
+        // A gone order's own frame may never come: only a read clears its row.
+        let read_after = continue_cancel_errors && failed_rows;
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
             return;
         };
         job.steps.pop_front();
         job.effective = true;
         if job.steps.is_empty() {
-            return self.finish(cx, request);
-        }
-        match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
-            Ok(slot) => self.issue(cx, request.command, slot),
-            Err(reason) => {
-                let error = VenueError::new(reason.venue_error().message);
-                self.end(cx, request.command, Some(&request), error, false);
+            self.finish(cx, request);
+        } else {
+            match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
+                Ok(slot) => self.issue(cx, request.command, slot),
+                Err(reason) => {
+                    let error = VenueError::new(reason.venue_error().message);
+                    self.end(cx, request.command, Some(&request), error, false);
+                }
             }
+        }
+        if read_after {
+            self.account_refresh(cx);
         }
     }
 
@@ -1473,6 +1480,10 @@ impl Okx {
         };
         if job.effective && !uncertain {
             error.outcome = None;
+        }
+        // A sibling rests: the caller must be told even though this call failed.
+        if !job.ids.is_empty() {
+            error = error.partial_ids(&job.ids);
         }
         for (id, status) in job.optimistic {
             if !uncertain

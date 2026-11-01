@@ -1129,12 +1129,17 @@ impl Woo {
             if response.status == 429 {
                 self.account.pause_until = cx.now + 10_000.0;
             }
+            cx.startup_read_refused(&crate::trading::answer_failure(
+                &response,
+                "WOO refused the API key".into(),
+            ));
             self.account_failed(cx, req, "WOO account HTTP read rejected");
             return;
         }
         let envelope = match Envelope::checked(response.body) {
             Ok(v) => v,
             Err(e) => {
+                cx.startup_read_refused(&crate::trading::answer_failure(&response, e.clone()));
                 self.account_failed(cx, req, &e);
                 return;
             }

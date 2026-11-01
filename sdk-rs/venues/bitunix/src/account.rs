@@ -1102,6 +1102,12 @@ impl BitunixFutures {
         read: Read,
         response: Option<&Response<'_>>,
     ) {
+        // A separate read key recovers on the primary; only the primary ends a start.
+        if self.options.read_credentials.is_none()
+            && let Some(response) = response
+        {
+            cx.startup_read_refused(&crate::recovery::failed(response));
+        }
         self.position_answered(cx, &read);
         self.order_answered(cx, &read);
         if read.axis == Axis::Balance {

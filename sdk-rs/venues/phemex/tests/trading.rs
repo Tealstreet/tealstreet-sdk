@@ -3381,10 +3381,40 @@ fn a_size_amend_of_a_partly_filled_order_treats_the_size_as_the_new_total() {
     old.remaining = 0.06;
     e.store_mut().upsert_order(old);
     let cancel = {
-        let a = command(&mut e, Command::AmendOrder { command: 1, id: "old".into(), price: None, amount: Some(0.09) });
+        let a = command(
+            &mut e,
+            Command::AmendOrder {
+                command: 1,
+                id: "old".into(),
+                price: None,
+                amount: Some(0.09),
+            },
+        );
         writes(&a)[0].clone()
     };
     ws_orders(&mut e, socket, vec![]);
-    let a = respond(&mut e, &cancel, json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}));
+    let a = respond(
+        &mut e,
+        &cancel,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+    );
     assert_eq!(p(&writes(&a)[0], "orderQtyRq").as_deref(), Some("0.05"));
+}
+
+#[test]
+fn a_terminal_row_does_not_stop_the_live_ones_being_canceled() {
+    let mut e = engine();
+    e.store_mut().upsert_order(order("live"));
+    let mut over = order("over");
+    over.status = OrderStatus::Closed;
+    e.store_mut().upsert_order(over);
+    let a = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 1,
+            ids: vec!["over".into(), "live".into()],
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "orderID").as_deref(), Some("live"));
 }

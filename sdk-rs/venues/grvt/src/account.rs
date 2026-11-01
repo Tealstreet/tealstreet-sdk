@@ -1105,7 +1105,15 @@ impl Grvt {
             cx.clear_timer(timer);
         }
         self.retire_login_session(cx);
-        cx.notice(Level::Error, code, message);
+        // Nothing reads the account once login is refused, so the start ends here.
+        let refused = code == code::AUTH_REJECTED
+            && cx.startup_read_refused(
+                &safe_cex_engine::VenueError::new(message)
+                    .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            );
+        if !refused {
+            cx.notice(Level::Error, code, message);
+        }
     }
     fn refresh_stream_session(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.login_pending || self.account.authentication_failed {
