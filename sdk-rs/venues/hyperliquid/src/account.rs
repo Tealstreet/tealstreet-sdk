@@ -39,6 +39,10 @@ pub enum Request {
     AmendSource {
         id: String,
     },
+    /// The frame-fed page never ran the startup role read; its amend reads need the account.
+    AmendRole {
+        id: String,
+    },
 }
 impl Request {
     pub(crate) fn is_builder(&self) -> bool {
@@ -191,6 +195,19 @@ impl Hyperliquid {
             self.account.spot_filled.remove(&id);
         }
     }
+    fn apply_role(&mut self, raw: &str) {
+        if let Ok(role) = serde_json::from_str::<Role>(raw) {
+            match role.role.as_ref() {
+                "user" => self.options.application_id = self.options.key.clone(),
+                "agent" => self.options.application_id = role.data.user.map(|v| v.into_owned()),
+                "subAccount" => {
+                    self.options.application_id = role.data.master.map(|v| v.into_owned())
+                }
+                "vault" => self.options.vault = self.options.key.clone(),
+                _ => {}
+            }
+        }
+    }
     pub(crate) fn user(&self) -> Option<&str> {
         self.options
             .vault
@@ -239,7 +256,7 @@ impl Hyperliquid {
         // approval is read, once, before the first placement.
         if cx.frame_fed() {
             match &request {
-                Request::Builder | Request::AmendSource { .. } => {}
+                Request::Builder | Request::AmendSource { .. } | Request::AmendRole { .. } => {}
                 _ => return,
             }
         }
@@ -541,9 +558,29 @@ impl Hyperliquid {
             self.amend_source_read(cx, id, Err("the order ID is not numeric".to_owned()));
             return;
         };
+        let Some(user) = self.user() else {
+            let Some(key) = self.options.key.as_deref() else {
+                self.amend_source_read(cx, id, Err("the account is not resolved".to_owned()));
+                return;
+            };
+            #[derive(Serialize)]
+            struct Role<'a> {
+                r#type: &'static str,
+                user: &'a str,
+            }
+            let body = serde_json::to_string(&Role {
+                r#type: "userRole",
+                user: key,
+            })
+            .unwrap();
+            self.account.fence_read = true;
+            self.read_body(cx, body, Request::AmendRole { id: id.to_owned() });
+            self.account.fence_read = false;
+            return;
+        };
         let body = serde_json::to_string(&Read {
             r#type: "orderStatus",
-            user: self.user().unwrap_or_default(),
+            user,
             oid,
         })
         .unwrap();
@@ -850,19 +887,7 @@ impl Hyperliquid {
                 if let Some(t) = self.account.role_timer.take() {
                     cx.clear_timer(t);
                 }
-                if let Ok(role) = serde_json::from_str::<Role>(raw) {
-                    match role.role.as_ref() {
-                        "user" => self.options.application_id = self.options.key.clone(),
-                        "agent" => {
-                            self.options.application_id = role.data.user.map(|v| v.into_owned())
-                        }
-                        "subAccount" => {
-                            self.options.application_id = role.data.master.map(|v| v.into_owned())
-                        }
-                        "vault" => self.options.vault = self.options.key.clone(),
-                        _ => {}
-                    }
-                }
+                self.apply_role(raw);
                 if self.user().is_some() {
                     self.private_bootstrap(cx);
                 } else {
@@ -891,6 +916,14 @@ impl Hyperliquid {
                 // Frame-fed: this engine's own read outlasts a source that has not re-read.
                 if self.account.builder_approved.is_some() {
                     cx.hold_setting(crate::BUILDER_HOLD.clone());
+                }
+            }
+            Request::AmendRole { id } => {
+                self.apply_role(raw);
+                if self.user().is_some() {
+                    self.read_amend_source(cx, &id);
+                } else {
+                    self.amend_source_read(cx, &id, Err("the account is not resolved".to_owned()));
                 }
             }
             Request::AmendSource { id } => {
@@ -1182,7 +1215,7 @@ impl Hyperliquid {
                 }
             }
             Request::Builder => self.account.builder_approved = None,
-            Request::AmendSource { id } => {
+            Request::AmendSource { id } | Request::AmendRole { id } => {
                 self.amend_source_read(cx, &id, Err(error.to_owned()));
             }
             Request::Fees => {}
