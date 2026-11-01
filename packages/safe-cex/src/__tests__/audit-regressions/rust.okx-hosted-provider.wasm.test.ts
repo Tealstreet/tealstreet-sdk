@@ -138,7 +138,7 @@ it.each(aliases)('actual WASM %s native private/business login dispatch uses the
   const preimage = `${seconds}GET/users/self/verify`;
   for (const login of logins) {
     expect(JSON.parse(login.text)).toEqual({ op: 'login', args: [{ apiKey: 'owned-primary-public',
-      passphrase: 'fixture-primary-passphrase', timestamp: String(seconds), sign: mac(preimage) }] });
+      passphrase: 'fixture-primary-passphrase', timestamp: seconds, sign: mac(preimage) }] });
   }
   const wsRequests = sign.mock.calls.map(([request]) => request).filter((request) => request.wsAuth?.toSign === preimage);
   expect(wsRequests).toHaveLength(2);
