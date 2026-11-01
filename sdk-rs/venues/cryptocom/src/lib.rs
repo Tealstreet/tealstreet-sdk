@@ -779,6 +779,10 @@ impl Venue for Cryptocom {
         if let Some(error) = error {
             match pending {
                 Pending::Account(request) => {
+                    // 40101 is retried once first; only its second answer is final.
+                    if request.retries >= 1 || !response.body.contains("40101") {
+                        cx.startup_read_refused(&reads::response_failure(response, error.clone()));
+                    }
                     self.account_failed(cx, request, &error, reads::FailureRecovery::Response)
                 }
                 Pending::History(request) => self.history_failed(
@@ -927,6 +931,12 @@ impl Venue for Cryptocom {
             Pending::Identity(request) => self.identity_reject(cx, request, missing_list()),
             Pending::History(request) => self.history_failed(cx, request, missing_list(), recovery),
             Pending::Account(request) => {
+                if request.retries >= 1 || !response.body.contains("40101") {
+                    cx.startup_read_refused(&reads::response_failure(
+                        response,
+                        missing_list().message,
+                    ));
+                }
                 self.account_failed(cx, request, &missing_list().message, recovery)
             }
             Pending::PublicTrades(trade) => self.public_trades_stream_failed(cx, *trade, response),

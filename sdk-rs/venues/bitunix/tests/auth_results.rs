@@ -978,3 +978,21 @@ fn valid_empty_lists_and_bad_financial_rows_accept_credentials_without_false_rea
         );
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let (mut e, actions) = started(false);
+    let r = http(&actions, "get_pending_positions");
+    let failed = answer(
+        &mut e,
+        &r,
+        100.0,
+        200,
+        "",
+        r#"{"code":10004,"msg":"IP refused"}"#,
+    );
+    assert!(failed.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}

@@ -2816,7 +2816,8 @@ impl<P> Cx<'_, P> {
 
     /// A private read the venue refused over the key, before the account
     /// loaded: ends the start once with that reason instead of retrying unseen.
-    pub fn startup_read_refused(&mut self, error: &VenueError) {
+    /// True when it reported, so a venue's own log of the refusal can stand aside.
+    pub fn startup_read_refused(&mut self, error: &VenueError) -> bool {
         let loaded = self.store.loaded();
         let refused = matches!(
             error.kind,
@@ -2826,7 +2827,7 @@ impl<P> Cx<'_, P> {
             || loaded.balance && loaded.orders && loaded.positions
             || std::mem::replace(&mut self.io.core.startup_refused, true)
         {
-            return;
+            return false;
         }
         self.notice(
             Level::Error,
@@ -2834,6 +2835,7 @@ impl<P> Cx<'_, P> {
             &error.message,
         );
         self.startup_failed(error.clone());
+        true
     }
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
