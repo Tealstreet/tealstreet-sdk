@@ -186,6 +186,65 @@ fn rejected_cancel_prevents_amend_replacement() {
     only_reconcile_pending(&h);
 }
 #[test]
+fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","state":"live"}]}"#);
+    let id =
+        h.e.store()
+            .orders()
+            .iter()
+            .find(|o| o.kind == safe_cex_engine::model::OrderType::TakeProfit)
+            .expect("the resting take profit")
+            .id
+            .clone();
+    h.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id,
+            price: Some(66000.0),
+            amount: None,
+        }),
+    );
+    h.collect();
+    h.reply(
+        "cancel-tpsl",
+        r#"{"code":"0","data":[{"tpslId":"91","code":"0","msg":null}]}"#,
+    );
+    let timer = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    h.handle(timer.1, Event::TimerFired { timer: timer.0 });
+    h.collect();
+    let r = h.take("order-tpsl");
+    h.respond(
+        r,
+        r#"{"code":"102000","msg":"trigger refused","data":null}"#,
+    );
+    let error = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("a failure");
+    assert!(
+        error.message.contains("BTC") && error.message.contains("no take profit"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
 fn conditional_amend_preserves_nested_protection_and_native_execution_provenance() {
     let mut h = Harness::new();
     h.open_private();

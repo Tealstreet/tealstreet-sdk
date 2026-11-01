@@ -184,7 +184,6 @@ fn fields(body: &str) -> Fields {
 impl BybitLinear {
     pub(crate) fn ordinary_command(&self, command: &Command) -> bool {
         trade_command_id(command).is_some()
-            && !matches!(command, Command::CancelOrdersWithSymbols { .. })
     }
 
     /// The genuine command entry: one preflight before any check or read.
@@ -417,7 +416,7 @@ impl BybitLinear {
                 // Every trading-stop leg is a position TP/SL setting (D1).
                 Call::TradingStop => LegIntent::Setting,
                 Call::Amend if amend_virtual => LegIntent::Setting,
-                Call::PartialStop => LegIntent::Setting,
+                Call::PartialStop { .. } => LegIntent::Setting,
                 Call::CancelPartialStop { .. } => LegIntent::ProtectionCancel,
                 _ => LegIntent::Command,
             };
@@ -937,12 +936,27 @@ impl BybitLinear {
                 }
             }
             Decision::Failed(error) => {
+                let stop_lost = match &active.leg.planned.call {
+                    Call::PartialStop {
+                        stop: (symbol, side, kind),
+                    } => Some(safe_cex_engine::error::stop_gone_text(
+                        symbol,
+                        *side,
+                        *kind,
+                        error.outcome == Some(Outcome::Unknown),
+                    )),
+                    _ => None,
+                };
                 // An execution's journal reports each failure to every observer.
                 if entry.hyro.is_none() {
                     cx.command_error(id, error.message.clone());
                 }
                 if !run.continue_on_error {
-                    let _ = cx.fail_plan(&plan, error);
+                    // Its cancel landed and nothing replaced it.
+                    let _ = match &stop_lost {
+                        Some(note) => cx.fail_plan_noted(&plan, error, note),
+                        None => cx.fail_plan(&plan, error),
+                    };
                     return;
                 }
                 run.error.get_or_insert(error);
@@ -1341,7 +1355,7 @@ impl BybitLinear {
         match call {
             Call::Leverage { symbol, leverage } => self.apply_leverage(cx, symbol, *leverage),
             Call::PositionMode { hedged } => self.apply_position_mode(cx, *hedged),
-            Call::PartialStop => self.schedule_partial_stop_refresh(cx),
+            Call::PartialStop { .. } => self.schedule_partial_stop_refresh(cx),
             _ => {}
         }
     }
@@ -1656,12 +1670,12 @@ impl BybitLinear {
                 }
                 Decision::Next(vec![target])
             }
-            Call::TradingStop | Call::PartialStop => {
+            Call::TradingStop | Call::PartialStop { .. } => {
                 if !Self::accepted(cx, context, Vec::new()) {
                     return Decision::Lost;
                 }
                 // No order id comes back; the stop's row arrives on the stream.
-                if matches!(planned.call, Call::PartialStop) {
+                if matches!(planned.call, Call::PartialStop { .. }) {
                     self.schedule_partial_stop_refresh(cx);
                 }
                 Decision::Next(Vec::new())
@@ -1721,9 +1735,14 @@ impl BybitLinear {
                 }
                 self.apply_position_mode(cx, *hedged);
                 // Symbols with open orders or positions stay on the old mode; retCode is 0.
-                if let Some(message) = serde_json::from_str::<serde_json::Value>(response.body)
+                #[derive(serde::Deserialize)]
+                struct Answer {
+                    #[serde(rename = "retMsg")]
+                    message: Option<String>,
+                }
+                if let Some(message) = serde_json::from_str::<Answer>(response.body)
                     .ok()
-                    .and_then(|body| body.get("retMsg")?.as_str().map(str::to_owned))
+                    .and_then(|body| body.message)
                     .filter(|message| message.starts_with("Partial symbols"))
                 {
                     cx.command_error(context_command(context), message);

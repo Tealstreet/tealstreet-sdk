@@ -171,6 +171,12 @@ pub enum Then {
     Closed(Box<closed::Request>),
 }
 
+impl Then {
+    fn reads_account_snapshot(&self) -> bool {
+        matches!(self, Self::Account(request) if request.is_snapshot_read())
+    }
+}
+
 pub struct Pending {
     category: Category,
     rest: Rest,
@@ -2933,9 +2939,7 @@ impl Venue for BybitLinear {
             return;
         }
         // A private snapshot with nothing in it can answer `list: null`.
-        if matches!(&pending.then, Then::Account(request) if request.is_snapshot_read())
-            && account::success_with_null_list(response.body)
-        {
+        if pending.then.reads_account_snapshot() && account::success_with_null_list(response.body) {
             return self.on_response(cx, pending, response);
         }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.

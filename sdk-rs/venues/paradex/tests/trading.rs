@@ -591,7 +591,87 @@ fn cancel_pair_errors_are_correlated_and_attempt_all_batches_without_resending()
     assert!(h.pending.is_empty());
 }
 #[test]
-fn untriggered_stop_with_null_execution_price_can_be_amended_without_cancel_replace() {
+fn cancel_all_also_deletes_untriggered_stops_by_id() {
+    let mut h = private();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: private });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_MARKET","status":"UNTRIGGERED","side":"SELL","size":"2","remaining_size":"2","price":"95","trigger_price":"90","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000}}}"#});
+    h.collect();
+    // Live: DELETE /orders?market= queued, the stop still there 8 minutes later.
+    h.command(Command::CancelSymbolOrders {
+        command: 12,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    let stop = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(stop, 204, "");
+    let all = take_method(&mut h, Method::Delete, "/orders?market=");
+    h.respond(all, 200, r#"{"message":"cancel requests queued"}"#);
+    assert!(h.result(12).is_ok());
+}
+
+#[test]
+fn a_refused_stop_replacement_says_the_stop_is_gone() {
+    let mut h = private();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: private });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_MARKET","status":"UNTRIGGERED","side":"SELL","size":"2","remaining_size":"2","price":"95","trigger_price":"90","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000}}}"#});
+    h.collect();
+    h.command(Command::AmendOrder {
+        command: 13,
+        id: "123".into(),
+        price: Some(91.),
+        amount: None,
+    });
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let place = h.take("/orders");
+    h.respond(place, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    let error = h.result(13).unwrap_err();
+    assert!(error.contains("no stop"), "{error}");
+}
+
+#[test]
+fn an_untriggered_stop_edit_cancels_and_replaces() {
     let mut h = private();
     let private = h
         .actions
@@ -623,24 +703,14 @@ fn untriggered_stop_with_null_execution_price_can_be_amended_without_cancel_repl
         price: Some(91.),
         amount: Some(3.),
     });
-    let request = h.take("/orders/123");
-    assert_eq!(request.method, Method::Put);
-    let payload: Payload = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-    // The venue refuses a price on a market trigger.
-    assert_eq!(payload.price, None);
+    // Live: editing an untriggered stop answers ORDER_IS_NOT_OPEN.
+    assert!(!h.pending.iter().any(|r| r.method == Method::Put));
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let place = h.take("/orders");
+    let payload: Payload = serde_json::from_str(place.body.as_deref().unwrap()).unwrap();
     assert_eq!(payload.trigger_price.as_deref(), Some("91"));
     assert_eq!(payload.size.as_deref(), Some("3"));
-    assert!(payload.signature.unwrap().starts_with("[\""));
-    h.respond(request, 200, r#"{"id":"123"}"#);
-    assert_eq!(h.result(13), Ok("[\"123\"]"));
-    h.command(Command::AmendOrder {
-        command: 130,
-        id: "123".into(),
-        price: None,
-        amount: Some(4.),
-    });
-    assert!(h.result(130).is_err());
-    assert!(h.pending.is_empty());
 }
 
 #[test]
@@ -838,8 +908,9 @@ fn post_ack_repair_cannot_restore_old_amendment_attributes_even_after_a_same_sta
 }
 
 #[test]
-fn post_ack_size_and_trigger_changes_require_all_exact_mutable_attributes() {
-    for trigger in [false, true] {
+fn post_ack_size_changes_require_all_exact_mutable_attributes() {
+    {
+        let trigger = false;
         let row = if trigger {
             AMEND_ROW
                 .replace("\"type\":\"LIMIT\"", "\"type\":\"STOP_LIMIT\"")

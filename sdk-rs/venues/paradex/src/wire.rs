@@ -41,7 +41,8 @@ pub struct Instrument<'a> {
     pub step_size: Number,
     #[serde(alias = "price_tick_size")]
     pub tick_size: Number,
-    #[serde(alias = "min_notional")]
+    /// `min_notional` is dollars, not a size: 10 read as 10 SOL, about 940 dollars.
+    #[serde(default)]
     pub min_order_size: Number,
     pub max_order_size: Number,
     pub price_bands_width: Number,

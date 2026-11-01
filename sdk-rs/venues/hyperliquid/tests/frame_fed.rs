@@ -11,10 +11,14 @@ use support::*;
 const ACCOUNT: &str = "0x14791697260e4c9a71f18484c9f997b308e59325";
 
 fn page_engine() -> (Engine<Hyperliquid>, Vec<String>) {
+    page_engine_for(Some(ACCOUNT.into()))
+}
+
+fn page_engine_for(application_id: Option<String>) -> (Engine<Hyperliquid>, Vec<String>) {
     let mut e = private_engine(
         Options {
             key: Some(ACCOUNT.into()),
-            application_id: Some(ACCOUNT.into()),
+            application_id,
             ..Options::default()
         },
         TEST_SECRET.into(),
@@ -335,4 +339,67 @@ fn the_page_engine_s_own_builder_approval_outlasts_a_source_that_has_not_read_it
     assert_eq!(sent.len(), 1, "{sent:?}");
     let body: Value = serde_json::from_str(sent[0].body.as_deref().unwrap()).unwrap();
     assert!(body["action"]["builder"].is_object(), "{body}");
+}
+
+// Live: an agent key with no applicationId read orderStatus with an empty user and got 422.
+#[test]
+fn an_amend_with_no_application_id_resolves_the_account_before_its_read() {
+    let (mut e, _) = page_engine_for(None);
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    let order = Order {
+        id: "592084223302".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: "BTC-PERP".into(),
+        kind: OrderType::Limit,
+        side: OrderSide::Buy,
+        price: 100.0,
+        amount: 1.0,
+        filled: 0.0,
+        remaining: 1.0,
+        reduce_only: false,
+        close: None,
+        client_order_id: None,
+        time_in_force: None,
+        last_update: 0.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    };
+    e.store_mut().set_orders(vec![order]);
+    e.handle(
+        2000.0,
+        Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 7,
+            id: "592084223302".into(),
+            price: Some(99.0),
+            amount: None,
+        }),
+    );
+    let mut bodies = Vec::new();
+    for _ in 0..5 {
+        for action in prepared_now(&mut e) {
+            if let Action::Http(r) = action {
+                bodies.push(r.body.clone().unwrap_or_default());
+                if kind(&r) == "userRole" {
+                    reply(
+                        &mut e,
+                        &r,
+                        200,
+                        r#"{"role":"agent","data":{"user":"0x1111111111111111111111111111111111111111"}}"#,
+                    );
+                }
+            }
+        }
+    }
+    assert!(bodies[0].contains("userRole"), "{bodies:?}");
+    let read = bodies
+        .iter()
+        .find(|b| b.contains("orderStatus"))
+        .expect("the fresh read");
+    assert!(
+        read.contains("0x1111111111111111111111111111111111111111"),
+        "{read}"
+    );
 }

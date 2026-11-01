@@ -304,14 +304,21 @@ fn time_in_force(text: &str) -> Option<TimeInForce> {
 
 /// A success whose list is null, which is how BingX answers an empty one.
 pub(crate) fn null_list(body: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(body).is_ok_and(|reply| {
-        let data = reply.get("data");
-        reply["code"] == 0
-            && (data.is_some_and(serde_json::Value::is_null)
-                || data
-                    .and_then(|data| data.get("orders"))
-                    .is_some_and(serde_json::Value::is_null))
-    })
+    use serde_json::value::RawValue;
+    use std::collections::HashMap;
+    let Ok(reply) = serde_json::from_str::<HashMap<&str, &RawValue>>(body) else {
+        return false;
+    };
+    let code = reply.get("code").map(|code| code.get());
+    let Some(data) = reply.get("data").filter(|_| code == Some("0")) else {
+        return false;
+    };
+    data.get() == "null"
+        || serde_json::from_str::<HashMap<&str, &RawValue>>(data.get()).is_ok_and(|fields| {
+            fields
+                .get("orders")
+                .is_some_and(|list| list.get() == "null")
+        })
 }
 
 /// A venue error is a failed snapshot, including errors transported as HTTP 200.

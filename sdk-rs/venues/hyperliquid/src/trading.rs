@@ -46,6 +46,10 @@ struct Job {
     builder_checked: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// An amend cancelling this stop before placing its replacement.
+    replacing_stop: Option<(String, OrderSide, OrderType)>,
+    /// What the failure must add: a Plan's text is projected from its recorded fact.
+    stop_note: Option<String>,
 }
 enum Step {
     ScheduleCancel {
@@ -69,6 +73,7 @@ pub struct Request {
 /// How long an unapproved builder fee stays believed before a placement re-reads it.
 const BUILDER_RECHECK_MS: f64 = 60_000.0;
 const AMEND_READ_MS: f64 = 5_000.0;
+const AMEND_RETRY_MS: f64 = 1_000.0;
 /// Hyperliquid refuses an order worth less than this.
 const MIN_ORDER_VALUE: f64 = 10.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -251,6 +256,7 @@ impl Hyperliquid {
         }
         let mut replacement = None;
         let mut amend_source = None;
+        let mut replacing_stop = None;
         let mut amend_size = None;
         let (command, steps) = match command {
             Command::PlaceOrders { command, orders } => {
@@ -278,6 +284,21 @@ impl Hyperliquid {
                 };
                 (command, VecDeque::from([Step::Cancel(orders)]))
             }
+            // An order the store has lost is still cancelled by its id and symbol.
+            Command::CancelOrdersWithSymbols { command, orders } => (
+                command,
+                VecDeque::from([Step::Cancel(
+                    orders
+                        .iter()
+                        .map(|order| {
+                            cx.store
+                                .order(&order.id)
+                                .cloned()
+                                .unwrap_or_else(|| order.limit_stand_in())
+                        })
+                        .collect(),
+                )]),
+            ),
             Command::CancelSymbolOrders { command, symbol } => (
                 command,
                 VecDeque::from([Step::Cancel(
@@ -312,6 +333,9 @@ impl Hyperliquid {
                     cx.refuse_command(Operation::Mutation, not_sent("Order not found"));
                     return;
                 };
+                if matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                    replacing_stop = Some((old.symbol.clone(), old.side, old.kind));
+                }
                 if !matches!(old.status, OrderStatus::Open | OrderStatus::Creating) {
                     cx.refuse_command(
                         Operation::Mutation,
@@ -440,6 +464,8 @@ impl Hyperliquid {
                 amend_filled: false,
                 builder_checked: false,
                 effective: false,
+                replacing_stop,
+                stop_note: None,
             },
         );
     }
@@ -1286,9 +1312,20 @@ impl Hyperliquid {
     }
     fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
         self.trading.inflight = false;
-        if let Some(job) = self.trading.active.take() {
+        if let Some(mut job) = self.trading.active.take() {
             if let Err(mut error) = result {
                 error = error.partial_ids(&job.ids);
+                if job.effective
+                    && job.ids.is_empty()
+                    && let Some((symbol, side, kind)) = &job.replacing_stop
+                {
+                    job.stop_note = Some(safe_cex_engine::error::stop_gone_text(
+                        symbol,
+                        *side,
+                        *kind,
+                        error.outcome == Some(Outcome::Unknown),
+                    ));
+                }
                 if (job.effective || !job.ids.is_empty())
                     && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
                 {
@@ -1333,6 +1370,11 @@ impl Hyperliquid {
         // A job popped inside another's callback cannot open a read until it returns.
         if read.is_err() && std::mem::take(&mut self.trading.amend_issuing) {
             self.trading.amend_retry = Some((cx.set_timer(1.0), id.to_owned()));
+            return;
+        }
+        // A 429 clears soon; the read bound still ends the wait.
+        if read.as_ref().is_err_and(|error| error.contains("HTTP 429")) {
+            self.trading.amend_retry = Some((cx.set_timer(AMEND_RETRY_MS), id.to_owned()));
             return;
         }
         if let Some(timer) = self.trading.amend_wait.take() {

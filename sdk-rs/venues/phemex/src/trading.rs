@@ -24,6 +24,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Default)]
 pub(crate) struct State {
+    /// The venue answered the current write with a code.
+    answered: bool,
     acknowledged: HashMap<String, Order>,
     jobs: HashMap<CommandId, Job>,
     retired: Vec<RetiredWrite>,
@@ -104,6 +106,11 @@ const REFUSALS: CodeTable = CodeTable {
     rows: &[
         Row {
             key: Key::Range(11001, 11001),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(11038),
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },
@@ -1921,6 +1928,7 @@ impl PhemexPerpetuals {
             .command
             .and_then(|id| self.trading.jobs.get(&id))
             .map_or(0, |job| job.ids.len());
+        self.trading.answered = false;
         let mut resolved = false;
         let mut refusal_code = None;
         let mut known_effects = false;
@@ -1951,27 +1959,28 @@ impl PhemexPerpetuals {
                 // prove no placement. Duplicate/routing/internal errors stay unknown.
                 // https://github.com/phemex/phemex-api-docs/blob/master/TradingErrorCode.md
                 let call = &request.call;
+                self.trading.answered = true;
                 if matches!(call, Call::Place { .. })
                     && env.data.as_ref().is_none_or(|data| data.get() == "null")
                     && matches!(
                         code,
                         11001
+                            | 11011
                             | 11027
                             | 11034
                             | 11035
                             | 11036
+                            | 11038
+                            | 11041
+                            | 11043
+                            | 11044
+                            | 11048
                             | 11053
                             | 11055
                             | 11056
                             | 11058
                             | 11081
                             | 11082
-                            | 11011
-                            | 11041
-                            | 11043
-                            | 11044
-                            | 11048
-                            | 11085
                             | 11150
                             | 20004
                             | 39999
@@ -2496,11 +2505,17 @@ impl PhemexPerpetuals {
                 Call::Place { order, .. } => Some(&**order),
                 _ => None,
             };
+            // An answered write cannot still land: its fence clears on the next read.
+            let read_at = if std::mem::take(&mut self.trading.answered) {
+                cx.now
+            } else {
+                expiry + CLOCK_SKEW_MS
+            };
             self.orders_uncertain(
                 cx,
                 job.map(|job| job.placing).unwrap_or_default(),
                 lost,
-                expiry + CLOCK_SKEW_MS,
+                read_at,
             );
         } else {
             self.orders_uncertain(cx, vec![], None, cx.now);

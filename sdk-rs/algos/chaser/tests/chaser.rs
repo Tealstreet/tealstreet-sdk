@@ -1526,6 +1526,30 @@ async fn hyperliquid_counts_a_row_fill_and_its_fill_event_once() {
     .await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_stop_with_no_store_row_cancels_by_symbol_on_a_by_id_venue() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.without_symbol_cancel();
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.store.borrow_mut().orders.clear();
+        stop(&factory, &cx);
+        settle(100).await;
+        let commands = port.commands.borrow();
+        assert!(
+            commands.iter().any(|c| matches!(
+                c,
+                Command::CancelOrdersWithSymbols { orders, .. }
+                    if orders[0].id == "o1" && orders[0].symbol == "BTCUSDT"
+            )),
+            "{commands:?}"
+        );
+    })
+    .await;
+}
+
 /// The stop reason stays true when a later attempt's cancel goes through.
 #[tokio::test(start_paused = true)]
 async fn a_requote_cancel_that_later_succeeds_says_an_attempt_failed() {
