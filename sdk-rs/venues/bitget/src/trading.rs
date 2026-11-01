@@ -295,6 +295,10 @@ struct CancelId {
 #[serde(rename_all = "camelCase")]
 struct Payload {
     #[serde(skip_serializing_if = "Option::is_none")]
+    long_leverage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    short_leverage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     trailing_stop_params: Option<Vec<TrailingParams>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     new_callback_ratio: Option<String>,
@@ -550,7 +554,7 @@ impl BitgetFutures {
                 if o.kind == OrderType::Conditional
                     || (o.trigger_price.is_some() && !o.redundant_protective_trigger())
                 {
-                    return Err("Bitget opening conditional orders are unsupported".into());
+                    return Err("Bitget conditional orders are unsupported".into());
                 }
                 if !o.amount.is_finite() || o.amount < 0.0 {
                     return Err("invalid Bitget order amount".into());
@@ -1277,6 +1281,25 @@ impl BitgetFutures {
                         pos_side: side_text,
                         ..Payload::default()
                     };
+                    // Isolated hedge names both sides' leverage (25200 otherwise).
+                    if isolated_hedge {
+                        let setting = cx.store.setting(symbol);
+                        let held = |kept: Option<f64>| num::format(kept.unwrap_or(leverage));
+                        let (long, short) = if requested_side == PositionSide::Long {
+                            (
+                                num::format(leverage),
+                                held(setting.and_then(|s| s.sell_leverage)),
+                            )
+                        } else {
+                            (
+                                held(setting.and_then(|s| s.buy_leverage)),
+                                num::format(leverage),
+                            )
+                        };
+                        p.margin_mode = Some(margin_text(MarginType::Isolated));
+                        p.long_leverage = Some(long);
+                        p.short_leverage = Some(short);
+                    }
                     paths::UTA_SET_LEVERAGE
                 } else {
                     p.hold_side = side_text;
@@ -1312,6 +1335,17 @@ impl BitgetFutures {
                         ))),
                         ..Payload::default()
                     };
+                    // Isolated hedge names both sides' leverage (25200 otherwise).
+                    if margin == MarginType::Isolated && cx.store.hedged() {
+                        let setting = cx.store.setting(symbol);
+                        let scalar = setting.map_or(1.0, |s| s.leverage);
+                        p.long_leverage = Some(num::format(
+                            setting.and_then(|s| s.buy_leverage).unwrap_or(scalar),
+                        ));
+                        p.short_leverage = Some(num::format(
+                            setting.and_then(|s| s.sell_leverage).unwrap_or(scalar),
+                        ));
+                    }
                     paths::UTA_SET_LEVERAGE
                 } else {
                     paths::SET_MARGIN

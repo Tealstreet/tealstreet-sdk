@@ -1032,3 +1032,39 @@ fn a_venue_read_without_the_parent_proves_its_preset_legs_gone() {
     assert_eq!(open_legs(&h), 0, "{:?}", h.logs);
     assert!(h.engine.store().order("1").is_none());
 }
+
+#[test]
+fn a_post_only_that_crossed_shows_its_reason_on_first_sight() {
+    let mut h = Harness::classic();
+    let mut row = ordinary_row("crossed");
+    row["status"] = serde_json::json!("canceled");
+    row["orderStatus"] = serde_json::json!("canceled");
+    row["cancelReason"] = serde_json::json!("post_only_cancel");
+    h.private_message(&serde_json::json!({"arg":{"channel":"orders"},"data":[row]}).to_string());
+    let order = h
+        .engine
+        .store()
+        .order("crossed")
+        .expect("the refused order shows");
+    assert_eq!(
+        order.extra.as_ref().and_then(|e| e.reject_reason),
+        Some(safe_cex_engine::model::RejectReason::PostOnly)
+    );
+}
+
+#[test]
+fn a_flat_classic_account_learns_its_position_mode_at_startup() {
+    let mut h = Harness::private_started();
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, r#"{"code":"00000","data":[]}"#);
+    h.respond(
+        "/mix/account/account?",
+        200,
+        r#"{"code":"00000","data":{"posMode":"hedge_mode","marginMode":"crossed","crossedMarginLeverage":"10"}}"#,
+    );
+    assert!(h.engine.store().hedged());
+}
