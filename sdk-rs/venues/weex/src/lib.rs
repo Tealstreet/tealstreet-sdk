@@ -1057,6 +1057,9 @@ impl Venue for WeexFutures {
                     if let Some(context) = &context {
                         let _ = cx.finish_http_context(context);
                     }
+                    if let Some(error) = account::key_refusal(response.body) {
+                        cx.startup_read_refused(&error);
+                    }
                     self.account_failed(
                         cx,
                         request,
@@ -1216,6 +1219,9 @@ impl Venue for WeexFutures {
                 request.retire_leg(cx);
             }
         } else {
+            if let Some(error) = account::key_refusal(response.body) {
+                cx.startup_read_refused(&error);
+            }
             self.on_request_failed(cx, p, &message);
         }
     }

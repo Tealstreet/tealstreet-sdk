@@ -2235,6 +2235,18 @@ impl Bitrue {
         request: Request,
         code: Option<i64>,
     ) {
+        // 403 here is the WAF limit, not the key, so it never ends a start.
+        if matches!(code, Some(401 | -2014 | -2015 | -1022))
+            && !matches!(
+                request,
+                Request::Brackets { .. } | Request::Keepalive { .. }
+            )
+        {
+            cx.startup_read_refused(
+                &VenueError::new(private_diagnostic("Bitrue refused the API key", code))
+                    .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            );
+        }
         match request {
             Request::Brackets { root, .. } => {
                 let _ = cx.fail_context(

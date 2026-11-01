@@ -1976,3 +1976,15 @@ fn invalid_incremental_quote_preserves_eligibility_for_its_corrected_receipt() {
     s.message(3, "update", &format!("[{}]", row("2", "110")));
     assert_eq!(execution_prices_and_amounts(&mut s.e), [(120.0, 1.0)]);
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut s = Session::new("DEFAULT", true);
+    let request = s.collect().pop().unwrap();
+    s.e.drain_actions().for_each(drop);
+    s.reply(request, 401, r#"{"error":"unauthorized"}"#);
+    assert!(s.e.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}

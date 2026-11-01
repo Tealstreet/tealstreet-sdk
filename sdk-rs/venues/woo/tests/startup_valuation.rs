@@ -193,3 +193,23 @@ fn owned_position_outside_partial_catalogue_cannot_clear_a_snapshot() {
             Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let (mut e, info, _, _) = pending_with(CATALOGUE);
+    e.handle(
+        1.0,
+        Event::HttpResponse {
+            request: info.id,
+            response: Response {
+                status: 401,
+                headers: "",
+                body: r#"{"success":false,"code":-1001,"message":"bad key"}"#,
+            },
+        },
+    );
+    assert!(e.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}
