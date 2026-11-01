@@ -337,6 +337,7 @@ impl Lighter {
                 let mut steps = VecDeque::new();
                 for id in ids {
                     // The ID a placement returned is its client index.
+                    let known_client = self.account.client_orders.contains_key(&id);
                     let id = if cx.store.order(&id).is_some() {
                         id
                     } else {
@@ -357,7 +358,18 @@ impl Lighter {
                         return;
                     }
                     let Some(order) = cx.store.order(&id).cloned() else {
-                        refuse(cx, not_sent(format!("Lighter order {id} not found")));
+                        if !known_client {
+                            refuse(cx, not_sent(format!("Lighter order {id} not found")));
+                            return;
+                        }
+                        // The venue holds it before its row arrives; "not found" would be false.
+                        refuse(
+                            cx,
+                            not_sent(format!(
+                                "Lighter order {id} has no row yet; open orders are being read, try again"
+                            )),
+                        );
+                        self.refresh_orders(cx);
                         return;
                     };
                     if let Err(error) = market_id(cx, &order.symbol) {
@@ -403,6 +415,12 @@ impl Lighter {
                 price,
                 amount,
             } => {
+                // The ID a placement returned is its client index.
+                let id = if cx.store.order(&id).is_some() {
+                    id
+                } else {
+                    self.account.client_orders.get(&id).cloned().unwrap_or(id)
+                };
                 if self
                     .trading
                     .active
