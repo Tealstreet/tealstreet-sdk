@@ -2058,7 +2058,10 @@ impl BitgetFutures {
             });
             job.fallback = Some(fallback);
         } else {
-            if is_algo(order.kind) && attached.is_none() {
+            // A resting limit's bracket protects nothing until the limit has filled.
+            if linked.iter().any(|o| is_algo(o.kind))
+                && attached.is_none_or(|limit| limit.filled > 0.0)
+            {
                 job.replaces_stop = Some(order.symbol.clone());
             }
             job.calls = fallback;
