@@ -436,6 +436,8 @@ impl TwapChasers for Rc<ChaserBook> {
         ChaserBook::progress(self, chaser_id).map(|progress| ChaserProgress {
             remaining_size: progress.remaining_size,
             stopped: progress.stopped,
+            ended: progress.ended,
+            order_may_be_open: progress.order_may_be_open,
         })
     }
 
