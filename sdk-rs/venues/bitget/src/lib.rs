@@ -41,6 +41,33 @@ pub struct Options {
     pub public_data_only: bool,
     pub credentials: Option<safe_cex_engine::signing::Identity>,
     pub product: Product,
+    /// A server shares one IP between accounts, against Bitget's 100 connections
+    /// per IP: it keeps three public sockets whatever the market count.
+    pub fixed_public_sockets: bool,
+}
+
+/// Index of the private connection in `sockets`; every other index is public.
+const PRIVATE_SOCKET: usize = 3;
+const MIN_PUBLIC_SOCKETS: usize = 3;
+/// Bitget closes a connection about every 50 s at 289 channels, none at 100.
+/// Tickers stop short of 100 to leave the primary room for books and candles.
+const TICKERS_PER_SOCKET: usize = 80;
+
+pub fn public_socket_count(markets: usize, fixed: bool) -> usize {
+    if fixed {
+        MIN_PUBLIC_SOCKETS
+    } else {
+        markets.div_ceil(TICKERS_PER_SOCKET).max(MIN_PUBLIC_SOCKETS)
+    }
+}
+
+/// A public connection's share of the tickers.
+fn public_slot(index: usize) -> usize {
+    if index < PRIVATE_SOCKET {
+        index
+    } else {
+        index - 1
+    }
 }
 
 pub enum Pending {
@@ -134,7 +161,7 @@ pub struct BitgetFutures {
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
-    sockets: [Connection; 4],
+    sockets: Vec<Connection>,
     ticker_index: Vec<Option<u32>>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     books: HashMap<String, BookState>,
@@ -200,7 +227,9 @@ impl BitgetFutures {
             account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
-            sockets: Default::default(),
+            sockets: (0..=PRIVATE_SOCKET)
+                .map(|_| Connection::default())
+                .collect(),
             ticker_index: Vec::new(),
             live_tickers: Default::default(),
             books: HashMap::new(),
@@ -324,7 +353,11 @@ impl BitgetFutures {
                 safe_cex_engine::SocketChannel::Public
             })
             .feed(
-                ["primary", "secondary-1", "secondary-2", "private"][index],
+                match index {
+                    0 => "primary".to_owned(),
+                    PRIVATE_SOCKET => "private".to_owned(),
+                    _ => format!("secondary-{}", public_slot(index)),
+                },
                 recover,
             );
         if reject_route {
@@ -341,6 +374,10 @@ impl BitgetFutures {
                 connection.supervisor.connecting(cx);
             }
         }
+    }
+
+    fn open_feed(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
+        self.connect(cx, index);
     }
 
     fn channel(&self, socket: SocketId) -> Option<usize> {
@@ -758,12 +795,13 @@ impl Venue for BitgetFutures {
             return;
         }
         connection.supervisor.opened(cx);
+        let public_sockets = self.sockets.len() - 1;
         let mut topics: Vec<_> = cx
             .store
             .markets()
             .iter()
             .enumerate()
-            .filter(|(i, _)| i % 3 == index)
+            .filter(|(i, _)| i % public_sockets == public_slot(index))
             .map(|(_, m)| ("ticker".to_owned(), m.symbol.clone()))
             .collect();
         if index == 0 {
@@ -1006,12 +1044,19 @@ impl Venue for BitgetFutures {
                 let _ = cx.finish_http_context(&context);
                 if tickers {
                     self.discovery.succeeded(cx, DiscoveryRead::Tickers);
-                    self.connect(cx, 1);
-                    self.connect(cx, 2);
+                    for index in (1..self.sockets.len()).filter(|index| *index != PRIVATE_SOCKET) {
+                        self.open_feed(cx, index);
+                    }
                 } else if cx.frame_fed() {
                     // The page engine loads instruments only; its data source streams.
                     self.discovery.succeeded(cx, DiscoveryRead::Markets);
                 } else {
+                    let public_sockets = public_socket_count(
+                        cx.store.markets().len(),
+                        self.options.fixed_public_sockets,
+                    );
+                    self.sockets
+                        .resize_with(public_sockets + 1, Connection::default);
                     self.connect(cx, 0);
                     self.discovery.succeeded(cx, DiscoveryRead::Markets);
                     self.discovery_read(cx, true);
@@ -1198,7 +1243,7 @@ impl Venue for BitgetFutures {
             };
             match tick {
                 Tick::Unhandled => continue,
-                Tick::Reconnect => self.connect(cx, index),
+                Tick::Reconnect => self.open_feed(cx, index),
                 Tick::Ping => {
                     if let Some(socket) = self.sockets[index].socket {
                         cx.send(socket, "ping");
