@@ -89,6 +89,9 @@ const START_TIMEOUT_MS = 30_000;
 /** A Rust start that still ran out of time starts over after each of these, then gives up visibly. */
 const START_RETRY_DELAYS_MS = [10_000, 20_000, 40_000, 60_000];
 
+/** A request held for an exchange that does not exist yet, matching the engine's write refusal. */
+const BUFFERED_REQUEST_WAIT_MS = 30_000;
+
 const USER_STARTED_ALGORITHMS = new Set<StoreWorkerPayload['op']>(['chaser:start', 'twap:start', 'twap:resume']);
 
 export class ExchangeWorker {
@@ -882,6 +885,14 @@ export class ExchangeWorker {
       const MAX_BUFFER_SIZE = 1000;
       if (this._messageBuffer.length < MAX_BUFFER_SIZE) {
         this._messageBuffer.push(payload);
+        if (this._requestKey(payload)) {
+          setTimeout(() => {
+            const at = this._messageBuffer.indexOf(payload);
+            if (at < 0) return;
+            this._messageBuffer.splice(at, 1);
+            this._rejectNeverSent(payload, 'The account did not load in time; nothing was sent. Retry once it loads.');
+          }, BUFFERED_REQUEST_WAIT_MS);
+        }
       } else {
         this._rejectNeverSent(payload, 'Worker startup queue is full; nothing was sent.');
         // Send warning through proper logging infrastructure

@@ -279,6 +279,53 @@ describe('frame-fed main-thread mirror', () => {
     });
   });
 
+  describe('a worker read that gets no answer', () => {
+    const silentMirror = () => {
+      const target = new RustEngineExchange(
+        'bybit',
+        { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
+        new DefaultStore(),
+      );
+      target.on('callMethod', () => {});
+      return target;
+    };
+
+    it('fails at 30 s while the account loads, and leaves a write on its long bound', async () => {
+      vi.useFakeTimers();
+      try {
+        fakeEngine({ supported: false });
+        exchange = silentMirror();
+        const read = exchange.callMethodInWorker('fetchOrders');
+        const refused = expect(read).rejects.toThrow('has not finished loading');
+        const write = vi.fn();
+        void exchange.callMethodInWorker('placeOrder', order as never).catch(write);
+        await vi.advanceTimersByTimeAsync(30_000);
+        await refused;
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(write).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the command timeout once the account has loaded', async () => {
+      vi.useFakeTimers();
+      try {
+        fakeEngine({ supported: false });
+        exchange = silentMirror();
+        exchange.store.update({
+          loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+        });
+        const outcome = vi.fn();
+        void exchange.callMethodInWorker('fetchOrders').catch(outcome);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(outcome).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('asks its data source to re-read a setting it holds', async () => {
     const fake = fakeEngine();
     const mirror = mirrorWith(fake);
