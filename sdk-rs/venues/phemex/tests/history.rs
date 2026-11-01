@@ -1492,3 +1492,21 @@ mod owned_bounded {
         );
     }
 }
+#[test]
+fn client_id_lookup_says_placed_only_for_an_order_the_venue_took() {
+    for (native, expected) in [
+        ("Rejected", r#"{"found":false,"definitive":true}"#),
+        ("Expired", r#"{"found":false,"definitive":true}"#),
+        ("Canceled", r#"{"found":false,"definitive":false}"#),
+        ("Deactivated", r#"{"found":false,"definitive":false}"#),
+    ] {
+        let mut e = engine(true);
+        let a = query(&mut e, lookup("caller"));
+        let row = ORDER
+            .replace("Filled", native)
+            .replace(r#""cumQtyRq":"0.001""#, r#""cumQtyRq":"0""#)
+            .replace("\"symbol\"", "\"clOrdId\":\"caller\",\"symbol\"");
+        respond(&mut e, &a, &format!("[{row}]"), false);
+        assert_eq!(result(&mut e).unwrap(), expected, "{native}");
+    }
+}

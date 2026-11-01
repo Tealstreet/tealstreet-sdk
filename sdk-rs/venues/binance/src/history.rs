@@ -596,8 +596,11 @@ impl BinanceFutures {
         // Secondary GET snapshots may belong to another account. Their cached
         // client IDs cannot establish primary placement identity.
         if !self.credentials.secondary_supplied()
+            // A Creating row may be a send still in flight; only the venue can say it is placed.
             && let Some(order) = cx.store.orders().iter().find(|order| {
-                order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
+                order.symbol == symbol
+                    && order.status != OrderStatus::Creating
+                    && order.client_order_id.as_deref() == Some(&client_order_id)
             })
         {
             match found(order.clone(), None) {
@@ -666,6 +669,12 @@ impl BinanceFutures {
         };
         let amount = parse(&row.orig_qty)?;
         let filled = parse(&row.executed_qty)?;
+        // Refused, or expired with nothing done (a post-only reject): the order was not placed.
+        if row.status == "REJECTED"
+            || (matches!(row.status.as_ref(), "EXPIRED" | "EXPIRED_IN_MATCH") && filled == 0.0)
+        {
+            return Ok(ABSENT.into());
+        }
         if row.order_id == 0
             || !matches!(row.side.as_ref(), "BUY" | "SELL")
             || amount <= 0.0

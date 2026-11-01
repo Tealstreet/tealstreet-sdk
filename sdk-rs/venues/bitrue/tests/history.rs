@@ -517,7 +517,7 @@ fn client_lookup_rejects_partial_or_failed_snapshots_without_definitive_misses()
     }
 }
 #[test]
-fn client_lookup_network_failure_falls_back_to_latest_cache_without_side_effects() {
+fn client_lookup_network_failure_never_answers_from_the_cache() {
     let mut e = engine();
     lookup(&mut e, SYMBOL, "caller-id");
     let order = fetched_order();
@@ -532,10 +532,23 @@ fn client_lookup_network_failure_falls_back_to_latest_cache_without_side_effects
             },
         );
     }
-    let found = lookup_result(&mut e);
-    assert!(found.found);
-    assert_eq!(found.order.unwrap().id, order.id);
+    let missing = lookup_result(&mut e);
+    assert!(!missing.found);
+    assert_eq!(missing.definitive, Some(false));
     assert_eq!(e.store().orders(), &[order]);
+}
+#[test]
+fn client_lookup_never_finds_a_creating_row() {
+    let mut e = engine();
+    let mut order = fetched_order();
+    order.status = safe_cex_engine::model::OrderStatus::Creating;
+    e.store_mut().upsert_order(order);
+    lookup(&mut e, SYMBOL, "caller-id");
+    let r = lookup_request(&mut e);
+    response(&mut e, r, r#"{"code":"0","data":[]}"#);
+    let missing = lookup_result(&mut e);
+    assert!(!missing.found);
+    assert_eq!(missing.definitive, Some(false));
 }
 #[test]
 fn client_lookup_without_private_credentials_never_asserts_definitive_absence() {

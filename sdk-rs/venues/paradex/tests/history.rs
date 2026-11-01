@@ -1121,3 +1121,47 @@ fn a_market_unlisted_at_admission_keeps_its_native_empty_answers() {
             .any(|r| r.url.contains("/orders-history") || r.url.contains("/orders?"))
     );
 }
+#[test]
+fn a_lookup_says_placed_only_for_an_order_the_venue_took() {
+    let unfilled = ORDER.replace(r#""remaining_size":"0.5""#, r#""remaining_size":"2""#);
+    for (row, expected) in [
+        (
+            unfilled.replace("USER_CANCELED", "POST_ONLY_WOULD_CROSS"),
+            r#"{"found":false,"definitive":true}"#,
+        ),
+        (
+            unfilled.replace(r#""status":"CLOSED""#, r#""status":"REJECTED""#),
+            r#"{"found":false,"definitive":true}"#,
+        ),
+        (
+            unfilled.replace("USER_CANCELED", ""),
+            r#"{"found":false,"definitive":false}"#,
+        ),
+    ] {
+        let mut h = private();
+        read(
+            &mut h,
+            11,
+            Query::OrderByClientId {
+                symbol: "BTC-USD-PERP".into(),
+                client_order_id: "caller".into(),
+            },
+        );
+        h.reply("/orders?", r#"{"results":[]}"#);
+        h.reply("/orders-history", &format!(r#"{{"results":[{row}]}}"#));
+        assert_eq!(h.result(11).unwrap(), expected, "{row}");
+    }
+    let mut h = private();
+    read(
+        &mut h,
+        12,
+        Query::OrderByClientId {
+            symbol: "BTC-USD-PERP".into(),
+            client_order_id: "caller".into(),
+        },
+    );
+    h.reply("/orders?", r#"{"results":[]}"#);
+    h.reply("/orders-history", &format!(r#"{{"results":[{unfilled}]}}"#));
+    let result: serde_json::Value = serde_json::from_str(h.result(12).unwrap()).unwrap();
+    assert_eq!(result["found"], true, "a user cancel after acknowledgement");
+}

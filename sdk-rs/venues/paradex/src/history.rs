@@ -72,7 +72,31 @@ pub struct Request {
     fallback: bool,
     lookup_history: bool,
     lookup_complete: bool,
+    /// The venue answered for this client ID with an order it never placed, or one it cannot tell.
+    lookup_refused: bool,
+    lookup_unconfirmed: bool,
     open_complete: bool,
+}
+/// What a lookup row says about placement: a refusal, or a terminal row with nothing
+/// filled and no reason, is not evidence the order was placed.
+enum Placement {
+    Placed,
+    Refused,
+    Unconfirmed,
+}
+fn placement(row: &crate::account::NativeOrder) -> Placement {
+    if matches!(row.status.as_str(), "REJECTED" | "EXPIRED") {
+        return Placement::Refused;
+    }
+    let terminal = matches!(row.status.as_str(), "CLOSED" | "CANCELED");
+    if !terminal || row.size != row.remaining_size {
+        return Placement::Placed;
+    }
+    match row.cancel_reason.as_str() {
+        "USER_CANCELED" => Placement::Placed,
+        "" => Placement::Unconfirmed,
+        _ => Placement::Refused,
+    }
 }
 impl Request {
     /// Admit the delivered page through its own leg; a stale leg admits nothing
@@ -421,6 +445,8 @@ impl History {
             fallback: false,
             lookup_history: false,
             lookup_complete: false,
+            lookup_refused: false,
+            lookup_unconfirmed: false,
             open_complete: false,
         };
         self.issue(cx, account, request);
@@ -562,7 +588,11 @@ impl History {
                 && page.fresh(row.id.clone())
             {
                 if let Ok(order) = crate::account::map_order(&row) {
-                    page.stage(Output::Lookup(order));
+                    match placement(&row) {
+                        Placement::Placed => page.stage(Output::Lookup(order)),
+                        Placement::Refused => request.lookup_refused = true,
+                        Placement::Unconfirmed => request.lookup_unconfirmed = true,
+                    }
                 } else {
                     request.valid = false;
                 }
@@ -897,7 +927,8 @@ impl History {
         };
         let lookup = matches!(request.query, Query::OrderByClientId { .. });
         let sort = !matches!(request.query, Query::PublicTrades { .. });
-        let definitive = request.lookup_complete;
+        let definitive =
+            request.lookup_refused || (request.lookup_complete && !request.lookup_unconfirmed);
         let _ = request.history.finish_with(cx, result, move |mut rows| {
             if lookup {
                 #[derive(Serialize)]

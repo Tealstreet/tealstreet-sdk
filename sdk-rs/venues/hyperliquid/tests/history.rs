@@ -881,3 +881,33 @@ fn owned_history_full_inclusive_gap_survives_both_funding_outcomes() {
         assert!(event.message.contains("full inclusive page"));
     }
 }
+#[test]
+fn client_id_lookup_says_placed_only_for_an_order_the_venue_took() {
+    for (status, found, definitive) in [
+        ("rejected", false, Some(true)),
+        ("badAloPxRejected", false, Some(true)),
+        ("perpMarginRejected", false, Some(true)),
+        ("someFutureStatus", false, Some(false)),
+        ("marginCanceled", true, None),
+        ("canceled", true, None),
+    ] {
+        let (mut e, _) = ready("disabled");
+        query(
+            &mut e,
+            Query::OrderByClientId {
+                symbol: "BTC-PERP".into(),
+                client_order_id: "0x00000000000000000000000000000001".into(),
+            },
+        );
+        let r = read(&mut e);
+        let body = format!(
+            r#"{{"status":"order","order":{{"order":{{"coin":"BTC","oid":9,"cloid":"0x00000000000000000000000000000001","side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit"}},"status":"{status}"}}}}"#
+        );
+        reply(&mut e, &r, 200, &body);
+        let answer = result(&mut e);
+        assert_eq!(answer["found"], found, "{status}");
+        if let Some(definitive) = definitive {
+            assert_eq!(answer["definitive"], definitive, "{status}");
+        }
+    }
+}

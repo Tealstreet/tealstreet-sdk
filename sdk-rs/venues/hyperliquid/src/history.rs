@@ -614,6 +614,16 @@ impl Hyperliquid {
                         return Err("Malformed Hyperliquid order lookup status".into());
                     }
                     let row = row.order.ok_or("Missing lookup order")?;
+                    // A rejection was never placed; an unknown status cannot say either way.
+                    if row.status == "rejected" || row.status.ends_with("Rejected") {
+                        return Ok("{\"found\":false,\"definitive\":true}".into());
+                    }
+                    let cancelled =
+                        row.status.ends_with("anceled") || row.status == "scheduledCancel";
+                    if !cancelled && !matches!(row.status.as_ref(), "open" | "triggered" | "filled")
+                    {
+                        return Ok("{\"found\":false,\"definitive\":false}".into());
+                    }
                     if let Some(mut order) = self.map_order(cx, &row.order)
                         && symbol_matches(&read.query, &order.symbol)
                     {

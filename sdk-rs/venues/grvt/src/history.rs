@@ -825,6 +825,25 @@ impl Grvt {
                 {
                     return Err("GRVT lookup identity mismatch".into());
                 }
+                // A rejection was never placed; an unfilled cancel may be a post-only reject.
+                #[derive(serde::Deserialize)]
+                struct Native<'a> {
+                    #[serde(borrow, rename = "s1", alias = "state")]
+                    state: NativeState<'a>,
+                }
+                #[derive(serde::Deserialize)]
+                struct NativeState<'a> {
+                    #[serde(borrow, rename = "s", alias = "status")]
+                    status: std::borrow::Cow<'a, str>,
+                }
+                let native: Native<'_> =
+                    serde_json::from_str(raw.get()).map_err(|_| "Malformed GRVT lookup state")?;
+                if native.state.status == "REJECTED" {
+                    return Ok("{\"found\":false,\"definitive\":true}".into());
+                }
+                if native.state.status == "CANCELLED" && decoded.order.filled == 0.0 {
+                    return Ok("{\"found\":false,\"definitive\":false}".into());
+                }
                 serde_json::to_string(&Found {
                     found: true,
                     order: decoded.order,
