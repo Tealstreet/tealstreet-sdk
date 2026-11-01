@@ -557,21 +557,6 @@ impl Okx {
         };
         if let Some(local) = local {
             match local {
-                Ok(data) if open_window => {
-                    // No request was made, so the empty answer cannot cover the window.
-                    let mut completion =
-                        match ReadCompletion::from_context(cx, command, root.clone()) {
-                            Ok(completion) => completion,
-                            Err(error) => {
-                                let _ = cx.fail_context(&root, error.read_venue_error());
-                                return;
-                            }
-                        };
-                    completion.incomplete(
-                        "history is INCOMPLETE: OKX answered this window without a read",
-                    );
-                    let _ = completion.finish(cx, Ok(data.into()));
-                }
                 Ok(data) => {
                     let _ = cx.done_context(&root, data.into());
                 }

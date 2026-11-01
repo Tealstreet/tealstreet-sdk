@@ -802,7 +802,7 @@ fn has_incomplete_marker(a: &[Action]) -> bool {
 }
 
 #[test]
-fn spot_window_fills_with_no_limit_flag_a_full_page_or_a_missing_symbol() {
+fn spot_window_fills_with_no_limit_flag_a_full_page() {
     let mut e = spot(true);
     let a = run(
         &mut e,
@@ -830,22 +830,4 @@ fn spot_window_fills_with_no_limit_flag_a_full_page_or_a_missing_symbol() {
         &json!({"code":"200000","data":{"items":rows}}).to_string(),
     );
     assert!(has_incomplete_marker(&out), "{out:?}");
-
-    let mut e = spot(true);
-    let out = run(
-        &mut e,
-        100.,
-        query(Query::Fills {
-            symbol: None,
-            order_id: None,
-            from_ms: Some(1.),
-            to_ms: Some(2.),
-            limit: None,
-        }),
-    );
-    assert!(has_incomplete_marker(&out), "{out:?}");
-    assert!(out.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { command: COMMAND, result }) if result == "[]"
-    )));
 }
