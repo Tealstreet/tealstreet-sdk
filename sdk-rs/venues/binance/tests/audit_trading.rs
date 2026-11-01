@@ -978,3 +978,28 @@ fn a_quantity_rounding_to_zero_is_refused_and_a_split_sends_exactly_its_amount()
     }
     assert_eq!(sizes, ["4", "4", "2.5"]);
 }
+
+#[test]
+fn an_amend_below_the_value_minimum_is_refused_before_the_cancel() {
+    let mut h = ready(Variant::UsdM);
+    let mut order = h.engine.store().order("12").unwrap().clone();
+    order.reduce_only = false;
+    h.engine.store_mut().upsert_order(order);
+    h.requests.clear();
+    h.event(Event::Command(Command::AmendOrder {
+        command: 80,
+        id: "12".into(),
+        price: Some(0.1),
+        amount: None,
+    }));
+    assert!(
+        !h.requests.iter().any(|r| r.method == Method::Delete),
+        "{:?}",
+        h.requests
+    );
+    assert!(
+        format!("{:?}", h.done).contains("the order is unchanged"),
+        "{:?}",
+        h.done
+    );
+}

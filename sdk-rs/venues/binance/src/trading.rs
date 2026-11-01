@@ -177,6 +177,8 @@ enum CancelProof {
 
 #[derive(Default)]
 pub struct TradingState {
+    /// MIN_NOTIONAL by symbol. Market limits carry no value minimum.
+    pub(crate) min_notional: HashMap<String, f64>,
     jobs: HashMap<CommandId, Job>,
     /// While an amendment plans its replacement: the original row's hedge side.
     amended_position_side: Option<&'static str>,
@@ -1792,6 +1794,20 @@ impl BinanceFutures {
             close: Some(order.close.unwrap_or(false)),
             stp_mode: None,
         };
+        // A replacement below the value minimum would be refused after the old order is gone.
+        let left = (replacement.amount - order.filled).max(0.0);
+        let value = left * replacement.price.unwrap_or(0.0);
+        let minimum = self
+            .trading
+            .min_notional
+            .get(&order.symbol)
+            .copied()
+            .unwrap_or(0.0);
+        if !order.reduce_only && value > 0.0 && value < minimum {
+            return Err(format!(
+                "Replacement worth {value} is below the {minimum} minimum; the order is unchanged"
+            ));
+        }
         // Validate before canceling; build the final payload after its cumulative fill is known.
         self.plan_place(cx, std::slice::from_ref(&replacement))?;
         let mut job = self.plan_cancel(std::slice::from_ref(&order));

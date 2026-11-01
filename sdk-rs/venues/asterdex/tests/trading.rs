@@ -1169,3 +1169,39 @@ fn live_1000_refusals_are_not_an_uncertain_placement() {
         );
     }
 }
+
+#[test]
+fn an_amend_below_the_value_minimum_is_refused_before_the_cancel() {
+    let mut h = Harness::new();
+    h.engine.start(1700000000000.0);
+    h.collect();
+    let index = h
+        .requests
+        .iter()
+        .position(|r| r.url.ends_with("/exchangeInfo"))
+        .unwrap();
+    let info = h.requests.remove(index);
+    h.reply(info, r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"2"},{"filterType":"MIN_NOTIONAL","notional":"5"}]}]}"#);
+    let index = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("/positionSide/dual"))
+        .unwrap();
+    let mode = h.requests.remove(index);
+    h.reply(mode, r#"{"dualSidePosition":false}"#);
+    let mut resting = order("283194212", OrderType::Limit);
+    resting.reduce_only = false;
+    h.engine.store_mut().set_orders(vec![resting]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(0.1),
+        amount: None,
+    });
+    assert!(!h.requests.iter().any(|r| r.method == Method::Delete));
+    assert!(
+        format!("{:?}", h.done).contains("the order is unchanged"),
+        "{:?}",
+        h.done
+    );
+}

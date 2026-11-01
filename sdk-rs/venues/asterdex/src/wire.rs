@@ -34,6 +34,8 @@ pub struct Filter<'a> {
     pub min_qty: Option<Str<'a>>,
     #[serde(borrow, default)]
     pub max_qty: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub notional: Option<Str<'a>>,
     pub limit: Option<u32>,
 }
 

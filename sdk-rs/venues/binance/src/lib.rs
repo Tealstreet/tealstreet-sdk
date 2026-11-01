@@ -1710,6 +1710,16 @@ impl Venue for BinanceFutures {
                     }
                 {
                     let market = market_from_wire(&m, self.options.variant);
+                    if let Some(notional) = m
+                        .filters
+                        .iter()
+                        .find(|f| f.filter_type == "MIN_NOTIONAL")
+                        .and_then(|f| f.notional.as_deref())
+                    {
+                        self.trading
+                            .min_notional
+                            .insert(market.symbol.clone(), num::parse(notional));
+                    }
                     if !market.precision.is_tradable() {
                         *rejected = true;
                         safe_cex_engine::startup::skipped_row(cx);
