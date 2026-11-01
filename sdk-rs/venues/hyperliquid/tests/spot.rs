@@ -619,10 +619,12 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
         Event::Command(Command::AmendOrder {
             command: 2,
             id: "101".into(),
-            price: Some(0.00095),
+            price: Some(0.002),
             amount: Some(6000.0),
         }),
     );
+    let read = take_http(&mut e);
+    support::answer_order_status(&mut e, &read);
     let r = take_http(&mut e);
     acknowledge(
         &mut e,
@@ -646,7 +648,7 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
     let w = &p["action"]["orders"][0];
     assert_eq!(w["a"], 10001);
     assert_eq!(w["s"], "6000");
-    assert_eq!(w["p"], "0.00095");
+    assert_eq!(w["p"], "0.002");
     assert_ne!(w["c"], "0x00000000000000000000000000000001");
 }
 #[test]
@@ -657,10 +659,12 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
         Event::Command(Command::AmendOrder {
             command: 2,
             id: "101".into(),
-            price: Some(0.00095),
+            price: Some(0.002),
             amount: None,
         }),
     );
+    let read = take_http(&mut e);
+    support::answer_order_status(&mut e, &read);
     let r = take_http(&mut e);
     let fill = r#"{"channel":"userFills","data":{"isSnapshot":false,"fills":[{"coin":"@1","side":"B","px":"0.000937","sz":"1","time":5001,"tid":9,"oid":101}]}}"#;
     support::message(&mut e, s, 5001.0, fill);

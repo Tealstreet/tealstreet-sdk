@@ -36,6 +36,9 @@ pub enum Request {
     },
     Builder,
     Fees,
+    AmendSource {
+        id: String,
+    },
 }
 impl Request {
     pub(crate) fn is_builder(&self) -> bool {
@@ -234,7 +237,7 @@ impl Hyperliquid {
         // approval is read, once, before the first placement.
         if cx.frame_fed() {
             match &request {
-                Request::Builder => {}
+                Request::Builder | Request::AmendSource { .. } => {}
                 _ => return,
             }
         }
@@ -524,6 +527,27 @@ impl Hyperliquid {
             .unwrap(),
             Request::Builder,
         );
+    }
+    pub(crate) fn read_amend_source(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        #[derive(Serialize)]
+        struct Read<'a> {
+            r#type: &'static str,
+            user: &'a str,
+            oid: u64,
+        }
+        let Ok(oid) = id.parse::<u64>() else {
+            self.amend_source_read(cx, id, Err("the order ID is not numeric".to_owned()));
+            return;
+        };
+        let body = serde_json::to_string(&Read {
+            r#type: "orderStatus",
+            user: self.user().unwrap_or_default(),
+            oid,
+        })
+        .unwrap();
+        self.account.fence_read = true;
+        self.read_body(cx, body, Request::AmendSource { id: id.to_owned() });
+        self.account.fence_read = false;
     }
     pub(crate) fn builder(&self) -> crate::Builder {
         let mut builder = self
@@ -867,6 +891,28 @@ impl Hyperliquid {
                     cx.hold_setting(crate::BUILDER_HOLD.clone());
                 }
             }
+            Request::AmendSource { id } => {
+                #[derive(serde::Deserialize)]
+                struct Lookup<'a> {
+                    #[serde(borrow)]
+                    status: &'a str,
+                    #[serde(default, borrow)]
+                    order: Option<crate::wire::OrderUpdate<'a>>,
+                }
+                let read = serde_json::from_str::<Lookup>(raw)
+                    .ok()
+                    .filter(|lookup| lookup.status == "order")
+                    .and_then(|lookup| lookup.order)
+                    .ok_or_else(|| "the order read was unreadable".to_owned());
+                match read {
+                    Ok(row) => self.amend_source_read(
+                        cx,
+                        &id,
+                        Ok((row.status.as_ref(), row.order.orig_sz, row.order.sz)),
+                    ),
+                    Err(error) => self.amend_source_read(cx, &id, Err(error)),
+                }
+            }
             Request::Fees => {
                 #[derive(serde::Deserialize)]
                 #[serde(rename_all = "camelCase")]
@@ -1128,6 +1174,9 @@ impl Hyperliquid {
                 }
             }
             Request::Builder => self.account.builder_approved = None,
+            Request::AmendSource { id } => {
+                self.amend_source_read(cx, &id, Err(error.to_owned()));
+            }
             Request::Fees => {}
         }
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);

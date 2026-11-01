@@ -52,6 +52,8 @@ impl Hyperliquid {
                 replacement: None,
                 amend_source: None,
                 amend_filled: false,
+                amend_total: None,
+                amend_read: false,
                 builder_checked: false,
                 effective: false,
             },

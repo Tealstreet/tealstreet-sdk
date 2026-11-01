@@ -50,16 +50,22 @@ fn opts(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
 fn write(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    fire_timers(e)
-        .into_iter()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                (r.url.ends_with("/exchange")).then_some(r)
-            } else {
-                None
-            }
-        })
-        .unwrap()
+    for _ in 0..3 {
+        let requests: Vec<_> = fire_timers(e)
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        if let Some(r) = requests.iter().find(|r| r.url.ends_with("/exchange")) {
+            return r.clone();
+        }
+        for r in requests.iter().filter(|r| kind(r) == "orderStatus") {
+            answer_order_status(e, r);
+        }
+    }
+    panic!("no write");
 }
 fn body(r: &HttpRequest) -> Value {
     serde_json::from_str(r.body.as_deref().unwrap()).unwrap()
@@ -721,6 +727,15 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
                 Action::Notice(Notice::CommandFailed { command: 2, error })
                 if error.legacy_text().contains("no longer open"))));
         } else {
+            let read = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Http(r) if kind(r) == "orderStatus" => Some(r),
+                    _ => None,
+                })
+                .expect("the amend reads first");
+            answer_order_status(&mut e, read);
+            let actions = fire_timers(&mut e);
             let cancel = action_write(&actions);
             assert_eq!(body(cancel)["action"]["cancels"][0]["o"], 9);
             reply_at(
