@@ -583,7 +583,11 @@ fn a_stop_whose_replacement_is_refused_says_the_stop_is_gone() {
         .iter()
         .find(|(id, _)| *id == 12)
         .expect("a failure");
-    assert!(error.message.contains("no stop"), "{}", error.message);
+    assert!(
+        error.message.contains("BTCUSDT") && error.message.contains("has no stop"),
+        "{}",
+        error.message
+    );
     assert!(error.message.contains("Order would immediately trigger"));
 }
 

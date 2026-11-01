@@ -70,11 +70,6 @@ impl Request {
 const NO_AGENT: &str = "No agent found";
 const BAD_SIGNATURE: &str = "Signature check failed";
 const DEVICE_TIME: &str = "Your device time must match the actual time";
-fn stop_gone(message: &str) -> String {
-    format!(
-        "The old stop was canceled and its replacement refused, so this position has no stop: {message}"
-    )
-}
 /// Aster's -1000 refusals: the fixed text of one, whatever follows it.
 fn refusal_1000(message: &str) -> Option<&'static str> {
     [NO_AGENT, BAD_SIGNATURE, DEVICE_TIME]
@@ -249,7 +244,7 @@ struct Job {
     continue_on_error: bool,
     result: Option<String>,
     /// A refused replacement here leaves the position without its stop.
-    replacing_stop: bool,
+    replacing_stop: Option<(String, OrderSide, OrderType)>,
 }
 // Above the venue open-order limit; never evict cancellation routing for a live ACK.
 const MAX_ACKNOWLEDGED_ORDERS: usize = 10_000;
@@ -1002,16 +997,18 @@ impl AsterDex {
                             .unwrap_or(message),
                     };
                     let native = (*code != 0).then_some(&native);
-                    let told = if was_place
-                        && self
-                            .trading
-                            .jobs
-                            .get(&command)
-                            .is_some_and(|job| job.replacing_stop)
+                    let told = match self
+                        .trading
+                        .jobs
+                        .get(&command)
+                        .and_then(|job| job.replacing_stop.as_ref())
+                        .filter(|_| was_place)
                     {
-                        stop_gone(message)
-                    } else {
-                        message.clone()
+                        Some((symbol, side, kind)) => format!(
+                            "{}: {message}",
+                            safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, false)
+                        ),
+                        None => message.clone(),
                     };
                     match cx.classify_write(leg, &ASTER, native, told) {
                         Ok(fact) => {
@@ -1082,8 +1079,13 @@ impl AsterDex {
                     {
                         error.outcome = Some(Outcome::Unknown);
                     }
-                    if was_place && job.replacing_stop {
-                        error.message = stop_gone(&error.message);
+                    if was_place && let Some((symbol, side, kind)) = &job.replacing_stop {
+                        let unknown = error.outcome == Some(Outcome::Unknown);
+                        error.message = format!(
+                            "{}: {}",
+                            safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown),
+                            error.message
+                        );
                     }
                     job.error = Some(error);
                 }
@@ -1220,7 +1222,7 @@ impl AsterDex {
         }
         let mut job = self.plan_cancel(std::slice::from_ref(order), false);
         job.steps.extend(place.steps);
-        job.replacing_stop = conditional;
+        job.replacing_stop = conditional.then(|| (order.symbol.clone(), order.side, order.kind));
         Ok(job)
     }
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {

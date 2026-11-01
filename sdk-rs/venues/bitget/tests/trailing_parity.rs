@@ -816,10 +816,7 @@ fn an_edit_that_loses_its_stop_says_the_position_is_unprotected() {
     let (rollback, _) = body(&mut h, "/place-strategy-order");
     h.reply(rollback, 200, refused);
     let error = h.done.last().unwrap().1.as_ref().unwrap_err().clone();
-    assert!(
-        error.contains("Your BTCUSDT stop is gone and your position is unprotected"),
-        "{error}"
-    );
+    assert!(error.contains("position has no stop"), "{error}");
 }
 
 #[test]

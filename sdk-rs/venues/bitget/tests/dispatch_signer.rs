@@ -324,7 +324,7 @@ fn rollback_provider_refusal_preserves_original_native_rejection_details() {
     // The note now comes from `end`, which every unfinished rollback reaches.
     assert_eq!(
         error.message,
-        "Bitget 40017: replace rejected (HTTP 200); Your BTCUSDT stop is gone and your position is unprotected; protection rollback failed: Signing provider refused the request"
+        "Bitget 40017: replace rejected (HTTP 200); Your BTCUSDT long position has no stop: the old stop was canceled and its replacement refused; protection rollback failed: Signing provider refused the request"
     );
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }

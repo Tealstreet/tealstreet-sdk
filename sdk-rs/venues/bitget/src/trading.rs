@@ -181,7 +181,7 @@ struct Job {
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
     /// The symbol of a stop this amend cancels before replacing it.
-    replaces_stop: Option<String>,
+    replaces_stop: Option<(String, OrderSide, OrderType)>,
 }
 
 pub struct Request {
@@ -907,15 +907,15 @@ impl BitgetFutures {
         // The cancel landed and nothing replaced it: lead with what the user must act on.
         if job.effective
             && job.ids.is_empty()
-            && let Some(symbol) = &job.replaces_stop
+            && let Some((symbol, side, kind)) = &job.replaces_stop
         {
-            let state = if error.outcome == Some(Outcome::Unknown) {
-                "may be gone, so your position may be unprotected: check Open Orders"
-            } else {
-                "is gone and your position is unprotected"
-            };
             // The note, because a Plan's failure text is projected from its recorded fact.
-            let stop = format!("Your {symbol} stop {state}");
+            let stop = safe_cex_engine::error::stop_gone_text(
+                symbol,
+                *side,
+                *kind,
+                error.outcome == Some(Outcome::Unknown),
+            );
             job.note = Some(match job.note.take() {
                 Some(note) => format!("{stop}; {note}"),
                 None => stop,
@@ -2082,7 +2082,10 @@ impl BitgetFutures {
             if linked.iter().any(|o| is_algo(o.kind))
                 && attached.is_none_or(|limit| limit.filled > 0.0)
             {
-                job.replaces_stop = Some(order.symbol.clone());
+                job.replaces_stop = linked
+                    .iter()
+                    .find(|o| is_algo(o.kind))
+                    .map(|stop| (stop.symbol.clone(), stop.side, stop.kind));
             }
             job.calls = fallback;
         }

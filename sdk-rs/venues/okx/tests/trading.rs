@@ -502,11 +502,7 @@ fn a_stop_whose_replacement_is_refused_is_gone_and_says_so() {
             _ => None,
         })
         .expect("a failure");
-    assert!(
-        error.message.contains("your stop is gone"),
-        "{}",
-        error.message
-    );
+    assert!(error.message.contains("has no stop"), "{}", error.message);
     assert_eq!(
         e.store().order("91_sl").unwrap().status,
         OrderStatus::Canceled

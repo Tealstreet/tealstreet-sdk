@@ -40,17 +40,6 @@ fn is_stop_kind(kind: OrderType) -> bool {
     )
 }
 
-fn stop_gone(message: &str, unproven: bool) -> String {
-    if unproven {
-        format!(
-            "The old stop was canceled and its replacement's outcome is unknown, so this position may have no stop: check Open Orders: {message}"
-        )
-    } else {
-        format!(
-            "The old stop was canceled and its replacement refused, so this position has no stop: {message}"
-        )
-    }
-}
 const POSITION_MODE_ALREADY_SET: i64 = -4059;
 const POST_ONLY_REJECTED: i64 = -5022;
 
@@ -163,7 +152,7 @@ struct Job {
     amendment: Option<Amendment>,
     /// An amend's cancel landed and this stop's replacement is next: any refusal
     /// now leaves the position without it.
-    replacing_stop: bool,
+    replacing_stop: Option<(String, OrderSide, OrderType)>,
 }
 
 struct Amendment {
@@ -586,9 +575,15 @@ impl BinanceFutures {
                 self.advance(cx, command);
                 return;
             }
-            let is_stop = is_stop_kind(amendment.replacement.kind);
             if let Some(job) = self.trading.jobs.get_mut(&command) {
-                job.replacing_stop = is_stop;
+                let replacement = &amendment.replacement;
+                job.replacing_stop = is_stop_kind(replacement.kind).then(|| {
+                    (
+                        replacement.symbol.clone(),
+                        replacement.side,
+                        replacement.kind,
+                    )
+                });
             }
             amendment.replacement.amount = if full_close {
                 0.0
@@ -602,10 +597,12 @@ impl BinanceFutures {
                 match plan {
                     Ok(plan) => job.steps.extend(plan.steps),
                     Err(error) => {
-                        job.planning_error = Some(if job.replacing_stop {
-                            VenueError::new(stop_gone(&error, false))
-                        } else {
-                            error.into()
+                        job.planning_error = Some(match &job.replacing_stop {
+                            Some((symbol, side, kind)) => VenueError::new(format!(
+                                "{}: {error}",
+                                safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, false)
+                            )),
+                            None => error.into(),
                         });
                     }
                 }
@@ -1075,13 +1072,15 @@ impl BinanceFutures {
                     .trading
                     .jobs
                     .get(&command)
-                    .is_some_and(|job| job.replacing_stop);
-                let told = if replacing_stop {
-                    stop_gone(&message, unproven)
-                } else {
-                    message.clone()
+                    .and_then(|job| job.replacing_stop.as_ref());
+                known_cancel_effects |= replacing_stop.is_some();
+                let told = match replacing_stop {
+                    Some((symbol, side, kind)) => format!(
+                        "{}: {message}",
+                        safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unproven)
+                    ),
+                    None => message.clone(),
                 };
-                known_cancel_effects |= replacing_stop;
                 let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &told) else {
                     return;
                 };

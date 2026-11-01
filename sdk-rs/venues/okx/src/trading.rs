@@ -160,7 +160,7 @@ pub struct Acknowledged {
 }
 struct Job {
     /// An amend that cancels a stop before placing its replacement.
-    replacing_stop: bool,
+    replacing_stop: Option<(String, OrderSide, OrderType)>,
     /// Set at genuine entry; the Plan follows its admission.
     preflight: Option<Preflight>,
     plan: Option<Plan>,
@@ -989,7 +989,8 @@ impl Okx {
                 }],
             )?;
             result.steps.extend(replacement.steps);
-            result.replacing_stop = matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit);
+            result.replacing_stop = matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                .then(|| (o.symbol.clone(), o.side, o.kind));
             result.continue_cancel_errors = false;
             result.finish = Finish::Ids;
             result
@@ -1485,14 +1486,14 @@ impl Okx {
             error.outcome = None;
         }
         // The old stop's cancel landed and nothing replaced it: its row must not read Open.
-        let stop_gone = job.replacing_stop && job.effective && job.ids.is_empty();
-        let note = stop_gone.then(|| {
-            if uncertain {
-                "your stop may be gone, so your position may be unprotected: check Open Orders"
-            } else {
-                "your stop is gone and your position is unprotected"
-            }
-        });
+        let note = job
+            .replacing_stop
+            .as_ref()
+            .filter(|_| job.effective && job.ids.is_empty())
+            .map(|(symbol, side, kind)| {
+                safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
+            });
+        let stop_gone = note.is_some();
         // A sibling rests: the caller must be told even though this call failed.
         if !job.ids.is_empty() {
             error = error.partial_ids(&job.ids);
@@ -1518,7 +1519,7 @@ impl Okx {
                 if let Some(request) = current {
                     let _ = cx.finish_plan_call(plan, &request.slot, &request.context);
                 }
-                match note {
+                match &note {
                     Some(note) => cx.fail_plan_noted(plan, error, note),
                     None => cx.fail_plan(plan, error),
                 }
@@ -1634,7 +1635,7 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         optimistic: Vec::new(),
         continue_cancel_errors: false,
         effective: false,
-        replacing_stop: false,
+        replacing_stop: None,
     }
 }
 fn is_algo(kind: OrderType) -> bool {
