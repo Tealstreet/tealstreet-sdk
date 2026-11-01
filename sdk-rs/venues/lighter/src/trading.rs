@@ -357,7 +357,10 @@ impl Lighter {
                         );
                         return;
                     }
-                    let Some(order) = cx.store.order(&id).cloned() else {
+                    let row = cx.store.order(&id).cloned();
+                    let Some(order) =
+                        row.or_else(|| self.account.unnamed_placements.get(&id).cloned())
+                    else {
                         if !known_client {
                             refuse(cx, not_sent(format!("Lighter order {id} not found")));
                             return;
@@ -1259,6 +1262,9 @@ impl Lighter {
                             // heal snapshot can drop this row first.
                             let placed = p.order.id.clone();
                             self.note_client_order(&placed, &placed);
+                            self.account
+                                .unnamed_placements
+                                .insert(placed, p.order.clone());
                             self.record_placement(p.order.clone());
                             // A live terminal event can overtake the HTTP acknowledgement.
                             if !self.account_order_terminal(&p.order.id)

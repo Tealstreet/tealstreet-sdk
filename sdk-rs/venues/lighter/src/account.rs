@@ -122,6 +122,8 @@ pub struct Account {
     lookup_retry: Option<TimerId>,
     /// Client order index to native order index, as rows report them.
     pub(crate) client_orders: HashMap<String, String>,
+    /// Placed orders the stream has not yet named: their client index can cancel them.
+    pub(crate) unnamed_placements: HashMap<String, Order>,
     connection: Connection,
     started: bool,
     revision: u64,
@@ -783,6 +785,10 @@ impl Lighter {
     pub(crate) fn note_client_order(&mut self, client: &str, native: &str) {
         if self.account.client_orders.len() >= 1_000 {
             self.account.client_orders.clear();
+            self.account.unnamed_placements.clear();
+        }
+        if client != native {
+            self.account.unnamed_placements.remove(client);
         }
         self.account
             .client_orders
