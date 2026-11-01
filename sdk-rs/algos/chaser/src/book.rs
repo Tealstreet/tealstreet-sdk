@@ -98,6 +98,14 @@ pub struct ChaserBook {
 }
 
 /// Worth trying again: the request never reached a verdict from the venue.
+/// A COSIGNED account's browser signs its writes: with it gone a requote cannot be placed.
+pub const SIGNER_OFFLINE_STOP_REASON: &str =
+    "Stopped: the browser that signs for this account went offline";
+
+fn signer_offline(error: &VenueError) -> bool {
+    error.message.contains("Signing provider is unavailable")
+}
+
 fn cancel_retryable(error: &VenueError) -> bool {
     matches!(
         error.kind,
@@ -107,7 +115,7 @@ fn cancel_retryable(error: &VenueError) -> bool {
                 | ErrorKind::VenueUnavailable
                 | ErrorKind::RateLimited
         )
-    ) || error.message.contains("Signing provider is unavailable")
+    ) || signer_offline(error)
 }
 
 impl ChaserBook {
@@ -709,7 +717,11 @@ impl ChaserBook {
             if let Err(error) = self.bounded_cancel(&chase.options.symbol, &to_cancel).await {
                 // The stop's own cancel keeps trying; this chase places nothing more.
                 if cancel_retryable(&error) {
-                    chase.mark_complete("Failed to cancel orders");
+                    chase.mark_complete(if signer_offline(&error) {
+                        SIGNER_OFFLINE_STOP_REASON
+                    } else {
+                        "Stopped: a cancel could not reach the venue"
+                    });
                     return Ok(());
                 }
                 let message = error.message.as_str();
@@ -1144,7 +1156,11 @@ impl ChaserBook {
                 ));
                 self.warn(&format!(
                     "{RETRYING}{symbol} order {id} is still open: {}. Retrying the cancel; it can still fill until then. {CANCEL_WAY_OUT}",
-                    error.message
+                    if signer_offline(&error) {
+                        "the browser that signs for this account is offline"
+                    } else {
+                        error.message.as_str()
+                    }
                 ));
             }
             // Traffic returning is the reconnect: try again at once after the minimum.
