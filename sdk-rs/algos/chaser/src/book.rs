@@ -33,6 +33,8 @@ const CANCEL_RETRY_MAX_MS: u64 = 10_000;
 pub const ANSWER_BOUND_MS: u64 = 16_000;
 /// A chase with no ticker change this long says so: it cannot re-quote without one.
 const NO_MARKET_DATA_MS: u64 = 30_000;
+/// A fills read that failed for a passing reason waits this long, then twice as long.
+const FILLS_RETRY_MIN_MS: u64 = 1_000;
 /// Ended chases remembered for `progress`, more than can wait on a slice timeout at once.
 const ENDED_KEPT: usize = 256;
 /// How an order whose cancel was retried ended.
@@ -139,6 +141,13 @@ pub const SIGNER_OFFLINE_STOP_REASON: &str =
 
 fn signer_offline(error: &VenueError) -> bool {
     error.message.contains("Signing provider is unavailable")
+}
+
+fn fills_read_retryable(error: &VenueError) -> bool {
+    matches!(
+        error.kind,
+        Some(ErrorKind::Network | ErrorKind::Timeout | ErrorKind::RateLimited)
+    )
 }
 
 fn cancel_retryable(error: &VenueError) -> bool {
@@ -940,6 +949,8 @@ impl ChaserBook {
         if !fill_tracked && !unconfirmed.is_empty() {
             if let Err(error) = self.confirm_fills(chase, &unconfirmed).await {
                 chase.mark_complete("Could not confirm the order before replacing it");
+                // Its cancel succeeded: a second one could only read as a failure.
+                chase.take_current();
                 self.error(&format!(
                     "Chaser for {} stopped before replacing order {}: whether it filled could not be read ({error}). Check Positions and Open Orders",
                     chase.options.symbol,
@@ -974,6 +985,8 @@ impl ChaserBook {
                         "Chaser reconciliation failed after cancellation; stopped before replacement: {error}"
                     );
                     chase.mark_complete("Failed to reconcile fills after cancellation");
+                    // Its cancel succeeded: a second one could only read as a failure.
+                    chase.take_current();
                     self.error(&message);
                     return Ok(());
                 }
@@ -996,13 +1009,38 @@ impl ChaserBook {
         chase: &Chase,
         ids: &[String],
     ) -> Result<Vec<(String, f64)>, String> {
-        safe_cex_algos::executor::timeout(ANSWER_BOUND_MS, self.read_filled_quantities(chase, ids))
+        self.bounded_fills_read(|| self.read_filled_quantities(chase, ids))
+            .await
+    }
+
+    /// One answer inside `ANSWER_BOUND_MS`. The order is already cancelled, so a
+    /// read that failed for a passing reason can wait; a refusal ends it at once.
+    async fn bounded_fills_read<T, F: std::future::Future<Output = Result<T, VenueError>>>(
+        &self,
+        read: impl Fn() -> F,
+    ) -> Result<T, String> {
+        let last_failure = RefCell::new(None);
+        let attempts = async {
+            let mut wait = FILLS_RETRY_MIN_MS;
+            loop {
+                match read().await {
+                    Err(error) if fills_read_retryable(&error) => {
+                        *last_failure.borrow_mut() = Some(error.message);
+                        self.cx.sleep_ms(wait).await;
+                        wait *= 2;
+                    }
+                    answer => return answer.map_err(|error| error.message),
+                }
+            }
+        };
+        safe_cex_algos::executor::timeout(ANSWER_BOUND_MS, attempts)
             .await
             .unwrap_or_else(|_| {
-                Err(format!(
-                    "fills read got no answer in {} s",
-                    ANSWER_BOUND_MS / 1000
-                ))
+                let seconds = ANSWER_BOUND_MS / 1000;
+                Err(match last_failure.borrow_mut().take() {
+                    Some(failure) => format!("fills read kept failing for {seconds} s: {failure}"),
+                    None => format!("fills read got no answer in {seconds} s"),
+                })
             })
     }
 
@@ -1012,7 +1050,7 @@ impl ChaserBook {
         chase: &Chase,
         ids: &[String],
     ) -> Result<Vec<(String, f64)>, String> {
-        let read = async {
+        let read = || async {
             let query = Query::Fills {
                 symbol: Some(chase.options.symbol.clone()),
                 order_id: None,
@@ -1022,10 +1060,9 @@ impl ChaserBook {
             };
             let result = self
                 .command(|command| Command::Query { command, query })
-                .await
-                .map_err(|error| error.message)?;
-            let rows: Vec<Execution> =
-                serde_json::from_str(&result).map_err(|error| error.to_string())?;
+                .await?;
+            let rows: Vec<Execution> = serde_json::from_str(&result)
+                .map_err(|error| VenueError::new(error.to_string()))?;
             let unit = self.base_per_placement_unit(chase);
             Ok(ids
                 .iter()
@@ -1039,21 +1076,14 @@ impl ChaserBook {
                 })
                 .collect())
         };
-        safe_cex_algos::executor::timeout(ANSWER_BOUND_MS, read)
-            .await
-            .unwrap_or_else(|_| {
-                Err(format!(
-                    "fills read got no answer in {} s",
-                    ANSWER_BOUND_MS / 1000
-                ))
-            })
+        self.bounded_fills_read(read).await
     }
 
     async fn read_filled_quantities(
         &self,
         chase: &Chase,
         ids: &[String],
-    ) -> Result<Vec<(String, f64)>, String> {
+    ) -> Result<Vec<(String, f64)>, VenueError> {
         let mut filled = Vec::new();
         for id in ids {
             let query = Query::Fills {
@@ -1066,10 +1096,9 @@ impl ChaserBook {
             };
             let result = self
                 .command(|command| Command::Query { command, query })
-                .await
-                .map_err(|error| error.message)?;
-            let rows: Vec<Execution> =
-                serde_json::from_str(&result).map_err(|error| error.to_string())?;
+                .await?;
+            let rows: Vec<Execution> = serde_json::from_str(&result)
+                .map_err(|error| VenueError::new(error.to_string()))?;
             let total = rows
                 .iter()
                 .filter(|row| &row.order_id == id)
