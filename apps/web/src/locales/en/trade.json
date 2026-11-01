@@ -328,6 +328,7 @@
     "hosted-server-status-warning": "connecting",
     "hosted-server-status-error": "disconnected",
     "hosted-server-status-neutral": "status unknown",
+    "hosted-server-status-local": "LOCAL: this venue runs on this device",
     "dismiss-banner": "Dismiss",
     "cli-local-server": "Local Server (Desktop)",
     "cli-local-server-auto-start": "Auto-start local server",
