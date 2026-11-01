@@ -211,6 +211,16 @@ fn a_census_with_a_rejected_row_keeps_the_fence() {
 }
 
 #[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let mut h = Harness::classic();
+    unknown_placement(&mut h);
+    h.orders(r#"{"code":"00000","data":{"entrustedList":[{"symbol":"ETHUSDT"}]}}"#);
+    h.failures.clear();
+    place(&mut h, 53);
+    assert!(!fenced(&h, 53), "{:?}", h.done);
+}
+
+#[test]
 fn a_failed_census_is_re_asked_and_the_fresh_one_releases() {
     let mut h = Harness::classic();
     unknown_placement(&mut h);

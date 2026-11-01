@@ -187,6 +187,22 @@ fn place_after_unknown_placement_is_refused_until_reconciled() {
 }
 
 #[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let (mut e, mut t) = ready_eth();
+    let out = unknown_placement(&mut e, &mut t);
+    for read in &orders_reads(&out) {
+        reply(
+            &mut e,
+            read,
+            200,
+            r#"{"code":200,"orders":{"BTC":[{"order_index":"77"}]}}"#,
+        );
+    }
+    drain(&mut e, &mut t);
+    assert_place_admitted(&mut e, &mut t, NOW, 9);
+}
+
+#[test]
 fn a_fresh_complete_snapshot_releases_cancel_all_and_its_cancels_send() {
     // dazzy3: a stuck cancel-all fence is the worst failure on this path.
     let (mut e, mut t) = ready_eth();

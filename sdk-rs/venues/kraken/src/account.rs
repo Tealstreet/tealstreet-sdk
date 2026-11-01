@@ -1221,7 +1221,13 @@ impl Kraken {
         cx.store.set_positions(positions);
     }
     /// A row without an id protects every stored order; otherwise only its own.
-    fn account_reject_order(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, id: &str) {
+    fn account_reject_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        id: &str,
+        symbol: &str,
+    ) {
         let kept = cx
             .store
             .orders()
@@ -1231,12 +1237,12 @@ impl Kraken {
         if id.is_empty() {
             let message = "Kraken skipped order row without an id".to_owned();
             self.account.log_skip(cx, "order:".into(), level, message);
-            request.orders.reject(None);
+            request.orders.reject_in(None, symbol);
         } else {
             let message = format!("Kraken skipped unmappable order {id}");
             self.account
                 .log_skip(cx, format!("order:{id}"), level, message);
-            request.orders.reject(Some(id.to_owned()));
+            request.orders.reject_in(Some(id.to_owned()), symbol);
         }
     }
     /// Both legs of `symbol` keep their stored copies; an empty symbol protects all.
@@ -1272,13 +1278,14 @@ impl Kraken {
         match serde_json::from_str::<OrderWire<'_>>(item) {
             Ok(row) => {
                 if row.symbol.is_empty() {
-                    self.account_reject_order(cx, request, &row.order_id);
+                    self.account_reject_order(cx, request, &row.order_id, "");
                 } else if cx.store.market(&row.symbol).is_some() {
                     let id = row.order_id.to_string();
+                    let symbol = row.symbol.to_string();
                     if let Some(order) = self.map_order(cx, row) {
                         request.orders.push(order);
                     } else {
-                        self.account_reject_order(cx, request, &id);
+                        self.account_reject_order(cx, request, &id, &symbol);
                     }
                 } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                     request.valid = false;
@@ -1293,7 +1300,11 @@ impl Kraken {
                 {
                     request.valid = false;
                 } else {
-                    self.account_reject_order(cx, request, &row.order_id);
+                    let symbol = safe_cex_engine::coverage::fence_symbol(
+                        cx.store,
+                        Some(row.symbol.as_ref()),
+                    );
+                    self.account_reject_order(cx, request, &row.order_id, &symbol);
                 }
             }
         }
@@ -1408,16 +1419,14 @@ impl Kraken {
             Scope::Orders => {
                 if request.revision == self.account.orders_revision {
                     let orders = request.orders;
-                    let clean = orders.rejected() == 0;
+                    let unproven = orders.unproven().to_vec();
                     let mapped = recovered(&orders, |o| (&o.id, &o.id));
                     self.account
                         .rearm_skips("order:", orders.rejected() == 0, mapped);
                     // Rejected rows keep their stored copies.
                     let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                     self.account_commit_orders(cx, orders);
-                    if clean {
-                        cx.orders_reconciled(None);
-                    }
+                    cx.orders_reconciled_except(&unproven, u64::MAX);
                 }
             }
             Scope::Positions => {

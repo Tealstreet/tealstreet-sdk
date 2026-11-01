@@ -1602,7 +1602,7 @@ impl Lighter {
                     code::ROW_SKIPPED,
                     format!("Lighter skipped order {id} on an unknown market"),
                 );
-                return coverage.reject(Some(id));
+                return coverage.reject_in(Some(id), market_hint.unwrap_or(""));
             }
             Err(OrderRowError::Invalid(_)) => {}
         }
@@ -1635,7 +1635,7 @@ impl Lighter {
                 None => "Lighter skipped unmappable order without an id".into(),
             },
         );
-        coverage.reject(id);
+        coverage.reject_in(id, market_hint.unwrap_or(""));
     }
     fn map_order_row(
         &self,
@@ -2098,11 +2098,8 @@ impl Lighter {
         cx.store.set_orders(merged);
         // Each per-market page carries its own read token, so the last one cannot
         // vouch for the first: a paged census owed a successor may predate the write.
-        if !coverage.any()
-            && revision == self.account.revision
-            && !(paged && self.account.orders_again)
-        {
-            cx.orders_reconciled(None);
+        if revision == self.account.revision && !(paged && self.account.orders_again) {
+            cx.orders_reconciled_except(coverage.unproven(), u64::MAX);
         }
     }
     pub(crate) fn account_response(
