@@ -1510,3 +1510,18 @@ fn client_id_lookup_says_placed_only_for_an_order_the_venue_took() {
         assert_eq!(result(&mut e).unwrap(), expected, "{native}");
     }
 }
+
+#[test]
+fn a_real_empty_rows_page_is_empty_not_an_error() {
+    for streamed in [true, false] {
+        let mut e = engine(true);
+        let a = query(&mut e, fills());
+        respond(
+            &mut e,
+            &a,
+            r#"{"code":0,"msg":"OK","data":{"rows":[]}}"#,
+            streamed,
+        );
+        assert_eq!(result(&mut e).unwrap(), "[]");
+    }
+}

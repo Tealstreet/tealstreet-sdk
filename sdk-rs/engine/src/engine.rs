@@ -1731,6 +1731,8 @@ struct IoCore {
     auth_failure_counted: bool,
     /// A refused key already ended this start.
     startup_refused: bool,
+    /// The slot that signed the read being delivered.
+    delivered_slot: Option<CredentialSlot>,
     /// Each retried read's latest Error time and digit-normalised text, by call site.
     retried_failures: HashMap<&'static str, (f64, String)>,
     #[cfg(feature = "managed-sockets")]
@@ -1903,6 +1905,7 @@ impl Default for IoCore {
             sockets: SocketRoles::default(),
             auth_failure_counted: false,
             startup_refused: false,
+            delivered_slot: None,
             retried_failures: HashMap::new(),
             #[cfg(feature = "managed-sockets")]
             socket_driver: Default::default(),
@@ -2816,17 +2819,20 @@ impl<P> Cx<'_, P> {
 
     /// A private read the venue refused over the key, before the account
     /// loaded: ends the start once with that reason instead of retrying unseen.
-    pub fn startup_read_refused(&mut self, error: &VenueError) {
+    /// True when it reported, so a venue's own log of the refusal can stand aside.
+    pub fn startup_read_refused(&mut self, error: &VenueError) -> bool {
         let loaded = self.store.loaded();
         let refused = matches!(
             error.kind,
             Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
         );
+        // A separate read key recovers on the primary; only the primary ends a start.
         if !refused
+            || self.io.core.delivered_slot == Some(CredentialSlot::Secondary)
             || loaded.balance && loaded.orders && loaded.positions
             || std::mem::replace(&mut self.io.core.startup_refused, true)
         {
-            return;
+            return false;
         }
         self.notice(
             Level::Error,
@@ -2834,6 +2840,7 @@ impl<P> Cx<'_, P> {
             &error.message,
         );
         self.startup_failed(error.clone());
+        true
     }
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
@@ -5501,6 +5508,7 @@ impl<V: Venue> Engine<V> {
                         headers: &incoming.headers,
                         body,
                     };
+                    cx.io.core.delivered_slot = pending.auth.map(|auth| auth.credential);
                     observe_account_auth(
                         &self.venue,
                         &pending,
@@ -5552,6 +5560,7 @@ impl<V: Venue> Engine<V> {
                 headers: &incoming.headers,
                 body,
             };
+            cx.io.core.delivered_slot = pending.auth.map(|auth| auth.credential);
             observe_account_auth(
                 &self.venue,
                 &pending,
@@ -5571,6 +5580,7 @@ impl<V: Venue> Engine<V> {
                     headers: &incoming.headers,
                     body,
                 };
+                cx.io.core.delivered_slot = pending.auth.map(|auth| auth.credential);
                 observe_account_auth(
                     &self.venue,
                     &pending,

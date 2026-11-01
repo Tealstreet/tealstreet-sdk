@@ -55,6 +55,26 @@ struct Skipped {
     ids: Vec<String>,
     unidentified: bool,
 }
+/// WEEX's documented key refusals, on a read answer.
+pub(crate) fn key_refusal(body: &str) -> Option<safe_cex_engine::VenueError> {
+    #[derive(Deserialize)]
+    struct Evidence {
+        #[serde(default)]
+        code: serde_json::Value,
+        #[serde(default)]
+        msg: String,
+    }
+    let evidence: Evidence = serde_json::from_str(body).ok()?;
+    let code = evidence
+        .code
+        .as_i64()
+        .or_else(|| evidence.code.as_str().and_then(|text| text.parse().ok()))?;
+    matches!(code, 40006 | 40009 | 40012 | 40014 | 40018).then(|| {
+        safe_cex_engine::VenueError::new(format!("WEEX refused the API key: {}", evidence.msg))
+            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+            .venue_code(code.to_string())
+    })
+}
 impl Skipped {
     fn covers(&self, id: &str) -> bool {
         self.unidentified || self.ids.iter().any(|skipped| skipped == id)

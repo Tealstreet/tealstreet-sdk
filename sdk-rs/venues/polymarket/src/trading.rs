@@ -883,7 +883,7 @@ impl Polymarket {
 }
 
 /// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
-fn http_failure(status: u16, message: String) -> VenueError {
+pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
     let error = VenueError::new(message);
     match status {
         408 | 500.. => error.outcome(Outcome::Unknown),

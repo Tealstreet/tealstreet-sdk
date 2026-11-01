@@ -305,3 +305,91 @@ fn a_post_only_cancel_reason_is_read() {
         Some(RejectReason::PostOnly)
     );
 }
+
+fn edit_bracket_of_limit_filled(filled: f64) -> String {
+    let mut h = Harness::classic();
+    let mut limit = h.engine.store().order("1").unwrap().clone();
+    limit.filled = filled;
+    let mut stop = limit.clone();
+    stop.id = "1__stop_loss".into();
+    stop.parent_id = Some("1".into());
+    stop.kind = OrderType::StopLoss;
+    h.engine.store_mut().upsert_order(limit);
+    h.engine.store_mut().upsert_order(stop);
+    h.command(Command::AmendOrder {
+        command: 9,
+        id: "1__stop_loss".into(),
+        price: Some(70.0),
+        amount: None,
+    });
+    for _ in 0..8 {
+        if h.done.iter().any(|(id, _)| *id == 9) {
+            break;
+        }
+        let Some(request) = h
+            .requests
+            .iter()
+            .find(|r| r.method == safe_cex_engine::Method::Post || r.url.contains("/position/"))
+            .map(|r| (r.id, r.url.clone(), r.body.clone()))
+        else {
+            break;
+        };
+        let body = if request.1.contains("cancel") {
+            r#"{"code":"00000","data":{"successList":[{"orderId":"1"}],"failureList":[],"orderId":"1"}}"#
+        } else if request.1.contains("place") {
+            r#"{"code":"40808","msg":"refused","data":null}"#
+        } else {
+            r#"{"code":"00000","data":[]}"#
+        };
+        h.requests.retain(|r| r.id != request.0);
+        h.reply(request.0, 200, body);
+    }
+    h.done
+        .iter()
+        .find(|(id, _)| *id == 9)
+        .expect("the edit ended")
+        .1
+        .clone()
+        .unwrap_err()
+}
+
+#[test]
+fn a_partly_filled_limit_losing_its_bracket_says_the_position_is_unprotected() {
+    let error = edit_bracket_of_limit_filled(0.5);
+    assert!(error.contains("Your BTCUSDT stop is gone"), "{error}");
+}
+
+#[test]
+fn an_unfilled_limit_losing_its_bracket_does_not() {
+    let error = edit_bracket_of_limit_filled(0.0);
+    assert!(!error.contains("unprotected"), "{error}");
+}
+
+#[test]
+fn a_price_amend_of_a_partly_filled_uta_order_places_what_is_left() {
+    let row = UTA_CLOSE
+        .replace(r#""cumExecQty":"0""#, r#""cumExecQty":"8""#)
+        .replace(
+            r#""orderStatus":"new""#,
+            r#""orderStatus":"partially_filled""#,
+        );
+    let orders = format!(r#"{{"code":"00000","data":{{"list":[{row}],"cursor":""}}}}"#);
+    let mut h = uta(true, NO_POSITIONS, &orders);
+    let id = "1500796226646327296";
+    assert_eq!(h.engine.store().order(id).unwrap().filled, 8.0);
+    h.command(Command::AmendOrder {
+        command: 7,
+        id: id.into(),
+        price: Some(90.0),
+        amount: None,
+    });
+    settle_settings(&mut h, true);
+    h.respond(
+        "/trade/cancel-order",
+        200,
+        &format!(r#"{{"code":"00000","data":{{"orderId":"{id}"}}}}"#),
+    );
+    settle_settings(&mut h, true);
+    let placed = body(&h.take("/trade/place-order"));
+    assert_eq!(placed["qty"], "10", "{placed}");
+}

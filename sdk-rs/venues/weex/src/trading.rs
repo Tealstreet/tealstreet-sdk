@@ -871,7 +871,10 @@ impl WeexFutures {
                             symbol: o.symbol.clone(),
                             kind: o.kind,
                             side: o.side,
-                            amount: amount.unwrap_or(o.remaining),
+                            amount: amount
+                                .map(|total| safe_cex_engine::num::left_of_total(total, o.filled))
+                                .transpose()?
+                                .unwrap_or(o.remaining),
                             price: if conditional {
                                 o.extra
                                     .as_ref()

@@ -1526,11 +1526,11 @@ impl Coinbase {
                     self.private_failed(cx, req, "Coinbase read-only key rejected");
                     return;
                 }
-                cx.notice(
-                    Level::Error,
-                    code::AUTH_REJECTED,
-                    "Coinbase credentials rejected",
-                );
+                let refused = safe_cex_engine::VenueError::new("Coinbase credentials rejected")
+                    .kind(safe_cex_engine::ErrorKind::AuthInvalid);
+                if !cx.startup_read_refused(&refused) {
+                    cx.notice(Level::Error, code::AUTH_REJECTED, &refused.message);
+                }
                 cx.deactivate();
                 return;
             }

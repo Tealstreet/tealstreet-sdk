@@ -67,10 +67,39 @@ impl Request {
     }
 }
 
+const NO_AGENT: &str = "No agent found";
+const BAD_SIGNATURE: &str = "Signature check failed";
+const DEVICE_TIME: &str = "Your device time must match the actual time";
+fn stop_gone(message: &str) -> String {
+    format!(
+        "The old stop was canceled and its replacement refused, so this position has no stop: {message}"
+    )
+}
+/// Aster's -1000 refusals: the fixed text of one, whatever follows it.
+fn refusal_1000(message: &str) -> Option<&'static str> {
+    [NO_AGENT, BAD_SIGNATURE, DEVICE_TIME]
+        .into_iter()
+        .find(|fixed| message.starts_with(fixed))
+}
 /// The native `failure` table: definitive refusals and codes that leave a
 /// write unknown.
 pub(crate) const ASTER: CodeTable = CodeTable {
     rows: &[
+        Row {
+            key: Key::IntMessage(-1000, NO_AGENT),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::IntMessage(-1000, BAD_SIGNATURE),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::IntMessage(-1000, DEVICE_TIME),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
         Row {
             key: Key::Int(-1000),
             verdict: Verdict::Unknown(None),
@@ -219,6 +248,8 @@ struct Job {
     error: Option<VenueError>,
     continue_on_error: bool,
     result: Option<String>,
+    /// A refused replacement here leaves the position without its stop.
+    replacing_stop: bool,
 }
 // Above the venue open-order limit; never evict cancellation routing for a live ACK.
 const MAX_ACKNOWLEDGED_ORDERS: usize = 10_000;
@@ -837,6 +868,20 @@ impl AsterDex {
                     self.request_refresh_orders(cx);
                 })
             }
+            // An amend's cancel leg must prove the order ended: a reply that says nothing
+            // readable leaves it maybe live, and a replacement could double it.
+            (
+                Call::Cancel {
+                    filled_at_amend: Some(_),
+                    ..
+                },
+                Ok(body),
+            ) if !serde_json::from_str::<CancelAck>(body).is_ok_and(|ack| ack.status.is_some()) => {
+                Err((
+                    0,
+                    "Aster cancel answer was unreadable; replacement was not submitted".into(),
+                ))
+            }
             (
                 Call::Cancel {
                     id,
@@ -952,10 +997,23 @@ impl AsterDex {
                 Err((code, message)) if !transport && !unproven && !replied => {
                     let native = Native {
                         code: NativeCode::Int(*code),
-                        message,
+                        message: refusal_1000(message)
+                            .filter(|_| *code == -1000)
+                            .unwrap_or(message),
                     };
                     let native = (*code != 0).then_some(&native);
-                    match cx.classify_write(leg, &ASTER, native, message.clone()) {
+                    let told = if was_place
+                        && self
+                            .trading
+                            .jobs
+                            .get(&command)
+                            .is_some_and(|job| job.replacing_stop)
+                    {
+                        stop_gone(message)
+                    } else {
+                        message.clone()
+                    };
+                    match cx.classify_write(leg, &ASTER, native, told) {
                         Ok(fact) => {
                             if native.is_none() {
                                 status_error = Some(fact.error().clone());
@@ -1023,6 +1081,9 @@ impl AsterDex {
                             .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
                     {
                         error.outcome = Some(Outcome::Unknown);
+                    }
+                    if was_place && job.replacing_stop {
+                        error.message = stop_gone(&error.message);
                     }
                     job.error = Some(error);
                 }
@@ -1107,11 +1168,44 @@ impl AsterDex {
         } else {
             None
         };
+        // Size is what is left to fill: the venue treats a replacement's size as new.
+        let size = match amount {
+            Some(total) if total <= order.filled => {
+                return Err(format!(
+                    "Aster amendment size must exceed the {} already filled",
+                    order.filled
+                ));
+            }
+            Some(total) => total - order.filled,
+            None => order.remaining,
+        };
+        // A stop that would trigger at once is refused after the old one is gone.
+        if conditional
+            && let Some(trigger) = price
+            && let Some(reference) = cx
+                .store
+                .ticker(&order.symbol)
+                .map(|t| {
+                    if order.trigger_type == Some(StopTriggerType::LastPrice) {
+                        t.last
+                    } else {
+                        t.mark
+                    }
+                })
+                .filter(|p| p.is_finite() && *p > 0.0)
+        {
+            let below = (order.kind == OrderType::StopLoss) == (order.side == OrderSide::Sell);
+            if (below && trigger >= reference) || (!below && trigger <= reference) {
+                return Err(format!(
+                    "Aster would trigger this stop immediately: {trigger} is past {reference}; the order was not changed"
+                ));
+            }
+        }
         let replacement = PlaceOrderOpts {
             symbol: order.symbol.clone(),
             kind: order.kind,
             side: order.side,
-            amount: amount.unwrap_or(order.amount),
+            amount: size,
             price: (!conditional).then_some(price.unwrap_or(order.price)),
             trigger_price: conditional.then_some(price.unwrap_or(order.price)),
             reduce_only: Some(order.reduce_only),
@@ -1126,6 +1220,7 @@ impl AsterDex {
         }
         let mut job = self.plan_cancel(std::slice::from_ref(order), false);
         job.steps.extend(place.steps);
+        job.replacing_stop = conditional;
         Ok(job)
     }
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
@@ -1470,6 +1565,12 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
 /// failure, a non-JSON HTTP error or an unproven acknowledgement.
 fn failure(code: i64, message: String) -> VenueError {
     let (kind, outcome) = match code {
+        -1000 if refusal_1000(&message) == Some(DEVICE_TIME) => {
+            (Some(ErrorKind::Rejected), Outcome::Rejected)
+        }
+        -1000 if refusal_1000(&message).is_some() => {
+            (Some(ErrorKind::AuthInvalid), Outcome::Rejected)
+        }
         0 | -1000 => (None, Outcome::Unknown),
         -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
         -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),

@@ -1007,7 +1007,14 @@ impl Blofin {
         if let Some(price) = price {
             positive(num::adjust(price, m.precision.price), "amend price")?;
         }
+        let filled_native = order
+            .extra
+            .as_ref()
+            .and_then(|e| e.filled_in_placement_units)
+            .unwrap_or(order.filled / m.contract_size.unwrap_or(1.0));
         let qty = amount
+            .map(|total| num::left_of_total(total, filled_native))
+            .transpose()?
             .or_else(|| order.extra.as_ref().and_then(|e| e.remaining_native))
             .unwrap_or(order.remaining / m.contract_size.unwrap_or(1.0));
         let raw = PlaceOrderOpts {
@@ -2058,7 +2065,8 @@ impl Blofin {
                     };
                     // Code-only: the "does not exist" text is 102068's own message.
                     let gone = matches!(&*row.code, "1000" | "102068");
-                    let accepted = reply.code == "0" && (row.code.is_empty() || row.code == "0");
+                    // Each row speaks for itself: code 2 is "partially succeeded".
+                    let accepted = row.code == "0" || (reply.code == "0" && row.code.is_empty());
                     if gone && !job.replacement_targets.is_empty() {
                         error = Some("BloFin replacement requires a confirmed cancellation".into());
                     }

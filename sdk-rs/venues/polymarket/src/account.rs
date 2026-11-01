@@ -765,6 +765,18 @@ impl Polymarket {
                         .is_some_and(|e| !matches!(e.get(), "null" | "false" | "\"\""))
                 })
         {
+            // Time and positions are unsigned, so only the signed reads prove a refusal.
+            if matches!(response.status, 401 | 403)
+                && matches!(
+                    request,
+                    Request::Balance | Request::Orders(..) | Request::Derive
+                )
+            {
+                cx.startup_read_refused(&crate::trading::http_failure(
+                    response.status,
+                    "Polymarket refused the API key".into(),
+                ));
+            }
             self.account_failed(cx, request);
             return;
         }

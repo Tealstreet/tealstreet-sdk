@@ -1087,3 +1087,35 @@ fn definitive_revoked_key_and_read_permission_still_report_auth_rejection() {
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_kraken::KrakenSpot::new(options()),
+    );
+    e.start(NOW);
+    let mut failures = 0;
+    for _ in 0..12 {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            match action {
+                Action::Http(r) => {
+                    let body = if r.url.ends_with("AssetPairs") {
+                        META
+                    } else if r.url.ends_with("Ticker") {
+                        TICKERS
+                    } else {
+                        r#"{"error":["EAPI:Invalid key"]}"#
+                    };
+                    reply(&mut e, &r, body);
+                }
+                Action::Notice(Notice::StartupFailed { .. }) => failures += 1,
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(failures, 1);
+}

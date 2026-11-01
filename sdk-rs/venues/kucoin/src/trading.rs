@@ -469,7 +469,15 @@ impl Kucoin {
             amount: if virtual_stop {
                 native
             } else {
-                amount.unwrap_or(native)
+                amount
+                    .map(|total| {
+                        safe_cex_engine::num::left_of_total(
+                            total,
+                            parent.filled / market.contract_size.unwrap_or(1.0),
+                        )
+                    })
+                    .transpose()?
+                    .unwrap_or(native)
             },
             price: if virtual_stop {
                 Some(parent.price)

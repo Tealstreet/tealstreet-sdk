@@ -963,6 +963,21 @@ pub struct TrailingRow {
 }
 
 /// A success whose list is null, which is how Bitget answers an empty one.
+/// A history page with nothing to list: its data, or the list inside it, is null.
+pub fn null_history(body: &str) -> bool {
+    use serde_json::value::RawValue;
+    let Ok(envelope) =
+        serde_json::from_str::<Envelope<std::collections::HashMap<&str, &RawValue>>>(body)
+    else {
+        return false;
+    };
+    envelope.code.0 == Some(0.0)
+        && envelope.data.is_none_or(|lists| {
+            ["fillList", "entrustedList"]
+                .iter()
+                .any(|name| lists.get(name).is_some_and(|list| list.get() == "null"))
+        })
+}
 pub fn null_list(body: &str) -> bool {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]

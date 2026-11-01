@@ -1031,3 +1031,31 @@ fn accepted_leverage_write_reports_unconfirmed_readback_without_resending() {
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 10.0);
 }
+
+#[test]
+fn a_refused_lot_reports_the_accepted_lot_as_partial() {
+    let mut e = engine();
+    let mut o = opts();
+    o.amount = 201.001;
+    let a = placed(&mut e, vec![o]);
+    let first = req(&a, Method::Post, "/v1/order");
+    let a = reply(&mut e, &first, 1001.0, r#"{"success":true,"order_id":1}"#);
+    let a = tick(&mut e, &a);
+    let second = req(&a, Method::Post, "/v1/order");
+    let a = reply(
+        &mut e,
+        &second,
+        1002.0,
+        r#"{"success":false,"code":-1101,"message":"too small"}"#,
+    );
+    let error = a
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { error, .. }) => {
+                Some(error.clone())
+            }
+            _ => None,
+        })
+        .expect("the command failed");
+    assert_eq!(error.partial.unwrap().order_ids, ["1"]);
+}

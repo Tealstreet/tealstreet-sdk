@@ -681,6 +681,50 @@ fn replacement_preserves_brackets_postonly_and_remaining() {
     assert_ne!(p(r, "clOrdID").as_deref(), Some("old"));
 }
 
+/// Hedged rows report reduceOnly false: re-derived, a close's replacement opens a short.
+#[test]
+fn a_hedged_close_amended_stays_on_its_position_side() {
+    let (mut e, socket) = authenticated("Hedged");
+    ws_orders(
+        &mut e,
+        socket,
+        vec![json!({
+            "orderID":"old","symbol":"BTCUSDT","side":"Sell","posSide":"Long","ordType":"Limit",
+            "ordStatus":"New","orderQty":"0.1","cumQty":"0","leavesQty":"0.1","priceRp":"69000",
+            "timeInForce":"PostOnly","transactTimeNs":1_900_000_000_u64,"reduceOnly":false
+        })],
+    );
+    assert!(!e.store().order("old").unwrap().reduce_only);
+    let cancel = amend_old(&mut e);
+    assert_eq!(p(&cancel, "posSide").as_deref(), Some("Long"));
+    let a = respond(
+        &mut e,
+        &cancel,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+    );
+    let replacement = &writes(&a)[0];
+    assert_eq!(p(replacement, "posSide").as_deref(), Some("Long"));
+}
+
+#[test]
+fn a_hedged_amend_with_no_known_position_side_is_refused_before_its_cancel() {
+    let (mut e, _socket) = authenticated("Hedged");
+    let mut old = order("old");
+    old.side = OrderSide::Sell;
+    e.store_mut().upsert_order(old);
+    let a = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert!(failure(&a).message.contains("position side is unknown"));
+}
+
 #[test]
 fn imported_unknown_bracket_type_rejects_before_cancel() {
     let mut e = engine();
@@ -3325,4 +3369,52 @@ fn a_refused_key_ends_the_start_with_the_reason() {
             .count();
     }
     assert_eq!(failures, 1, "named once, not a hang");
+}
+
+#[test]
+fn a_size_amend_of_a_partly_filled_order_treats_the_size_as_the_new_total() {
+    let (mut e, socket) = authenticated("OneWay");
+    let mut old = order("old");
+    old.time_in_force = Some(TimeInForce::GoodTillCancel);
+    old.amount = 0.1;
+    old.filled = 0.04;
+    old.remaining = 0.06;
+    e.store_mut().upsert_order(old);
+    let cancel = {
+        let a = command(
+            &mut e,
+            Command::AmendOrder {
+                command: 1,
+                id: "old".into(),
+                price: None,
+                amount: Some(0.09),
+            },
+        );
+        writes(&a)[0].clone()
+    };
+    ws_orders(&mut e, socket, vec![]);
+    let a = respond(
+        &mut e,
+        &cancel,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+    );
+    assert_eq!(p(&writes(&a)[0], "orderQtyRq").as_deref(), Some("0.05"));
+}
+
+#[test]
+fn a_terminal_row_does_not_stop_the_live_ones_being_canceled() {
+    let mut e = engine();
+    e.store_mut().upsert_order(order("live"));
+    let mut over = order("over");
+    over.status = OrderStatus::Closed;
+    e.store_mut().upsert_order(over);
+    let a = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 1,
+            ids: vec!["over".into(), "live".into()],
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "orderID").as_deref(), Some("live"));
 }

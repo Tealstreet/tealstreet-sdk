@@ -1102,6 +1102,9 @@ impl BitunixFutures {
         read: Read,
         response: Option<&Response<'_>>,
     ) {
+        if let Some(response) = response {
+            cx.startup_read_refused(&crate::recovery::failed(response));
+        }
         self.position_answered(cx, &read);
         self.order_answered(cx, &read);
         if read.axis == Axis::Balance {

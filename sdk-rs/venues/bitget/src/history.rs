@@ -830,7 +830,15 @@ impl BitgetFutures {
         }
         let valid = envelope
             .map_err(|e| e.to_string())
-            .and_then(Envelope::checked);
+            .and_then(Envelope::checked)
+            .map(drop)
+            .or_else(|error| {
+                if crate::wire::null_history(response.body) {
+                    Ok(())
+                } else {
+                    Err(error)
+                }
+            });
         if response.status != 200 || valid.is_err() || r.invalid {
             let error = valid
                 .err()
@@ -851,6 +859,7 @@ impl BitgetFutures {
                     .or(c.end_id)
                     .map(|id| id.text().into_owned())
                     .filter(|s| !s.is_empty()),
+                None if crate::wire::null_history(response.body) => None,
                 None => {
                     self.query_failed(cx, r, "Bitget invalid history cursor");
                     return;
