@@ -26,6 +26,46 @@ const LOST_PLACEMENT_CHECKS_MS: [u64; 4] = [1_000, 2_000, 4_000, 8_000];
 const CANCEL_RETRY_BOUND_MS: u64 = 600_000;
 const CANCEL_RETRY_MIN_MS: u64 = 1_000;
 const CANCEL_RETRY_MAX_MS: u64 = 10_000;
+/// Opens the warning that a stop's cancel is being retried.
+const RETRYING: &str = "Chaser stopped, but ";
+/// Open the message that ends a stop's cancel, retried or not.
+const SETTLED: [&str; 2] = ["Chaser stopped: ", "Chaser could not cancel "];
+
+/// The order a stop's retrying warning names, for a host that keeps warnings.
+pub fn retrying_order(message: &str) -> Option<&str> {
+    message.strip_prefix(RETRYING)?;
+    named_orders(message).into_iter().next()
+}
+
+/// The orders a message ending a stop's cancel names: a kept retrying
+/// warning for one of them is superseded.
+pub fn settled_orders(message: &str) -> Vec<&str> {
+    if SETTLED.iter().any(|prefix| message.starts_with(prefix)) {
+        named_orders(message)
+    } else {
+        Vec::new()
+    }
+}
+
+fn named_orders(message: &str) -> Vec<&str> {
+    let Some((_, rest)) = message.split_once(" order ") else {
+        return Vec::new();
+    };
+    // "o1 is ...", "o1: ..." or a list "o1, o2: ...".
+    let mut ids = Vec::new();
+    for word in rest.split(' ') {
+        match word.strip_suffix(',') {
+            Some(id) => ids.push(id),
+            None => {
+                ids.push(word.trim_end_matches(':'));
+                break;
+            }
+        }
+    }
+    ids.retain(|id| !id.is_empty());
+    ids
+}
+
 /// Close All walks positions only, so it never reaches a stranded chase order.
 const CANCEL_WAY_OUT: &str = "Cancel it in Open Orders or use Nuke";
 /// Each chase runs its own supervisor, price checks and REST reconciles.
@@ -254,7 +294,7 @@ impl ChaserBook {
     /// A stopping chase's cancel the venue refused leaves the order open: say so,
     /// rather than reporting the chase finished as if nothing were left behind.
     /// Not for an order the store has since seen finish, while the cancel waited.
-    fn cancel_failed(&self, symbol: &str, ids: &[String], error: &VenueError) {
+    fn cancel_failed(&self, symbol: &str, ids: &[String], error: &VenueError) -> bool {
         let gone = ["already canceled", "already filled", "never placed"]
             .iter()
             .any(|phrase| error.message.contains(phrase));
@@ -263,13 +303,15 @@ impl ChaserBook {
             .filter(|id| !self.known_closed(id))
             .map(String::as_str)
             .collect();
-        if !gone && !open.is_empty() {
+        let told = !gone && !open.is_empty();
+        if told {
             self.error(&format!(
                 "Chaser could not cancel {symbol} order {}: {}; it may still be open. {CANCEL_WAY_OUT}",
                 open.join(", "),
                 error.message
             ));
         }
+        told
     }
 
     fn log(&self, chase: &Chase, message: &str) {
@@ -968,6 +1010,7 @@ impl ChaserBook {
                     self.warn(&format!(
                         "Chaser stopped: {symbol} order {id} {end} before its cancel got through"
                     ));
+                    chase.note_outcome_told();
                 }
                 break;
             }
@@ -977,9 +1020,7 @@ impl ChaserBook {
             {
                 Ok(_) => {
                     if retrying {
-                        self.warn(&format!(
-                            "Chaser stopped: {symbol} order {id} is now cancelled"
-                        ));
+                        self.tell_retried_end(chase, &symbol, id, None).await;
                     }
                     break;
                 }
@@ -990,6 +1031,12 @@ impl ChaserBook {
                 // A refusal is often the order already filling: completion, with its fills, says which.
                 if cancel_retryable(&error) {
                     self.cancel_failed(&symbol, std::slice::from_ref(&id.to_owned()), &error);
+                    if retrying {
+                        chase.note_outcome_told();
+                    }
+                } else if retrying {
+                    self.tell_retried_end(chase, &symbol, id, Some(&error))
+                        .await;
                 } else {
                     chase.note_cancel_refused(id, &symbol, error);
                 }
@@ -1001,7 +1048,7 @@ impl ChaserBook {
                     "{reason}; retrying the cancel of order {id}. {CANCEL_WAY_OUT}"
                 ));
                 self.warn(&format!(
-                    "Chaser stopped, but {symbol} order {id} is still open: {}. Retrying the cancel; it can still fill until then. {CANCEL_WAY_OUT}",
+                    "{RETRYING}{symbol} order {id} is still open: {}. Retrying the cancel; it can still fill until then. {CANCEL_WAY_OUT}",
                     error.message
                 ));
             }
@@ -1017,6 +1064,43 @@ impl ChaserBook {
         if retrying {
             chase.mark_complete(&reason);
         }
+    }
+
+    /// How a stop cancel that had to wait out an outage ended. The store can
+    /// lag the reconnect, and a venue may answer a cancel of a filled order as
+    /// done, so the order's own fills say whether it filled first.
+    async fn tell_retried_end(
+        &self,
+        chase: &Chase,
+        symbol: &str,
+        id: &str,
+        refusal: Option<&VenueError>,
+    ) {
+        let filled = self
+            .filled_quantities(std::slice::from_ref(&id.to_owned()))
+            .await
+            .ok()
+            .and_then(|rows| rows.first().map(|(_, amount)| *amount));
+        match (filled, refusal) {
+            (Some(filled), _) if filled > 0.0 => {
+                chase.set_filled_amount(id, filled);
+                self.warn(&format!(
+                    "Chaser stopped: {symbol} order {id} filled {filled} before its cancel got through"
+                ));
+            }
+            (_, Some(error))
+                if self.cancel_failed(symbol, std::slice::from_ref(&id.to_owned()), error) => {}
+            (Some(_), None) => {
+                self.warn(&format!("Chaser stopped: {symbol} order {id} is now cancelled"))
+            }
+            (Some(_), Some(_)) => self.warn(&format!(
+                "Chaser stopped: {symbol} order {id} cancelled before its cancel got through"
+            )),
+            (None, _) => self.warn(&format!(
+                "Chaser stopped: {symbol} order {id} is no longer open, but its fills could not be read: check Positions"
+            )),
+        }
+        chase.note_outcome_told();
     }
 
     async fn emit_complete(&self, chase: &Chase) {
@@ -1071,6 +1155,7 @@ impl ChaserBook {
             size: chase.options.size,
             filled,
             stop_reason: chase.stop_reason(),
+            outcome_told: chase.outcome_told(),
         };
         self.cx.port.emit(
             "chaser:complete",

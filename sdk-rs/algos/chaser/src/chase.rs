@@ -102,6 +102,9 @@ pub struct ChaserComplete {
     pub size: f64,
     pub filled: f64,
     pub stop_reason: String,
+    /// The chaser already told how a stop it had to retry ended; the page adds no outcome of its own.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub outcome_told: bool,
 }
 
 /// The fill in the unit of `PlaceOrderOpts.amount`.
@@ -132,6 +135,7 @@ struct State {
     cancels_claimed: Vec<String>,
     /// Orders whose stop cancel the venue refused while the store still had them open.
     cancel_refused: Vec<(String, String, VenueError)>,
+    outcome_told: bool,
     last_partial_fill_at: Option<Instant>,
 }
 
@@ -289,6 +293,14 @@ impl Chase {
                 .cancel_refused
                 .push((order_id.to_owned(), symbol.to_owned(), error));
         }
+    }
+
+    pub fn note_outcome_told(&self) {
+        self.state.borrow_mut().outcome_told = true;
+    }
+
+    pub fn outcome_told(&self) -> bool {
+        self.state.borrow().outcome_told
     }
 
     pub fn take_cancel_refused(&self) -> Vec<(String, String, VenueError)> {

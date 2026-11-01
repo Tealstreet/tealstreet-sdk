@@ -510,7 +510,7 @@ fn transport_down() -> VenueError {
 async fn a_stop_keeps_cancelling_through_an_outage_past_60_s_and_the_row_stays_until_then() {
     local(async {
         let port = FakePort::new("bybit");
-        port.accept_placements();
+        accept_with_fills(&port, Ok("[]"));
         let (factory, cx) = start(&port, BUY_ONE);
         settle(1100).await;
         let online = cancels_fail_until(&port, transport_down());
@@ -619,6 +619,138 @@ async fn an_order_that_fills_during_the_retries_ends_them_and_says_filled() {
         assert!(port.errors().is_empty(), "{:?}", port.errors());
     })
     .await;
+}
+
+/// The venue filled the order during the outage; the store has not caught up,
+/// and the venue answers the cancel as done (Bybit 110001).
+#[tokio::test(start_paused = true)]
+async fn a_retried_stop_whose_order_filled_offline_says_filled_once() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":1}]"#));
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = cancels_fail_until(&port, transport_down());
+        stop(&factory, &cx);
+        settle(30_000).await;
+        online.set(true);
+        settle(10_000).await;
+        assert!(factory.book().active_chasers().is_empty());
+        let warnings = warnings(&port);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(
+            warnings[1].contains("o1") && warnings[1].contains("filled 1 before its cancel"),
+            "{warnings:?}"
+        );
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+        let [complete] = port.completes().try_into().unwrap();
+        assert_eq!(complete["filled"], 1.0);
+        assert_eq!(complete["outcomeTold"], true);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_retried_stop_that_cancelled_says_so_from_the_fills() {
+    for (fills, end) in [
+        (Ok("[]"), "is now cancelled"),
+        (Err("fills unavailable"), "its fills could not be read"),
+    ] {
+        local(async {
+            let port = FakePort::new("bybit");
+            accept_with_fills(&port, fills);
+            let (factory, cx) = start(&port, BUY_ONE);
+            settle(1100).await;
+            let online = cancels_fail_until(&port, transport_down());
+            stop(&factory, &cx);
+            settle(30_000).await;
+            online.set(true);
+            settle(10_000).await;
+            let warnings = warnings(&port);
+            assert_eq!(warnings.len(), 2, "{warnings:?}");
+            assert!(warnings[1].contains(end), "{warnings:?}");
+            let [complete] = port.completes().try_into().unwrap();
+            assert_eq!(complete["filled"], 0.0);
+            assert_eq!(complete["outcomeTold"], true);
+        })
+        .await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_retried_stop_the_venue_refuses_because_it_filled_says_filled() {
+    local(async {
+        let port = FakePort::new("binance");
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":1}]"#));
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = Rc::new(Cell::new(false));
+        let flag = online.clone();
+        let mut inner = std::mem::replace(
+            &mut *port.responder.borrow_mut(),
+            Box::new(|_| Ok("[]".into())),
+        );
+        *port.responder.borrow_mut() = Box::new(move |command| match command {
+            Command::CancelOrders { .. } | Command::CancelOrdersWithSymbols { .. } => {
+                Err(if flag.get() {
+                    VenueError::new("Unknown order sent.")
+                        .kind(ErrorKind::Rejected)
+                        .outcome(Outcome::Rejected)
+                } else {
+                    transport_down()
+                })
+            }
+            other => inner(other),
+        });
+        stop(&factory, &cx);
+        settle(30_000).await;
+        online.set(true);
+        settle(10_000).await;
+        assert!(factory.book().active_chasers().is_empty());
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+        let warnings = warnings(&port);
+        assert!(
+            warnings
+                .last()
+                .unwrap()
+                .contains("filled 1 before its cancel"),
+            "{warnings:?}"
+        );
+        assert_eq!(port.completes()[0]["outcomeTold"], true);
+    })
+    .await;
+}
+
+#[test]
+fn a_retrying_warning_and_the_message_that_ends_it_name_the_same_order() {
+    let retry = "Chaser stopped, but BTCUSDT order 71b464ec is still open: Signing provider is unavailable. Retrying the cancel";
+    assert_eq!(safe_cex_chaser::retrying_order(retry), Some("71b464ec"));
+    assert_eq!(
+        safe_cex_chaser::retrying_order("Chaser stopped: BTCUSDT order o1 is now cancelled"),
+        None
+    );
+    for (message, ids) in [
+        (
+            "Chaser stopped: BTCUSDT order 71b464ec is now cancelled",
+            vec!["71b464ec"],
+        ),
+        (
+            "Chaser stopped: BTCUSDT order o1 filled 1 before its cancel got through",
+            vec!["o1"],
+        ),
+        (
+            "Chaser could not cancel BTCUSDT order o1, o2: refused; it may still be open",
+            vec!["o1", "o2"],
+        ),
+        (
+            "Chaser could not cancel BTCUSDT order o1: refused",
+            vec!["o1"],
+        ),
+        (retry, vec![]),
+        ("Chase on BTCUSDT stopped with nothing filled.", vec![]),
+    ] {
+        assert_eq!(safe_cex_chaser::settled_orders(message), ids, "{message}");
+    }
 }
 
 #[tokio::test(start_paused = true)]

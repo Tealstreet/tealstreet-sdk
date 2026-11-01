@@ -73,6 +73,37 @@ struct Unheard {
     error: Option<String>,
     /// The frame as sent, replayed as is.
     frame: String,
+    /// The order a stop's retrying warning names: a later end of that cancel supersedes it.
+    retrying: Option<String>,
+}
+
+/// A page that was away must not hear that a cancel is still retrying once
+/// its end is known.
+fn drop_superseded(unheard: &mut VecDeque<Unheard>, op: &str, data: &str) {
+    if !matches!(op, "warning" | "error") {
+        return;
+    }
+    let text = notice_text(data);
+    let settled = safe_cex_chaser::settled_orders(&text);
+    if !settled.is_empty() {
+        unheard.retain(|kept| {
+            kept.retrying
+                .as_deref()
+                .is_none_or(|id| !settled.contains(&id))
+        });
+    }
+}
+
+/// The order a retrying warning names, so its end can supersede it.
+fn retrying_of(op: &str, data: &str) -> Option<String> {
+    (op == "warning")
+        .then(|| safe_cex_chaser::retrying_order(&notice_text(data)).map(str::to_owned))
+        .flatten()
+}
+
+/// An algo notice's text: chaser notices are JSON strings.
+fn notice_text(data: &str) -> std::borrow::Cow<'_, str> {
+    serde_json::from_str::<String>(data).map_or(std::borrow::Cow::Borrowed(data), Into::into)
 }
 
 /// Bound on settling chaser cancels before the engine is disposed anyway.
@@ -162,14 +193,16 @@ impl AccountPort for Port {
         })
     }
     fn emit(&self, op: &str, data: String) {
+        drop_superseded(&mut self.unheard.borrow_mut(), op, &data);
         if op == "error" {
             self.errors.set(self.errors.get() + 1);
             crate::state::Log::warn(&format!("algo error {}: {data}", self.name));
             let frame = algo_error(&self.name, &data);
             let holding = (self.broadcast)(Some(frame.clone()));
-            self.keep_unheard(Some(data), frame, holding);
+            self.keep_unheard(Some(data), frame, holding, None);
             return;
         }
+        let retrying = retrying_of(op, &data);
         let frame = algo_msg(&self.name, op, data);
         if owed_on_rejoin(op) {
             let mut holding = (self.broadcast)(None);
@@ -177,7 +210,7 @@ impl AccountPort for Port {
                 holding.live = vec![signer.socket()];
             }
             (self.emit)(frame.clone());
-            self.keep_unheard(None, frame, holding);
+            self.keep_unheard(None, frame, holding, retrying);
             return;
         }
         (self.emit)(frame);
@@ -260,7 +293,13 @@ impl Port {
         error.sent.elapsed() < UNHEARD_TTL && (error.owed || !error.told.iter().all(heard))
     }
 
-    fn keep_unheard(&self, error: Option<String>, frame: String, holding: Holding) {
+    fn keep_unheard(
+        &self,
+        error: Option<String>,
+        frame: String,
+        holding: Holding,
+        retrying: Option<String>,
+    ) {
         let mut unheard = self.unheard.borrow_mut();
         unheard.retain(|error| self.still_unheard(error));
         if unheard.len() == UNHEARD_ERRORS {
@@ -272,6 +311,7 @@ impl Port {
             told: holding.live,
             error,
             frame,
+            retrying,
         });
     }
 
@@ -871,6 +911,45 @@ fn error_kind(kind: &str) -> Option<ErrorKind> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_retrying_warning_is_not_replayed_once_its_cancel_ended() {
+        let kept = |op: &str, message: &str| {
+            let data = serde_json::to_string(message).unwrap();
+            Unheard {
+                sent: Instant::now(),
+                told: Vec::new(),
+                owed: true,
+                error: None,
+                frame: data.clone(),
+                retrying: retrying_of(op, &data),
+            }
+        };
+        let retry = "Chaser stopped, but BTCUSDT order 71b464ec is still open: Signing provider is unavailable. Retrying the cancel; it can still fill until then. Cancel it in Open Orders or use Nuke";
+        let mut unheard = VecDeque::from([
+            kept("warning", retry),
+            kept("warning", &retry.replace("71b464ec", "other")),
+            kept("chaser:complete", r#"{"id":"c1"}"#),
+        ]);
+        let ended =
+            serde_json::to_string("Chaser stopped: BTCUSDT order 71b464ec is now cancelled")
+                .unwrap();
+        drop_superseded(&mut unheard, "log", &ended);
+        assert_eq!(unheard.len(), 3, "only a warning or error ends a cancel");
+        drop_superseded(&mut unheard, "warning", &ended);
+        assert_eq!(unheard.len(), 2);
+        assert!(
+            unheard
+                .iter()
+                .all(|kept| kept.retrying.as_deref() != Some("71b464ec"))
+        );
+        let failed = serde_json::to_string(
+            "Chaser could not cancel BTCUSDT order a1, other: refused; it may still be open. Cancel it in Open Orders or use Nuke",
+        )
+        .unwrap();
+        drop_superseded(&mut unheard, "error", &failed);
+        assert_eq!(unheard.len(), 1, "the chase's end stays");
+    }
 
     #[test]
     fn a_chase_end_and_its_warnings_are_replayed_to_a_page_that_was_away() {
