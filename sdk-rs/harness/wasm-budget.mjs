@@ -79,7 +79,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // Tightest families at CI (abc18ecd30a) + 10 KiB, rounded up to KiB, before the exec store fix.
 // #2650 Bitget flat leverage read: CI 2,140,041 B; ddi's rule, CI + 10 KiB, rounded up to a KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 1_888_256,
+  apexomni: 1_889_280,
   asterdex: 2_020_352,
   backpack: 1_801_216,
   binance: 2_062_336,
@@ -90,27 +90,27 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitunix: 1_748_992,
   blofin: 1_846_272,
   breakoutprop: 1_441_792,
-  bybit: 2_064_384,
+  bybit: 2_065_408,
   coinbase: 1_742_848,
-  cryptocom: 1_632_256,
+  cryptocom: 1_633_280,
   grvt: 1_708_032,
   hyperliquid: 1_985_536,
   hyperliquidspot: 1_985_536,
   kraken: 2_023_424,
   krakenspot: 2_023_424,
   kucoin: 1_518_592,
-  kucoinspot: 2_001_920,
+  kucoinspot: 2_002_944,
   lighter: 1_890_304,
   'lighter-robinhood': 1_890_304,
   mexc: 1_653_760,
-  okx: 1_817_600,
-  orderly: 1_651_712,
+  okx: 1_818_624,
+  orderly: 1_652_736,
   paradex: 2_124_800,
   phemex: 1_923_072,
   polymarket: 1_529_856,
   txflow: 1_760_256,
   weex: 1_848_320,
-  woo: 2_269_184,
+  woo: 2_270_208,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

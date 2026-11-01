@@ -866,6 +866,49 @@ async fn a_requote_cancel_lost_to_an_outage_stops_the_chase_and_keeps_cancelling
     .await;
 }
 
+/// COSIGNED: the browser that signs went offline, so the requote's cancel could not
+/// be sent. The chase says so, in its reason and its warning, and the cancel that
+/// gets through once the browser is back ends it.
+#[tokio::test(start_paused = true)]
+async fn a_requote_with_its_signer_gone_says_the_signer_is_offline() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok("[]"));
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let back = cancels_fail_until(
+            &port,
+            VenueError::new("Signing provider is unavailable")
+                .kind(ErrorKind::Internal)
+                .outcome(Outcome::NotSent),
+        );
+        port.set_ticker(101.0, 101.5);
+        settle(5_000).await;
+        let rows = factory.book().active_chasers();
+        assert!(
+            rows[0]
+                .stop_reason
+                .starts_with(safe_cex_chaser::SIGNER_OFFLINE_STOP_REASON),
+            "{}",
+            rows[0].stop_reason
+        );
+        assert!(
+            warnings(&port)[0].contains("the browser that signs for this account is offline"),
+            "{:?}",
+            warnings(&port)
+        );
+        back.set(true);
+        settle(15_000).await;
+        let [complete] = port.completes().try_into().unwrap();
+        assert_eq!(
+            complete["stopReason"],
+            safe_cex_chaser::SIGNER_OFFLINE_STOP_REASON
+        );
+        assert_eq!(port.placements().len(), 1);
+    })
+    .await;
+}
+
 /// No STOP: a requote's cancel lost to the outage stops the chase, and the
 /// order fills offline before the venue answers the cancel as done.
 #[tokio::test(start_paused = true)]
