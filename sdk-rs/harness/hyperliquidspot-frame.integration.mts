@@ -6,16 +6,22 @@ import { spotRig, spotResponse } from './spot-host-rig.mjs';
 function rig() {
   let oid = 900;
   let rejectCancel = false;
+  // What the venue lists: a read after the ack must show the order it just accepted.
+  const open = new Map();
   const r = spotRig('hyperliquidspot', HYPERLIQUID_SPOT_REPLAY, (request) => {
     validateHyperliquidSpotRequest({ ...request, now: 1792454400000 });
     const body = JSON.parse(request.body);
     if (body.type === 'spotMetaAndAssetCtxs') return spotResponse(hyperliquidSpotMeta);
     if (body.type === 'spotClearinghouseState') return spotResponse(hyperliquidSpotBalance);
-    if (body.type === 'frontendOpenOrders') return spotResponse([]);
+    if (body.type === 'frontendOpenOrders') return spotResponse([...open.values()]);
+    if (body.type === 'orderStatus') return spotResponse({ status: 'order', order: { status: 'open', statusTimestamp: 1792454400000, order: open.get(body.oid) } });
     assert(new URL(request.url).pathname === '/exchange');
+    if (body.action.type === 'cancel' && !rejectCancel) for (const { o } of body.action.cancels) open.delete(o);
     if (body.action.type === 'cancel') return spotResponse({ status: 'ok', response: { type: 'cancel', data: { statuses: rejectCancel ? [{ error: 'Order was never placed' }] : ['success'] } } });
     assert.equal(body.action.type, 'order');
-    return spotResponse({ status: 'ok', response: { type: 'order', data: { statuses: body.action.orders.map(() => ({ resting: { oid: ++oid } })) } } });
+    const statuses = body.action.orders.map(() => ({ resting: { oid: ++oid } }));
+    for (const { resting } of statuses) open.set(resting.oid, { coin: 'PURR/USDC', side: 'B', limitPx: '90', sz: '0.25', origSz: '0.25', oid: resting.oid, timestamp: 1792454400000, orderType: 'Limit', tif: 'Gtc', reduceOnly: false, isTrigger: false, isPositionTpsl: false, triggerPx: '0', triggerCondition: 'N/A', children: [] });
+    return spotResponse({ status: 'ok', response: { type: 'order', data: { statuses } } });
   });
   return { ...r, rejectCancel() { rejectCancel = true; } };
 }

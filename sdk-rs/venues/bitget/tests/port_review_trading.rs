@@ -96,10 +96,7 @@ fn isolated_hedge_routes_requested_or_default_leg_and_preserves_other_settings()
                 payload[if uta { "posSide" } else { "holdSide" }],
                 if short { "short" } else { "long" }
             );
-            assert_eq!(
-                payload["leverage"],
-                if uta { json!("25") } else { json!(25.0) }
-            );
+            assert_eq!(payload["leverage"], json!("25"));
             assert_eq!(
                 h.engine.store().position("long").unwrap().leverage,
                 if short { 10.0 } else { 25.0 }
@@ -365,7 +362,7 @@ fn zero_leverage_limits_use_ts_defaults_and_inverted_limits_cannot_panic() {
     );
     let limits = &h.engine.store().market("BTCUSDT").unwrap().limits.leverage;
     assert_eq!((limits.min, limits.max), (1.0, 20.0));
-    for (min, max, requested, expected) in [(0.0, 0.0, 80.0, 20.0), (0.0, 0.0, 0.5, 1.0)] {
+    for (min, max, requested, expected) in [(0.0, 0.0, 80.0, "20"), (0.0, 0.0, 0.5, "1")] {
         let mut h = Harness::classic();
         h.engine.store_mut().update_markets(|m| {
             m.limits.leverage.min = min;

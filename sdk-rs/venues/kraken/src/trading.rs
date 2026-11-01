@@ -98,7 +98,7 @@ struct OrderEvent {
     kind: String,
     // Other event types carry other fields; only an execution's number counts.
     #[serde(default)]
-    amount: Option<serde_json::Value>,
+    amount: Option<Box<serde_json::value::RawValue>>,
 }
 #[derive(Deserialize)]
 struct Preference {
@@ -738,7 +738,7 @@ impl Kraken {
                     .events
                     .iter()
                     .filter(|event| event.kind == "EXECUTION")
-                    .filter_map(|event| event.amount.as_ref().and_then(serde_json::Value::as_f64))
+                    .filter_map(|event| event.amount.as_ref()?.get().parse::<f64>().ok())
                     .sum();
                 // A market or IOC order never rests, whatever its status says.
                 let rests = !matches!(p.order.kind, OrderType::Market)
