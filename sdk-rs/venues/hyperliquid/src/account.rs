@@ -36,6 +36,9 @@ pub enum Request {
     },
     Builder,
     Fees,
+    AmendSource {
+        id: String,
+    },
 }
 impl Request {
     pub(crate) fn is_builder(&self) -> bool {
@@ -117,6 +120,8 @@ pub struct Account {
     inflight: HashSet<String>,
     orders_refresh_due: HashSet<String>,
     pub suppressed: HashMap<String, f64>,
+    /// The read epoch of each dex's last clean order census, "" the main one.
+    pub clean_dexes: HashMap<String, u64>,
     seen_fills: HashSet<u64>,
     fill_queue: VecDeque<u64>,
     spot_filled: HashMap<String, (String, f64)>,
@@ -234,7 +239,7 @@ impl Hyperliquid {
         // approval is read, once, before the first placement.
         if cx.frame_fed() {
             match &request {
-                Request::Builder => {}
+                Request::Builder | Request::AmendSource { .. } => {}
                 _ => return,
             }
         }
@@ -524,6 +529,27 @@ impl Hyperliquid {
             .unwrap(),
             Request::Builder,
         );
+    }
+    pub(crate) fn read_amend_source(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        #[derive(Serialize)]
+        struct Read<'a> {
+            r#type: &'static str,
+            user: &'a str,
+            oid: u64,
+        }
+        let Ok(oid) = id.parse::<u64>() else {
+            self.amend_source_read(cx, id, Err("the order ID is not numeric".to_owned()));
+            return;
+        };
+        let body = serde_json::to_string(&Read {
+            r#type: "orderStatus",
+            user: self.user().unwrap_or_default(),
+            oid,
+        })
+        .unwrap();
+        self.account.fence_read = true;
+        self.read_body(cx, body, Request::AmendSource { id: id.to_owned() });
+        self.account.fence_read = false;
     }
     pub(crate) fn builder(&self) -> crate::Builder {
         let mut builder = self
@@ -867,6 +893,28 @@ impl Hyperliquid {
                     cx.hold_setting(crate::BUILDER_HOLD.clone());
                 }
             }
+            Request::AmendSource { id } => {
+                #[derive(serde::Deserialize)]
+                struct Lookup<'a> {
+                    #[serde(borrow)]
+                    status: &'a str,
+                    #[serde(default, borrow)]
+                    order: Option<crate::wire::OrderUpdate<'a>>,
+                }
+                let read = serde_json::from_str::<Lookup>(raw)
+                    .ok()
+                    .filter(|lookup| lookup.status == "order")
+                    .and_then(|lookup| lookup.order)
+                    .ok_or_else(|| "the order read was unreadable".to_owned());
+                match read {
+                    Ok(row) => self.amend_source_read(
+                        cx,
+                        &id,
+                        Ok((row.status.as_ref(), row.order.orig_sz, row.order.sz)),
+                    ),
+                    Err(error) => self.amend_source_read(cx, &id, Err(error)),
+                }
+            }
             Request::Fees => {
                 #[derive(serde::Deserialize)]
                 #[serde(rename_all = "camelCase")]
@@ -965,9 +1013,15 @@ impl Hyperliquid {
                     for symbol in symbols {
                         cx.orders_reconciled_since(Some(&symbol), epoch);
                     }
-                    if dex.is_empty() && self.dex_names.is_empty() && self.discovery_settled() {
+                    self.account.clean_dexes.insert(dex.clone(), epoch);
+                    if self.discovery_settled()
+                        && let Some(epoch) =
+                            every_dex_clean(&self.dex_names, &self.account.clean_dexes)
+                    {
                         cx.orders_reconciled_since(None, epoch);
                     }
+                } else {
+                    self.account.clean_dexes.remove(&dex);
                 }
                 self.account
                     .suppressed
@@ -1128,6 +1182,9 @@ impl Hyperliquid {
                 }
             }
             Request::Builder => self.account.builder_approved = None,
+            Request::AmendSource { id } => {
+                self.amend_source_read(cx, &id, Err(error.to_owned()));
+            }
             Request::Fees => {}
         }
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
@@ -2491,4 +2548,30 @@ fn failed_protective_status(status: &str) -> bool {
             | "delistedCanceled"
             | "liquidatedCanceled"
     )
+}
+
+/// The oldest epoch once every dex has a clean census: an all-symbol fence needs them all.
+fn every_dex_clean(names: &[String], clean: &HashMap<String, u64>) -> Option<u64> {
+    let main = clean.get("")?;
+    names.iter().try_fold(*main, |oldest, name| {
+        clean.get(name).map(|epoch| oldest.min(*epoch))
+    })
+}
+
+#[cfg(test)]
+mod every_dex_clean_tests {
+    use super::*;
+
+    #[test]
+    fn an_all_symbol_fence_waits_for_every_dex_then_takes_the_oldest_read() {
+        let names = vec!["xyz".to_string(), "flx".to_string()];
+        let mut clean = HashMap::new();
+        clean.insert(String::new(), 5);
+        assert_eq!(every_dex_clean(&names, &clean), None);
+        clean.insert("xyz".to_string(), 3);
+        assert_eq!(every_dex_clean(&names, &clean), None);
+        clean.insert("flx".to_string(), 9);
+        assert_eq!(every_dex_clean(&names, &clean), Some(3));
+        assert_eq!(every_dex_clean(&[], &clean), Some(5));
+    }
 }

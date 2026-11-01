@@ -917,7 +917,8 @@ impl Blofin {
             })
             .collect();
         }
-        if o.order_id.is_empty() || o.order_category != "normal" {
+        // `pre_tp_sl` is an ordinary order with its bracket attached.
+        if o.order_id.is_empty() || !matches!(o.order_category.as_ref(), "normal" | "pre_tp_sl") {
             return vec![];
         }
         vec![Order {
@@ -1177,7 +1178,7 @@ impl Blofin {
             } => match serde_json::from_str::<AssetRow>(item) {
                 Ok(b) => {
                     *available += b.available.0;
-                    *frozen += b.frozen.0;
+                    *frozen += b.frozen;
                 }
                 Err(_) => *failed = true,
             },

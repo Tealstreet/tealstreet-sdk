@@ -978,10 +978,11 @@ impl Okx {
                 generation,
                 version,
                 equity,
-                risk_rows: 1,
+                risk_rows,
                 invalid: false,
                 ..
-            } => {
+            // No row at all must not hang a start; once loaded it keeps the last snapshot.
+            } if risk_rows == 1 || !cx.store.loaded().balance => {
                 if let Some(join) = &mut self.account.join
                     && join.generation == generation
                 {
@@ -1256,6 +1257,23 @@ impl Okx {
         if !self.account_request_current(&request) {
             return;
         }
+        // A key the config read passed can still be refused the risk or position read.
+        if matches!(request, Request::Balance { .. } | Request::Positions { .. })
+            && !cx.store.loaded().balance
+            && let Some(code) = error.venue_code.clone()
+            && code != "50113"
+            && let Some(kind) = rest_key_rejection(&code)
+        {
+            let read_key = self.options.read_credentials.is_some();
+            let which = if read_key {
+                "read-only API key"
+            } else {
+                "API key"
+            };
+            let refused = rejection(which, &code, &error.message, kind);
+            self.reject_startup(cx, refused, kind == ErrorKind::AuthInvalid && !read_key);
+            return;
+        }
         match request {
             Request::Balance { generation, .. } | Request::Positions { generation, .. } => {
                 if self
@@ -1375,11 +1393,7 @@ impl Okx {
                 cx.stop_socket_feed(feed);
             }
         }
-        cx.notice(
-            Level::Error,
-            code::for_startup_error(&error),
-            &error.message,
-        );
+        cx.notice_error(Level::Error, code::for_startup_error(&error), &error);
         cx.startup_failed(error);
         // As Bybit: a refused trading key also stops the host's login loop.
         if trading_key_refused {

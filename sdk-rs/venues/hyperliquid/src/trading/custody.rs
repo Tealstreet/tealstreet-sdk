@@ -384,6 +384,7 @@ impl Hyperliquid {
             self.trading.active = None;
             self.trading.inflight = false;
             self.trading.builder_wait = None;
+            self.trading.amend_wait = None;
         }
         if self.trading.active.is_none() {
             self.trading.active = self.trading.queue.pop_front();
