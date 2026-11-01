@@ -580,7 +580,11 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
     assert_eq!(request.method, Method::Delete);
     h.response(&request, 200, r#"{"code":"200000","data":[]}"#);
     h.pace();
-    assert!(!h.has("/api/v1/stopOrders"));
+    h.reply(
+        "/api/v1/stopOrders?symbol=XBTUSDTM",
+        r#"{"code":"200000","data":[]}"#,
+    );
+    h.pace();
     assert_eq!(h.done(1), Ok("[]".into()));
     h.command(Command::CancelSymbolOrders {
         command: 2,

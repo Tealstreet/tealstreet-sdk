@@ -616,3 +616,45 @@ fn separate_engines_with_the_same_signer_cannot_reuse_action_nonces() {
     let second = second["nonce"].as_u64().unwrap();
     assert!(second > first);
 }
+
+// A nuke must not leave a stop, and one stop must not keep the rest open.
+#[test]
+fn cancel_all_sends_stops_with_the_rest() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus};
+    let mut e = engine();
+    let symbol = limit("x").symbol;
+    let row = |id: &str, kind| Order {
+        id: id.into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: symbol.clone(),
+        kind,
+        side: OrderSide::Sell,
+        price: 100.0,
+        amount: 1.0,
+        filled: 0.0,
+        remaining: 1.0,
+        reduce_only: true,
+        close: None,
+        client_order_id: None,
+        time_in_force: None,
+        last_update: 0.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    };
+    e.store_mut().set_orders(vec![
+        row("11", OrderType::Limit),
+        row("22", OrderType::StopLoss),
+    ]);
+    e.handle(
+        1000.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 9,
+            symbol: symbol.clone(),
+        }),
+    );
+    let body = write(&mut e).body.unwrap();
+    assert!(body.contains("11") && body.contains("22"), "{body}");
+}
