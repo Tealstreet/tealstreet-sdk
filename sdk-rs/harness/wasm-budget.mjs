@@ -83,7 +83,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_893_376,
   asterdex: 2_025_472,
   backpack: 1_805_312,
-  binance: 2_066_432,
+  binance: 2_080_768,
   bingx: 1_892_352,
   bitget: 2_170_880,
   bitgetusdc: 2_170_880,
