@@ -172,10 +172,13 @@ describe('frame-fed main-thread mirror', () => {
         const mirror = mirrorWith(fake);
         exchange = mirror.exchange;
 
+        const errors: unknown[] = [];
+        mirror.exchange.on('error', (error: unknown) => errors.push(error));
         const placed = mirror.exchange.placeOrder(order);
         const refused = expect(placed).rejects.toMatchObject({ outcome: 'notSent' });
         await vi.advanceTimersByTimeAsync(30_000);
         await refused;
+        expect(errors).toHaveLength(1);
 
         finishLoad();
         await vi.advanceTimersByTimeAsync(1_000);

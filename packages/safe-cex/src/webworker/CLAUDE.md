@@ -245,9 +245,13 @@ either one loses it; bybit calls `connectAndSubscribe()` INSIDE
 `socket.ws?.readyState === OPEN`, and a socket whose `connectAndSubscribe` never
 ran has no `ws`.
 
-**The 30 s `START_TIMEOUT_MS` race rejects into the same catch**, so a timeout is
-tagged `worker_error_phase: 'startup'` with `worker_error_family: 'timeout'`.
-That pairing is the point, not conflation.
+**The start timeout race rejects into the same catch** (30 s, Rust engine 120 s), so
+a timeout is tagged `worker_error_phase: 'startup'` with `worker_error_family:
+'timeout'`. That pairing is the point, not conflation. A Rust timeout then starts
+over on the same worker (`retryTimedOutStart`, 10/20/40/60 s, then final). The
+web controller's `startup_failed` latch stops only its own automatic reloads, not
+this; a successful load clears it. Every request after a failed start is answered
+`notSent` (`failedWorker`), because the page's own timer is 121 s.
 
 **The `try` deliberately spans the WHOLE of `start()`, not just
 `_exchange.start()`.** Half of startup runs before the exchange exists — the

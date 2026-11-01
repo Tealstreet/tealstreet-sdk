@@ -185,6 +185,8 @@ const start = (ctx: Worker, shared = false) => {
   const getMyExchangeWorker = () =>
     accountName ? exchangeWorkers[accountName] : anonymousExchangeWorkers[exchangeName];
 
+  let failedWorker: ExchangeWorker | undefined;
+
   const deleteMyExchangeWorker = () => {
     if (accountName) {
       delete exchangeWorkers[accountName];
@@ -294,13 +296,16 @@ const start = (ctx: Worker, shared = false) => {
     // no IndexedDB cache, default-demo, etc.).
     exchangeWorker.store.update(payload.data.store);
 
+    failedWorker = undefined;
     const started = await exchangeWorker.start();
     if (!started) {
+      if (exchangeWorker.retryTimedOutStart()) return;
       // Startup was cancelled (e.g. dispose mid-flight) or failed. Drop the
       // worker from the map so a subsequent init creates a fresh one instead
       // of reusing a half-initialized instance.
       if (getMyExchangeWorker() === exchangeWorker) {
         deleteMyExchangeWorker();
+        failedWorker = exchangeWorker;
       }
       exchangeWorker.dispose();
       return;
@@ -472,6 +477,9 @@ const start = (ctx: Worker, shared = false) => {
             portsBySubId[payload.data.subId] = ctx;
           }
           exchangeWorker.handlePayload(payload);
+        } else {
+          // A caller waits on its own long timer: a failed start still answers until the next init.
+          failedWorker?.handlePayload(payload);
         }
         break;
     }
