@@ -29,6 +29,14 @@ const CANCEL_RETRY_MAX_MS: u64 = 10_000;
 /// A cancel or fills read sent into a link that died with no answer can hang
 /// for minutes; past this a cancel is tried again and fills count as unread.
 const ANSWER_BOUND_MS: u64 = 10_000;
+/// How an order whose cancel was retried ended.
+enum Settled {
+    Filled(f64),
+    /// Cancelled, after filling this much.
+    Cancelled(f64),
+    FillsUnread,
+}
+
 /// Opens the warning that a stop's cancel is being retried.
 const RETRYING: &str = "Chaser stopped, but ";
 /// Open the message that ends a stop's cancel, retried or not.
@@ -1106,18 +1114,20 @@ impl ChaserBook {
         let started = Instant::now();
         let mut delay = CANCEL_RETRY_MIN_MS;
         let mut retrying = false;
+        // How the order ended, for the stop reason once the retry is over.
+        let mut ended = None;
         while chase.current().iter().any(|current| current == id) {
             if self.known_closed(id) {
                 if retrying {
-                    let filled = self
-                        .store()
-                        .order(id)
-                        .is_some_and(|order| order.status == OrderStatus::Closed);
-                    let end = if filled { "filled" } else { "cancelled" };
-                    self.warn(&format!(
-                        "Chaser stopped: {symbol} order {id} {end} before its cancel got through"
-                    ));
-                    chase.note_outcome_told();
+                    let end = self.store().order(id).map(|order| {
+                        if order.status == OrderStatus::Closed {
+                            Settled::Filled(placement_filled(order))
+                        } else {
+                            Settled::Cancelled(placement_filled(order))
+                        }
+                    });
+                    let end = end.unwrap_or(Settled::Cancelled(0.0));
+                    ended = Some(self.tell_settled(chase, &symbol, id, end));
                 }
                 break;
             }
@@ -1127,7 +1137,7 @@ impl ChaserBook {
             {
                 Ok(_) => {
                     if retrying {
-                        self.tell_retried_end(chase, &symbol, id, None).await;
+                        ended = self.tell_retried_end(chase, &symbol, id, None).await;
                     }
                     break;
                 }
@@ -1142,7 +1152,8 @@ impl ChaserBook {
                         chase.note_outcome_told();
                     }
                 } else if retrying {
-                    self.tell_retried_end(chase, &symbol, id, Some(&error))
+                    ended = self
+                        .tell_retried_end(chase, &symbol, id, Some(&error))
                         .await;
                 } else {
                     chase.note_cancel_refused(id, &symbol, error);
@@ -1173,8 +1184,41 @@ impl ChaserBook {
         }
         chase.drop_current(id);
         if retrying {
-            chase.mark_complete(&reason);
+            chase.mark_complete(&match ended {
+                Some(end) => format!("{reason}; {end}"),
+                None => reason,
+            });
         }
+    }
+
+    /// The one final message for an order whose cancel had to be retried, and
+    /// the same outcome for the stop reason.
+    fn tell_settled(&self, chase: &Chase, symbol: &str, id: &str, end: Settled) -> String {
+        let (message, outcome) = match end {
+            Settled::Filled(filled) => (
+                format!(
+                    "Chaser stopped: {symbol} order {id} filled {filled} before its cancel got through"
+                ),
+                format!("order {id} filled {filled}"),
+            ),
+            Settled::Cancelled(filled) if filled > 0.0 => (
+                format!("Chaser stopped: {symbol} order {id} is cancelled after filling {filled}"),
+                format!("order {id} is cancelled after filling {filled}"),
+            ),
+            Settled::Cancelled(_) => (
+                format!("Chaser stopped: {symbol} order {id} is cancelled; nothing filled"),
+                format!("order {id} is cancelled, nothing filled"),
+            ),
+            Settled::FillsUnread => (
+                format!(
+                    "Chaser stopped: {symbol} order {id} is no longer open, but its fills could not be read: check Positions"
+                ),
+                format!("order {id} is no longer open, its fills unread"),
+            ),
+        };
+        self.warn(&message);
+        chase.note_outcome_told();
+        outcome
     }
 
     /// How a stop cancel that had to wait out an outage ended. The store can
@@ -1186,32 +1230,29 @@ impl ChaserBook {
         symbol: &str,
         id: &str,
         refusal: Option<&VenueError>,
-    ) {
+    ) -> Option<String> {
         let filled = self
             .filled_quantities(std::slice::from_ref(&id.to_owned()))
             .await
             .ok()
             .and_then(|rows| rows.first().map(|(_, amount)| *amount));
-        match (filled, refusal) {
-            (Some(filled), _) if filled > 0.0 => {
-                chase.set_filled_amount(id, filled);
-                self.warn(&format!(
-                    "Chaser stopped: {symbol} order {id} filled {filled} before its cancel got through"
-                ));
-            }
-            (_, Some(error))
-                if self.cancel_failed(symbol, std::slice::from_ref(&id.to_owned()), error) => {}
-            (Some(_), None) => {
-                self.warn(&format!("Chaser stopped: {symbol} order {id} is now cancelled"))
-            }
-            (Some(_), Some(_)) => self.warn(&format!(
-                "Chaser stopped: {symbol} order {id} cancelled before its cancel got through"
-            )),
-            (None, _) => self.warn(&format!(
-                "Chaser stopped: {symbol} order {id} is no longer open, but its fills could not be read: check Positions"
-            )),
+        // A refusal while the store still shows it open is said as such.
+        if let Some(error) = refusal
+            && !filled.is_some_and(|filled| filled > 0.0)
+            && self.cancel_failed(symbol, std::slice::from_ref(&id.to_owned()), error)
+        {
+            chase.note_outcome_told();
+            return None;
         }
-        chase.note_outcome_told();
+        let end = match filled {
+            Some(filled) if filled > 0.0 => {
+                chase.set_filled_amount(id, filled);
+                Settled::Filled(filled)
+            }
+            Some(_) => Settled::Cancelled(0.0),
+            None => Settled::FillsUnread,
+        };
+        Some(self.tell_settled(chase, symbol, id, end))
     }
 
     async fn emit_complete(&self, chase: &Chase) {
