@@ -1165,3 +1165,23 @@ fn a_lookup_says_placed_only_for_an_order_the_venue_took() {
     let result: serde_json::Value = serde_json::from_str(h.result(12).unwrap()).unwrap();
     assert_eq!(result["found"], true, "a user cancel after acknowledgement");
 }
+
+#[test]
+fn a_null_flags_field_does_not_drop_a_history_row() {
+    let mut h = private();
+    read(
+        &mut h,
+        6,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let row = ORDER.replace(r#""flags":[]"#, r#""flags":null"#);
+    assert_ne!(row, ORDER);
+    h.reply("/orders-history", &format!(r#"{{"results":[{row}]}}"#));
+    let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(6).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+}

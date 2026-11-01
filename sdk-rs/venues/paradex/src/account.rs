@@ -1922,7 +1922,8 @@ impl Account {
         } else {
             self.native.remove(&row.id);
         }
-        if !row.cancel_reason.is_empty() {
+        // The user's own cancel is not a rejection.
+        if !row.cancel_reason.is_empty() && row.cancel_reason != "USER_CANCELED" {
             cx.notice(
                 Level::Error,
                 code::ORDER_REJECTED,
