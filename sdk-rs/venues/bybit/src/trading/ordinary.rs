@@ -160,6 +160,8 @@ pub(crate) fn server_time(message: &str) -> Option<f64> {
         .and_then(|digits| digits.parse::<f64>().ok())
 }
 
+const MODE_MISMATCH: &str = "position idx not match position mode";
+
 #[derive(serde::Deserialize)]
 struct Fields {
     #[serde(rename = "orderLinkId", default)]
@@ -1199,6 +1201,30 @@ impl BybitLinear {
         }
     }
 
+    /// A refused mode means the cached one is wrong: the next write re-reads it.
+    fn forget_body_modes(&mut self, body: &str) {
+        #[derive(serde::Deserialize)]
+        struct Symbols {
+            #[serde(default)]
+            symbol: Option<String>,
+            #[serde(default)]
+            request: Vec<Symbols>,
+        }
+        let Ok(body) = serde_json::from_str::<Symbols>(body) else {
+            return;
+        };
+        for symbol in body
+            .symbol
+            .iter()
+            .chain(body.request.iter().flat_map(|row| &row.symbol))
+        {
+            self.account.position_modes.remove(symbol);
+            for product in &mut self.products {
+                product.account.position_modes.remove(symbol);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn refused_leg(
         &mut self,
@@ -1212,6 +1238,22 @@ impl BybitLinear {
     ) -> Decision {
         let context = &active.context;
         let planned = &active.leg.planned;
+        if message.contains(MODE_MISMATCH) {
+            self.forget_body_modes(&planned.body);
+        }
+        // TS treats this as done: the order already holds what was asked.
+        if code == 10001
+            && matches!(planned.call, Call::Amend)
+            && message == "order not modified"
+            && !planned.body.contains("\"triggerPrice\"")
+        {
+            let target = fields(&planned.body).order_id.unwrap_or_default();
+            return if Self::accepted(cx, context, vec![target.clone()]) {
+                Decision::Next(vec![target])
+            } else {
+                Decision::Lost
+            };
+        }
         // Bybit's own clock is evidence; read it before sanitizing.
         let server = server_time(&message);
         // Signature diagnostics can contain the complete signed origin.
@@ -1407,6 +1449,11 @@ impl BybitLinear {
                 ) else {
                     return Decision::Lost;
                 };
+                if rows.iter().any(
+                    |row| matches!(row, Row::Refused { message, .. } if message.contains(MODE_MISMATCH)),
+                ) {
+                    self.forget_body_modes(&planned.body);
+                }
                 for (index, row) in rows.iter().enumerate() {
                     if let Row::Refused { code, message } = row {
                         cx.command_error(
