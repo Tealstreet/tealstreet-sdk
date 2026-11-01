@@ -362,6 +362,17 @@ impl fmt::Display for VenueError {
 
 impl std::error::Error for VenueError {}
 
+/// What a non-stop order's edit cost: its cancel landed and nothing replaced it.
+pub fn order_gone_text(symbol: &str, unknown: bool) -> String {
+    if unknown {
+        format!(
+            "Your {symbol} order may be gone: it was canceled and its replacement's outcome is unknown. Check Open Orders"
+        )
+    } else {
+        format!("Your {symbol} order is gone: it was canceled and its replacement refused")
+    }
+}
+
 /// What a stop's edit cost: its cancel landed and nothing replaced it. One text for
 /// every venue, because a vanished stop is what the user must act on.
 pub fn stop_gone_text(
@@ -613,6 +624,15 @@ mod tests {
             serde_json::to_string(&error).unwrap(),
             r#"{"message":"Too many requests","kind":"rateLimited","outcome":"notSent","venueCode":"10006","venueMessage":"Too many visits","retryAfterMs":1000.0}"#
         );
+    }
+
+    #[test]
+    fn a_vanished_order_names_its_symbol() {
+        assert_eq!(
+            super::order_gone_text("BTCUSDT", false),
+            "Your BTCUSDT order is gone: it was canceled and its replacement refused"
+        );
+        assert!(super::order_gone_text("ETHUSDT", true).contains("Your ETHUSDT order may be gone"));
     }
 
     #[test]

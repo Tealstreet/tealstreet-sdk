@@ -153,6 +153,23 @@ struct Job {
     /// An amend's cancel landed and this stop's replacement is next: any refusal
     /// now leaves the position without it.
     replacing_stop: Option<(String, OrderSide, OrderType)>,
+    /// The same for any other order: a refusal now leaves it gone.
+    replacing_order: Option<String>,
+}
+
+impl Job {
+    /// What a failed replacement cost, once its cancel has landed.
+    fn gone_text(&self, unknown: bool) -> Option<String> {
+        if let Some((symbol, side, kind)) = &self.replacing_stop {
+            return Some(safe_cex_engine::error::stop_gone_text(
+                symbol, *side, *kind, unknown,
+            ));
+        }
+        self.replacing_order
+            .as_deref()
+            .filter(|_| self.ids.is_empty())
+            .map(|symbol| safe_cex_engine::error::order_gone_text(symbol, unknown))
+    }
 }
 
 struct Amendment {
@@ -590,6 +607,8 @@ impl BinanceFutures {
                         replacement.kind,
                     )
                 });
+                job.replacing_order =
+                    (!is_stop_kind(replacement.kind)).then(|| replacement.symbol.clone());
             }
             amendment.replacement.amount = if full_close {
                 0.0
@@ -603,11 +622,8 @@ impl BinanceFutures {
                 match plan {
                     Ok(plan) => job.steps.extend(plan.steps),
                     Err(error) => {
-                        job.planning_error = Some(match &job.replacing_stop {
-                            Some((symbol, side, kind)) => VenueError::new(format!(
-                                "{}: {error}",
-                                safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, false)
-                            )),
+                        job.planning_error = Some(match job.gone_text(false) {
+                            Some(gone) => VenueError::new(format!("{gone}: {error}")),
                             None => error.into(),
                         });
                     }
@@ -1074,17 +1090,15 @@ impl BinanceFutures {
                     message: &message,
                 });
                 // The cancel landed, so the leg's words lead with what the user lost.
-                let replacing_stop = self
+                let gone = self
                     .trading
                     .jobs
                     .get(&command)
-                    .and_then(|job| job.replacing_stop.as_ref());
-                known_cancel_effects |= replacing_stop.is_some();
-                let told = match replacing_stop {
-                    Some((symbol, side, kind)) => format!(
-                        "{}: {message}",
-                        safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unproven)
-                    ),
+                    .filter(|_| ids.is_empty())
+                    .and_then(|job| job.gone_text(unproven));
+                known_cancel_effects |= gone.is_some();
+                let told = match gone {
+                    Some(gone) => format!("{gone}: {message}"),
                     None => message.clone(),
                 };
                 let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &told) else {

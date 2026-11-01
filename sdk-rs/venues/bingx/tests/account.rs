@@ -88,6 +88,9 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                // The rig's public socket stays silent, so this notice is true here.
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
                 Action::Notice(Notice::Event(event)) => {
                     if event.level == Level::Error {
                         self.errors.push(event.message.clone());

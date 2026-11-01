@@ -48,6 +48,8 @@ struct Job {
     effective: bool,
     /// An amend cancelling this stop before placing its replacement.
     replacing_stop: Option<(String, OrderSide, OrderType)>,
+    /// The same for any other order: its symbol.
+    replacing_order: Option<String>,
     /// What the failure must add: a Plan's text is projected from its recorded fact.
     stop_note: Option<String>,
 }
@@ -257,6 +259,7 @@ impl Hyperliquid {
         let mut replacement = None;
         let mut amend_source = None;
         let mut replacing_stop = None;
+        let mut replacing_order = None;
         let mut amend_size = None;
         let (command, steps) = match command {
             Command::PlaceOrders { command, orders } => {
@@ -335,6 +338,8 @@ impl Hyperliquid {
                 };
                 if matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit) {
                     replacing_stop = Some((old.symbol.clone(), old.side, old.kind));
+                } else {
+                    replacing_order = Some(old.symbol.clone());
                 }
                 if !matches!(old.status, OrderStatus::Open | OrderStatus::Creating) {
                     cx.refuse_command(
@@ -465,6 +470,7 @@ impl Hyperliquid {
                 builder_checked: false,
                 effective: false,
                 replacing_stop,
+                replacing_order,
                 stop_note: None,
             },
         );
@@ -1323,6 +1329,16 @@ impl Hyperliquid {
                         symbol,
                         *side,
                         *kind,
+                        error.outcome == Some(Outcome::Unknown),
+                    ));
+                }
+                if job.effective
+                    && job.ids.is_empty()
+                    && !job.amend_filled
+                    && let Some(symbol) = &job.replacing_order
+                {
+                    job.stop_note = Some(safe_cex_engine::error::order_gone_text(
+                        symbol,
                         error.outcome == Some(Outcome::Unknown),
                     ));
                 }

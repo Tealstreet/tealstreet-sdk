@@ -247,6 +247,22 @@ struct Job {
     result: Option<String>,
     /// A refused replacement here leaves the position without its stop.
     replacing_stop: Option<(String, OrderSide, OrderType)>,
+    /// A refused replacement here leaves nothing resting of this symbol's order.
+    replacing_order: Option<String>,
+}
+impl Job {
+    /// What a failed replacement cost, once its cancel has landed.
+    fn gone_text(&self, unknown: bool) -> Option<String> {
+        if let Some((symbol, side, kind)) = &self.replacing_stop {
+            return Some(safe_cex_engine::error::stop_gone_text(
+                symbol, *side, *kind, unknown,
+            ));
+        }
+        self.replacing_order
+            .as_deref()
+            .filter(|_| self.ids.is_empty())
+            .map(|symbol| safe_cex_engine::error::order_gone_text(symbol, unknown))
+    }
 }
 // Above the venue open-order limit; never evict cancellation routing for a live ACK.
 const MAX_ACKNOWLEDGED_ORDERS: usize = 10_000;
@@ -1005,13 +1021,10 @@ impl AsterDex {
                         .trading
                         .jobs
                         .get(&command)
-                        .and_then(|job| job.replacing_stop.as_ref())
                         .filter(|_| was_place)
+                        .and_then(|job| job.gone_text(false))
                     {
-                        Some((symbol, side, kind)) => format!(
-                            "{}: {message}",
-                            safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, false)
-                        ),
+                        Some(gone) => format!("{gone}: {message}"),
                         None => message.clone(),
                     };
                     match cx.classify_write(leg, &ASTER, native, told) {
@@ -1083,13 +1096,9 @@ impl AsterDex {
                     {
                         error.outcome = Some(Outcome::Unknown);
                     }
-                    if was_place && let Some((symbol, side, kind)) = &job.replacing_stop {
-                        let unknown = error.outcome == Some(Outcome::Unknown);
-                        error.message = format!(
-                            "{}: {}",
-                            safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown),
-                            error.message
-                        );
+                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    if was_place && let Some(gone) = job.gone_text(unknown) {
+                        error.message = format!("{gone}: {}", error.message);
                     }
                     job.error = Some(error);
                 }
@@ -1238,6 +1247,7 @@ impl AsterDex {
         let mut job = self.plan_cancel(std::slice::from_ref(order), false);
         job.steps.extend(place.steps);
         job.replacing_stop = conditional.then(|| (order.symbol.clone(), order.side, order.kind));
+        job.replacing_order = (!conditional).then(|| order.symbol.clone());
         Ok(job)
     }
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {

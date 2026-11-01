@@ -499,6 +499,35 @@ fn cancel_replace_uses_remaining_native_once_and_a_new_client_id() {
     assert!(!body.contains("original-caller"));
 }
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    let cancel = h.take("/api/v1/orders/old");
+    h.response(
+        &cancel,
+        200,
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    h.confirm_cancel("old", 10.0, 4.0);
+    let create = h.take("/api/v1/orders");
+    h.response(
+        &create,
+        200,
+        r#"{"code":"300003","msg":"Balance insufficient"}"#,
+    );
+    h.pace();
+    let error = h.done(1).unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}
+#[test]
 fn ambiguous_cancel_prevents_replacement() {
     let mut h = Harness::new();
     h.set_order("old", OrderType::Limit, 6.0);

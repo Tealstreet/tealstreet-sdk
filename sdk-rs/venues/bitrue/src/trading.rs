@@ -1317,6 +1317,21 @@ impl Bitrue {
     }
     /// Fails the job under its owner (the journal projects the outcome), then
     /// wakes the next queued command.
+    /// An amend's replacement failed after its cancel landed: the order no longer rests.
+    fn note_replacement_lost(work: &mut Work, effect: &Effect, unknown: bool) {
+        // The accepted cancel's own ID is already in `ids`.
+        let placed = work
+            .ids
+            .iter()
+            .any(|id| work.guard.as_ref().is_none_or(|guard| guard.id != *id));
+        if work.amend
+            && !placed
+            && matches!(effect, Effect::Place { .. })
+            && let Some(symbol) = work.symbols.first()
+        {
+            work.note = Some(safe_cex_engine::error::order_gone_text(symbol, unknown));
+        }
+    }
     fn end(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1527,6 +1542,11 @@ impl Bitrue {
             error.outcome = Some(Outcome::Unknown);
         }
         let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
+        Self::note_replacement_lost(
+            &mut active.work,
+            &request.step.effect,
+            error.outcome == Some(Outcome::Unknown),
+        );
         if active.work.cancel_batch
             && let Effect::Cancel(target) = &request.step.effect
         {
@@ -1644,6 +1664,11 @@ impl Bitrue {
                     let _ = cx.finish_plan_call(&plan, &request.slot, &request.context);
                     return self.batch_next(cx, active);
                 }
+                Self::note_replacement_lost(
+                    &mut active.work,
+                    &request.step.effect,
+                    error.outcome == Some(Outcome::Unknown),
+                );
                 self.end(cx, active, current, error)
             }
             Answer::Stopped => self.trading.active = Some(active),

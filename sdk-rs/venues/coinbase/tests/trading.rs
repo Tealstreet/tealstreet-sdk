@@ -2276,3 +2276,27 @@ fn transient_then_mismatched_key_check_still_discovers_the_portfolio() {
     s.collect();
     assert!(!s.deactivated);
 }
+
+#[test]
+fn an_intx_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut s = Session::new("INTX", false).ready();
+    s.seed("old", "BTC-PERP-INTX", "1", "100");
+    s.command(Command::AmendOrder {
+        command: 8,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    let r = s.write();
+    s.reply(r, 200, r#"{"results":[{"order_id":"old","success":true}]}"#);
+    let r = s.write();
+    s.reply(r,200,r#"{"order":{"order_id":"old","product_id":"BTC-PERP-INTX","status":"CANCELLED","filled_size":"0"}}"#);
+    let r = s.write();
+    s.reply(
+        r,
+        200,
+        r#"{"success":false,"error_response":{"error":"INSUFFICIENT_FUND","message":"refused"}}"#,
+    );
+    let error = s.done(8).unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}

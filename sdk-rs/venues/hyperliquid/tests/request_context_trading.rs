@@ -2012,6 +2012,62 @@ fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
     );
 }
 
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, socket) = boot();
+    e.handle(1500., Event::WsMessage { socket, text: r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"# });
+    e.drain_actions().for_each(drop);
+    let symbol = e.store().order("9").unwrap().symbol.clone();
+    let amended = command(
+        &mut e,
+        NOW,
+        Command::AmendOrder {
+            command: OWNER,
+            id: "9".into(),
+            price: Some(85.),
+            amount: None,
+        },
+    );
+    let amended = answer_amend_read(&mut e, &amended, &status_body("10", "6", "open"));
+    let cancel = native_release(&mut e, &amended);
+    respond(
+        &mut e,
+        NOW + 1.,
+        &cancel,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let settled: Vec<_> = e.drain_actions().collect();
+    let paced = prepare_for_pacing(&mut e, NOW + 1., &settled);
+    let (timer, at) = paced
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > NOW + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("same-owner replacement pacing");
+    e.handle(at, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let replacement = native_release_at(&mut e, at, &actions);
+    respond(
+        &mut e,
+        at + 1.,
+        &replacement,
+        200,
+        &statuses_reply("Order has invalid price"),
+    );
+    let settled: Vec<_> = e.drain_actions().collect();
+    let result = results(&settled, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert!(
+        error
+            .message
+            .contains(&format!("Your {symbol} order is gone")),
+        "{}",
+        error.message
+    );
+}
+
 // deaws2's live bodies.
 fn statuses_reply(row: &str) -> String {
     format!(

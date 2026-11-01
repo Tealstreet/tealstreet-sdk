@@ -93,6 +93,9 @@ impl Session {
                     self.private = Some(socket);
                     self.privates.push(socket)
                 }
+                // The rig's public socket stays silent, so this notice is true here.
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
                 Action::Notice(safe_cex_engine::Notice::Event(event)) => {
                     if event.level == safe_cex_engine::Level::Error {
                         self.errors.push(event.message.clone());
