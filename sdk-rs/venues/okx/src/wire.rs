@@ -209,6 +209,7 @@ pub struct OrderRow<'a> {
     pub algo_cl_ord_id: &'a str,
     pub ord_type: &'a str,
     pub state: &'a str,
+    pub fail_code: &'a str,
     pub side: &'a str,
     pub sz: &'a str,
     pub acc_fill_sz: &'a str,

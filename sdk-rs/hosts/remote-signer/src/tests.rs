@@ -866,6 +866,60 @@ async fn a_sign_during_a_parked_gap_fails_after_the_timeout_and_sends_nothing() 
     assert!(link.is_available());
 }
 
+/// The only holder is gone, its drop not yet seen: nothing else can sign, and
+/// the failure is the text the chaser reports as an offline signer.
+#[tokio::test(start_paused = true)]
+async fn a_lone_silent_signer_fails_a_cancel_sign_until_the_browser_returns() {
+    let link = SignerLink::new(1, Arc::new(|_| true));
+    let (account, options) = account(link.clone(), "bybit", json!({ "key": "AK" }));
+    let (credential, signing, _) = refs(&options);
+    let work = || {
+        request(
+            vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing.clone(),
+                payload: vec![
+                    bytes("1700000000000"),
+                    PayloadPart::Credential {
+                        key: credential.clone(),
+                    },
+                    bytes("5000"),
+                    bytes("{}"),
+                ],
+            }],
+            SignReceipt {
+                stamp_ms: Some(1_700_000_000_000.),
+                ..Default::default()
+            },
+        )
+    };
+    let started = tokio::time::Instant::now();
+    let error = account.provider.sign(work()).await.map(|_| ()).unwrap_err();
+    assert_eq!(started.elapsed(), SIGN_TIMEOUT);
+    assert_eq!(error.to_string(), "Signing provider is unavailable");
+
+    // Parked after the drop: still nothing signs.
+    link.suspend();
+    let error = account.provider.sign(work()).await.map(|_| ()).unwrap_err();
+    assert_eq!(error.to_string(), "Signing provider is unavailable");
+
+    // The browser returns: only now does a signature exist.
+    let (answers, mut asked) = mpsc::unbounded_channel::<String>();
+    link.attach(2, Arc::new(move |frame| answers.send(frame).is_ok()));
+    let signed = account.provider.sign(work());
+    tokio::pin!(signed);
+    let frame = tokio::select! {
+        _ = &mut signed => panic!("signed with no browser answer"),
+        frame = asked.recv() => frame.unwrap(),
+    };
+    let frame: Value = serde_json::from_str(&frame).unwrap();
+    assert!(link.resolve(
+        2,
+        json!({ "id": frame["d"]["id"], "wsAuthSignature": "07".repeat(32) })
+    ));
+    assert!(signed.await.is_ok());
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_sign_waiting_out_a_gap_fails_at_once_when_the_session_ends() {
     let link = SignerLink::new(1, Arc::new(|_| true));

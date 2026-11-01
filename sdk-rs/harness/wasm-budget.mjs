@@ -79,7 +79,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // Tightest families at CI (abc18ecd30a) + 10 KiB, rounded up to KiB, before the exec store fix.
 // #2650 Bitget flat leverage read: CI 2,140,041 B; ddi's rule, CI + 10 KiB, rounded up to a KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 1_889_280,
+  apexomni: 1_890_304,
   asterdex: 2_021_376,
   backpack: 1_802_240,
   binance: 2_063_360,
@@ -92,14 +92,14 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   breakoutprop: 1_442_816,
   bybit: 2_065_408,
   coinbase: 1_743_872,
-  cryptocom: 1_633_280,
+  cryptocom: 1_634_304,
   grvt: 1_709_056,
   hyperliquid: 1_986_560,
   hyperliquidspot: 1_986_560,
   kraken: 2_024_448,
   krakenspot: 2_024_448,
   kucoin: 1_519_616,
-  kucoinspot: 2_002_944,
+  kucoinspot: 2_003_968,
   lighter: 1_891_328,
   'lighter-robinhood': 1_891_328,
   mexc: 1_654_784,

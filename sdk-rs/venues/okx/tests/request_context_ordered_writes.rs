@@ -429,7 +429,7 @@ fn native_code_one_all_refused_cancel_stops_and_restores_optimistic_status() {
         ids.iter()
             .all(|id| engine.store().order(id).unwrap().status == OrderStatus::Canceling)
     );
-    let rows = [r#"{"sCode":"51400","sMsg":"Order does not exist"}"#; 20].join(",");
+    let rows = [r#"{"sCode":"51000","sMsg":"Parameter error"}"#; 20].join(",");
     reply(
         &mut engine,
         post(&first),
@@ -682,7 +682,7 @@ fn a_managed_code_one_cancel_fails_the_plan_without_continuing() {
     );
     let (first, managed) = release(&mut engine, 5.);
     assert!(managed, "the cancel batch is a managed Plan call");
-    let rows = [r#"{"sCode":"51400","sMsg":"Order does not exist"}"#; 20].join(",");
+    let rows = [r#"{"sCode":"51000","sMsg":"Parameter error"}"#; 20].join(",");
     reply(
         &mut engine,
         post(&first),
@@ -1281,4 +1281,86 @@ fn a_census_begun_before_a_mark_cannot_release_it_from_a_later_page() {
             .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")));
     }
     assert!(retry(&mut e, OWNER + 3, "ETHUSDT", 12.));
+}
+
+#[test]
+fn a_stale_regular_row_refused_with_code_1_still_sends_the_algo_cancels() {
+    let mut engine = trading_engine();
+    engine.store_mut().upsert_order(stored("101"));
+    engine.store_mut().upsert_order(Order {
+        kind: OrderType::StopLoss,
+        ..stored("202_sl")
+    });
+    engine.handle(
+        5.,
+        Event::Command(Command::CancelOrders {
+            command: OWNER,
+            ids: vec!["101".into(), "202_sl".into()],
+        }),
+    );
+    let first = prepared(&mut engine, 5.);
+    reply(
+        &mut engine,
+        post(&first),
+        r#"{"code":"1","data":[{"ordId":"101","sCode":"51400","sMsg":"Order does not exist"}],"msg":"All operations failed"}"#,
+        6.,
+    );
+    let second = prepared(&mut engine, 6.);
+    let Action::Http(request) = post(&second) else {
+        unreachable!()
+    };
+    assert!(request.url.ends_with("/cancel-algos"));
+}
+
+// OKX answers an accepted row with a non-empty sMsg; only sCode decides.
+#[test]
+fn accepted_rows_with_a_success_message_complete_and_send_the_next_lots() {
+    let mut engine = trading_engine();
+    small_lots(&mut engine);
+    place(&mut engine, vec![order(30)]);
+    let mut output = prepared(&mut engine, 5.);
+    for (batch, size) in [(0, 20), (1, 10)] {
+        let rows: Vec<_> = (0..size)
+            .map(|row| format!(r#"{{"ordId":"{batch}-{row}","sCode":"0","sMsg":"Order placed"}}"#))
+            .collect();
+        let now = 6. + f64::from(batch);
+        reply(
+            &mut engine,
+            post(&output),
+            &format!(r#"{{"code":"0","data":[{}]}}"#, rows.join(",")),
+            now,
+        );
+        output = prepared(&mut engine, now);
+        assert!(!output.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+        )));
+    }
+    let done = output.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandDone {
+            command: OWNER,
+            result,
+        }) => Some(result),
+        _ => None,
+    });
+    let ids: Vec<String> = serde_json::from_str(done.expect("the command completes")).unwrap();
+    assert_eq!(ids.len(), 30);
+}
+
+#[test]
+fn a_refused_row_still_fails_whatever_its_message() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let output = prepared(&mut engine, 5.);
+    reply(
+        &mut engine,
+        post(&output),
+        r#"{"code":"1","data":[{"sCode":"51008","sMsg":"Order failed. Insufficient balance."}]}"#,
+        6.,
+    );
+    let output = prepared(&mut engine, 6.);
+    assert!(output.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+    )));
 }

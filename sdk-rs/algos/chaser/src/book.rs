@@ -28,7 +28,8 @@ const CANCEL_RETRY_MIN_MS: u64 = 1_000;
 const CANCEL_RETRY_MAX_MS: u64 = 10_000;
 /// A cancel or fills read sent into a link that died with no answer can hang
 /// for minutes; past this a cancel is tried again and fills count as unread.
-const ANSWER_BOUND_MS: u64 = 10_000;
+/// Longer than a hosted sign's 15 s, so an offline signer is reported as that.
+pub const ANSWER_BOUND_MS: u64 = 16_000;
 /// How an order whose cancel was retried ended.
 enum Settled {
     Filled(f64),
@@ -725,10 +726,10 @@ impl ChaserBook {
             if let Err(error) = self.bounded_cancel(&chase.options.symbol, &to_cancel).await {
                 // The stop's own cancel keeps trying; this chase places nothing more.
                 if cancel_retryable(&error) {
-                    chase.mark_complete(if signer_offline(&error) {
-                        SIGNER_OFFLINE_STOP_REASON
+                    chase.mark_complete(&if signer_offline(&error) {
+                        SIGNER_OFFLINE_STOP_REASON.to_owned()
                     } else {
-                        "Stopped: a cancel could not reach the venue"
+                        format!("Stopped: a cancel attempt failed: {}", error.message)
                     });
                     return Ok(());
                 }
