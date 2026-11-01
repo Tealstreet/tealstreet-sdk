@@ -845,7 +845,7 @@ impl Blofin {
         let filled = clean(o.filled_size.0 * m.contract_size.unwrap_or(1.0));
         let status = match o.state.as_ref() {
             "filled" | "effective" => OrderStatus::Closed,
-            "canceled" | "order_failed" => OrderStatus::Canceled,
+            "canceled" | "partially_canceled" | "order_failed" => OrderStatus::Canceled,
             _ => OrderStatus::Open,
         };
         let base = Order {
@@ -1190,7 +1190,11 @@ impl Blofin {
                     if (o.inst_type.is_empty() || o.inst_type.eq_ignore_ascii_case("SWAP"))
                         && !matches!(
                             o.state.as_ref(),
-                            "filled" | "effective" | "canceled" | "order_failed"
+                            "filled"
+                                | "effective"
+                                | "canceled"
+                                | "partially_canceled"
+                                | "order_failed"
                         )
                         && cx.store.market_by_id(&o.inst_id).is_none()
                     {

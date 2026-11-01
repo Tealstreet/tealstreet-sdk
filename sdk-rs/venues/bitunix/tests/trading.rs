@@ -525,7 +525,8 @@ fn native_amend_accepts_limit_protection_and_targeted_standalone_leg() {
     let b = r.body.as_deref().unwrap();
     assert!(b.contains(r#""orderId":"second""#));
     assert!(b.contains(r#""tpPrice":"86000""#));
-    assert!(b.contains(r#""slPrice":"100000""#));
+    // Live: a separate SL on the position was copied here and a second SL appeared.
+    assert!(!b.contains("slPrice"), "{b}");
 }
 #[test]
 fn split_order_rejection_cannot_resend_already_accepted_chunks() {
