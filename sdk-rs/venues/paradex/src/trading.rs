@@ -975,13 +975,10 @@ impl Trading {
             return;
         }
         // A stop the venue already removed: what the cancel asked for is true.
-        if matches!(&request.kind, Kind::Cancel(ids) if ids.len() == 1)
+        let kind = &request.kind;
+        let already_gone = matches!(kind, Kind::Cancel(ids) if ids.len() == 1)
             && response.status == 400
-            && response.body.contains("ORDER_ID_NOT_FOUND")
-        {
-            self.complete(cx, account, request, Ok(Vec::new()), false);
-            return;
-        }
+            && response.body.contains("ORDER_ID_NOT_FOUND");
         let result = crate::success(response).and_then(|()| match &request.kind {
             Kind::Amend { id, .. } => {
                 let row: Identity = serde_json::from_str(response.body)
@@ -1005,17 +1002,21 @@ impl Trading {
             }
             _ => Ok(Vec::new()),
         });
-        let result = result.map_err(|error| match crate::success(response) {
-            Err(_) => answer_failure(response.status, error),
-            Ok(()) => unproven(error),
-        });
+        let result = if already_gone {
+            Ok(Vec::new())
+        } else {
+            result.map_err(|error| match crate::success(response) {
+                Err(_) => answer_failure(response.status, error),
+                Ok(()) => unproven(error),
+            })
+        };
         if result.is_ok() && matches!(request.kind, Kind::Amend { .. }) {
             account.amend_ack(cx, response.body);
         }
         let rejected = ((400..500).contains(&response.status)
             && !matches!(response.status, 408 | 429))
             || ((200..300).contains(&response.status) && crate::success(response).is_err());
-        self.complete(cx, account, request, result, rejected);
+        self.complete(cx, account, request, result, rejected && !already_gone);
     }
     pub fn on_failed(
         &mut self,
