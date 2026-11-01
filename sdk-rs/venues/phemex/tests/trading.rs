@@ -3297,3 +3297,32 @@ fn a_failed_mode_read_says_so_and_sends_nothing() {
     assert!(writes(&a).is_empty());
     assert!(done(&a).unwrap_err().contains("position mode of ETHUSDT"));
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut e = support::prepared_engine(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    });
+    e.start(0.);
+    let a: Vec<_> = e.drain_actions().collect();
+    let mut a = raw(&mut e, &requests(&a)[0], PRODUCTS);
+    let ticker = requests(&a)
+        .into_iter()
+        .find(|r| r.url.contains("24hr/all"))
+        .unwrap();
+    a.extend(raw(&mut e, &ticker, DAILY));
+    let mut failures = 0;
+    for r in requests(&a)
+        .iter()
+        .filter(|r| r.url.contains("accountPositions"))
+    {
+        let answered = raw(&mut e, r, r#"{"code":401,"msg":"401 Unauthorized"}"#);
+        failures += answered
+            .iter()
+            .filter(|x| matches!(x, Action::Notice(Notice::StartupFailed { .. })))
+            .count();
+    }
+    assert_eq!(failures, 1, "named once, not a hang");
+}

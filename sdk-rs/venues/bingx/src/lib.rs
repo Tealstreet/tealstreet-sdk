@@ -1096,14 +1096,21 @@ impl Venue for Bingx {
                 }
             }
             Pending::History(request) => self.history.on_stream_error(cx, request, response),
-            pending => self.on_request_failed(
-                cx,
-                pending,
-                &format!(
-                    "response did not contain the expected list: {}",
-                    response.body
-                ),
-            ),
+            pending => {
+                if matches!(pending, Pending::Account(_))
+                    && let Some(error) = account::key_refusal(&response)
+                {
+                    cx.startup_read_refused(&error);
+                }
+                self.on_request_failed(
+                    cx,
+                    pending,
+                    &format!(
+                        "response did not contain the expected list: {}",
+                        response.body
+                    ),
+                );
+            }
         }
     }
     fn on_http_failed(

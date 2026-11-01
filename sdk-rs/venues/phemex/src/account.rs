@@ -125,6 +125,29 @@ struct OrdersPage<'a> {
     #[serde(borrow)]
     rows: Vec<&'a RawValue>,
 }
+/// A read refused over the key: HTTP or body 401 or 403.
+pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::VenueError> {
+    #[derive(Deserialize)]
+    struct Evidence<'a> {
+        #[serde(default)]
+        code: Option<i64>,
+        #[serde(borrow, default)]
+        msg: std::borrow::Cow<'a, str>,
+    }
+    let evidence = serde_json::from_str::<Evidence<'_>>(response.body).ok();
+    let code = evidence.as_ref().and_then(|e| e.code);
+    if !matches!(response.status, 401 | 403) && !matches!(code, Some(401 | 403)) {
+        return None;
+    }
+    let detail = evidence
+        .as_ref()
+        .map_or(String::new(), |e| e.msg.to_string());
+    Some(
+        safe_cex_engine::VenueError::new(format!("Phemex refused the API key: {detail}"))
+            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+            .venue_message(detail),
+    )
+}
 #[derive(Default)]
 pub struct State {
     started: bool,

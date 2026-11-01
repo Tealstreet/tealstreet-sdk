@@ -235,3 +235,24 @@ fn accepted_credentials_do_not_change_the_existing_bad_balance_snapshot_policy()
     assert_eq!(e.store().balance().total, 17.0);
     assert!(a.iter().any(|a| matches!(a, Action::Notice(Notice::Event(e)) if e.code == safe_cex_engine::log::code::SNAPSHOT_DISCARDED)));
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let (mut e, a) = started(true);
+    let r = http(&a, "/user/balance");
+    let answered = reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":100413,"msg":"Incorrect apiKey"}"#,
+    );
+    let failed: Vec<_> = answered
+        .iter()
+        .filter_map(|x| match x {
+            Action::Notice(Notice::StartupFailed { error }) => Some(error.message.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failed.len(), 1, "{failed:?}");
+    assert!(failed[0].contains("Incorrect apiKey"));
+}
