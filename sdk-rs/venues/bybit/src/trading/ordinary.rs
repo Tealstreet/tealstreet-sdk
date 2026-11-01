@@ -1721,9 +1721,14 @@ impl BybitLinear {
                 }
                 self.apply_position_mode(cx, *hedged);
                 // Symbols with open orders or positions stay on the old mode; retCode is 0.
-                if let Some(message) = serde_json::from_str::<serde_json::Value>(response.body)
+                #[derive(serde::Deserialize)]
+                struct Answer {
+                    #[serde(rename = "retMsg")]
+                    message: Option<String>,
+                }
+                if let Some(message) = serde_json::from_str::<Answer>(response.body)
                     .ok()
-                    .and_then(|body| body.get("retMsg")?.as_str().map(str::to_owned))
+                    .and_then(|body| body.message)
                     .filter(|message| message.starts_with("Partial symbols"))
                 {
                     cx.command_error(context_command(context), message);

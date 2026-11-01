@@ -172,7 +172,7 @@ describe('retained Orderly Rust family oracle', () => {
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
     const deactivated = vi.fn();
     exchange.on('deactivate', deactivated);
-    await expect(exchange.start()).rejects.toThrow(/credentials were rejected/);
+    await expect(exchange.start()).rejects.toThrow(/API key expired or rejected/);
     expect(deactivated).toHaveBeenCalledTimes(1);
     expect((exchange as any).startupWaiters.size).toBe(0);
   });

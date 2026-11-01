@@ -517,7 +517,7 @@ fn setting_commands_update_store_only_after_ack_and_failures_preserve_settings()
         side: None,
     });
     let (request, p) = body(&mut h, "/set-leverage");
-    assert_eq!(p["leverage"].as_f64(), Some(125.0));
+    assert_eq!(p["leverage"], "125");
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 20.0);
     h.reply(request, 200, r#"{"code":"00000","data":{}}"#);
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 125.0);

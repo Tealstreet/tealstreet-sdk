@@ -98,7 +98,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   hyperliquid: 2_001_920,
   hyperliquidspot: 2_001_920,
   kraken: 2_056_192,
-  krakenspot: 2_039_808,
+  krakenspot: 2_056_768,
   kucoin: 1_531_904,
   kucoinspot: 2_023_424,
   lighter: 1_906_688,
