@@ -189,7 +189,7 @@ const REFUSALS: CodeTable = CodeTable {
         },
     ],
     success: &[Key::Int(0)],
-    unlisted: Verdict::Unknown(None),
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
     status: &[],
 };
 /// How a failed write ended, which decides when its open orders are read.
