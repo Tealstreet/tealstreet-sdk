@@ -117,6 +117,8 @@ pub struct Account {
     inflight: HashSet<String>,
     orders_refresh_due: HashSet<String>,
     pub suppressed: HashMap<String, f64>,
+    /// The read epoch of each dex's last clean order census, "" the main one.
+    pub clean_dexes: HashMap<String, u64>,
     seen_fills: HashSet<u64>,
     fill_queue: VecDeque<u64>,
     spot_filled: HashMap<String, (String, f64)>,
@@ -965,9 +967,15 @@ impl Hyperliquid {
                     for symbol in symbols {
                         cx.orders_reconciled_since(Some(&symbol), epoch);
                     }
-                    if dex.is_empty() && self.dex_names.is_empty() && self.discovery_settled() {
+                    self.account.clean_dexes.insert(dex.clone(), epoch);
+                    if self.discovery_settled()
+                        && let Some(epoch) =
+                            every_dex_clean(&self.dex_names, &self.account.clean_dexes)
+                    {
                         cx.orders_reconciled_since(None, epoch);
                     }
+                } else {
+                    self.account.clean_dexes.remove(&dex);
                 }
                 self.account
                     .suppressed
@@ -2491,4 +2499,30 @@ fn failed_protective_status(status: &str) -> bool {
             | "delistedCanceled"
             | "liquidatedCanceled"
     )
+}
+
+/// The oldest epoch once every dex has a clean census: an all-symbol fence needs them all.
+fn every_dex_clean(names: &[String], clean: &HashMap<String, u64>) -> Option<u64> {
+    let main = clean.get("")?;
+    names.iter().try_fold(*main, |oldest, name| {
+        clean.get(name).map(|epoch| oldest.min(*epoch))
+    })
+}
+
+#[cfg(test)]
+mod every_dex_clean_tests {
+    use super::*;
+
+    #[test]
+    fn an_all_symbol_fence_waits_for_every_dex_then_takes_the_oldest_read() {
+        let names = vec!["xyz".to_string(), "flx".to_string()];
+        let mut clean = HashMap::new();
+        clean.insert(String::new(), 5);
+        assert_eq!(every_dex_clean(&names, &clean), None);
+        clean.insert("xyz".to_string(), 3);
+        assert_eq!(every_dex_clean(&names, &clean), None);
+        clean.insert("flx".to_string(), 9);
+        assert_eq!(every_dex_clean(&names, &clean), Some(3));
+        assert_eq!(every_dex_clean(&[], &clean), Some(5));
+    }
 }
