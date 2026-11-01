@@ -60,7 +60,16 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
         Some(10001) => ErrorKind::Network,
         Some(0) => ErrorKind::Internal,
         Some(10002 | 10008 | 10010 | 10011) => ErrorKind::InvalidInput,
-        Some(10009 | 20001..=20016 | 30001..=30042 | 40001..=40008) | None => ErrorKind::Rejected,
+        Some(
+            10009
+            | 20001..=20016
+            | 30001..=30042
+            | 40001..=40008
+            | 200001..=200099
+            | 300001..=300099
+            | 500001..=500099,
+        )
+        | None => ErrorKind::Rejected,
         _ => ErrorKind::VenueUnavailable,
     };
     let mut error = VenueError::new(message.clone()).kind(kind);
