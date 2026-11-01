@@ -14,7 +14,15 @@ const UNENDED_CHASE_MS = 3_000;
 type Rows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
 
 /** The `chaser:complete` fields this reads. */
-export type ChaseEnd = { id?: string; symbol?: string; size?: number; filled?: number; outcomeTold?: boolean };
+export type ChaseEnd = {
+  id?: string;
+  symbol?: string;
+  size?: number;
+  filled?: number;
+  outcomeTold?: boolean;
+  /** The server replayed it to a page that was away when the chase ended. */
+  replayed?: boolean;
+};
 
 /** A stop the user was told was uncertain: they are owed how it ended. */
 type Owed = { label: string; done?: () => void };
@@ -32,6 +40,13 @@ const unendedChase = (chase: ActiveChaser) => {
     `Chase on ${chase.symbol} ended without a result: its account reloaded or its engine restarted while it ran. ` +
     `Its ${orders} may still be open, or may have filled: check Positions and Open Orders.`
   );
+};
+
+/** How a chase ended while the page was away; its fill toast went with the page. */
+const awayOutcome = ({ symbol, size, filled = 0 }: ChaseEnd) => {
+  if (!(filled > 0)) return `Chase on ${symbol} stopped while you were away, with nothing filled.`;
+  if (size !== undefined && filled >= size) return `Chase on ${symbol} filled ${filled} while you were away.`;
+  return `Chase on ${symbol} stopped while you were away, after filling ${filled}${size !== undefined ? ` of ${size}` : ''}.`;
 };
 
 type AlgoWatchHost = {
@@ -65,6 +80,8 @@ export class AlgoControlWatch {
   /** Chases the rows show running, and those whose completion came. */
   private running = new Map<string, ActiveChaser>();
   private readonly ended = new Set<string>();
+  /** Chase ends already told to a page that was away. */
+  private readonly toldAway = new Set<string>();
   /** Chases a stop was sent for: whoever sent it reports how they end. */
   private readonly stopSent = new Set<string>();
   private readonly unended = new Map<string, ReturnType<typeof setTimeout>>();
@@ -158,7 +175,14 @@ export class AlgoControlWatch {
       this.completedChaseSymbols.delete(event.symbol);
     }
     const owed = event.id === undefined ? undefined : this.owed.get(event.id);
-    if (!owed || event.id === undefined) return;
+    if (!owed || event.id === undefined) {
+      // Once per chase: a later rejoin may replay the same end again.
+      if (event.replayed && !event.outcomeTold && event.id !== undefined && !this.toldAway.has(event.id)) {
+        this.toldAway.add(event.id);
+        this.host.tell(awayOutcome(event));
+      }
+      return;
+    }
     this.settle(event.id);
     // A stop the chaser had to retry ends with its own message: one outcome, not two.
     if (!event.outcomeTold) this.host.tell(chaseOutcome(event));
