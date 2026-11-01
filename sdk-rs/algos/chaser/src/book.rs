@@ -1109,6 +1109,22 @@ impl ChaserBook {
             };
             if let Err(error) = &placed {
                 last_refusal = Some(error.message.clone());
+                // A refused key stays refused: another try only repeats the request.
+                if ids.is_empty()
+                    && !lost
+                    && matches!(
+                        error.kind,
+                        Some(ErrorKind::AuthInvalid | ErrorKind::AuthPermission)
+                    )
+                {
+                    self.error(&format!(
+                        "Chaser for {} stopped: the venue refused this account's key: {}",
+                        chase.options.symbol, error.message
+                    ));
+                    chase.mark_complete("The venue refused this account's key");
+                    self.check_and_mark_if_complete(chase);
+                    return Vec::new();
+                }
             }
             let mut unconfirmed = lost;
             if let Some(client_order_id) = client_order_id.as_deref()
