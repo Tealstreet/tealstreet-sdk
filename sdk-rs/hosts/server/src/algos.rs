@@ -71,7 +71,7 @@ struct Unheard {
     owed: bool,
     /// An error's message, for the stop notice; None for an outcome notice.
     error: Option<String>,
-    /// The frame as sent, replayed as is.
+    /// The frame replayed to a page that missed it.
     frame: String,
     /// The order a stop's retrying warning names: a later end of that cancel supersedes it.
     retrying: Option<String>,
@@ -203,16 +203,18 @@ impl AccountPort for Port {
             return;
         }
         let retrying = retrying_of(op, &data);
-        let frame = algo_msg(&self.name, op, data);
         if owed_on_rejoin(op) {
+            let replay = algo_msg(&self.name, op, replayed(op, &data));
+            let frame = algo_msg(&self.name, op, data);
             let mut holding = (self.broadcast)(None);
             if let Some(signer) = &self.signer {
                 holding.live = vec![signer.socket()];
             }
-            (self.emit)(frame.clone());
-            self.keep_unheard(None, frame, holding, retrying);
+            (self.emit)(frame);
+            self.keep_unheard(None, replay, holding, retrying);
             return;
         }
+        let frame = algo_msg(&self.name, op, data);
         (self.emit)(frame);
     }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -884,6 +886,18 @@ fn completion(notice: &Value) -> Result<String, VenueError> {
     }
 }
 
+/// A chase's end as replayed to a page that was away: marked, so the page tells it
+/// once, since the fill toast it would have shown went with the page.
+fn replayed(op: &str, data: &str) -> String {
+    match serde_json::from_str::<Value>(data) {
+        Ok(Value::Object(mut end)) if op == "chaser:complete" => {
+            end.insert("replayed".into(), Value::Bool(true));
+            Value::Object(end).to_string()
+        }
+        _ => data.to_owned(),
+    }
+}
+
 /// A chase's end and its outcome warnings are owed to a page that was away, as errors are.
 fn owed_on_rejoin(op: &str) -> bool {
     matches!(op, "warning" | "chaser:complete")
@@ -949,6 +963,18 @@ mod tests {
         .unwrap();
         drop_superseded(&mut unheard, "error", &failed);
         assert_eq!(unheard.len(), 1, "the chase's end stays");
+    }
+
+    #[test]
+    fn a_chase_end_replayed_to_a_page_that_was_away_says_so() {
+        let end = r#"{"id":"c1","symbol":"BTCUSDT","size":0.001,"filled":0.001,"stopReason":"Completed"}"#;
+        let replay: Value = serde_json::from_str(&replayed("chaser:complete", end)).unwrap();
+        assert_eq!(replay["replayed"], true);
+        assert_eq!(replay["filled"], 0.001);
+        assert_eq!(
+            replayed("warning", "\"Chaser stopped: x\""),
+            "\"Chaser stopped: x\""
+        );
     }
 
     #[test]

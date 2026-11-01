@@ -176,6 +176,29 @@ describe('a stop the user was told might not have landed', () => {
   });
 });
 
+describe('a chase that ended while the page was away', () => {
+  it('is told once, with what filled, when the server replays its end', () => {
+    const { told, watch } = setup();
+    const end = { id: 'c1', symbol: 'BTCUSDT', size: 0.001, filled: 0.001, replayed: true };
+    watch.chaseCompleted(end);
+    watch.chaseCompleted(end);
+    watch.chaseCompleted({ id: 'c2', symbol: 'ETHUSDT', size: 1, filled: 0.4, replayed: true });
+    watch.chaseCompleted({ id: 'c3', symbol: 'SOLUSDT', size: 1, filled: 0, replayed: true });
+    expect(told).toEqual([
+      'Chase on BTCUSDT filled 0.001 while you were away.',
+      'Chase on ETHUSDT stopped while you were away, after filling 0.4 of 1.',
+      'Chase on SOLUSDT stopped while you were away, with nothing filled.',
+    ]);
+  });
+
+  it('adds nothing for a live end, or one whose outcome the chaser already told', () => {
+    const { told, watch } = setup();
+    watch.chaseCompleted({ id: 'c1', symbol: 'BTCUSDT', size: 1, filled: 1 });
+    watch.chaseCompleted({ id: 'c2', symbol: 'BTCUSDT', size: 1, filled: 1, replayed: true, outcomeTold: true });
+    expect(told).toEqual([]);
+  });
+});
+
 describe('a running chase whose engine went away', () => {
   const running = (id: string) => ({ ...(chaser(id) as object), currentOrderIds: ['o1'] }) as never;
 
