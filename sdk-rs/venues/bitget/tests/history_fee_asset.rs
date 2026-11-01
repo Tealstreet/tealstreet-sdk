@@ -121,8 +121,9 @@ fn a_null_fill_list_is_an_empty_page() {
             h.done
                 .iter()
                 .any(|(id, result)| *id == 42 && result.is_ok()),
-            "{body}: {:?}",
-            h.done
+            "{body}: {:?} {:?}",
+            h.done,
+            h.logs
         );
     }
 }

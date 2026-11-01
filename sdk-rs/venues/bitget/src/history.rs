@@ -830,7 +830,15 @@ impl BitgetFutures {
         }
         let valid = envelope
             .map_err(|e| e.to_string())
-            .and_then(Envelope::checked);
+            .and_then(Envelope::checked)
+            .map(drop)
+            .or_else(|error| {
+                if crate::wire::null_history(response.body) {
+                    Ok(())
+                } else {
+                    Err(error)
+                }
+            });
         if response.status != 200 || valid.is_err() || r.invalid {
             let error = valid
                 .err()
