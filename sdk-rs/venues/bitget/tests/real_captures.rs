@@ -369,7 +369,10 @@ fn an_unfilled_limit_losing_its_bracket_does_not() {
 fn a_price_amend_of_a_partly_filled_uta_order_places_what_is_left() {
     let row = UTA_CLOSE
         .replace(r#""cumExecQty":"0""#, r#""cumExecQty":"8""#)
-        .replace(r#""orderStatus":"new""#, r#""orderStatus":"partially_filled""#);
+        .replace(
+            r#""orderStatus":"new""#,
+            r#""orderStatus":"partially_filled""#,
+        );
     let orders = format!(r#"{{"code":"00000","data":{{"list":[{row}],"cursor":""}}}}"#);
     let mut h = uta(true, NO_POSITIONS, &orders);
     let id = "1500796226646327296";
