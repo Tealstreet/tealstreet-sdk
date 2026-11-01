@@ -532,6 +532,59 @@ fn a_signature_refusal_then_a_lost_resend_keeps_cancel_all_fenced() {
 }
 
 #[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    let mut h = Harness::new();
+    position(&mut h);
+    h.e.store_mut().upsert_order(Order {
+        id: "456".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: "E-BTC-USDT".into(),
+        kind: OrderType::StopLoss,
+        side: OrderSide::Sell,
+        price: 1800.0,
+        amount: 0.001,
+        filled: 0.0,
+        remaining: 0.001,
+        reduce_only: true,
+        close: None,
+        client_order_id: None,
+        time_in_force: Some(TimeInForce::GoodTillCancel),
+        last_update: 0.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    });
+    h.command(Command::AmendOrder {
+        command: 7,
+        id: "456".into(),
+        price: Some(1790.0),
+        amount: None,
+    });
+    let detail = |status| {
+        format!(
+            r#"{{"code":"0","data":[{{"orderId":456,"contractName":"E-BTC-USDT","status":"{status}","origQty":0.001,"executedQty":0,"side":"SELL","type":"MARKET","action":"CLOSE","conditionOrder":true,"triggerType":1,"triggerPriceType":2}}]}}"#
+        )
+    };
+    let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(inspect, &detail("INIT"));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(cancel, r#"{"code":"0","data":{"orderId":456}}"#);
+    let verify = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(verify, &detail("CANCELED"));
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    h.reply(create, r#"{"code":"-2019","msg":"insufficient margin"}"#);
+    let error = failure(&h, 7).expect("a failure");
+    assert!(
+        error
+            .message
+            .contains("Your E-BTC-USDT long position has no stop"),
+        "{}",
+        error.message
+    );
+}
+#[test]
 fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     let mut h = Harness::new();
     h.order(0.0);

@@ -528,6 +528,52 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     assert!(error.contains("order is gone"), "{error}");
 }
 #[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    for (id, cancelled, expected) in [
+        ("old", "old", "Your BTCUSDT short position has no stop"),
+        (
+            "parent__stop_loss",
+            "parent",
+            "Your BTCUSDT long position has no stop",
+        ),
+    ] {
+        let mut h = Harness::new();
+        if id == "old" {
+            h.set_order("old", OrderType::StopLoss, 6.0);
+        } else {
+            h.set_order("parent", OrderType::Limit, 6.0);
+            h.set_order(id, OrderType::StopLoss, 6.0);
+            h.engine
+                .store_mut()
+                .update_order(id, |o| o.side = OrderSide::Sell);
+        }
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: id.into(),
+            price: Some(90.0),
+            amount: None,
+        });
+        h.metadata(false, "CROSS");
+        let cancel = h.take(&format!("/api/v1/orders/{cancelled}"));
+        h.response(
+            &cancel,
+            200,
+            &format!(r#"{{"code":"200000","data":{{"cancelledOrderIds":["{cancelled}"]}}}}"#),
+        );
+        h.pace();
+        h.confirm_cancel(cancelled, 10.0, 4.0);
+        let create = h.take("/api/v1/");
+        h.response(
+            &create,
+            200,
+            r#"{"code":"300003","msg":"Balance insufficient"}"#,
+        );
+        h.pace();
+        let error = h.done(1).unwrap_err();
+        assert!(error.contains(expected), "{error}");
+    }
+}
+#[test]
 fn ambiguous_cancel_prevents_replacement() {
     let mut h = Harness::new();
     h.set_order("old", OrderType::Limit, 6.0);

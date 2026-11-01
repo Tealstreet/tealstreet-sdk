@@ -1428,11 +1428,12 @@ impl Lighter {
             && let Some(old) = &job.amend
         {
             let unknown = error.outcome == Some(Outcome::Unknown);
-            error.message = format!(
-                "{}: {}",
-                safe_cex_engine::error::order_gone_text(&old.symbol, unknown),
-                error.message
-            );
+            let gone = if matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                safe_cex_engine::error::stop_gone_text(&old.symbol, old.side, old.kind, unknown)
+            } else {
+                safe_cex_engine::error::order_gone_text(&old.symbol, unknown)
+            };
+            error.message = format!("{gone}: {}", error.message);
         }
         error
     }

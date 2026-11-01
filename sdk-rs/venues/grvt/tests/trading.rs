@@ -913,6 +913,51 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     assert!(error.contains("order is gone"), "{error}");
 }
 #[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    let mut e = boot();
+    seed(&mut e);
+    e.store_mut().update_order("42", |o| {
+        o.kind = OrderType::StopLoss;
+        o.side = OrderSide::Sell;
+        o.reduce_only = true;
+        o.close = Some(false);
+        o.price = 90.;
+        o.trigger_type = Some(StopTriggerType::MarkPrice);
+        o.time_in_force = Some(TimeInForce::GoodTillCancel);
+    });
+    let stop = |json: &str| {
+        json.replace("\"po\":true", "\"po\":false")
+            .replace("\"ro\":false", "\"ro\":true")
+            .replace("\"ib\":true", "\"ib\":false")
+            .replace(
+                "\"ct\":\"1699999999000000000\"",
+                "\"ct\":\"1699999999000000000\",\"t\":{\"tt\":\"STOP_LOSS\",\"t\":{\"tb\":\"MARK\",\"tp\":\"90\",\"cp\":false,\"is\":false}}",
+            )
+    };
+    let get = http(
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 9,
+                id: "42".into(),
+                price: Some(85.),
+                amount: None,
+            },
+        ),
+        "/order",
+    );
+    let cancel = http(reply(&mut e, &get, 200, &stop(OPEN)), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let replacement = http(reply(&mut e, &verify, 200, &stop(CANCELED)), "create_order");
+    let actions = reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#);
+    let result = done(&actions, 9).unwrap();
+    let error = result.as_ref().unwrap_err();
+    assert!(
+        error.contains("Your BTC_USDT_PERP long position has no stop"),
+        "{error}"
+    );
+}
+#[test]
 fn cancellation_ack_without_final_state_or_with_new_fill_aborts_amendment() {
     let advanced = CANCELED.replace("[\"0.2\"]", "[\"0.3\"]");
     for confirmation in [OPEN, advanced.as_str()] {

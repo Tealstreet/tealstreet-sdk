@@ -155,12 +155,22 @@ struct Job {
     ids: Vec<String>,
     collect_ids: bool,
     amendment: Option<f64>,
+    /// The amended order's side and kind: what its lost replacement costs.
+    amended: Option<(OrderSide, OrderType)>,
 }
 #[derive(Default)]
 pub struct Trading {
     jobs: HashMap<u64, Job>,
     next_client: u32,
     cancels: HashMap<String, (usize, OrderStatus)>,
+}
+
+fn gone_text(symbol: &str, side: OrderSide, kind: OrderType, unknown: bool) -> String {
+    if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+        safe_cex_engine::error::stop_gone_text(symbol, side, kind, unknown)
+    } else {
+        safe_cex_engine::error::order_gone_text(symbol, unknown)
+    }
 }
 
 fn client_id(id: &str) -> Result<u32, String> {
@@ -615,6 +625,12 @@ impl Backpack {
                 } else {
                     None
                 };
+                let amended = steps.first().and_then(|step| match step {
+                    Step::Cancel { id, .. } if collect_ids => {
+                        cx.store.order(id).map(|o| (o.side, o.kind))
+                    }
+                    _ => None,
+                });
                 let preflight = preflight.as_ref().unwrap();
                 if steps.is_empty() {
                     let _ = cx.done_empty_plan(preflight, "[]".into());
@@ -637,6 +653,7 @@ impl Backpack {
                         ids: vec![],
                         collect_ids,
                         amendment,
+                        amended,
                     },
                 );
                 self.run_trade(cx, u64::from(id));
@@ -1209,9 +1226,9 @@ impl Backpack {
                                     .get(&request.command)
                                     .is_some_and(|job| job.amendment.is_some()) =>
                             {
-                                cx.store.order(id).map(|o| {
-                                    safe_cex_engine::error::order_gone_text(&o.symbol, false)
-                                })
+                                cx.store
+                                    .order(id)
+                                    .map(|o| gone_text(&o.symbol, o.side, o.kind, false))
                             }
                             _ => None,
                         };
@@ -1314,18 +1331,16 @@ impl Backpack {
         if !optional {
             // The amend's cancel landed and nothing replaced it.
             let gone = match &request.step {
-                Step::Place { order, .. }
-                    if self
-                        .trading
-                        .jobs
-                        .get(&request.command)
-                        .is_some_and(|job| job.amendment.is_some() && job.ids.is_empty()) =>
-                {
-                    Some(safe_cex_engine::error::order_gone_text(
-                        &order.symbol,
-                        error.outcome == Some(Outcome::Unknown),
-                    ))
-                }
+                Step::Place { order, .. } => self
+                    .trading
+                    .jobs
+                    .get(&request.command)
+                    .filter(|job| job.ids.is_empty())
+                    .and_then(|job| job.amended)
+                    .map(|(side, kind)| {
+                        let unknown = error.outcome == Some(Outcome::Unknown);
+                        gone_text(&order.symbol, side, kind, unknown)
+                    }),
                 _ => None,
             };
             let _ = match &gone {

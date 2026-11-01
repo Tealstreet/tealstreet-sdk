@@ -16,6 +16,7 @@ enum Call {
         id: String,
         filled: f64,
         symbol: String,
+        amended: (OrderSide, OrderType),
     },
     Cancel {
         id: String,
@@ -40,6 +41,8 @@ enum Call {
 }
 #[derive(Clone)]
 struct Replacement {
+    /// The amended order's side and kind: a virtual leg's own, not its parent's.
+    amended: (OrderSide, OrderType),
     id: String,
     options: PlaceOrderOpts,
     filled: f64,
@@ -539,6 +542,11 @@ impl Kucoin {
             } => {
                 let (parent, opts) = self.replacement(cx, &id, price, amount)?;
                 self.format_placement(cx, &opts)?;
+                let amended = cx
+                    .store
+                    .order(&id)
+                    .map(|o| (o.side, o.kind))
+                    .ok_or_else(|| format!("Order not found: {id}"))?;
                 steps.push_back(cancel(&parent.id, &api_symbol(cx.store, &parent.symbol)));
                 let filled = parent
                     .extra
@@ -549,6 +557,7 @@ impl Kucoin {
                     );
                 steps.push_back(confirm_cancel(
                     Replacement {
+                        amended,
                         id: parent.id,
                         options: opts,
                         filled,
@@ -1047,6 +1056,7 @@ impl Kucoin {
                                 id: replacement.id.clone(),
                                 filled,
                                 symbol: replacement.options.symbol.clone(),
+                                amended: replacement.amended,
                             };
                             self.trading
                                 .jobs
@@ -1118,7 +1128,9 @@ impl Kucoin {
         }
         if let Err(error) = result {
             let replacing = match &request.step.call {
-                Call::PlaceAfterCancel { symbol, .. } => Some(symbol.clone()),
+                Call::PlaceAfterCancel {
+                    symbol, amended, ..
+                } => Some((symbol.clone(), *amended)),
                 _ => None,
             };
             if let Call::ConfirmCancel(mut replacement) = request.step.call
@@ -1144,13 +1156,14 @@ impl Kucoin {
                 error.outcome = Some(Outcome::NotSent);
             }
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
-            if let Some(symbol) = replacing.filter(|_| job.ids.is_empty()) {
+            if let Some((symbol, (side, kind))) = replacing.filter(|_| job.ids.is_empty()) {
                 let unknown = error.outcome == Some(Outcome::Unknown);
-                error.message = format!(
-                    "{}: {}",
-                    safe_cex_engine::error::order_gone_text(&symbol, unknown),
-                    error.message
-                );
+                let gone = if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                    safe_cex_engine::error::stop_gone_text(&symbol, side, kind, unknown)
+                } else {
+                    safe_cex_engine::error::order_gone_text(&symbol, unknown)
+                };
+                error.message = format!("{gone}: {}", error.message);
             }
             job.record(error);
             if !job.keep_going {

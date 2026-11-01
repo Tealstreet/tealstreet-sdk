@@ -101,7 +101,8 @@ struct Work {
     refresh_result: bool,
     protections: Vec<String>,
     census_started: bool,
-    amend: bool,
+    /// The amended order's side and kind: what its lost replacement costs.
+    amend: Option<(OrderSide, OrderType)>,
     cancel_batch: bool,
     cancel_errors: Vec<CancelFailure>,
     /// A cancel batch's native aggregate, appended to the projected terminal.
@@ -362,7 +363,7 @@ impl Work {
             refresh_result: false,
             protections: vec![],
             census_started: false,
-            amend: false,
+            amend: None,
             cancel_batch: false,
             cancel_errors: vec![],
             note: None,
@@ -755,7 +756,7 @@ impl Bitrue {
                     price,
                     amount,
                 };
-                work.amend = true;
+                work.amend = Some((order.side, order.kind));
                 work.symbol(&order.symbol);
                 work.steps
                     .push_back(target.lookup(Effect::Inspect(Box::new(amend))));
@@ -1204,7 +1205,7 @@ impl Bitrue {
         floor: Option<safe_cex_engine::StampFloor>,
     ) {
         let plan = active.plan.clone().expect("admitted Plan");
-        let narrowed = active.work.amend && matches!(step.effect, Effect::Place { .. });
+        let narrowed = active.work.amend.is_some() && matches!(step.effect, Effect::Place { .. });
         let context = if narrowed {
             cx.plan_leg_context_with_intent(&plan, &slot, Intent::Place)
         } else {
@@ -1324,12 +1325,18 @@ impl Bitrue {
             .ids
             .iter()
             .any(|id| work.guard.as_ref().is_none_or(|guard| guard.id != *id));
-        if work.amend
+        if let Some((side, kind)) = work.amend
             && !placed
             && matches!(effect, Effect::Place { .. })
             && let Some(symbol) = work.symbols.first()
         {
-            work.note = Some(safe_cex_engine::error::order_gone_text(symbol, unknown));
+            work.note = Some(
+                if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                    safe_cex_engine::error::stop_gone_text(symbol, side, kind, unknown)
+                } else {
+                    safe_cex_engine::error::order_gone_text(symbol, unknown)
+                },
+            );
         }
     }
     fn end(
