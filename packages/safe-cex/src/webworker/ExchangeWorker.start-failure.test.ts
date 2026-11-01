@@ -211,6 +211,72 @@ describe('a Rust start on a slow link', () => {
   });
 });
 
+describe('a call that beats the exchange into being', () => {
+  const metadata = (requestId: string) => ({
+    op: 'callMethod',
+    data: { requestId, method: 'updateSymbolMetadata', args: ['BTCUSDT'] },
+  });
+
+  it('is answered under the engine bounds, not held for the whole start', async () => {
+    const { messages, send } = context();
+    const module = { WasmEngine: SlowEngine };
+    let finishLoad = () => {};
+    const loader = new Promise<void>((resolve) => {
+      finishLoad = resolve;
+    });
+    setWasmEngineLoader(async () => {
+      await loader;
+      return module;
+    });
+    const clock = vi.spyOn(virtualClock, 'start');
+    let clockDone = () => {};
+    clock.mockReturnValueOnce(new Promise<void>((resolve) => (clockDone = resolve)));
+    void send(init);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await send(metadata('held-metadata'));
+    await send(buy('held-write'));
+    await send(read('held-read'));
+    clockDone();
+    finishLoad();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(reply(messages, 'held-metadata')[0].data.success).toBe(true);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reply(messages, 'held-write')[0].data.result).toMatchObject({ outcome: 'notSent' });
+    expect(reportedStartFailure(messages)).toBe(false);
+    expect(reply(messages, 'held-read')).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(reply(messages, 'held-read')).toHaveLength(1);
+  });
+});
+
+describe('an exchange that never comes into being', () => {
+  it('refuses a held write and read as notSent at 30 s and sends nothing', async () => {
+    vi.spyOn(virtualClock, 'start').mockReturnValueOnce(new Promise<void>(() => {}));
+    const { messages, send } = context();
+    void send(init);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await send(buy('stuck-write'));
+    await send(read('stuck-read'));
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(reply(messages, 'stuck-write')).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(reply(messages, 'stuck-write')[0].data.result).toMatchObject({ outcome: 'notSent' });
+    expect(reply(messages, 'stuck-read')[0].data.success).toBe(false);
+    expect(built.flatMap((engine) => engine.commands).some((command) => command.op === 'placeOrders')).toBe(false);
+  });
+
+  it('a write once the exchange exists and the private API failed gets its 30 s refusal, not the command timeout', async () => {
+    const { messages, send } = context();
+    void send(init);
+    await vi.advanceTimersByTimeAsync(9_000);
+    await send(buy('offline-write'));
+    await send(read('offline-read'));
+    await vi.advanceTimersByTimeAsync(30_100);
+    expect(reply(messages, 'offline-write')[0].data.result).toMatchObject({ outcome: 'notSent' });
+    expect(built.flatMap((engine) => engine.commands).some((command) => command.op === 'placeOrders')).toBe(false);
+  });
+});
+
 describe('a Telegram bot on a retried start', () => {
   const withBot = { ...init, data: { ...init.data, telegramBotToken: 'bot' } };
 

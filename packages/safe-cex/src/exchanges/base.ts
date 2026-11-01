@@ -659,7 +659,12 @@ export class BaseExchange implements Exchange {
 
     this.on = this.emitter.on.bind(this.emitter);
     this.once = this.emitter.once.bind(this.emitter);
-    this.off = this.emitter.off.bind(this.emitter);
+    this.off = (event, handler) => {
+      this.emitter.off(event, handler);
+      // A kept page engine outlives its worker: nothing can answer what that worker held.
+      if (event === 'callMethod' && !this.emitter.hasListeners('callMethod')) this.abandonWorkerCalls();
+      return this.emitter;
+    };
 
     this.unsubscribeFromStore = this.store.subscribe((data) => {
       // Frames carry native orders; chaser tags arrive independently with the
@@ -1589,6 +1594,7 @@ export class BaseExchange implements Exchange {
 
   dispose() {
     this.isDisposed = true;
+    this.abandonWorkerCalls();
     this.unsubscribeFromStore();
     this.remoteSignerAvailabilityCleanups.forEach((cleanup) => cleanup());
     this.remoteSignerAvailabilityCleanups.clear();
@@ -1810,6 +1816,12 @@ export class BaseExchange implements Exchange {
   protected workerCommandTimeoutError = (_method: CallableMethodsInWorker, _args: unknown[]): Error =>
     new Error('Timeout callMethodInWorker');
 
+  private readonly pendingWorkerCalls = new Set<() => void>();
+
+  private abandonWorkerCalls() {
+    for (const abandon of [...this.pendingWorkerCalls]) abandon();
+  }
+
   callMethodInWorker = async <M extends CallableMethodsInWorker>(
     method: M,
     ...args: Parameters<this[M]>
@@ -1818,7 +1830,20 @@ export class BaseExchange implements Exchange {
     const timing = TIMED_WRITE_METHODS.has(method) ? claimWriteTiming(method).timing : undefined;
 
     return new Promise<ReturnType<this[M]>>((resolve, reject) => {
+      const abandon = () => {
+        clearTimeout(timeout);
+        this.pendingWorkerCalls.delete(abandon);
+        this.emitter.off('callMethod:done', handleDone);
+        if (timing) emitWriteTiming(this, timing, 'error');
+        reject(
+          Object.assign(this.workerCommandTimeoutError(method, args), {
+            message: 'The account worker stopped before answering; reconcile interrupted writes before retrying',
+          }),
+        );
+      };
+      this.pendingWorkerCalls.add(abandon);
       const timeout = setTimeout(() => {
+        this.pendingWorkerCalls.delete(abandon);
         // Timeout path must also remove the listener, otherwise every timed-out
         // call leaks a handleDone closure permanently attached to the emitter.
         this.emitter.off('callMethod:done', handleDone);
@@ -1828,6 +1853,7 @@ export class BaseExchange implements Exchange {
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);
+          this.pendingWorkerCalls.delete(abandon);
           this.emitter.off('callMethod:done', handleDone);
           if (timing) {
             Object.assign(timing.marks, event.timing);
@@ -1847,6 +1873,7 @@ export class BaseExchange implements Exchange {
         this.emitter.dispatch('callMethod', { method, args, requestId, ...(timing ? { timing: timing.marks } : {}) });
       } catch (error) {
         clearTimeout(timeout);
+        this.pendingWorkerCalls.delete(abandon);
         this.emitter.off('callMethod:done', handleDone);
         reject(error);
       }

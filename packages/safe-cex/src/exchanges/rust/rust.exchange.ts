@@ -360,6 +360,8 @@ const MULTI_COMMAND_WAIT_FACTOR = 5;
 const COLD_START_READS = /^(fetch|find|refresh)/;
 /** How long a write may queue for startup; it must not outlive its caller's wait. */
 const STARTUP_WRITE_WAIT_MS = 30_000;
+/** How long a worker read may wait while the account loads, matching the write refusal. */
+const STARTUP_READ_WAIT_MS = 30_000;
 const WORKER_CAPABILITY_RETRY_MS = 30_000;
 const WORKER_BRIDGE_WAIT_MS = 30_000;
 const WORKER_BRIDGE_POLL_MS = 25;
@@ -1469,12 +1471,21 @@ export class RustEngineExchange extends BaseExchange {
   protected override workerCommandTimeoutMs = (method: CallableMethodsInWorker) =>
     Math.min(
       (MULTI_COMMAND_WORKER_METHODS.has(method) ? MULTI_COMMAND_WAIT_FACTOR : 1) * this.commandTimeoutMs + 1000,
-      2_147_483_647,
+      this.isWorkerReadDuringLoad(method) ? STARTUP_READ_WAIT_MS : 2_147_483_647,
     );
+
+  private isWorkerReadDuringLoad(method: CallableMethodsInWorker) {
+    if (WORKER_WRITE_METHODS.has(method) || MULTI_COMMAND_WORKER_METHODS.has(method)) return false;
+    const { markets, balance, orders, positions } = this.store.loaded;
+    return !markets || (!this.isPublicDataOnly && !(balance && orders && positions));
+  }
 
   protected override workerCommandTimeoutError = (method: CallableMethodsInWorker, args: unknown[]): Error => {
     const clientOrderIds = workerCallClientOrderIds(method, args);
-    return Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
+    const message = this.isWorkerReadDuringLoad(method)
+      ? `${this.name} ${method} got no answer: the account has not finished loading. Retry once it loads.`
+      : 'Rust worker command timed out; reconcile interrupted writes before retrying';
+    return Object.assign(new Error(message), {
       code: 'COMMAND_TIMEOUT',
       command: method,
       ...(WORKER_WRITE_METHODS.has(method) ? { outcome: 'unknown' as const } : {}),
