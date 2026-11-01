@@ -283,8 +283,9 @@ fn authenticated_reconnect_requests_fresh_challenge_and_ignores_old_socket() {
             }
         })
         .collect::<Vec<_>>();
-    assert_eq!(sent.len(), 3);
-    for msg in sent {
+    assert_eq!(sent.len(), 4);
+    assert!(sent[3].contains(r#""feed":"heartbeat""#));
+    for msg in &sent[..3] {
         assert!(msg.contains("fresh"));
         assert!(msg.contains("signed_challenge"));
         assert!(!msg.contains("account_balances"));
