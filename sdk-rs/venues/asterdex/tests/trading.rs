@@ -1083,3 +1083,85 @@ fn capability_profile_v3_keeps_stp_advertised() {
     let h = Harness::options(v3_options());
     assert!(h.engine.capabilities().stp_controls);
 }
+
+// deaws2's live bodies follow.
+#[test]
+fn a_price_amend_of_a_partly_filled_order_sends_what_is_left() {
+    let mut h = Harness::new();
+    let mut partial = order("367384866", OrderType::Limit);
+    partial.amount = 1.0;
+    partial.filled = 0.4;
+    partial.remaining = 0.6;
+    h.engine.store_mut().set_orders(vec![partial]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "367384866".into(),
+        price: Some(9200.0),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":367384866,"status":"CANCELED"}"#);
+    let place = h.take(Method::Post);
+    assert!(place.url.contains("quantity=0.6"), "{}", place.url);
+}
+
+#[test]
+fn an_amend_size_at_or_below_the_filled_amount_is_refused_before_any_write() {
+    let mut h = Harness::new();
+    let mut partial = order("367384866", OrderType::Limit);
+    partial.amount = 590.0;
+    partial.filled = 268.0;
+    partial.remaining = 322.0;
+    h.engine.store_mut().set_orders(vec![partial]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "367384866".into(),
+        price: None,
+        amount: Some(268.0),
+    });
+    assert!(h.result(1).is_err());
+    assert!(!h.requests.iter().any(|r| r.method != Method::Get));
+}
+
+#[test]
+fn a_refused_stop_replacement_says_the_stop_is_gone() {
+    let mut h = Harness::new();
+    h.engine
+        .store_mut()
+        .set_orders(vec![order("283194212", OrderType::StopLoss)]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(9200.04),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+    let place = h.take(Method::Post);
+    h.reply(
+        place,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let message = h.result(1).as_ref().unwrap_err();
+    assert!(message.contains("no stop"), "{message}");
+}
+
+#[test]
+fn live_1000_refusals_are_not_an_uncertain_placement() {
+    for message in [
+        "No agent found",
+        "Signature check failed",
+        "Your device time must match the actual time within 5 seconds",
+    ] {
+        let mut h = Harness::new();
+        h.place(limit());
+        let place = h.take(Method::Post);
+        h.reply(place, &format!(r#"{{"code":-1000,"msg":"{message}"}}"#));
+        assert!(h.result(1).is_err());
+        h.place(limit());
+        assert!(
+            h.requests.iter().any(|r| r.method == Method::Post),
+            "{message} left a fence"
+        );
+    }
+}
