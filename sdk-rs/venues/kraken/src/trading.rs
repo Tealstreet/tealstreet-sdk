@@ -21,9 +21,6 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     canceled_ids: Vec<String>,
-    amend: Option<Order>,
-    amend_filled: bool,
-    amend_canceled: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
 }
@@ -86,6 +83,15 @@ struct Status {
     status: String,
     #[serde(default, alias = "orderId")]
     order_id: String,
+    #[serde(default, rename = "orderEvents")]
+    events: Vec<OrderEvent>,
+}
+#[derive(Deserialize)]
+struct OrderEvent {
+    #[serde(default, rename = "type")]
+    kind: String,
+    #[serde(default)]
+    amount: f64,
 }
 #[derive(Deserialize)]
 struct Preference {
@@ -105,34 +111,6 @@ struct Cancel<'a> {
 }
 
 impl Kraken {
-    pub(crate) fn trade_order_observed(&mut self, id: &str, filled: f64, status: OrderStatus) {
-        for job in self
-            .trading
-            .active
-            .iter_mut()
-            .chain(self.trading.queue.iter_mut())
-        {
-            if job
-                .amend
-                .as_ref()
-                .is_some_and(|o| o.id == id && (filled > o.filled || status == OrderStatus::Closed))
-            {
-                job.amend_filled = true;
-            }
-        }
-    }
-    pub(crate) fn trade_execution_observed(&mut self, id: &str) {
-        for job in self
-            .trading
-            .active
-            .iter_mut()
-            .chain(self.trading.queue.iter_mut())
-        {
-            if job.amend.as_ref().is_some_and(|o| o.id == id) {
-                job.amend_filled = true;
-            }
-        }
-    }
     pub(crate) fn trading_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
         let (id, result) = match command {
             Command::PlaceOrders { command, orders } => (*command, self.prepare_orders(cx, orders)),
@@ -171,12 +149,9 @@ impl Kraken {
                 let result = if cx.store.market(symbol).is_none() {
                     Err(format!("Unknown Kraken market {symbol}"))
                 } else {
-                    Ok((
-                        VecDeque::from([Step::Leverage {
-                            symbol: symbol.clone(),
-                        }]),
-                        None,
-                    ))
+                    Ok(VecDeque::from([Step::Leverage {
+                        symbol: symbol.clone(),
+                    }]))
                 };
                 (*command, result)
             }
@@ -205,7 +180,7 @@ impl Kraken {
                 },
                 Err(not_sent(error)),
             ),
-            Ok((steps, amend)) => {
+            Ok(steps) => {
                 if self.signer.is_none() || self.options.public_data_only {
                     crate::public_context::local(
                         cx,
@@ -223,9 +198,6 @@ impl Kraken {
                         steps,
                         ids: Vec::new(),
                         canceled_ids: Vec::new(),
-                        amend,
-                        amend_filled: false,
-                        amend_canceled: false,
                         effective: false,
                     });
                     self.trading_pump(cx);
@@ -238,7 +210,7 @@ impl Kraken {
         &self,
         cx: &Cx<'_, Pending>,
         orders: &[PlaceOrderOpts],
-    ) -> Result<(VecDeque<Step>, Option<Order>), String> {
+    ) -> Result<VecDeque<Step>, String> {
         if orders.iter().any(|o| o.client_order_id.is_some()) {
             return Err("Kraken does not support caller client order IDs".into());
         }
@@ -283,7 +255,7 @@ impl Kraken {
                 }
             }
         }
-        Ok((steps, None))
+        Ok(steps)
     }
     fn prepare_order(
         &self,
@@ -418,19 +390,16 @@ impl Kraken {
             order,
         })
     }
-    fn prepare_cancel(&self, ids: &[String]) -> Result<(VecDeque<Step>, Option<Order>), String> {
+    fn prepare_cancel(&self, ids: &[String]) -> Result<VecDeque<Step>, String> {
         let unique = ids.iter().collect::<HashSet<_>>();
         if unique.len() != ids.len() || ids.iter().any(|id| id.is_empty()) {
             return Err("Kraken cancellation requires distinct nonempty IDs".into());
         }
-        Ok((
-            if ids.is_empty() {
-                VecDeque::new()
-            } else {
-                VecDeque::from([Step::Cancel(ids.to_vec())])
-            },
-            None,
-        ))
+        Ok(if ids.is_empty() {
+            VecDeque::new()
+        } else {
+            VecDeque::from([Step::Cancel(ids.to_vec())])
+        })
     }
     fn prepare_amend(
         &self,
@@ -438,7 +407,7 @@ impl Kraken {
         id: &str,
         price: Option<f64>,
         amount: Option<f64>,
-    ) -> Result<(VecDeque<Step>, Option<Order>), String> {
+    ) -> Result<VecDeque<Step>, String> {
         let original = cx
             .store
             .order(id)
@@ -468,67 +437,28 @@ impl Kraken {
                 return Err("Invalid Kraken amendment size".into());
             }
             replacement.remaining = replacement.amount - original.filled;
-            params.push(("size", number(replacement.amount)));
+            // Kraken's edit size is the unfilled size, not the total.
+            params.push(("size", number(replacement.remaining)));
         }
+        let protective = matches!(original.kind, OrderType::StopLoss | OrderType::TakeProfit);
         if let Some(price) = price {
             replacement.price = adjust(price, market.precision.price)?;
             if replacement.price <= 0.0 {
                 return Err("Invalid Kraken amendment price".into());
             }
-            params.push(("limitPrice", number(replacement.price)));
-        }
-        if matches!(original.kind, OrderType::StopLoss | OrderType::TakeProfit) {
-            let trigger = original
-                .trigger_type
-                .or_else(|| {
-                    original.extra.as_ref().and_then(|e| {
-                        if original.kind == OrderType::StopLoss {
-                            e.sl_trigger_type
-                        } else {
-                            e.tp_trigger_type
-                        }
-                    })
-                })
-                .ok_or("Cannot safely amend Kraken protective order without trigger provenance")?;
-            let opts = PlaceOrderOpts {
-                symbol: original.symbol.clone(),
-                kind: original.kind,
-                side: original.side,
-                amount: replacement.amount - original.filled,
-                price: Some(replacement.price),
-                trigger_price: None,
-                max_slippage_pct: None,
-                stp_mode: None,
-                bybit_bbo: None,
-                bybit_slippage_tolerance_ticks: None,
-                implied_volatility: None,
-                stop_loss: None,
-                take_profit: None,
-                reduce_only: Some(true),
-                time_in_force: None,
-                trigger_type: Some(trigger),
-                tp_trigger_type: None,
-                sl_trigger_type: None,
-                client_order_id: None,
-                close: original.close,
+            let field = if protective {
+                "stopPrice"
+            } else {
+                "limitPrice"
             };
-            let prepared = self.prepare_order(cx, &opts)?;
-            Ok((
-                VecDeque::from([
-                    Step::Cancel(vec![original.id.clone()]),
-                    Step::Place(Box::new(prepared)),
-                ]),
-                Some(original),
-            ))
-        } else if original.kind == OrderType::Limit {
-            Ok((
-                VecDeque::from([Step::Edit {
-                    original: Box::new(original),
-                    replacement: Box::new(replacement),
-                    form: sign::form(&params),
-                }]),
-                None,
-            ))
+            params.push((field, number(replacement.price)));
+        }
+        if protective || original.kind == OrderType::Limit {
+            Ok(VecDeque::from([Step::Edit {
+                original: Box::new(original),
+                replacement: Box::new(replacement),
+                form: sign::form(&params),
+            }]))
         } else {
             Err("Kraken amendment supports limit and reconciled protective orders only".into())
         }
@@ -539,7 +469,7 @@ impl Kraken {
         symbol: &str,
         leverage: Option<f64>,
         isolated: bool,
-    ) -> Result<(VecDeque<Step>, Option<Order>), String> {
+    ) -> Result<VecDeque<Step>, String> {
         let market = cx.store.market(symbol).ok_or("Unknown Kraken market")?;
         let use_current = leverage.is_none() && isolated;
         let leverage = leverage
@@ -565,19 +495,16 @@ impl Kraken {
             market.limits.leverage.min,
             market.limits.leverage.max,
         )?;
-        Ok((
-            VecDeque::from([Step::Setting {
-                symbol: symbol.into(),
-                leverage,
-                use_current,
-                margin: if isolated {
-                    MarginType::Isolated
-                } else {
-                    MarginType::Cross
-                },
-            }]),
-            None,
-        ))
+        Ok(VecDeque::from([Step::Setting {
+            symbol: symbol.into(),
+            leverage,
+            use_current,
+            margin: if isolated {
+                MarginType::Isolated
+            } else {
+                MarginType::Cross
+            },
+        }]))
     }
     fn trading_pump(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.trading.waiting {
@@ -595,28 +522,6 @@ impl Kraken {
                 cx.done(job.command, serde_json::to_string(&job.ids).unwrap());
                 continue;
             };
-            if matches!(&step, Step::Cancel(_))
-                && let Some(old) = job.amend.as_ref()
-                && cx.store.order(&old.id).is_none_or(|current| {
-                    current.filled > old.filled
-                        || current.price != old.price
-                        || current.amount != old.amount
-                        || current.trigger_type != old.trigger_type
-                        || current.kind != old.kind
-                })
-            {
-                self.trading_finish(
-                    cx,
-                    Err(not_sent(
-                        "Kraken protective order changed before amendment dispatch",
-                    )),
-                );
-                continue;
-            }
-            if job.amend_filled && matches!(step, Step::Place(_)) {
-                self.trading_finish(cx,Err(not_sent("Kraken protective order executed while cancellation was in flight; replacement suppressed")));
-                continue;
-            }
             let command = job.command;
             if let Step::Setting {
                 symbol,
@@ -822,7 +727,20 @@ impl Kraken {
                 }
                 p.order.id = status.order_id.clone();
                 p.order.last_update = cx.now;
-                if status.status == "placed" {
+                let executed: f64 = status
+                    .events
+                    .iter()
+                    .filter(|event| event.kind == "EXECUTION")
+                    .map(|event| event.amount)
+                    .sum();
+                // A market or IOC order never rests, whatever its status says.
+                let rests = !matches!(p.order.kind, OrderType::Market)
+                    && !matches!(
+                        p.order.time_in_force,
+                        Some(TimeInForce::ImmediateOrCancel | TimeInForce::FillOrKill)
+                    )
+                    && executed < p.order.amount;
+                if status.status == "placed" && rests {
                     let order = cx
                         .store
                         .order(&p.order.id)
@@ -860,14 +778,14 @@ impl Kraken {
                 let mut error: Option<VenueError> = None;
                 let mut cancelled = false;
                 for status in statuses {
-                    if status.status == "cancelled"
+                    // Already gone counts as done; the reconcile settles how it ended.
+                    let gone = status.status == "notFound";
+                    if (status.status == "cancelled" || gone)
                         && ids.contains(&status.order_id)
                         && seen.insert(status.order_id.clone())
                     {
                         cancelled = true;
-                        if let Some(job) = self.trading.active.as_mut()
-                            && job.amend.is_none()
-                        {
+                        if let Some(job) = self.trading.active.as_mut() {
                             job.canceled_ids.push(status.order_id.clone());
                         }
                         self.account_order_removed(cx, &status.order_id);
@@ -899,11 +817,6 @@ impl Kraken {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     return Err(error);
-                }
-                if let Some(job) = self.trading.active.as_mut()
-                    && job.amend.as_ref().is_some_and(|old| ids.contains(&old.id))
-                {
-                    job.amend_canceled = true;
                 }
             }
             Step::Edit {
@@ -993,20 +906,17 @@ impl Kraken {
             match result {
                 Ok(result) => cx.done(job.command, result),
                 Err(mut error) => {
-                    if job.amend_canceled {
-                        error.message = format!(
-                            "Kraken canceled the original protective order; replacement failed: {}",
-                            error.message
-                        );
-                    }
                     let ids: Vec<_> = job
                         .canceled_ids
                         .into_iter()
                         .chain(job.ids.iter().cloned())
                         .collect();
                     error = error.partial_ids(&ids);
-                    if job.effective || job.amend_canceled || !job.ids.is_empty() {
+                    if job.effective || !job.ids.is_empty() {
                         error.outcome = Some(Outcome::Unknown);
+                    }
+                    if error.outcome == Some(Outcome::Rejected) {
+                        cx.placement_resolved(job.command);
                     }
                     cx.fail(job.command, error);
                 }
@@ -1087,6 +997,16 @@ const ERROR_CODES: CodeTable = CodeTable {
             only: None,
         },
         Row {
+            key: Key::Text("invalidSide"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("MAX_LEVERAGE_OUT_OF_BOUNDS"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
             key: Key::Text("invalidUnit"),
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
@@ -1153,10 +1073,13 @@ fn classified_failure(
     code: Option<&str>,
     message: impl Into<String>,
 ) -> VenueError {
-    let native = code.map(|code| Native {
-        code: NativeCode::Text(code),
-        message: code,
-    });
+    // "nonceBelowThreshold: TOO_SMALL": the code is what precedes the detail.
+    let native = code
+        .map(|code| code.split(':').next().unwrap_or(code).trim())
+        .map(|code| Native {
+            code: NativeCode::Text(code),
+            message: code,
+        });
     let released = Released::Response(response);
     let verdict = classify::verdict(&ERROR_CODES, intent, released, native.as_ref());
     classify::error(verdict, intent, released, native.as_ref(), message)
