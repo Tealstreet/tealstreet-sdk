@@ -1112,7 +1112,9 @@ impl Trading {
                     } else {
                         code::ORDER_REJECTED
                     };
-                    cx.notice(Level::Error, code, message);
+                    // A failed entry fails the command, whose caller names it; a toast here doubles it.
+                    let level = if leg.is_some() { Level::Error } else { Level::Warn };
+                    cx.notice(level, code, message);
                     // A failed entry orphans its children; a failed child must not skip its
                     // sibling, or a rejected TP would leave the position without its SL.
                     if leg.is_none() {
