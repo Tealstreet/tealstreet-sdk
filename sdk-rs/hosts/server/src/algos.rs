@@ -1060,6 +1060,14 @@ mod tests {
     }
 
     #[test]
+    fn the_chaser_waits_out_a_sign_before_calling_a_cancel_unanswered() {
+        assert!(
+            std::time::Duration::from_millis(safe_cex_chaser::ANSWER_BOUND_MS)
+                > safe_cex_remote_signer::SIGN_TIMEOUT
+        );
+    }
+
+    #[test]
     fn the_audit_reads_ok_only_when_every_cancel_settled() {
         assert_eq!(shutdown_result(false, false), Value::from("ok"));
         assert!(
