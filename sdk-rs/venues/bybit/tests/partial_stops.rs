@@ -342,12 +342,7 @@ fn partial_replacement_closes_the_original_side_in_hedge_mode_even_without_reduc
 #[test]
 fn partial_replacement_uses_total_native_amount_and_zero_converts_to_full() {
     for profile in PROFILES {
-        for amount in [
-            None,
-            Some(9.234),
-            Some(0.0),
-            Some(if profile.inverse() { 0.4 } else { 0.0004 }),
-        ] {
+        for amount in [None, Some(9.234), Some(0.0)] {
             let mut h = ready(profile);
             seed(
                 &mut h,
@@ -379,6 +374,30 @@ fn partial_replacement_uses_total_native_amount_and_zero_converts_to_full() {
             assert_eq!(request.sl_size.as_deref(), expected);
             assert!(request.tp_size.is_none());
         }
+    }
+}
+
+#[test]
+fn a_replacement_quantity_rounding_to_zero_is_refused_not_turned_into_full() {
+    for profile in PROFILES {
+        let mut h = ready(profile);
+        seed(
+            &mut h,
+            profile,
+            "Sell",
+            "StopLoss",
+            "MarkPrice",
+            false,
+            true,
+        );
+        amend(
+            &mut h,
+            Some(90.0),
+            Some(if profile.inverse() { 0.4 } else { 0.0004 }),
+        );
+        assert!(h.result(91).unwrap().is_err(), "{profile:?}");
+        assert!(!h.has_request("/v5/position/trading-stop"), "{profile:?}");
+        assert!(!h.has_request(profile.cancel_path()), "{profile:?}");
     }
 }
 

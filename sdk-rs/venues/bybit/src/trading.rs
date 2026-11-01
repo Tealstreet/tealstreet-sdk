@@ -403,14 +403,31 @@ impl BybitLinear {
                 };
                 Ok(single("/v5/account/set-margin-mode", body, call))
             }
-            Command::SetPositionMode { hedged, .. } => {
+            Command::SetPositionMode { hedged, symbol, .. } => {
                 let hedged = *hedged;
                 if self.category == Category::Inverse {
+                    // Inverse modes switch per symbol or per base coin; a named symbol
+                    // switches alone. Every coin is tried: one refusal leaves the rest.
+                    if let Some(symbol) = symbol {
+                        let body = Body::new()
+                            .str("category", self.paths.category)
+                            .str("symbol", symbol)
+                            .int("mode", if hedged { 3 } else { 0 })
+                            .finish();
+                        return Some(Ok(single(
+                            "/v5/position/switch-mode",
+                            body,
+                            Call::PositionMode { hedged },
+                        )));
+                    }
                     let mut coins = std::collections::BTreeSet::new();
                     for market in cx.store.markets() {
                         coins.insert(market.base.clone());
                     }
-                    let mut job = Job::default();
+                    let mut job = Job {
+                        continue_on_error: true,
+                        ..Job::default()
+                    };
                     for coin in coins {
                         let body = Body::new()
                             .str("category", self.paths.category)
@@ -701,7 +718,7 @@ impl BybitLinear {
         {
             return Err("Bybit spot attached TP/SL requires a limit order".into());
         }
-        let reduce_only = !conditional && opts.reduce_only == Some(true);
+        let reduce_only = opts.reduce_only == Some(true);
         let position_idx = self.position_idx(cx, &opts.symbol, opts.side, reduce_only);
         let stop_loss = opts.stop_loss.filter(|p| *p != 0.0).map(adjust_price);
         let take_profit = opts.take_profit.filter(|p| *p != 0.0).map(adjust_price);
@@ -924,6 +941,10 @@ impl BybitLinear {
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
         let price = stop_trigger_price(opts, market.precision.price)?;
         let amount = num::adjust(opts.amount, market.precision.amount);
+        // tpslMode Full closes the whole position: only an explicit zero may ask for it.
+        if opts.amount != 0.0 && amount == 0.0 {
+            return Err("Stop quantity rounds to zero for this market".into());
+        }
         let partial = amount != 0.0;
         let mut body = Body::new()
             .str("category", self.category_for(&opts.symbol).as_str())
@@ -1012,7 +1033,11 @@ impl BybitLinear {
                 .store
                 .market(&order.symbol)
                 .ok_or_else(|| format!("Market {} not found", order.symbol))?;
-            let amount = num::adjust(amount.unwrap_or(order.amount), market.precision.amount);
+            let requested = amount.unwrap_or(order.amount);
+            let amount = num::adjust(requested, market.precision.amount);
+            if requested != 0.0 && amount == 0.0 {
+                return Err("Stop quantity rounds to zero for this market".into());
+            }
             if !amount.is_finite() || amount < 0.0 {
                 return Err(
                     "A Partial position stop needs a nonnegative replacement quantity".into(),

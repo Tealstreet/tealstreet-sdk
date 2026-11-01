@@ -3452,7 +3452,14 @@ fn live_private_topics_turn_position_and_wallet_polls_into_a_60s_safety_reconcil
     // Live topics: no position or wallet reads for the next 55 s of ticks...
     // (a live venue answers the private pings, so the socket stays up).
     let pong = r#"{"success":true,"ret_msg":"pong","conn_id":"c","op":"pong"}"#;
-    for _ in 0..11 {
+    // Positions keep their tick for a while after the snapshot's open position went flat.
+    for _ in 0..6 {
+        h.advance(POLL_MS);
+        h.message("/v5/private", pong);
+        assert!(!h.has_request("/v5/account/wallet-balance"));
+        drain_account_reads(&mut h);
+    }
+    for _ in 0..5 {
         h.advance(POLL_MS);
         h.message("/v5/private", pong);
         assert!(!polls_account(&h), "{:?}", h.paths());
@@ -3708,4 +3715,57 @@ fn a_leverage_write_goes_out_unless_both_rails_already_match() {
     h.reply(write.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{}}"#);
     set(&mut h, 103);
     assert!(!h.has_request("/v5/position/set-leverage"));
+}
+
+// B1: /v5/position/list lags the stream; a read issued just after a frame may omit it.
+#[test]
+fn a_lagging_position_read_cannot_flatten_a_fresh_frame_and_reads_continue_after_flat() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    respond_snapshot(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"c"}"#,
+    );
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe","conn_id":"c"}"#,
+    );
+    let flat_reads = |h: &mut Harness| {
+        while h.has_request("/v5/position/list") {
+            h.respond("/v5/position/list", 200, EMPTY_LIST);
+        }
+    };
+    drain_account_reads(&mut h);
+    h.advance(POLL_MS);
+    flat_reads(&mut h);
+    h.advance(POLL_MS - 200.0);
+    flat_reads(&mut h);
+    h.message(
+        "/v5/private",
+        r#"{"topic":"position","data":[{"symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"3","avgPrice":"50000","markPrice":"51000","positionValue":"153000","leverage":"10","unrealisedPnl":"300","curRealisedPnl":"0","positionIM":"30"}]}"#,
+    );
+    let contracts = |h: &Harness| {
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == "BTCUSDT")
+            .map_or(0.0, |p| p.contracts)
+    };
+    assert_eq!(contracts(&h), 3.0);
+    // The tick 200 ms later reads; the venue has not caught up.
+    h.advance(200.0);
+    assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
+    flat_reads(&mut h);
+    assert_eq!(contracts(&h), 3.0);
+    // A read issued past the guard is believed...
+    h.advance(POLL_MS);
+    flat_reads(&mut h);
+    assert_eq!(contracts(&h), 0.0);
+    // ...and the tick keeps reading, so a wrong flat is not stuck for 60 s.
+    h.advance(POLL_MS);
+    assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
 }
