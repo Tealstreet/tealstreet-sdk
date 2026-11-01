@@ -43,10 +43,14 @@ pub struct TickerQuote {
 }
 
 /// A chaser's progress as the chaser runtime reports it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ChaserProgress {
     pub remaining_size: f64,
     pub stopped: bool,
+    /// Finished: its cancel has settled and its remainder is final.
+    pub ended: bool,
+    /// Ended with a cancel that never proved its order gone.
+    pub order_may_be_open: bool,
 }
 
 /// Read-only views of the engine store and the chaser runtime.

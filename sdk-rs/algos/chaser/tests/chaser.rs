@@ -33,6 +33,10 @@ struct FakePort {
     unanswered: RefCell<Option<Unanswered>>,
     /// Every cancel answers only after this long, like a sign waiting out its timeout.
     cancel_answer_ms: Cell<u64>,
+    /// Every placement answers, and its row lands, only after this long.
+    place_answer_ms: Cell<u64>,
+    /// A placement's row is not in the store when it answers.
+    rows_lag: Cell<bool>,
     /// Cancels answer done but leave the row as it was: Bybit 110001 for an
     /// order that filled unseen.
     cancels_find_nothing: Cell<bool>,
@@ -63,6 +67,8 @@ impl AccountPort for FakePort {
         }
         let delay = if is_cancel(&command) {
             self.cancel_answer_ms.get()
+        } else if matches!(command, Command::PlaceOrders { .. }) {
+            self.place_answer_ms.get()
         } else {
             0
         };
@@ -103,6 +109,8 @@ impl FakePort {
             }),
             unanswered: RefCell::new(None),
             cancel_answer_ms: Cell::new(0),
+            place_answer_ms: Cell::new(0),
+            rows_lag: Cell::new(false),
             cancels_find_nothing: Cell::new(false),
         })
     }
@@ -116,13 +124,15 @@ impl FakePort {
                 port.next_order.set(port.next_order.get() + 1);
                 let id = format!("o{}", port.next_order.get());
                 let opts = &orders[0];
-                port.store.borrow_mut().orders.push(order(
-                    &id,
-                    opts.price.unwrap(),
-                    opts.amount,
-                    0.0,
-                    OrderStatus::Open,
-                ));
+                if !port.rows_lag.get() {
+                    port.store.borrow_mut().orders.push(order(
+                        &id,
+                        opts.price.unwrap(),
+                        opts.amount,
+                        0.0,
+                        OrderStatus::Open,
+                    ));
+                }
                 return Ok(format!(r#"["{id}"]"#));
             }
             // A cancel acknowledgement closes the row, as the engine does.
@@ -1029,6 +1039,182 @@ async fn a_requote_cancel_waiting_out_the_sign_timeout_names_the_offline_signer(
             "{:?}",
             warnings(&port)
         );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_during_the_first_placement_cancels_what_lands_before_completing() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        port.place_answer_ms.set(2_000);
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(500).await;
+        stop(&factory, &cx);
+        settle(100).await;
+        assert_eq!(completions(&port), 0, "its order is still on the wire");
+        settle(2_000).await;
+        assert_eq!(port.cancels(), vec!["o1".to_string()]);
+        assert_eq!(completions(&port), 1);
+        assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_during_a_requote_placement_cancels_what_lands() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.place_answer_ms.set(2_000);
+        port.set_ticker(101.0, 101.5);
+        settle(500).await;
+        assert_eq!(port.cancels(), vec!["o1".to_string()]);
+        stop(&factory, &cx);
+        settle(2_000).await;
+        assert_eq!(port.cancels(), vec!["o1".to_string(), "o2".to_string()]);
+        assert_eq!(completions(&port), 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn nuke_and_dispose_wait_for_a_placement_on_the_wire_and_cancel_it() {
+    local(async {
+        for nuke in [true, false] {
+            let port = FakePort::new("bybit");
+            port.accept_placements();
+            port.place_answer_ms.set(2_000);
+            let (factory, _cx) = start(&port, BUY_ONE);
+            settle(500).await;
+            if nuke {
+                factory.book().stop_for_nuke("nuked").await;
+            } else {
+                factory.book().shutdown("disposed").await;
+            }
+            assert_eq!(port.placements().len(), 1);
+            assert!(
+                port.cancels().contains(&"o1".to_string()),
+                "landed and cancelled before the sweep went on"
+            );
+            assert_eq!(completions(&port), 1);
+        }
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_slow_replacement_row_does_not_read_as_the_order_leaving_the_book() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.update_order("o1", |_| {});
+        settle(10).await;
+        port.rows_lag.set(true);
+        port.set_ticker(101.0, 101.5);
+        settle(1200).await;
+        assert_eq!(port.placements().len(), 2);
+        for _ in 0..3 {
+            port.publish(Change {
+                orders: true,
+                ..Change::default()
+            });
+            settle(10).await;
+        }
+        assert!(!factory.book().active_chasers()[0].is_stopped);
+        assert_eq!(completions(&port), 0);
+    })
+    .await;
+}
+
+/// As these venues answer: a read with no symbol is empty, and a filled order's
+/// cancel reads as done with its row Canceled (-2011).
+fn binance_filled_unseen(port: &Rc<FakePort>, fills: Result<&'static str, &'static str>) {
+    port.accept_placements();
+    let accept = RefCell::new(std::mem::replace(
+        &mut *port.responder.borrow_mut(),
+        Box::new(|_| Ok("null".into())),
+    ));
+    *port.responder.borrow_mut() = Box::new(move |command| match command {
+        Command::Query {
+            query: safe_cex_engine::engine::Query::Fills { symbol, .. },
+            ..
+        } => match symbol {
+            Some(_) => fills.map(Into::into).map_err(VenueError::new),
+            None => Ok("[]".into()),
+        },
+        other => (accept.borrow_mut())(other),
+    });
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_binance_order_filled_unseen_is_not_placed_again() {
+    local(async {
+        for venue in ["binance", "asterdex"] {
+            let port = FakePort::new(venue);
+            binance_filled_unseen(&port, Ok(r#"[{"orderId":"o1","qty":1}]"#));
+            let (factory, _cx) = start(&port, BUY_ONE);
+            settle(1100).await;
+            port.set_ticker(101.0, 101.5);
+            settle(200).await;
+            assert_eq!(port.placements().len(), 1, "{venue}");
+            assert!(factory.book().active_chasers().is_empty(), "{venue}");
+            assert_eq!(port.completes()[0]["filled"], 1.0, "{venue}");
+        }
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_binance_requote_whose_fills_cannot_be_read_places_nothing() {
+    local(async {
+        let port = FakePort::new("binance");
+        binance_filled_unseen(&port, Err("read failed"));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.set_ticker(101.0, 101.5);
+        settle(200).await;
+        assert_eq!(port.placements().len(), 1);
+        assert!(
+            port.errors()
+                .iter()
+                .any(|e| e.contains("could not be read"))
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_fills_read_names_the_symbol_and_starts_near_the_chase() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok("[]"));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.cancels_find_nothing.set(true);
+        port.set_ticker(101.0, 101.5);
+        settle(200).await;
+        let commands = port.commands.borrow();
+        let (symbol, from_ms) = commands
+            .iter()
+            .find_map(|command| match command {
+                Command::Query {
+                    query:
+                        safe_cex_engine::engine::Query::Fills {
+                            symbol, from_ms, ..
+                        },
+                    ..
+                } => Some((symbol.clone(), *from_ms)),
+                _ => None,
+            })
+            .expect("a fills read");
+        assert_eq!(symbol.as_deref(), Some("BTCUSDT"));
+        assert!(from_ms.is_some_and(|from| from > 0.0), "{from_ms:?}");
     })
     .await;
 }
