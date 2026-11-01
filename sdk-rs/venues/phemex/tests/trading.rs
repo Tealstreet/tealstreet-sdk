@@ -1616,6 +1616,75 @@ fn cancel_all_after_create_result(value: impl FnOnce(&HttpRequest) -> Value) -> 
 }
 
 #[test]
+fn a_duplicate_id_or_routing_code_is_never_called_refused() {
+    for code in [11085, 11107] {
+        let mut e = rejection_engine(vec![]);
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 71,
+                orders: vec![opts("rejected-caller")],
+            },
+        );
+        let create = writes(&a)[0].clone();
+        let a = respond(&mut e, &create, json!({"code":code,"msg":"x","data":null}));
+        let outcome = a.iter().find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.outcome),
+            _ => None,
+        });
+        assert_eq!(
+            outcome,
+            Some(Some(safe_cex_engine::Outcome::Unknown)),
+            "{code}"
+        );
+    }
+}
+
+// An unlisted code stays unknown, but the fence must not wait out the signature's expiry.
+#[test]
+fn an_answered_unknown_code_reads_orders_at_once() {
+    let mut e = rejection_engine(vec![]);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 71,
+            orders: vec![opts("rejected-caller")],
+        },
+    );
+    let create = writes(&a)[0].clone();
+    let a = respond(&mut e, &create, json!({"code":12345,"msg":"x","data":null}));
+    assert!(
+        a.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/g-orders/activeList"))),
+        "{a:?}"
+    );
+}
+
+// Live: this body was read as unknown and latched writes for 75 s.
+#[test]
+fn a_code_in_a_200_with_no_data_is_a_definite_refusal() {
+    let mut e = rejection_engine(vec![]);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 71,
+            orders: vec![opts("rejected-caller")],
+        },
+    );
+    let create = writes(&a)[0].clone();
+    let a = respond(
+        &mut e,
+        &create,
+        json!({"code":11038,"msg":"TE_TRIGGER_INVALID","data":null}),
+    );
+    let outcome = a.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.outcome),
+        _ => None,
+    });
+    assert_eq!(outcome, Some(Some(safe_cex_engine::Outcome::Rejected)));
+}
+
+#[test]
 fn definitive_create_rejection_does_not_fence_cancel_all_of_existing_orders() {
     for biz_error in [0, 11001] {
         let a = cancel_all_after_create_result(|create| {
@@ -3259,9 +3328,7 @@ fn the_venue_trimming_an_oversize_reduce_only_order_is_accepted() {
 
 #[test]
 fn listed_refusals_leave_no_uncertain_lock() {
-    for code in [
-        11011, 11041, 11043, 11044, 11048, 11085, 11150, 20004, 39999,
-    ] {
+    for code in [11011, 11041, 11043, 11044, 11048, 11150, 20004, 39999] {
         let mut e = engine();
         let a = command(
             &mut e,

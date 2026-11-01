@@ -69,6 +69,7 @@ pub struct Request {
 /// How long an unapproved builder fee stays believed before a placement re-reads it.
 const BUILDER_RECHECK_MS: f64 = 60_000.0;
 const AMEND_READ_MS: f64 = 5_000.0;
+const AMEND_RETRY_MS: f64 = 1_000.0;
 /// Hyperliquid refuses an order worth less than this.
 const MIN_ORDER_VALUE: f64 = 10.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1333,6 +1334,11 @@ impl Hyperliquid {
         // A job popped inside another's callback cannot open a read until it returns.
         if read.is_err() && std::mem::take(&mut self.trading.amend_issuing) {
             self.trading.amend_retry = Some((cx.set_timer(1.0), id.to_owned()));
+            return;
+        }
+        // A 429 clears soon; the read bound still ends the wait.
+        if read.as_ref().is_err_and(|error| error.contains("HTTP 429")) {
+            self.trading.amend_retry = Some((cx.set_timer(AMEND_RETRY_MS), id.to_owned()));
             return;
         }
         if let Some(timer) = self.trading.amend_wait.take() {
