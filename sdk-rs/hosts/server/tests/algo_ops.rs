@@ -606,6 +606,49 @@ async fn disposing_for_no_browser_stops_the_chases_and_says_why() {
         .await;
 }
 
+/// The live run: the chase ended (filled) while no browser held the account, then
+/// the account was disposed. Its end is kept for the next init, marked replayed.
+#[tokio::test]
+async fn a_chase_that_ended_with_no_browser_is_kept_past_the_dispose() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("chaser:start", web_chase(None));
+            let store = algos
+                .next("store", |data| !active_chasers(data).is_empty())
+                .await;
+            let id = active_chasers(&store["data"])[0]["id"].clone();
+            algos.op("chaser:terminate", id.clone());
+            algos.next("chaser:complete", |_| true).await;
+            let (kept, notice) = tokio::sync::oneshot::channel();
+            let kept = Mutex::new(Some(kept));
+            algos
+                .inbox
+                .send(AlgoInput::Dispose {
+                    reason: "no browser for 60s".into(),
+                    stopped: Some(Box::new(move |notice| {
+                        if let Some(kept) = kept.lock().unwrap().take() {
+                            let _ = kept.send(notice);
+                        }
+                    })),
+                })
+                .unwrap();
+            let kept = tokio::time::timeout(Duration::from_secs(5), notice)
+                .await
+                .unwrap()
+                .unwrap();
+            let [end] = kept.ends.as_slice() else {
+                panic!("one kept chase end: {kept:?}");
+            };
+            let end: Value = serde_json::from_str(end).unwrap();
+            assert_eq!(end["d"]["op"], "chaser:complete");
+            let event = first(&end["d"]["data"]);
+            assert_eq!(event["id"], id);
+            assert_eq!(event["replayed"], true);
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
     LocalSet::new()
@@ -634,6 +677,7 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
                     .unwrap()
                     .unwrap(),
                 "Chase on BTCUSDT stopped: no browser for 60s. Its order may still be open: check it."
+                    .into()
             );
             while let Ok(text) = algos.out.try_recv() {
                 let message: Value = serde_json::from_str(&text).unwrap();

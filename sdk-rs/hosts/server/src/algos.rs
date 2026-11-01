@@ -54,8 +54,25 @@ pub struct Holding {
 /// Sends a frame, if given, to every live holder; says who holds the account.
 pub type Broadcast = Box<dyn Fn(Option<String>) -> Holding + Send>;
 
+/// What a client that is not there to see it is told on its next init: why its
+/// algos stopped, and the ends of chases it missed, as replayable frames.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Kept {
+    pub text: String,
+    pub ends: Vec<String>,
+}
+
+impl From<&str> for Kept {
+    fn from(text: &str) -> Self {
+        Self {
+            text: text.to_owned(),
+            ends: Vec::new(),
+        }
+    }
+}
+
 /// Keeps a stop notice for a client that is not there to see it.
-pub type StopNotice = Box<dyn Fn(String) + Send>;
+pub type StopNotice = Box<dyn Fn(Kept) + Send>;
 
 /// Errors kept for a browser that may not have seen them, oldest dropped first.
 const UNHEARD_ERRORS: usize = 32;
@@ -75,6 +92,8 @@ struct Unheard {
     frame: String,
     /// The order a stop's retrying warning names: a later end of that cancel supersedes it.
     retrying: Option<String>,
+    /// A chase's end: kept past a dispose for the account's next init.
+    end: bool,
 }
 
 /// A page that was away must not hear that a cancel is still retrying once
@@ -199,7 +218,7 @@ impl AccountPort for Port {
             crate::state::Log::warn(&format!("algo error {}: {data}", self.name));
             let frame = algo_error(&self.name, &data);
             let holding = (self.broadcast)(Some(frame.clone()));
-            self.keep_unheard(Some(data), frame, holding, None);
+            self.keep_unheard(Some(data), frame, holding, None, false);
             return;
         }
         let retrying = retrying_of(op, &data);
@@ -211,7 +230,7 @@ impl AccountPort for Port {
                 holding.live = vec![signer.socket()];
             }
             (self.emit)(frame);
-            self.keep_unheard(None, replay, holding, retrying);
+            self.keep_unheard(None, replay, holding, retrying, op == "chaser:complete");
             return;
         }
         let frame = algo_msg(&self.name, op, data);
@@ -301,6 +320,7 @@ impl Port {
         frame: String,
         holding: Holding,
         retrying: Option<String>,
+        end: bool,
     ) {
         let mut unheard = self.unheard.borrow_mut();
         unheard.retain(|error| self.still_unheard(error));
@@ -314,10 +334,28 @@ impl Port {
             error,
             frame,
             retrying,
+            end,
         });
     }
 
     /// The errors no frame followed, once.
+    /// At a dispose with no browser: the unheard errors' messages and chase ends' frames.
+    fn take_unheard_for_dispose(&self) -> (Vec<String>, Vec<String>) {
+        let mut errors = Vec::new();
+        let mut ends = Vec::new();
+        for kept in self.unheard.borrow_mut().drain(..) {
+            if !self.still_unheard(&kept) {
+                continue;
+            }
+            match kept.error {
+                Some(error) => errors.push(error),
+                None if kept.end => ends.push(kept.frame),
+                None => {}
+            }
+        }
+        (errors, ends)
+    }
+
     fn take_unheard(&self) -> Vec<String> {
         self.unheard
             .borrow_mut()
@@ -772,19 +810,25 @@ pub async fn run(
     let stop_notice = |may_rest| stop_notice(&chasers, &twaps, &port.store(), reason, may_rest);
     let (stopped_notice, unsettled_notice) = (stop_notice(false), stop_notice(true));
     // Kept for the next init only when no browser is there to be sent them.
-    let unheard_notices = || -> Vec<String> {
-        port.take_unheard()
+    let unheard_notices = || -> (Vec<String>, Vec<String>) {
+        let (errors, ends) = port.take_unheard_for_dispose();
+        let errors = errors
             .into_iter()
             .map(|data| serde_json::from_str(&data).unwrap_or(data))
-            .collect()
+            .collect();
+        (errors, ends)
     };
     let mut notices = Vec::new();
+    let mut ends = Vec::new();
     match &stopped {
         Some(stopped) => {
-            notices = unheard_notices();
+            (notices, ends) = unheard_notices();
             notices.extend(unsettled_notice.clone());
-            if !notices.is_empty() {
-                stopped(notices.join("\n"));
+            if !notices.is_empty() || !ends.is_empty() {
+                stopped(Kept {
+                    text: notices.join("\n"),
+                    ends: ends.clone(),
+                });
             }
         }
         None => {
@@ -823,10 +867,14 @@ pub async fn run(
     );
     // Its cancels can fail too, with no browser to tell: a fuller notice replaces the first.
     if let Some(stopped) = &stopped {
-        let raised = unheard_notices();
-        if !raised.is_empty() {
+        let (raised, ended) = unheard_notices();
+        if !raised.is_empty() || !ended.is_empty() {
             notices.extend(raised);
-            stopped(notices.join("\n"));
+            ends.extend(ended);
+            stopped(Kept {
+                text: notices.join("\n"),
+                ends: ends.clone(),
+            });
         }
     }
     scope.dispose();
@@ -937,6 +985,7 @@ mod tests {
                 error: None,
                 frame: data.clone(),
                 retrying: retrying_of(op, &data),
+                end: false,
             }
         };
         let retry = "Chaser stopped, but BTCUSDT order 71b464ec is still open: Signing provider is unavailable. Retrying the cancel; it can still fill until then. Cancel it in Open Orders or use Nuke";
