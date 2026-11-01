@@ -3326,3 +3326,21 @@ fn a_refused_key_ends_the_start_with_the_reason() {
     }
     assert_eq!(failures, 1, "named once, not a hang");
 }
+
+#[test]
+fn a_size_amend_of_a_partly_filled_order_treats_the_size_as_the_new_total() {
+    let (mut e, socket) = authenticated("OneWay");
+    let mut old = order("old");
+    old.time_in_force = Some(TimeInForce::GoodTillCancel);
+    old.amount = 0.1;
+    old.filled = 0.04;
+    old.remaining = 0.06;
+    e.store_mut().upsert_order(old);
+    let cancel = {
+        let a = command(&mut e, Command::AmendOrder { command: 1, id: "old".into(), price: None, amount: Some(0.09) });
+        writes(&a)[0].clone()
+    };
+    ws_orders(&mut e, socket, vec![]);
+    let a = respond(&mut e, &cancel, json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}));
+    assert_eq!(p(&writes(&a)[0], "orderQtyRq").as_deref(), Some("0.05"));
+}

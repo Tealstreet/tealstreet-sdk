@@ -96,7 +96,6 @@ struct Amendment {
     reported_at: f64,
     overflow: bool,
     terminal: bool,
-    default_amount: bool,
     started: f64,
 }
 impl Amendment {
@@ -301,7 +300,10 @@ fn replacement(
         symbol: parent.symbol.clone(),
         kind: parent.kind,
         side: parent.side,
-        amount: amount.unwrap_or(parent.remaining),
+        amount: amount
+            .map(|total| safe_cex_engine::num::left_of_total(total, parent.filled))
+            .transpose()?
+            .unwrap_or(parent.remaining),
         price: Some(parent.price),
         trigger_price: None,
         max_slippage_pct: None,
@@ -862,7 +864,6 @@ impl ApexOmni {
                         reported_at: cx.now,
                         overflow: false,
                         terminal: false,
-                        default_amount: amount.is_none(),
                         started: cx.now,
                     });
                 }
@@ -1307,20 +1308,16 @@ impl ApexOmni {
                     let _ = cx.fail_plan(&delivery.plan, error);
                     return;
                 }
-                if amendment.default_amount {
-                    let additional =
-                        crate::account::subtract(amendment.filled, amendment.baseline_filled)
-                            .max(0.0);
-                    amendment.order.amount =
-                        crate::account::subtract(amendment.order.amount, additional);
-                }
+                // The amended total less fills: those since planning come off too.
+                let additional =
+                    crate::account::subtract(amendment.filled, amendment.baseline_filled).max(0.0);
+                amendment.order.amount =
+                    crate::account::subtract(amendment.order.amount, additional);
                 if !amendment.terminal
                     && amendment.filled < amendment.total_amount
                     && amendment.order.amount > 0.0
                 {
-                    let prepared = if amendment.default_amount
-                        && amendment.filled > amendment.baseline_filled
-                    {
+                    let prepared = if amendment.filled > amendment.baseline_filled {
                         validate(std::slice::from_ref(&amendment.order), cx).and_then(|()| {
                             let mut issued = cx
                                 .store

@@ -982,15 +982,18 @@ impl PhemexPerpetuals {
             kind: parent.kind,
             side: parent.side,
             // A resting stop reports leavesQty 0; zero here would mean a full close.
-            amount: amount.unwrap_or(
-                if matches!(parent.kind, OrderType::StopLoss | OrderType::TakeProfit)
-                    && parent.filled == 0.
-                {
-                    parent.amount
-                } else {
-                    parent.remaining
-                },
-            ),
+            amount: amount
+                .map(|total| num::left_of_total(total, parent.filled))
+                .transpose()?
+                .unwrap_or(
+                    if matches!(parent.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                        && parent.filled == 0.
+                    {
+                        parent.amount
+                    } else {
+                        parent.remaining
+                    },
+                ),
             price: Some(if child_amend {
                 parent.price
             } else {
