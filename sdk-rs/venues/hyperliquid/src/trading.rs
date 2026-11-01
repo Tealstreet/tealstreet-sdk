@@ -46,6 +46,10 @@ struct Job {
     builder_checked: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// An amend cancelling this stop before placing its replacement.
+    replacing_stop: Option<(String, OrderSide, OrderType)>,
+    /// What the failure must add: a Plan's text is projected from its recorded fact.
+    stop_note: Option<String>,
 }
 enum Step {
     ScheduleCancel {
@@ -251,6 +255,7 @@ impl Hyperliquid {
         }
         let mut replacement = None;
         let mut amend_source = None;
+        let mut replacing_stop = None;
         let mut amend_size = None;
         let (command, steps) = match command {
             Command::PlaceOrders { command, orders } => {
@@ -312,6 +317,9 @@ impl Hyperliquid {
                     cx.refuse_command(Operation::Mutation, not_sent("Order not found"));
                     return;
                 };
+                if matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                    replacing_stop = Some((old.symbol.clone(), old.side, old.kind));
+                }
                 if !matches!(old.status, OrderStatus::Open | OrderStatus::Creating) {
                     cx.refuse_command(
                         Operation::Mutation,
@@ -440,6 +448,8 @@ impl Hyperliquid {
                 amend_filled: false,
                 builder_checked: false,
                 effective: false,
+                replacing_stop,
+                stop_note: None,
             },
         );
     }
@@ -1286,9 +1296,20 @@ impl Hyperliquid {
     }
     fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
         self.trading.inflight = false;
-        if let Some(job) = self.trading.active.take() {
+        if let Some(mut job) = self.trading.active.take() {
             if let Err(mut error) = result {
                 error = error.partial_ids(&job.ids);
+                if job.effective
+                    && job.ids.is_empty()
+                    && let Some((symbol, side, kind)) = &job.replacing_stop
+                {
+                    job.stop_note = Some(safe_cex_engine::error::stop_gone_text(
+                        symbol,
+                        *side,
+                        *kind,
+                        error.outcome == Some(Outcome::Unknown),
+                    ));
+                }
                 if (job.effective || !job.ids.is_empty())
                     && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
                 {

@@ -146,6 +146,8 @@ struct Job {
     commit: Commit,
     /// The hedged leverage legs: a failure refreshes the account, as native's join did.
     join: bool,
+    /// An amend cancelling this stop before placing its replacement.
+    replacing_stop: Option<(String, String, OrderSide, OrderType)>,
 }
 struct Step {
     receipts: Vec<OrderIdentityReceipt>,
@@ -382,6 +384,7 @@ impl Job {
             replacement_targets: vec![],
             commit: Commit::None,
             join: false,
+            replacing_stop: None,
         }
     }
 }
@@ -1248,6 +1251,10 @@ impl Blofin {
                     id, price, amount, ..
                 } => {
                     let order = cx.store.order(&id).ok_or("Unknown order to amend")?;
+                    if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                        job.replacing_stop =
+                            Some((id.clone(), order.symbol.clone(), order.side, order.kind));
+                    }
                     let mut rows = self.replacement(cx, order, price, amount)?;
                     let real = id.split("__").next().unwrap_or(&id);
                     // Preserve every other protection on a shared native target.
@@ -1587,7 +1594,30 @@ impl Blofin {
                     let finished = cx.finish_plan_call(plan, slot, context);
                     debug_assert!(finished.is_ok(), "Plan call seal stranded");
                 }
-                let failed = cx.fail_plan(plan, error);
+                // Its row ended only because the cancel landed: nothing replaced it.
+                let stop_gone = active
+                    .job
+                    .replacing_stop
+                    .as_ref()
+                    .filter(|(id, ..)| {
+                        active.job.ids.is_empty()
+                            && cx
+                                .store
+                                .order(id)
+                                .is_none_or(|order| order.status == OrderStatus::Canceled)
+                    })
+                    .map(|(_, symbol, side, kind)| {
+                        safe_cex_engine::error::stop_gone_text(
+                            symbol,
+                            *side,
+                            *kind,
+                            error.outcome == Some(safe_cex_engine::Outcome::Unknown),
+                        )
+                    });
+                let failed = match &stop_gone {
+                    Some(note) => cx.fail_plan_noted(plan, error, note),
+                    None => cx.fail_plan(plan, error),
+                };
                 debug_assert!(failed.is_ok(), "Plan terminal stranded");
                 if active.job.join {
                     self.refresh_account(cx);

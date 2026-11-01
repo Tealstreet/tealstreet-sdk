@@ -346,7 +346,10 @@ impl Hyperliquid {
         if let Some(plan) = &custody.plan {
             match result {
                 Err(error) => {
-                    let _ = cx.fail_plan(plan, error);
+                    let _ = match &job.stop_note {
+                        Some(note) => cx.fail_plan_noted(plan, error, note),
+                        None => cx.fail_plan(plan, error),
+                    };
                 }
                 Ok(data) => {
                     if let (Some(slot), Some(context)) = (&custody.slot, &custody.context)
