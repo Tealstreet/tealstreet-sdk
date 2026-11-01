@@ -1,11 +1,7 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, Market, Order, PlaceOrderOpts, Position, StoreData } from '../../types';
+import type { TwapOptions } from '../../webworker/twap/TwapOptions';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,9 +15,13 @@ import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInst
 import { ChaserOrderManager, chaserOrderManagerInstance } from '../../webworker/chaserOrder/ChaserOrderManager';
 import { TwapInstance } from '../../webworker/twap/TwapInstance';
 import { twapManager } from '../../webworker/twap/TwapManager';
-import type { TwapOptions } from '../../webworker/twap/TwapOptions';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const accounts: BaseExchange[] = [];
 const loaded = { markets: true, tickers: true, orders: true, positions: true, balance: true };
@@ -127,7 +127,8 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
     start: vi.fn(idle),
     wsOpen: idle,
     wsMessage: idle,
-    wsClose: idle, wsRouteExhausted: idle,
+    wsClose: idle,
+    wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,
@@ -138,6 +139,14 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
       // not part of the native command these regressions compare.
       const { timeoutMs: _wait, ...command } = JSON.parse(json);
       commands.push(command);
+      // A market close closes: the nuke reads flat back before it reports success.
+      if (command.op === 'placeOrders' && command.orders?.every((o: PlaceOrderOpts) => o.reduceOnly)) {
+        const closed = command.orders.map(
+          (o: PlaceOrderOpts) => `${o.symbol}:${o.side === OrderSide.Sell ? PositionSide.Long : PositionSide.Short}`,
+        );
+        state = { ...state, positions: state.positions?.filter((p) => !closed.includes(`${p.symbol}:${p.side}`)) };
+        dirty = true;
+      }
       return command.command === undefined
         ? '[]'
         : JSON.stringify([
@@ -494,10 +503,13 @@ describe('Rust native current-account reads', () => {
     const r = fixture('mexc');
     await r.start();
     r.store.update({ positions: [{ ...position(), contracts: 9999 }] });
-    r.update({ positions: [
-      { ...position(), id: 'BTCUSDT-long' },
-      { ...position(), id: 'BTCUSDT-short', side: PositionSide.Short, contracts: 3 },
-    ], options: { isHedged: true } });
+    r.update({
+      positions: [
+        { ...position(), id: 'BTCUSDT-long' },
+        { ...position(), id: 'BTCUSDT-short', side: PositionSide.Short, contracts: 3 },
+      ],
+      options: { isHedged: true },
+    });
     await r.exchange.nukePositions(3);
     expect(r.commands.filter((c) => c.op === 'placeOrders').map((c) => c.orders)).toEqual([
       [{ symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 20, reduceOnly: true }],
@@ -531,6 +543,32 @@ describe('Rust native current-account reads', () => {
     expect(logs.join()).toContain('Open positions: unknown, not loaded');
   });
 
+  it('cancels before it closes, so a close cannot fill against the account own bid', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position()] });
+    const cancel = vi.spyOn(r.exchange, 'cancelAllOrders');
+    const place = vi.spyOn(r.exchange, 'placeOrders');
+    await r.exchange.nuke(3);
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(place.mock.invocationCallOrder[0]);
+  });
+
+  it('closes again when a successful close left a position, and says so if it never goes flat', async () => {
+    vi.useFakeTimers();
+    try {
+      const r = fixture();
+      await r.start();
+      r.update({ positions: [position()] });
+      const place = vi.spyOn(r.exchange, 'placeOrders').mockResolvedValue([]);
+      const nuking = r.exchange.nukePositions(3).catch((thrown: unknown) => thrown);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(((await nuking) as Error).message).toMatch(/did not leave the account flat: BTCUSDT/);
+      expect(place).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('names a cause shared by both nuke legs once', async () => {
     const r = fixture();
     await r.start();
@@ -547,33 +585,49 @@ describe('Rust native current-account reads', () => {
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
   });
 
-  it.each(['partial', 'unknown'] as const)('keeps a %s close outcome, names the symbol, retries reduce-only 3 times and cancels orders', async (kind) => {
-    const r = fixture();
-    await r.start();
-    r.update({ positions: [position()], orders: [order()] });
-    const failure = Object.freeze(Object.assign(new Error('Close interrupted'), kind === 'unknown'
-      ? { outcome: 'unknown', clientOrderId: 'close-request', actualClientOrderIds: ['native-close'] }
-      : { partialOrderIds: ['accepted'], partialOrderCount: 1, totalOrderCount: 2 }));
-    const place = vi.spyOn(r.exchange, 'placeOrders').mockRejectedValue(failure);
-    const error = vi.fn();
-    r.exchange.on('error', error);
-    const nuking = r.exchange.nuke(3).catch((thrown: unknown) => thrown);
-    await vi.advanceTimersByTimeAsync(300);
-    const thrown = (await nuking) as Error;
-    expect(thrown.message).toBe('Nuke could not close BTCUSDT: Close interrupted');
-    expect(thrown).toMatchObject(kind === 'unknown' ? { outcome: 'unknown', clientOrderId: 'close-request' } : { partialOrderIds: ['accepted'] });
-    expect(place).toHaveBeenCalledTimes(4);
-    expect(place.mock.calls.every(([[close]]) => close.reduceOnly === true)).toBe(true);
-    expect(error).toHaveBeenCalledOnce();
-    expect(r.commands.filter((c) => c.op === 'cancelSymbolOrders')).toHaveLength(1);
-    expect(r.exchange.isNuking).toBe(false);
-  });
+  it.each(['partial', 'unknown'] as const)(
+    'keeps a %s close outcome, names the symbol, retries reduce-only 3 times and cancels orders',
+    async (kind) => {
+      const r = fixture();
+      await r.start();
+      r.update({ positions: [position()], orders: [order()] });
+      const failure = Object.freeze(
+        Object.assign(
+          new Error('Close interrupted'),
+          kind === 'unknown'
+            ? { outcome: 'unknown', clientOrderId: 'close-request', actualClientOrderIds: ['native-close'] }
+            : { partialOrderIds: ['accepted'], partialOrderCount: 1, totalOrderCount: 2 },
+        ),
+      );
+      const place = vi.spyOn(r.exchange, 'placeOrders').mockRejectedValue(failure);
+      const error = vi.fn();
+      r.exchange.on('error', error);
+      const nuking = r.exchange.nuke(3).catch((thrown: unknown) => thrown);
+      await vi.advanceTimersByTimeAsync(300);
+      const thrown = (await nuking) as Error;
+      expect(thrown.message).toBe('Nuke could not close BTCUSDT: Close interrupted');
+      expect(thrown).toMatchObject(
+        kind === 'unknown' ? { outcome: 'unknown', clientOrderId: 'close-request' } : { partialOrderIds: ['accepted'] },
+      );
+      expect(place).toHaveBeenCalledTimes(4);
+      expect(place.mock.calls.every(([[close]]) => close.reduceOnly === true)).toBe(true);
+      expect(error).toHaveBeenCalledOnce();
+      expect(r.commands.filter((c) => c.op === 'cancelSymbolOrders')).toHaveLength(1);
+      expect(r.exchange.isNuking).toBe(false);
+    },
+  );
 
   it('a transient close failure closes on retry with no final error', async () => {
     const r = fixture();
     await r.start();
     r.update({ positions: [position()] });
-    const place = vi.spyOn(r.exchange, 'placeOrders').mockRejectedValueOnce(new Error('busy')).mockResolvedValue(['close']);
+    const place = vi
+      .spyOn(r.exchange, 'placeOrders')
+      .mockRejectedValueOnce(new Error('busy'))
+      .mockImplementationOnce(async () => {
+        r.update({ positions: [] });
+        return ['closed'];
+      });
     const nuking = r.exchange.nukePositions();
     await vi.advanceTimersByTimeAsync(100);
     await expect(nuking).resolves.toBeDefined();
@@ -595,7 +649,7 @@ describe('Rust native current-account reads', () => {
     expect(place.mock.calls.filter(([[close]]) => close.symbol === 'ETHUSDT')).toHaveLength(4);
   });
 
-  it('stops retrying once a failed close\'s position is gone', async () => {
+  it("stops retrying once a failed close's position is gone", async () => {
     const r = fixture();
     await r.start();
     r.update({ positions: [position()] });
@@ -712,11 +766,17 @@ describe('Rust native current-account reads', () => {
     await r.start();
     r.update({ positions: [position()] });
     let finish!: (ids: string[]) => void;
-    vi.spyOn(r.exchange, 'placeOrders').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    vi.spyOn(r.exchange, 'placeOrders').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
     const first = r.exchange.nukePositions();
     await vi.advanceTimersByTimeAsync(0);
     await expect(r.exchange.nukePositions()).rejects.toThrow('already in progress');
     expect(r.exchange.isNuking).toBe(true);
+    r.update({ positions: [] });
     finish(['accepted']);
     await first;
     expect(r.exchange.isNuking).toBe(false);
@@ -725,14 +785,16 @@ describe('Rust native current-account reads', () => {
   it('still closes valid positions when another one cannot be sized', async () => {
     const r = fixture('mexc');
     await r.start();
-    r.update({ positions: [
-      { ...position(), id: 'BTCUSDT-long' },
-      { ...position(), id: 'ETHUSDT-long', symbol: 'ETHUSDT', contracts: NaN },
-    ] });
+    r.update({
+      positions: [
+        { ...position(), id: 'BTCUSDT-long' },
+        { ...position(), id: 'ETHUSDT-long', symbol: 'ETHUSDT', contracts: NaN },
+      ],
+    });
     await expect(r.exchange.nukePositions()).rejects.toThrow('Nuke could not close ETHUSDT: invalid close size');
-    expect(r.commands.filter((c) => c.op === 'placeOrders').map((c) => c.orders)).toEqual([[
-      { symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 20, reduceOnly: true },
-    ]]);
+    expect(r.commands.filter((c) => c.op === 'placeOrders').map((c) => c.orders)).toEqual([
+      [{ symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 20, reduceOnly: true }],
+    ]);
     expect(r.exchange.isNuking).toBe(false);
   });
 
