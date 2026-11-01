@@ -1142,6 +1142,7 @@ impl Woo {
                     error.message,
                     json(&job.ids).unwrap()
                 );
+                error = error.partial_ids(&job.ids);
             }
             if (job.effective || !job.ids.is_empty())
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
