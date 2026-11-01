@@ -1361,14 +1361,15 @@ impl Okx {
     pub(crate) fn socket_account_is_ready(&self) -> bool {
         self.account.ready
     }
-    pub(crate) fn socket_account_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn socket_account_ready(&mut self, cx: &mut Cx<'_, Pending>, reopened: bool) {
         if self.account.configured {
-            // A read started before the stream, first open included, may miss what it delivered.
-            self.account.join = None;
-            self.account.generation += 1;
-            self.account.orders_generation += 1;
-            self.account.orders_in_flight = false;
-            self.account.revision += 1;
+            if reopened {
+                self.account.join = None;
+                self.account.generation += 1;
+                self.account.orders_generation += 1;
+                self.account.orders_in_flight = false;
+                self.account.revision += 1;
+            }
             self.account_refresh(cx);
         }
     }
