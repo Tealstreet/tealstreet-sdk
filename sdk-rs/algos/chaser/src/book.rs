@@ -26,6 +26,8 @@ const LOST_PLACEMENT_CHECKS_MS: [u64; 4] = [1_000, 2_000, 4_000, 8_000];
 const CANCEL_RETRY_BOUND_MS: u64 = 600_000;
 const CANCEL_RETRY_MIN_MS: u64 = 1_000;
 const CANCEL_RETRY_MAX_MS: u64 = 10_000;
+/// Close All walks positions only, so it never reaches a stranded chase order.
+const CANCEL_WAY_OUT: &str = "Cancel it in Open Orders or use Nuke";
 /// Each chase runs its own supervisor, price checks and REST reconciles.
 pub const MAX_CHASES_PER_ACCOUNT: usize = 50;
 const MISSING_ORDER_CONFIRMATIONS: u32 = 2;
@@ -263,7 +265,7 @@ impl ChaserBook {
             .collect();
         if !gone && !open.is_empty() {
             self.error(&format!(
-                "Chaser could not cancel {symbol} order {}: {}; it may still be open",
+                "Chaser could not cancel {symbol} order {}: {}; it may still be open. {CANCEL_WAY_OUT}",
                 open.join(", "),
                 error.message
             ));
@@ -990,9 +992,11 @@ impl ChaserBook {
             }
             if !retrying && !self.known_closed(id) {
                 retrying = true;
-                chase.mark_complete(&format!("{reason}; retrying the cancel of order {id}"));
+                chase.mark_complete(&format!(
+                    "{reason}; retrying the cancel of order {id}. {CANCEL_WAY_OUT}"
+                ));
                 self.warn(&format!(
-                    "Chaser stopped, but {symbol} order {id} is still open: {}. Retrying the cancel; it can still fill until then",
+                    "Chaser stopped, but {symbol} order {id} is still open: {}. Retrying the cancel; it can still fill until then. {CANCEL_WAY_OUT}",
                     error.message
                 ));
             }

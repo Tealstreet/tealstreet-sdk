@@ -436,9 +436,10 @@ async fn a_refused_cancel_on_stop_says_the_order_may_still_be_open() {
             .unwrap();
         settle(10).await;
         assert!(
-            port.errors()
-                .iter()
-                .any(|e| e.contains("o1") && e.contains("may still be open")),
+            port.errors().iter().any(|e| e.contains("o1")
+                && e.contains("may still be open")
+                && e.contains("Open Orders")
+                && e.contains("Nuke")),
             "{:?}",
             port.errors()
         );
@@ -519,7 +520,9 @@ async fn a_stop_keeps_cancelling_through_an_outage_past_60_s_and_the_row_stays_u
         assert_eq!(rows.len(), 1, "the row stays while its order may be live");
         assert!(rows[0].is_stopped);
         assert!(
-            rows[0].stop_reason.contains("retrying"),
+            rows[0].stop_reason.contains("retrying")
+                && rows[0].stop_reason.contains("Open Orders")
+                && rows[0].stop_reason.contains("Nuke"),
             "{}",
             rows[0].stop_reason
         );
@@ -530,6 +533,11 @@ async fn a_stop_keeps_cancelling_through_an_outage_past_60_s_and_the_row_stays_u
             warnings(&port).len(),
             1,
             "one retrying state: {:?}",
+            warnings(&port)
+        );
+        assert!(
+            warnings(&port)[0].contains("Open Orders") && warnings(&port)[0].contains("Nuke"),
+            "{:?}",
             warnings(&port)
         );
         online.set(true);
@@ -774,9 +782,10 @@ async fn an_order_still_open_when_its_cancel_is_refused_is_reported() {
             "{errors:?}"
         );
         assert!(
-            errors
-                .iter()
-                .any(|e| e.contains("o1") && e.contains("may still be open")),
+            errors.iter().any(|e| e.contains("o1")
+                && e.contains("may still be open")
+                && e.contains("Open Orders")
+                && e.contains("Nuke")),
             "{errors:?}"
         );
     })
