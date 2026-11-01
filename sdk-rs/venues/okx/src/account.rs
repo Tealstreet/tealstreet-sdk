@@ -235,7 +235,6 @@ pub struct AccountState {
     order_versions: HashMap<String, (u64, f64, bool)>,
     balance_version: u64,
     join: Option<Join>,
-    read_again: bool,
     generation: u64,
     orders_in_flight: bool,
     orders_generation: u64,
@@ -1362,14 +1361,6 @@ impl Okx {
     pub(crate) fn socket_account_is_ready(&self) -> bool {
         self.account.ready
     }
-    pub(crate) fn account_read_again(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.read_again && self.account.join.is_none() && !self.account.orders_in_flight
-        {
-            self.account.read_again = false;
-            self.account_refresh(cx);
-        }
-    }
-
     pub(crate) fn socket_account_ready(&mut self, cx: &mut Cx<'_, Pending>, reopened: bool) {
         if self.account.configured {
             if reopened {
@@ -1378,10 +1369,6 @@ impl Okx {
                 self.account.orders_generation += 1;
                 self.account.orders_in_flight = false;
                 self.account.revision += 1;
-            } else {
-                // A startup read still running may predate the stream: read again after it.
-                self.account.read_again =
-                    self.account.join.is_some() || self.account.orders_in_flight;
             }
             self.account_refresh(cx);
         }

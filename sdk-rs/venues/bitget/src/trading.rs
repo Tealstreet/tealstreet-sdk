@@ -280,7 +280,6 @@ enum Effect {
 #[derive(Clone, Serialize)]
 #[serde(untagged)]
 enum Leverage {
-    Number(f64),
     Text(String),
 }
 
@@ -1271,7 +1270,7 @@ impl BitgetFutures {
                         PositionSide::Short => "short",
                     });
                 let mut p = self.classic(cx, symbol)?;
-                p.leverage = Some(Leverage::Number(leverage));
+                p.leverage = Some(Leverage::Text(num::format(leverage)));
                 let path = if self.account.uta {
                     p = Payload {
                         category: Some(self.product().to_uppercase()),
