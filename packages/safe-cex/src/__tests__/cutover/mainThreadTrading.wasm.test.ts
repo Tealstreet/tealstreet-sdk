@@ -90,17 +90,27 @@ const RESPONSES: Record<string, string> = {
 /** Canned Binance USD-M venue; records every request the worker's engine sends. */
 const venue = () => {
   const requests: string[] = [];
+  // A market close flattens the account: Nuke reads flat back from the stream before it reports.
+  const flatten: Array<() => void> = [];
   const transport: Transport = {
     prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
-    connect: (_url, { onOpen }) => {
+    connect: (_url, { onOpen, onMessage }) => {
       setTimeout(onOpen, 0);
+      flatten.push(() =>
+        onMessage(
+          '{"e":"ACCOUNT_UPDATE","E":1700000001000,"T":1700000001000,"a":{"m":"ORDER","B":[],"P":[{"s":"BTCUSDT","pa":"0","ep":"0","cr":"0","up":"0","mt":"cross","iw":"0","ps":"BOTH"}]}}',
+        ),
+      );
       return { send: () => {}, close: () => {} };
     },
     request: async ({ method, url }) => {
       requests.push(`${method} ${url}`);
       const parsed = new URL(url);
       const name = parsed.pathname.split('/').pop()!;
+      if (method === 'POST' && parsed.searchParams.get('type') === 'MARKET') {
+        setTimeout(() => flatten.forEach((send) => send()), 0);
+      }
       // A single cancel is acknowledged with the cancelled order, as Binance USD-M does.
       const body =
         method === 'DELETE' && name === 'order'
