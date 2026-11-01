@@ -176,6 +176,8 @@ pub struct Chase {
     pub verify_fills: Cell<bool>,
     /// The symbol's position size when the watcher last looked.
     pub position_seen: Cell<Option<f64>>,
+    /// Ticker changes seen, to tell a chase that has stopped getting market data.
+    pub tickers_seen: Cell<u64>,
     /// A placement is on the wire: its order may land, so nothing finishes the chase yet.
     placing: Cell<bool>,
     placing_ended: Notify,
@@ -220,6 +222,7 @@ impl Chase {
             needs_reconcile: Cell::new(false),
             verify_fills: Cell::new(false),
             position_seen: Cell::new(None),
+            tickers_seen: Cell::new(0),
             placing: Cell::new(false),
             placing_ended: Notify::new(),
             placements: Cell::new(0),
