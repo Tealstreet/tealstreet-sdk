@@ -424,8 +424,9 @@ impl Hyperliquid {
         if !self.options.public_data_only
             && let Some(actual) = self.sealed_agent()
         {
-            let expected = self.options.key.as_deref().or(self.user());
-            if let Some(expected) = expected
+            // Only the API wallet field names the signer. The trading account is
+            // another wallet by design, and a Hosted server holds no such field.
+            if let Some(expected) = self.options.key.as_deref()
                 && !actual.eq_ignore_ascii_case(expected)
             {
                 cx.notice(
