@@ -11,6 +11,16 @@ import { setMainAcceptsFrames } from './frameForwarding';
 import startWorkerContext, { exchangeWorkers } from './store.webworker';
 import { setTwapLockManager } from './twap/twapLock';
 
+const telegram = vi.hoisted(() => ({ started: [] as Array<() => { isDisposed: boolean }> }));
+vi.mock('./TelgramWorker', () => ({
+  TelegramWorker: class {
+    constructor(private readonly getExchange: () => { isDisposed: boolean }) {}
+    start() {
+      telegram.started.push(this.getExchange);
+    }
+  },
+}));
+
 /** An engine whose account never loads, as on a link too slow for its start bound. */
 let loads = false;
 const built: SlowEngine[] = [];
@@ -113,6 +123,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   loads = false;
   built.length = 0;
+  telegram.started.length = 0;
   vi.spyOn(virtualClock, 'start').mockResolvedValue();
   setMainAcceptsFrames(true);
   setRustEngineTransport(() => transport);
@@ -197,6 +208,47 @@ describe('a Rust start on a slow link', () => {
     expect(reply(messages, 'late')[0].data.success).toBe(false);
     await vi.advanceTimersByTimeAsync(600_000);
     expect(built).toHaveLength(5);
+  });
+});
+
+describe('a Telegram bot on a retried start', () => {
+  const withBot = { ...init, data: { ...init.data, telegramBotToken: 'bot' } };
+
+  it('starts once the retry brings the account up, not during the wait, and reads the live exchange', async () => {
+    const { send } = context();
+    void send(withBot);
+    await vi.advanceTimersByTimeAsync(121_000);
+    expect(telegram.started).toHaveLength(0);
+    loads = true;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(exchangeWorkers[ACCOUNT].isRecovering).toBe(false);
+    expect(telegram.started).toHaveLength(1);
+    expect(telegram.started[0]().isDisposed).toBe(false);
+  });
+
+  it('never starts when the retries run out, or without a token', async () => {
+    const { send } = context();
+    void send(withBot);
+    await vi.advanceTimersByTimeAsync(5 * 120_000 + 130_000 + 1_000);
+    expect(telegram.started).toHaveLength(0);
+
+    delete exchangeWorkers[ACCOUNT];
+    loads = false;
+    const other = context();
+    void other.send(init);
+    await vi.advanceTimersByTimeAsync(121_000);
+    loads = true;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(exchangeWorkers[ACCOUNT].isRecovering).toBe(false);
+    expect(telegram.started).toHaveLength(0);
+  });
+
+  it('still starts once on a first start that succeeds', async () => {
+    loads = true;
+    const { send } = context();
+    void send(withBot);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(telegram.started).toHaveLength(1);
   });
 });
 

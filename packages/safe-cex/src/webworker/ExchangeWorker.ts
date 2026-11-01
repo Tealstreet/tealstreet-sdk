@@ -120,6 +120,8 @@ export class ExchangeWorker {
   private _recoveryUpdateIds: StoreData['updateIds'] | undefined;
   private _startTimedOut = false;
   private _startRetries = 0;
+  /** Runs once, when a retried start finally brings the account up. */
+  onStartRetrySucceeded: (() => void) | undefined;
   private _unsubscribeStore: (() => void) | null = null;
   private readonly _publicDemand = new Map<string, StoreWorkerPayload>();
   private readonly _pendingRequests = new Map<string, { payload: StoreWorkerPayload; generation: number }>();
@@ -1224,7 +1226,11 @@ export class ExchangeWorker {
     for (const demand of this._publicDemand.values()) this.handlePayload(demand);
     if (this._stopped || this._exchange?.isDisposed) return;
     this.sendSnapshot();
-    if (!this._stopped && !this._exchange?.isDisposed) this._ctx.postMessage({ op: 'ws-reconnected' });
+    if (this._stopped || this._exchange?.isDisposed) return;
+    this._ctx.postMessage({ op: 'ws-reconnected' });
+    const succeeded = this.onStartRetrySucceeded;
+    this.onStartRetrySucceeded = undefined;
+    succeeded?.();
   }
 
   private _initializeProcessorsAndHandlers() {

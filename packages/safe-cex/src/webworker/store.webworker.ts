@@ -195,6 +195,11 @@ const start = (ctx: Worker, shared = false) => {
     }
   };
 
+  const startTelegramWorker = (worker: ExchangeWorker, payload: StoreWorkerPayload) => {
+    if (!payload.data.telegramBotToken) return;
+    new TelegramWorker(() => worker.exchange!, payload.data.telegramBotToken).start();
+  };
+
   const initExchangeWorker = async (payload: StoreWorkerPayload) => {
     _initPayload = payload;
     accountName = payload.data.accountName;
@@ -299,7 +304,10 @@ const start = (ctx: Worker, shared = false) => {
     failedWorker = undefined;
     const started = await exchangeWorker.start();
     if (!started) {
-      if (exchangeWorker.retryTimedOutStart()) return;
+      if (exchangeWorker.retryTimedOutStart()) {
+        exchangeWorker.onStartRetrySucceeded = () => startTelegramWorker(exchangeWorker, payload);
+        return;
+      }
       // Startup was cancelled (e.g. dispose mid-flight) or failed. Drop the
       // worker from the map so a subsequent init creates a fresh one instead
       // of reusing a half-initialized instance.
@@ -408,15 +416,7 @@ const start = (ctx: Worker, shared = false) => {
         // re-get exchangeWorker after init
         exchangeWorker = getMyExchangeWorker();
 
-        if (
-          exchangeWorker?.exchange &&
-          !exchangeWorker.exchange.isDisposed &&
-          payload.data.telegramBotToken &&
-          payload.data.telegramBotToken !== ''
-        ) {
-          const telegramWorker = new TelegramWorker(() => exchangeWorker!.exchange!, payload.data.telegramBotToken);
-          telegramWorker.start();
-        }
+        if (exchangeWorker?.exchange && !exchangeWorker.exchange.isDisposed) startTelegramWorker(exchangeWorker, payload);
         break;
       case 'dispose':
         if (shared) {
