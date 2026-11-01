@@ -93,6 +93,14 @@ const SETTLE_AFTER_PLACEMENT_MS: u64 = 1000;
 /// Venues whose order rows lag or vanish, so fills are tracked by event and
 /// reconciled over REST before any replacement.
 const FILL_TRACKED_VENUES: [&str; 3] = ["hyperliquid", "grvt", "bybitdemo"];
+/// Their engines mark a row cancelled on "unknown order" (-2011), which a filled
+/// order also answers, so only the venue's fills tell. An order id read here
+/// takes no time bound: the order id alone selects the rows.
+fn cancel_answer_hides_fills(venue: &str) -> bool {
+    venue.starts_with("binance") || venue == "asterdex"
+}
+/// Fills are read from this long before the chase started, for clock skew.
+const FILLS_FROM_MARGIN_MS: f64 = 60_000.0;
 
 /// Progress of one chase, for TWAP slices.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -186,6 +194,7 @@ impl ChaserBook {
             options,
             &self.cx.port.store(),
             self.cx.scope.child(),
+            self.cx.now_ms(),
         ));
         self.chases.borrow_mut().push(chase.clone());
         let book = self.clone();
@@ -476,7 +485,7 @@ impl ChaserBook {
         if ids.is_empty() {
             return Ok(());
         }
-        for (id, filled) in self.filled_quantities(ids).await? {
+        for (id, filled) in self.filled_quantities(chase, ids).await? {
             if filled > chase.filled_by(&id) {
                 chase.set_filled_amount(&id, filled);
                 self.warn(&format!(
@@ -784,7 +793,7 @@ impl ChaserBook {
             // Order rows carry cumulative fills and the rejoin snapshot
             // refreshes them, so REST only tops up; a venue without fill
             // lookup by order id falls back to the rows.
-            match self.filled_quantities(&chase.ever()).await {
+            match self.filled_quantities(chase, &chase.ever()).await {
                 Ok(filled) => {
                     for (id, amount) in filled {
                         chase.set_filled_amount(&id, amount);
@@ -801,9 +810,10 @@ impl ChaserBook {
         }
         // A cancel the venue answers as done (Bybit 110001) may be an order that
         // filled unseen: only the venue's fills tell, and none, no replacement.
+        let hides_fills = cancel_answer_hides_fills(&self.store().venue);
         let unconfirmed: Vec<String> = to_cancel
             .iter()
-            .filter(|id| !self.known_closed(id))
+            .filter(|id| hides_fills || !self.known_closed(id))
             .cloned()
             .collect();
         if !fill_tracked && !unconfirmed.is_empty() {
@@ -829,7 +839,7 @@ impl ChaserBook {
             } else {
                 chase.current()
             };
-            match self.filled_quantities(&ids).await {
+            match self.filled_quantities(chase, &ids).await {
                 Ok(filled) => {
                     for (id, amount) in filled {
                         chase.set_filled_amount(&id, amount);
@@ -860,8 +870,12 @@ impl ChaserBook {
         Ok(())
     }
 
-    async fn filled_quantities(&self, ids: &[String]) -> Result<Vec<(String, f64)>, String> {
-        safe_cex_algos::executor::timeout(ANSWER_BOUND_MS, self.read_filled_quantities(ids))
+    async fn filled_quantities(
+        &self,
+        chase: &Chase,
+        ids: &[String],
+    ) -> Result<Vec<(String, f64)>, String> {
+        safe_cex_algos::executor::timeout(ANSWER_BOUND_MS, self.read_filled_quantities(chase, ids))
             .await
             .unwrap_or_else(|_| {
                 Err(format!(
@@ -871,7 +885,11 @@ impl ChaserBook {
             })
     }
 
-    async fn read_filled_quantities(&self, ids: &[String]) -> Result<Vec<(String, f64)>, String> {
+    async fn read_filled_quantities(
+        &self,
+        chase: &Chase,
+        ids: &[String],
+    ) -> Result<Vec<(String, f64)>, String> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Execution {
@@ -881,9 +899,10 @@ impl ChaserBook {
         let mut filled = Vec::new();
         for id in ids {
             let query = Query::Fills {
-                symbol: None,
+                symbol: Some(chase.options.symbol.clone()),
                 order_id: Some(id.clone()),
-                from_ms: Some(0.0),
+                from_ms: (!cancel_answer_hides_fills(&self.store().venue))
+                    .then_some(chase.started_ms - FILLS_FROM_MARGIN_MS),
                 to_ms: None,
                 limit: Some(1000),
             };
@@ -1272,7 +1291,7 @@ impl ChaserBook {
         refusal: Option<&VenueError>,
     ) -> Option<String> {
         let filled = self
-            .filled_quantities(std::slice::from_ref(&id.to_owned()))
+            .filled_quantities(chase, std::slice::from_ref(&id.to_owned()))
             .await
             .ok()
             .and_then(|rows| rows.first().map(|(_, amount)| *amount));
@@ -1315,7 +1334,7 @@ impl ChaserBook {
         if chase.options.client_id.is_some()
             && !ids.is_empty()
             && self.fill_tracked()
-            && let Ok(filled) = self.filled_quantities(&ids).await
+            && let Ok(filled) = self.filled_quantities(chase, &ids).await
         {
             for (id, amount) in filled {
                 chase.set_filled_amount(&id, amount);

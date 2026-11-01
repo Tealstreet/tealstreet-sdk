@@ -145,6 +145,7 @@ struct State {
 pub struct Chase {
     pub id: String,
     pub options: ChaserOptions,
+    pub started_ms: f64,
     pub target_position_contracts: Option<f64>,
     /// The supervisor's tasks. Cleanup never aborts it mid-placement; it exits
     /// cooperatively once stopped, so a placement in flight is still cancelled.
@@ -177,7 +178,13 @@ pub struct Dirty {
 }
 
 impl Chase {
-    pub fn new(id: String, options: ChaserOptions, store: &AlgoStore, scope: Scope) -> Self {
+    pub fn new(
+        id: String,
+        options: ChaserOptions,
+        store: &AlgoStore,
+        scope: Scope,
+        started_ms: f64,
+    ) -> Self {
         let target_position_contracts = (!options.reduce_only()).then(|| {
             let side = options.entry_side();
             let existing = store
@@ -190,6 +197,7 @@ impl Chase {
         let watch_scope = scope.child();
         Self {
             id,
+            started_ms,
             target_position_contracts,
             scope,
             watch_scope,

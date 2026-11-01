@@ -1132,6 +1132,93 @@ async fn a_slow_replacement_row_does_not_read_as_the_order_leaving_the_book() {
     .await;
 }
 
+/// As these venues answer: a read with no symbol is empty, and a filled order's
+/// cancel reads as done with its row Canceled (-2011).
+fn binance_filled_unseen(port: &Rc<FakePort>, fills: Result<&'static str, &'static str>) {
+    port.accept_placements();
+    let accept = RefCell::new(std::mem::replace(
+        &mut *port.responder.borrow_mut(),
+        Box::new(|_| Ok("null".into())),
+    ));
+    *port.responder.borrow_mut() = Box::new(move |command| match command {
+        Command::Query {
+            query: safe_cex_engine::engine::Query::Fills { symbol, .. },
+            ..
+        } => match symbol {
+            Some(_) => fills.map(Into::into).map_err(VenueError::new),
+            None => Ok("[]".into()),
+        },
+        other => (accept.borrow_mut())(other),
+    });
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_binance_order_filled_unseen_is_not_placed_again() {
+    local(async {
+        for venue in ["binance", "asterdex"] {
+            let port = FakePort::new(venue);
+            binance_filled_unseen(&port, Ok(r#"[{"orderId":"o1","qty":1}]"#));
+            let (factory, _cx) = start(&port, BUY_ONE);
+            settle(1100).await;
+            port.set_ticker(101.0, 101.5);
+            settle(200).await;
+            assert_eq!(port.placements().len(), 1, "{venue}");
+            assert!(factory.book().active_chasers().is_empty(), "{venue}");
+            assert_eq!(port.completes()[0]["filled"], 1.0, "{venue}");
+        }
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_binance_requote_whose_fills_cannot_be_read_places_nothing() {
+    local(async {
+        let port = FakePort::new("binance");
+        binance_filled_unseen(&port, Err("read failed"));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.set_ticker(101.0, 101.5);
+        settle(200).await;
+        assert_eq!(port.placements().len(), 1);
+        assert!(
+            port.errors()
+                .iter()
+                .any(|e| e.contains("could not be read"))
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_fills_read_names_the_symbol_and_starts_near_the_chase() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok("[]"));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.cancels_find_nothing.set(true);
+        port.set_ticker(101.0, 101.5);
+        settle(200).await;
+        let commands = port.commands.borrow();
+        let (symbol, from_ms) = commands
+            .iter()
+            .find_map(|command| match command {
+                Command::Query {
+                    query:
+                        safe_cex_engine::engine::Query::Fills {
+                            symbol, from_ms, ..
+                        },
+                    ..
+                } => Some((symbol.clone(), *from_ms)),
+                _ => None,
+            })
+            .expect("a fills read");
+        assert_eq!(symbol.as_deref(), Some("BTCUSDT"));
+        assert!(from_ms.is_some_and(|from| from > 0.0), "{from_ms:?}");
+    })
+    .await;
+}
+
 /// The stop reason stays true when a later attempt's cancel goes through.
 #[tokio::test(start_paused = true)]
 async fn a_requote_cancel_that_later_succeeds_says_an_attempt_failed() {
