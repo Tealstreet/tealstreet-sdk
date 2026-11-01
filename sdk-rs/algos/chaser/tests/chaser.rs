@@ -447,6 +447,54 @@ async fn a_venue_without_symbol_cancel_requotes_by_id() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_chase_with_no_market_data_says_so_once_and_a_ticking_one_does_not() {
+    local(async {
+        let port = FakePort::new("blofin");
+        port.accept_placements();
+        let (_factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        for _ in 0..3 {
+            settle(20_000).await;
+            port.set_ticker(100.0, 100.5);
+        }
+        assert!(
+            warnings(&port)
+                .iter()
+                .all(|text| !text.contains("no market data"))
+        );
+        settle(100_000).await;
+        let told = warnings(&port)
+            .iter()
+            .filter(|text| text.contains("no market data"))
+            .count();
+        assert_eq!(told, 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_chase_keeps_its_row_until_its_completion_is_out() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        *port.unanswered.borrow_mut() =
+            Some(Box::new(|command| matches!(command, Command::Query { .. })));
+        let id = factory.book().active_chasers()[0].id.clone();
+        factory.book().remove(&id);
+        // Past the page's 3 s for a row gone alone, with the fills read still out.
+        settle(5_000).await;
+        assert!(port.completes().is_empty());
+        assert_eq!(factory.book().active_chasers().len(), 1);
+        settle(20_000).await;
+        assert_eq!(port.completes().len(), 1);
+        assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_refused_requote_cancel_stops_the_chase_visibly_and_places_nothing_more() {
     local(async {
         let port = FakePort::new("bybit");
