@@ -871,7 +871,11 @@ pub async fn run(
     }
     twap.terminate_all();
     let errors_before = port.errors.get();
-    let deadline_passed = tokio::time::timeout(SHUTDOWN_DEADLINE, book.shutdown(reason))
+    let settling = async {
+        twap.placements_settled().await;
+        book.shutdown(reason).await;
+    };
+    let deadline_passed = tokio::time::timeout(SHUTDOWN_DEADLINE, settling)
         .await
         .is_err();
     if deadline_passed {

@@ -10,7 +10,7 @@ use safe_cex_native::{
 use safe_cex_remote_signer::{Outbox, SignerLink, remote_account};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
@@ -306,6 +306,8 @@ pub struct Registry {
     ids: AtomicU64,
     engine_config: ServerConfig,
     pub resume_grace: Duration,
+    /// The process is going away: no new account starts.
+    draining: AtomicBool,
     /// 5-10 account starts per second per egress IP, with jitter (DESIGN sizing).
     pacer: crate::pacing::Pacer,
     /// Why algos stopped while no browser was there to see it, one per
@@ -543,6 +545,7 @@ impl Registry {
                 ..ServerConfig::default()
             },
             resume_grace,
+            draining: AtomicBool::new(false),
             pacer: crate::pacing::Pacer::new(7, Duration::from_millis(60)),
             notices: Arc::default(),
         }
@@ -611,6 +614,9 @@ impl Registry {
         token: Option<(String, u64)>,
         outbox: Outbox,
     ) -> Result<Arc<Account>, String> {
+        if self.draining.load(Ordering::Relaxed) {
+            return Err("The server is restarting; reconnecting".into());
+        }
         let key = (user.to_owned(), init.account_name.clone());
         let fingerprint = init.fingerprint();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
@@ -936,6 +942,25 @@ impl Registry {
         drop(accounts);
         *account.holders.lock().unwrap() = Holders::default();
         Self::stop(account, reason, stopped);
+    }
+
+    /// The process is stopping: every account's algos settle and its engine ends,
+    /// within `deadline`. Holders stay, so browsers still sign those cancels and
+    /// are told. False if some account had not ended by then.
+    pub async fn drain(&self, deadline: Duration) -> bool {
+        self.draining.store(true, Ordering::Relaxed);
+        let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
+        for account in &accounts {
+            Self::stop(account, "the server is restarting", None);
+        }
+        let until = tokio::time::Instant::now() + deadline;
+        while self.threads.accounts() > 0 {
+            if tokio::time::Instant::now() >= until {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        true
     }
 
     /// Moves a closing socket's private accounts under `resume_id` for the grace
@@ -1399,6 +1424,35 @@ pub(crate) mod tests {
             (account.user.clone(), account.name.clone()),
             account.clone(),
         );
+    }
+
+    #[tokio::test]
+    async fn a_drain_stops_every_account_keeps_its_holders_and_refuses_new_ones() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = Arc::new(Registry::new(
+                    EngineThreads::start(1).unwrap(),
+                    Duration::from_millis(1),
+                    Duration::from_secs(60),
+                ));
+                let (account, mut inbox) = held_account();
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .insert(("u".into(), "acct".into()), account.clone());
+                assert!(registry.drain(Duration::from_millis(100)).await);
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert_eq!(account.holders.lock().unwrap().by_id.len(), 1);
+                let refused = registry
+                    .obtain("u", &init_frame(""), true, 2, None, Arc::new(|_| true))
+                    .await;
+                assert!(refused.is_err_and(|error| error.contains("restarting")));
+            })
+            .await;
     }
 
     #[tokio::test]

@@ -99,6 +99,13 @@ const FILL_TRACKED_VENUES: [&str; 3] = ["hyperliquid", "grvt", "bybitdemo"];
 fn cancel_answer_hides_fills(venue: &str) -> bool {
     venue.starts_with("binance") || venue == "asterdex"
 }
+/// Venues whose order amounts are lots; their fills read in base units.
+fn amounts_in_lots(venue: &str) -> bool {
+    matches!(venue, "kucoin" | "mexc" | "blofin" | "okx" | "bitrue")
+}
+/// How long a row may trail its cancel's answer (Phemex acks `Init`) before fills are read.
+const ROW_CLOSE_WAIT_MS: u64 = 1_000;
+const ROW_CLOSE_POLL_MS: u64 = 100;
 /// Fills are read from this long before the chase started, for clock skew.
 const FILLS_FROM_MARGIN_MS: f64 = 60_000.0;
 
@@ -344,9 +351,14 @@ impl ChaserBook {
     /// rather than reporting the chase finished as if nothing were left behind.
     /// Not for an order the store has since seen finish, while the cancel waited.
     fn cancel_failed(&self, symbol: &str, ids: &[String], error: &VenueError) -> bool {
-        let gone = ["already canceled", "already filled", "never placed"]
-            .iter()
-            .any(|phrase| error.message.contains(phrase));
+        let gone = [
+            "already canceled",
+            "already filled",
+            "never placed",
+            "not exist",
+        ]
+        .iter()
+        .any(|phrase| error.message.contains(phrase));
         let open: Vec<&str> = ids
             .iter()
             .filter(|id| !self.known_closed(id))
@@ -811,6 +823,16 @@ impl ChaserBook {
         // A cancel the venue answers as done (Bybit 110001) may be an order that
         // filled unseen: only the venue's fills tell, and none, no replacement.
         let hides_fills = cancel_answer_hides_fills(&self.store().venue);
+        if !hides_fills && !fill_tracked {
+            let mut waited = 0;
+            while waited < ROW_CLOSE_WAIT_MS
+                && !chase.is_stopped()
+                && !to_cancel.iter().all(|id| self.known_closed(id))
+            {
+                self.cx.sleep_ms(ROW_CLOSE_POLL_MS).await;
+                waited += ROW_CLOSE_POLL_MS;
+            }
+        }
         let unconfirmed: Vec<String> = to_cancel
             .iter()
             .filter(|id| hides_fills || !self.known_closed(id))
@@ -916,16 +938,35 @@ impl ChaserBook {
                 .iter()
                 .filter(|row| &row.order_id == id)
                 .map(|row| row.qty)
-                .sum();
+                .sum::<f64>()
+                / self.base_per_placement_unit(chase);
             filled.push((id.clone(), total));
         }
         Ok(filled)
     }
 
+    fn base_per_placement_unit(&self, chase: &Chase) -> f64 {
+        let store = self.store();
+        if !amounts_in_lots(&store.venue) {
+            return 1.0;
+        }
+        store
+            .markets
+            .get(&chase.options.symbol)
+            .and_then(|market| market.contract_size)
+            .filter(|size| *size > 0.0)
+            .unwrap_or(1.0)
+    }
+
     /// What landed, even after a STOP: the caller makes it current for cleanup to cancel.
     async fn try_place_orders(&self, chase: &Rc<Chase>) -> Vec<String> {
         chase.set_placing(true);
+        let amount = chase.remaining();
         let ids = self.place_until_resting(chase).await;
+        // A split order's parts are not known apart.
+        if let [id] = ids.as_slice() {
+            chase.note_placed(id, amount);
+        }
         chase.set_placing(false);
         ids
     }
@@ -937,6 +978,7 @@ impl ChaserBook {
             10
         };
         let mut tries = 1;
+        let mut last_refusal: Option<String> = None;
         loop {
             if chase.is_stopped() {
                 return Vec::new();
@@ -948,7 +990,10 @@ impl ChaserBook {
             }
             if tries >= max_tries {
                 self.error(&format!(
-                    "Chaser failed to place orders after {max_tries} tries"
+                    "Chaser failed to place orders after {max_tries} tries{}",
+                    last_refusal
+                        .as_deref()
+                        .map_or_else(String::new, |refusal| format!(": {refusal}"))
                 ));
                 chase.mark_complete(&format!("Failed to place orders after {max_tries} tries"));
                 self.check_and_mark_if_complete(chase);
@@ -990,6 +1035,9 @@ impl ChaserBook {
                 },
                 Err(error) => (Vec::new(), error.outcome == Some(Outcome::Unknown)),
             };
+            if let Err(error) = &placed {
+                last_refusal = Some(error.message.clone());
+            }
             let mut unconfirmed = lost;
             if let Some(client_order_id) = client_order_id.as_deref()
                 && ids.is_empty()
@@ -1323,7 +1371,7 @@ impl ChaserBook {
                 .filter_map(|id| {
                     store
                         .order(id)
-                        .map(|order| (order.id.clone(), placement_filled(order)))
+                        .map(|order| (order.id.clone(), chase.row_filled(order)))
                 })
                 .collect()
         };

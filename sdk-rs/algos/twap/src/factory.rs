@@ -56,6 +56,9 @@ struct Inner {
     rescheduled: Notify,
     driver_started: Cell<bool>,
     client_ids: ClientIdMinter,
+    /// Slice placements awaiting their answer: each may yet land.
+    placing: Cell<usize>,
+    placed: Notify,
 }
 
 impl TwapFactory {
@@ -70,6 +73,8 @@ impl TwapFactory {
                 rescheduled: Notify::new(),
                 driver_started: Cell::new(false),
                 client_ids: ClientIdMinter::default(),
+                placing: Cell::new(0),
+                placed: Notify::new(),
             }),
         }
     }
@@ -85,11 +90,18 @@ impl TwapFactory {
 
     /// A nuke's first step: stop every running TWAP so it places no further
     /// slice, and return the ids it stopped. Its chase slices stop with the
-    /// chaser book's `stop_for_nuke`.
+    /// chaser book's `stop_for_nuke`; then await [`Self::placements_settled`].
     pub fn stop_for_nuke(&self) -> Vec<String> {
         let stopped = self.inner.book.borrow().running_ids();
         self.terminate_all();
         stopped
+    }
+
+    /// Until no slice placement is on the wire, so a sweep sees what landed.
+    pub async fn placements_settled(&self) {
+        while self.inner.placing.get() > 0 {
+            self.inner.placed.notified().await;
+        }
     }
 
     /// Start a TWAP for a typed caller such as the exec `twap` command, with
@@ -251,10 +263,13 @@ impl Inner {
             }
         };
         let future = cx.port.command(command);
+        inner.placing.set(inner.placing.get() + 1);
         let (inner, task_cx) = (inner.clone(), cx.clone());
         let symbol = request.symbol.clone();
         cx.spawn(async move {
             let outcome = placement_outcome(future.await);
+            inner.placing.set(inner.placing.get() - 1);
+            inner.placed.notify_waiters();
             match (settle_token, outcome) {
                 (Some(token), outcome) => Self::settled(&inner, &task_cx, &twap_id, token, outcome),
                 (None, Err(failure)) => report_remainder(&task_cx, &symbol, &failure.message),

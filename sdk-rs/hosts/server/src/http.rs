@@ -36,6 +36,25 @@ pub struct App {
     pub config: Config,
     pub started: Instant,
     pub public_per_ip: Mutex<HashMap<IpAddr, usize>>,
+    /// True once sockets must close: the process is stopping.
+    pub closing: tokio::sync::watch::Sender<bool>,
+}
+
+/// Inside the 30 s a roll allows, with room for the close frames.
+const DRAIN_DEADLINE: Duration = Duration::from_secs(25);
+const CLOSE_FRAMES_DEADLINE: Duration = Duration::from_secs(2);
+
+/// SIGTERM: settle every account while browsers can still sign, then close each
+/// socket 1001 so its page reconnects to the next process.
+pub async fn drain(app: &App) {
+    if !app.registry.drain(DRAIN_DEADLINE).await {
+        Log::warn("drain passed its deadline; orders may rest");
+    }
+    let _ = app.closing.send(true);
+    let until = tokio::time::Instant::now() + CLOSE_FRAMES_DEADLINE;
+    while app.metrics.snapshot().0 > 0 && tokio::time::Instant::now() < until {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 pub fn router(app: Arc<App>) -> Router {
@@ -278,6 +297,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
     let mut loaded = session.take_loaded();
     session.open().await;
     let taken_over = session.taken_over();
+    let mut closing = app.closing.subscribe();
     let close_at = expires.map(|expires_at_ms| {
         let remaining = Duration::from_millis(expires_at_ms.saturating_sub(now_ms()));
         tokio::time::Instant::now() + remaining + TOKEN_GRACE
@@ -304,6 +324,10 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
             _ = overflow.notified() => {
                 Log::warn("slow client dropped: outbound queue full");
                 send(&mut sink, close(1013, "Client is not reading; reconnect")).await;
+                break;
+            }
+            _ = closing.changed() => {
+                send(&mut sink, close(1001, "Server restarting")).await;
                 break;
             }
             _ = &mut expiry => {
