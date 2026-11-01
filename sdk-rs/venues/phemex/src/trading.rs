@@ -977,6 +977,24 @@ impl PhemexPerpetuals {
                 _ => return Err("Phemex invalid virtual bracket".into()),
             }
         }
+        // Hedged rows report reduceOnly false, so the row's flag would turn a close's
+        // replacement into an opening order on the other side.
+        let position_side = self
+            .trading
+            .sides
+            .get(&base)
+            .filter(|_| self.live_order_metadata(cx, &base))
+            .map(String::as_str)
+            .or_else(|| self.account.order_pos_side(&base));
+        let reduce_only = match position_side {
+            Some("Long") => parent.side == OrderSide::Sell,
+            Some("Short") => parent.side == OrderSide::Buy,
+            Some(_) => parent.reduce_only,
+            None if self.account.mode(&parent.symbol) == Some(PositionMode::Hedged) => {
+                return Err("Phemex amendment position side is unknown".into());
+            }
+            None => parent.reduce_only,
+        };
         let opts = PlaceOrderOpts {
             symbol: parent.symbol.clone(),
             kind: parent.kind,
@@ -1000,7 +1018,7 @@ impl PhemexPerpetuals {
             max_slippage_pct: None,
             stop_loss: sl,
             take_profit: tp,
-            reduce_only: Some(parent.reduce_only),
+            reduce_only: Some(reduce_only),
             time_in_force: parent.time_in_force,
             trigger_type: parent.trigger_type,
             tp_trigger_type: if parent.kind == OrderType::TakeProfit {
