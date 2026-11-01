@@ -59,6 +59,8 @@ pub struct Request {
     effect: Effect,
     order_reply: OrderReply,
 }
+/// How long an unapproved builder fee stays believed before a placement re-reads it.
+const BUILDER_RECHECK_MS: f64 = 60_000.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OrderReply {
     Rows,
@@ -311,7 +313,12 @@ impl Hyperliquid {
                     kind: old.kind,
                     side: old.side,
                     price: Some(price.unwrap_or(old.price)),
-                    amount: amount.unwrap_or(old.amount),
+                    // A partly filled order re-sends only what is left.
+                    amount: amount.unwrap_or(if old.filled > 0.0 {
+                        old.remaining
+                    } else {
+                        old.amount
+                    }),
                     reduce_only: Some(old.reduce_only),
                     time_in_force: old.time_in_force,
                     trigger_price: None,
@@ -641,9 +648,18 @@ impl Hyperliquid {
             );
             return;
         }
-        let needs_builder = matches!(job.steps.front(), Some(Step::Place(_)))
-            && self.account.builder_approved.is_none()
-            && !job.builder_checked;
+        let placing = matches!(job.steps.front(), Some(Step::Place(_)));
+        let needs_builder =
+            placing && self.account.builder_approved.is_none() && !job.builder_checked;
+        // The fee may have been approved since: re-read without holding this order.
+        if placing
+            && !self.spot
+            && self.account.builder_approved == Some(false)
+            && self.options.application_id.is_some()
+            && cx.now - self.account.builder_read_at >= BUILDER_RECHECK_MS
+        {
+            self.check_builder(cx);
+        }
         if needs_builder {
             if let Err(error) = self.park_trade_builder(cx) {
                 self.finish_trade(cx, Err(error));

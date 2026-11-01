@@ -1906,3 +1906,42 @@ fn cited_margin_refusal_with_an_accepted_row_is_known_partial() {
     assert!(e.store().order("900").is_some());
     no_trade(&actions);
 }
+
+#[test]
+fn a_price_only_amend_of_a_partly_filled_order_sends_what_is_left() {
+    let (mut e, socket) = boot();
+    e.handle(1500., Event::WsMessage { socket, text: r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"# });
+    e.drain_actions().for_each(drop);
+    let amended = command(
+        &mut e,
+        NOW,
+        Command::AmendOrder {
+            command: OWNER,
+            id: "9".into(),
+            price: Some(85.),
+            amount: None,
+        },
+    );
+    let cancel = native_release(&mut e, &amended);
+    respond(
+        &mut e,
+        NOW + 1.,
+        &cancel,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let settled: Vec<_> = e.drain_actions().collect();
+    let paced = prepare_for_pacing(&mut e, NOW + 1., &settled);
+    let (timer, at) = paced
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > NOW + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("same-owner replacement pacing");
+    e.handle(at, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let replacement = native_release_at(&mut e, at, &actions);
+    let wire: Value = serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(wire["action"]["orders"][0]["s"], "6");
+}
