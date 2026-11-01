@@ -1571,3 +1571,21 @@ fn cancelling_a_gone_order_is_done() {
     assert!(done(&mut e).is_ok());
     assert!(e.store().order("a").is_none());
 }
+
+#[test]
+fn order_events_of_any_shape_never_make_a_placed_order_invalid() {
+    for events in [
+        r#"null"#,
+        r#"[{"type":"PLACE","order":{"orderId":"o"},"reducedQuantity":null}]"#,
+        r#"[{"type":"EXECUTION","amount":null},{"type":null}]"#,
+    ] {
+        let (mut e, _) = ready();
+        place(&mut e, vec![limit()]);
+        let r = http(&mut e, "sendorder");
+        let body = format!(
+            r#"{{"result":"success","sendStatus":{{"status":"placed","order_id":"n","orderEvents":{events}}}}}"#
+        );
+        reply(&mut e, &r, 200, &body);
+        assert!(done(&mut e).is_ok(), "{events}");
+    }
+}

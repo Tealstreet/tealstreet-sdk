@@ -11,6 +11,7 @@ function rig() {
     const body = JSON.parse(request.body);
     if (body.type === 'spotMetaAndAssetCtxs') return spotResponse(hyperliquidSpotMeta);
     if (body.type === 'spotClearinghouseState') return spotResponse(hyperliquidSpotBalance);
+    if (body.type === 'frontendOpenOrders') return spotResponse([]);
     assert(new URL(request.url).pathname === '/exchange');
     if (body.action.type === 'cancel') return spotResponse({ status: 'ok', response: { type: 'cancel', data: { statuses: rejectCancel ? [{ error: 'Order was never placed' }] : ['success'] } } });
     assert.equal(body.action.type, 'order');

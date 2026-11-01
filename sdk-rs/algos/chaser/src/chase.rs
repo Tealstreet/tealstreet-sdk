@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use safe_cex_algos::executor::Instant;
 use safe_cex_algos::{AlgoStore, Scope};
-use safe_cex_engine::VenueError;
+use safe_cex_engine::error::VenueError;
 use safe_cex_engine::model::{Order, OrderSide, OrderStatus, PositionSide};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
