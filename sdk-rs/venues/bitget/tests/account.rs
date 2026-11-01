@@ -1068,3 +1068,41 @@ fn a_flat_classic_account_learns_its_position_mode_at_startup() {
     );
     assert!(h.engine.store().hedged());
 }
+
+fn stored_stop(h: &Harness, id: &str) -> safe_cex_engine::model::Order {
+    let mut stop = h.engine.store().orders()[0].clone();
+    stop.id = id.into();
+    stop.parent_id = None;
+    stop.kind = safe_cex_engine::model::OrderType::StopLoss;
+    stop
+}
+
+#[test]
+fn a_same_session_cancel_clears_a_stop() {
+    let mut h = Harness::classic();
+    let stop = stored_stop(&h, "my-stop");
+    h.engine.store_mut().upsert_order(stop);
+    h.requests.clear();
+    h.command(safe_cex_engine::Command::CancelOrders {
+        command: 91,
+        ids: vec!["my-stop".into()],
+    });
+    let cancel = h
+        .requests
+        .iter()
+        .find(|r| r.url.contains("cancel"))
+        .expect("a cancel request")
+        .id;
+    h.reply(
+        cancel,
+        200,
+        r#"{"code":"00000","data":{"successList":[{"orderId":"my-stop"}],"failureList":[]}}"#,
+    );
+    assert!(
+        h.done.iter().any(|(id, r)| *id == 91 && r.is_ok()),
+        "{:?}",
+        h.done
+    );
+    let status = h.engine.store().order("my-stop").map(|o| o.status);
+    assert_ne!(status, Some(safe_cex_engine::model::OrderStatus::Open));
+}
