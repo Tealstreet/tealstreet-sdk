@@ -60,6 +60,9 @@ impl Venue for WeightedReads {
     fn fence_uncertain_placements(&self) -> bool {
         self.inner.fence_uncertain_placements()
     }
+    fn enforces_reduce_only(&self, store: &safe_cex_engine::Store, symbol: &str) -> bool {
+        self.inner.enforces_reduce_only(store, symbol)
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.inner.reconcile_uncertain(cx, symbols);
     }
