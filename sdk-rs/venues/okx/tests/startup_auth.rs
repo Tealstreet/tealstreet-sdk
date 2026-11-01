@@ -339,6 +339,32 @@ fn rejected_read_only_key_fails_startup_without_deactivating() {
 }
 
 #[test]
+fn an_ip_outside_the_key_whitelist_fails_startup_saying_to_add_the_new_ips() {
+    let mut engine = crate::support::engine(keyed());
+    let mut rig = Rig::default();
+    let config = to_config(&mut engine, &mut rig);
+    respond(
+        &mut engine,
+        &config,
+        200,
+        r#"{"code":"50110","msg":"Your IP 203.0.113.7 is not included in your API key's IP whitelist.","data":[]}"#,
+        2.,
+    );
+    rig.take(&mut engine, 2.);
+    rig.run(&mut engine, 600_000.);
+    assert_eq!(rig.failures.len(), 1);
+    assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthPermission));
+    assert!(
+        rig.failures[0]
+            .message
+            .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT),
+        "{}",
+        rig.failures[0].message
+    );
+    assert_eq!(rig.deactivated, 0);
+}
+
+#[test]
 fn invalid_read_only_credentials_fail_startup() {
     let mut engine = crate::support::engine(Options {
         read_credentials: Some(ReadCredentials {

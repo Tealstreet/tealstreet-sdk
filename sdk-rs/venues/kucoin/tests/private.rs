@@ -338,6 +338,30 @@ fn standalone_stop_direction_accounts_for_side_and_keeps_trigger_basis() {
     );
 }
 #[test]
+fn an_account_read_the_ip_whitelist_refuses_is_a_named_auth_failure() {
+    let mut h = Harness::new();
+    h.ready();
+    h.poll();
+    let body = r#"{"code":"400006","msg":"The requested IP address is not in the API whitelist"}"#;
+    for _ in 0..3 {
+        let r = h.http("/positions");
+        h.respond(&r, 400, body);
+    }
+    assert!(
+        h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "auth.rejected"
+                    && event.level == safe_cex_engine::Level::Error
+                    && event.message.contains("not in the API whitelist")
+                    && event.message.ends_with(safe_cex_engine::error::IP_WHITELIST_HINT)
+        )),
+        "{:?}",
+        h.actions
+    );
+}
+
+#[test]
 fn failed_positions_snapshot_never_becomes_empty() {
     let mut h = Harness::new();
     h.ready();

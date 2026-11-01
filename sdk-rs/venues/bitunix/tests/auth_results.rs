@@ -175,11 +175,19 @@ fn private_missing_list_diagnostics_never_copy_the_raw_account_body() {
         "",
         r#"{"code":10004,"msg":"IP whitelist refused","privateAccount":"DO-NOT-LOG-ACCOUNT-PAYLOAD"}"#,
     );
+    let mut named = false;
     for action in result {
         if let Action::Notice(Notice::Event(event)) = action {
             assert!(!event.message.contains("DO-NOT-LOG-ACCOUNT-PAYLOAD"));
+            // 10004 is the IP whitelist refusal: the venue's words and what to do.
+            named |= event.level == safe_cex_engine::Level::Error
+                && event.message.contains("IP whitelist refused")
+                && event
+                    .message
+                    .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT);
         }
     }
+    assert!(named, "the read failure names the IP whitelist");
 }
 #[test]
 fn a_private_rate_pause_cannot_be_bypassed_by_the_balance_tick() {

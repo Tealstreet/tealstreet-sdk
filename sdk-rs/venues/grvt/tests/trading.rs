@@ -1536,6 +1536,10 @@ fn failed_builder_check_retries_within_budget_then_names_the_cause_and_rechecks(
     assert!(error.contains("could not be checked"), "{error}");
     assert!(error.contains("code 1008"), "{error}");
     assert!(error.contains("Request IP is not whitelisted"), "{error}");
+    assert!(
+        error.contains(safe_cex_engine::error::IP_WHITELIST_HINT),
+        "{error}"
+    );
     let mut next = opts();
     next.client_order_id = Some("43".into());
     let actions = command(

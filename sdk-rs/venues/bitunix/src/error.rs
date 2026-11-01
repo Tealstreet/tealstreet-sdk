@@ -67,6 +67,10 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
     if let Some(code) = code {
         error = error.venue_code(code.0.to_string()).venue_message(message);
     }
+    // 10004: the current IP is not in the API key's IP whitelist.
+    if code.is_some_and(|code| code.0 == 10004) {
+        error = error.ip_whitelist_refused();
+    }
     if write {
         error = error.outcome(
             if matches!(
@@ -212,7 +216,15 @@ mod tests {
                     )
                     .unwrap_err();
                     assert_eq!(error.kind, Some(kind));
-                    assert_eq!(error.message, "verbatim");
+                    // 10004 is the IP whitelist refusal: the venue's words, then what to do.
+                    if code == 10004 {
+                        assert_eq!(
+                            error.message,
+                            format!("verbatim. {}", safe_cex_engine::error::IP_WHITELIST_HINT)
+                        );
+                    } else {
+                        assert_eq!(error.message, "verbatim");
+                    }
                     assert_eq!(error.venue_code, Some(code.to_string()));
                     assert_eq!(
                         error.outcome,

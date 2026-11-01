@@ -1019,6 +1019,13 @@ fn trading_failures_carry_the_aster_code_kind_and_outcome() {
             Outcome::Unknown,
         ),
         (
+            401,
+            // The wording Aster answers from an IP the key's whitelist excludes.
+            r#"{"code":-2015,"msg":"Ip not in whitelist"}"#,
+            Some(ErrorKind::AuthInvalid),
+            Outcome::Rejected,
+        ),
+        (
             200,
             r#"{"code":200,"msg":"success"}"#,
             // An acknowledgement without an order ID is an unproven reply.
@@ -1053,6 +1060,14 @@ fn trading_failures_carry_the_aster_code_kind_and_outcome() {
             h.result(1),
             &Err(error.message.clone()),
             "text is unchanged"
+        );
+        assert_eq!(
+            error
+                .message
+                .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT),
+            body.contains("whitelist"),
+            "{}",
+            error.message
         );
     }
 }
