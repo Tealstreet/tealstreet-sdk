@@ -691,8 +691,8 @@ impl ChaserBook {
                 } else if !told {
                     told = true;
                     book.warn(&format!(
-                        "Chaser for {} has had no market data for {} s, so it is not re-quoting. \
-                         Its order may be resting away from the market: check your connection or stop the chase.",
+                        "Chaser for {} has had no market data update for {} s and re-quotes only when one arrives. \
+                         If the market is not just quiet, check your connection or stop the chase.",
                         watched.options.symbol,
                         NO_MARKET_DATA_MS / 1000
                     ));
