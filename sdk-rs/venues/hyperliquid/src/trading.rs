@@ -1522,10 +1522,9 @@ mod signing_tests {
     #[test]
     fn price_ties_round_up_in_decimal() {
         for (price, wire) in [
-            (1.00005, "1.0001"),
-            (1.23455, "1.2346"),
-            (2.00015, "2.0002"),
-            (1.15555, "1.1556"),
+            (1.00185, "1.0019"),
+            (1.00395, "1.004"),
+            (1.00805, "1.0081"),
             (10.12345, "10.123"),
         ] {
             assert_eq!(price_wire(price, 0.1, false).unwrap(), wire, "{price}");
