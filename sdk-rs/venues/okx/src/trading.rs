@@ -159,6 +159,8 @@ pub struct Acknowledged {
     pub version: u64,
 }
 struct Job {
+    /// An amend that cancels a stop before placing its replacement.
+    replacing_stop: bool,
     /// Set at genuine entry; the Plan follows its admission.
     preflight: Option<Preflight>,
     plan: Option<Plan>,
@@ -987,6 +989,7 @@ impl Okx {
                 }],
             )?;
             result.steps.extend(replacement.steps);
+            result.replacing_stop = matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit);
             result.continue_cancel_errors = false;
             result.finish = Finish::Ids;
             result
@@ -1481,6 +1484,15 @@ impl Okx {
         if job.effective && !uncertain {
             error.outcome = None;
         }
+        // The old stop's cancel landed and nothing replaced it: its row must not read Open.
+        let stop_gone = job.replacing_stop && job.effective && job.ids.is_empty();
+        let note = stop_gone.then(|| {
+            if uncertain {
+                "your stop may be gone, so your position may be unprotected: check Open Orders"
+            } else {
+                "your stop is gone and your position is unprotected"
+            }
+        });
         // A sibling rests: the caller must be told even though this call failed.
         if !job.ids.is_empty() {
             error = error.partial_ids(&job.ids);
@@ -1491,7 +1503,14 @@ impl Okx {
                     matches!(o.status, OrderStatus::Updating | OrderStatus::Canceling)
                 })
             {
-                cx.store.set_order_status(&id, status);
+                cx.store.set_order_status(
+                    &id,
+                    if stop_gone {
+                        OrderStatus::Canceled
+                    } else {
+                        status
+                    },
+                );
             }
         }
         let _ = match (&job.plan, &job.preflight) {
@@ -1499,7 +1518,10 @@ impl Okx {
                 if let Some(request) = current {
                     let _ = cx.finish_plan_call(plan, &request.slot, &request.context);
                 }
-                cx.fail_plan(plan, error)
+                match note {
+                    Some(note) => cx.fail_plan_noted(plan, error, note),
+                    None => cx.fail_plan(plan, error),
+                }
             }
             (None, Some(preflight)) => cx.fail_preflight(preflight, error),
             (None, None) => Ok(()),
@@ -1612,6 +1634,7 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         optimistic: Vec::new(),
         continue_cancel_errors: false,
         effective: false,
+        replacing_stop: false,
     }
 }
 fn is_algo(kind: OrderType) -> bool {
