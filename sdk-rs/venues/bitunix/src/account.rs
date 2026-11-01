@@ -247,6 +247,7 @@ pub struct AccountState {
     pub filled: HashMap<String, (f64, f64)>,
     pub pending_executions: HashMap<String, f64>,
     pub login_retry: Option<(TimerId, safe_cex_engine::SocketId)>,
+    pub login_answered: bool,
 }
 /// The TS Bitunix tick (exchange metadata): balance every tick, the full
 /// account every 32 ticks.
@@ -1659,6 +1660,7 @@ impl BitunixFutures {
             m.op.as_ref()
         };
         if operation == "login" {
+            self.account.login_answered = true;
             #[derive(serde::Deserialize)]
             struct Login {
                 result: bool,
@@ -1668,6 +1670,9 @@ impl BitunixFutures {
                 .and_then(|raw| serde_json::from_str::<Login>(raw.get()).ok())
                 .map(|login| login.result);
             if result == Some(true) {
+                if let Some(socket) = self.sockets.iter_mut().find(|s| s.id == socket) {
+                    socket.supervisor.authenticated(cx);
+                }
                 if let Some((timer, owner)) = self.account.login_retry
                     && owner == socket
                 {
