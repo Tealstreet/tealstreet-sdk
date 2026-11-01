@@ -267,6 +267,9 @@ pub struct AccountState {
     orders: Option<OrdersJoin>,
     orders_follow_up: bool,
     orders_stale: bool,
+    /// Stale only because the last read rejected rows, on these markets: it is
+    /// retried, but it still proves absence everywhere else.
+    orders_stale_unproven: Option<Vec<String>>,
     last_orders_retry_at: f64,
     wallet_in_flight: bool,
     wallet_follow_up: bool,
@@ -284,6 +287,16 @@ pub struct AccountState {
 }
 
 impl AccountState {
+    fn mark_orders_stale(&mut self) {
+        self.orders_stale = true;
+        self.orders_stale_unproven = None;
+    }
+
+    /// Whether the last order read may release an uncertain-write fence.
+    fn orders_read_proves(&self) -> bool {
+        !self.orders_stale || self.orders_stale_unproven.is_some()
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             unsupported_logged: RowReports::unbounded(RowRepeat::Once),
@@ -1182,7 +1195,7 @@ impl BybitLinear {
             self.drop_account_reads(cx);
             self.account.orders_follow_up = false;
             self.account.positions_follow_up = false;
-            self.account.orders_stale = true;
+            self.account.mark_orders_stale();
             self.account.wallet_in_flight = false;
             self.account.wallet_follow_up = false;
             return;
@@ -1928,7 +1941,7 @@ impl BybitLinear {
                 let Ok(frame) =
                     serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
                 else {
-                    self.account.orders_stale = true;
+                    self.account.mark_orders_stale();
                     if let Some(join) = &mut self.account.orders {
                         join.rejected.reject(None);
                     }
@@ -2389,13 +2402,17 @@ impl BybitLinear {
         {
             return;
         }
+        let symbol = identity
+            .as_ref()
+            .and_then(|r| r.symbol.clone())
+            .unwrap_or_default();
         let key = identity.and_then(|r| {
             r.symbol
                 .filter(|v| !v.is_empty())
                 .and(r.order_id.filter(|v| !v.is_empty()))
         });
-        rejected.skip(cx, key, Level::Warn, "Bybit malformed order row; cached identity/protection retained and reconciliation scheduled");
-        self.account.orders_stale = true;
+        rejected.skip_in(cx, key, &symbol, Level::Warn, "Bybit malformed order row; cached identity/protection retained and reconciliation scheduled");
+        self.account.mark_orders_stale();
     }
     fn reject_position_item(
         &mut self,
@@ -2456,7 +2473,7 @@ impl BybitLinear {
                 // A sound row of a type the store cannot hold must not block every
                 // other order; finish_orders keeps its last known state and says so.
                 if well_formed && mapped.is_none() && !self.variant.is_hyro() {
-                    rejected.reject(Some(row.order_id.to_string()));
+                    rejected.reject_in(Some(row.order_id.to_string()), &row.symbol);
                     unsupported.push(row.order_id.to_string());
                 } else if !well_formed
                     || mapped.as_ref().is_none_or(|mapped| {
@@ -2822,13 +2839,17 @@ impl BybitLinear {
             self.fetch_orders(cx);
         }
         if join.failed {
-            self.account.orders_stale = true;
+            self.account.mark_orders_stale();
             if self.variant.is_hyro() {
                 self.hyro_read_failed(cx, "orders reconciliation failed");
             }
             return;
         }
         self.account.orders_stale = join.rejected.any();
+        self.account.orders_stale_unproven = join
+            .rejected
+            .any()
+            .then(|| join.rejected.unproven().to_vec());
         if self.variant.is_hyro() {
             if let Some(snapshot) = &mut self.account.snapshot {
                 snapshot.orders = Some(join.rows);
@@ -2949,15 +2970,26 @@ impl BybitLinear {
         }
         // A committed, wholly admitted fresh read clears the engine's
         // uncertain-write fence once no product's order read is still out.
-        if !join.rejected.any()
-            && !self.account.orders_stale
-            && self.account.orders.is_none()
+        if self.account.orders.is_none()
+            && self.account.orders_read_proves()
             && self
                 .products
                 .iter()
-                .all(|state| state.account.orders.is_none() && !state.account.orders_stale)
+                .all(|state| state.account.orders.is_none() && state.account.orders_read_proves())
         {
-            cx.orders_reconciled(None);
+            // Only the markets of rejected rows stay fenced.
+            let mut unproven = join.rejected.unproven().to_vec();
+            for state in &self.products {
+                unproven.extend(
+                    state
+                        .account
+                        .orders_stale_unproven
+                        .iter()
+                        .flatten()
+                        .cloned(),
+                );
+            }
+            cx.orders_reconciled_except(&unproven, u64::MAX);
         }
     }
 

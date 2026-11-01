@@ -3110,6 +3110,35 @@ fn trading_stop_amends_treat_tpsl_not_modified_as_satisfied() {
     }
 }
 
+#[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let mut h = ready();
+    place(
+        &mut h,
+        31,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let first = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: first,
+        error: "connection reset",
+    });
+    while h.has_request("/v5/order/realtime") {
+        let read = h.take("/v5/order/realtime");
+        h.reply(
+            read.id,
+            200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[{"symbol":"ETHUSDT","orderId":"mm","stopOrderType":"MmRateClose"}]}}"#,
+        );
+    }
+    place(
+        &mut h,
+        32,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    h.take("/v5/order/create-batch");
+}
+
 /// 1d-ii A3: a reconcile asked for while an older order read is still out
 /// issues its own fresh read; the older one predates the uncertain write.
 #[test]

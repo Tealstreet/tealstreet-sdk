@@ -1414,7 +1414,8 @@ impl Account {
                         (None, _) => "Paradex skipped unmappable order without an id".into(),
                     },
                 );
-                coverage.reject(id);
+                let symbol = safe_cex_engine::coverage::fence_symbol(cx.store, row_market(item));
+                coverage.reject_in(id, &symbol);
             }
             _ => {}
         }
@@ -1670,7 +1671,7 @@ impl Account {
             } => {
                 self.orders_busy = false;
                 if !invalid {
-                    let clean = coverage.rejected() == 0;
+                    let unproven = coverage.unproven().to_vec();
                     // Decode all fallible mapping before entering native publication.
                     let prepared = rows
                         .into_iter()
@@ -1683,8 +1684,8 @@ impl Account {
                     let committed = cx.store.commit_orders_snapshot([token], |current| {
                         self.publish_orders_snapshot(prepared, coverage, current)
                     });
-                    if committed && clean {
-                        cx.orders_reconciled(None);
+                    if committed {
+                        cx.orders_reconciled_except(&unproven, u64::MAX);
                     }
                 } else {
                     cx.notice(

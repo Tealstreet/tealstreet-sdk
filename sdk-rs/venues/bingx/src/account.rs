@@ -78,6 +78,8 @@ pub enum Request {
         rows: Vec<Order>,
         metas: Vec<OrderMeta>,
         skipped: Vec<String>,
+        /// Markets of the skipped rows, which stay fenced.
+        unproven: Vec<String>,
         unavailable: bool,
     },
 }
@@ -246,6 +248,16 @@ fn log_snapshot_skips(
         log_skip(cx, logged, kind, id, kept(id));
     }
 }
+fn order_row_symbol(store: &safe_cex_engine::Store, item: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: &'a str,
+    }
+    let row = serde_json::from_str::<Row<'_>>(item).ok();
+    safe_cex_engine::coverage::fence_symbol(store, row.as_ref().map(|row| row.symbol))
+}
+
 /// A malformed order row's id; empty when even that is unreadable.
 fn order_identity(item: &str) -> String {
     serde_json::from_str::<OrderIdentity<'_>>(item)
@@ -665,6 +677,7 @@ impl Account {
                 rows: Vec::new(),
                 metas: Vec::new(),
                 skipped: Vec::new(),
+                unproven: Vec::new(),
                 unavailable: false,
             },
             true,
@@ -1077,6 +1090,7 @@ impl Account {
                 rows,
                 metas,
                 skipped,
+                unproven,
                 unavailable,
                 ..
             } => {
@@ -1085,6 +1099,7 @@ impl Account {
                     .and_then(|native| Some((map_order(&native, cx)?, native)))
                 else {
                     skipped.push(order_identity(item));
+                    unproven.push(order_row_symbol(cx.store, item));
                     return;
                 };
                 let (order, native) = order;
@@ -1355,6 +1370,7 @@ impl Account {
                 mut rows,
                 metas,
                 skipped,
+                unproven,
                 unavailable,
             } => {
                 if self.orders_in_flight == Some(owner) {
@@ -1414,8 +1430,8 @@ impl Account {
                     });
                     if complete {
                         self.orders_witness = cx.store.begin_orders_snapshot();
-                        cx.orders_reconciled_since(None, read_epoch);
                     }
+                    cx.orders_reconciled_except(&unproven, read_epoch);
                 }
             }
         }
@@ -2120,6 +2136,7 @@ mod sign_failure_owners {
                     rows: vec![],
                     metas: vec![],
                     skipped: vec![],
+                    unproven: vec![],
                     unavailable: false,
                 },
                 3 => Request::ListenKey { epoch: 4 },

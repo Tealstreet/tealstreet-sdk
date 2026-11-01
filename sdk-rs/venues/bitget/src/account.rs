@@ -666,7 +666,10 @@ impl BitgetFutures {
                             "skipped Bitget order record {}: {error}",
                             id.as_deref().unwrap_or("without id")
                         );
-                        snapshot.skipped.skip(cx, id, Level::Warn, message);
+                        let symbol = order_row_symbol(cx.store, item);
+                        snapshot
+                            .skipped
+                            .skip_in(cx, id, &symbol, Level::Warn, message);
                     }
                 }
             }
@@ -879,8 +882,8 @@ impl BitgetFutures {
                             self.account.plans.insert(id, plan);
                         }
                     }
-                    // Only a clean census can prove an uncertain placement absent.
-                    let clean = snapshot.skipped.rejected() == 0;
+                    // A rejected row keeps its market's fence; the rest of the census counts.
+                    let unproven = snapshot.skipped.unproven().to_vec();
                     self.commit_orders(
                         cx,
                         snapshot.rows,
@@ -889,8 +892,8 @@ impl BitgetFutures {
                         snapshot.started,
                         snapshot.stream_revision,
                     );
-                    if !snapshot.virtual_only && clean {
-                        cx.orders_reconciled(None);
+                    if !snapshot.virtual_only {
+                        cx.orders_reconciled_except(&unproven, u64::MAX);
                     }
                     if self.account.orders_dirty {
                         self.refresh_orders(cx, false);
@@ -2824,6 +2827,16 @@ pub(crate) fn order_status(value: &str) -> Option<OrderStatus> {
     })
 }
 /// Native id of an order row that failed to map, chosen as `map_order` does.
+fn order_row_symbol(store: &safe_cex_engine::Store, item: &str) -> String {
+    #[derive(Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: &'a str,
+    }
+    let row = serde_json::from_str::<Row<'_>>(item).ok();
+    safe_cex_engine::coverage::fence_symbol(store, row.as_ref().map(|row| row.symbol))
+}
+
 fn order_row_id(item: &str) -> Option<String> {
     #[derive(Deserialize)]
     struct Row<'a> {

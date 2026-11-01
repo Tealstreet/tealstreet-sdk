@@ -1426,6 +1426,29 @@ fn an_unknown_placement_refuses_a_retry_until_a_fresh_order_read_reconciles_it()
     take_method(&mut h, Method::Post, "/orders");
 }
 #[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let mut h = private();
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let write = take_method(&mut h, Method::Post, "/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: write.id,
+            error: "response lost after acceptance",
+        },
+    );
+    h.collect();
+    let fresh = take_method(&mut h, Method::Get, "/orders");
+    h.respond(
+        fresh,
+        200,
+        r#"{"results":[{"id":"77","market":"SOL-USD-PERP"}]}"#,
+    );
+    place(&mut h, 9, vec![opts(OrderType::Limit)]);
+    take_method(&mut h, Method::Post, "/orders");
+}
+
+#[test]
 fn engine_reasks_join_a_slow_post_write_read_that_then_releases_the_fence() {
     let mut h = private();
     place(&mut h, 8, vec![opts(OrderType::Limit)]);
