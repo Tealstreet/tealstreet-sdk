@@ -1620,6 +1620,7 @@ fn a_real_rest_order_row_shows() {
         .order("2533274198957701")
         .expect("the order shows");
     assert_eq!(order.amount, 10.0);
+    assert_eq!(order.client_order_id.as_deref(), Some("179354719285865"));
 }
 
 // L1: a placement returns its client index; the store keys the row by the native one.
@@ -1651,4 +1652,24 @@ fn an_amend_by_the_returned_client_index_finds_the_order() {
             if error.message.contains("not found"))
     });
     assert!(!failed);
+}
+
+// Live: a verification page during start left the engine waiting past 150 s with no retry.
+#[test]
+fn a_405_page_on_the_account_lookup_retries() {
+    let mut options = options();
+    options.application_id = Some(ADDRESS.into());
+    options.api_key_index = Some("4".into());
+    let (mut e, mut actions) = to_lookup(options);
+    let mut retried = false;
+    for _ in 0..6 {
+        for r in account_requests(&actions) {
+            reply(&mut e, &r, 405, "<html>Human Verification</html>");
+        }
+        actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        retried |= actions.iter().any(
+            |a| matches!(a, Action::SetTimer { at_ms, .. } if (*at_ms - NOW - 5_000.0).abs() < 1_000.0),
+        );
+    }
+    assert!(retried);
 }

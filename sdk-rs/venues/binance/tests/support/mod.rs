@@ -298,6 +298,9 @@ impl Harness {
                     );
                     self.startup_failures.push(error);
                 }
+                // The rig's public socket stays silent, so this notice is true here.
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
                 Action::Notice(Notice::Event(event)) => {
                     if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE {
                         for (key, value) in &event.fields {

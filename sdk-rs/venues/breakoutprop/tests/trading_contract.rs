@@ -1177,3 +1177,26 @@ fn p0_write_login(status: u16, kind: safe_cex_engine::ErrorKind) {
     assert!(!notices.contains("example-password"));
     assert!(!notices.contains("secret-token"));
 }
+
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut rig = private();
+    rig.engine.store_mut().set_orders(vec![open()]);
+    amend(&mut rig, 10);
+    let cancel = rig.next_request();
+    rig.reply(
+        &cancel,
+        200,
+        r#"{"orderId":46073148,"updateOrderId":46073149}"#,
+    );
+    let confirmation = rig.next_request();
+    rig.reply(&confirmation, 200, &cancellation_history(0.0).to_string());
+    let replacement = rig.next_request();
+    rig.reply(
+        &replacement,
+        409,
+        r#"{"errorCode":33,"description":"Rejected"}"#,
+    );
+    let error = rig.result(10).unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}

@@ -12,14 +12,31 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[derive(Clone)]
 enum Call {
     Place,
-    PlaceAfterCancel { id: String, filled: f64 },
-    Cancel { id: String, fallback: bool },
+    PlaceAfterCancel {
+        id: String,
+        filled: f64,
+        symbol: String,
+    },
+    Cancel {
+        id: String,
+        fallback: bool,
+    },
     ConfirmCancel(Box<Replacement>),
     Write,
-    Leverage { symbol: String, leverage: f64 },
-    Margin { symbol: String, isolated: bool },
-    CheckMode { hedged: bool },
-    Mode { hedged: bool },
+    Leverage {
+        symbol: String,
+        leverage: f64,
+    },
+    Margin {
+        symbol: String,
+        isolated: bool,
+    },
+    CheckMode {
+        hedged: bool,
+    },
+    Mode {
+        hedged: bool,
+    },
 }
 #[derive(Clone)]
 struct Replacement {
@@ -813,7 +830,7 @@ impl Kucoin {
         true
     }
     fn send_trade(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
-        if let Call::PlaceAfterCancel { id, filled } = &request.step.call
+        if let Call::PlaceAfterCancel { id, filled, .. } = &request.step.call
             && self.account_order_filled(id) > *filled
         {
             let error = "KuCoin newer fills invalidated cancellation proof";
@@ -1029,6 +1046,7 @@ impl Kucoin {
                             step.call = Call::PlaceAfterCancel {
                                 id: replacement.id.clone(),
                                 filled,
+                                symbol: replacement.options.symbol.clone(),
                             };
                             self.trading
                                 .jobs
@@ -1099,6 +1117,10 @@ impl Kucoin {
             _ => {}
         }
         if let Err(error) = result {
+            let replacing = match &request.step.call {
+                Call::PlaceAfterCancel { symbol, .. } => Some(symbol.clone()),
+                _ => None,
+            };
             if let Call::ConfirmCancel(mut replacement) = request.step.call
                 && replacement.read_retries < 2
             {
@@ -1122,6 +1144,14 @@ impl Kucoin {
                 error.outcome = Some(Outcome::NotSent);
             }
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
+            if let Some(symbol) = replacing.filter(|_| job.ids.is_empty()) {
+                let unknown = error.outcome == Some(Outcome::Unknown);
+                error.message = format!(
+                    "{}: {}",
+                    safe_cex_engine::error::order_gone_text(&symbol, unknown),
+                    error.message
+                );
+            }
             job.record(error);
             if !job.keep_going {
                 job.steps.clear();

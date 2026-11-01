@@ -706,3 +706,32 @@ fn a_refused_key_fails_the_start_instead_of_polling() {
     );
     assert_eq!(h.startup_failures.len(), 1, "{:?}", h.startup_failures);
 }
+
+#[test]
+fn window_fills_with_no_limit_flag_a_full_page() {
+    let mut h = started(true);
+    h.requests.clear();
+    h.event(Event::Command(Command::Query {
+        command: 83,
+        query: safe_cex_engine::Query::Fills {
+            symbol: Some(SYMBOL.into()),
+            order_id: None,
+            from_ms: Some(1_592_000_000_000.0),
+            to_ms: Some(1_593_000_000_000.0),
+            limit: None,
+        },
+    }));
+    let request = h.take("/eapi/v1/userTrades");
+    assert!(request.url.contains("limit=1000"), "{}", request.url);
+    let rows = (1..=1000)
+        .map(|n| format!(r#"{{"id":"{n}","tradeId":{n},"orderId":"4611875134427365000","symbol":"BTC-261225-85000-C","side":"BUY","price":"100","quantity":"1","fee":"-1","quoteAsset":"USDT","liquidity":"TAKER","time":1592465880683}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    h.reply(request.id, 200, "", &format!("[{rows}]"));
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 83 && result.is_ok())
+    );
+    assert!(h.command_notices.contains(&(83, "incomplete")));
+}

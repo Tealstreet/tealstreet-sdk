@@ -626,6 +626,46 @@ fn a_stop_whose_replacement_is_refused_says_the_stop_is_gone() {
     assert!(error.message.contains("Order would immediately trigger"));
 }
 
+/// The limit drag: the cancel lands, the replacement is refused, the order is gone.
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = ready();
+    let id = "8389765519993909000";
+    h.event(Event::Command(Command::AmendOrder {
+        command: 12,
+        id: id.into(),
+        price: Some(91000.0),
+        amount: None,
+    }));
+    let cancel = h.take("/fapi/v1/order");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"symbol":"BTCUSDT","orderId":8389765519993909000,"status":"CANCELED","origQty":"0.004","executedQty":"0.001"}"#,
+    );
+    let replacement = h.take("/fapi/v1/order");
+    assert_eq!(replacement.method, Method::Post);
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
+    );
+    let (_, error) = h
+        .failures
+        .iter()
+        .find(|(id, _)| *id == 12)
+        .expect("a failure");
+    assert!(
+        error.message.contains("Your BTCUSDT order is gone"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains("Margin is insufficient"));
+}
+
 #[test]
 fn leverage_and_position_mode_update_the_settings_frame() {
     let mut h = ready();
@@ -1368,7 +1408,10 @@ fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected()
     let [(12, error)] = h.failures.as_slice() else {
         panic!("{:?}", h.failures);
     };
-    assert_eq!(error.message, "Margin is insufficient.");
+    assert_eq!(
+        error.message,
+        "Your BTCUSDT order is gone: it was canceled and its replacement refused: Margin is insufficient."
+    );
     assert_eq!(error.outcome, None, "the cancel already took effect");
 }
 

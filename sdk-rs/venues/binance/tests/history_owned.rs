@@ -430,3 +430,21 @@ fn signing_failure_after_accepted_income_stays_typed_strict_and_cancels_timers()
         assert!(!h.timers.iter().any(|(_, at)| *at == h.now + 2000.0));
     }
 }
+
+#[test]
+fn income_start_alone_with_no_limit_walks_chunks_up_to_now() {
+    let mut h = harness();
+    start(
+        &mut h,
+        97,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(1.0),
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let request = h.take("/income");
+    assert!(request.url.contains("endTime="), "{}", request.url);
+}

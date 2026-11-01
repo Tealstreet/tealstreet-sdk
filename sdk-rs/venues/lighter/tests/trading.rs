@@ -426,6 +426,36 @@ fn successful_amend_uses_fresh_generated_index() {
 }
 
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, _) = ready_unattributed();
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 8,
+            id: "42".into(),
+            price: Some(92.0),
+            amount: None,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let cancel = http(&mut e, "sendTx");
+    ack(&mut e, &cancel);
+    let t = timer(&mut e);
+    e.handle(NOW + 100.0, Event::TimerFired { timer: t });
+    let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
+    reply_at(
+        &mut e,
+        NOW + 100.0,
+        &replacement,
+        200,
+        r#"{"code":21121,"message":"replacement refused"}"#,
+    );
+    let error = failure(&mut e);
+    assert!(error.contains("order is gone"), "{error}");
+}
+
+#[test]
 fn fill_overtaking_cancel_ack_aborts_amendment() {
     let (mut e, _) = ready_unattributed();
     e.handle(

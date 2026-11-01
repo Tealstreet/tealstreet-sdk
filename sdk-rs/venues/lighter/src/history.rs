@@ -417,7 +417,11 @@ impl Lighter {
             order,
             from,
             to,
-            limit: limit.unwrap_or(100).clamp(1, 200) as usize,
+            // A window with no limit walks to its start; no default may stop it.
+            limit: match limit {
+                None if from.is_some() => usize::MAX,
+                limit => limit.unwrap_or(100).clamp(1, 200) as usize,
+            },
             stage_start: 0,
             count: 0,
             failed: None,
@@ -824,6 +828,10 @@ impl Lighter {
             Ok(e) if response.status < 300 && e.code.0 == "200" => e,
             Ok(e) => {
                 self.history_failed(cx, request, &format!("{} {}", response.status, e.message));
+                return;
+            }
+            Err(_) if response.status >= 300 => {
+                self.history_failed(cx, request, &format!("HTTP {}", response.status));
                 return;
             }
             Err(e) => {

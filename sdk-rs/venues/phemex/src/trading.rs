@@ -63,6 +63,16 @@ struct Job {
     live: Option<Request>,
     /// Set while a replacement waits for its accepted cancel to end.
     cancel_wait: Option<safe_cex_engine::request_context::ConditionWait>,
+    /// An amend's symbol, once its cancel is proven and its replacement is issued.
+    replacing: Option<String>,
+}
+impl Job {
+    fn gone_note(&self, unknown: bool) -> Option<String> {
+        self.replacing
+            .as_deref()
+            .filter(|_| self.ids.is_empty())
+            .map(|symbol| safe_cex_engine::error::order_gone_text(symbol, unknown))
+    }
 }
 /// One symbol-scoped position read ahead of a command that needs its mode.
 pub struct SymbolModeRead {
@@ -220,6 +230,7 @@ struct Step {
 }
 struct Guard {
     id: String,
+    symbol: String,
     amount: f64,
     filled: f64,
 }
@@ -1061,6 +1072,7 @@ impl PhemexPerpetuals {
         if let Some(step) = replacement.front_mut() {
             step.replacement = Some(Guard {
                 id: base.clone(),
+                symbol: parent.symbol.clone(),
                 amount: parent.amount,
                 filled: parent.filled,
             });
@@ -1642,6 +1654,7 @@ impl PhemexPerpetuals {
                         signed_until: None,
                         live: None,
                         cancel_wait: None,
+                        replacing: None,
                     },
                 );
                 if let Some(symbol) = cancel_all {
@@ -1692,6 +1705,9 @@ impl PhemexPerpetuals {
                 "Phemex order changed while canceling; replacement was not sent",
             );
             return;
+        }
+        if let Some(guard) = &step.replacement {
+            job.replacing = Some(guard.symbol.clone());
         }
         let Some(slot) = job.slot.take() else {
             return;
@@ -2321,12 +2337,17 @@ impl PhemexPerpetuals {
         let Some(job) = self.trading.jobs.remove(&id) else {
             return;
         };
+        let gone = job.gone_note(error.outcome == Some(safe_cex_engine::Outcome::Unknown));
         if job.effective || !job.ids.is_empty() {
             error.outcome = None;
         }
         self.account_refresh(cx);
         cx.command_error(id, error.message.clone());
-        let _ = cx.fail_plan(&job.plan, error.partial_ids(&job.ids));
+        let error = error.partial_ids(&job.ids);
+        let _ = match &gone {
+            Some(gone) => cx.fail_plan_noted(&job.plan, error, gone),
+            None => cx.fail_plan(&job.plan, error),
+        };
         self.orders_reconcile(cx);
     }
 
@@ -2476,6 +2497,9 @@ impl PhemexPerpetuals {
         };
         let job = self.trading.jobs.remove(&command);
         self.account_refresh(cx);
+        let gone = job.as_ref().and_then(|job| {
+            job.gone_note(uncertain || error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+        });
         if let Some(job) = &job {
             if !uncertain && (job.effective || !job.ids.is_empty()) {
                 error.outcome = None;
@@ -2484,7 +2508,10 @@ impl PhemexPerpetuals {
         }
         if let Some(job) = &job {
             cx.command_error(command, error.message.clone());
-            let _ = cx.fail_plan(&job.plan, error);
+            let _ = match &gone {
+                Some(gone) => cx.fail_plan_noted(&job.plan, error, gone),
+                None => cx.fail_plan(&job.plan, error),
+            };
         }
         if uncertain {
             let expiry = job

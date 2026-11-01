@@ -623,7 +623,12 @@ fn cancel_all_also_deletes_untriggered_stops_by_id() {
         symbol: "BTC-USD-PERP".into(),
     });
     let stop = take_method(&mut h, Method::Delete, "/orders/123");
-    h.respond(stop, 204, "");
+    // Live: a stop already gone answers this, and the nuke read as failed.
+    h.respond(
+        stop,
+        400,
+        r#"{"error":"ORDER_ID_NOT_FOUND","message":"order not found"}"#,
+    );
     let all = take_method(&mut h, Method::Delete, "/orders?market=");
     h.respond(all, 200, r#"{"message":"cancel requests queued"}"#);
     assert!(h.result(12).is_ok());

@@ -612,3 +612,33 @@ fn owned_history_spot_transport_failure_is_typed_with_the_existing_diagnostic() 
             .any(|a| matches!(a, Action::Notice(Notice::CommandError { command: 10, .. })))
     );
 }
+
+#[test]
+fn window_orders_with_no_limit_walk_past_the_default() {
+    let mut h = funding();
+    h.query(
+        12,
+        Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(1000.0),
+            to_ms: Some(2000.0),
+            limit: None,
+        },
+    );
+    let r = h.take();
+    let rows = (0..1000)
+        .map(|n| json!({"id":format!("o{n}"),"symbol":"XBTUSDTM","side":"buy","type":"limit","price":"100","size":"1","dealSize":"1","createdAt":1500}))
+        .collect::<Vec<_>>();
+    h.reply(
+        &r,
+        200,
+        &json!({"code":"200000","data":{"currentPage":1,"totalPage":2,"totalNum":1001,"items":rows}})
+            .to_string(),
+    );
+    let next = h.take();
+    assert!(
+        next.url.contains("currentPage=2") || next.url.contains("pageNumber=2"),
+        "{}",
+        next.url
+    );
+}

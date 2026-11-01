@@ -1873,7 +1873,8 @@ impl Lighter {
             remaining,
             reduce_only,
             close: None,
-            client_order_id: None,
+            // What the placement answered with: it names this row to whoever holds that id.
+            client_order_id: client_order_index(raw),
             time_in_force: tif,
             last_update: event_time(
                 wire.updated_at.as_ref().or(wire.timestamp.as_ref()),
@@ -2198,7 +2199,8 @@ impl Lighter {
                 if ok && let Some(index) = found {
                     self.identity_ready(cx, index);
                 } else {
-                    self.account.lookup_failed |= !ok && !(400..500).contains(&response.status);
+                    // Only these say the account is absent; a 405 verification page says nothing.
+                    self.account.lookup_failed |= !ok && !matches!(response.status, 400 | 404);
                     self.next_lookup(cx, candidates);
                 }
             }

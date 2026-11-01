@@ -841,3 +841,27 @@ fn paged_income_request_sequence_is_pinned() {
         ]
     );
 }
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let (mut e, _) = ready();
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("ETH".into()),
+            order_id: None,
+            from_ms: Some(NOW - 10_000.0),
+            to_ms: Some(NOW),
+            limit: None,
+        },
+    );
+    let rows = (0..100)
+        .map(|i| trade(&format!("t{i}"), NOW as u64 - 500))
+        .collect();
+    answer(&mut e, &r, rows, Some("next-page"));
+    let next = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("/trades?"))
+        .expect("a second page beyond the default");
+    assert!(next.url.contains("cursor=next-page"));
+}

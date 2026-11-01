@@ -951,3 +951,38 @@ fn concurrent_single_page_owners_complete_independently_and_empty_is_valid() {
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert_eq!(rows[0]["price"], 60000.0);
 }
+
+#[test]
+fn window_fills_with_no_limit_flag_a_full_page() {
+    let mut e = engine();
+    query(
+        &mut e,
+        Query::Fills {
+            symbol: Some(SYMBOL.into()),
+            order_id: None,
+            from_ms: Some(1_700_000_000_000.0),
+            to_ms: Some(1_700_000_001_000.0),
+            limit: None,
+        },
+    );
+    let r = request(&mut e);
+    assert!(r.url.contains("limit=1000"), "{}", r.url);
+    let rows = (0..1000)
+        .map(|n| {
+            ROW.replace(
+                "1558124009467904992",
+                &(1558124009467904992u64 + n).to_string(),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    response(&mut e, r, &format!(r#"{{"code":"0","data":[{rows}]}}"#));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions.iter().any(
+            |a| matches!(a, safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+        ),
+        "{actions:?}"
+    );
+}

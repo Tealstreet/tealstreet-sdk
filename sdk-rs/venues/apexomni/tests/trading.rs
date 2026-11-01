@@ -873,6 +873,34 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
 }
 
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    let replacement = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &replacement,
+        NOW + 16.0,
+        r#"{"code":429,"msg":"too many requests"}"#,
+    );
+    let error = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 99, error }) => Some(error),
+            _ => None,
+        })
+        .expect("a failure");
+    assert!(
+        error.message.contains("Your BTCUSDT order is gone"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
 fn write_failures_use_shared_classification_and_preserve_network_text() {
     use safe_cex_engine::{ErrorKind, Outcome};
     for (status, body, kind, outcome, code) in [

@@ -370,3 +370,33 @@ fn zero_width_requested_range_is_filtered_after_native_window_expansion() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].tran_id, "1");
 }
+
+#[test]
+fn open_ended_funding_window_with_no_limit_walks_past_the_default() {
+    let mut h = Harness::new();
+    let now = h.now as u64;
+    h.event(Event::Command(Command::Query {
+        command: 1,
+        query: Query::Income {
+            symbol: Some("BTCUSDT".into()),
+            kind: Some("FUNDING_FEE".into()),
+            from_ms: Some((now - 3_600_000) as f64),
+            to_ms: None,
+            limit: None,
+        },
+    }));
+    // Twenty full pages reach the old default of 1000 rows; the walk continues.
+    for page in 0..20 {
+        let r = h.take();
+        let rows = (0..50)
+            .map(|n| {
+                let id = page * 50 + n + 1;
+                row(id, now - 1000 - id)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        h.reply(&r, &rows, true);
+        h.advance();
+    }
+    assert!(h.take().url.contains("funding-history"));
+}

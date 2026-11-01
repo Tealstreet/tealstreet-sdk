@@ -1,11 +1,12 @@
 //! European Options codecs. Native quantities remain contracts, never futures lots.
 use crate::{BinanceFutures, Pending, Query, Variant, reads};
 use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
+use safe_cex_engine::history::ReadCompletion;
 use safe_cex_engine::model::{
     Balance, CurrencyBalance, DerivativeProduct, Limits, Market, MinMax, Order, OrderSide,
     OrderStatus, OrderType, Position, PositionSide, Precision, ProductKind, Ticker, TimeInForce,
 };
-use safe_cex_engine::request_context::{Context, Scope};
+use safe_cex_engine::request_context::{Context, Owner, Scope};
 use safe_cex_engine::store::{MarketSetting, OrderSnapshotToken};
 use safe_cex_engine::{Cx, ErrorKind, Level, Response, TimerId, VenueError};
 use serde::Deserialize;
@@ -478,7 +479,25 @@ impl BinanceFutures {
                 |(_, message)| Err(error(message)),
             );
             match result {
-                Ok(result) => {
+                Ok((result, page_rows)) if open_window(&request) && page_rows >= MAX_QUERY_ROWS => {
+                    // The native read is one page; a full one may hide older rows.
+                    let Owner::Command { id, .. } = request.context.owner() else {
+                        let _ = cx.done_context(&request.context, result);
+                        return;
+                    };
+                    match ReadCompletion::from_context(cx, id, request.context.clone()) {
+                        Ok(mut completion) => {
+                            completion.incomplete(
+                                "history is INCOMPLETE: Binance Options read one page and it was full",
+                            );
+                            let _ = completion.finish(cx, Ok(result));
+                        }
+                        Err(error) => {
+                            let _ = cx.fail_context(&request.context, error.read_venue_error());
+                        }
+                    }
+                }
+                Ok((result, _)) => {
                     let _ = cx.done_context(&request.context, result);
                 }
                 Err(error) => {
@@ -920,6 +939,9 @@ impl BinanceFutures {
         }
         if let Some(limit) = limit {
             params = params.num("limit", f64::from(limit));
+        } else if from.is_some() {
+            // The venue's own default page is 100 rows; ask for its maximum.
+            params = params.num("limit", MAX_QUERY_ROWS as f64);
         }
         let path = if kind == Kind::Fills {
             self.paths.user_trades
@@ -946,13 +968,18 @@ impl BinanceFutures {
         );
     }
 
-    fn options_query_result(&self, request: &Request, body: &str) -> Result<String, VenueError> {
+    fn options_query_result(
+        &self,
+        request: &Request,
+        body: &str,
+    ) -> Result<(String, usize), VenueError> {
         let malformed = || error("Malformed Binance Options history response");
         match request.query.as_ref() {
             Some(safe_cex_engine::Query::Fills {
                 symbol, order_id, ..
             }) => {
                 let rows: Vec<FillRow> = serde_json::from_str(body).map_err(|_| malformed())?;
+                let page_rows = rows.len();
                 let mut fills = Vec::new();
                 let mut seen = HashSet::new();
                 for row in rows {
@@ -995,11 +1022,15 @@ impl BinanceFutures {
                         maker: row.liquidity == "MAKER",
                     });
                 }
-                serde_json::to_string(&fills).map_err(|_| malformed())
+                Ok((
+                    serde_json::to_string(&fills).map_err(|_| malformed())?,
+                    page_rows,
+                ))
             }
             Some(safe_cex_engine::Query::OrderHistory { symbol, .. }) => {
                 let rows: Vec<HistoricalRow> =
                     serde_json::from_str(body).map_err(|_| malformed())?;
+                let page_rows = rows.len();
                 let mut history = Vec::new();
                 let mut seen = HashSet::new();
                 for row in rows {
@@ -1031,11 +1062,34 @@ impl BinanceFutures {
                         updated_time: row.update_time,
                     });
                 }
-                serde_json::to_string(&history).map_err(|_| malformed())
+                Ok((
+                    serde_json::to_string(&history).map_err(|_| malformed())?,
+                    page_rows,
+                ))
             }
             _ => Err(malformed()),
         }
     }
+}
+
+/// The native row maximum of one history read.
+const MAX_QUERY_ROWS: usize = 1000;
+
+fn open_window(request: &Request) -> bool {
+    matches!(
+        request.query,
+        Some(
+            safe_cex_engine::Query::Fills {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | safe_cex_engine::Query::OrderHistory {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            }
+        )
+    )
 }
 
 fn optional_native_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {

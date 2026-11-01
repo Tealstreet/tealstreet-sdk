@@ -933,12 +933,10 @@ impl BitgetFutures {
             && job.ids.is_empty()
             && let Some(symbol) = &job.replaces_order
         {
-            let state = if error.outcome == Some(Outcome::Unknown) {
-                "may be gone: check Open Orders"
-            } else {
-                "is gone: it was canceled and its replacement refused"
-            };
-            let order = format!("Your {symbol} order {state}");
+            let order = safe_cex_engine::error::order_gone_text(
+                symbol,
+                error.outcome == Some(Outcome::Unknown),
+            );
             job.note = Some(match job.note.take() {
                 Some(note) => format!("{order}; {note}"),
                 None => order,

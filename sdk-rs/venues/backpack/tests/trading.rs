@@ -887,6 +887,53 @@ fn amend_does_not_replace_after_an_ambiguous_cancel_ack() {
 }
 
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, _) = ready_orders(&format!("[{ORDER}]"));
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2000.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "123".into(),
+            price: Some(142.0),
+            amount: None,
+        }),
+    );
+    let cancel = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
+    let place = actions(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.method == Method::Post => Some(r),
+            _ => None,
+        })
+        .expect("the replacement");
+    reply(
+        &mut e,
+        &place,
+        400,
+        r#"{"code":"INVALID_ORDER","message":"bad"}"#,
+    );
+    let error = actions(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("a failure");
+    assert!(
+        error.message.contains("Your SOL_USDC_PERP order is gone"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
 fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome, Response};
     let market = r#"[{"symbol":"SOL_USDC_PERP","type":"market","side":"buy","amount":1}]"#;

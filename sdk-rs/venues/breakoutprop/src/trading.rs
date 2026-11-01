@@ -228,9 +228,22 @@ struct Job {
     ids: Vec<String>,
     reserved_places: usize,
     cancel_targets: Vec<String>,
+    /// An amend's symbol: its replacement's refusal leaves the order gone.
+    replaces: Option<String>,
 }
 
 impl Job {
+    fn note_replacement_lost(&self, error: &mut VenueError) {
+        if let Some(symbol) = self.replaces.as_deref().filter(|_| self.ids.is_empty()) {
+            let unknown = error.outcome == Some(Outcome::Unknown);
+            error.message = format!(
+                "{}: {}",
+                safe_cex_engine::error::order_gone_text(symbol, unknown),
+                error.message
+            );
+        }
+    }
+
     /// Keeps the first failure's text; an Unknown leg makes the whole command Unknown.
     fn record(&mut self, error: VenueError) {
         match &mut self.error {
@@ -665,6 +678,7 @@ impl BreakoutProp {
             ]),
             reserved_places: 1,
             cancel_targets: vec![self.trading.canonical_code(store, id).to_owned()],
+            replaces: Some(order.symbol.clone()),
             ..Job::default()
         })
     }
@@ -854,7 +868,12 @@ impl BreakoutProp {
             job.in_flight = job.in_flight.saturating_sub(1);
             match outcome {
                 Ok(()) => job.effective = true,
-                Err(error) => job.record(error),
+                Err(mut error) => {
+                    if was_place {
+                        job.note_replacement_lost(&mut error);
+                    }
+                    job.record(error);
+                }
             }
         }
         self.advance_trade(cx, command);
@@ -864,10 +883,13 @@ impl BreakoutProp {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: VenueError,
+        mut error: VenueError,
     ) {
         if matches!(request.step, Step::Place { .. }) {
             self.order_revision = self.order_revision.wrapping_add(1);
+            if let Some(job) = self.trading.jobs.get(&request.command) {
+                job.note_replacement_lost(&mut error);
+            }
         }
         self.on_trade_failed_step(cx, request.command, error);
     }

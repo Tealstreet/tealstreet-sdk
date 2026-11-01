@@ -67,6 +67,8 @@ struct Job {
     preflight: Preflight,
     plan: Option<Plan>,
     amending: bool,
+    /// An amend's symbol: its replacement's refusal leaves the order gone.
+    replaces: Option<String>,
 }
 pub struct Request {
     command: CommandId,
@@ -786,6 +788,7 @@ impl ApexOmni {
                 preflight,
                 plan: None,
                 amending: false,
+                replaces: None,
             });
         } else {
             self.trading.active = Some(Job {
@@ -796,6 +799,7 @@ impl ApexOmni {
                 preflight,
                 plan: None,
                 amending: false,
+                replaces: None,
             });
             self.drive_trading(cx);
         }
@@ -842,6 +846,7 @@ impl ApexOmni {
                         .store
                         .order(parent_id(&id))
                         .expect("replacement validated parent");
+                    job.replaces = Some(parent.symbol.clone());
                     prepared.push_back(Step::Write(
                         sign::Request::form(
                             "/v3/delete-order",
@@ -1081,7 +1086,29 @@ impl ApexOmni {
         delivery: Request,
         error: VenueError,
     ) {
-        let _ = cx.fail_plan(&delivery.plan, error);
+        let unknown = error.outcome == Some(Outcome::Unknown);
+        let _ = self.fail_delivery(cx, &delivery, error, unknown);
+    }
+
+    /// Fails a call's Plan, saying so when it was an amend's replacement.
+    fn fail_delivery(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        delivery: &Request,
+        error: impl Into<VenueError>,
+        unknown: bool,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        let gone = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|job| matches!(delivery.accepted, Accepted::Place) && job.ids.is_empty())
+            .and_then(|job| job.replaces.as_deref())
+            .map(|symbol| safe_cex_engine::error::order_gone_text(symbol, unknown));
+        match gone {
+            Some(gone) => cx.fail_plan_noted(&delivery.plan, error, &gone),
+            None => cx.fail_plan(&delivery.plan, error),
+        }
     }
 
     pub(crate) fn trading_retired(&mut self, owner: &HttpOwnerRetirement) -> Option<Preflight> {
@@ -1230,11 +1257,12 @@ impl ApexOmni {
                         self.send_trading(cx, delivery);
                     }
                     Err(_) => {
-                        let _ = cx.fail_plan(&delivery.plan, error);
+                        let _ = self.fail_delivery(cx, &delivery, error, false);
                     }
                 }
             } else {
-                let _ = cx.fail_plan(&delivery.plan, error);
+                let unknown = error.outcome == Some(Outcome::Unknown);
+                let _ = self.fail_delivery(cx, &delivery, error, unknown);
             }
             return;
         }
@@ -1258,10 +1286,8 @@ impl ApexOmni {
         if matches!(delivery.accepted, Accepted::Place) && placed.is_none() {
             let message = "ApeX Omni placement response has no order ID";
             let _ = cx.http_write_unproven(&delivery.context, message);
-            let _ = cx.fail_plan(
-                &delivery.plan,
-                VenueError::new(message).kind(ErrorKind::Internal),
-            );
+            let error = VenueError::new(message).kind(ErrorKind::Internal);
+            let _ = self.fail_delivery(cx, &delivery, error, true);
             return;
         }
         if cx
@@ -1344,7 +1370,12 @@ impl ApexOmni {
                             }
                         }
                         Err(error) => {
-                            let _ = cx.fail_plan(&delivery.plan, error);
+                            // The cancel landed: a replacement that cannot be built is refused.
+                            let gone = safe_cex_engine::error::order_gone_text(
+                                &amendment.order.symbol,
+                                false,
+                            );
+                            let _ = cx.fail_plan_noted(&delivery.plan, error, &gone);
                             return;
                         }
                     }

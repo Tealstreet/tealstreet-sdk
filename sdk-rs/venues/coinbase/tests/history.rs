@@ -823,3 +823,26 @@ fn duplicate_only_changing_cursors_continue_to_native_family_budget() {
     }
     assert_partial(&mut d, &["a"]);
 }
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut d = Driver::new(true, "BTC-USD", false);
+    d.query(Query::Fills {
+        symbol: Some("BTC-USD".into()),
+        order_id: None,
+        from_ms: Some(NOW),
+        to_ms: Some(NOW + 1000.0),
+        limit: None,
+    });
+    let r = d.request();
+    let rows = (0..100)
+        .map(|n| fill(&format!("t{n}"), "100", "1", false, "2024-01-01T00:00:00Z"))
+        .collect::<Vec<_>>()
+        .join(",");
+    d.reply(
+        r,
+        200,
+        &format!(r#"{{"fills":[{rows}],"cursor":"page-2","proof_token_required":false}}"#),
+    );
+    assert!(d.request().url.ends_with("cursor=page-2"));
+}

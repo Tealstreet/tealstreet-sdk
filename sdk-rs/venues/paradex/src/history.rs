@@ -875,6 +875,12 @@ impl History {
         }
         let kept = request.history.accepted_len() + request.history.staged_len();
         let (enough, bounded) = match &request.query {
+            // A window with no limit walks to its start; no default may stop it.
+            Query::Fills {
+                limit: None,
+                from_ms: Some(_),
+                ..
+            } => (false, false),
             Query::Fills { limit, .. } => {
                 (kept >= limit.unwrap_or(100).clamp(1, 500) as usize, true)
             }
@@ -917,10 +923,34 @@ impl History {
             }
             CursorStep::Done => {}
         }
+        // The aggregate fallback reads one page; a full one cannot prove a no-limit window.
+        let full_fallback = request.fallback
+            && request.raw_rows >= 100
+            && matches!(
+                request.query,
+                Query::Fills {
+                    limit: None,
+                    from_ms: Some(_),
+                    ..
+                }
+            );
+        if full_fallback {
+            self.finish(
+                cx,
+                request,
+                Err(VenueError::new("Paradex fill fallback read one full page")),
+            );
+            return;
+        }
         self.finish(cx, request, Ok(()));
     }
     fn finish(&self, cx: &mut Cx<'_, Pending>, request: Request, result: Result<(), VenueError>) {
         let limit = match request.query {
+            Query::Fills {
+                limit: None,
+                from_ms: Some(_),
+                ..
+            } => None,
             Query::Fills { limit, .. } | Query::PublicTrades { limit, .. } => {
                 Some(limit.unwrap_or(100).clamp(1, 500) as usize)
             }
