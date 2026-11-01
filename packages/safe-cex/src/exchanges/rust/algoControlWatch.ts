@@ -65,6 +65,8 @@ export class AlgoControlWatch {
   /** Chases the rows show running, and those whose completion came. */
   private running = new Map<string, ActiveChaser>();
   private readonly ended = new Set<string>();
+  /** Chases a stop was sent for: whoever sent it reports how they end. */
+  private readonly stopSent = new Set<string>();
   private readonly unended = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly stopTracking: () => void;
 
@@ -78,7 +80,7 @@ export class AlgoControlWatch {
     const rows = new Map(this.host.rows().activeChasers.map((chase) => [chase.id, chase]));
     for (const [id, chase] of this.running) {
       if (rows.has(id) || this.unended.has(id)) continue;
-      if (this.ended.delete(id) || this.owed.has(id)) continue;
+      if (this.ended.delete(id) || this.stopSent.delete(id) || this.owed.has(id)) continue;
       this.unended.set(
         id,
         setTimeout(() => {
@@ -87,6 +89,7 @@ export class AlgoControlWatch {
         }, UNENDED_CHASE_MS),
       );
     }
+    for (const id of this.stopSent) if (!rows.has(id)) this.stopSent.delete(id);
     for (const id of rows.keys()) {
       const timer = this.unended.get(id);
       if (timer !== undefined) clearTimeout(timer);
@@ -99,6 +102,7 @@ export class AlgoControlWatch {
   observe(op: string, data: unknown) {
     if (this.resending) return;
     const id = typeof data === 'string' ? data : undefined;
+    if (op === 'chaser:terminate' && id) this.stopSent.add(id);
     const rows = this.host.rows();
     switch (op) {
       case 'chaser:terminate':
