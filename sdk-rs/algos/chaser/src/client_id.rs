@@ -41,7 +41,8 @@ impl ClientIdMinter {
             "okx" | "okxdemo" | "okxeu" | "okxeudemo" => {
                 format!("e847386590ce4dBC{hex}")[..32].to_string()
             }
-            "phemex" => format!("Tealstreet_{hex}"),
+            // The engine refuses a caller id over 40 characters.
+            "phemex" => format!("Tealstreet_{hex}")[..40].to_string(),
             "paradex" => format!("ts_{hex}"),
             "bitrue" => hex[..30].to_string(),
             "grvt" => (u64::from_str_radix(&hex[..16], 16).unwrap_or(1) >> 1)
@@ -50,5 +51,34 @@ impl ClientIdMinter {
             _ => return None,
         };
         Some(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Each venue engine's own limit on a caller client order id.
+    #[test]
+    fn every_minted_id_fits_its_venue_limit() {
+        let minter = ClientIdMinter::default();
+        for (venue, max) in [
+            ("hyperliquid", 34),
+            ("hyperliquidspot", 34),
+            ("binance", 36),
+            ("binancespot", 36),
+            ("binancepm", 32),
+            ("okx", 32),
+            ("okxdemo", 32),
+            ("okxeu", 32),
+            ("okxeudemo", 32),
+            ("phemex", 40),
+            ("paradex", 64),
+            ("bitrue", 31),
+            ("grvt", 19),
+        ] {
+            let id = minter.mint(venue).unwrap();
+            assert!(id.len() <= max, "{venue}: {id} is {} long", id.len());
+        }
     }
 }
