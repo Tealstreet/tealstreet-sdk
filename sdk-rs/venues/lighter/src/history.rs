@@ -830,6 +830,10 @@ impl Lighter {
                 self.history_failed(cx, request, &format!("{} {}", response.status, e.message));
                 return;
             }
+            Err(_) if response.status >= 300 => {
+                self.history_failed(cx, request, &format!("HTTP {}", response.status));
+                return;
+            }
             Err(e) => {
                 finish(
                     cx,

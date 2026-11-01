@@ -974,6 +974,14 @@ impl Trading {
             self.complete(cx, account, request, result, false);
             return;
         }
+        // A stop the venue already removed: what the cancel asked for is true.
+        if matches!(&request.kind, Kind::Cancel(ids) if ids.len() == 1)
+            && response.status == 400
+            && response.body.contains("ORDER_ID_NOT_FOUND")
+        {
+            self.complete(cx, account, request, Ok(Vec::new()), false);
+            return;
+        }
         let result = crate::success(response).and_then(|()| match &request.kind {
             Kind::Amend { id, .. } => {
                 let row: Identity = serde_json::from_str(response.body)

@@ -2198,7 +2198,8 @@ impl Lighter {
                 if ok && let Some(index) = found {
                     self.identity_ready(cx, index);
                 } else {
-                    self.account.lookup_failed |= !ok && !(400..500).contains(&response.status);
+                    // Only these say the account is absent; a 405 verification page says nothing.
+                    self.account.lookup_failed |= !ok && !matches!(response.status, 400 | 404);
                     self.next_lookup(cx, candidates);
                 }
             }
