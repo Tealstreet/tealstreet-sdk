@@ -778,3 +778,20 @@ fn one_uta_write_starts_one_complete_refresh_without_a_duplicate_dirty_followup(
         "[\"one-write-trailing\"]"
     );
 }
+
+// Seen on one key: a definite refusal, with its code in the message.
+#[test]
+fn uta_trailing_refused_400172_is_a_named_refusal() {
+    let mut h = uta(false);
+    place(&mut h, vec![opts("sell", 95.0)]);
+    ready(&mut h);
+    let (id, _) = body(&mut h, "/place-strategy-order");
+    h.reply(
+        id,
+        200,
+        r#"{"code":"400172","msg":"trailing stop is not available","data":null}"#,
+    );
+    let error = h.done.last().unwrap().1.as_ref().unwrap_err().clone();
+    assert!(error.contains("400172"), "{error}");
+    assert_eq!(h.engine.store().orders().len(), 0);
+}

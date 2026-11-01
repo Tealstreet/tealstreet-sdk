@@ -37,6 +37,8 @@ pub(crate) const CODES: CodeTable = CodeTable {
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
+        // UTA trailing stop refused, seen on one key; whether it is venue-wide is unconfirmed.
+        refused(400172, ErrorKind::Rejected),
         refused(40001, ErrorKind::AuthInvalid),
         refused(40006, ErrorKind::AuthInvalid),
         refused(40011, ErrorKind::AuthInvalid),
