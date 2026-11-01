@@ -321,6 +321,14 @@ fn rejected_read_only_ip_fails_startup_without_deactivating() {
     assert_eq!(rig.failures.len(), 1);
     assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthPermission));
     assert!(rig.failures[0].message.contains("read-only API key"));
+    // The legacy runtime's recorded BloFin body: the user is told to add the new IPs.
+    assert!(
+        rig.failures[0]
+            .message
+            .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT),
+        "{}",
+        rig.failures[0].message
+    );
     assert_eq!(rig.deactivated, 0);
 }
 

@@ -207,6 +207,13 @@ fn rejected_read_only_ip_fails_startup_without_deactivating() {
     assert_eq!(h.startup_failures.len(), 1);
     assert_eq!(h.startup_failures[0].kind, Some(ErrorKind::AuthPermission));
     assert!(h.startup_failures[0].message.contains("read-only API key"));
+    assert!(
+        h.startup_failures[0]
+            .message
+            .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT),
+        "{}",
+        h.startup_failures[0].message
+    );
     assert_eq!(h.deactivations, 0);
 }
 

@@ -1682,6 +1682,37 @@ fn ip_whitelist_rejection_keeps_its_actionable_message() {
     )));
 }
 
+#[test]
+fn a_login_refused_for_its_ip_names_the_whitelist() {
+    let mut h = Harness::new(true);
+    let login = h.take("login");
+    h.now += 1.;
+    // GRVT's documented 1008 answer (reference/grvt/docs/trading_streams.md).
+    h.engine.handle(
+        h.now,
+        Event::HttpResponse {
+            request: login.id,
+            response: Response {
+                status: 401,
+                headers: "",
+                body: r#"{"code":1008,"message":"Your IP has not been whitelisted for access","status":401}"#,
+            },
+        },
+    );
+    h.collect();
+    assert!(
+        h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "auth.rejected"
+                    && event.level == safe_cex_engine::Level::Error
+                    && event.message.contains("whitelist every Tealstreet IP")
+        )),
+        "{:?}",
+        h.actions
+    );
+}
+
 fn reporter_summary(h: &mut Harness, coins: &str) {
     let (timer, at) = h
         .actions
