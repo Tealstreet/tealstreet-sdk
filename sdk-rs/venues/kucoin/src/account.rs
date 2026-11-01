@@ -809,6 +809,11 @@ impl Kucoin {
                 return;
             }
             let path = request.path(cx.store);
+            cx.startup_read_refused(&crate::wire::write_failure(
+                status,
+                body,
+                format!("KuCoin refused the API key on {path}"),
+            ));
             match envelope.as_ref() {
                 Ok(e) if e.code == crate::wire::IP_REFUSED => cx.retried_failure_error(
                     "kucoin.account:773",
