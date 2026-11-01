@@ -260,9 +260,21 @@ fn ack_identity(raw: &str, allow_client: bool) -> Result<(Option<String>, bool),
         #[serde(borrow, default = "empty_id")]
         client_id: &'a serde_json::value::RawValue,
     }
-    let row: Identity<'_> = serde_json::from_str(raw).map_err(|e| e.to_string())?;
-    let order = serde_json::from_str::<Str<'_>>(row.order_id.get());
-    let client = serde_json::from_str::<Str<'_>>(row.client_id.get());
+    // A partial TP/SL answers with a one-row array; every real row carries a null clientId.
+    let first = if raw.trim_start().starts_with('[') {
+        let rows: Vec<&serde_json::value::RawValue> =
+            serde_json::from_str(raw).map_err(|e| e.to_string())?;
+        rows.first().map_or("{}", |row| row.get())
+    } else {
+        raw
+    };
+    let row: Identity<'_> = serde_json::from_str(first).map_err(|e| e.to_string())?;
+    let text = |raw: &'_ serde_json::value::RawValue| {
+        serde_json::from_str::<Option<Str<'_>>>(raw.get())
+            .map(|id| id.map_or_else(String::new, |id| id.into_owned()))
+    };
+    let order = text(row.order_id);
+    let client = text(row.client_id);
     let malformed = order.is_err()
         || client.is_err()
         || order
@@ -271,20 +283,11 @@ fn ack_identity(raw: &str, allow_client: bool) -> Result<(Option<String>, bool),
         || client
             .as_ref()
             .is_ok_and(|id| !id.is_empty() && id.trim().is_empty());
-    let id = order
-        .ok()
-        .filter(|id| !id.trim().is_empty())
-        .map(|id| id.into_owned())
-        .or_else(|| {
-            allow_client
-                .then(|| {
-                    client
-                        .ok()
-                        .filter(|id| !id.trim().is_empty())
-                        .map(|id| id.into_owned())
-                })
-                .flatten()
-        });
+    let id = order.ok().filter(|id| !id.trim().is_empty()).or_else(|| {
+        allow_client
+            .then(|| client.ok().filter(|id| !id.trim().is_empty()))
+            .flatten()
+    });
     Ok((id, malformed))
 }
 fn stop(t: Option<StopTriggerType>) -> &'static str {
@@ -1960,7 +1963,7 @@ impl BitunixFutures {
             live.current = Some((request.slot.clone(), request.context.clone()));
         }
         if definitive
-            && message.contains("position does not exist")
+            && message.contains("not exist")
             && request.step.single_place()
             && let Some(orders) = self
                 .trading
@@ -2384,7 +2387,7 @@ impl BitunixFutures {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Ack<'a> {
-            #[serde(borrow, default, alias = "id")]
+            #[serde(borrow, default, alias = "id", deserialize_with = "crate::wire::text")]
             order_id: Str<'a>,
         }
         let accepted = match serde_json::from_str::<Ack<'_>>(data) {
@@ -2655,5 +2658,37 @@ mod serial_auth_tests {
             assert_eq!(call.attempts, attempts);
             assert_eq!(call.timeout_ms, CALL_MS);
         }
+    }
+}
+
+#[cfg(test)]
+mod real_ack_tests {
+    use super::ack_identity;
+
+    #[test]
+    fn real_bitunix_acks_with_null_client_ids_are_accepted() {
+        for (raw, id) in [
+            (
+                r#"{"orderId":"2116901515347927040","clientId":null}"#,
+                "2116901515347927040",
+            ),
+            (
+                r#"{"orderId":"6851989027826864077","clientId":null}"#,
+                "6851989027826864077",
+            ),
+            (
+                r#"[{"orderId":"5158509051432141703","clientId":null}]"#,
+                "5158509051432141703",
+            ),
+        ] {
+            assert_eq!(
+                ack_identity(raw, true).unwrap(),
+                (Some(id.to_owned()), false)
+            );
+        }
+        assert_eq!(
+            ack_identity(r#"{"orderId":null,"clientId":null}"#, true).unwrap(),
+            (None, false)
+        );
     }
 }
