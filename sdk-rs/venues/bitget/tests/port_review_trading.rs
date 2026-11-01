@@ -124,7 +124,7 @@ fn cross_or_oneway_ignores_side_and_updates_coupled_settings() {
             let p = set_leverage(&mut h, Some(PositionSide::Short), 25.0);
             assert!(p.get("holdSide").is_none());
             assert!(p.get("posSide").is_none());
-            assert!(p.get("productType").is_some());
+            assert_eq!(p.get("productType").is_some(), !uta);
             assert!(
                 h.engine
                     .store()

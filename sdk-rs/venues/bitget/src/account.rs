@@ -1972,6 +1972,16 @@ impl BitgetFutures {
                                     .insert(order.id.clone(), cx.now + 10_000.0);
                                 self.account.opened.remove(&order.id);
                                 cx.store.set_order_status(&order.id, order.status);
+                                if let Some(reason) =
+                                    order.extra.as_ref().and_then(|extra| extra.reject_reason)
+                                {
+                                    cx.store.update_order(&order.id, |stored| {
+                                        stored
+                                            .extra
+                                            .get_or_insert_with(OrderExtra::default)
+                                            .reject_reason = Some(reason);
+                                    });
+                                }
                             }
                             _ if !self
                                 .account
@@ -2567,7 +2577,11 @@ impl BitgetFutures {
                 OrderSide::Sell
             });
         let protected = first_text(&[&raw.hold_side, &raw.pos_side]);
-        if (!raw.plan_type.is_empty() || (self.account.uta && kind.is_none()))
+        // One-way, posSide on a UTA strategy row says nothing about what it closes: its side does.
+        if (!raw.plan_type.is_empty()
+            || (self.account.uta
+                && kind.is_none()
+                && (cx.store.hedged() || order_side(&raw.side).is_none())))
             && matches!(protected, "long" | "short" | "buy" | "sell")
         {
             side = if matches!(protected, "long" | "buy") {
@@ -2582,6 +2596,14 @@ impl BitgetFutures {
         {
             side = side.opposite();
         }
+        // A UTA hedge close reads reduceOnly NO with no tradeSide on REST: side and
+        // posSide say it, and an amend rebuilt without it would open the other way.
+        let uta_hedge_close = self.account.uta
+            && (is_hedged(first_text(&[&raw.pos_mode, &raw.hold_mode])) || cx.store.hedged())
+            && matches!(
+                (raw.side.as_ref(), protected),
+                ("sell", "long") | ("buy", "short")
+            );
         let amount = first(&[raw.size, raw.sz, raw.qty, raw.amount]).unwrap_or(0.0);
         let filled = first(&[
             raw.acc_base_volume,
@@ -2631,6 +2653,7 @@ impl BitgetFutures {
                 native_remaining
             },
             reduce_only: raw.reduce_only.0
+                || uta_hedge_close
                 || !raw.plan_type.is_empty()
                 || (raw.strategy_type == "trailing_stop" && !unsupported_trailing_exposure(raw))
                 || [&raw.trade_side, &raw.t_s, &raw.side].iter().any(|value| {
@@ -2681,6 +2704,12 @@ impl BitgetFutures {
                 ..OrderExtra::default()
             }),
         };
+        let mut base = base;
+        if raw.cancel_reason == "post_only_cancel" {
+            base.extra
+                .get_or_insert_with(OrderExtra::default)
+                .reject_reason = Some(RejectReason::PostOnly);
+        }
         let mut orders = vec![];
         if kind.is_none() {
             for (kind, price, trigger) in [
