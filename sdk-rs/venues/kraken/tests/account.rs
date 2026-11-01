@@ -5,7 +5,7 @@ use support::*;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 5_000.0;
 
-const ORDER: &str = r#"{"instrument":"PF_XBTUSD","order_id":"order-1","qty":2,"filled":0.5,"type":"stop","direction":1,"stop_price":90,"reduce_only":true,"triggerSignal":"last","last_update_time":1700000000000}"#;
+const ORDER: &str = r#"{"instrument":"PF_XBTUSD","order_id":"order-1","qty":1.5,"filled":0.5,"type":"stop","direction":1,"stop_price":90,"reduce_only":true,"triggerSignal":"last","last_update_time":1700000000000}"#;
 fn snapshot(e: &mut Engine<Kraken>, socket: SocketId) {
     message(
         e,
@@ -661,7 +661,7 @@ fn execution_remaining_updates_orders_without_counting_cumulative_progress_twice
         &format!(
             r#"{{"feed":"open_orders","order":{}}}"#,
             ORDER
-                .replace("\"filled\":0.5", "\"filled\":1")
+                .replace("\"qty\":1.5,\"filled\":0.5", "\"qty\":1,\"filled\":1")
                 .replace("1700000000000", "1700000000002")
         ),
     );
@@ -685,7 +685,7 @@ fn cumulative_order_before_execution_does_not_double_count_and_final_remaining_c
         &format!(
             r#"{{"feed":"open_orders","order":{}}}"#,
             ORDER
-                .replace("\"filled\":0.5", "\"filled\":1")
+                .replace("\"qty\":1.5,\"filled\":0.5", "\"qty\":1,\"filled\":1")
                 .replace("1700000000000", "1700000000001")
         ),
     );
