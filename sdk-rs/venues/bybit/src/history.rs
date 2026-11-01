@@ -21,9 +21,9 @@ const FILLS_PAGE_LIMIT: u32 = 100;
 const ORDERS_PAGE_LIMIT: u32 = 50;
 const INCOME_PAGE_LIMIT: u32 = 50;
 const TRADES_LIMIT: u32 = 1000;
-const MAX_PAGES_PER_WINDOW: u32 = 10;
+const MAX_PAGES_PER_WINDOW: u32 = 100;
 /// TS walks up to 20 order-history pages of 50.
-const MAX_ORDER_PAGES_PER_WINDOW: u32 = 20;
+const MAX_ORDER_PAGES_PER_WINDOW: u32 = 200;
 
 pub struct Request {
     command: CommandId,
@@ -442,6 +442,7 @@ impl BybitLinear {
             );
             return;
         }
+        let now = cx.now;
         let mut walk = match read {
             Read::OrderByClientId { .. } => {
                 let _ = cx.fail_context(
@@ -459,7 +460,14 @@ impl BybitLinear {
                 to_ms,
                 limit,
             } => {
-                let cap = limit.unwrap_or(50) as usize;
+                // An omitted limit reads the whole window, as order history does.
+                let cap = limit.unwrap_or(0) as usize;
+                // A start alone reads only its first 7 days; an old one answers empty.
+                let to_ms = if order_id.is_none() {
+                    to_ms.or(from_ms.map(|_| now))
+                } else {
+                    to_ms
+                };
                 let mut params = vec![("category", self.paths.category.to_owned())];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 params.extend(order_id.map(|id| ("orderId", id)));
@@ -471,7 +479,11 @@ impl BybitLinear {
                     path: "/v5/execution/list",
                     signed: true,
                     params,
-                    limit: (cap as u32).clamp(1, FILLS_PAGE_LIMIT),
+                    limit: if cap == 0 {
+                        FILLS_PAGE_LIMIT
+                    } else {
+                        (cap as u32).clamp(1, FILLS_PAGE_LIMIT)
+                    },
                     windows: windows(from_ms, to_ms),
                     window: (None, None),
                     stage_started: false,
@@ -488,6 +500,7 @@ impl BybitLinear {
             } => {
                 // An omitted limit reads the whole window (bounded by the page guard), as TS does.
                 let cap = limit.unwrap_or(0) as usize;
+                let to_ms = to_ms.or(from_ms.map(|_| now));
                 let mut params = vec![("category", self.paths.category.to_owned())];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 Walk {
