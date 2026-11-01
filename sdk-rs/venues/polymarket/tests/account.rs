@@ -123,6 +123,9 @@ impl H {
                 }
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { error }) => self
+                    .errors
+                    .push(format!("startup failed: {}", error.message)),
                 _ => {}
             }
         }
@@ -1202,4 +1205,15 @@ fn clean_holdings_response_rearms_named_and_anonymous_skip_memory() {
     ] {
         assert_eq!(holding_skip_count(&h, message), 2);
     }
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut h = H::new();
+    h.response("/balance-allowance", 401, r#"{"error":"Unauthorized"}"#);
+    assert!(
+        h.errors.iter().any(|e| e.starts_with("startup failed:")),
+        "{:?}",
+        h.errors
+    );
 }
