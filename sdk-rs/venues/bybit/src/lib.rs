@@ -2937,8 +2937,8 @@ impl Venue for BybitLinear {
         // requires its streamed list. A private snapshot with nothing in it can
         // answer `list: null`.
         if matches!(pending.then, Then::Fees(_) | Then::RefreshMarkets(_))
-            || (matches!(&pending.then, Then::Account(request) if request.is_snapshot_read())
-                && account::success_with_null_list(response.body))
+            || (matches!(&pending.then, Then::Account(read) if read.is_snapshot_read())
+                && account::success_with_null_list(&response))
             || (matches!(
                 pending.then,
                 Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
