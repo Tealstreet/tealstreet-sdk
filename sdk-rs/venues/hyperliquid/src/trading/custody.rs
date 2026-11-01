@@ -540,7 +540,7 @@ impl Hyperliquid {
             && statuses
                 .iter()
                 .skip(1)
-                .any(|status| matches!(status, Status::Text(text) if text == "waitingForFill"))
+                .any(|status| matches!(status, Status::Text(text) if deferred_child(text)))
         {
             return self.report_attached_order(cx, request, statuses, message);
         }
@@ -615,7 +615,7 @@ impl Hyperliquid {
         for (index, status) in statuses.iter().enumerate() {
             let error = match status {
                 Status::Error { error } => error.as_str(),
-                Status::Text(text) if index > 0 && text == "waitingForFill" => continue,
+                Status::Text(text) if index > 0 && deferred_child(text) => continue,
                 Status::Text(_) => "Unknown Hyperliquid order status",
                 _ => continue,
             };
@@ -646,4 +646,10 @@ impl Hyperliquid {
         };
         cx.http_write_fact(&request.context, fact, None).map(drop)
     }
+}
+
+/// A child still waiting on its parent: an unfilled parent's child says
+/// waitingForFill, a filled parent's says waitingForTrigger.
+fn deferred_child(text: &str) -> bool {
+    text == "waitingForFill" || text == "waitingForTrigger"
 }

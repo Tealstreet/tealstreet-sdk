@@ -1231,12 +1231,29 @@ fn a_deferred_attachment_never_hides_another_child_failure() {
     }
 }
 
+// deaws2's live reply: a marketable limit with a stop loss fills at once.
+#[test]
+fn a_filled_or_resting_parent_returns_its_id_with_either_child_state() {
+    for parent in [
+        json!({"filled":{"oid":3001,"totalSz":"1","avgPx":"100"}}),
+        json!({"resting":{"oid":3001}}),
+    ] {
+        for child in ["waitingForTrigger", "waitingForFill"] {
+            let body = json!({"status":"ok","response":{"type":"order","data":{
+                "statuses":[parent, child]
+            }}})
+            .to_string();
+            let (_, actions) = native_two_row_reply(&body);
+            assert_eq!(results(&actions, OWNER), vec![Ok(r#"["3001"]"#.into())]);
+        }
+    }
+}
+
 #[test]
 fn a_deferred_attachment_requires_its_accepted_parent_in_the_parent_row() {
     for statuses in [
         json!(["waitingForFill", {"resting":{"oid":3001}}]),
         json!([{"error":"Insufficient margin to place order."}, "waitingForFill"]),
-        json!([{"resting":{"oid":3001}}, "waitingForTrigger"]),
     ] {
         let body = json!({"status":"ok","response":{"type":"order","data":{
             "statuses":statuses
