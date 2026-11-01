@@ -1984,3 +1984,21 @@ fn a_real_partial_then_filled_snapshot_pair_loads_no_order() {
             .is_none()
     );
 }
+
+#[test]
+fn preset_legs_end_when_a_terminal_row_does_not_repeat_them() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    push_orders(&mut e, s, "snapshot", 1, &order("New", 100));
+    let mut leg = e.store().order("one").unwrap().clone();
+    leg.id = "one__stop_loss".into();
+    leg.parent_id = Some("one".into());
+    leg.kind = safe_cex_engine::model::OrderType::StopLoss;
+    e.store_mut().upsert_order(leg);
+    push_orders(&mut e, s, "incremental", 2, &order("Canceled", 200));
+    assert_eq!(
+        e.store().order("one__stop_loss").unwrap().status,
+        OrderStatus::Canceled
+    );
+}

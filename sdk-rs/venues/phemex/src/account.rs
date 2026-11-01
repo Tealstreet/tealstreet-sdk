@@ -1516,6 +1516,19 @@ impl PhemexPerpetuals {
                     for order in mapped {
                         cx.store.upsert_order(order);
                     }
+                    // A terminal row may not repeat its TP/SL; the legs do not outlive it anyway.
+                    if row.terminal() {
+                        for suffix in ["__stop_loss", "__take_profit"] {
+                            let leg = format!("{}{suffix}", row.order_id);
+                            if cx
+                                .store
+                                .order(&leg)
+                                .is_some_and(|o| o.status == OrderStatus::Open)
+                            {
+                                cx.store.set_order_status(&leg, OrderStatus::Canceled);
+                            }
+                        }
+                    }
                 }
             }
             if safe_snapshot {

@@ -3906,3 +3906,31 @@ fn an_order_past_the_split_bound_is_refused_without_a_request() {
         "{actions:?}"
     );
 }
+
+#[test]
+fn preset_legs_end_when_a_terminal_row_does_not_repeat_them() {
+    let id = "fd4300ae-7847-404e-b947-b46980a4d140";
+    let frame = |status: &str| {
+        let frame = order_frame(status, "0", "0.002", "EC_NoError");
+        let at = frame.find(r#""orderId":""#).unwrap() + 11;
+        let end = at + frame[at..].find('"').unwrap();
+        format!("{}{id}{}", &frame[..at], &frame[end..])
+    };
+    let mut h = ready();
+    h.message("/v5/private", &frame("New"));
+    let mut leg = h.engine.store().order(id).unwrap().clone();
+    leg.id = format!("{id}__stop_loss");
+    leg.parent_id = Some(id.into());
+    leg.kind = OrderType::StopLoss;
+    leg.status = OrderStatus::Open;
+    h.engine.store_mut().upsert_order(leg);
+    h.message("/v5/private", &frame("Cancelled"));
+    assert_eq!(
+        h.engine
+            .store()
+            .order(&format!("{id}__stop_loss"))
+            .unwrap()
+            .status,
+        OrderStatus::Canceled
+    );
+}
