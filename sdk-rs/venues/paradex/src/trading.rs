@@ -1282,6 +1282,9 @@ impl Trading {
         let size = num::adjust(amount.unwrap_or(size), m.precision.amount);
         let price = if limit {
             num::adjust(price.unwrap_or(raw_price), m.precision.price)
+        } else if raw.kind.ends_with("_MARKET") {
+            // The venue refuses a price here, and a row can carry one.
+            0.
         } else {
             raw_price
         };

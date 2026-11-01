@@ -591,6 +591,48 @@ fn cancel_pair_errors_are_correlated_and_attempt_all_batches_without_resending()
     assert!(h.pending.is_empty());
 }
 #[test]
+fn a_market_trigger_row_carrying_a_price_amends_without_one() {
+    let mut h = private();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: private });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_MARKET","status":"UNTRIGGERED","side":"SELL","size":"2","remaining_size":"2","price":"95","trigger_price":"90","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000}}}"#});
+    h.collect();
+    h.command(Command::AmendOrder {
+        command: 13,
+        id: "123".into(),
+        price: Some(91.),
+        amount: None,
+    });
+    let request = h.take("/orders/123");
+    let payload: Payload = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        payload.price, None,
+        "the venue answered price must be omitted"
+    );
+    assert_eq!(payload.trigger_price.as_deref(), Some("91"));
+}
+
+#[test]
 fn untriggered_stop_with_null_execution_price_can_be_amended_without_cancel_replace() {
     let mut h = private();
     let private = h
