@@ -83,15 +83,22 @@ struct Status {
     status: String,
     #[serde(default, alias = "orderId")]
     order_id: String,
-    #[serde(default, rename = "orderEvents")]
+    #[serde(default, rename = "orderEvents", deserialize_with = "nullable_events")]
     events: Vec<OrderEvent>,
+}
+fn nullable_events<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<OrderEvent>, D::Error> {
+    Ok(Option::<Vec<OrderEvent>>::deserialize(d)?.unwrap_or_default())
+}
+fn nullable_kind<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
 }
 #[derive(Deserialize)]
 struct OrderEvent {
-    #[serde(default, rename = "type")]
+    #[serde(default, rename = "type", deserialize_with = "nullable_kind")]
     kind: String,
+    // Other event types carry other fields; only an execution's number counts.
     #[serde(default)]
-    amount: f64,
+    amount: Option<serde_json::Value>,
 }
 #[derive(Deserialize)]
 struct Preference {
@@ -731,7 +738,7 @@ impl Kraken {
                     .events
                     .iter()
                     .filter(|event| event.kind == "EXECUTION")
-                    .map(|event| event.amount)
+                    .filter_map(|event| event.amount.as_ref().and_then(serde_json::Value::as_f64))
                     .sum();
                 // A market or IOC order never rests, whatever its status says.
                 let rests = !matches!(p.order.kind, OrderType::Market)
