@@ -55,6 +55,16 @@ pub enum Request {
     Balance,
 }
 
+fn order_row_symbol(store: &safe_cex_engine::Store, item: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: &'a str,
+    }
+    let row = serde_json::from_str::<Row<'_>>(item).ok();
+    safe_cex_engine::coverage::fence_symbol(store, row.as_ref().map(|row| row.symbol))
+}
+
 /// Rejects a row the snapshot could not map; its stored copies keep their last known state.
 fn reject<T>(
     cx: &mut Cx<'_, Pending>,
@@ -62,12 +72,13 @@ fn reject<T>(
     kind: &str,
     key: &str,
     ids: Vec<String>,
+    symbol: &str,
 ) {
     if key.trim().is_empty() {
         cx.notice(Level::Warn, code::ROW_SKIPPED,
             format!("ApeX skipped malformed {kind} row without an identity; keeping the last known state"),
         );
-        rows.reject(None);
+        rows.reject_in(None, symbol);
         return;
     }
     cx.notice(
@@ -76,7 +87,7 @@ fn reject<T>(
         format!("ApeX skipped malformed {kind} row {key}; keeping its last known state"),
     );
     for id in ids {
-        rows.reject(Some(id));
+        rows.reject_in(Some(id), symbol);
     }
 }
 
@@ -877,7 +888,7 @@ impl ApexOmni {
                         let legs = [PositionSide::Long, PositionSide::Short]
                             .map(|side| position_id(&symbol, side))
                             .into();
-                        reject(cx, rows, "position", &symbol, legs);
+                        reject(cx, rows, "position", &symbol, legs, "");
                     }
                 }
             }
@@ -896,8 +907,9 @@ impl ApexOmni {
                     Ok(mapped) => mapped.into_iter().for_each(|order| rows.push(order)),
                     Err(_) => {
                         let id = wire::row_key(item).id;
+                        let symbol = order_row_symbol(cx.store, item);
                         let ids = vec![id.clone()];
-                        reject(cx, rows, "order", &id, ids);
+                        reject(cx, rows, "order", &id, ids, &symbol);
                     }
                 }
             }
@@ -1011,8 +1023,8 @@ impl ApexOmni {
                     return;
                 }
                 // A clean read started after the mark releases the fence once published.
-                let release =
-                    rows.rejected() == 0 && std::mem::take(&mut self.account.order_read_fresh);
+                let release = std::mem::take(&mut self.account.order_read_fresh);
+                let unproven = rows.unproven().to_vec();
                 // Bracket children share their parent's identity.
                 let rows = rows.commit(cx.store.orders().iter().cloned(), |o| {
                     base_id(&o.id).to_owned()
@@ -1028,12 +1040,12 @@ impl ApexOmni {
                     }
                     // Released here only: this response's token certifies the orders read.
                     if self.commit_snapshot(cx) && release {
-                        cx.orders_reconciled_since(None, read_epoch);
+                        cx.orders_reconciled_except(&unproven, read_epoch);
                     }
                 } else {
                     self.commit_orders(cx, rows, revision);
                     if release {
-                        cx.orders_reconciled_since(None, read_epoch);
+                        cx.orders_reconciled_except(&unproven, read_epoch);
                     }
                 }
                 if self.account.reconcile_owed {

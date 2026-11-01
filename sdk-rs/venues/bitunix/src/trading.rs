@@ -1720,6 +1720,7 @@ impl BitunixFutures {
         self.account.reask = reask;
         if !reask {
             self.account.paid = [None, None];
+            self.account.paid_unproven.clear();
         }
         for (slot, axis) in [(0, Axis::Orders), (1, Axis::Tpsl)] {
             if !reask || self.account.owed[slot].is_some() {

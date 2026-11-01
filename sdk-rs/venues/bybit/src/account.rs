@@ -2389,12 +2389,16 @@ impl BybitLinear {
         {
             return;
         }
+        let symbol = identity
+            .as_ref()
+            .and_then(|r| r.symbol.clone())
+            .unwrap_or_default();
         let key = identity.and_then(|r| {
             r.symbol
                 .filter(|v| !v.is_empty())
                 .and(r.order_id.filter(|v| !v.is_empty()))
         });
-        rejected.skip(cx, key, Level::Warn, "Bybit malformed order row; cached identity/protection retained and reconciliation scheduled");
+        rejected.skip_in(cx, key, &symbol, Level::Warn, "Bybit malformed order row; cached identity/protection retained and reconciliation scheduled");
         self.account.orders_stale = true;
     }
     fn reject_position_item(
@@ -2456,7 +2460,7 @@ impl BybitLinear {
                 // A sound row of a type the store cannot hold must not block every
                 // other order; finish_orders keeps its last known state and says so.
                 if well_formed && mapped.is_none() && !self.variant.is_hyro() {
-                    rejected.reject(Some(row.order_id.to_string()));
+                    rejected.reject_in(Some(row.order_id.to_string()), &row.symbol);
                     unsupported.push(row.order_id.to_string());
                 } else if !well_formed
                     || mapped.as_ref().is_none_or(|mapped| {
@@ -2949,15 +2953,15 @@ impl BybitLinear {
         }
         // A committed, wholly admitted fresh read clears the engine's
         // uncertain-write fence once no product's order read is still out.
-        if !join.rejected.any()
-            && !self.account.orders_stale
+        if !self.account.orders_stale
             && self.account.orders.is_none()
             && self
                 .products
                 .iter()
                 .all(|state| state.account.orders.is_none() && !state.account.orders_stale)
         {
-            cx.orders_reconciled(None);
+            // Only the markets of rejected rows stay fenced.
+            cx.orders_reconciled_except(join.rejected.unproven(), u64::MAX);
         }
     }
 

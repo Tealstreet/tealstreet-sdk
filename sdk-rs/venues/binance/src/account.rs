@@ -1589,7 +1589,7 @@ impl BinanceFutures {
                 return;
             }
         }
-        let clean = join.skipped.rejected() == 0;
+        let unproven = join.skipped.unproven().to_vec();
         if !cx
             .store
             .commit_orders_snapshot([join.token], |current_rows| {
@@ -1654,9 +1654,9 @@ impl BinanceFutures {
         {
             self.account.orders_stale = true;
             self.schedule_orders_refresh(cx);
-        } else if clean {
-            // Published and fully mapped: this read may resolve an uncertain placement.
-            cx.orders_reconciled_since(None, join.epoch);
+        } else {
+            // Published: resolves an uncertain placement, except on a rejected row's market.
+            cx.orders_reconciled_except(&unproven, join.epoch);
         }
         self.account
             .order_position_sides
@@ -1794,8 +1794,9 @@ impl BinanceFutures {
             join.rejected_symbols
                 .entry(id.clone())
                 .or_default()
-                .push(symbol);
-            join.skipped.reject(Some(id));
+                .push(symbol.clone());
+            let fence = symbol;
+            join.skipped.reject_in(Some(id), &fence);
         }
     }
 

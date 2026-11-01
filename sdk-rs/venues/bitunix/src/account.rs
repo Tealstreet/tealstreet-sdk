@@ -115,14 +115,26 @@ impl Read {
         self.order_rejected.any() || self.order_newer.overflowed()
     }
     fn reject_order(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
-        self.order_rejected.skip(
+        let symbol = order_row_symbol(cx.store, item);
+        self.order_rejected.skip_in(
             cx,
             order_identity(item),
+            &symbol,
             Level::Warn,
             "Bitunix malformed order row; keeping its cached native family",
         );
     }
 }
+fn order_row_symbol(store: &safe_cex_engine::Store, item: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: &'a str,
+    }
+    let row = serde_json::from_str::<Row<'_>>(item).ok();
+    safe_cex_engine::coverage::fence_symbol(store, row.as_ref().map(|row| row.symbol))
+}
+
 fn order_identity(item: &str) -> Option<String> {
     #[derive(serde::Deserialize)]
     struct Identity<'a> {
@@ -206,6 +218,8 @@ pub struct AccountState {
     /// The dispatch epoch of each slot's paying snapshot since the last new
     /// request; the release needs both and reports from the earlier.
     pub paid: [Option<u64>; 2],
+    /// Markets of rows those paid censuses rejected, which stay fenced.
+    pub paid_unproven: Vec<String>,
     /// Symbols whose leverage/margin mode were read on first candle interest.
     pub symbol_settings: std::collections::HashSet<String>,
     /// Serial of the last balance read that was answered (reply or failure).
@@ -1365,10 +1379,13 @@ impl BitunixFutures {
         let Some(token) = read.order_token.take() else {
             return;
         };
-        let (reconcile, slot, partial, serial, epoch) = (
+        let mut unproven = read.order_rejected.unproven().to_vec();
+        if read.order_newer.overflowed() {
+            unproven.push(String::new());
+        }
+        let (reconcile, slot, serial, epoch) = (
             read.reconcile,
             usize::from(read.axis == Axis::Tpsl),
-            read.partial_orders(),
             read.serial,
             read.epoch,
         );
@@ -1382,12 +1399,14 @@ impl BitunixFutures {
         // A slot counts only when its own clean snapshot pays the debt. The
         // release reports from the earlier slot's dispatch epoch, so a mark
         // made after either census began survives it.
-        if reconcile && !partial && self.account.owed[slot].is_some_and(|owed| serial >= owed) {
+        if reconcile && self.account.owed[slot].is_some_and(|owed| serial >= owed) {
             self.account.owed[slot] = None;
             self.account.paid[slot] = Some(epoch);
+            self.account.paid_unproven.extend(unproven);
             if let [Some(regular), Some(tpsl)] = self.account.paid {
                 self.account.paid = [None, None];
-                cx.orders_reconciled_since(None, regular.min(tpsl));
+                let unproven = std::mem::take(&mut self.account.paid_unproven);
+                cx.orders_reconciled_except(&unproven, regular.min(tpsl));
             }
         }
     }

@@ -561,6 +561,8 @@ impl AsterDex {
                 #[serde(rename_all = "camelCase")]
                 struct Identity {
                     order_id: wire::Id,
+                    #[serde(default)]
+                    symbol: String,
                 }
                 let row = serde_json::from_str::<OrderRow>(item).ok();
                 match row.as_ref().and_then(|o| Some((o, order_from_wire(o)?))) {
@@ -580,7 +582,7 @@ impl AsterDex {
                                 code::ROW_SKIPPED,
                                 format!("Aster skipped malformed open order row {id}"),
                             );
-                            rows.reject(Some(id));
+                            rows.reject_in(Some(id), &row.symbol);
                         }
                         Err(_) => {
                             cx.notice(
@@ -940,7 +942,7 @@ impl AsterDex {
                         }
                     } else {
                         // Only a clean snapshot can prove an uncertain placement absent.
-                        let clean = rows.rejected() == 0;
+                        let unproven = rows.unproven().to_vec();
                         let mut rows =
                             rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                         self.account
@@ -980,9 +982,7 @@ impl AsterDex {
                             self.account.orders_seeded = true;
                         }
                         cx.store.set_orders(rows);
-                        if clean {
-                            cx.orders_reconciled(None);
-                        }
+                        cx.orders_reconciled_except(&unproven, u64::MAX);
                     }
                 }
                 if std::mem::take(&mut self.account.orders_requery) {

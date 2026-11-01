@@ -602,6 +602,29 @@ fn a_fresh_order_read_with_a_rejected_row_keeps_the_fence() {
     assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
 }
 
+/// A rejected row names its market: it cannot be an uncertain order on another
+/// one, so it no longer holds every symbol's fence for as long as it is listed.
+#[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let mut e = engine();
+    let sent = command(&mut e, place());
+    let lost = write(&sent, Method::Post, "/order").clone();
+    let failed = answer(&mut e, &lost, 503, "upstream timeout");
+    let fresh = failed
+        .requests
+        .iter()
+        .find(|r| r.url.contains("/openOrders"))
+        .expect("the reconcile read starts at once")
+        .clone();
+    answer(
+        &mut e,
+        &fresh,
+        200,
+        r#"[{"orderId":77,"symbol":"ETHUSDT"}]"#,
+    );
+    write(&command(&mut e, place()), Method::Post, "/order");
+}
+
 /// Cancel-all keeps the engine's default fence: refused NotSent while a
 /// placement is Unknown, because it could miss the uncertain order. Cancel by
 /// ID stays admitted; the fresh read releases cancel-all too.

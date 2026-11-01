@@ -641,17 +641,21 @@ impl Cryptocom {
             }
             Rows::Orders(rows) => {
                 let skips = &mut self.account.order_skips;
+                let symbol = safe_cex_engine::coverage::fence_symbol(
+                    cx.store,
+                    key.as_ref().and_then(|k| k.instrument_name),
+                );
                 let Some(order_id) = key.and_then(|k| k.order_id.map(id)) else {
                     let level = skip_level(!cx.store.orders().is_empty());
                     let message = "Crypto.com skipped unmappable order row without an id";
                     skips.report(cx, String::new(), level, message);
-                    rows.reject(None);
+                    rows.reject_in(None, &symbol);
                     return;
                 };
                 let level = skip_level(cx.store.order(&order_id).is_some());
                 let message = format!("Crypto.com skipped unmappable order row {order_id}");
                 skips.report(cx, order_id.clone(), level, message);
-                rows.reject(Some(order_id));
+                rows.reject_in(Some(order_id), &symbol);
             }
             Rows::Balance(Some(_)) => request.skipped.add(None),
             // The summary row itself is unreadable.
@@ -817,6 +821,7 @@ impl Cryptocom {
                         self.account.order_token.take(),
                     ) {
                         let clean = regular.rejected() == 0 && rows.rejected() == 0;
+                        let unproven: Vec<String> = [regular.unproven(), rows.unproven()].concat();
                         let committed = cx.store.commit_orders_snapshot([token], |current| {
                             if clean {
                                 self.account.order_skips.clear();
@@ -871,10 +876,9 @@ impl Cryptocom {
                         });
                         // Both lists published cleanly from a read started after the mark,
                         // with no write dispatched or ended while either leg was out.
-                        if committed && clean && std::mem::take(&mut self.account.order_read_fresh)
-                        {
+                        if committed && std::mem::take(&mut self.account.order_read_fresh) {
                             if self.account.writes == self.account.census_writes {
-                                cx.orders_reconciled(None);
+                                cx.orders_reconciled_except(&unproven, u64::MAX);
                             } else {
                                 self.account.reconcile_owed = true;
                             }
