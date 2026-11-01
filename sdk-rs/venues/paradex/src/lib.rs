@@ -158,6 +158,9 @@ impl Venue for Paradex {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
     // Private reads bind the account's JWT Session; the engine copies the Bearer
     // only at prepare and re-prepares when the JWT moves before release.
     fn session_bearer(&self, generation: u64) -> safe_cex_engine::request_context::SessionBearer {

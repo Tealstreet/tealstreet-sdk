@@ -1,6 +1,7 @@
 // Null protection values are documented in the BloFin REST algo/TPSL examples.
 // The captured public tape currently contains no nulls; required-field nulls
-// below are defensive corruption cases, not claims about captured live traffic.
+// below are defensive corruption cases. A null size is live traffic: the
+// full-position TP/SL bodies below are deaws2's captures from key bf.
 mod support;
 use safe_cex_engine::{Action, Event, Notice};
 use support::*;
@@ -74,7 +75,7 @@ fn malformed_ws_order_row_retains_known_order_and_processes_valid_sibling() {
     h.ws(&format!(
         r#"{{"arg":{{"channel":"orders"}},"data":[{good}]}}"#
     ));
-    let bad = good.replace("\"size\":\"1\"", "\"size\":null");
+    let bad = good.replace("\"size\":\"1\"", "\"filledSize\":null");
     let sibling = good.replace("\"123\"", "\"456\"");
     h.ws(&format!(
         r#"{{"arg":{{"channel":"orders"}},"data":[{bad},{sibling}]}}"#
@@ -172,4 +173,58 @@ fn websocket_balance_pnl_rounds_raw_sum_to_cents_not_market_price_precision() {
     ));
     assert_eq!(h.e.store().positions()[0].unrealized_pnl, 1.0);
     assert_eq!(h.e.store().balance().upnl, 1.23);
+}
+
+const FULL_POSITION_REST_ROW: &str = r#"{"tpslId":"10029980452","instId":"BTC-USDT","marginMode":"cross","positionSide":"long","positionId":"","side":"sell","tpTriggerPrice":null,"tpOrderPrice":null,"slTriggerPrice":"50000.000000000000000000","slOrderPrice":"-1","size":null,"state":"live","leverage":"10","reduceOnly":"true","actualSize":null,"clientOrderId":"b3cd","createTime":"1793542820720","brokerId":"b3cdedc0a20880ba","tpTriggerPriceType":null,"slTriggerPriceType":"last"}"#;
+const FULL_POSITION_SOCKET: &str = r#"{"action":"update","arg":{"channel":"orders-algo"},"data":[{"instType":"SWAP","instId":"BTC-USDT","tpslId":"10029980452","algoId":"10029980452","clientOrderId":"b3cd","positionId":"","size":null,"orderType":"conditional","side":"sell","positionSide":"long","marginMode":"cross","leverage":"10","state":"live","tpTriggerPrice":null,"tpTriggerPriceType":null,"tpOrderPrice":null,"slTriggerPrice":"50000.000000000000000000","slTriggerPriceType":"last","slOrderPrice":"-1","triggerPrice":null,"triggerPriceType":"last","orderPrice":null,"actualSize":"","actualSide":"","reduceOnly":"true","cancelType":"not_canceled","amendResult":null,"createTime":"1793542820720","updateTime":"1793542820720","brokerId":"b3cdedc0a20880ba"}]}"#;
+
+#[test]
+fn a_captured_full_position_stop_shows_from_the_rest_list() {
+    let mut h = Harness::new();
+    h.modes();
+    h.reply("orders-pending", r#"{"code":"0","data":[]}"#);
+    h.reply(
+        "orders-tpsl-pending",
+        &format!(r#"{{"code":"0","data":[{FULL_POSITION_REST_ROW}]}}"#),
+    );
+    h.reply("orders-tpsl-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-algo-pending", r#"{"code":"0","data":[]}"#);
+    let order =
+        h.e.store()
+            .order("10029980452__stop_loss")
+            .expect("visible");
+    assert_eq!(order.amount, 0.0);
+    assert_eq!(order.price, 50000.0);
+}
+
+#[test]
+fn a_captured_full_position_stop_shows_from_the_socket_and_its_cancel_settles_when_gone() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    h.ws(FULL_POSITION_SOCKET);
+    let order =
+        h.e.store()
+            .order("10029980452__stop_loss")
+            .expect("visible");
+    assert_eq!(order.amount, 0.0);
+    h.handle(
+        1.0,
+        Event::Command(safe_cex_engine::Command::CancelOrders {
+            command: 7,
+            ids: vec!["10029980452__stop_loss".into()],
+        }),
+    );
+    h.collect();
+    // The captured 102068 reply: one object, null algoId.
+    h.reply(
+        "cancel-tpsl",
+        r#"{"code":"0","msg":"","data":{"algoId":null,"clientOrderId":"","msg":"Cancel failed as the order has been filled, triggered, canceled or does not exist.","code":"102068"}}"#,
+    );
+    assert!(h.e.store().order("10029980452__stop_loss").is_none());
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+    );
 }

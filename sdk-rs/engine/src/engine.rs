@@ -596,6 +596,14 @@ const UNCERTAIN_PLACEMENT: &str =
 #[cfg(feature = "order-locks")]
 const UNCERTAIN_CANCEL_ALL: &str = "Placement outcome is uncertain; reconcile before cancel-all";
 
+/// Every order of this placement is reduce-only and its venue enforces that.
+#[cfg(feature = "order-locks")]
+fn enforced_close<V: Venue>(venue: &V, store: &Store, command: &Command) -> bool {
+    matches!(command, Command::PlaceOrders { orders, .. } if !orders.is_empty()
+        && orders.iter().all(|order| order.reduce_only == Some(true)
+            && venue.enforces_reduce_only(store, &order.symbol)))
+}
+
 pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
     cx.fail(command, UNSUPPORTED_VENUE_ACTION);
 }
@@ -2879,6 +2887,21 @@ impl<P> Cx<'_, P> {
         let _ = (symbol, epoch);
     }
 
+    /// `orders_reconciled_since(None, epoch)` for a read that skipped rows, keeping
+    /// the fences of `unproven` symbols whose skipped row could be the uncertain
+    /// write. An empty symbol is a row naming no market and keeps every fence.
+    pub fn orders_reconciled_except(&mut self, unproven: &[String], epoch: u64) {
+        #[cfg(feature = "order-locks")]
+        if let Some(token) = self.io.core.order_response_token {
+            self.io
+                .core
+                .order_locks
+                .reconciled_except(unproven, token.min(epoch));
+        }
+        #[cfg(not(feature = "order-locks"))]
+        let _ = (unproven, epoch);
+    }
+
     /// Call only after accepting a complete, fresh authoritative order read.
     /// A read started before an uncertain placement cannot clear its fence.
     pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
@@ -3573,6 +3596,12 @@ pub trait Venue {
     /// Unknown until a fresh order read resolves it. Opt in only when
     /// `reconcile_uncertain` starts that read at once, so the fence is short-lived.
     fn fence_uncertain_placements(&self) -> bool {
+        false
+    }
+
+    /// The venue itself refuses a reduce-only order on `symbol` that would open
+    /// a position, so such a close passes the uncertain-placement fence.
+    fn enforces_reduce_only(&self, _store: &Store, _symbol: &str) -> bool {
         false
     }
 
@@ -5075,10 +5104,11 @@ impl<V: Venue> Engine<V> {
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements())
-                        && let Err(refusal) = cx.io.core.order_locks.acquire(
+                        && let Err(refusal) = cx.io.core.order_locks.acquire_admitting(
                             &command,
                             cx.store,
                             self.venue.fence_uncertain_cancel_all(),
+                            enforced_close(&self.venue, cx.store, &command),
                         )
                     {
                         let error = match (refusal, &command) {
@@ -5118,6 +5148,7 @@ impl<V: Venue> Engine<V> {
                         &command,
                         cx.store,
                         self.venue.fence_uncertain_cancel_all(),
+                        enforced_close(&self.venue, cx.store, &command),
                     )
                 {
                     let message = if matches!(command, Command::CancelSymbolOrders { .. }) {

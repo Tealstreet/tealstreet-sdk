@@ -896,6 +896,9 @@ impl Venue for Okx {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
 
     fn capture_http_reconciliation(
         &self,

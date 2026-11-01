@@ -859,6 +859,9 @@ impl Venue for AsterDex {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
 
     /// The engine asks at each uncertain seal and re-asks with backoff while
     /// fenced; a call starts one read or joins the owed requery, and the clean
