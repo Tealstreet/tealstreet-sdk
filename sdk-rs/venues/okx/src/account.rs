@@ -609,6 +609,7 @@ impl Okx {
         if !self.account_delivery_current(cx, request) {
             return;
         }
+        let (mut readable_position, mut readable_order) = (None, None);
         match request {
             Request::Config { .. } | Request::Leverage { .. } | Request::LeverageRefresh { .. } => {
             }
@@ -648,7 +649,17 @@ impl Okx {
                 rows,
                 invalid,
                 ..
-            } => match serde_json::from_str::<PositionRow<'_>>(item) {
+            } => match serde_json::from_str::<PositionRow<'_>>(
+                readable_position
+                    .get_or_insert_with(|| {
+                        serde_json::from_str::<PositionRow<'_>>(item)
+                            .is_err()
+                            .then(|| readable_rows(item))
+                            .flatten()
+                    })
+                    .as_deref()
+                    .unwrap_or(item),
+            ) {
                 Ok(p) => {
                     if !self.account_scope(*product, p.inst_id, p.inst_type) {
                         *invalid = true;
@@ -702,7 +713,17 @@ impl Okx {
                 cursor,
                 invalid,
                 ..
-            } => match serde_json::from_str::<OrderRow<'_>>(item) {
+            } => match serde_json::from_str::<OrderRow<'_>>(
+                readable_order
+                    .get_or_insert_with(|| {
+                        serde_json::from_str::<OrderRow<'_>>(item)
+                            .is_err()
+                            .then(|| readable_rows(item))
+                            .flatten()
+                    })
+                    .as_deref()
+                    .unwrap_or(item),
+            ) {
                 Ok(o) => {
                     *page_count += 1;
                     *cursor = page_cursor(*kind, o.ord_id, o.algo_id).into();
@@ -1777,7 +1798,12 @@ impl Okx {
         };
         match message.arg.channel {
             "orders" | "orders-algo" | "algo-advance" => {
-                let _ = json::each::<OrderRow<'_>>(data.get(), |row| {
+                let readable = serde_json::from_str::<Vec<OrderRow<'_>>>(data.get())
+                    .is_err()
+                    .then(|| readable_rows(data.get()))
+                    .flatten();
+                let rows = readable.as_deref().unwrap_or(data.get());
+                let _ = json::each::<OrderRow<'_>>(rows, |row| {
                     if cx.store.market_by_id(row.inst_id).is_none() {
                         cx.notice(
                             Level::Warn,
@@ -1865,8 +1891,13 @@ impl Okx {
             }
             "positions" => {
                 let mut valid = false;
+                let readable = serde_json::from_str::<Vec<PositionRow<'_>>>(data.get())
+                    .is_err()
+                    .then(|| readable_rows(data.get()))
+                    .flatten();
+                let rows = readable.as_deref().unwrap_or(data.get());
                 let _ =
-                    json::each::<PositionRow<'_>>(data.get(), |row| {
+                    json::each::<PositionRow<'_>>(rows, |row| {
                         if let Some((p, risk)) = self.position(cx, &row) {
                             valid = true;
                             self.account.revision += 1;

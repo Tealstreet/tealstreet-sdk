@@ -1142,3 +1142,23 @@ fn a_failed_algo_is_reported_once_and_ends() {
         );
     }
 }
+
+// Whether OKX sends these is unknown; one such field must not hide a row.
+#[test]
+fn a_null_number_or_escape_in_a_row_keeps_it() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"501","ordType":"limit","state":"live","side":"buy","sz":4,"accFillSz":"0","px":"38000","lever":null,"reduceOnly":null,"clOrdId":"a\/b"}]}"#,
+    );
+    let order = e.store().order("501").expect("row kept");
+    assert_eq!(order.client_order_id.as_deref(), Some("a/b"));
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"positions"},"data":[{"instId":"BTC-USDT-SWAP","instType":"SWAP","pos":"2","posSide":"net","avgPx":"38000","markPx":"38000","lever":null,"upl":"0","liqPx":"","mgnMode":"cross","imr":null,"mmr":"1","ccy":"USDT"}]}"#,
+    );
+    assert!(e.store().positions().iter().any(|p| p.contracts != 0.0));
+}
