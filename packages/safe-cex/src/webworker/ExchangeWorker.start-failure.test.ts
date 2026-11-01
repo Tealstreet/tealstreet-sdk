@@ -211,6 +211,44 @@ describe('a Rust start on a slow link', () => {
   });
 });
 
+describe('a call that beats the exchange into being', () => {
+  const metadata = (requestId: string) => ({
+    op: 'callMethod',
+    data: { requestId, method: 'updateSymbolMetadata', args: ['BTCUSDT'] },
+  });
+
+  it('is answered under the engine bounds, not held for the whole start', async () => {
+    const { messages, send } = context();
+    const module = { WasmEngine: SlowEngine };
+    let finishLoad = () => {};
+    const loader = new Promise<void>((resolve) => {
+      finishLoad = resolve;
+    });
+    setWasmEngineLoader(async () => {
+      await loader;
+      return module;
+    });
+    const clock = vi.spyOn(virtualClock, 'start');
+    let clockDone = () => {};
+    clock.mockReturnValueOnce(new Promise<void>((resolve) => (clockDone = resolve)));
+    void send(init);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await send(metadata('held-metadata'));
+    await send(buy('held-write'));
+    await send(read('held-read'));
+    clockDone();
+    finishLoad();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(reply(messages, 'held-metadata')[0].data.success).toBe(true);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reply(messages, 'held-write')[0].data.result).toMatchObject({ outcome: 'notSent' });
+    expect(reportedStartFailure(messages)).toBe(false);
+    expect(reply(messages, 'held-read')).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(reply(messages, 'held-read')).toHaveLength(1);
+  });
+});
+
 describe('a Telegram bot on a retried start', () => {
   const withBot = { ...init, data: { ...init.data, telegramBotToken: 'bot' } };
 

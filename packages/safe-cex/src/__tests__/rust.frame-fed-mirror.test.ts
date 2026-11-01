@@ -234,6 +234,51 @@ describe('frame-fed main-thread mirror', () => {
     });
   });
 
+  describe('when its worker goes away with calls pending', () => {
+    const silentBridge = (target: RustEngineExchange) => {
+      const bridge = () => {};
+      target.on('callMethod', bridge);
+      return bridge;
+    };
+    const mirrorOnly = () =>
+      new RustEngineExchange('bybit', { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false }, new DefaultStore());
+
+    it('rejects a kept engine at once when the bridge is removed, a write as unknown', async () => {
+      vi.useFakeTimers();
+      try {
+        fakeEngine({ supported: false });
+        exchange = mirrorOnly();
+        const bridge = silentBridge(exchange);
+        const pendingRead = exchange.callMethodInWorker('fetchHistoricalFills', { from: 0, to: 1 } as never);
+        const pendingWrite = exchange.callMethodInWorker('placeOrder', order as never);
+        const read = expect(pendingRead).rejects.toThrow('stopped before answering');
+        const write = expect(pendingWrite).rejects.toMatchObject({ outcome: 'unknown' });
+        await vi.advanceTimersByTimeAsync(0);
+        exchange.off('callMethod', bridge);
+        await read;
+        await write;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps waiting while another bridge remains, and rejects on dispose', async () => {
+      fakeEngine({ supported: false });
+      const target = mirrorOnly();
+      const first = silentBridge(target);
+      silentBridge(target);
+      const pending = target.callMethodInWorker('fetchHistoricalFills', { from: 0, to: 1 } as never);
+      target.off('callMethod', first);
+      const outcome = vi.fn();
+      void pending.catch(outcome);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(outcome).not.toHaveBeenCalled();
+      target.dispose();
+      await expect(pending).rejects.toThrow('stopped before answering');
+    });
+  });
+
   it('asks its data source to re-read a setting it holds', async () => {
     const fake = fakeEngine();
     const mirror = mirrorWith(fake);

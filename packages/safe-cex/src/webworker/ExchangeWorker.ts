@@ -313,6 +313,12 @@ export class ExchangeWorker {
     });
   }
 
+  private _flushBufferedCalls() {
+    const calls = this._messageBuffer.filter((payload) => payload.op === 'callMethod');
+    this._messageBuffer = this._messageBuffer.filter((payload) => payload.op !== 'callMethod');
+    calls.forEach((payload) => this.handlePayload(payload));
+  }
+
   /**
    * Bootstraps the exchange inside the worker.
    *
@@ -378,6 +384,8 @@ export class ExchangeWorker {
       const isRust = this._exchange instanceof RustEngineExchange;
       const startTimeoutMs = isRust ? RUST_START_TIMEOUT_MS : START_TIMEOUT_MS;
       const startPromise = this._exchange.start().then(() => 'started' as const);
+      // Its calls queue under the engine's own bounds; held here they would wait out the whole start.
+      if (isRust) this._flushBufferedCalls();
       const timeoutPromise = new Promise<never>((_, reject) => {
         startupTimeout = setTimeout(() => {
           this._startTimedOut = isRust;
