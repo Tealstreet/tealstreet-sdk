@@ -3,7 +3,7 @@ use futures_util::{SinkExt, StreamExt};
 use safe_cex_exchange_server::accounts::Registry;
 use safe_cex_exchange_server::auth::{PROXY_PUBLIC_KEY, Verifier};
 use safe_cex_exchange_server::config::Config;
-use safe_cex_exchange_server::http::{App, router};
+use safe_cex_exchange_server::http::{App, drain, router};
 use safe_cex_exchange_server::state::Metrics;
 use safe_cex_exchange_server::threads::EngineThreads;
 use std::net::SocketAddr;
@@ -12,6 +12,10 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 async fn server() -> String {
+    server_app().await.0
+}
+
+async fn server_app() -> (String, Arc<App>) {
     let config = Config {
         port: 0,
         region: Some("tyo".into()),
@@ -34,18 +38,38 @@ async fn server() -> String {
         config,
         started: std::time::Instant::now(),
         public_per_ip: Default::default(),
+        closing: tokio::sync::watch::channel(false).0,
     };
+    let app = Arc::new(app);
+    let served = app.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(
             listener,
-            router(Arc::new(app)).into_make_service_with_connect_info::<SocketAddr>(),
+            router(served).into_make_service_with_connect_info::<SocketAddr>(),
         )
         .await
         .unwrap();
     });
-    address.to_string()
+    (address.to_string(), app)
+}
+
+#[tokio::test]
+async fn a_drain_closes_sockets_1001() {
+    let (address, app) = server_app().await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}/account"))
+        .await
+        .unwrap();
+    drain(&app).await;
+    let closed = loop {
+        match tokio::time::timeout(Duration::from_secs(2), socket.next()).await {
+            Ok(Some(Ok(Message::Close(frame)))) => break frame,
+            Ok(Some(Ok(_))) => {}
+            other => panic!("no close frame: {other:?}"),
+        }
+    };
+    assert_eq!(u16::from(closed.unwrap().code), 1001);
 }
 
 async fn get(address: &str, path: &str) -> (u16, String) {

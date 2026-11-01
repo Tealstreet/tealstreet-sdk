@@ -234,7 +234,7 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
   });
 
   it.each([
-    ['a JSON array', '[{"a":1}]', {}],
+    ['an array under a form type', '[{"a":1}]', { 'content-type': 'application/x-www-form-urlencoded' }],
     ['a number the parser would change', '{"n":1.000}', {}],
     ['a large integer', '{"id":18446744073709551615}', {}],
     ['spacing', '{"a": 1}', {}],
@@ -248,6 +248,22 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     const prepared = await adapter.prepare(config);
     expect(() => prepared.bind(config)).toThrow(expect.objectContaining({ code: 'HTTP_PREPARATION_UNSUPPORTED' }));
     expect(mockWs.sentMessages).toHaveLength(0);
+    adapter.dispose();
+  });
+
+  it('sends a JSON array body as the array, with the bytes it was signed over', async () => {
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const body = '[{"instId":"BTC-USDT-SWAP","tag":"x","sz":"1"},{"instId":"ETH-USDT-SWAP","tag":"x","sz":"2"}]';
+    const config: any = {
+      url: 'https://www.okx.com/api/v5/trade/batch-orders',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      data: body,
+    };
+    const prepared = await adapter.prepare(config);
+    prepared.bind(config).dispatch().catch(() => {});
+    expect(Array.isArray(mockWs.sentMessages[0].arg.data)).toBe(true);
+    expect(JSON.stringify(mockWs.sentMessages[0].arg.data)).toBe(body);
     adapter.dispose();
   });
 

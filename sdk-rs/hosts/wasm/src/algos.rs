@@ -371,6 +371,7 @@ impl Algos {
     fn stop_all(&mut self, reason: String) {
         let _installed = self.install();
         let stopped_twaps = self.twap.stop_for_nuke();
+        let twap = self.twap.clone();
         let running: Vec<String> = self
             .book
             .active_chasers()
@@ -381,8 +382,13 @@ impl Algos {
         let (book, port) = (self.book.clone(), self.port.clone());
         // In the scope: disposal aborts it, and the JS host then answers the wait.
         self.cx.spawn(async move {
+            let settling = async {
+                let stopped = book.stop_for_nuke(&reason).await;
+                twap.placements_settled().await;
+                stopped
+            };
             let (stopped_chasers, settled) =
-                match executor::timeout(SHUTDOWN_DEADLINE_MS, book.stop_for_nuke(&reason)).await {
+                match executor::timeout(SHUTDOWN_DEADLINE_MS, settling).await {
                     Ok(stopped) => (stopped, true),
                     Err(_) => (running, false),
                 };

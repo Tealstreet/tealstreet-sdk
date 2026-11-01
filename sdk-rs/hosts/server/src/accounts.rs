@@ -10,7 +10,7 @@ use safe_cex_native::{
 use safe_cex_remote_signer::{Outbox, SignerLink, remote_account};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
@@ -264,6 +264,11 @@ impl Account {
             (live.outbox)(text);
         }
     }
+
+    /// Signing and the proxy token follow this socket, which already holds the account.
+    pub fn sign_through_socket(&self, id: u64, outbox: Outbox, token: Option<(String, u64)>) {
+        self.hold(id, Live { outbox, token });
+    }
 }
 
 /// How an account's algo host reaches its sockets, without a cycle back to it.
@@ -306,6 +311,8 @@ pub struct Registry {
     ids: AtomicU64,
     engine_config: ServerConfig,
     pub resume_grace: Duration,
+    /// The process is going away: no new account starts.
+    draining: AtomicBool,
     /// 5-10 account starts per second per egress IP, with jitter (DESIGN sizing).
     pacer: crate::pacing::Pacer,
     /// Why algos stopped while no browser was there to see it, one per
@@ -543,6 +550,7 @@ impl Registry {
                 ..ServerConfig::default()
             },
             resume_grace,
+            draining: AtomicBool::new(false),
             pacer: crate::pacing::Pacer::new(7, Duration::from_millis(60)),
             notices: Arc::default(),
         }
@@ -611,6 +619,9 @@ impl Registry {
         token: Option<(String, u64)>,
         outbox: Outbox,
     ) -> Result<Arc<Account>, String> {
+        if self.draining.load(Ordering::Relaxed) {
+            return Err("The server is restarting; reconnecting".into());
+        }
         let key = (user.to_owned(), init.account_name.clone());
         let fingerprint = init.fingerprint();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
@@ -659,7 +670,8 @@ impl Registry {
         let replaced = self.accounts.lock().unwrap().insert(key, account.clone());
         if let Some(replaced) = replaced {
             // A concurrent init of the same name won the race; the later build stands.
-            Self::stop(&replaced, "account replaced by a newer init", None);
+            // Its holders go too, so the losing socket stops calling a stopped account.
+            self.dispose_for(&replaced, "account replaced by a newer init", None);
         }
         Ok(account)
     }
@@ -936,6 +948,25 @@ impl Registry {
         drop(accounts);
         *account.holders.lock().unwrap() = Holders::default();
         Self::stop(account, reason, stopped);
+    }
+
+    /// The process is stopping: every account's algos settle and its engine ends,
+    /// within `deadline`. Holders stay, so browsers still sign those cancels and
+    /// are told. False if some account had not ended by then.
+    pub async fn drain(&self, deadline: Duration) -> bool {
+        self.draining.store(true, Ordering::Relaxed);
+        let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
+        for account in &accounts {
+            Self::stop(account, "the server is restarting", None);
+        }
+        let until = tokio::time::Instant::now() + deadline;
+        while self.threads.accounts() > 0 {
+            if tokio::time::Instant::now() >= until {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        true
     }
 
     /// Moves a closing socket's private accounts under `resume_id` for the grace
@@ -1402,6 +1433,35 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn a_drain_stops_every_account_keeps_its_holders_and_refuses_new_ones() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = Arc::new(Registry::new(
+                    EngineThreads::start(1).unwrap(),
+                    Duration::from_millis(1),
+                    Duration::from_secs(60),
+                ));
+                let (account, mut inbox) = held_account();
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .insert(("u".into(), "acct".into()), account.clone());
+                assert!(registry.drain(Duration::from_millis(100)).await);
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert_eq!(account.holders.lock().unwrap().by_id.len(), 1);
+                let refused = registry
+                    .obtain("u", &init_frame(""), true, 2, None, Arc::new(|_| true))
+                    .await;
+                assert!(refused.is_err_and(|error| error.contains("restarting")));
+            })
+            .await;
+    }
+
+    #[tokio::test]
     async fn a_failing_signer_tells_live_sockets_what_stopped_with_the_account() {
         tokio::task::LocalSet::new()
             .run_until(async {
@@ -1707,6 +1767,70 @@ pub(crate) mod tests {
             ["enableSpotMarkets"]
         );
         assert!(differing_fields(&a.fingerprint(), &a.fingerprint()).is_empty());
+    }
+
+    pub(crate) fn signing_holder(account: &Account) -> Option<u64> {
+        account.holders.lock().unwrap().signing
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn algo_replies_reach_every_live_holder() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let account = held_account_running_algos(link, String::new());
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let seen = Arc::new(Mutex::new(Vec::new()));
+                for id in [8, 9] {
+                    let seen = seen.clone();
+                    hold_live(
+                        &account,
+                        id,
+                        Arc::new(move |frame| {
+                            seen.lock().unwrap().push((id, frame));
+                            true
+                        }),
+                    );
+                }
+                account
+                    .algos
+                    .as_ref()
+                    .unwrap()
+                    .send(crate::algos::AlgoInput::Joined)
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let seen = seen.lock().unwrap();
+                for id in [8, 9] {
+                    assert!(
+                        seen.iter()
+                            .any(|(holder, frame)| *holder == id
+                                && frame.contains(r#""op":"store""#)),
+                        "holder {id}: {seen:?}"
+                    );
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn the_loser_of_an_init_race_no_longer_holds_the_stopped_account() {
+        let registry = registry();
+        let init = init_frame("");
+        let out = || -> Outbox { Arc::new(|_| true) };
+        let (first, second) = tokio::join!(
+            registry.obtain("u", &init, true, 1, None, out()),
+            registry.obtain("u", &init, true, 2, None, out()),
+        );
+        let (first, second) = (first.unwrap(), second.unwrap());
+        assert!(!Arc::ptr_eq(&first, &second), "both built");
+        assert_eq!(
+            [registry.holds(&first, 1), registry.holds(&second, 2)]
+                .iter()
+                .filter(|held| **held)
+                .count(),
+            1
+        );
+        assert_eq!(registry.account_count(), 1);
     }
 
     #[test]

@@ -30,6 +30,9 @@ impl Adapter {
             Some(book) => book.stop_for_nuke(NUKE_STOP_REASON).await,
             None => Vec::new(),
         };
+        if let Some(twap) = &self.twap {
+            twap.placements_settled().await;
+        }
         let stopped = json!({"stoppedChasers": stopped_chasers, "stoppedTwaps": stopped_twaps});
         // A browser writer runs the legs itself; the host only stops its algos.
         if mode == "algos" {

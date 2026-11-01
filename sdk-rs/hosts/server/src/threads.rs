@@ -14,6 +14,7 @@ struct Lane {
 #[derive(Clone)]
 pub struct EngineThreads {
     lanes: Arc<Vec<Lane>>,
+    panics: Arc<AtomicUsize>,
 }
 
 /// Which lane an account occupies; release it when the account task ends.
@@ -33,8 +34,10 @@ impl Drop for Placement {
 impl EngineThreads {
     pub fn start(count: usize) -> std::io::Result<Self> {
         let mut lanes = Vec::with_capacity(count);
+        let panics = Arc::new(AtomicUsize::new(0));
         for index in 0..count {
             let (jobs, mut inbox) = mpsc::unbounded_channel::<Job>();
+            let job_panics = panics.clone();
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()?;
@@ -44,7 +47,15 @@ impl EngineThreads {
                     let local = tokio::task::LocalSet::new();
                     local.block_on(&runtime, async move {
                         while let Some(job) = inbox.recv().await {
-                            job();
+                            // A panic here would end the lane; its accounts' tasks
+                            // are caught by the runtime, so only a job can do that.
+                            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err()
+                            {
+                                job_panics.fetch_add(1, Ordering::Relaxed);
+                                crate::state::Log::warn(&format!(
+                                    "engine-{index}: an account start panicked"
+                                ));
+                            }
                         }
                     });
                 })?;
@@ -55,6 +66,7 @@ impl EngineThreads {
         }
         Ok(Self {
             lanes: Arc::new(lanes),
+            panics,
         })
     }
 
@@ -79,10 +91,36 @@ impl EngineThreads {
             .is_ok()
     }
 
+    /// Account starts that panicked since the process began.
+    pub fn panics(&self) -> usize {
+        self.panics.load(Ordering::Relaxed)
+    }
+
     pub fn accounts(&self) -> usize {
         self.lanes
             .iter()
             .map(|lane| lane.accounts.load(Ordering::Relaxed))
             .sum()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_panicking_account_start_leaves_its_lane_working_and_is_counted() {
+        let threads = EngineThreads::start(1).unwrap();
+        assert!(threads.place(|_| panic!("start failed")));
+        let (done, finished) = tokio::sync::oneshot::channel();
+        assert!(threads.place(move |_| {
+            let _ = done.send(());
+        }));
+        tokio::time::timeout(std::time::Duration::from_secs(5), finished)
+            .await
+            .expect("the lane still runs jobs")
+            .unwrap();
+        assert_eq!(threads.panics(), 1);
+        assert_eq!(threads.accounts(), 0);
     }
 }
