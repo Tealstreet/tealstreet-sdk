@@ -1089,3 +1089,31 @@ fn a_real_trigger_row_with_a_null_tif_stays_visible() {
     assert_eq!(order.kind, safe_cex_engine::model::OrderType::StopLoss);
     assert_eq!(order.amount, 0.005);
 }
+
+#[test]
+fn a_triggered_stop_does_not_show_price_zero() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":78,"side":"A","limitPx":"88.5","triggerPx":"0.0","orderType":"Stop Market","origSz":"1","sz":"1","tif":"Gtc"},"status":"triggered"}]}"#,
+    );
+    assert_eq!(e.store().order("78").unwrap().price, 88.5);
+}
+
+#[test]
+fn a_fill_arms_an_order_read_because_partial_fills_send_no_update() {
+    let (mut e, s) = ready("disabled");
+    e.drain_actions().for_each(drop);
+    message(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"userFills","data":{"user":"0x14791697260e4c9a71f18484c9f997b308e59325","fills":[{"coin":"BTC","px":"90","sz":"0.1","side":"B","time":2000,"startPosition":"0","dir":"Open Long","closedPnl":"0","hash":"0x0","oid":9,"crossed":true,"fee":"0","tid":5,"feeToken":"USDC"}]}}"#,
+    );
+    let armed = e
+        .drain_actions()
+        .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if at_ms < 3001.0));
+    assert!(armed);
+}

@@ -2289,6 +2289,8 @@ impl Hyperliquid {
                     self.refresh_spot(cx, false);
                 } else {
                     self.optimistic_fill(cx, &symbol, &fill);
+                    // Partial fills send no orderUpdates: only a read shows what is left.
+                    self.schedule_orders(cx);
                 }
             }
         }
@@ -2436,11 +2438,14 @@ pub(crate) fn infer(row: &OrderRow<'_>) -> (OrderType, f64) {
     if row.order_type == "Limit" {
         return (OrderType::Limit, row.limit_px);
     }
-    if row.order_type == "Take Profit Market" || (row.trigger_px.is_some() && row.tpsl == "tp") {
-        return (OrderType::TakeProfit, row.trigger_px.unwrap_or(0.0));
+    // A triggered stop reports triggerPx 0.0; its limit price is what it works at.
+    let trigger = row.trigger_px.filter(|px| *px > 0.0);
+    let price = trigger.unwrap_or(row.limit_px);
+    if row.order_type == "Take Profit Market" || (trigger.is_some() && row.tpsl == "tp") {
+        return (OrderType::TakeProfit, price);
     }
-    if row.order_type == "Stop Market" || row.trigger_px.is_some() {
-        return (OrderType::StopLoss, row.trigger_px.unwrap_or(0.0));
+    if row.order_type == "Stop Market" || trigger.is_some() {
+        return (OrderType::StopLoss, price);
     }
     if row.limit_px != 0.0 {
         (OrderType::Limit, row.limit_px)
