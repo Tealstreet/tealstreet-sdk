@@ -1671,3 +1671,39 @@ fn row_report_stale_ws_snapshot_does_not_rearm_but_a_current_clean_update_does()
         "the current clean read still rearms"
     );
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(support::options()));
+    e.start(support::NOW);
+    let mut failures = vec![];
+    for _ in 0..12 {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, support::NOW);
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            match action {
+                Action::Http(r) => {
+                    let body = if r.url.contains("/instruments") {
+                        support::META
+                    } else if r.url.contains("/tickers") {
+                        support::TICKERS
+                    } else {
+                        r#"{"result":"error","error":"authenticationError"}"#
+                    };
+                    support::reply(&mut e, &r, 200, body);
+                }
+                Action::WsConnect { socket, .. } => {
+                    e.handle(support::NOW, Event::WsOpened { socket })
+                }
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { error }) => {
+                    failures.push(error)
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].message.contains("authenticationError"));
+}

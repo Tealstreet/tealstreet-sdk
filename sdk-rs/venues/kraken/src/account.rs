@@ -1410,6 +1410,15 @@ impl Kraken {
             }
         }
         if !wire::success(response) || !request.valid {
+            if response.status == 401 || response.body.contains("authenticationError") {
+                cx.startup_read_refused(
+                    &safe_cex_engine::VenueError::new(
+                        "Kraken refused the API key: authenticationError",
+                    )
+                    .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+                    .venue_message("authenticationError"),
+                );
+            }
             self.account.read_failures = self.account.read_failures.saturating_add(1);
             cx.retried_failure(
                 "kraken.account:1266",

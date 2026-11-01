@@ -1448,3 +1448,27 @@ fn a_balance_row_missing_secondary_fields_still_updates_the_balance() {
     assert!(h.engine.store().loaded().balance);
     assert_eq!(h.engine.store().balance().total, 2010.0);
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut h = Harness::new();
+    let body = r#"{"code":"400003","msg":"KC-API-KEY not exists"}"#;
+    let mut failed = 0;
+    for _ in 0..24 {
+        let requests: Vec<_> = std::mem::take(&mut h.actions)
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. }) => {
+                    failed += 1;
+                    None
+                }
+                _ => None,
+            })
+            .collect();
+        for r in &requests {
+            h.respond(r, 200, body);
+        }
+    }
+    assert_eq!(failed, 1);
+}
