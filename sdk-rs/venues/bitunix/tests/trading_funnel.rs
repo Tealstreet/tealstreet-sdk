@@ -773,7 +773,7 @@ fn a_rejected_row_on_another_market_releases_the_fence() {
     for request in &fresh {
         let malformed = ORDERS
             .replace("BTCUSDT", "ETHUSDT")
-            .replace(r#""qty":"3""#, r#""qty":"-3""#);
+            .replace(r#""qty":"3""#, r#""qty":{"bad":1}"#);
         let body = if request.url.contains("/tpsl/") {
             TPSL
         } else {
