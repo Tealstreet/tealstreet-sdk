@@ -1628,6 +1628,8 @@
     "breakeven-success": "Breakeven stop loss order created successfully",
     "breakeven-error": "Failed to create breakeven stop loss order",
     "breakeven-all-success": "Breakeven stop loss orders created for all positions",
+    "breakeven-all-none": "No open positions to set breakeven stops on",
+    "breakeven-all-partial": "Breakeven stops: {{placed}} placed, {{failed}} failed, {{unconfirmed}} unconfirmed. Check open orders.",
     "quick-order-actions-percents": "Quick Order Buttons",
     "quick-order-percents-desc": "Customize the % buttons shown in the Quick Order panel within the Open Positions module",
     "quick-order-percents-error": "Each value must be 1–100, unique, and sorted.",
