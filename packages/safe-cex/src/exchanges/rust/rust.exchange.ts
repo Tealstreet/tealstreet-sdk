@@ -1209,7 +1209,10 @@ export class RustEngineExchange extends BaseExchange {
       if (!this.isDisposed) this.store.update(data as Partial<AlgoRows>);
       return;
     }
-    this.emitter.emit(op, data);
+    // Nobody awaits a running algo, so its error is its only outcome: it must beat the
+    // gates that drop an unforced error on a stream that looks down, as a dead key's does.
+    if (op === 'error') this.emitter.emit(op, data, { forceToast: true });
+    else this.emitter.emit(op, data);
   };
 
   /** As `stopAccountAlgos.ts`, in the engine: TWAPs first, then every chase, waiting
@@ -2182,7 +2185,9 @@ export class RustEngineExchange extends BaseExchange {
       }
       return (await (timing ? this.host.command(command, { onStage: timing.mark }) : this.host.command(command))) as T;
     } catch (error) {
-      if (report) this.reportCommandError(error);
+      // The web's placement failure names the order; a second raw report would only repeat it.
+      const callerReports = command.op === 'placeOrders' && this.options.callerReportsPlacementFailures;
+      if (report && !callerReports) this.reportCommandError(error);
       throw error;
     }
   };
