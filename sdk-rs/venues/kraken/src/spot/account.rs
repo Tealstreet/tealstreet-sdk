@@ -706,6 +706,10 @@ impl KrakenSpot {
                         || (signature_refused && request.signature_retries == 1));
                 if credential_refused {
                     self.reject_auth(cx, &e);
+                    cx.startup_read_refused(
+                        &safe_cex_engine::VenueError::new(e.clone())
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                    );
                 }
                 let error = super::trading::write_failure(response.status, response.body, e);
                 self.private_failed(cx, request, error);

@@ -561,9 +561,6 @@ impl Kraken {
             self.account_native_order_clock(&order.id, order.last_update);
         }
         let order = self.account_merge_order(order);
-        if live {
-            self.trade_order_observed(&order.id, order.filled, order.status);
-        }
         self.account.orders_revision += 1;
         self.account.records.insert(order.id.clone(), order.clone());
         cx.store.upsert_order(order);
@@ -872,7 +869,6 @@ impl Kraken {
                             {
                                 continue;
                             }
-                            self.trade_execution_observed(&e.order_id);
                             if let (Some(remaining), Some(time), Some(mut order)) = (
                                 e.remaining_order_qty,
                                 e.time,
@@ -915,7 +911,7 @@ impl Kraken {
             }
             "open_orders" | "open_orders_snapshot" => {
                 if msg.is_cancel && !msg.order_id.is_empty() {
-                    self.account_ws_remove(cx, &msg.order_id, 0.0, &msg.reason);
+                    self.account_ws_remove(cx, &msg.order_id, &msg.reason);
                     self.account.payloads.insert("open_orders".into(), cx.now);
                     self.account_schedule_heal(cx);
                 } else if let Some(raw) = msg.orders {
@@ -937,10 +933,9 @@ impl Kraken {
                             let mapped = recovered(&builder, |o| (&o.id, &o.id));
                             self.account
                                 .rearm_skips("order:", builder.rejected() == 0, mapped);
-                            let live = builder.rows().len();
                             let orders =
                                 builder.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
-                            self.account_commit_orders(cx, orders, live);
+                            self.account_commit_orders(cx, orders);
                         }
                     } else {
                         cx.notice(
@@ -964,7 +959,7 @@ impl Kraken {
                     }
                     self.account.payloads.insert("open_orders".into(), cx.now);
                     if msg.is_cancel {
-                        self.account_ws_remove(cx, &order.id, order.filled, &msg.reason);
+                        self.account_ws_remove(cx, &order.id, &msg.reason);
                     } else {
                         self.account_apply_order(cx, order, true);
                     }
@@ -1025,23 +1020,13 @@ impl Kraken {
         }
         true
     }
-    fn account_ws_remove(&mut self, cx: &mut Cx<'_, Pending>, id: &str, filled: f64, reason: &str) {
+    fn account_ws_remove(&mut self, cx: &mut Cx<'_, Pending>, id: &str, reason: &str) {
         if reason == "stop_order_triggered" {
-            self.trade_execution_observed(id);
             self.account.orders_revision += 1;
             self.account.records.remove(id);
             self.account.local_order_updates.remove(id);
             cx.store.remove_orders(&[id]);
         } else {
-            self.trade_order_observed(
-                id,
-                filled,
-                if reason == "full_fill" {
-                    OrderStatus::Closed
-                } else {
-                    OrderStatus::Canceled
-                },
-            );
             self.account_order_removed(cx, id);
         }
     }
@@ -1067,14 +1052,9 @@ impl Kraken {
             None if row.side.eq_ignore_ascii_case("sell") => false,
             _ => return None,
         };
-        let remaining = row
-            .unfilled_size
-            .unwrap_or((row.qty - row.filled_size).max(0.0));
-        let amount = if row.unfilled_size.is_some() {
-            remaining + row.filled_size
-        } else {
-            row.qty
-        };
+        // The socket's qty is what is left, like REST's unfilledSize.
+        let remaining = row.unfilled_size.unwrap_or(row.qty);
+        let amount = remaining + row.filled_size;
         if amount <= 0.0 || remaining < 0.0 || row.filled_size < 0.0 || row.filled_size > amount {
             return None;
         }
@@ -1212,18 +1192,14 @@ impl Kraken {
             last_update: Some(cx.now),
         })
     }
-    /// The first `live` rows are native observations; the rest are kept stored copies.
-    fn account_commit_orders(&mut self, cx: &mut Cx<'_, Pending>, orders: Vec<Order>, live: usize) {
+    fn account_commit_orders(&mut self, cx: &mut Cx<'_, Pending>, orders: Vec<Order>) {
         let mut mapped = vec![];
-        for (n, order) in orders.into_iter().enumerate() {
+        for order in orders {
             if self.account.terminal.contains(&order.id) {
                 continue;
             }
             self.account_native_order_clock(&order.id, order.last_update);
             let order = self.account_merge_order(order);
-            if n < live {
-                self.trade_order_observed(&order.id, order.filled, order.status);
-            }
             mapped.push(order);
         }
         self.account.records = mapped.iter().map(|o| (o.id.clone(), o.clone())).collect();
@@ -1449,7 +1425,7 @@ impl Kraken {
                         .rearm_skips("order:", orders.rejected() == 0, mapped);
                     // Rejected rows keep their stored copies.
                     let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
-                    self.account_commit_orders(cx, orders, 0);
+                    self.account_commit_orders(cx, orders);
                     cx.orders_reconciled_except(&unproven, u64::MAX);
                 }
             }

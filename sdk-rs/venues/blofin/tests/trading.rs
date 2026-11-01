@@ -1620,3 +1620,30 @@ fn multi_position_mode_refusal_of_a_protective_order_is_explained() {
             .contains("Turn off Multi-Position mode on BloFin")
     );
 }
+
+#[test]
+fn a_size_amend_of_a_partly_filled_order_treats_the_size_as_the_new_total() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    seed_order(&mut h, "12", r#", "filledSize":"4""#);
+    h.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id: "12".into(),
+            price: None,
+            amount: Some(9.0),
+        }),
+    );
+    h.collect();
+    h.reply(
+        "cancel-batch-orders",
+        r#"{"code":"0","data":[{"orderId":"12","code":"0"}]}"#,
+    );
+    resume_cancel(&mut h);
+    h.reply("order-detail", r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"4"}}"#);
+    let r = h.take("batch-orders");
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(p[0]["size"], "5");
+}
