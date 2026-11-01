@@ -324,7 +324,7 @@ struct OpenSession {
 
 /// Why an account's algos stopped, until its owning session has been told.
 struct StopRecord {
-    text: String,
+    kept: crate::algos::Kept,
     at: tokio::time::Instant,
     /// The resume id of the session whose expiry stopped them.
     owner: String,
@@ -796,7 +796,12 @@ impl Registry {
     /// The stop notice for a session that resumed `from`, if it is still owed one.
     /// Another session's init must not cost the owner it, and a session that can't
     /// be the owner (a reopened tab, a second device) is told once between them.
-    pub fn take_notice(&self, user: &str, name: &str, from: Option<&str>) -> Option<String> {
+    pub fn take_notice(
+        &self,
+        user: &str,
+        name: &str,
+        from: Option<&str>,
+    ) -> Option<crate::algos::Kept> {
         let mut notices = self.notices.lock().unwrap();
         let key = (user.to_owned(), name.to_owned());
         let record = notices.get_mut(&key)?;
@@ -805,13 +810,13 @@ impl Registry {
             return None;
         }
         if from == Some(record.owner.as_str()) {
-            return notices.remove(&key).map(|record| record.text);
+            return notices.remove(&key).map(|record| record.kept);
         }
         if record.told_other {
             return None;
         }
         record.told_other = true;
-        Some(record.text.clone())
+        Some(record.kept.clone())
     }
 
     /// Where the algo host leaves a notice for a browser that is gone.
@@ -819,13 +824,13 @@ impl Registry {
         let notices = self.notices.clone();
         let key = (account.user.clone(), account.name.clone());
         let owner = owner.to_owned();
-        Box::new(move |text| {
+        Box::new(move |kept| {
             let mut notices = notices.lock().unwrap();
             notices.retain(|_, record| record.at.elapsed() < NOTICE_TTL);
             notices.insert(
                 key.clone(),
                 StopRecord {
-                    text,
+                    kept,
                     at: tokio::time::Instant::now(),
                     owner: owner.clone(),
                     told_other: false,
@@ -876,12 +881,17 @@ impl Registry {
                 ),
             ));
         }
-        let stopped: crate::algos::StopNotice = Box::new(move |notice| {
+        let stopped: crate::algos::StopNotice = Box::new(move |kept| {
             for outbox in &live {
-                outbox(crate::envelope::algo_error(
-                    &name,
-                    Value::String(notice.clone()),
-                ));
+                if !kept.text.is_empty() {
+                    outbox(crate::envelope::algo_error(
+                        &name,
+                        Value::String(kept.text.clone()),
+                    ));
+                }
+                for end in &kept.ends {
+                    outbox(end.clone());
+                }
             }
         });
         self.dispose_for(account, "remote signing failed repeatedly", Some(stopped));
@@ -1454,7 +1464,10 @@ pub(crate) mod tests {
                     "never another user's"
                 );
                 assert_eq!(
-                    registry.take_notice("u", "acct", None).as_deref(),
+                    registry
+                        .take_notice("u", "acct", None)
+                        .map(|kept| kept.text)
+                        .as_deref(),
                     Some("stopped"),
                     "a second device, or a reopened tab, is told"
                 );
@@ -1464,7 +1477,10 @@ pub(crate) mod tests {
                     "and a page load after it is not told again"
                 );
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("owner")).as_deref(),
+                    registry
+                        .take_notice("u", "acct", Some("owner"))
+                        .map(|kept| kept.text)
+                        .as_deref(),
                     Some("stopped"),
                     "the device that owned the chase still is"
                 );
@@ -1476,7 +1492,10 @@ pub(crate) mod tests {
                 (registry.keep_notice(&account, "owner"))("first".into());
                 (registry.keep_notice(&account, "owner"))("second".into());
                 assert_eq!(
-                    registry.take_notice("u", "acct", Some("owner")).as_deref(),
+                    registry
+                        .take_notice("u", "acct", Some("owner"))
+                        .map(|kept| kept.text)
+                        .as_deref(),
                     Some("second"),
                     "one per account"
                 );

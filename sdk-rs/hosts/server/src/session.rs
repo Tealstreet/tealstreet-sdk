@@ -367,19 +367,28 @@ impl Session {
                 self.metrics.note_init();
                 self.join(account).await;
                 // Algos stopped while no browser was attached: say why.
-                if let Some(notice) = self.registry.take_notice(
+                // Chases that ended while it was gone are told as their replayed ends.
+                if let Some(kept) = self.registry.take_notice(
                     self.user(),
                     &init.account_name,
                     self.identity.resume_from.as_deref(),
                 ) {
                     Log::info(&format!(
-                        "algo stop notice {} to socket {}: {notice}",
-                        init.account_name, self.socket
+                        "algo stop notice {} to socket {}: {} ({} chase ends)",
+                        init.account_name,
+                        self.socket,
+                        kept.text,
+                        kept.ends.len()
                     ));
-                    self.send(envelope::algo_error(
-                        &init.account_name,
-                        Value::String(notice),
-                    ));
+                    if !kept.text.is_empty() {
+                        self.send(envelope::algo_error(
+                            &init.account_name,
+                            Value::String(kept.text),
+                        ));
+                    }
+                    for end in kept.ends {
+                        self.send(end);
+                    }
                 }
             }
             Err(error) => {
@@ -1997,6 +2006,56 @@ mod tests {
                 assert_eq!(frame["d"]["op"], "error");
                 assert_eq!(frame["d"]["data"][1]["forceToast"], true);
                 assert_eq!(told(Some("r1")).await.len(), 0, "once");
+            })
+            .await;
+    }
+
+    /// A chase that ended while no browser held the account reaches the next
+    /// init as its replayed end, with no empty error beside it.
+    #[tokio::test(start_paused = true)]
+    async fn the_next_init_gets_the_end_of_a_chase_it_missed() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let (account, _algos) =
+                    crate::accounts::tests::held_account_with(Some(link), init.fingerprint());
+                crate::accounts::tests::register(&registry, &account);
+                let end = r#"{"t":"msg","d":{"op":"chaser:complete","data":{"id":"c1","filled":0.001,"replayed":true}}}"#;
+                (registry.keep_notice(&account, "r1"))(crate::algos::Kept {
+                    text: String::new(),
+                    ends: vec![end.to_owned()],
+                });
+                let (out, mut sent, _) = Out::channel(64);
+                let identity = Identity {
+                    user: Some("u".into()),
+                    token: Some(("t".into(), u64::MAX)),
+                    resume_from: Some("r1".into()),
+                    resumable: true,
+                };
+                let mut session =
+                    Session::new(registry.clone(), Arc::new(Metrics::default()), identity, out);
+                session.open().await;
+                let wire = format!(
+                    r#"{{"t":"init","d":{}}}"#,
+                    serde_json::to_string(&init).unwrap()
+                );
+                assert!(session.handle(&wire).await.is_ok());
+                let mut frames = Vec::new();
+                while let Ok(frame) = sent.try_recv() {
+                    frames.push(frame);
+                }
+                assert_eq!(frames.iter().filter(|frame| *frame == end).count(), 1, "{frames:?}");
+                assert!(
+                    !frames.iter().any(|frame| frame.contains(r#""op":"error""#)),
+                    "{frames:?}"
+                );
             })
             .await;
     }
