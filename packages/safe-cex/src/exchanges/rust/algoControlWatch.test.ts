@@ -116,6 +116,19 @@ describe('a stop the user was told might not have landed', () => {
     expect(told).toHaveLength(3);
   });
 
+  it('adds nothing when the chaser already told how its retried stop ended', () => {
+    const { rows, told, watch, update } = setup();
+    rows.activeChasers = [chaser('c1')];
+    watch.observe('chaser:terminate', 'c1');
+    vi.advanceTimersByTime(60_000);
+    const before = told.length;
+    // The connection returns: the row goes, then the end the chaser already told.
+    update({ activeChasers: [] });
+    watch.chaseCompleted({ id: 'c1', symbol: 'BTCUSDT', size: 1, filled: 0, outcomeTold: true });
+    vi.advanceTimersByTime(120_000);
+    expect(told).toHaveLength(before);
+  });
+
   it('says it stopped, and what filled, when the end comes during the retries', () => {
     const { rows, told, watch, update } = setup();
     rows.activeChasers = [chaser('c1')];

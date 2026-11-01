@@ -12,7 +12,7 @@ use safe_cex_algos::{AlgoCx, AlgoFactory};
 
 pub use book::{
     ChaserBook, KEPT_ORDER_STOP_REASON, MAX_CHASES_PER_ACCOUNT, Progress,
-    UNCONFIRMED_ORDER_STOP_REASON,
+    UNCONFIRMED_ORDER_STOP_REASON, retrying_order, settled_orders,
 };
 pub use chase::{
     ActiveChaser, ChaserComplete, ChaserOptions, Terminate, TerminateKind, adjust, placement_filled,

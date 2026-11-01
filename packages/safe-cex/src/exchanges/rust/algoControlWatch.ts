@@ -12,7 +12,7 @@ const OUTCOME_WAIT_MS = 10_000;
 type Rows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
 
 /** The `chaser:complete` fields this reads. */
-export type ChaseEnd = { id?: string; symbol?: string; size?: number; filled?: number };
+export type ChaseEnd = { id?: string; symbol?: string; size?: number; filled?: number; outcomeTold?: boolean };
 
 /** A stop the user was told was uncertain: they are owed how it ended. */
 type Owed = { label: string; done?: () => void };
@@ -108,7 +108,8 @@ export class AlgoControlWatch {
     const owed = event.id === undefined ? undefined : this.owed.get(event.id);
     if (!owed || event.id === undefined) return;
     this.settle(event.id);
-    this.host.tell(chaseOutcome(event));
+    // A stop the chaser had to retry ends with its own message: one outcome, not two.
+    if (!event.outcomeTold) this.host.tell(chaseOutcome(event));
   }
 
   private readonly owed = new Map<string, Owed>();
