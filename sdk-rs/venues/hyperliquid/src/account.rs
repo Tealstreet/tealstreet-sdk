@@ -944,7 +944,7 @@ impl Hyperliquid {
                         || (state.server_time.or(state.time).is_some()
                             && self.account.state_time.contains_key(&dex))
                     {
-                        self.apply_state(cx, &dex, &state, true, Some(settings_revision));
+                        self.apply_state(cx, &dex, &state, true, false, Some(settings_revision));
                     }
                 } else {
                     cx.notice(
@@ -1355,6 +1355,8 @@ impl Hyperliquid {
         dex: &str,
         state: &Clearinghouse<'_>,
         authoritative: bool,
+        // The feed's own frame lists every open coin of its dex; one it omits is closed.
+        complete: bool,
         settings_revision: Option<u64>,
     ) {
         // While discovery retries, unknown nonzero ownership holds the snapshot; once
@@ -1419,7 +1421,7 @@ impl Hyperliquid {
             coverage.reject(Some(coin));
         }
         let source_time = state.server_time.or(state.time);
-        if (authoritative || !dex.is_empty())
+        if (authoritative || complete || !dex.is_empty())
             && let Some(time) = source_time
             && self
                 .account
@@ -1453,7 +1455,7 @@ impl Hyperliquid {
                 }
             }
         }
-        let mut positions = if authoritative || !dex.is_empty() {
+        let mut positions = if authoritative || complete || !dex.is_empty() {
             cx.store
                 .positions()
                 .iter()
@@ -2004,9 +2006,9 @@ impl Hyperliquid {
                     && let Some(mut state) = env.clearinghouse_state
                 {
                     state.time = env.server_time.or(env.time).or(state.time);
-                    self.apply_state(cx, &env.dex, &state, false, None);
+                    self.apply_state(cx, &env.dex, &state, false, true, None);
                 } else if let Ok(state) = serde_json::from_str::<Clearinghouse>(raw) {
-                    self.apply_state(cx, "", &state, false, None);
+                    self.apply_state(cx, "", &state, false, false, None);
                 }
             }
             "spotState" | "spotClearinghouseState" => {
