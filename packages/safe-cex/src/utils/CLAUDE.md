@@ -196,7 +196,8 @@ it inflates the e2e load-gate's diagnostic counters.
 **The Tealstreet endpoints are not in this file.** `virtualClock` takes a host
 clock through `setServerTimeSource`; `transport/registerTealstreetTransport`
 registers `transport/tealstreet/tealstreetTimeSource` (same-origin `/api/time`,
-or `NEXT_PUBLIC_TIME_API_ORIGIN`, with half-RTT correction). Without a
+or `NEXT_PUBLIC_TIME_API_ORIGIN`, with half-RTT correction, keeping the shortest of three
+round trips: one slow reply reads late by half its delay and could cross the 1 s threshold). Without a
 registered source — a plain OSS consumer — generic sync uses venue time (Bybit
 through the transport's public CORS proxy, which is `api.bybit.com` directly
 under the direct transport and can 403 in geo-blocked regions or fail CORS in a
@@ -297,21 +298,3 @@ drift measurement.
   exponent (`2.5e-7` has eight decimal places); do not reduce it to the
   exponent's absolute value.
 - `__testdata__/market-samples.json` — Real symbol samples from supported exchanges
-
-## Live polling slowdown
-
-`tickIntervalOverride.ts` publishes multiplier changes through
-`subscribeTickIntervalMultipliers`. Engine pollers subscribe once and remove the
-listener on disposal; Rust accounts send the resolved interval as a scale on
-each venue's own cadence (plus that interval as a ceiling) rather than
-reconstructing wildcard/exact precedence. A paused interval stays paused across configuration
-updates. Other TS pollers continue reading the multiplier at their next tick.
-
-## Native position sizing
-
-`nativePositionSize.ts` is the shared sizing leaf for SDK bulk closes and the
-existing script-api-core re-export. It converts base contracts for linear
-markets and quote notional for inverse markets, retaining the existing maximum
-of derived size and `extra.contractsNative`. Missing/zero contract size defaults
-to one. Rounding and input validation belong to the caller; do not add a reverse
-dependency on script-api-core.
