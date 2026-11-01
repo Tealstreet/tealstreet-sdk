@@ -57,6 +57,7 @@ impl Hyperliquid {
                 builder_checked: false,
                 effective: false,
                 replacing_stop: None,
+                replacing_order: None,
                 stop_note: None,
             },
         );

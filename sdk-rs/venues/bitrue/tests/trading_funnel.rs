@@ -530,3 +530,27 @@ fn a_signature_refusal_then_a_lost_resend_keeps_cancel_all_fenced() {
         "no cancel without the protective order's identity"
     );
 }
+
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = Harness::new();
+    h.order(0.0);
+    h.amend();
+    let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(inspect, &detail("NEW", 0.0, ""));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(
+        cancel,
+        &format!(r#"{{"code":"0","data":{{"orderId":{ORDER}}}}}"#),
+    );
+    let verify = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(verify, &detail("CANCELED", 0.0, ""));
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    h.reply(create, r#"{"code":"-2019","msg":"insufficient margin"}"#);
+    let error = failure(&h, 7).expect("a failure");
+    assert!(
+        error.message.contains("Your E-BTC-USDT order is gone"),
+        "{}",
+        error.message
+    );
+}

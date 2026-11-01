@@ -118,6 +118,8 @@ struct Job {
     continue_on_error: bool,
     // A trigger move cancels before placing; a failed placement must say so.
     replaces_cancelled: Option<(String, OrderSide, OrderType)>,
+    // A limit's cancelReplace may cancel and then refuse the placement.
+    replaces_order: Option<String>,
 }
 struct Run {
     job: Job,
@@ -784,6 +786,23 @@ impl Trading {
                 let lost = safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, false);
                 message = format!("{lost}: {message}");
             }
+            if canceled
+                && let Some(symbol) = self
+                    .jobs
+                    .get(&request.command)
+                    .and_then(|run| run.job.replaces_order.as_ref())
+            {
+                let refused = envelope.as_ref().is_ok_and(|e| e.code != 0)
+                    || data.is_some_and(|data| {
+                        !data.new_order_result.is_empty()
+                            && !matches!(
+                                data.new_order_result.as_ref(),
+                                "SUCCESS" | "true" | "TRUE"
+                            )
+                    });
+                let lost = safe_cex_engine::error::order_gone_text(symbol, !refused);
+                message = format!("{lost}: {message}");
+            }
             let native = envelope.as_ref().ok().map(|e| Native {
                 code: NativeCode::Int(e.code),
                 message: &e.msg,
@@ -1396,6 +1415,7 @@ impl Trading {
             kind: OrderIdentityKind::ClientOrderId,
             identity,
         }];
+        job.replaces_order = Some(o.symbol.clone());
         Ok(job)
     }
     fn leverage(

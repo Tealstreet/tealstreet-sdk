@@ -293,6 +293,59 @@ fn conditional_amend_preserves_nested_protection_and_native_execution_provenance
     assert!(!done(&h));
 }
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    seed_order(&mut h, "12", "");
+    h.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id: "12".into(),
+            price: Some(61000.0),
+            amount: None,
+        }),
+    );
+    h.collect();
+    h.reply(
+        "cancel-batch-orders",
+        r#"{"code":"0","data":[{"orderId":"12","code":"0","msg":null}]}"#,
+    );
+    let timer = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 350.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    let at = h.now + 350.0;
+    h.handle(at, Event::TimerFired { timer });
+    h.collect();
+    h.reply("order-detail", r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"0"}}"#);
+    let r = h.take("batch-orders");
+    h.respond(
+        r,
+        r#"{"code":"102000","msg":"replacement refused","data":null}"#,
+    );
+    let error = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("a failure");
+    assert!(
+        error.message.contains("BTC") && error.message.contains("order is gone"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
 fn settings_rejections_preserve_known_leverage() {
     let mut h = Harness::new();
     h.seed();

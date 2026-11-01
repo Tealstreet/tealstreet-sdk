@@ -889,6 +889,30 @@ fn amendment_waits_for_final_cancellation_and_preserves_post_only() {
     assert!(replacement.body.as_deref().unwrap().contains("\"po\":true"));
 }
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut e = boot();
+    seed(&mut e);
+    let get = http(
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 9,
+                id: "42".into(),
+                price: Some(110.),
+                amount: None,
+            },
+        ),
+        "/order",
+    );
+    let cancel = http(reply(&mut e, &get, 200, OPEN), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let replacement = http(reply(&mut e, &verify, 200, CANCELED), "create_order");
+    let actions = reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#);
+    let result = done(&actions, 9).unwrap();
+    let error = result.as_ref().unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}
+#[test]
 fn cancellation_ack_without_final_state_or_with_new_fill_aborts_amendment() {
     let advanced = CANCELED.replace("[\"0.2\"]", "[\"0.3\"]");
     for confirmation in [OPEN, advanced.as_str()] {

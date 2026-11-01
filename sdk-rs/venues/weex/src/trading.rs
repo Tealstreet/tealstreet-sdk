@@ -37,6 +37,16 @@ struct Job {
     continue_on_error: bool,
     refresh: bool,
     hedged: Option<bool>,
+    /// An amend's symbol, once its cancel is proven and its replacement is issued.
+    replacing: Option<String>,
+}
+impl Job {
+    fn gone_note(&self, unknown: bool) -> Option<String> {
+        self.replacing
+            .as_deref()
+            .filter(|_| self.native_ids.is_empty())
+            .map(|symbol| safe_cex_engine::error::order_gone_text(symbol, unknown))
+    }
 }
 pub(crate) struct Request {
     command: CommandId,
@@ -48,6 +58,7 @@ pub(crate) struct Request {
 }
 struct ReplacementGuard {
     id: String,
+    symbol: String,
     amount: f64,
     filled: f64,
 }
@@ -904,6 +915,7 @@ impl WeexFutures {
                         if let Some(step) = replacement.front_mut() {
                             step.replacement = Some(ReplacementGuard {
                                 id: o.id.clone(),
+                                symbol: o.symbol.clone(),
                                 amount: o.amount,
                                 filled: o.filled,
                             });
@@ -1135,6 +1147,7 @@ impl WeexFutures {
                 continue_on_error,
                 refresh,
                 hedged,
+                replacing: None,
             },
         );
         self.trade_next(cx, id);
@@ -1156,6 +1169,9 @@ impl WeexFutures {
                 let _ = cx.fail_plan(&job.plan, "WEEX order changed while canceling; replacement not submitted; reconcile before retrying");
                 self.refresh_account(cx);
                 return;
+            }
+            if let Some(guard) = &step.replacement {
+                job.replacing = Some(guard.symbol.clone());
             }
             let plan = job.plan.clone();
             let slot = match cx.plan_slots(&plan).and_then(|slots| {
@@ -1330,7 +1346,15 @@ impl WeexFutures {
             self.refresh_account(cx);
             return;
         }
-        let _ = cx.fail_plan(&request.plan, error);
+        let gone = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .and_then(|job| job.gone_note(error.outcome == Some(Outcome::Unknown)));
+        let _ = match &gone {
+            Some(gone) => cx.fail_plan_noted(&request.plan, error, gone),
+            None => cx.fail_plan(&request.plan, error),
+        };
         self.refresh_account(cx);
     }
 
@@ -1405,7 +1429,11 @@ impl WeexFutures {
         match assessed {
             Ok(ids) => job.native_ids.extend(ids),
             Err(error) if !job.continue_on_error => {
-                let _ = cx.fail_plan(&request.plan, error);
+                let gone = job.gone_note(error.outcome == Some(Outcome::Unknown));
+                let _ = match &gone {
+                    Some(gone) => cx.fail_plan_noted(&request.plan, error, gone),
+                    None => cx.fail_plan(&request.plan, error),
+                };
                 return;
             }
             Err(_) => {}

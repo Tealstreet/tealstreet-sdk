@@ -148,6 +148,8 @@ struct Job {
     join: bool,
     /// An amend cancelling this stop before placing its replacement.
     replacing_stop: Option<(String, String, OrderSide, OrderType)>,
+    /// The same for any other order: its id and symbol.
+    replacing_order: Option<(String, String)>,
 }
 struct Step {
     receipts: Vec<OrderIdentityReceipt>,
@@ -385,6 +387,7 @@ impl Job {
             commit: Commit::None,
             join: false,
             replacing_stop: None,
+            replacing_order: None,
         }
     }
 }
@@ -1254,6 +1257,8 @@ impl Blofin {
                     if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
                         job.replacing_stop =
                             Some((id.clone(), order.symbol.clone(), order.side, order.kind));
+                    } else {
+                        job.replacing_order = Some((id.clone(), order.symbol.clone()));
                     }
                     let mut rows = self.replacement(cx, order, price, amount)?;
                     let real = id.split("__").next().unwrap_or(&id);
@@ -1595,6 +1600,19 @@ impl Blofin {
                     debug_assert!(finished.is_ok(), "Plan call seal stranded");
                 }
                 // Its row ended only because the cancel landed: nothing replaced it.
+                let unknown = error.outcome == Some(safe_cex_engine::Outcome::Unknown);
+                let order_gone = active
+                    .job
+                    .replacing_order
+                    .as_ref()
+                    .filter(|(id, _)| {
+                        active.job.ids.is_empty()
+                            && cx
+                                .store
+                                .order(id)
+                                .is_none_or(|order| order.status == OrderStatus::Canceled)
+                    })
+                    .map(|(_, symbol)| safe_cex_engine::error::order_gone_text(symbol, unknown));
                 let stop_gone = active
                     .job
                     .replacing_stop
@@ -1607,13 +1625,9 @@ impl Blofin {
                                 .is_none_or(|order| order.status == OrderStatus::Canceled)
                     })
                     .map(|(_, symbol, side, kind)| {
-                        safe_cex_engine::error::stop_gone_text(
-                            symbol,
-                            *side,
-                            *kind,
-                            error.outcome == Some(safe_cex_engine::Outcome::Unknown),
-                        )
-                    });
+                        safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown)
+                    })
+                    .or(order_gone);
                 let failed = match &stop_gone {
                     Some(note) => cx.fail_plan_noted(plan, error, note),
                     None => cx.fail_plan(plan, error),
