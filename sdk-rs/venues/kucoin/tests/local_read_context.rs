@@ -15,7 +15,6 @@ const SYMBOL: &str = "BTC-USDT";
 const COMMAND: u32 = 71;
 const CREDENTIALS: &str = "KuCoin Spot requires credentials";
 const UNSUPPORTED_TRADES: &str = "KuCoin Spot public trades are not implemented in TS";
-const UNSUPPORTED_LEVERAGE: &str = "KuCoin leverage query is unsupported";
 
 fn policy() -> Policy {
     Policy {
@@ -283,6 +282,7 @@ fn typed(a: &[Action], message: &str, kind: ErrorKind, outcome: Option<Outcome>)
 enum Expected {
     Done(Value),
     Failed(&'static str, ErrorKind),
+    FuturesMarginRead,
 }
 fn cases(keyed: bool) -> Vec<(Command, Expected)> {
     let queries = vec![
@@ -353,7 +353,21 @@ fn check(a: &[Action], expected: &Expected) {
     match expected {
         Expected::Done(value) => assert_eq!(&done(a), value),
         Expected::Failed(message, kind) => typed(a, message, *kind, Some(Outcome::NotSent)),
+        Expected::FuturesMarginRead => futures_margin_read(a),
     }
+}
+/// The first of the leverage read's steps, signed, with nothing settled yet.
+fn futures_margin_read(a: &[Action]) {
+    assert_eq!(a.len(), 1, "one signed read and no terminal: {a:?}");
+    let Action::Http(r) = &a[0] else {
+        panic!("expected the margin mode read: {a:?}");
+    };
+    assert_eq!(r.method, Method::Get);
+    assert_eq!(
+        r.url,
+        format!("https://api-futures.kucoin.com/api/v2/position/getMarginMode?symbol={SYMBOL}")
+    );
+    assert!(r.headers.iter().any(|(k, _)| *k == "KC-API-SIGN"));
 }
 
 #[test]
@@ -368,16 +382,21 @@ fn local_spot_errors_gain_typed_metadata_without_changing_credential_precedence(
     }
 }
 #[test]
-fn futures_leverage_remains_unsupported_with_typed_local_authority() {
-    for keyed in [false, true] {
-        let mut e = seeded(Kucoin::new(options(keyed)));
-        typed(
-            &run(&mut e, 100., leverage("UNKNOWN")),
-            UNSUPPORTED_LEVERAGE,
-            ErrorKind::Unsupported,
-            Some(Outcome::NotSent),
-        );
-    }
+fn futures_leverage_refusals_stay_local_with_typed_authority() {
+    let mut e = seeded(Kucoin::new(options(false)));
+    typed(
+        &run(&mut e, 100., leverage(SYMBOL)),
+        "KuCoin leverage requires credentials",
+        ErrorKind::InvalidInput,
+        Some(Outcome::NotSent),
+    );
+    let mut e = seeded(Kucoin::new(options(true)));
+    typed(
+        &run(&mut e, 100., leverage("UNKNOWN")),
+        "unknown market UNKNOWN",
+        ErrorKind::InvalidInput,
+        Some(Outcome::NotSent),
+    );
 }
 #[test]
 fn native_local_results_keep_cache_matching_full_order_and_empty_results() {
@@ -443,16 +462,11 @@ fn nonfinite_clock_refuses_every_local_spot_path_before_projection_or_publicatio
     }
 }
 #[test]
-fn nonfinite_clock_refuses_futures_unsupported_terminal() {
+fn nonfinite_clock_refuses_futures_leverage_before_any_read() {
     let mut e = invalid_clocks(seeded(Kucoin::new(options(true))), || {
         vec![leverage(SYMBOL)]
     });
-    typed(
-        &run(&mut e, 100., leverage(SYMBOL)),
-        UNSUPPORTED_LEVERAGE,
-        ErrorKind::Unsupported,
-        Some(Outcome::NotSent),
-    );
+    futures_margin_read(&run(&mut e, 100., leverage(SYMBOL)));
 }
 fn saturated<V: Venue>(
     mut e: Engine<Probe<V>>,
@@ -497,12 +511,12 @@ fn genuine_capacity_refusal_covers_every_local_spot_path_and_same_clock_recovery
     }
 }
 #[test]
-fn genuine_capacity_refusal_covers_futures_local_terminal_and_recovery() {
+fn genuine_capacity_refusal_covers_futures_leverage_and_recovery() {
     saturated(
         seeded(Kucoin::new(options(true))),
         || vec![leverage(SYMBOL)],
         leverage(SYMBOL),
-        Expected::Failed(UNSUPPORTED_LEVERAGE, ErrorKind::Unsupported),
+        Expected::FuturesMarginRead,
     );
 }
 #[test]
@@ -581,9 +595,9 @@ fn fixed_clock_reuse_retires_all_local_owners_beyond_registry_capacity() {
     let mut e = seeded(Kucoin::new(options(true)));
     for _ in 0..270 {
         typed(
-            &run(&mut e, 100., leverage(SYMBOL)),
-            UNSUPPORTED_LEVERAGE,
-            ErrorKind::Unsupported,
+            &run(&mut e, 100., leverage("UNKNOWN")),
+            "unknown market UNKNOWN",
+            ErrorKind::InvalidInput,
             Some(Outcome::NotSent),
         );
     }
