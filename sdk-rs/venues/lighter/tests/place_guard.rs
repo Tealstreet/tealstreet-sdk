@@ -420,3 +420,35 @@ fn a_proven_placement_and_a_later_cancel_all_still_proceed() {
         http(&out)
     );
 }
+
+/// Live: a snapshot dropped the placed row before the stream named its native
+/// id, and a cancel by the index the placement returned said "not found".
+#[test]
+fn a_cancel_by_the_returned_index_before_its_row_arrives_is_not_called_not_found() {
+    let (mut e, mut t) = ready_eth();
+    let send = submit(&mut e, &mut t, 7, 10);
+    reply(
+        &mut e,
+        &send,
+        200,
+        r#"{"code":200,"tx_hash":"transaction-hash"}"#,
+    );
+    let out = drain(&mut e, &mut t);
+    let [Notice::CommandDone { result, .. }] = &terminals(&out, 7)[..] else {
+        panic!("a proven placement completes");
+    };
+    let ids: Vec<String> = serde_json::from_str(result).unwrap();
+    e.store_mut().remove_orders(&[ids[0].as_str()]);
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelOrders {
+            command: 8,
+            ids: vec![ids[0].clone()],
+        }),
+    );
+    let out = drain(&mut e, &mut t);
+    let [Notice::CommandFailed { error, .. }] = &terminals(&out, 8)[..] else {
+        panic!("{:?}", terminals(&out, 8));
+    };
+    assert!(error.message.contains("no row yet"), "{}", error.message);
+}

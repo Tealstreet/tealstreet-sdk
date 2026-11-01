@@ -1255,6 +1255,10 @@ impl Lighter {
                     Step::Place(orders) | Step::Group { orders, .. } => {
                         for mut p in orders {
                             p.order.last_update = cx.now;
+                            // Known before the stream names its native id: the
+                            // heal snapshot can drop this row first.
+                            let placed = p.order.id.clone();
+                            self.note_client_order(&placed, &placed);
                             self.record_placement(p.order.clone());
                             // A live terminal event can overtake the HTTP acknowledgement.
                             if !self.account_order_terminal(&p.order.id)
