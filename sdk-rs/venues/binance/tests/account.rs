@@ -1771,3 +1771,28 @@ fn a_refused_key_ends_the_start_with_the_reason() {
     let message = &h.startup_failures[0].message;
     assert!(message.contains("Invalid API-key"), "{message}");
 }
+
+// Live: a 90 day start with no end answered empty while 7 days answered 16 rows.
+#[test]
+fn a_fills_start_with_no_end_walks_every_seven_day_window_to_now() {
+    let mut h = ready();
+    let now = h.now;
+    h.event(Event::Command(Command::Query {
+        command: 42,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(now - 15.0 * 86_400_000.0),
+            to_ms: None,
+            limit: None,
+        },
+    }));
+    let mut windows = 0;
+    while h.has_request("/fapi/v1/userTrades") {
+        let page = h.take("/fapi/v1/userTrades");
+        assert!(page.url.contains("endTime="), "{}", page.url);
+        windows += 1;
+        h.reply(page.id, 200, "", "[]");
+    }
+    assert_eq!(windows, 3);
+}
