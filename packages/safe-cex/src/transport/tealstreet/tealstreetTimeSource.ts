@@ -7,15 +7,13 @@ dayjs.extend(utc);
 const getBaseUrl = (): string => (typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '');
 
 /**
- * Accepts either a bare origin for the dedicated time service, which serves
- * `/v1/time`, or a full endpoint URL. The full-URL form exists for the native
- * app, whose `self.location.origin` is the Metro dev server: it names the edge
- * `/api/time` (~70ms) rather than the CloudFront-fronted service (~750ms).
+ * Same-origin `/api/time`, unless a full endpoint URL is configured: the native
+ * app names one because its `self.location.origin` is the Metro dev server. A bare
+ * origin, the old `time.tealstreet.io` form, is ignored so that host can retire.
  */
 export const getTealstreetTimeEndpoint = (): string => {
   const configured = process.env.NEXT_PUBLIC_TIME_API_ORIGIN?.trim().replace(/\/+$/, '');
-  if (!configured) return `${getBaseUrl()}/api/time`;
-  return /\/time$/.test(configured) ? configured : `${configured}/v1/time`;
+  return configured && /\/time$/.test(configured) ? configured : `${getBaseUrl()}/api/time`;
 };
 
 const SAMPLES = 3;
