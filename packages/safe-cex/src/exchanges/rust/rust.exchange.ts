@@ -1581,7 +1581,13 @@ export class RustEngineExchange extends BaseExchange {
             },
           );
         if (!this.isWorkerMirror || !PAGE_ENGINE_PLACEMENTS.has(method) || this.frameFedSettled) return viaWorker();
-        return this.untilFrameFedSettled(method).then(() => (this.frameFed ? local(...args) : viaWorker()));
+        return this.untilFrameFedSettled(method).then(
+          () => (this.frameFed ? local(...args) : viaWorker()),
+          (error: unknown) => {
+            this.reportCommandError(error);
+            throw error;
+          },
+        );
       };
     }
   }

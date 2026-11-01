@@ -83,6 +83,12 @@ const splitWorkerLogExtra = (extra: Record<string, any> | undefined) => {
   return { extra: plainExtra, sentryTags, sentryExtra, suppressConsoleLog };
 };
 
+/** A slow link is not a failed start: the Rust engine gets this long, other venues keep their 30 s. */
+const RUST_START_TIMEOUT_MS = 120_000;
+const START_TIMEOUT_MS = 30_000;
+/** A Rust start that still ran out of time starts over after each of these, then gives up visibly. */
+const START_RETRY_DELAYS_MS = [10_000, 20_000, 40_000, 60_000];
+
 const USER_STARTED_ALGORITHMS = new Set<StoreWorkerPayload['op']>(['chaser:start', 'twap:start', 'twap:resume']);
 
 export class ExchangeWorker {
@@ -112,6 +118,8 @@ export class ExchangeWorker {
   private _recoveryAttempted = false;
   private _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private _recoveryUpdateIds: StoreData['updateIds'] | undefined;
+  private _startTimedOut = false;
+  private _startRetries = 0;
   private _unsubscribeStore: (() => void) | null = null;
   private readonly _publicDemand = new Map<string, StoreWorkerPayload>();
   private readonly _pendingRequests = new Map<string, { payload: StoreWorkerPayload; generation: number }>();
@@ -318,6 +326,7 @@ export class ExchangeWorker {
   async start(): Promise<boolean> {
     const startupToken = this._startupToken;
     const generation = ++this._generation;
+    this._startTimedOut = false;
     let startupTimeout: ReturnType<typeof setTimeout> | undefined;
     const cancelledPromise = new Promise<'cancelled'>((resolve) => {
       this._cancelStartup = () => {
@@ -364,13 +373,14 @@ export class ExchangeWorker {
 
       this.log('info', `Starting exchange in webworker: ${this._exchangeName}`);
 
-      const START_TIMEOUT_MS = 30_000;
+      const isRust = this._exchange instanceof RustEngineExchange;
+      const startTimeoutMs = isRust ? RUST_START_TIMEOUT_MS : START_TIMEOUT_MS;
       const startPromise = this._exchange.start().then(() => 'started' as const);
       const timeoutPromise = new Promise<never>((_, reject) => {
-        startupTimeout = setTimeout(
-          () => reject(new Error(`Exchange start timed out after ${START_TIMEOUT_MS / 1000}s`)),
-          START_TIMEOUT_MS,
-        );
+        startupTimeout = setTimeout(() => {
+          this._startTimedOut = isRust;
+          reject(new Error(`Exchange start timed out after ${startTimeoutMs / 1000}s`));
+        }, startTimeoutMs);
       });
 
       const result = await Promise.race([startPromise, timeoutPromise, cancelledPromise]);
@@ -846,7 +856,7 @@ export class ExchangeWorker {
       return;
     }
     if (this._stopped) {
-      this._rejectUnavailablePayload(payload);
+      this._rejectUndispatched(payload);
       return;
     }
     const isDemand = this._recordPublicDemand(payload);
@@ -854,7 +864,7 @@ export class ExchangeWorker {
     if (isUiState) this._latestUiState = { ...payload, data: { ...payload.data } };
     if (this._recovering || (this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead)) {
       // Subscription state is safe to retain; trading/query requests are never replayed.
-      if (!isDemand && !isUiState) this._rejectUnavailablePayload(payload);
+      if (!isDemand && !isUiState) this._rejectUndispatched(payload);
       return;
     }
     if (!this._exchange) {
@@ -1010,10 +1020,18 @@ export class ExchangeWorker {
     });
   }
 
+  /** Never reached the exchange, so a request is `notSent`; a started algorithm says so too. */
+  private _rejectUndispatched(payload: StoreWorkerPayload, message?: string) {
+    if (this._requestKey(payload)) this._rejectNeverSent(payload, message);
+    else this._rejectUnavailablePayload(payload, message);
+  }
+
   private _dropMessageBuffer() {
     const dropped = this._messageBuffer;
     this._messageBuffer = [];
-    for (const payload of dropped) this._rejectNeverSent(payload);
+    for (const payload of dropped) {
+      this._rejectUndispatched(payload, 'Exchange stopped before this operation was sent; nothing was sent.');
+    }
   }
 
   private _rejectUnavailablePayload(
@@ -1134,6 +1152,46 @@ export class ExchangeWorker {
     }, 500);
   }
 
+  /**
+   * A Rust start that ran out of time starts over on this worker, keeping its
+   * public demand, and answers what it held. False leaves the failure final.
+   */
+  retryTimedOutStart(): boolean {
+    const delay = START_RETRY_DELAYS_MS[this._startRetries];
+    // A shared port needs a fresh provider attachment, as after an engine failure.
+    if (!this._startTimedOut || this._stopped || delay === undefined || this._options.publicFeed?.mode === 'shared')
+      return false;
+    this._startTimedOut = false;
+    this._startRetries++;
+    this._recoveryUpdateIds = { ...this._store.updateIds };
+    this._recovering = true;
+    this._deferInterruptedRequests({
+      message: 'Exchange start timed out; interrupted operation outcomes are unknown and were not replayed.',
+      name: 'EngineDisposedError',
+      code: 'ENGINE_DISPOSED',
+    });
+    this._finishRustTwaps();
+    this._generation++;
+    this._clearRuntimePipeline();
+    this._exchange?.dispose();
+    this._dropMessageBuffer();
+    this._invalidateReadiness();
+    this._ctx.postMessage({
+      op: 'warning',
+      data: [`${this._exchangeName} is still loading on a slow connection; retrying in ${delay / 1000}s.`],
+    });
+    const token = this._startupToken;
+    this._recoveryTimer = setTimeout(() => {
+      this._recoveryTimer = null;
+      void this._recoverEngine(token).catch((failure: unknown) => {
+        if (token !== this._startupToken || this._stopped) return;
+        this.dispose();
+        this.logError('Exchange start retry failed; reinitialize the account.', failure);
+      });
+    }, delay);
+    return true;
+  }
+
   private async _recoverEngine(token: number) {
     if (token !== this._startupToken || this._stopped) return;
     const previousUpdateIds = this._recoveryUpdateIds ?? this._store.serialize().updateIds;
@@ -1155,6 +1213,7 @@ export class ExchangeWorker {
     this._ctx.postMessage({ op: 'store', data: this._sanitizeForPostMessage(this._store.serialize()) });
     const started = await this.start();
     if (token !== this._startupToken || this._stopped) return;
+    if (!started && this.retryTimedOutStart()) return;
     if (!started || this._exchange?.isDisposed) {
       this.dispose();
       this._ctx.postMessage({ op: 'warning', data: ['Rust engine recovery failed; reinitialize the account.'] });
