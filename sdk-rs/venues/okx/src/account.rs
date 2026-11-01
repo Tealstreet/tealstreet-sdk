@@ -226,6 +226,9 @@ pub struct AccountState {
     unlisted_logged: HashSet<String>,
     /// `position:`/`order:`/`coin:` + identity (empty when unreadable) of skips already logged.
     skip_logged: HashSet<String>,
+    /// Symbols of this census's rejected rows that could be an uncertain write:
+    /// no stored copy proves them older. Empty text: the row names no market.
+    census_unproven: Vec<String>,
     account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
@@ -446,6 +449,7 @@ impl Okx {
         if include_orders && !self.account.orders_in_flight {
             self.account.orders_in_flight = true;
             self.account.orders_generation += 1;
+            self.account.census_unproven.clear();
             let generation = self.account.orders_generation;
             self.orders_page(
                 cx,
@@ -734,7 +738,7 @@ impl Okx {
                     if o.inst_id.is_empty()
                         || (cx.store.market_by_id(o.inst_id).is_some() && !valid_order(&o))
                     {
-                        self.reject_order(cx, rows, o.ord_id, o.algo_id);
+                        self.reject_order(cx, rows, o.inst_id, o.ord_id, o.algo_id);
                         return;
                     }
                     if cx.store.market_by_id(o.inst_id).is_none() && !terminal_state(o.state) {
@@ -768,7 +772,7 @@ impl Okx {
                         }
                         return;
                     }
-                    self.reject_order(cx, rows, &row.ord_id, &row.algo_id);
+                    self.reject_order(cx, rows, &row.inst_id, &row.ord_id, &row.algo_id);
                 }
             },
         }
@@ -816,6 +820,7 @@ impl Okx {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         rows: &mut SnapshotBuilder<String, Order>,
+        inst_id: &str,
         ord_id: &str,
         algo_id: &str,
     ) {
@@ -823,6 +828,19 @@ impl Okx {
             .into_iter()
             .filter(|id| !id.is_empty())
             .collect();
+        let stored = ids.iter().any(|id| {
+            ORDER_SUFFIXES
+                .iter()
+                .any(|suffix| cx.store.order(&format!("{id}{suffix}")).is_some())
+        });
+        if !stored {
+            if inst_id.is_empty() {
+                self.account.census_unproven.push(String::new());
+            } else if let Some(market) = cx.store.market_by_id(inst_id) {
+                // A market this account cannot trade cannot hold its placement.
+                self.account.census_unproven.push(market.symbol.clone());
+            }
+        }
         let Some(first) = ids.first() else {
             let message = "OKX skipped order row without an id";
             self.log_skip(cx, "order:".into(), Level::Warn, message);
@@ -1120,9 +1138,13 @@ impl Okx {
                     }
                 }
                 cx.store.set_orders(rows);
-                // A rejected row may be an uncertain placement; it proves nothing.
+                // A rejected row may be an uncertain placement only if nothing stored proves
+                // it older; that symbol stays fenced, and the rest of the census still counts.
                 if clean {
                     cx.orders_reconciled_since(None, epoch);
+                } else {
+                    let unproven = std::mem::take(&mut self.account.census_unproven);
+                    cx.orders_reconciled_except(&unproven, epoch);
                 }
                 self.trading
                     .acknowledged
