@@ -1388,6 +1388,109 @@ async fn an_unreadable_final_fill_falls_back_to_the_position() {
     .await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_late_fill_on_a_replaced_order_comes_off_the_remainder() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok("[]"));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.set_ticker(101.0, 101.5);
+        settle(1200).await;
+        port.update_order("o1", |row| row.filled = 0.4);
+        settle(60_000).await;
+        port.set_ticker(102.0, 102.5);
+        settle(1200).await;
+        let placements = port.placements();
+        assert_eq!(placements.len(), 3);
+        assert!((placements[2].1 - 0.6).abs() < 1e-9, "{placements:?}");
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_partial_refusal_of_a_split_order_cancels_the_parts_that_landed() {
+    local(async {
+        let port = FakePort::new("bybit");
+        *port.responder.borrow_mut() = Box::new(|command| match command {
+            Command::PlaceOrders { .. } => {
+                let mut error = VenueError::new("part refused").outcome(Outcome::Rejected);
+                error.partial = Some(Box::new(safe_cex_engine::error::Partial {
+                    order_ids: vec!["part1".into()],
+                    total: Some(2),
+                    failed_index: Some(1),
+                }));
+                Err(error)
+            }
+            _ => Ok("null".into()),
+        });
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(100).await;
+        assert_eq!(port.placements().len(), 1, "not placed again");
+        stop(&factory, &cx);
+        settle(100).await;
+        assert_eq!(port.cancels(), vec!["part1".to_string()]);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_order_cancelled_from_outside_stops_the_chase_and_says_so() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.set_ticker(100.0, 100.5);
+        settle(100).await;
+        port.update_order("o1", |row| row.status = OrderStatus::Canceled);
+        settle(100).await;
+        assert_eq!(port.placements().len(), 1, "{:?}", port.placements());
+        assert!(factory.book().active_chasers().is_empty());
+        assert!(
+            warnings(&port)
+                .iter()
+                .any(|w| w.contains("cancelled outside the chase")),
+            "{:?}",
+            warnings(&port)
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn hyperliquid_counts_a_row_fill_and_its_fill_event_once() {
+    local(async {
+        let port = FakePort::new("hyperliquid");
+        accept_with_fills(&port, Ok("[]"));
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.update_order("o1", |row| row.filled = 0.4);
+        settle(10).await;
+        port.publish(Change {
+            fills: vec![safe_cex_engine::engine::Fill {
+                id: None,
+                order_id: "o1".into(),
+                symbol: "BTCUSDT".into(),
+                side: OrderSide::Buy,
+                price: 100.0,
+                amount: 0.4,
+            }],
+            ..Change::default()
+        });
+        settle(10).await;
+        assert_eq!(
+            factory
+                .book()
+                .progress(&factory.book().active_chasers()[0].id)
+                .unwrap()
+                .remaining_size,
+            0.6
+        );
+    })
+    .await;
+}
+
 /// The stop reason stays true when a later attempt's cancel goes through.
 #[tokio::test(start_paused = true)]
 async fn a_requote_cancel_that_later_succeeds_says_an_attempt_failed() {

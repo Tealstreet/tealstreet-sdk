@@ -609,9 +609,9 @@ impl ChaserBook {
                     chase.needs_reconcile.set(true);
                 }
                 if fill_tracked {
-                    let current = chase.current();
+                    let ever = chase.ever();
                     for fill in change.fills.iter().filter(|fill| {
-                        current.contains(&fill.order_id) && fill.symbol == chase.options.symbol
+                        ever.contains(&fill.order_id) && fill.symbol == chase.options.symbol
                     }) {
                         chase.add_fill_amount(&fill.order_id, fill.amount);
                     }
@@ -623,6 +623,7 @@ impl ChaserBook {
                     }
                 }
                 if change.orders {
+                    book.apply_replaced_fills(&chase);
                     if chase.placements() != placements {
                         placements = chase.placements();
                         seen = false;
@@ -654,6 +655,19 @@ impl ChaserBook {
                 chase.mark_dirty(Dirty { orders: change.orders, positions: change.positions, tickers: change.tickers });
             }
         });
+    }
+
+    /// A fill landing on an order already replaced still comes off what is left.
+    fn apply_replaced_fills(&self, chase: &Chase) {
+        let (ever, current) = (chase.ever(), chase.current());
+        let store = self.store();
+        for order in store
+            .orders
+            .iter()
+            .filter(|order| ever.contains(&order.id) && !current.contains(&order.id))
+        {
+            chase.subtract_filled_size(order);
+        }
     }
 
     /// Returns true when the chase is over (all filled or stopped).
@@ -732,12 +746,27 @@ impl ChaserBook {
             return Ok(());
         }
         let done = self.apply_order_fill_state(chase, &orders);
-        if chase.take_fresh_order()
-            && orders
-                .iter()
-                .all(|order| order.status == OrderStatus::Canceled)
-        {
-            chase.bump_tick_distance();
+        let all_canceled = orders
+            .iter()
+            .all(|order| order.status == OrderStatus::Canceled);
+        if chase.take_fresh_order() {
+            if all_canceled {
+                chase.bump_tick_distance();
+            }
+        } else if all_canceled && !done {
+            let rejected = orders.iter().any(|order| {
+                order.extra.as_ref().and_then(|extra| extra.reject_reason)
+                    == Some(RejectReason::PostOnly)
+            });
+            // Not this chase's cancel, or the row would be replaced: Cancel All or the venue.
+            if !rejected {
+                chase.mark_complete("Its order was cancelled outside the chase");
+                self.warn(&format!(
+                    "Chaser for {} stopped: its order was cancelled outside the chase",
+                    chase.options.symbol
+                ));
+                return Ok(());
+            }
         }
         if done {
             return Ok(());
@@ -1070,7 +1099,13 @@ impl ChaserBook {
                     Ok(ids) => (ids, false),
                     Err(_) => (Vec::new(), true),
                 },
-                Err(error) => (Vec::new(), error.outcome == Some(Outcome::Unknown)),
+                // A split order refused part way: the parts that landed rest.
+                Err(error) => match &error.partial {
+                    Some(partial) if !partial.order_ids.is_empty() => {
+                        (partial.order_ids.clone(), false)
+                    }
+                    _ => (Vec::new(), error.outcome == Some(Outcome::Unknown)),
+                },
             };
             if let Err(error) = &placed {
                 last_refusal = Some(error.message.clone());
