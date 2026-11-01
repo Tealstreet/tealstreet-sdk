@@ -19,7 +19,7 @@ const policies = new Set([
   'quantityUnits', 'positionHistory', 'closedPositionFormat', 'fillHistoryTime',
   'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
   'finiteHistoryBounds', 'rejectOrderHistoryFilters', 'publicCatalogueValidation',
-  'isolatedBookSubscriptions', 'inverseClosedPositions',
+  'isolatedBookSubscriptions', 'inverseClosedPositions', 'orderHistoryNeedsSymbol',
 ]);
 const conditional = {
   account: (v) => v !== 'unsupported' ? [{ op: 'fetchAccount' }] : [],

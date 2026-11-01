@@ -20,8 +20,6 @@ const POSITION_READ_TIMEOUT_MS: f64 = 10_000.0;
 // so the group proof bound matches POSITION_READ_TIMEOUT_MS; refine at live smoke.
 const GROUP_PROOF_BOUND_MS: u32 = 10_000;
 const GROUP_PENDING_MESSAGE: &str = "is awaiting confirmation of its grouped placement";
-const NONCE_RETRIES: u8 = 3;
-const NONCE_RETRY_MS: f64 = 1_000.0;
 const RATE_MESSAGE: &str = "Lighter rate limit is active; wait before retrying. Limits can apply to IP, account or transaction quota.";
 const MAX_CLIENT_INDEX: u64 = (1 << 48) - 1;
 
@@ -48,7 +46,6 @@ struct PositionWait {
     confirmed: Option<bool>,
 }
 struct Job {
-    nonce_retries: u8,
     preflight: Preflight,
     plan: Option<Plan>,
     slot: Option<Slot>,
@@ -575,7 +572,6 @@ impl Lighter {
             return;
         }
         self.trading.queue.push_back(Job {
-            nonce_retries: 0,
             preflight,
             plan: None,
             slot: None,
@@ -1031,16 +1027,6 @@ impl Lighter {
             return;
         }
         self.trading.inflight = false;
-        // Nothing was sent yet, and our own reads share this budget: wait briefly, then ask again.
-        if matches!(response.status, 405 | 429)
-            && matches!(&request, Request::Nonce)
-            && self.trading.active.as_ref().unwrap().nonce_retries < NONCE_RETRIES
-        {
-            self.trading.active.as_mut().unwrap().nonce_retries += 1;
-            self.trade_read_finished(cx, &context);
-            self.trading.timer = Some(cx.set_timer(NONCE_RETRY_MS));
-            return;
-        }
         if matches!(response.status, 405 | 429) && !matches!(&request, Request::Submit(_)) {
             let parsed = serde_json::from_str::<Reply>(response.body).ok();
             let mut error = not_sent(RATE_MESSAGE).kind(ErrorKind::RateLimited);
