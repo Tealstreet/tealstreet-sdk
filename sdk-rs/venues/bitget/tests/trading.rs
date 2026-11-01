@@ -1443,3 +1443,27 @@ fn an_amend_finding_its_order_gone_does_not_place_the_replacement() {
             .any(|r| r.url.contains("/batch-place-order"))
     );
 }
+
+#[test]
+fn split_remainder_stays_on_the_lot_step() {
+    let mut h = Harness::classic();
+    let mut market = h.engine.store().market("BTCUSDT").unwrap().clone();
+    market.precision.amount = 0.1;
+    market.limits.amount.min = 0.1;
+    market.limits.amount.max = 72000.0;
+    h.engine.store_mut().set_markets(vec![market]);
+    place(
+        &mut h,
+        vec![
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":180000.05,"price":90.0}),
+        ],
+    );
+    let (_, payload) = body(&mut h, "/batch-place-order");
+    let sizes: Vec<_> = payload["orderList"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["size"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(sizes, ["72000", "72000", "36000.1"]);
+}

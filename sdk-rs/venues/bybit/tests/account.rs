@@ -3875,3 +3875,34 @@ fn a_cancel_batch_in_a_rest_outage_is_bounded_per_command() {
     }
     assert!((1..=2).contains(&sent), "{sent} sends");
 }
+
+#[test]
+fn an_order_past_the_split_bound_is_refused_without_a_request() {
+    let mut h = ready();
+    let max = h
+        .engine
+        .store()
+        .market("BTCUSDT")
+        .unwrap()
+        .limits
+        .amount
+        .max;
+    let order = serde_json::from_value(serde_json::json!({
+        "symbol": "BTCUSDT", "type": "market", "side": "buy", "amount": max * 2000.0
+    }))
+    .unwrap();
+    h.engine.handle(
+        h.now,
+        safe_cex_engine::Event::Command(safe_cex_engine::Command::PlaceOrders {
+            command: 77,
+            orders: vec![order],
+        }),
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("safe split bound")),
+        "{actions:?}"
+    );
+}
