@@ -1048,16 +1048,14 @@ impl BinanceFutures {
                 self.account.keepalive_failing = false;
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_REFRESH_MS));
             }
-            Request::PositionMode => {
-                match serde_json::from_str::<PositionModeBody>(body) {
-                    Ok(mode) => cx.store.set_hedged(mode.dual_side_position),
-                    Err(error) => self.account_request_failed(
-                        cx,
-                        Request::PositionMode,
-                        VenueError::new(error.to_string()),
-                    ),
-                }
-            }
+            Request::PositionMode => match serde_json::from_str::<PositionModeBody>(body) {
+                Ok(mode) => cx.store.set_hedged(mode.dual_side_position),
+                Err(error) => self.account_request_failed(
+                    cx,
+                    Request::PositionMode,
+                    VenueError::new(error.to_string()),
+                ),
+            },
             Request::PositionRisk {
                 generation,
                 rows,
@@ -1739,10 +1737,14 @@ impl BinanceFutures {
     fn note_position_side(&mut self, id: &str, position_side: Option<&str>) {
         match position_side {
             Some("LONG") => {
-                self.account.order_position_sides.insert(id.to_owned(), "LONG");
+                self.account
+                    .order_position_sides
+                    .insert(id.to_owned(), "LONG");
             }
             Some("SHORT") => {
-                self.account.order_position_sides.insert(id.to_owned(), "SHORT");
+                self.account
+                    .order_position_sides
+                    .insert(id.to_owned(), "SHORT");
             }
             Some(_) => {
                 self.account.order_position_sides.remove(id);
