@@ -275,7 +275,8 @@ fn partial_bracket_failure_returns_the_accepted_entry_and_does_not_replay_it() {
     assert_eq!(payload.flags, Some(vec!["REDUCE_ONLY".into()]));
     h.respond(sl, 200, r#"{"id":"sl"}"#);
     assert!(h.pending.is_empty());
-    assert_eq!(h.result(10), Ok("[\"entry\",\"sl\"]"));
+    // The entry stands, but a refused leg leaves it unprotected: the command fails.
+    assert!(h.result(10).is_err());
     assert!(logged_child_rejection(
         &h,
         "TP/SL take-profit placement failed: Paradex HTTP 400: REJECTED; still placing the stop-loss"
@@ -298,7 +299,7 @@ fn a_rejected_stop_loss_keeps_the_take_profit_and_the_next_order() {
     assert_eq!(payload.client_id.as_deref(), Some("next"));
     h.respond(after, 200, r#"{"id":"next-id","client_id":"next"}"#);
     assert!(h.pending.is_empty());
-    assert_eq!(h.result(11), Ok("[\"entry\",\"tp\",\"next-id\"]"));
+    assert!(h.result(11).is_err());
     assert!(logged_child_rejection(
         &h,
         "TP/SL stop-loss placement failed: Paradex HTTP 400: REJECTED; no other leg remains to send"
@@ -625,7 +626,8 @@ fn untriggered_stop_with_null_execution_price_can_be_amended_without_cancel_repl
     let request = h.take("/orders/123");
     assert_eq!(request.method, Method::Put);
     let payload: Payload = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-    assert_eq!(payload.price.as_deref(), Some("0"));
+    // The venue refuses a price on a market trigger.
+    assert_eq!(payload.price, None);
     assert_eq!(payload.trigger_price.as_deref(), Some("91"));
     assert_eq!(payload.size.as_deref(), Some("3"));
     assert!(payload.signature.unwrap().starts_with("[\""));
@@ -1560,4 +1562,43 @@ fn a_refused_auth_is_a_typed_terminal_failure_without_retries() {
     assert!(!h.pending.iter().any(|r| r.url.contains("/auth/")));
     let error = failed(&h, 81);
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+}
+
+#[test]
+fn a_real_batch_answer_with_a_null_error_slot_is_accepted() {
+    let mut h = private();
+    place(&mut h, 9, vec![opts(OrderType::Limit)]);
+    let r = h.take("/orders");
+    let batch = r.url.contains("batch");
+    let client = opts(OrderType::Limit).client_order_id.unwrap();
+    let body = format!(
+        r#"{{"orders":[{{"id":"1793547697690201709231680000","market":"BTC-USD-PERP","side":"BUY","type":"LIMIT","size":"12","remaining_size":"12","price":"1.1117","status":"NEW","cancel_reason":"","client_id":"{client}","instruction":"GTC","flags":[],"trigger_price":"0"}}],"errors":[null]}}"#
+    );
+    h.respond(r, 200, &body);
+    assert!(batch, "this shape is the batch endpoint's");
+    assert!(h.result(9).is_ok(), "{:?}", h.result(9));
+}
+
+#[test]
+fn a_refused_bracket_leg_is_reported_with_the_entry_as_partial() {
+    let mut h = private();
+    let mut order = opts(OrderType::Limit);
+    order.client_order_id = None;
+    order.stop_loss = Some(90.);
+    place(&mut h, 9, vec![order]);
+    let main = h.take("/orders");
+    let payload: Payload = serde_json::from_str(main.body.as_deref().unwrap()).unwrap();
+    let client = payload.client_id.unwrap();
+    h.respond(
+        main,
+        200,
+        &format!("{{\"id\":\"entry\",\"client_id\":\"{client}\"}}"),
+    );
+    let sl = h.take("/orders");
+    h.respond(
+        sl,
+        400,
+        r#"{"error":"REDUCE_ONLY_NO_POSITION","message":"no position"}"#,
+    );
+    assert!(h.result(9).is_err());
 }

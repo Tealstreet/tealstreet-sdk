@@ -1205,3 +1205,22 @@ fn rest_and_stream_remaining_preserve_native_decimal_precision() {
         }
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_and_deactivates() {
+    let (mut e, _, http) = seeded();
+    let (mut failures, mut deactivated) = (0, false);
+    let refused = r#"{"code":10002,"msg":"rpc error: code = InvalidArgument desc = Api credential is invalid [apiKey=K]!","timeCost":3308}"#;
+    for r in http {
+        response(&mut e, &r, 20.0, refused);
+        for action in e.prepared(20.0) {
+            match action {
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. }) => failures += 1,
+                Action::Notice(safe_cex_engine::Notice::Deactivate) => deactivated = true,
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(failures, 1);
+    assert!(deactivated);
+}

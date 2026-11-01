@@ -271,3 +271,25 @@ pub struct AccountPush<'a> {
     #[serde(borrow, default)]
     pub details: Vec<Equity<'a>>,
 }
+
+/// A row the borrowed records cannot read, rewritten so they can: null fields dropped,
+/// numbers as text, JSON escapes resolved. Cold path: only after a row failed to parse.
+pub fn readable_rows(text: &str) -> Option<String> {
+    fn clean(row: &mut serde_json::Value) {
+        match row {
+            serde_json::Value::Array(rows) => rows.iter_mut().for_each(clean),
+            serde_json::Value::Object(fields) => {
+                fields.retain(|_, value| !value.is_null());
+                for value in fields.values_mut() {
+                    if let serde_json::Value::Number(number) = value {
+                        *value = serde_json::Value::String(number.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut rows = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    clean(&mut rows);
+    serde_json::to_string(&rows).ok()
+}

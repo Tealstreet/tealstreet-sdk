@@ -143,6 +143,7 @@ struct Job {
     placement: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    leg_refused: bool,
 }
 impl Job {
     /// One failure keeps its classification; several join their text and share
@@ -606,6 +607,7 @@ impl Trading {
                     operations: VecDeque::new(),
                     results: vec![],
                     errors: vec![],
+                    leg_refused: false,
                     attempt_all: true,
                     placement: true,
                     effective: false,
@@ -780,6 +782,7 @@ impl Trading {
                         operations,
                         results: Vec::new(),
                         errors: Vec::new(),
+                        leg_refused: false,
                         attempt_all,
                         placement,
                         effective: false,
@@ -872,7 +875,8 @@ impl Trading {
                 .errors
                 .iter()
                 .any(|e| e.outcome == Some(Outcome::Unknown));
-            if state.errors.is_empty() || (state.placement && !state.results.is_empty() && !unknown)
+            if state.errors.is_empty()
+                || (state.placement && !state.results.is_empty() && !unknown && !state.leg_refused)
             {
                 let result = if state.placement {
                     serde_json::to_string(&state.results).map_err(|e| e.to_string())
@@ -1083,7 +1087,9 @@ impl Trading {
                             job.operations.pop_front();
                         }
                         job.errors.push(error);
-                    } else if error.outcome == Some(Outcome::Unknown) {
+                    } else {
+                        // A refused leg leaves the entry unprotected: the command says so.
+                        job.leg_refused = true;
                         job.errors.push(error);
                     }
                 } else {
@@ -1341,11 +1347,16 @@ struct Modify {
     #[serde(rename = "type")]
     kind: String,
     size: String,
+    // The venue refuses a price on a market trigger; the signature still covers 0.
+    #[serde(skip_serializing_if = "unpriced")]
     price: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     trigger_price: Option<String>,
     signature: String,
     signature_timestamp: u64,
+}
+fn unpriced(price: &str) -> bool {
+    price == "0"
 }
 impl SignedBody for Modify {
     fn preimage(&self) -> Preimage<'_> {
@@ -1507,12 +1518,16 @@ fn decode_placement(
         #[serde(default)]
         orders: Vec<Identity>,
         #[serde(default)]
-        errors: Vec<Failure>,
+        // A success row answers null in its error slot.
+        errors: Vec<Option<Failure>>,
     }
     let (rows, errors) = if batch {
         let response: Batch =
             serde_json::from_str(body).map_err(|_| "invalid Paradex batch placement envelope")?;
-        (response.orders, response.errors)
+        (
+            response.orders,
+            response.errors.into_iter().flatten().collect(),
+        )
     } else {
         (
             vec![
