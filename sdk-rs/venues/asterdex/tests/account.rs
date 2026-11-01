@@ -1544,3 +1544,55 @@ fn reporter_once_does_not_upgrade_a_remembered_warning_after_its_stored_copy_dis
         ["Aster skipped malformed position row BTCUSDT:short"]
     );
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let refused = r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#;
+    let mut e = support::engine(Options {
+        key: Some("documented-key".into()),
+        secret: Some("synthetic-secret".into()),
+        ..Default::default()
+    });
+    let now = 1700000000000.0;
+    e.start(now);
+    let mut failures = vec![];
+    for _ in 0..16 {
+        let actions: Vec<_> = support::drain(&mut e, now).into_iter().collect();
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            match action {
+                Action::Http(r) => {
+                    let body = if r.url.contains("/time") {
+                        r#"{"serverTime":1700000000000}"#
+                    } else if r.url.contains("/exchangeInfo") {
+                        MARKETS
+                    } else if r.url.contains("/leverageBracket")
+                        || r.url.contains("/ticker/24hr")
+                        || r.url.contains("/openInterest")
+                    {
+                        "[]"
+                    } else {
+                        refused
+                    };
+                    e.handle(
+                        now,
+                        Event::HttpResponse {
+                            request: r.id,
+                            response: safe_cex_engine::Response {
+                                status: if body == refused { 401 } else { 200 },
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                Action::Notice(Notice::StartupFailed { error }) => failures.push(error),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].message.contains("Invalid API-key"));
+}

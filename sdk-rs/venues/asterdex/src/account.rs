@@ -718,7 +718,17 @@ impl AsterDex {
         response: Result<Response<'_>, &str>,
     ) {
         let error = match &response {
-            Ok(r) => venue_error(r).map(|(_, m)| m),
+            Ok(r) => venue_error(r).map(|(code, m)| {
+                if matches!(code, -2014 | -2015) {
+                    cx.startup_read_refused(
+                        &safe_cex_engine::VenueError::new(m.clone())
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+                            .venue_code(code.to_string())
+                            .venue_message(m.clone()),
+                    );
+                }
+                m
+            }),
             Err(e) => Some((*e).into()),
         };
         let body = response.as_ref().map_or("", |r| r.body);
