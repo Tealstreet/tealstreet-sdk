@@ -1703,6 +1703,7 @@ struct IoCore {
     #[cfg(test)]
     read_root_sweep_capacity: Option<usize>,
     public_feed_policy: PublicFeedPolicy,
+    public_feed_watch: PublicFeedWatch,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     /// A frame-fed engine (`crate::frame_fed`): its account state arrives as
     /// frames from a data source; it opens no socket and makes no account read.
@@ -1893,6 +1894,7 @@ impl Default for IoCore {
             #[cfg(test)]
             read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
+            public_feed_watch: PublicFeedWatch::default(),
             private_feed_policy: Default::default(),
             frame_fed: false,
             setting_holds: Default::default(),
@@ -3039,6 +3041,9 @@ impl crate::engine::CoreCx<'_> {
                 .core
                 .sockets
                 .connected(socket, channel, &mut self.io.core.health);
+            if *channel == SocketChannel::Public {
+                self.io.core.public_feed_watch.attempted(socket);
+            }
         }
         self.io.core.actions.push(Action::WsConnect {
             binary,
@@ -3356,6 +3361,54 @@ impl<V: Venue> Clone for HttpRelease<V> {
 }
 
 /// One exchange implementation. All methods are synchronous and must not block.
+const PUBLIC_FEED_UNAVAILABLE_TEXT: &str = "Live WebSocket connection failed to establish. Historical candles may still load, but live charts and order books will not update. Check your network, VPN, firewall, or browser extensions, then reload Tealstreet.";
+
+/// One notice per outage when no public socket opens. A connect timeout or a backoff
+/// timer always delivers an event while a feed is failing, so `is_due` needs no timer.
+#[derive(Default)]
+struct PublicFeedWatch {
+    attempts: std::collections::HashSet<SocketId>,
+    serial: u64,
+    seen_serial: u64,
+    last_attempt: f64,
+    deadline: Option<f64>,
+    noticed: bool,
+}
+impl PublicFeedWatch {
+    const WAIT_MS: f64 = 20_000.;
+    /// Longer than any public feed's backoff, so a feed retired on purpose stays quiet.
+    const STILL_TRYING_MS: f64 = 17_000.;
+
+    fn attempted(&mut self, socket: SocketId) {
+        self.attempts.insert(socket);
+        self.serial += 1;
+    }
+    fn opened(&mut self, socket: SocketId) {
+        if self.attempts.remove(&socket) {
+            self.deadline = None;
+            self.noticed = false;
+        }
+    }
+    fn closed(&mut self, socket: SocketId) {
+        self.attempts.remove(&socket);
+    }
+    fn is_due(&mut self, now: f64) -> bool {
+        if self.serial != self.seen_serial {
+            self.seen_serial = self.serial;
+            self.last_attempt = now;
+            if self.deadline.is_none() && !self.noticed {
+                self.deadline = Some(now + Self::WAIT_MS);
+            }
+        }
+        if self.deadline.is_none_or(|deadline| now < deadline) {
+            return false;
+        }
+        self.deadline = None;
+        self.noticed = !self.attempts.is_empty() || now - self.last_attempt < Self::STILL_TRYING_MS;
+        self.noticed
+    }
+}
+
 pub trait Venue {
     fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
         None
@@ -4571,7 +4624,24 @@ impl<V: Venue> Engine<V> {
                 command_entry::wait_deadline(now, command_entry::DEFAULT_COMMAND_WAIT_MS);
             self.io.receive_command_wait(id, deadline, now);
         }
+        match &event {
+            Event::WsOpened { socket } => self.io.core.public_feed_watch.opened(*socket),
+            Event::WsClosed { socket, .. } | Event::WsRouteExhausted { socket } => {
+                self.io.core.public_feed_watch.closed(*socket)
+            }
+            _ => {}
+        }
         self.handle_received(now, event);
+        if self.io.core.public_feed_watch.is_due(now) {
+            let core = &mut self.io.core;
+            core.actions
+                .push(Action::Notice(Notice::Event(crate::log::LogEvent {
+                    level: Level::Error,
+                    code: log_code::PUBLIC_FEED_UNAVAILABLE,
+                    message: PUBLIC_FEED_UNAVAILABLE_TEXT.to_owned(),
+                    fields: Vec::new(),
+                })));
+        }
         self.io.core.command_waits.end_receipt();
         #[cfg(feature = "repair-mutations")]
         self.flush_repair_notices(now);

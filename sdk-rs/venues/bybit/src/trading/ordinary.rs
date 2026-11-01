@@ -184,7 +184,6 @@ fn fields(body: &str) -> Fields {
 impl BybitLinear {
     pub(crate) fn ordinary_command(&self, command: &Command) -> bool {
         trade_command_id(command).is_some()
-            && !matches!(command, Command::CancelOrdersWithSymbols { .. })
     }
 
     /// The genuine command entry: one preflight before any check or read.
