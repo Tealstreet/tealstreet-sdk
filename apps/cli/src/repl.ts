@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
 import type { CLISession, PromptConfig } from '../../../packages/cli-core/src/index';
+import { accountsToStart } from './accountsToStart';
 import { watchOneShotChases } from './chaseAbandoned';
 import type { CommandContext } from '../../../packages/cli-core/src/commands/Command';
 import {
@@ -2446,21 +2447,13 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
 
     // Start all accounts (including primary) in the background without blocking the CLI prompt
     const activeAccounts = adapter.getActiveAccounts();
-    // Build list of accounts to enable - include primary account even if not in active list
     const primaryAccount = session.currentAccountName ? getAccount(session.currentAccountName) : null;
-    const accountsToEnable: ExchangeAccountConfig[] = [];
-
-    // Add primary account first if it exists and is active
-    if (primaryAccount && primaryAccount.active && !exchangeManager.isConnected(primaryAccount.name)) {
-      accountsToEnable.push(primaryAccount);
-    }
-
-    // Add other active accounts (skip primary since it's already added)
-    for (const acc of activeAccounts) {
-      if (acc.name === session.currentAccountName) continue;
-      if (exchangeManager.isConnected(acc.name)) continue;
-      accountsToEnable.push(acc);
-    }
+    const accountsToEnable = accountsToStart(
+      primaryAccount,
+      Boolean(accountName),
+      activeAccounts,
+      (name) => exchangeManager.isConnected(name),
+    );
 
     if (accountsToEnable.length > 0) {
       // Fire off all enables in parallel, don't block
