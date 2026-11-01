@@ -1615,6 +1615,30 @@ fn cancel_all_after_create_result(value: impl FnOnce(&HttpRequest) -> Value) -> 
     )
 }
 
+// Live: this body was read as unknown and latched writes for 75 s.
+#[test]
+fn a_code_in_a_200_with_no_data_is_a_definite_refusal() {
+    let mut e = rejection_engine(vec![]);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 71,
+            orders: vec![opts("rejected-caller")],
+        },
+    );
+    let create = writes(&a)[0].clone();
+    let a = respond(
+        &mut e,
+        &create,
+        json!({"code":11038,"msg":"TE_TRIGGER_INVALID","data":null}),
+    );
+    let outcome = a.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.outcome),
+        _ => None,
+    });
+    assert_eq!(outcome, Some(Some(safe_cex_engine::Outcome::Rejected)));
+}
+
 #[test]
 fn definitive_create_rejection_does_not_fence_cancel_all_of_existing_orders() {
     for biz_error in [0, 11001] {

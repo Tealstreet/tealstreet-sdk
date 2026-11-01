@@ -664,14 +664,39 @@ impl Trading {
                     .market(&symbol)
                     .ok_or_else(|| "Paradex cancel-all requires a known nonempty market".to_owned())
                     .map(|market| {
-                        VecDeque::from([Operation {
+                        // The venue's cancel-all leaves untriggered stops, which can still
+                        // fire; only a delete by id clears them.
+                        let mut operations: VecDeque<_> = cx
+                            .store
+                            .orders()
+                            .iter()
+                            .filter(|order| {
+                                order.symbol == symbol
+                                    && matches!(
+                                        order.kind,
+                                        OrderType::StopLoss
+                                            | OrderType::TakeProfit
+                                            | OrderType::Conditional
+                                    )
+                            })
+                            .map(|order| Operation {
+                                receipts: Vec::new(),
+                                hash: None,
+                                method: Method::Delete,
+                                path: format!("/orders/{}", encode(&order.id)),
+                                body: None,
+                                kind: Kind::Cancel(vec![order.id.clone()]),
+                            })
+                            .collect();
+                        operations.push_back(Operation {
                             receipts: Vec::new(),
                             hash: None,
                             method: Method::Delete,
                             path: format!("/orders?market={}", encode(&market.id)),
                             body: None,
                             kind: Kind::Empty,
-                        }])
+                        });
+                        operations
                     }),
                 false,
                 false,

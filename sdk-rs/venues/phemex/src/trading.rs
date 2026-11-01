@@ -1947,35 +1947,11 @@ impl PhemexPerpetuals {
                 return Ok(());
             }
             if code != 0 {
-                // Only documented balance/parameter/risk rejects with no order data
-                // prove no placement. Duplicate/routing/internal errors stay unknown.
-                // https://github.com/phemex/phemex-api-docs/blob/master/TradingErrorCode.md
+                // A code in a 200 with no order data is a definite refusal (11038 latched writes
+                // for 75 s when read as uncertain); with order data it stays unknown.
                 let call = &request.call;
                 if matches!(call, Call::Place { .. })
                     && env.data.as_ref().is_none_or(|data| data.get() == "null")
-                    && matches!(
-                        code,
-                        11001
-                            | 11027
-                            | 11034
-                            | 11035
-                            | 11036
-                            | 11053
-                            | 11055
-                            | 11056
-                            | 11058
-                            | 11081
-                            | 11082
-                            | 11011
-                            | 11041
-                            | 11043
-                            | 11044
-                            | 11048
-                            | 11085
-                            | 11150
-                            | 20004
-                            | 39999
-                    )
                 {
                     request
                         .command
