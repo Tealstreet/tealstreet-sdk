@@ -180,7 +180,11 @@ impl AccountPort for Port {
             self.placed
                 .record(orders.iter().map(|order| order.symbol.as_str()));
         }
-        let audit = crate::audit::typed(&command).map(|fields| (self.who.clone(), fields));
+        let audit = crate::audit::typed(&command).map(|fields| AuditLine {
+            who: self.who.clone(),
+            fields,
+            write: |line| println!("{line}"),
+        });
         let id = command.completion_id();
         let (tx, rx) = oneshot::channel();
         if let Some(id) = id {
@@ -205,8 +209,8 @@ impl AccountPort for Port {
                     None => Ok("null".into()),
                 }
             };
-            if let Some((who, fields)) = audit {
-                crate::audit::log(&who, "algo", &fields, crate::audit::venue_result(&result));
+            if let Some(audit) = audit {
+                audit.settled(crate::audit::venue_result(&result));
             }
             result
         })
@@ -291,6 +295,31 @@ fn stop_notice(
     });
     let lines: Vec<String> = chases.chain(twaps).collect();
     (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// A command's audit line, also written if its waiter gives up before the
+/// result (a chaser's bounded cancel), whose answer nothing then hears.
+struct AuditLine {
+    who: crate::audit::Who,
+    fields: serde_json::Map<String, Value>,
+    write: fn(&Value),
+}
+
+impl AuditLine {
+    fn settled(self, result: Value) {
+        (self.write)(&crate::audit::line(&self.who, "algo", &self.fields, result));
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for AuditLine {
+    fn drop(&mut self) {
+        let result = serde_json::json!({
+            "message": "no answer before the caller stopped waiting; the command may still complete",
+            "outcome": "unknown",
+        });
+        (self.write)(&crate::audit::line(&self.who, "algo", &self.fields, result));
+    }
 }
 
 /// The terminateAll audit result: ok only when every cancel settled.
@@ -1057,6 +1086,30 @@ mod tests {
         ] {
             assert_eq!(error_kind(kind.as_str()), Some(kind));
         }
+    }
+
+    #[test]
+    fn an_abandoned_command_still_writes_its_audit_line_once() {
+        thread_local! {
+            static LINES: std::cell::RefCell<Vec<Value>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        let audit = || AuditLine {
+            who: crate::audit::Who {
+                user: "u".into(),
+                account: "acct".into(),
+                venue: "bybit".into(),
+            },
+            fields: serde_json::Map::new(),
+            write: |line| LINES.with(|lines| lines.borrow_mut().push(line.clone())),
+        };
+        drop(audit());
+        audit().settled("ok".into());
+        LINES.with(|lines| {
+            let lines = lines.borrow();
+            assert_eq!(lines.len(), 2);
+            assert_eq!(lines[0]["result"]["outcome"], "unknown");
+            assert_eq!(lines[1]["result"], "ok");
+        });
     }
 
     #[test]
