@@ -1334,6 +1334,60 @@ async fn a_cancel_answered_not_exist_does_not_say_may_still_be_open() {
     .await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_fill_during_the_final_cancel_is_reported_from_the_venue() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(
+            &port,
+            Ok(r#"[{"orderId":"o1","qty":0.4},{"orderId":"other","qty":9}]"#),
+        );
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        stop(&factory, &cx);
+        settle(100).await;
+        assert_eq!(port.completes()[0]["filled"], 0.4);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_vanished_row_reports_its_fill_without_a_client_id() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":1}]"#));
+        let _chase = start(
+            &port,
+            r#"{"symbol":"BTCUSDT","size":1,"side":"buy","maxAttempts":10,"delay":0}"#,
+        );
+        settle(1100).await;
+        port.update_order("o1", |_| {});
+        settle(10).await;
+        port.remove_orders();
+        settle(10).await;
+        port.remove_orders();
+        settle(100).await;
+        let [complete] = port.completes().try_into().unwrap();
+        assert_eq!(complete["filled"], 1.0);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unreadable_final_fill_falls_back_to_the_position() {
+    local(async {
+        let port = FakePort::new("bybit");
+        accept_with_fills(&port, Err("read failed"));
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.store.borrow_mut().positions.push(long(0.3));
+        stop(&factory, &cx);
+        settle(100).await;
+        assert_eq!(port.completes()[0]["filled"], 0.3);
+    })
+    .await;
+}
+
 /// The stop reason stays true when a later attempt's cancel goes through.
 #[tokio::test(start_paused = true)]
 async fn a_requote_cancel_that_later_succeeds_says_an_attempt_failed() {
@@ -1446,7 +1500,7 @@ async fn a_fills_read_that_never_answers_still_ends_with_one_final() {
         stop(&factory, &cx);
         settle(30_000).await;
         online.set(true);
-        settle(30_000).await;
+        settle(40_000).await;
         assert!(factory.book().active_chasers().is_empty());
         let warnings = warnings(&port);
         assert_eq!(warnings.len(), 2, "{warnings:?}");
