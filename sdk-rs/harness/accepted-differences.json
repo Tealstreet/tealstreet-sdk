@@ -1,5 +1,44 @@
 {
   "schema": 1,
   "description": "Named TS/Rust output differences accepted because Rust is intentionally better or TS cannot express the value. Each entry names the exact venue, tape SHA and diagnostic paths, its category, rationale and evidence. An accepted key that is no longer reproduced fails verification. Accepted differences are not known failures: they never cover performance, coverage or harness integrity diagnostics.",
-  "differences": []
+  "differences": [
+    {
+      "venue": "kraken",
+      "tape": "sdk-rs/harness/tapes/kraken-private.jsonl",
+      "tapeSha256": "2bf4d2df43d6b7bdf10b45945bc01674367405b080fce9f0320eab288660e4ca",
+      "diagnostics": [
+        {
+          "failures": [
+            "account orders[0].amount: ts=1 rust=1.2",
+            "account orders[0].remaining: ts=0.8 rust=1",
+            "checkpoint 1 account.orders[0].amount: ts=2 rust=2.5",
+            "checkpoint 1 account.orders[0].remaining: ts=1.5 rust=2",
+            "checkpoint 16 account.orders[0].amount: ts=1 rust=1.2",
+            "checkpoint 16 account.orders[0].remaining: ts=0.8 rust=1",
+            "checkpoint 2 account.orders[0].amount: ts=2 rust=2.5",
+            "checkpoint 2 account.orders[0].remaining: ts=1.5 rust=2",
+            "checkpoint 3 account.orders[0].amount: ts=2 rust=2.5",
+            "checkpoint 3 account.orders[0].remaining: ts=1.5 rust=2",
+            "checkpoint 4 account.orders[0].amount: ts=2 rust=2.5",
+            "checkpoint 4 account.orders[0].remaining: ts=1.5 rust=2",
+            "checkpoint 5 account.orders[0].amount: ts=2 rust=2.5",
+            "checkpoint 5 account.orders[0].remaining: ts=1.5 rust=2"
+          ],
+          "category": "rust-better",
+          "rationale": "K2: Kraken open_orders qty is the unfilled size, so the total is qty plus filled. TS shows qty as the total and subtracts filled again; Rust shows the true total and remainder.",
+          "evidence": "sdk-rs/harness/tapes/kraken-private.jsonl open_orders row with qty 2 and filled 0.5; venues/kraken/tests pin the rule (#2726)."
+        },
+        {
+          "failures": [
+            "checkpoint 5 account.orders[2].stopLossTrigger: ts=null rust=\"mark_price\"",
+            "checkpoint 5 account.orders[3].takeProfitTrigger: ts=null rust=\"last_price\"",
+            "command results[3].ok[0]: ts=\"204\" rust=\"202\""
+          ],
+          "category": "rust-better",
+          "rationale": "K7: Rust moves a stop with the native editorder and keeps its id; TS cancels and replaces it under a new id, leaving a moment with no stop.",
+          "evidence": "sdk-rs/harness/private-tape-kraken.mjs amendOrder 202, tagged impl rust and ts (#2742)."
+        }
+      ]
+    }
+  ]
 }
