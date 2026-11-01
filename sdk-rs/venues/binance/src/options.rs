@@ -503,12 +503,8 @@ impl BinanceFutures {
         );
         self.option_state.busy.remove(&request.kind);
         // A refused key ends the start; polling it would never load the account.
-        if let Some(message) = refused
-            && !cx.store.loaded().balance
-        {
-            let _ = cx.finish_http_context(&request.context);
-            cx.startup_failed(VenueError::new(message).kind(ErrorKind::AuthInvalid));
-            return;
+        if let Some(message) = refused {
+            cx.startup_read_refused(&VenueError::new(message).kind(ErrorKind::AuthInvalid));
         }
         let _ = cx.finish_http_context(&request.context);
         match result {
