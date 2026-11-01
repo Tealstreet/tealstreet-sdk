@@ -1485,6 +1485,29 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
 }
 
 #[test]
+fn beta_a_rejected_row_on_another_market_releases_the_fence() {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let unknown = http(&mut e, "sendorder");
+    reply(&mut e, &unknown, 503, "<html>");
+    let fresh = http(&mut e, "openorders");
+    reply(
+        &mut e,
+        &fresh,
+        200,
+        r#"{"result":"success","openOrders":[{"order_id":"77","symbol":"PF_SOLUSD"}]}"#,
+    );
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 84,
+            orders: vec![limit()],
+        },
+    );
+    http(&mut e, "sendorder");
+}
+
+#[test]
 fn beta_slow_reconcile_joins_reasks_and_only_a_clean_retry_releases() {
     slow_reconcile(false);
 }

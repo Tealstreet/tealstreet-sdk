@@ -2352,6 +2352,34 @@ fn malformed_only_updates_repair_and_balance_only_updates_stay_quiet() {
 }
 
 #[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let mut h = Harness::ready_with_orders(r#"{"code":0,"data":[]}"#);
+    let place = |command| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol":"BTCUSDT", "type":"limit", "side":"buy",
+                "amount":0.01, "price":60000
+            }))
+            .unwrap(),
+        ],
+    };
+    h.now += 1.;
+    h.event(Event::Command(place(700)));
+    let first = h.take("/openApi/swap/v2/trade/order");
+    h.reply(first.id, 503, "Service Unavailable");
+    let fresh = h.take(ORDERS);
+    h.reply(
+        fresh.id,
+        200,
+        r#"{"code":0,"data":[{"orderId":"77","symbol":"ETH-USDT"}]}"#,
+    );
+    h.now += 1.;
+    h.event(Event::Command(place(701)));
+    h.take("/openApi/swap/v2/trade/order");
+}
+
+#[test]
 fn metadata_commit_fences_older_positions_and_signature_retries_keep_the_fence() {
     let mut h = Harness::ready();
     let poll = h.timers.iter().find(|(_, at)| *at == 3000.0).unwrap().0;

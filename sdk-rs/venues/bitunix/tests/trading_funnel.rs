@@ -735,6 +735,47 @@ fn an_unknown_placement_fences_retries_until_a_fresh_reconcile() {
     );
 }
 
+#[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let (mut e, _) = startup();
+    let place = |command: u32| {
+        Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_str(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","price":90500.04,"amount":0.0021}"#,
+            )
+            .unwrap(),
+        ],
+    }
+    };
+    e.handle(1200.0, Event::Command(place(201)));
+    let write = post(&http(&prepared(&mut e, 1200.0)), "place_order").expect("the placement");
+    e.handle(
+        1300.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "lost placement ACK",
+        },
+    );
+    let sealed = prepared(&mut e, 1300.0);
+    let fresh: Vec<HttpRequest> = http(&sealed)
+        .into_iter()
+        .filter(|r| r.url.ends_with("get_pending_orders"))
+        .collect();
+    assert_eq!(fresh.len(), 2);
+    for request in &fresh {
+        let body = if request.url.contains("/tpsl/") {
+            TPSL
+        } else {
+            r#"{"code":0,"data":{"orderList":[{"orderId":"77","symbol":"ETHUSDT"}]}}"#
+        };
+        answer(&mut e, 2400.0, request, body);
+    }
+    e.handle(2500.0, Event::Command(place(205)));
+    assert_eq!(writes_of(&prepared(&mut e, 2500.0), "place_order"), 1);
+}
+
 /// A second Unknown seal while the first's census is in flight joins it rather
 /// than superseding it, yet stays owed: the dirty follow-up, dispatched after
 /// the second mark, releases both symbols.

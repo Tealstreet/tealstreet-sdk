@@ -1864,6 +1864,45 @@ fn engine_re_asks_join_the_fresh_read_in_flight_and_its_clean_answer_releases() 
 /// Cancel-all on a symbol with an Unknown placement is refused NotSent until the
 /// fresh order read releases the fence (default `fence_uncertain_cancel_all`).
 #[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let (mut e, _socket) = ready_with_socket();
+    let place = |e: &mut TestEngine, now, command, client: &str| {
+        e.handle(
+            now,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![order(serde_json::json!({ "clientOrderId": client }))],
+            }),
+        );
+        actions(e)
+    };
+    let write = http(place(&mut e, NOW + 10.0, 42, "first"))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/order"))
+        .expect("the placement write");
+    e.handle(
+        NOW + 20.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "connection reset after write",
+        },
+    );
+    let fresh = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the reconcile read");
+    response(
+        &mut e,
+        &fresh,
+        NOW + 30.0,
+        r#"{"code":0,"data":[{"id":"77","symbol":"SOL-USDT"}]}"#,
+    );
+    actions(&mut e);
+    let retry = http(place(&mut e, NOW + 40.0, 43, "retry"));
+    assert!(retry.iter().any(|r| r.url.ends_with("/v3/order")));
+}
+
+#[test]
 fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() {
     const EMPTY: &str = r#"{"code":0,"data":[]}"#;
     let cancel_all = |e: &mut TestEngine, now: f64, command: safe_cex_engine::CommandId| {
