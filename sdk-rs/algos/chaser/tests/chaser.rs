@@ -7,7 +7,7 @@ use std::time::Duration;
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoFactory, AlgoStore, Change, CommandFuture, Scope};
 use safe_cex_chaser::{ChaserFactory, MAX_CHASES_PER_ACCOUNT, UNCONFIRMED_ORDER_STOP_REASON};
 use safe_cex_engine::engine::{Command, CommandId, Fill};
-use safe_cex_engine::error::{Outcome, VenueError};
+use safe_cex_engine::error::{ErrorKind, Outcome, VenueError};
 use safe_cex_engine::model::{
     Limits, Market, MinMax, Order, OrderSide, OrderStatus, OrderType, Position, PositionSide,
     Precision, Ticker,
@@ -442,6 +442,274 @@ async fn a_refused_cancel_on_stop_says_the_order_may_still_be_open() {
             "{:?}",
             port.errors()
         );
+    })
+    .await;
+}
+
+fn cancels_seen(port: &FakePort) -> usize {
+    port.commands
+        .borrow()
+        .iter()
+        .filter(|command| {
+            matches!(
+                command,
+                Command::CancelOrders { .. } | Command::CancelOrdersWithSymbols { .. }
+            )
+        })
+        .count()
+}
+
+fn warnings(port: &FakePort) -> Vec<String> {
+    port.emitted
+        .borrow()
+        .iter()
+        .filter(|(op, _)| op == "warning")
+        .map(|(_, data)| data.clone())
+        .collect()
+}
+
+fn completions(port: &FakePort) -> usize {
+    port.emitted
+        .borrow()
+        .iter()
+        .filter(|(op, _)| op == "chaser:complete")
+        .count()
+}
+
+/// Cancels fail with `error` until `open` says the link is back.
+fn cancels_fail_until(port: &FakePort, error: VenueError) -> Rc<Cell<bool>> {
+    let open = Rc::new(Cell::new(false));
+    let flag = open.clone();
+    let mut inner = std::mem::replace(
+        &mut *port.responder.borrow_mut(),
+        Box::new(|_| Ok("[]".into())),
+    );
+    *port.responder.borrow_mut() = Box::new(move |command| match command {
+        Command::CancelOrders { .. } | Command::CancelOrdersWithSymbols { .. } if !flag.get() => {
+            Err(error.clone())
+        }
+        other => inner(other),
+    });
+    open
+}
+
+fn stop(factory: &ChaserFactory, cx: &AlgoCx) -> String {
+    let id = factory.book().active_chasers()[0].id.clone();
+    factory
+        .handle("chaser:terminate", &serde_json::to_string(&id).unwrap(), cx)
+        .unwrap();
+    id
+}
+
+fn transport_down() -> VenueError {
+    VenueError::new("HTTP transport request failed").kind(ErrorKind::Network)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_keeps_cancelling_through_an_outage_past_60_s_and_the_row_stays_until_then() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = cancels_fail_until(&port, transport_down());
+        stop(&factory, &cx);
+        settle(90_000).await;
+        let rows = factory.book().active_chasers();
+        assert_eq!(rows.len(), 1, "the row stays while its order may be live");
+        assert!(rows[0].is_stopped);
+        assert!(
+            rows[0].stop_reason.contains("retrying"),
+            "{}",
+            rows[0].stop_reason
+        );
+        assert!(cancels_seen(&port) > 5);
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+        assert_eq!(completions(&port), 0);
+        assert_eq!(
+            warnings(&port).len(),
+            1,
+            "one retrying state: {:?}",
+            warnings(&port)
+        );
+        online.set(true);
+        settle(10_000).await;
+        assert!(factory.book().active_chasers().is_empty());
+        assert_eq!(completions(&port), 1);
+        assert!(warnings(&port).last().unwrap().contains("now cancelled"));
+        let done = cancels_seen(&port);
+        settle(60_000).await;
+        assert_eq!(cancels_seen(&port), done);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unavailable_signing_provider_is_retried_too() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = cancels_fail_until(
+            &port,
+            VenueError::new("Signing provider is unavailable")
+                .kind(ErrorKind::Internal)
+                .outcome(Outcome::NotSent),
+        );
+        stop(&factory, &cx);
+        settle(30_000).await;
+        assert_eq!(factory.book().active_chasers().len(), 1);
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+        online.set(true);
+        settle(10_000).await;
+        assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn traffic_returning_retries_within_about_a_second() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = cancels_fail_until(&port, transport_down());
+        stop(&factory, &cx);
+        settle(60_000).await;
+        online.set(true);
+        port.set_ticker(100.0, 100.5);
+        settle(1_100).await;
+        assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_order_that_fills_during_the_retries_ends_them_and_says_filled() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        cancels_fail_until(&port, transport_down());
+        stop(&factory, &cx);
+        settle(5_000).await;
+        port.update_order("o1", |order| {
+            order.filled = 1.0;
+            order.status = OrderStatus::Closed;
+        });
+        settle(11_000).await;
+        assert!(factory.book().active_chasers().is_empty());
+        assert!(
+            warnings(&port).last().unwrap().contains("filled"),
+            "{:?}",
+            warnings(&port)
+        );
+        assert_eq!(completions(&port), 1);
+        assert!(port.errors().is_empty(), "{:?}", port.errors());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_retries_end_at_their_bound_with_a_final_message() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        cancels_fail_until(&port, transport_down());
+        stop(&factory, &cx);
+        settle(590_000).await;
+        assert!(port.errors().is_empty());
+        settle(30_000).await;
+        assert!(factory.book().active_chasers().is_empty());
+        assert!(
+            port.errors()
+                .iter()
+                .any(|e| e.contains("may still be open"))
+        );
+        assert_eq!(completions(&port), 1);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_definite_refusal_after_retries_stays_final() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = cancels_fail_until(&port, transport_down());
+        stop(&factory, &cx);
+        settle(5_000).await;
+        online.set(true);
+        port.refuse_cancels();
+        settle(11_000).await;
+        let seen = cancels_seen(&port);
+        settle(60_000).await;
+        assert_eq!(cancels_seen(&port), seen);
+        assert!(factory.book().active_chasers().is_empty());
+        assert!(
+            port.errors()
+                .iter()
+                .any(|e| e.contains("may still be open"))
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_requote_cancel_lost_to_an_outage_stops_the_chase_and_keeps_cancelling() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let online = cancels_fail_until(&port, transport_down());
+        port.set_ticker(101.0, 101.5);
+        settle(30_000).await;
+        let rows = factory.book().active_chasers();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].is_stopped);
+        let placements = port
+            .commands
+            .borrow()
+            .iter()
+            .filter(|command| matches!(command, Command::PlaceOrders { .. }))
+            .count();
+        assert_eq!(placements, 1, "nothing more is placed");
+        online.set(true);
+        settle(10_000).await;
+        assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_during_the_retries_ends_them_with_one_try_and_a_final_message() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        cancels_fail_until(&port, transport_down());
+        stop(&factory, &cx);
+        settle(5_000).await;
+        factory.book().shutdown("account disposed").await;
+        assert!(factory.book().active_chasers().is_empty());
+        assert!(
+            port.errors()
+                .iter()
+                .any(|e| e.contains("may still be open"))
+        );
+        assert_eq!(completions(&port), 1);
+        let seen = cancels_seen(&port);
+        settle(60_000).await;
+        assert!(cancels_seen(&port) <= seen + 1);
     })
     .await;
 }
