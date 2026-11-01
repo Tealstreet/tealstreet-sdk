@@ -203,6 +203,15 @@ describe('a running chase whose engine went away', () => {
     expect(told).toEqual([]);
   });
 
+  it('leaves a chase it saw stopped to whoever stopped it, as a page disposing its account does', () => {
+    const { told, watch, update } = setup();
+    update({ activeChasers: [running('c1')] });
+    watch.observe('chaser:terminate', 'c1');
+    update({ activeChasers: [] });
+    vi.advanceTimersByTime(120_000);
+    expect(told).toEqual([]);
+  });
+
   it('says nothing when the row comes straight back', () => {
     const { told, update } = setup();
     update({ activeChasers: [running('c1')] });
