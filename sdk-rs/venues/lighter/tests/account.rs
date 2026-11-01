@@ -1504,3 +1504,120 @@ fn a_rejected_order_reports_its_reason_once_from_the_stream() {
     );
     assert!(notices(&mut e).is_empty());
 }
+
+const ADDRESS: &str = "0xb01cd2000000000000000000000000000000dba0";
+
+/// Starts to the first account lookup, answering the public reads.
+fn to_lookup(
+    options: support::Options,
+) -> (
+    safe_cex_engine::Engine<safe_cex_venue_lighter::Lighter>,
+    Vec<Action>,
+) {
+    let mut e = engine(options);
+    e.start(NOW);
+    for _ in 0..12 {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let lookup = actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/account?")));
+        if lookup {
+            return (e, actions);
+        }
+        for action in actions {
+            if let Action::Http(r) = action {
+                let body = if r.url.contains("orderBook") {
+                    META
+                } else {
+                    r#"{"code":200,"order_book_stats":[]}"#
+                };
+                reply(&mut e, &r, 200, body);
+            }
+        }
+    }
+    panic!("no account lookup");
+}
+
+fn account_requests(actions: &[Action]) -> Vec<safe_cex_engine::HttpRequest> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.url.contains("/api/v1/account") || r.url.contains("L1") => {
+                Some(r.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_failed_address_lookup_never_adopts_the_api_key_index_and_retries() {
+    let mut options = options();
+    options.application_id = Some(ADDRESS.into());
+    options.api_key_index = Some("4".into());
+    let (mut e, mut actions) = to_lookup(options);
+    let mut seen = vec![];
+    let mut timer = None;
+    for _ in 0..6 {
+        for r in account_requests(&actions) {
+            seen.push(r.url.clone());
+            reply(&mut e, &r, 503, "unavailable");
+        }
+        actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        timer = timer.or(actions.iter().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (*at_ms - NOW - 5_000.0).abs() < 1_000.0 => {
+                Some(*timer)
+            }
+            _ => None,
+        }));
+    }
+    assert!(seen.iter().all(|u| !u.contains("by=index")), "{seen:?}");
+    assert!(e.store().balance().total == 0.0);
+    e.handle(
+        NOW + 5_000.0,
+        Event::TimerFired {
+            timer: timer.expect("a retry"),
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 5_000.0);
+    assert!(!account_requests(&actions).is_empty());
+}
+
+#[test]
+fn a_real_account_row_with_both_index_names_resolves() {
+    let (mut e, actions) = to_lookup(options());
+    let r = account_requests(&actions).remove(0);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":200,"total":1,"accounts":[{"code":0,"account_type":0,"index":718895,"account_index":718895,"available_balance":"1","collateral":"1","positions":[]}]}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("accountActiveOrders"))),
+        "the lookup resolved and reads began"
+    );
+}
+
+#[test]
+fn a_real_rest_order_row_shows() {
+    let (mut e, s) = ready();
+    let row = r#"{"order_index":2533274198957701,"client_order_index":179354719285865,"order_id":"2533274198957701","client_order_id":"179354719285865","market_index":1,"market_symbol":"ETH","market_kind":"perps","initial_base_amount":"10","price":"1.125370","remaining_base_amount":"10","is_ask":false,"filled_base_amount":"0","side":"","type":"limit","time_in_force":"good-till-time","reduce_only":false,"trigger_price":"0.000000","status":"open","trigger_status":"na","timestamp":1793547192,"created_at":1793547192,"updated_at":1793547192,"transaction_time":1793547193162492,"order_version":0}"#;
+    e.handle(NOW + 1.0, Event::WsOpened { socket: s });
+    for r in requests(&mut e) {
+        if r.url.contains("/account?") {
+            reply_at(&mut e, NOW + 3.0, &r, 200, ACCOUNT);
+        } else {
+            let body = format!(r#"{{"code":200,"orders":[{row}]}}"#);
+            reply_at(&mut e, NOW + 3.0, &r, 200, &body);
+        }
+    }
+    let order = e
+        .store()
+        .order("2533274198957701")
+        .expect("the order shows");
+    assert_eq!(order.amount, 10.0);
+}
