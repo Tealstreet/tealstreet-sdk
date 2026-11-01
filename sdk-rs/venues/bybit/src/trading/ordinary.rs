@@ -417,7 +417,9 @@ impl BybitLinear {
                 Call::TradingStop => LegIntent::Setting,
                 Call::Amend if amend_virtual => LegIntent::Setting,
                 Call::PartialStop { .. } => LegIntent::Setting,
-                Call::CancelPartialStop { .. } => LegIntent::ProtectionCancel,
+                Call::CancelPartialStop { .. } | Call::ClearAttachedLeg { .. } => {
+                    LegIntent::ProtectionCancel
+                }
                 _ => LegIntent::Command,
             };
             legs.push_back(Leg {
@@ -1294,7 +1296,7 @@ impl BybitLinear {
         // amend's target (an attached TP/SL's parent).
         let own_target = match &planned.call {
             Call::CancelPartialStop { id, .. } => Some(id.clone()),
-            Call::Amend => fields(&planned.body).order_id,
+            Call::Amend | Call::ClearAttachedLeg { .. } => fields(&planned.body).order_id,
             _ => None,
         };
         // A whole answer with item rows or native IDs contradicts itself; an
@@ -1649,6 +1651,24 @@ impl BybitLinear {
                     cx.store.remove_orders(&terminal);
                 }
                 decision
+            }
+            Call::ClearAttachedLeg { leg } => {
+                let Some(target) = fields(&planned.body).order_id else {
+                    return Self::unproven(cx, context, "Bybit amend has no target", &[]);
+                };
+                if ack::targeted(result, &target).is_err() {
+                    return Self::unproven(
+                        cx,
+                        context,
+                        "Bybit amend acknowledgement does not name its order",
+                        &ack::evidence_ids(result),
+                    );
+                }
+                if !Self::accepted(cx, context, Vec::new()) {
+                    return Decision::Lost;
+                }
+                cx.store.remove_orders(&[leg.as_str()]);
+                Decision::Next(Vec::new())
             }
             Call::Amend => {
                 let Some(target) = fields(&planned.body).order_id else {

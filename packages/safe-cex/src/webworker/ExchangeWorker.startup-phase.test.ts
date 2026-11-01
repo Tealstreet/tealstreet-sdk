@@ -77,6 +77,20 @@ describe('ExchangeWorker startup phase tagging', () => {
     expect(phaseOf(messages)).toBe('startup');
   });
 
+  it('tags a start() that disposed its own exchange, as a refused key does', async () => {
+    loaderMock.mockImplementation(async () => FakeExchange);
+    const { messages, worker } = createWorker();
+    startMock.mockImplementation(function (this: FakeExchange) {
+      this.isDisposed = true;
+      return Promise.reject(new Error('Invalid API-key, IP, or permissions for action'));
+    });
+
+    await expect(worker.start()).resolves.toBe(false);
+
+    expect(phaseOf(messages)).toBe('startup');
+    expect(errorPayloads(messages)[0].data[0]).toContain('Invalid API-key');
+  });
+
   // The venue's own message is the only thing the web-side family classifier
   // can see; "Error starting exchange" lives in the log message arg. Both must
   // survive together or the phase cannot be cross-referenced with the cause.

@@ -176,6 +176,8 @@ pub struct Chase {
     pub verify_fills: Cell<bool>,
     /// The symbol's position size when the watcher last looked.
     pub position_seen: Cell<Option<f64>>,
+    /// Ticker changes seen, to tell a chase that has stopped getting market data.
+    pub tickers_seen: Cell<u64>,
     /// A placement is on the wire: its order may land, so nothing finishes the chase yet.
     placing: Cell<bool>,
     placing_ended: Notify,
@@ -220,6 +222,7 @@ impl Chase {
             needs_reconcile: Cell::new(false),
             verify_fills: Cell::new(false),
             position_seen: Cell::new(None),
+            tickers_seen: Cell::new(0),
             placing: Cell::new(false),
             placing_ended: Notify::new(),
             placements: Cell::new(0),
@@ -428,6 +431,17 @@ impl Chase {
             .borrow_mut()
             .current
             .retain(|current| current != id);
+    }
+
+    /// The venue now shows this order under its own id.
+    pub fn adopt_venue_id(&self, placed: &str, venue_id: &str) {
+        let mut state = self.state.borrow_mut();
+        if let Some(id) = state.current.iter_mut().find(|id| *id == placed) {
+            *id = venue_id.to_owned();
+        }
+        if !state.ever.iter().any(|id| id == venue_id) {
+            state.ever.push(venue_id.to_owned());
+        }
     }
 
     pub fn take_current(&self) -> Vec<String> {

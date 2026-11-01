@@ -7,7 +7,7 @@ import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePa
 
 import throttle from 'lodash/throttle';
 
-import { classifiedError, exchangeErrorTags } from '../commandOutcome';
+import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
@@ -416,8 +416,14 @@ export class ExchangeWorker {
       return true;
     } catch (e) {
       if (
+        // Only the worker's own stop is quiet. An exchange that disposed itself because its
+        // start failed (a refused key) must report it, or nothing downstream can react.
         startupToken !== this._startupToken ||
-        (this._exchange?.isDisposed && !(this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead))
+        this._disposed ||
+        // The exchange told the user itself, then stopped (a lost shared feed).
+        (this._exchange?.isDisposed &&
+          isErrorReported(e) &&
+          !(this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead))
       ) {
         console.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
         return false;
