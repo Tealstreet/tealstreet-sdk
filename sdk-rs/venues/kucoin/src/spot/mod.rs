@@ -1098,6 +1098,11 @@ impl Venue for KucoinSpot {
                     let error = crate::wire::write_failure(response.status, response.body, e);
                     self.write_failed(cx, job, error);
                 } else {
+                    cx.startup_read_refused(&crate::wire::write_failure(
+                        response.status,
+                        response.body,
+                        e.clone(),
+                    ));
                     self.on_request_failed(cx, pending, &e);
                 }
                 return;

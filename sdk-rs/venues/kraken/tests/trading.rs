@@ -1499,7 +1499,11 @@ fn live_refusal_codes_with_detail_are_refusals_and_leave_no_fence() {
         let r = http(&mut e, "sendorder");
         reply(&mut e, &r, 200, body);
         let [error] = failures(&mut e).try_into().unwrap();
-        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected), "{body}");
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{body}"
+        );
         place(&mut e, vec![limit()]);
         http(&mut e, "sendorder");
     }
