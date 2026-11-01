@@ -78,6 +78,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // plus 10 KiB, rounded up to a KiB.
 // Tightest families at CI (abc18ecd30a) + 10 KiB, rounded up to KiB, before the exec store fix.
 // #2650 Bitget flat leverage read: CI 2,140,041 B; ddi's rule, CI + 10 KiB, rounded up to a KiB.
+// #2700 Phemex replacement condition wait: CI 1,931,732 B; ddi's rule, CI + 10 KiB, rounded up to a KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_893_376,
   asterdex: 2_025_472,
@@ -106,7 +107,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   okx: 1_822_720,
   orderly: 1_656_832,
   paradex: 2_129_920,
-  phemex: 1_927_168,
+  phemex: 1_942_528,
   polymarket: 1_533_952,
   txflow: 1_764_352,
   weex: 1_852_416,
