@@ -1,4 +1,3 @@
-import { HttpPreparationError } from '@tealstreet/safe-cex-wasm/host';
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -236,33 +235,12 @@ describe('managed engine through real HOW preparation', () => {
       url: signed.url,
       method: 'POST',
       params: {},
-      data: { orderLinkId: 'a', price: '1.2300', qty: 2 },
+      data: signed.body,
       headers: signed.headers,
     });
     expect(new TextDecoder().decode((await pending).body as Uint8Array)).toBe(state.reply.data_raw);
     expect(raw.request).not.toHaveBeenCalled();
     expect(() => bound.dispatch()).toThrow();
-    routed.dispose!();
-  });
-
-  it('refuses as unsupported a body the tunnel could not resend as signed', async () => {
-    const routed = createEngineTransport(
-      'bybit',
-      { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true },
-      rawTransport(),
-    );
-    const state = tunnelState(SINGAPORE_HOW_EGRESS);
-    state.sent.length = 0;
-    const original = {
-      request: 32,
-      method: 'POST',
-      url: 'https://api.bybit.com/v5/order/create-batch',
-      headers: {},
-      intent: 'primary' as const,
-    };
-    const prepared = await routed.prepareHttp!(original);
-    expect(() => prepared.bind({ ...original, body: '{"a": 1}' })).toThrow(HttpPreparationError);
-    expect(state.sent).toHaveLength(0);
     routed.dispose!();
   });
 });

@@ -341,3 +341,20 @@ pub fn advance_packet_timers<V: safe_cex_engine::Venue>(
     }
     panic!("native packet timers did not settle");
 }
+
+/// The fresh read an amend makes first, answered from the stored row.
+pub fn answer_order_status(e: &mut Engine<Hyperliquid>, r: &HttpRequest) {
+    let body: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+    let id = body["oid"].to_string();
+    let order = e.store().order(&id).expect("amended order").clone();
+    let side = if order.side == safe_cex_engine::model::OrderSide::Buy {
+        "B"
+    } else {
+        "A"
+    };
+    let reply_body = format!(
+        r#"{{"status":"order","order":{{"order":{{"coin":"BTC","oid":{id},"side":"{side}","limitPx":"{}","origSz":"{}","sz":"{}"}},"status":"open"}}}}"#,
+        order.price, order.amount, order.remaining
+    );
+    reply(e, r, 200, &reply_body);
+}

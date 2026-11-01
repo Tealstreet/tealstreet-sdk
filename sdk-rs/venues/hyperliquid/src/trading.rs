@@ -27,6 +27,9 @@ pub struct Trading {
     retry_step: usize,
     expected: HashSet<String>,
     uncertain_settings: HashSet<String>,
+    amend_wait: Option<TimerId>,
+    amend_issuing: bool,
+    amend_retry: Option<(TimerId, String)>,
 }
 struct Job {
     custody: Option<custody::Custody>,
@@ -36,6 +39,10 @@ struct Job {
     replacement: Option<String>,
     amend_source: Option<String>,
     amend_filled: bool,
+    /// The total the caller asked for, which the fresh read turns into what is left.
+    amend_total: Option<f64>,
+    /// The read that sizes this amend has been issued.
+    amend_read: bool,
     builder_checked: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
@@ -61,6 +68,9 @@ pub struct Request {
 }
 /// How long an unapproved builder fee stays believed before a placement re-reads it.
 const BUILDER_RECHECK_MS: f64 = 60_000.0;
+const AMEND_READ_MS: f64 = 5_000.0;
+/// Hyperliquid refuses an order worth less than this.
+const MIN_ORDER_VALUE: f64 = 10.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OrderReply {
     Rows,
@@ -241,6 +251,7 @@ impl Hyperliquid {
         }
         let mut replacement = None;
         let mut amend_source = None;
+        let mut amend_size = None;
         let (command, steps) = match command {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = self.preflight(cx, &orders) {
@@ -323,6 +334,7 @@ impl Hyperliquid {
                     );
                     return;
                 }
+                amend_size = amount;
                 let mut opts = PlaceOrderOpts {
                     symbol: old.symbol.clone(),
                     kind: old.kind,
@@ -438,6 +450,8 @@ impl Hyperliquid {
                 ids: Vec::new(),
                 replacement,
                 amend_source,
+                amend_total: amend_size,
+                amend_read: false,
                 amend_filled: false,
                 builder_checked: false,
                 effective: false,
@@ -630,7 +644,10 @@ impl Hyperliquid {
         Ok((wires, grouping))
     }
     pub(crate) fn pump_trades(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.trading.inflight || self.trading.builder_wait.is_some() {
+        if self.trading.inflight
+            || self.trading.builder_wait.is_some()
+            || self.trading.amend_wait.is_some()
+        {
             return;
         }
         if self.trading.active.is_none() {
@@ -661,6 +678,23 @@ impl Hyperliquid {
                 cx,
                 Err(not_sent("Hyperliquid amendment source is no longer open")),
             );
+            return;
+        }
+        // Partial fills send no orderUpdates, so the stored row can be far behind:
+        // an amend sizes itself from a fresh read, before anything is canceled.
+        if matches!(job.steps.front(), Some(Step::Cancel(_)))
+            && !job.amend_read
+            && let Some(source) = job.amend_source.clone()
+        {
+            if let Err(error) = self.park_trade_builder(cx) {
+                self.finish_trade(cx, Err(error));
+                return;
+            }
+            self.trading.active.as_mut().unwrap().amend_read = true;
+            self.trading.amend_wait = Some(cx.set_timer(AMEND_READ_MS));
+            self.trading.amend_issuing = true;
+            self.read_amend_source(cx, &source);
+            self.trading.amend_issuing = false;
             return;
         }
         let placing = matches!(job.steps.front(), Some(Step::Place(_)));
@@ -1298,7 +1332,81 @@ impl Hyperliquid {
         }
         self.pump_trades(cx);
     }
+    /// The fresh read an amend waits on, or its failure: nothing has been canceled yet.
+    pub(crate) fn amend_source_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        read: Result<(&str, f64, f64), String>,
+    ) {
+        let Some(job) = self.trading.active.as_mut() else {
+            return;
+        };
+        if job.amend_source.as_deref() != Some(id) || self.trading.amend_wait.is_none() {
+            return;
+        }
+        // A job popped inside another's callback cannot open a read until it returns.
+        if read.is_err() && std::mem::take(&mut self.trading.amend_issuing) {
+            self.trading.amend_retry = Some((cx.set_timer(1.0), id.to_owned()));
+            return;
+        }
+        if let Some(timer) = self.trading.amend_wait.take() {
+            cx.clear_timer(timer);
+        }
+        let sized = read.and_then(|(status, total, left)| {
+            if !matches!(status, "open" | "triggered") {
+                return Err(format!("Hyperliquid order is already {status}"));
+            }
+            let filled = (total - left).max(0.0);
+            let Some(Step::Place(opts)) = job.steps.get_mut(1) else {
+                return Err("Hyperliquid amendment has no replacement".into());
+            };
+            // A full-position stop has no size to carry.
+            if total > 0.0 {
+                opts.amount = match job.amend_total {
+                    Some(amended) => num::left_of_total(amended, filled)?,
+                    None => left,
+                };
+                let value = opts.amount * opts.price.unwrap_or(0.0);
+                if value > 0.0 && value < MIN_ORDER_VALUE {
+                    return Err(format!(
+                        "Hyperliquid would refuse the replacement: {} left is worth under ${MIN_ORDER_VALUE}; the order was not changed",
+                        opts.amount
+                    ));
+                }
+            }
+            Ok((total, filled, left))
+        });
+        match sized {
+            Ok((total, filled, left)) => {
+                cx.store.update_order(id, |order| {
+                    order.amount = total;
+                    order.filled = filled;
+                    order.remaining = left;
+                });
+                self.release_trade_builder(cx);
+            }
+            Err(error) => {
+                let error = not_sent(format!("Hyperliquid amendment not sent: {error}"));
+                self.finish_trade(cx, Err(error));
+            }
+        }
+    }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self
+            .trading
+            .amend_retry
+            .as_ref()
+            .is_some_and(|(t, _)| *t == timer)
+            && let Some((_, id)) = self.trading.amend_retry.take()
+        {
+            self.read_amend_source(cx, &id);
+        }
+        if self.trading.amend_wait == Some(timer) {
+            self.trading.amend_wait = None;
+            let error = not_sent("Hyperliquid amendment not sent: the order read did not answer");
+            self.finish_trade(cx, Err(error));
+        }
         if self.trading.builder_wait == Some(timer) {
             self.trading.builder_wait = None;
             self.account.builder_approved = Some(false);

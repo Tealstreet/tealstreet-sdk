@@ -238,7 +238,7 @@ fn accepted_credentials_do_not_change_the_existing_bad_balance_snapshot_policy()
 
 #[test]
 fn a_refused_key_ends_the_start_with_the_reason() {
-    let (mut e, a) = started(true);
+    let (mut e, a) = started(false);
     let r = http(&a, "/user/balance");
     let answered = reply(
         &mut e,
@@ -255,4 +255,21 @@ fn a_refused_key_ends_the_start_with_the_reason() {
         .collect();
     assert_eq!(failed.len(), 1, "{failed:?}");
     assert!(failed[0].contains("Incorrect apiKey"));
+}
+
+#[test]
+fn a_refused_read_key_does_not_end_the_start() {
+    let (mut e, a) = started(true);
+    let r = http(&a, "/user/balance");
+    let answered = reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":100413,"msg":"Incorrect apiKey"}"#,
+    );
+    assert!(
+        !answered
+            .iter()
+            .any(|x| matches!(x, Action::Notice(Notice::StartupFailed { .. })))
+    );
 }

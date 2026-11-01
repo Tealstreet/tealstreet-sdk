@@ -17,6 +17,17 @@ use std::{
 };
 
 const FEEDS: [&str; 3] = ["fills", "open_orders", "open_positions"];
+/// Kraken alerts on any frame it dislikes; only these words refuse the private feeds.
+fn refuses_private_feed(msg: &Ws<'_>) -> bool {
+    match msg.event.as_ref() {
+        "error" | "subscribed_failed" | "unsubscribed_failed" => true,
+        "alert" | "info" => {
+            let message = msg.message.to_ascii_lowercase();
+            message.contains("authenticat") || message.contains("api key")
+        }
+        _ => false,
+    }
+}
 /// Recent execution deduplication and terminal fences survive reconnects without
 /// retaining every historical identity for the lifetime of the engine.
 #[derive(Default)]
@@ -696,12 +707,7 @@ impl Kraken {
         if msg.event == "pong" {
             return Control::Pong;
         }
-        if msg.event == "error"
-            || msg.event == "alert"
-            || msg.event == "subscribed_failed"
-            || msg.event == "unsubscribed_failed"
-            || (msg.event == "info" && msg.message.to_ascii_lowercase().contains("authentication"))
-        {
+        if refuses_private_feed(&msg) {
             return Control::Auth(AuthEvidence::Rejected(safe_cex_engine::VenueError::new(
                 "Kraken private subscription rejected",
             )));
@@ -824,14 +830,11 @@ impl Kraken {
             for feed in FEEDS {
                 cx.send(socket, serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string());
             }
+            // Kraken has no ping frame; this feed is its keepalive, every 10 s.
+            cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
             return true;
         }
-        if msg.event == "error"
-            || msg.event == "alert"
-            || msg.event == "subscribed_failed"
-            || msg.event == "unsubscribed_failed"
-            || (msg.event == "info" && msg.message.to_ascii_lowercase().contains("authentication"))
-        {
+        if refuses_private_feed(&msg) {
             self.account_disconnect(cx, "Kraken private subscription rejected");
             return true;
         }

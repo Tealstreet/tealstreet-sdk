@@ -17,7 +17,7 @@ pub(super) fn policy(private: bool, futures: bool) -> FeedPolicy {
             connect_timeout_ms: if private && futures { 15_000. } else { 45_000. },
             auth_timeout_ms: (private && futures).then_some(15_000.),
             idle_timeout_ms: if private && futures { 60_000. } else { 45_000. },
-            ping_interval_ms: Some(if private && futures { 10_000. } else { 15_000. }),
+            ping_interval_ms: (!private || !futures).then_some(15_000.),
             backoff_cap_ms: if private && futures { 30_000. } else { 16_000. },
             ..Config::default()
         },

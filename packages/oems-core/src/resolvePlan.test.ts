@@ -160,13 +160,7 @@ describe('reduce all my positions by 30%', () => {
   it('closes with a reduce-only market order sized in the venue own units', () => {
     for (const command of result.commands) {
       expect(command.method).toBe('placeOrder');
-      expect(Object.keys(command.args[0] as object).sort()).toEqual([
-        'amount',
-        'reduceOnly',
-        'side',
-        'symbol',
-        'type',
-      ]);
+      expect(Object.keys(command.args[0] as object).sort()).toEqual(['amount', 'reduceOnly', 'side', 'symbol', 'type']);
     }
   });
 
@@ -415,7 +409,14 @@ describe('place_order', () => {
   it('refuses a market order it cannot price against the fat-finger limit', () => {
     const base = context();
     const result = resolve(
-      plan({ kind: 'place_order', account: 'binance-main', symbol: 'BTCUSDT', side: 'buy', orderType: 'market', amount: 0.001 }),
+      plan({
+        kind: 'place_order',
+        account: 'binance-main',
+        symbol: 'BTCUSDT',
+        side: 'buy',
+        orderType: 'market',
+        amount: 0.001,
+      }),
       { markets: base.markets.map((m) => (m.symbol === 'BTCUSDT' ? { ...m, lastPrice: 0 } : m)) },
     );
     expect(result.commands).toHaveLength(0);
@@ -522,6 +523,15 @@ describe('amend_order', () => {
     expect(Object.keys((result.commands[0].args[1] as { update: object }).update)).toEqual(['price']);
   });
 
+  it('sends the engine a total, so the size asked for is what stays open after a part fill', () => {
+    const partFilled = { ...context().orders[0], amount: 10, filled: 4, remaining: 6, nativeRemaining: 6 };
+    const result = resolve(plan({ kind: 'amend_order', account: 'binance-main', orderId: 'o1', amount: 5 }), {
+      orders: [partFilled],
+    });
+    expect(result.commands[0].args).toEqual(['o1', { update: { amount: 9 } }, 'binance-main']);
+    expect(result.commands[0].preview).toMatch(/remaining amount to 5/);
+  });
+
   it('refuses an id the context does not hold', () => {
     const result = resolve(plan({ kind: 'amend_order', account: 'binance-main', orderId: 'nope', amount: 1 }));
     expect(result.rejections[0].reason).toMatch(/no open order nope/);
@@ -608,7 +618,9 @@ describe('user overrides', () => {
   });
 
   it('matches on side, so one leg of a hedge cannot take the other leg edit', () => {
-    const result = resolveWith(reduce30, [{ step: 0, symbol: 'ETHUSD', account: 'bybit-hedge', side: 'buy', amount: 5 }]);
+    const result = resolveWith(reduce30, [
+      { step: 0, symbol: 'ETHUSD', account: 'bybit-hedge', side: 'buy', amount: 5 },
+    ]);
     // The long leg closes with a SELL and is untouched; only the short leg's
     // closing BUY takes the edit.
     expect(result.commands[1].args[0]).toMatchObject({ side: 'sell', amount: 30 });
@@ -634,9 +646,7 @@ describe('user overrides', () => {
     const result = resolveWith(reduce30, [
       { step: 0, symbol: 'BTCUSDT', account: 'binance-main', side: 'sell', amount: 0.0000001 },
     ]);
-    expect(result.commands.some((command) => (command.args[0] as { symbol: string }).symbol === 'BTCUSDT')).toBe(
-      false,
-    );
+    expect(result.commands.some((command) => (command.args[0] as { symbol: string }).symbol === 'BTCUSDT')).toBe(false);
     expect(result.rejections.map((rejection) => rejection.reason).join(' ')).toMatch(/minimum|not a size/);
   });
 
@@ -855,7 +865,9 @@ describe('user overrides', () => {
   });
 
   it('ignores an override that matches no order', () => {
-    const result = resolveWith(reduce30, [{ step: 0, symbol: 'DOGEUSDT', account: 'binance-main', side: 'sell', amount: 5 }]);
+    const result = resolveWith(reduce30, [
+      { step: 0, symbol: 'DOGEUSDT', account: 'binance-main', side: 'sell', amount: 5 },
+    ]);
     expect(result.commands.map((command) => (command.args[0] as { amount: number }).amount)).toEqual([0.3, 30, 12]);
   });
 });
