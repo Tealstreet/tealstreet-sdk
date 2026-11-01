@@ -24,6 +24,7 @@ struct Port {
     emits: RefCell<Vec<(String, Value)>>,
     fail: Cell<bool>,
     fail_outcome: Cell<Option<safe_cex_engine::error::Outcome>>,
+    answer_ms: Cell<u64>,
 }
 
 impl AccountPort for Port {
@@ -41,7 +42,9 @@ impl AccountPort for Port {
         self.commands.borrow_mut().push(command);
         let fail = self.fail.get();
         let outcome = self.fail_outcome.get();
+        let answer_ms = self.answer_ms.get();
         Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(answer_ms)).await;
             if fail {
                 Err(VenueError {
                     message: "rejected".into(),
@@ -238,6 +241,27 @@ async fn closing_the_sending_socket_leaves_the_schedule_running() {
             tokio::time::sleep(Duration::from_millis(15_001)).await;
             settle().await;
             assert_eq!(placed_amounts(&port).len(), 2);
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_waits_for_a_market_slice_on_the_wire() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            port.answer_ms.set(3_000);
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            factory
+                .handle("twap:start", &twap_options(json!({})), &cx)
+                .unwrap();
+            settle().await;
+            assert_eq!(placed_amounts(&port), vec![0.5]);
+            let started = tokio::time::Instant::now();
+            assert_eq!(factory.stop_for_nuke().len(), 1);
+            factory.placements_settled().await;
+            assert!(started.elapsed() >= Duration::from_millis(3_000));
         })
         .await;
 }

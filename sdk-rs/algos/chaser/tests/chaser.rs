@@ -1198,7 +1198,7 @@ async fn a_fills_read_names_the_symbol_and_starts_near_the_chase() {
         settle(1100).await;
         port.cancels_find_nothing.set(true);
         port.set_ticker(101.0, 101.5);
-        settle(200).await;
+        settle(1_500).await;
         let commands = port.commands.borrow();
         let (symbol, from_ms) = commands
             .iter()
@@ -1215,6 +1215,49 @@ async fn a_fills_read_names_the_symbol_and_starts_near_the_chase() {
             .expect("a fills read");
         assert_eq!(symbol.as_deref(), Some("BTCUSDT"));
         assert!(from_ms.is_some_and(|from| from > 0.0), "{from_ms:?}");
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_row_trailing_its_cancel_answer_does_not_end_the_chase_on_an_unreadable_venue() {
+    local(async {
+        let port = FakePort::new("polymarket");
+        accept_with_fills(&port, Err("Polymarket historical fills are unsupported"));
+        let (factory, _cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.cancels_find_nothing.set(true);
+        port.set_ticker(101.0, 101.5);
+        settle(300).await;
+        port.update_order("o1", |row| row.status = OrderStatus::Canceled);
+        port.cancels_find_nothing.set(false);
+        settle(500).await;
+        assert_eq!(port.placements().len(), 2, "{:?}", port.errors());
+        assert!(!factory.book().active_chasers()[0].is_stopped);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn lot_venues_compare_fills_in_lots() {
+    local(async {
+        let port = FakePort::new("kucoin");
+        port.store
+            .borrow_mut()
+            .markets
+            .get_mut("BTCUSDT")
+            .unwrap()
+            .contract_size = Some(0.001);
+        // 0.0004 BTC of a 1 lot order: not filled, and not the whole of it.
+        accept_with_fills(&port, Ok(r#"[{"orderId":"o1","qty":0.0004}]"#));
+        let _chase = start(&port, BUY_ONE);
+        settle(1100).await;
+        port.cancels_find_nothing.set(true);
+        port.set_ticker(101.0, 101.5);
+        settle(1_500).await;
+        let placements = port.placements();
+        assert_eq!(placements.len(), 2, "{:?}", port.errors());
+        assert!((placements[1].1 - 0.6).abs() < 1e-9, "{placements:?}");
     })
     .await;
 }

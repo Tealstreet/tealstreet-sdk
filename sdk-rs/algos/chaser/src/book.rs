@@ -99,6 +99,13 @@ const FILL_TRACKED_VENUES: [&str; 3] = ["hyperliquid", "grvt", "bybitdemo"];
 fn cancel_answer_hides_fills(venue: &str) -> bool {
     venue.starts_with("binance") || venue == "asterdex"
 }
+/// Venues whose order amounts are lots; their fills read in base units.
+fn amounts_in_lots(venue: &str) -> bool {
+    matches!(venue, "kucoin" | "mexc")
+}
+/// How long a row may trail its cancel's answer (Phemex acks `Init`) before fills are read.
+const ROW_CLOSE_WAIT_MS: u64 = 1_000;
+const ROW_CLOSE_POLL_MS: u64 = 100;
 /// Fills are read from this long before the chase started, for clock skew.
 const FILLS_FROM_MARGIN_MS: f64 = 60_000.0;
 
@@ -811,6 +818,16 @@ impl ChaserBook {
         // A cancel the venue answers as done (Bybit 110001) may be an order that
         // filled unseen: only the venue's fills tell, and none, no replacement.
         let hides_fills = cancel_answer_hides_fills(&self.store().venue);
+        if !hides_fills && !fill_tracked {
+            let mut waited = 0;
+            while waited < ROW_CLOSE_WAIT_MS
+                && !chase.is_stopped()
+                && !to_cancel.iter().all(|id| self.known_closed(id))
+            {
+                self.cx.sleep_ms(ROW_CLOSE_POLL_MS).await;
+                waited += ROW_CLOSE_POLL_MS;
+            }
+        }
         let unconfirmed: Vec<String> = to_cancel
             .iter()
             .filter(|id| hides_fills || !self.known_closed(id))
@@ -916,10 +933,24 @@ impl ChaserBook {
                 .iter()
                 .filter(|row| &row.order_id == id)
                 .map(|row| row.qty)
-                .sum();
+                .sum::<f64>()
+                / self.base_per_placement_unit(chase);
             filled.push((id.clone(), total));
         }
         Ok(filled)
+    }
+
+    fn base_per_placement_unit(&self, chase: &Chase) -> f64 {
+        let store = self.store();
+        if !amounts_in_lots(&store.venue) {
+            return 1.0;
+        }
+        store
+            .markets
+            .get(&chase.options.symbol)
+            .and_then(|market| market.contract_size)
+            .filter(|size| *size > 0.0)
+            .unwrap_or(1.0)
     }
 
     /// What landed, even after a STOP: the caller makes it current for cleanup to cancel.
