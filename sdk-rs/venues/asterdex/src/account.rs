@@ -1195,6 +1195,7 @@ impl AsterDex {
             };
             wire::OrderUpdate {
                 i: event.i,
+                ps: None,
                 s: event.s,
                 side: event.side,
                 ot: None,

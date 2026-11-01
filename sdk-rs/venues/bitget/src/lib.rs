@@ -1040,6 +1040,15 @@ impl Venue for BitgetFutures {
             .is_some_and(|e| e.code.0.is_some_and(|code| code != 0.0))
         {
             self.on_response(cx, pending, response);
+        } else if matches!(
+            &pending,
+            Pending::Account {
+                request: account::Request::Orders(_) | account::Request::Positions { .. },
+                ..
+            }
+        ) && wire::null_list(response.body)
+        {
+            self.on_response(cx, pending, response);
         } else {
             self.on_request_failed(
                 cx,
