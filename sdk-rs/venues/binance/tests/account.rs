@@ -563,21 +563,17 @@ fn a_stop_whose_replacement_is_refused_says_the_stop_is_gone() {
         price: Some(91000.0),
         amount: None,
     }));
-    let cancel = h.take("/fapi/v1/order");
+    let cancel = h.take("/fapi/v1/algoOrder");
     h.reply(
         cancel.id,
         200,
         "",
-        r#"{"symbol":"BTCUSDT","orderId":8389765519993909000,"status":"CANCELED","origQty":"0.003","executedQty":"0"}"#,
+        r#"{"algoId":8389765519993909000,"code":"200","msg":"success"}"#,
     );
-    let replacement = h
-        .requests
-        .iter()
-        .find(|r| r.method == Method::Post)
-        .expect("the replacement")
-        .id;
+    let replacement = h.take("/fapi/v1/algoOrder");
+    assert_eq!(replacement.method, Method::Post);
     h.reply(
-        replacement,
+        replacement.id,
         400,
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
