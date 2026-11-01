@@ -26,6 +26,9 @@ const LOST_PLACEMENT_CHECKS_MS: [u64; 4] = [1_000, 2_000, 4_000, 8_000];
 const CANCEL_RETRY_BOUND_MS: u64 = 600_000;
 const CANCEL_RETRY_MIN_MS: u64 = 1_000;
 const CANCEL_RETRY_MAX_MS: u64 = 10_000;
+/// A cancel or fills read sent into a link that died with no answer can hang
+/// for minutes; past this a cancel is tried again and fills count as unread.
+const ANSWER_BOUND_MS: u64 = 10_000;
 /// Opens the warning that a stop's cancel is being retried.
 const RETRYING: &str = "Chaser stopped, but ";
 /// Open the message that ends a stop's cancel, retried or not.
@@ -430,6 +433,20 @@ impl ChaserBook {
             .await
     }
 
+    /// A cancel that got no answer in time is a timeout, tried again like a lost link.
+    async fn bounded_cancel(&self, symbol: &str, ids: &[String]) -> Result<String, VenueError> {
+        safe_cex_algos::executor::timeout(ANSWER_BOUND_MS, self.cancel(symbol, ids))
+            .await
+            .unwrap_or_else(|_| {
+                Err(VenueError::new(format!(
+                    "The cancel got no answer in {} s",
+                    ANSWER_BOUND_MS / 1000
+                ))
+                .kind(ErrorKind::Timeout)
+                .outcome(Outcome::Unknown))
+            })
+    }
+
     async fn run(self: Rc<Self>, chase: Rc<Chase>) {
         let changes = self.cx.port.subscribe();
         self.log(
@@ -643,7 +660,7 @@ impl ChaserBook {
             .collect();
         if !to_cancel.is_empty() {
             self.log(chase, "cancelling orders");
-            if let Err(error) = self.cancel(&chase.options.symbol, &to_cancel).await {
+            if let Err(error) = self.bounded_cancel(&chase.options.symbol, &to_cancel).await {
                 // The stop's own cancel keeps trying; this chase places nothing more.
                 if cancel_retryable(&error) {
                     chase.mark_complete("Failed to cancel orders");
@@ -723,6 +740,17 @@ impl ChaserBook {
     }
 
     async fn filled_quantities(&self, ids: &[String]) -> Result<Vec<(String, f64)>, String> {
+        safe_cex_algos::executor::timeout(ANSWER_BOUND_MS, self.read_filled_quantities(ids))
+            .await
+            .unwrap_or_else(|_| {
+                Err(format!(
+                    "fills read got no answer in {} s",
+                    ANSWER_BOUND_MS / 1000
+                ))
+            })
+    }
+
+    async fn read_filled_quantities(&self, ids: &[String]) -> Result<Vec<(String, f64)>, String> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Execution {
@@ -1015,7 +1043,7 @@ impl ChaserBook {
                 break;
             }
             let error = match self
-                .cancel(&symbol, std::slice::from_ref(&id.to_owned()))
+                .bounded_cancel(&symbol, std::slice::from_ref(&id.to_owned()))
                 .await
             {
                 Ok(_) => {
