@@ -14,8 +14,7 @@ use safe_cex_engine::model::{
     Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
-use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Outcome, SocketId, VenueError, num};
+use safe_cex_engine::{Command, CommandId, Cx, Outcome, SocketId, VenueError, num};
 use std::collections::{HashMap, VecDeque};
 
 /// Orders per `create-batch` request (Bybit's non-VIP limit).
@@ -288,22 +287,6 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        // Bybit cancels by order id only; refuse rather than leave it open.
-        if matches!(command, Command::CancelOrdersWithSymbols { .. }) {
-            let policy = Policy {
-                operation: Operation::Mutation,
-                credential: None,
-                timeout_ms: 1_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            };
-            if let Ok(root) = cx.admit_http_command(policy) {
-                let refusal = not_sent("Bybit has no symbol-qualified cancel; use cancelOrders")
-                    .kind(ErrorKind::Unsupported);
-                let _ = cx.fail_context(&root, refusal);
-            }
-            return;
-        }
         if self.ordinary_command(&command) {
             self.start_ordinary(cx, command);
         }
@@ -323,6 +306,19 @@ impl BybitLinear {
                 })
                 .collect::<Result<Vec<Order>, String>>()
                 .map(|orders| self.plan_cancel(&orders)),
+            // An order the store has lost is still cancelled by its id and symbol.
+            Command::CancelOrdersWithSymbols { orders, .. } => {
+                let orders: Vec<Order> = orders
+                    .iter()
+                    .map(|order| {
+                        cx.store
+                            .order(&order.id)
+                            .cloned()
+                            .unwrap_or_else(|| order.limit_stand_in())
+                    })
+                    .collect();
+                Ok(self.plan_cancel(&orders))
+            }
             Command::AmendOrder {
                 id, price, amount, ..
             } => self.plan_amend(cx, id, *price, *amount),

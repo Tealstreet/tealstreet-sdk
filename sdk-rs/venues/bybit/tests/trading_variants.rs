@@ -3632,10 +3632,9 @@ fn hyro_recv_window_refusal_resend_uses_bybit_clock() {
     );
 }
 
-/// Bybit has no symbol-addressed cancel: the command is refused before any
-/// I/O instead of finishing without a terminal.
+/// An order the store has lost is still cancelled, by the id and symbol given.
 #[test]
-fn cancel_orders_with_symbols_is_refused_not_left_open() {
+fn cancel_orders_with_symbols_cancels_an_order_the_store_has_lost() {
     for variant in [Variant::Linear, Variant::Hyrotrader] {
         let mut h = ready(variant);
         h.requests.clear();
@@ -3646,26 +3645,13 @@ fn cancel_orders_with_symbols_is_refused_not_left_open() {
                 symbol: "BTCUSDT".into(),
             }],
         });
-        let failure = h.notices.iter().find_map(|notice| match notice {
-            safe_cex_engine::Notice::CommandFailed {
-                command: 130,
-                error,
-            } => Some(error),
-            _ => None,
-        });
-        assert_eq!(
-            failure.and_then(|error| error.kind),
-            Some(safe_cex_engine::ErrorKind::Unsupported),
-            "{variant:?}: {failure:?}"
-        );
-        assert_eq!(
-            h.outcomes,
-            [(130, Some(safe_cex_engine::Outcome::NotSent))],
-            "{variant:?}"
-        );
         assert!(
-            !h.paths().iter().any(|p| p.contains("/v5/order/")),
-            "{variant:?}"
+            h.requests.iter().any(|r| r.url.contains("/v5/order/cancel")
+                && r.body
+                    .as_deref()
+                    .is_some_and(|b| b.contains("any") && b.contains("BTCUSDT"))),
+            "{variant:?}: {:?}",
+            h.paths()
         );
     }
 }
