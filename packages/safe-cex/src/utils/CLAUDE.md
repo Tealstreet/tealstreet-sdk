@@ -196,7 +196,8 @@ it inflates the e2e load-gate's diagnostic counters.
 **The Tealstreet endpoints are not in this file.** `virtualClock` takes a host
 clock through `setServerTimeSource`; `transport/registerTealstreetTransport`
 registers `transport/tealstreet/tealstreetTimeSource` (same-origin `/api/time`,
-or `NEXT_PUBLIC_TIME_API_ORIGIN`, with half-RTT correction). Without a
+or `NEXT_PUBLIC_TIME_API_ORIGIN`, with half-RTT correction, keeping the shortest of three
+round trips: one slow reply reads late by half its delay and could cross the 1 s threshold). Without a
 registered source — a plain OSS consumer — generic sync uses venue time (Bybit
 through the transport's public CORS proxy, which is `api.bybit.com` directly
 under the direct transport and can 403 in geo-blocked regions or fail CORS in a
