@@ -36327,7 +36327,7 @@
     },
     {
       "venue": "kucoin",
-      "tapeSha256": "df6ab9578b95617c40f9ce49b64f82ddd58ac4153e35514893306d55c0ea2f88",
+      "tapeSha256": "7271b023a3dfbb91dc2a5d8e0223d6fca801e664ac3654bb060d62f37919628b",
       "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
       "diagnostics": [
         {
