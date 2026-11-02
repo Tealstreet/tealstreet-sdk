@@ -1897,3 +1897,28 @@ fn the_first_private_open_reads_orders_and_positions() {
     h.advance(10_000.0);
     assert!(h.has_request("/fapi/v1/openOrders"));
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            401,
+            r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#,
+        ),
+        (
+            200,
+            r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#,
+        ),
+        (401, r#"{"code":-2014,"msg":"API-key format invalid."}"#),
+    ] {
+        let mut h = Harness::started(credentials());
+        h.expect_startup_failure = true;
+        h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+        h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+        h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+        h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+        h.respond("/fapi/v1/listenKey", status, body);
+        h.respond("/fapi/v3/account", status, body);
+        assert_eq!(h.startup_failures.len(), 1, "{status} {body}");
+    }
+}
