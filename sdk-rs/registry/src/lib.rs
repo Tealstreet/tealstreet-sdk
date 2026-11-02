@@ -2198,7 +2198,6 @@ pub fn build_with_signer<T: Visit>(
                     credentials: identities.primary,
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    fixed_public_sockets: options.fixed_public_sockets,
                     product: if venue == "bitgetinverse" {
                         Product::Inverse
                     } else if venue == "bitgetusdc" {
@@ -2491,9 +2490,6 @@ pub struct EngineOptions {
     /// The caller signs remotely (a remote or payload signer) rather than with a local secret.
     #[serde(default)]
     pub remote_signing: bool,
-    /// Set by a server host: its accounts share one IP.
-    #[serde(default)]
-    pub fixed_public_sockets: bool,
     #[serde(default)]
     pub paradex_address: Option<String>,
     #[serde(default)]
