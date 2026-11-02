@@ -324,6 +324,28 @@ pub struct Registry {
     /// Why algos stopped while no browser was there to see it, one per
     /// (user, account), for that account's next init.
     notices: Notices,
+    /// When each user last opened a socket, and was last logged as not returning.
+    presence: Arc<Mutex<HashMap<String, Presence>>>,
+}
+
+#[derive(Clone, Copy)]
+struct Presence {
+    socket_at: std::time::Instant,
+    told_at: Option<std::time::Instant>,
+}
+
+/// How long after its session is disposed for no browser a user may stay away unlogged.
+const RETURN_WAIT: Duration = Duration::from_secs(5 * 60);
+/// A user absent again within this is not logged again.
+const RETURN_LOG_EVERY: Duration = Duration::from_secs(60 * 60);
+
+/// An opaque, stable tag for a user in logs: never the raw id. The same form as the
+/// routing Worker's tag (the first six bytes of SHA-256, hex), so the journals line up.
+pub fn user_tag(user: &str) -> String {
+    safe_cex_crypto::sha256(user.as_bytes())[..6]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// The operator's drain of this box before a restart.
@@ -615,6 +637,7 @@ impl Registry {
             algos_ended: Arc::new(tokio::sync::watch::channel(0).0),
             pacer: crate::pacing::Pacer::new(7, Duration::from_millis(60)),
             notices: Arc::default(),
+            presence: Arc::default(),
         }
     }
 
@@ -882,6 +905,47 @@ impl Registry {
         if empty {
             self.dispose_for(account, "account disposed", None);
         }
+    }
+
+    /// A socket of `user` opened: they are back.
+    pub fn user_connected(&self, user: &str) {
+        let now = std::time::Instant::now();
+        let mut presence = self.presence.lock().unwrap();
+        presence
+            .entry(user.to_owned())
+            .and_modify(|seen| seen.socket_at = now)
+            .or_insert(Presence {
+                socket_at: now,
+                told_at: None,
+            });
+    }
+
+    /// The line for a user whose session was disposed for no browser at `disposed_at`
+    /// and who has opened no socket since, at most once per user per RETURN_LOG_EVERY.
+    fn did_not_return(
+        &self,
+        user: &str,
+        disposed_at: std::time::Instant,
+        now: std::time::Instant,
+    ) -> Option<String> {
+        let mut presence = self.presence.lock().unwrap();
+        let seen = presence.entry(user.to_owned()).or_insert(Presence {
+            socket_at: disposed_at,
+            told_at: None,
+        });
+        if seen.socket_at > disposed_at
+            || seen
+                .told_at
+                .is_some_and(|told| now.duration_since(told) < RETURN_LOG_EVERY)
+        {
+            return None;
+        }
+        seen.told_at = Some(now);
+        Some(format!(
+            "hosted user did not return: {} after {} min",
+            user_tag(user),
+            now.duration_since(disposed_at).as_secs() / 60
+        ))
     }
 
     /// The stop notice for a session that resumed `from`, if it is still owed one.
@@ -1162,6 +1226,17 @@ impl Registry {
             let expired = registry.parked.lock().unwrap().remove(&resume_id);
             if let Some(expired) = expired {
                 let reason = format!("no browser for {}s", grace.as_secs());
+                let disposed_at = std::time::Instant::now();
+                let user = expired.user.clone();
+                let watcher = registry.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(RETURN_WAIT).await;
+                    if let Some(line) =
+                        watcher.did_not_return(&user, disposed_at, std::time::Instant::now())
+                    {
+                        Log::warn(&line);
+                    }
+                });
                 for (account, park_holder) in expired.accounts {
                     // No browser to tell: the next init of the account is told.
                     let last = {
@@ -1939,6 +2014,45 @@ pub(crate) mod tests {
                 );
             })
             .await;
+    }
+
+    #[test]
+    fn a_user_who_does_not_return_is_logged_by_tag_once_an_hour() {
+        let registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        let user = "auth0|5f1d00c0ffee";
+        let disposed = std::time::Instant::now();
+        let five = disposed + Duration::from_secs(5 * 60);
+        let line = registry.did_not_return(user, disposed, five).unwrap();
+        assert_eq!(
+            line,
+            format!("hosted user did not return: {} after 5 min", user_tag(user))
+        );
+        assert!(
+            !line.contains("auth0") && user_tag(user).len() == 12,
+            "{line}"
+        );
+        assert_eq!(
+            registry.did_not_return(user, disposed, five + Duration::from_secs(60)),
+            None
+        );
+        let later = five + Duration::from_secs(60 * 60);
+        assert!(
+            registry.did_not_return(user, disposed, later).is_some(),
+            "again after an hour"
+        );
+        // One who came back is not logged.
+        let back = "auth0|returning";
+        let gone = std::time::Instant::now();
+        std::thread::sleep(Duration::from_millis(2));
+        registry.user_connected(back);
+        assert_eq!(
+            registry.did_not_return(back, gone, gone + Duration::from_secs(300)),
+            None
+        );
     }
 
     #[tokio::test(start_paused = true)]
