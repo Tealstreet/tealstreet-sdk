@@ -592,6 +592,7 @@ impl Venue for KrakenSpot {
                 });
             }
             "ohlc" => {
+                let mut candles: Vec<(String, Interval, Candle)> = Vec::new();
                 let _ = safe_cex_engine::json::each::<Ohlc<'_>>(data.get(), |o| {
                     let Some(timestamp) = crate::history::timestamp(&o.interval_begin) else {
                         return;
@@ -612,10 +613,24 @@ impl Venue for KrakenSpot {
                                 .map_or(&*o.symbol, String::as_str)
                             && interval(*tf) == Some(o.interval)
                         {
-                            cx.candle(symbol, *tf, candle);
+                            candles.push((symbol.clone(), *tf, candle));
                         }
                     }
                 });
+                candles.sort_by(|a, b| a.2.timestamp.total_cmp(&b.2.timestamp));
+                // A subscribe answers with recent candles as a snapshot: only the newest is live.
+                if msg.kind == "snapshot" {
+                    let mut newest: Vec<(String, Interval, Candle)> = Vec::new();
+                    for row in candles.into_iter().rev() {
+                        if !newest.iter().any(|(s, i, _)| *s == row.0 && *i == row.1) {
+                            newest.push(row);
+                        }
+                    }
+                    candles = newest;
+                }
+                for (symbol, tf, candle) in candles {
+                    cx.candle(&symbol, tf, candle);
+                }
             }
             _ => {}
         }

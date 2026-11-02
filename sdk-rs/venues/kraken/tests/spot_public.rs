@@ -469,3 +469,51 @@ fn checksum_valid_updates_apply_all_rows_and_trim_subscribed_depth() {
     assert_eq!(book.best_bid(), Some(101.5));
     assert_eq!(book.bids().len(), 100);
 }
+
+/// Each candle in a frame's candles section, by its timestamp: rows end the section as six f64s.
+fn candle_timestamps(frame: &[u8]) -> Vec<f64> {
+    safe_cex_engine::wire::sections(frame)
+        .filter(|(kind, _)| *kind == 6)
+        .flat_map(|(_, body)| {
+            let count = u32::from_le_bytes(body[..4].try_into().unwrap()) as usize;
+            let rows = &body[body.len() - count * 48..];
+            (0..count)
+                .map(|row| f64::from_le_bytes(rows[row * 48..row * 48 + 8].try_into().unwrap()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Kraken v2 `ohlc`: a subscribe answers with recent candles as a `snapshot`, then `update`s.
+#[test]
+fn an_ohlc_snapshot_streams_only_its_newest_candle_and_updates_stream_live() {
+    use safe_cex_engine::model::Interval;
+    let (mut e, s, _) = ready(true);
+    e.handle(
+        NOW,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "XBT/USD".into(),
+            interval: Interval::M1,
+        }),
+    );
+    e.drain_actions().for_each(drop);
+    e.take_frame(NOW);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"ohlc","type":"snapshot","timestamp":"2023-11-14T22:03:10Z","data":[{"symbol":"BTC/USD","interval":1,"interval_begin":"2023-11-14T22:01:00Z","open":99,"high":102,"low":98,"close":100,"volume":3},{"symbol":"BTC/USD","interval":1,"interval_begin":"2023-11-14T22:03:00Z","open":100,"high":101,"low":99,"close":101,"volume":1},{"symbol":"BTC/USD","interval":1,"interval_begin":"2023-11-14T22:02:00Z","open":100,"high":103,"low":99,"close":100,"volume":2}]}"#,
+    );
+    let snapshot = e.take_frame(NOW).expect("the forming candle").to_vec();
+    assert_eq!(
+        candle_timestamps(&snapshot),
+        [1699999380.0],
+        "recent history in the snapshot is not live"
+    );
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"ohlc","type":"update","timestamp":"2023-11-14T22:04:01Z","data":[{"symbol":"BTC/USD","interval":1,"interval_begin":"2023-11-14T22:04:00Z","open":101,"high":101,"low":100,"close":100,"volume":1}]}"#,
+    );
+    let live = e.take_frame(NOW).expect("the live candle").to_vec();
+    assert_eq!(candle_timestamps(&live), [1699999440.0]);
+}
