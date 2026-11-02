@@ -1455,6 +1455,14 @@ impl Venue for AsterDex {
                 if let Some(from) = from_ms {
                     path.push_str(&format!("&startTime={}", num::format(from)));
                 }
+                // Aster refuses startTime == endTime (-1023), so one candle asks through its close.
+                let to_ms = to_ms.map(|to| {
+                    if from_ms == Some(to) {
+                        to + interval.ms() - 1.
+                    } else {
+                        to
+                    }
+                });
                 if let Some(to) = to_ms {
                     path.push_str(&format!("&endTime={}", num::format(to)));
                 }
