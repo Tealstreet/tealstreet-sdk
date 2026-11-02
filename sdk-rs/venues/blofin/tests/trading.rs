@@ -1553,9 +1553,27 @@ fn trading_failures_are_classified_without_changing_their_text() {
         ),
         (
             200,
-            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"102002","msg":"Insufficient balance"}]}"#,
+            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"103003","msg":"Insufficient balance"}]}"#,
             Some(ErrorKind::Rejected),
             Some(Outcome::Rejected),
+        ),
+        (
+            200,
+            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"102002","msg":"Duplicate customized order ID"}]}"#,
+            None,
+            Some(Outcome::Unknown),
+        ),
+        (
+            200,
+            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"150003","msg":"clientId already exist"}]}"#,
+            None,
+            Some(Outcome::Unknown),
+        ),
+        (
+            200,
+            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"152030","msg":"Duplicated clientId."}]}"#,
+            None,
+            Some(Outcome::Unknown),
         ),
         (
             200,

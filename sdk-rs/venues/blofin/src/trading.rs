@@ -35,7 +35,6 @@ const CODES: CodeTable = CodeTable {
         refused(Key::Int(152423), ErrorKind::InvalidInput),
         // Order, price and size rules.
         refused(Key::Int(542), ErrorKind::Rejected),
-        refused(Key::Int(102002), ErrorKind::Rejected),
         refused(Key::Int(102014), ErrorKind::Rejected),
         refused(Key::Int(102015), ErrorKind::Rejected),
         refused(Key::Int(102022), ErrorKind::Rejected),
@@ -49,9 +48,6 @@ const CODES: CodeTable = CodeTable {
         // Balance and margin.
         refused(Key::Int(103003), ErrorKind::Rejected),
         refused(Key::Int(150004), ErrorKind::Rejected),
-        // Duplicate client order ID.
-        refused(Key::Int(150003), ErrorKind::InvalidInput),
-        refused(Key::Int(152030), ErrorKind::InvalidInput),
         // Leverage and margin-mode settings blocked.
         refused(Key::Int(110006), ErrorKind::Rejected),
         refused(Key::Int(110019), ErrorKind::Rejected),

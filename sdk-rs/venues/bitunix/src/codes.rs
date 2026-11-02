@@ -43,7 +43,7 @@ pub(crate) const BITUNIX: CodeTable = CodeTable {
             Verdict::Refused(ErrorKind::Rejected),
         ),
         row(
-            Key::Range(30001, 30042),
+            Key::Range(30001, 30041),
             Verdict::Refused(ErrorKind::Rejected),
         ),
         row(

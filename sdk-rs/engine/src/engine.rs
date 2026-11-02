@@ -598,6 +598,14 @@ const UNCERTAIN_PLACEMENT: &str =
     "Placement outcome is uncertain; reconcile before placing or amending";
 #[cfg(feature = "order-locks")]
 const UNCERTAIN_CANCEL_ALL: &str = "Placement outcome is uncertain; reconcile before cancel-all";
+#[cfg(feature = "order-locks")]
+fn fence_refusal(message: &str, hold: Option<&str>) -> VenueError {
+    match hold {
+        Some(hold) => VenueError::new(format!("{message}. {hold}")),
+        None => VenueError::new(message),
+    }
+    .outcome(crate::Outcome::NotSent)
+}
 
 /// Every order of this placement is reduce-only and its venue enforces that.
 #[cfg(feature = "order-locks")]
@@ -1641,6 +1649,9 @@ struct IoCore {
     /// clears it: the next re-ask and how many have run (bounded backoff).
     #[cfg(feature = "order-locks")]
     fence_reread: Option<(f64, u32)>,
+    /// Why a fresh orders read cannot lift a fence, for the refusal to say.
+    #[cfg(feature = "order-locks")]
+    fence_hold: Option<String>,
     /// The `reconcile_uncertain` call in progress is a backoff re-ask.
     #[cfg(feature = "order-locks")]
     reconcile_reask: bool,
@@ -1847,6 +1858,8 @@ impl Default for IoCore {
             reconcile_due: Vec::new(),
             #[cfg(feature = "order-locks")]
             fence_reread: None,
+            #[cfg(feature = "order-locks")]
+            fence_hold: None,
             #[cfg(feature = "order-locks")]
             reconcile_reask: false,
             command_entry: None,
@@ -2957,6 +2970,17 @@ impl<P> Cx<'_, P> {
 
     /// `orders_reconciled` for a read that began at `epoch` (`order_read_epoch`):
     /// a mark made after its first page was sent survives this answer.
+    /// A fresh orders read could not speak for every row, so a fence stays up until
+    /// the row is gone; a refusal says why. `None` once a read speaks for every row.
+    pub fn orders_fence_held(&mut self, reason: Option<&str>) {
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.core.fence_hold = reason.map(str::to_owned);
+        }
+        #[cfg(not(feature = "order-locks"))]
+        let _ = reason;
+    }
+
     pub fn orders_reconciled_since(&mut self, symbol: Option<&str>, epoch: u64) {
         #[cfg(feature = "order-locks")]
         if let Some(token) = self.io.core.order_response_token {
@@ -5284,15 +5308,16 @@ impl<V: Venue> Engine<V> {
                                     .outcome(crate::Outcome::NotSent)
                             }
                             (crate::order_locks::Refusal::Uncertain(_), _) => {
-                                VenueError::new(UNCERTAIN_PLACEMENT)
-                                    .outcome(crate::Outcome::NotSent)
+                                fence_refusal(UNCERTAIN_PLACEMENT, cx.io.core.fence_hold.as_deref())
                             }
                             (_, Command::CancelSymbolOrders { symbol, .. })
                                 if self.venue.fence_uncertain_cancel_all()
                                     && cx.io.core.order_locks.uncertain(symbol) =>
                             {
-                                VenueError::new(UNCERTAIN_CANCEL_ALL)
-                                    .outcome(crate::Outcome::NotSent)
+                                fence_refusal(
+                                    UNCERTAIN_CANCEL_ALL,
+                                    cx.io.core.fence_hold.as_deref(),
+                                )
                             }
                             _ => "Order amendment or cancellation is already in flight".into(),
                         };
@@ -5324,7 +5349,7 @@ impl<V: Venue> Engine<V> {
                     };
                     cx.refuse_before_entry(
                         id,
-                        VenueError::new(message).outcome(crate::Outcome::NotSent),
+                        fence_refusal(message, cx.io.core.fence_hold.as_deref()),
                     );
                     return;
                 }
@@ -5425,7 +5450,7 @@ impl<V: Venue> Engine<V> {
                 };
                 cx.refuse_before_entry(
                     command,
-                    VenueError::new(UNCERTAIN_CANCEL_ALL).outcome(crate::Outcome::NotSent),
+                    fence_refusal(UNCERTAIN_CANCEL_ALL, cx.io.core.fence_hold.as_deref()),
                 );
             } else {
                 if let Some(id) = command.completion_id() {
