@@ -1,11 +1,14 @@
 //! Bybit's VENUE_STATE for frame-fed engines: what the write path reads that
 //! the store does not hold. Per-symbol hedge mode picks `positionIdx` (a flat
 //! hedge-mode symbol has no position row to say so), and position-bound TP/SL
-//! ids route a stop amend to the position's trading stop.
+//! ids route a stop amend to the position's trading stop, while trailing
+//! take-profit ids refuse an amend.
 //!
 //! Encoding (version 1): u8 version; u32 mode count, then per mode u8
 //! category, u8 hedged, u16 length, symbol bytes; u32 bound count, then per
-//! id u16 length, id bytes.
+//! id u16 length, id bytes; then, optionally, u32 trailing take-profit count
+//! and per id u16 length, id bytes. The server and the browser may run
+//! different builds: an older reader ignores the tail, a newer one reads none.
 use crate::paths::Category;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,6 +18,7 @@ const VERSION: u8 = 1;
 pub(crate) struct VenueState {
     pub modes: BTreeMap<(u8, String), bool>,
     pub bound: BTreeSet<String>,
+    pub trailing_profit: BTreeSet<String>,
 }
 
 pub(crate) fn category_code(category: Category) -> u8 {
@@ -41,9 +45,11 @@ impl VenueState {
             out.push(u8::from(*hedged));
             text(&mut out, symbol);
         }
-        out.extend_from_slice(&(self.bound.len() as u32).to_le_bytes());
-        for id in &self.bound {
-            text(&mut out, id);
+        for ids in [&self.bound, &self.trailing_profit] {
+            out.extend_from_slice(&(ids.len() as u32).to_le_bytes());
+            for id in ids {
+                text(&mut out, id);
+            }
         }
         out
     }
@@ -51,32 +57,43 @@ impl VenueState {
     /// `None` for another version or malformed bytes: the caller keeps its state.
     pub fn decode(bytes: &[u8]) -> Option<Self> {
         let mut at = 0;
-        let mut take = |n: usize| {
-            let slice = bytes.get(at..at + n)?;
-            at += n;
-            Some(slice)
-        };
-        if take(1)? != [VERSION] {
+        if take(bytes, &mut at, 1)? != [VERSION] {
             return None;
         }
         let mut state = Self::default();
-        let count = u32::from_le_bytes(take(4)?.try_into().ok()?);
+        let count = u32::from_le_bytes(take(bytes, &mut at, 4)?.try_into().ok()?);
         for _ in 0..count {
-            let head = take(2)?;
+            let head = take(bytes, &mut at, 2)?;
             let (category, hedged) = (head[0], head[1] != 0);
-            let length = u16::from_le_bytes(take(2)?.try_into().ok()?) as usize;
-            let symbol = std::str::from_utf8(take(length)?).ok()?.to_owned();
+            let symbol = text_at(bytes, &mut at)?;
             state.modes.insert((category, symbol), hedged);
         }
-        let count = u32::from_le_bytes(take(4)?.try_into().ok()?);
-        for _ in 0..count {
-            let length = u16::from_le_bytes(take(2)?.try_into().ok()?) as usize;
-            state
-                .bound
-                .insert(std::str::from_utf8(take(length)?).ok()?.to_owned());
+        state.bound = ids_at(bytes, &mut at)?;
+        if at < bytes.len() {
+            state.trailing_profit = ids_at(bytes, &mut at)?;
         }
         Some(state)
     }
+}
+
+fn take<'a>(bytes: &'a [u8], at: &mut usize, n: usize) -> Option<&'a [u8]> {
+    let slice = bytes.get(*at..*at + n)?;
+    *at += n;
+    Some(slice)
+}
+
+fn text_at(bytes: &[u8], at: &mut usize) -> Option<String> {
+    let length = u16::from_le_bytes(take(bytes, at, 2)?.try_into().ok()?) as usize;
+    Some(
+        std::str::from_utf8(take(bytes, at, length)?)
+            .ok()?
+            .to_owned(),
+    )
+}
+
+fn ids_at(bytes: &[u8], at: &mut usize) -> Option<BTreeSet<String>> {
+    let count = u32::from_le_bytes(take(bytes, at, 4)?.try_into().ok()?);
+    (0..count).map(|_| text_at(bytes, at)).collect()
 }
 
 #[cfg(test)]
@@ -89,11 +106,20 @@ mod tests {
         state.modes.insert((0, "BTCUSDT".into()), true);
         state.modes.insert((1, "BTCUSD".into()), false);
         state.bound.insert("stop-1".into());
+        state.bound.insert("trailing-tp".into());
+        state.trailing_profit.insert("trailing-tp".into());
         let bytes = state.encode();
         assert_eq!(VenueState::decode(&bytes), Some(state));
         let mut other = bytes.clone();
         other[0] = 2;
         assert_eq!(VenueState::decode(&other), None);
         assert_eq!(VenueState::decode(&bytes[..bytes.len() - 1]), None);
+        // An older writer's state, with no trailing tail, still reads.
+        let older = VenueState {
+            trailing_profit: BTreeSet::new(),
+            ..VenueState::decode(&bytes).unwrap()
+        };
+        let without_tail = &bytes[..bytes.len() - (4 + 2 + "trailing-tp".len())];
+        assert_eq!(VenueState::decode(without_tail), Some(older));
     }
 }

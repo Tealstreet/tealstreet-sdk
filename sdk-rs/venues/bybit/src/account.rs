@@ -152,6 +152,9 @@ pub struct Mapped {
     /// A position TP/SL (`tpslMode` Full or Partial), rather than an
     /// opening trigger. Full stops have zero amount in the store.
     pub position_bound: bool,
+    /// A futures trailing take-profit (`TrailingProfit`): shown as a take
+    /// profit at its trigger, but Bybit offers no way to edit it in place.
+    pub trailing_profit: bool,
     fill_cursor: Option<Cursor>,
     terminal: bool,
     /// A spot TP/SL classified with neither a trigger direction nor a price
@@ -298,6 +301,8 @@ pub struct AccountState {
     /// Bybit permits different position modes on different symbols.
     pub position_modes: HashMap<String, bool>,
     pub position_bound: HashSet<String>,
+    /// Ids of futures trailing take-profits, which amends refuse.
+    pub trailing_profit: HashSet<String>,
     /// Frame-fed: the mode this engine switched to, held over the data source
     /// until its VENUE_STATE agrees (`SettingKey::Venue(MODE_HOLD, category)`).
     pub held_mode: Option<bool>,
@@ -545,6 +550,8 @@ pub fn order_type(text: &str) -> Option<OrderType> {
         "Stop" | "StopLoss" | "PartialStopLoss" | "MmRateClose" => OrderType::StopLoss,
         "TakeProfit" | "PartialTakeProfit" => OrderType::TakeProfit,
         "TrailingStop" => OrderType::TrailingStopLoss,
+        // A futures trailing take-profit: a take profit at its current trigger.
+        "TrailingProfit" => OrderType::TakeProfit,
         _ => return None,
     })
 }
@@ -650,6 +657,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
             "CreateByTakeProfit" | "CreateByPartialTakeProfit" => Some("TakeProfit"),
             "CreateByStopLoss" | "CreateByPartialStopLoss" => Some("StopLoss"),
             "CreateByTrailingStop" => Some("TrailingStop"),
+            "CreateByTrailingProfit" => Some("TrailingProfit"),
             _ => None,
         })
         .flatten();
@@ -688,6 +696,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         && !o.reduce_only
         && !o.close_on_trigger
         && !position_bound
+        && wire_type != "TrailingProfit"
         && (trigger_price.map_or(0.0, float) > 0.0 || create_type == Some("CreateByStopOrder"));
     let kind = if opening_trigger {
         OrderType::Conditional
@@ -709,7 +718,9 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         Some(leaves) => float(leaves),
         None => subtract(qty, filled),
     };
-    let amount = if matches!(wire_type, "StopLoss" | "TakeProfit") && tpsl_mode == Some("Full") {
+    let amount = if matches!(wire_type, "StopLoss" | "TakeProfit" | "TrailingProfit")
+        && tpsl_mode == Some("Full")
+    {
         0.0
     } else {
         qty
@@ -799,6 +810,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     Some(Mapped {
         orders,
         position_bound,
+        trailing_profit: wire_type == "TrailingProfit",
         unpriced_tpsl,
         terminal: matches!(
             o.order_status.as_ref(),
@@ -1445,6 +1457,7 @@ impl BybitLinear {
         }
         let mut orders = Vec::new();
         self.account.position_bound.clear();
+        self.account.trailing_profit.clear();
         for mapped in snapshot.orders.expect("checked above") {
             if self.stale_terminal_snapshot(&mapped) {
                 continue;
@@ -1470,6 +1483,11 @@ impl BybitLinear {
             if mapped.position_bound {
                 self.account
                     .position_bound
+                    .insert(mapped.orders[0].id.clone());
+            }
+            if mapped.trailing_profit {
+                self.account
+                    .trailing_profit
                     .insert(mapped.orders[0].id.clone());
             }
             orders.extend(mapped.orders);
@@ -2452,6 +2470,11 @@ impl BybitLinear {
         } else if !self.account.position_bound.is_empty() {
             self.account.position_bound.remove(id);
         }
+        if mapped.trailing_profit {
+            self.account.trailing_profit.insert(id.clone());
+        } else if !self.account.trailing_profit.is_empty() {
+            self.account.trailing_profit.remove(id);
+        }
     }
 
     fn on_position_rows(&mut self, cx: &mut Cx<'_, Pending>, rows: &[PositionRow<'_>]) {
@@ -3065,10 +3088,12 @@ impl BybitLinear {
             .filter(|id| !join.rejected.conflicts(*id))
             .map(str::to_owned)
             .collect();
-        self.account.position_bound.retain(|id| {
+        let kept = |id: &String| {
             join.rejected.holds(parent_order_id(id))
                 && !admitted_parents.contains(parent_order_id(id))
-        });
+        };
+        self.account.position_bound.retain(kept);
+        self.account.trailing_profit.retain(kept);
         let mut orders = Vec::new();
         for mut mapped in join.rows {
             if join
@@ -3090,6 +3115,11 @@ impl BybitLinear {
             if mapped.position_bound {
                 self.account
                     .position_bound
+                    .insert(mapped.orders[0].id.clone());
+            }
+            if mapped.trailing_profit {
+                self.account
+                    .trailing_profit
                     .insert(mapped.orders[0].id.clone());
             }
             orders.extend(mapped.orders);

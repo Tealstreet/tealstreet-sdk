@@ -4050,3 +4050,140 @@ fn income_window_with_no_limit_is_not_capped_at_the_default() {
     let rows = serde_json::from_str::<Vec<serde_json::Value>>(result).unwrap();
     assert_eq!(rows.len(), 1001);
 }
+
+/// A Bybit futures trailing take-profit, from the live row the unsupported-order
+/// log named: `stopOrderType` TrailingProfit, `createType` CreateByTrailingProfit.
+const TRAILING_PROFIT_ID: &str = "8f2b7c1e-5d4a-4b0e-9c3f-trailing-tp";
+const TRAILING_PROFIT_ROW: &str = r#"{"orderId":"8f2b7c1e-5d4a-4b0e-9c3f-trailing-tp","orderLinkId":"","blockTradeId":"","symbol":"DOGEUSDT","price":"0","qty":"1500","side":"Sell","isLeverage":"","positionIdx":0,"orderStatus":"Untriggered","cancelType":"UNKNOWN","rejectReason":"EC_NoError","avgPrice":"0","leavesQty":"1500","leavesValue":"0","cumExecQty":"0","cumExecValue":"0","cumExecFee":"0","timeInForce":"IOC","orderType":"Market","stopOrderType":"TrailingProfit","createType":"CreateByTrailingProfit","orderIv":"","triggerPrice":"0.0657","takeProfit":"0","stopLoss":"0","tpTriggerBy":"","slTriggerBy":"","triggerDirection":2,"triggerBy":"LastPrice","lastPriceOnCreated":"0.0712","reduceOnly":true,"closeOnTrigger":true,"smpType":"None","smpGroup":0,"smpOrderId":"","tpslMode":"Full","tpLimitPrice":"","slLimitPrice":"","placeType":"","createdTime":"1762140000000","updatedTime":"1762140000000","category":"linear"}"#;
+fn trailing_profit_row() -> serde_json::Value {
+    serde_json::from_str(TRAILING_PROFIT_ROW).unwrap()
+}
+
+fn assert_trailing_profit_shown(h: &Harness) {
+    let order = h.engine.store().order(TRAILING_PROFIT_ID).expect("shown");
+    assert_eq!(order.kind, OrderType::TakeProfit);
+    assert_eq!(order.price, 0.0657);
+    assert_eq!(order.amount, 0.0);
+    assert_eq!(order.side, OrderSide::Sell);
+    assert_eq!(order.status, OrderStatus::Open);
+    assert!(
+        !h.logs.iter().any(|m| m.contains("unsupported type")),
+        "{:?}",
+        h.logs
+    );
+}
+
+/// Over REST and over the private stream.
+fn with_trailing_profit() -> [Harness; 2] {
+    let mut rest = ready();
+    refresh_orders(&mut rest, &[trailing_profit_row()]);
+    let mut stream = ready();
+    stream.message(
+        "/v5/private",
+        &serde_json::json!({"topic": "order", "data": [trailing_profit_row()]}).to_string(),
+    );
+    [rest, stream]
+}
+
+#[test]
+fn a_trailing_take_profit_is_a_full_take_profit_at_its_trigger() {
+    for h in with_trailing_profit() {
+        assert_trailing_profit_shown(&h);
+    }
+}
+
+#[test]
+fn a_trailing_take_profit_cancels_by_order_id() {
+    for (command, mut h) in (120..).zip(with_trailing_profit()) {
+        h.requests.clear();
+        h.command(Command::CancelOrders {
+            command,
+            ids: vec![TRAILING_PROFIT_ID.into()],
+        });
+        // Linear cancels go in a batch, each row by its orderId.
+        let cancel = h.take("/v5/order/cancel-batch");
+        assert!(
+            body(&cancel).contains(&format!(r#""orderId":"{TRAILING_PROFIT_ID}""#)),
+            "{}",
+            body(&cancel)
+        );
+        assert!(!h.has_request("/v5/position/trading-stop"));
+        assert!(!h.has_request("/v5/order/amend"));
+    }
+}
+
+const TRAILING_PROFIT_REFUSAL: &str =
+    "A Bybit trailing take-profit cannot be edited here; cancel and recreate it on Bybit";
+
+fn assert_amend_refused(h: &mut Harness, command: u32) {
+    h.requests.clear();
+    h.command(Command::AmendOrder {
+        command,
+        id: TRAILING_PROFIT_ID.into(),
+        price: Some(0.07),
+        amount: None,
+    });
+    assert!(h.requests.is_empty(), "{:?}", h.paths());
+    assert_eq!(
+        h.result(command),
+        Some(&Err(TRAILING_PROFIT_REFUSAL.to_owned()))
+    );
+}
+
+#[test]
+fn a_trailing_take_profit_amend_is_refused_without_a_request() {
+    for (command, mut h) in (130..).zip(with_trailing_profit()) {
+        assert_amend_refused(&mut h, command);
+    }
+}
+
+#[test]
+fn a_frame_fed_engine_refuses_a_trailing_take_profit_amend_from_the_source_state() {
+    for (command, mut source) in (140..).zip(with_trailing_profit()) {
+        let snapshot = source.engine.snapshot_frame(source.now).to_vec();
+        let mut engine = support::engine(credentials());
+        engine.set_frame_fed().unwrap();
+        let mut h = Harness::started_engine(engine);
+        h.respond("status=PreLaunch", 200, support::PRELAUNCH);
+        h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
+        h.engine.apply_frame(h.now, &snapshot, true).unwrap();
+        h.collect();
+        assert_eq!(
+            h.engine.store().order(TRAILING_PROFIT_ID).map(|o| o.kind),
+            Some(OrderType::TakeProfit)
+        );
+        assert_amend_refused(&mut h, command);
+    }
+}
+
+#[test]
+fn an_id_no_longer_trailing_amends_as_an_ordinary_full_take_profit() {
+    let mut h = ready();
+    let mut row = trailing_profit_row();
+    row["symbol"] = serde_json::json!("BTCUSDT");
+    row["triggerPrice"] = serde_json::json!("100000");
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic": "order", "data": [row.clone()]}).to_string(),
+    );
+    assert_amend_refused(&mut h, 150);
+    // The same id as an ordinary full take-profit keeps the trading-stop path.
+    row["stopOrderType"] = serde_json::json!("TakeProfit");
+    row["createType"] = serde_json::json!("CreateByTakeProfit");
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic": "order", "data": [row]}).to_string(),
+    );
+    h.requests.clear();
+    h.command(Command::AmendOrder {
+        command: 151,
+        id: TRAILING_PROFIT_ID.into(),
+        price: Some(101000.0),
+        amount: None,
+    });
+    let amend = h.take("/v5/position/trading-stop");
+    assert_eq!(
+        body(&amend),
+        r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Full","takeProfit":"101000","tpTriggerBy":"LastPrice"}"#
+    );
+}
