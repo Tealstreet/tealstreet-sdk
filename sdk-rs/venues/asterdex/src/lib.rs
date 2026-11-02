@@ -889,8 +889,27 @@ impl Venue for AsterDex {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             cancel_with_symbols: true,
             order_book_query: true,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
 
     fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
@@ -1303,7 +1322,11 @@ impl Venue for AsterDex {
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::Signed(req) => self.on_signed_failed(cx, req, error),
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
 
@@ -1571,7 +1594,11 @@ impl AsterDex {
             }) => {
                 let _ = cx.fail_context(&root, error);
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
 }

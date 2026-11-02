@@ -642,6 +642,7 @@ impl Venue for BitgetFutures {
             },
             account: safe_cex_engine::AccountLookup::Query,
             leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -650,6 +651,17 @@ impl Venue for BitgetFutures {
     }
     fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
         self.refresh_settings(cx, symbol);
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
     }
     fn export_venue_state(&self) -> Option<Vec<u8>> {
         Some(venue_state::encode(
@@ -1184,6 +1196,7 @@ impl Venue for BitgetFutures {
         _pending: Vec<Pending>,
     ) {
         self.history_retired(owner);
+        self.account.fresh_positions.retired(owner);
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

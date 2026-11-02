@@ -37,7 +37,7 @@ function record(extra = {}) {
     stpControls: false, bybitExecutionControls: false, rejectClientSlippage: false,
     finiteCommandNumbers: false, finiteHistoryBounds: false, rejectOrderHistoryFilters: false,
     publicCatalogueValidation: false, isolatedBookSubscriptions: false,
-    inverseClosedPositions: false, scheduleCancel: false, orderHistoryNeedsSymbol: false, ...extra,
+    inverseClosedPositions: false, scheduleCancel: false, orderHistoryNeedsSymbol: false, freshPositions: false, ...extra,
   };
 }
 
@@ -52,6 +52,13 @@ test('only runtime-advertised commands are selected; policy fields add no ops', 
     'scheduleCancel', 'scheduleCancel',
   ]);
   assert.equal(new Set(probes.map((probe) => probe.command.command)).size, probes.length);
+});
+
+test('freshPositions advertises the readPositions op', () => {
+  assert.deepEqual(
+    advertisedCommands(record({ freshPositions: true })).map((probe) => probe.command.op),
+    ['cancelSymbolOrders', 'readPositions'],
+  );
 });
 
 test('unknown, missing, mistyped and unknown-enum capabilities fail closed', () => {

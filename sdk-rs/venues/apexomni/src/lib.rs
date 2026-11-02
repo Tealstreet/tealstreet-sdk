@@ -278,8 +278,27 @@ impl Venue for ApexOmni {
             account: safe_cex_engine::AccountLookup::Query,
             order_history: false,
             income_history: false,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.options.credentials_ignored {

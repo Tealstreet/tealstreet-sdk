@@ -672,6 +672,10 @@ pub fn translate(
             }
             one(command("fetchOrderHistory", out, false))
         }
+        // A positions read issued after this call, for a second Nuke close.
+        "readPositions" if capabilities.fresh_positions => {
+            one(command("readPositions", Map::new(), false))
+        }
         // The engine owns venue reconciliation (it has no command for it); these
         // re-baseline the caller from the engine with a fresh full snapshot.
         "fetchAndSetPrivateSnapshot" => one(Plan::Resnapshot(Value::Null)),
@@ -1011,6 +1015,18 @@ mod tests {
     }
 
     // Web: order form / ladder / hotkeys `sendOrder` -> placeOrderWithClientOrderId({...order, clientOrderId}).
+    #[test]
+    fn web_read_positions_needs_the_capability() {
+        let fresh = Capabilities {
+            fresh_positions: true,
+            ..caps()
+        };
+        let (command, reply) = web("readPositions", json!([]), &fresh);
+        assert_eq!(command, json!({"op":"readPositions"}));
+        assert!(matches!(reply, Reply::Result));
+        assert!(translate("readPositions", &[], &caps(), &[], false).is_err());
+    }
+
     #[test]
     fn web_place_order_with_client_order_id_decodes() {
         let order = json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":0.001,"price":60000,

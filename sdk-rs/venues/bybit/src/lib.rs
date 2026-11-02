@@ -322,6 +322,8 @@ pub struct BybitLinear {
     /// The raw first account of the last good REST wallet read: TS `balance.info`.
     balance_info: Option<String>,
     market_refresh: refresh::State,
+    fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
 }
 
 /// Bybit kline interval codes.
@@ -564,6 +566,8 @@ impl BybitLinear {
             history: history::HistoryState::default(),
             balance_info: None,
             market_refresh: refresh::State::default(),
+            fresh_positions: Default::default(),
+            fresh_positions_timer: None,
         }
     }
 
@@ -2500,6 +2504,7 @@ impl Venue for BybitLinear {
     ) {
         // Closed-position owners travel in their pending and drop with it.
         self.retire_history(owner);
+        self.fresh_positions.retired(owner);
     }
 
     fn reconcile_http(
@@ -2520,16 +2525,22 @@ impl Venue for BybitLinear {
             Then::Options(request) => self.on_options_response(cx, request, Err(error)),
             Then::History(request) => self.on_history_failed(cx, request, error),
             Then::Closed(request) => self.on_closed_failed(cx, *request, error),
-            then => self.on_request_failed(
-                cx,
-                Pending {
-                    category: pending.category,
-                    rest: pending.rest,
-                    then,
-                    read: pending.read,
-                },
-                &error.message,
-            ),
+            then => {
+                self.select_category(pending.category);
+                if then.reads_account_snapshot() {
+                    self.keep_read_error(&then, &error);
+                }
+                self.on_request_failed(
+                    cx,
+                    Pending {
+                        category: pending.category,
+                        rest: pending.rest,
+                        then,
+                        read: pending.read,
+                    },
+                    &error.message,
+                );
+            }
         }
     }
 
@@ -2579,6 +2590,7 @@ impl Venue for BybitLinear {
             closed_positions: !self.variant.is_spot(),
             balance_info: true,
             market_refresh: true,
+            fresh_positions: !self.variant.is_spot(),
             // Hyro's snapshot replaces every setting, so a flat read would not last.
             leverage_query: if self.variant.is_spot() || self.variant.is_hyro() {
                 safe_cex_engine::LeverageQuery::Settings
@@ -2942,6 +2954,13 @@ impl Venue for BybitLinear {
         if pending.then.reads_account_snapshot() && account::success_with_null_list(response.body) {
             return self.on_response(cx, pending, response);
         }
+        // A native refusal keeps its classification for the command this read answers.
+        if pending.then.reads_account_snapshot()
+            && let Some(error) = read_refusal(&response, "Bybit: ")
+        {
+            self.select_category(pending.category);
+            self.keep_read_error(&pending.then, &error);
+        }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still
         // requires its streamed list.
@@ -3084,6 +3103,11 @@ impl Venue for BybitLinear {
         if self.on_unlisted_timer(cx, timer) {
             return;
         }
+        if self.fresh_positions_timer == Some(timer) {
+            self.fresh_positions_timer = None;
+            self.retry_fresh_positions(cx);
+            return;
+        }
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);
@@ -3104,6 +3128,7 @@ impl Venue for BybitLinear {
                 from_ms,
                 to_ms,
             } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchBalanceInfo => {
                 // A cached answer still needs this command's own authority.
                 let Ok(context) = cx.admit_http_command(policy::read_policy()) else {

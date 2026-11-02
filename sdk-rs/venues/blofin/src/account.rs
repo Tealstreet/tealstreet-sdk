@@ -9,6 +9,7 @@ use safe_cex_engine::credential_selection::{
 use safe_cex_engine::execution::{
     Arithmetic, CumulativePrice, Cursor, ExecutionRounding, Rejection, Report,
 };
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::selected_read::{
@@ -108,6 +109,12 @@ pub(crate) struct Account {
     reporting_started: f64,
     startup_executions: VecDeque<Execution>,
     account_busy: bool,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     pub sources: HashMap<String, Source>,
     fills: HashMap<String, (f64, Option<f64>)>,
     fill_order: VecDeque<String>,
@@ -127,6 +134,8 @@ pub(crate) struct Account {
     /// Order ids (empty when unidentified) whose skipped row was already logged.
     order_skips: RowReports<String>,
 }
+/// How soon `readPositions` tries again after a read a newer stream frame overrode.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum StartupRead {
     Margin,
@@ -196,6 +205,9 @@ pub enum Request {
         positions_revision: u64,
         balance_revision: u64,
         failed: bool,
+        read: u32,
+        /// Owned rows on a market the catalogue does not list.
+        unlisted: Vec<String>,
     },
     Balance {
         positions: SnapshotBuilder<String, Position>,
@@ -205,6 +217,8 @@ pub enum Request {
         positions_revision: u64,
         balance_revision: u64,
         failed: bool,
+        read: u32,
+        unlisted: Vec<String>,
     },
     Orders {
         family: u8,
@@ -659,6 +673,7 @@ impl Blofin {
         if std::mem::replace(&mut self.account.startup_rejected, true) {
             return;
         }
+        self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
         for read in [StartupRead::Margin, StartupRead::Mode] {
             self.account.startup.succeeded(cx, &read);
         }
@@ -744,6 +759,7 @@ impl Blofin {
             return;
         }
         self.account.account_busy = true;
+        self.account.positions_read += 1;
         self.private_read(
             cx,
             "/api/v1/account/positions",
@@ -754,9 +770,40 @@ impl Blofin {
                 positions_revision: self.account.positions_revision,
                 balance_revision: self.account.balance_revision,
                 failed: false,
+                read: self.account.positions_read,
+                unlisted: Vec::new(),
             },
             true,
         );
+    }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.signed()
+            || self.account.margin.is_none()
+            || !self.account.mode_loaded
+            || self.account.startup_rejected
+        {
+            let error =
+                VenueError::new("BloFin account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.positions_read + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.refresh_account(cx);
+        }
+    }
+    /// At once for a waiter the read predates, else once a newer stream frame
+    /// that held the read can have been overtaken.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, read: u32) {
+        if self.account.fresh_positions.predates(0, read) {
+            self.refresh_account(cx);
+        } else if self.account.fresh_positions.owed(0)
+            && self.account.fresh_positions_timer.is_none()
+        {
+            self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
     }
     pub(crate) fn reconcile_uncertain_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if !cx.reconcile_reask() {
@@ -1141,6 +1188,7 @@ impl Blofin {
                 used,
                 upnl,
                 failed,
+                unlisted,
                 ..
             } => match serde_json::from_str::<PositionRow<'_>>(item) {
                 Ok(p) => {
@@ -1165,7 +1213,11 @@ impl Blofin {
                                 p.inst_id
                             ),
                         );
+                        unlisted.push(p.inst_id.to_string());
                         return;
+                    }
+                    if p.positions.0 != 0.0 && cx.store.market_by_id(&p.inst_id).is_none() {
+                        unlisted.push(p.inst_id.to_string());
                     }
                     if let Some(position) = self.map_position(cx, &p) {
                         *used += p.maintenance_margin.0;
@@ -1173,7 +1225,7 @@ impl Blofin {
                         positions.push(position);
                     }
                 }
-                Err(_) => self.reject_position(cx, positions, failed, item),
+                Err(_) => self.reject_position(cx, positions, failed, unlisted, item),
             },
             Request::Balance { wallet, failed, .. } => match serde_json::from_str::<AssetRow>(item)
             {
@@ -1251,6 +1303,7 @@ impl Blofin {
         cx: &mut Cx<'_, Pending>,
         positions: &mut SnapshotBuilder<String, Position>,
         failed: &mut bool,
+        unlisted: &mut Vec<String>,
         item: &str,
     ) {
         let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
@@ -1259,6 +1312,12 @@ impl Blofin {
             .as_deref()
             .is_some_and(|t| !t.is_empty() && !t.eq_ignore_ascii_case("SWAP"))
         {
+            // Its quantity is unreadable, so an uncatalogued row is listed.
+            if let Some(inst_id) = row.inst_id.as_deref().filter(|id| !id.is_empty())
+                && cx.store.market_by_id(inst_id).is_none()
+            {
+                unlisted.push(inst_id.to_owned());
+            }
             return;
         }
         let inst_id = row.inst_id.as_deref().unwrap_or_default();
@@ -1273,6 +1332,8 @@ impl Blofin {
         let Some(symbol) = cx.store.market_by_id(inst_id).map(|m| m.symbol.clone()) else {
             if self.malformed_markets.contains(inst_id) {
                 *failed = true;
+            } else {
+                unlisted.push(inst_id.to_owned());
             }
             return;
         };
@@ -1372,7 +1433,9 @@ impl Blofin {
             if response.body.contains("152401") || response.body.contains("152406") {
                 self.account.auth_failures += 1;
             }
+            self.account.read_error = read_refusal(&response, &e);
             self.account_failed(cx, request, &e);
+            self.account.read_error = None;
             return;
         }
         self.account.auth_failures = 0;
@@ -1449,6 +1512,7 @@ impl Blofin {
             Request::Positions {
                 positions,
                 positions_revision,
+                read,
                 ..
             } if positions.rejected() > 0 => {
                 // Used margin and UPnL sum the rows, so the balance waits for a clean read.
@@ -1459,6 +1523,9 @@ impl Blofin {
                         positions.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                     self.commit_positions(cx, positions);
                 }
+                let error = VenueError::new("BloFin positions: a row could not be mapped");
+                self.account.fresh_positions.failed(cx, 0, read, &error);
+                self.read_fresh_positions_again(cx, read);
             }
             Request::Positions {
                 positions,
@@ -1467,6 +1534,8 @@ impl Blofin {
                 positions_revision,
                 balance_revision,
                 failed: false,
+                read,
+                unlisted,
             } => self.private_read(
                 cx,
                 "/api/v1/asset/balances?accountType=futures",
@@ -1478,6 +1547,8 @@ impl Blofin {
                     positions_revision,
                     balance_revision,
                     failed: false,
+                    read,
+                    unlisted,
                 },
                 true,
             ),
@@ -1489,12 +1560,18 @@ impl Blofin {
                 positions_revision,
                 balance_revision,
                 failed: false,
+                read,
+                unlisted,
             } => {
                 self.account.account_busy = false;
                 if positions_revision == self.account.positions_revision {
                     self.account.position_skips.clear();
                     self.commit_positions(cx, positions.commit([], |p| p.id.clone()));
+                    self.account
+                        .fresh_positions
+                        .committed(cx, 0, read, &unlisted);
                 }
+                self.read_fresh_positions_again(cx, read);
                 if balance_revision == self.account.balance_revision {
                     let used = round_usd(used);
                     let upnl = round_usd(upnl);
@@ -1768,8 +1845,15 @@ impl Blofin {
                         Some((cx.set_timer(1000.0 * f64::from(attempt)), attempt + 1));
                 }
             }
-            Request::Positions { .. } | Request::Balance { .. } => {
-                self.account.account_busy = false
+            Request::Positions { read, .. } | Request::Balance { read, .. } => {
+                self.account.account_busy = false;
+                let fresh = self
+                    .account
+                    .read_error
+                    .take()
+                    .unwrap_or_else(|| VenueError::new(error));
+                self.account.fresh_positions.failed(cx, 0, read, &fresh);
+                self.read_fresh_positions_again(cx, read);
             }
             Request::Margin { .. } => self.setting_unsettled(cx, StartupRead::Margin),
             Request::Mode { .. } => self.setting_unsettled(cx, StartupRead::Mode),
@@ -2211,6 +2295,13 @@ impl Blofin {
         cx.fill(fill);
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.fresh_positions_timer == Some(timer) {
+            self.account.fresh_positions_timer = None;
+            if self.account.fresh_positions.owed(0) {
+                self.refresh_account(cx);
+            }
+            return true;
+        }
         if let Some(read) = self.account.startup.on_timer(timer) {
             self.read_setting(cx, read);
             return true;
@@ -2279,6 +2370,21 @@ fn execution_prefix(
 
 /// BloFin key refusals no retry can fix (docs "Error Codes", 1524xx); 152405,
 /// 152407, 152410 (timestamp/nonce) and every other code stay transient.
+/// A typed cause for a failing positions read: a refused key, or a rate limit.
+pub(crate) fn read_refusal(response: &Response<'_>, message: &str) -> Option<VenueError> {
+    #[derive(Deserialize)]
+    struct Code<'a> {
+        #[serde(borrow)]
+        code: Str<'a>,
+    }
+    let code = serde_json::from_str::<Code<'_>>(response.body).ok();
+    let kind = code
+        .as_ref()
+        .and_then(|c| key_rejection(c.code.as_ref()))
+        .or((response.status == 429).then_some(ErrorKind::RateLimited))?;
+    Some(VenueError::new(message).kind(kind))
+}
+
 fn key_rejection(code: &str) -> Option<ErrorKind> {
     match code {
         "152401" | "152408" | "152409" => Some(ErrorKind::AuthInvalid),

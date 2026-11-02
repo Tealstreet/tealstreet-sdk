@@ -2,6 +2,7 @@
 //! positions and the unified wallet, and the reconciliation that keeps them
 //! honest against the stream.
 use crate::sign::Query;
+use crate::venue_state::category_code;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
 use safe_cex_engine::Level;
@@ -30,6 +31,8 @@ const POSITION_FRAME_GUARD_MS: f64 = 1_000.0;
 /// How long the per-tick position read outlives the last open position, so a
 /// lagging read that wrongly showed flat is repaired before the safety reconcile.
 const POSITION_READ_TAIL_MS: f64 = 30_000.0;
+/// How soon `readPositions` tries again after a read a stream frame overrode.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
 /// Consecutive Hyro reads the private stream may overtake before one is admitted.
 const HYRO_OVERTAKEN_READS: u8 = 2;
 const FILL_REPAIR_GRACE_MS: f64 = 8_000.0;
@@ -121,6 +124,7 @@ pub enum Request {
         rows: Vec<MappedPosition>,
         invalid: bool,
         rejected: RowAdmission<String>,
+        unlisted: Vec<String>,
     },
     Wallet {
         session: u32,
@@ -175,6 +179,8 @@ struct PositionsJoin {
     failed: bool,
     rejected: RowAdmission<String>,
     cursors: HashSet<String>,
+    /// Owned rows this product does not trade, on no catalogued market.
+    unlisted: Vec<String>,
 }
 
 struct OrdersJoin {
@@ -209,6 +215,9 @@ pub struct Wallet {
 
 struct HyroSnapshot {
     revision: u32,
+    /// The positions read of this snapshot.
+    generation: u32,
+    unlisted: Vec<String>,
     orders: Option<Vec<Mapped>>,
     positions: Option<Vec<MappedPosition>>,
     wallet: Option<Wallet>,
@@ -263,6 +272,8 @@ pub struct AccountState {
     positions_generation: u32,
     positions: Option<PositionsJoin>,
     positions_follow_up: bool,
+    /// The venue's error for the private read that just failed.
+    read_error: Option<VenueError>,
     orders_generation: u32,
     orders: Option<OrdersJoin>,
     orders_follow_up: bool,
@@ -1232,6 +1243,10 @@ impl BybitLinear {
             self.account.mark_orders_stale();
             self.account.wallet_in_flight = false;
             self.account.wallet_follow_up = false;
+            // The dropped read owed a command; REST does not need the socket.
+            if self.fresh_positions.owed(category_code(self.category)) {
+                self.fetch_positions(cx);
+            }
             return;
         }
         self.account.session_version += 1;
@@ -1253,6 +1268,14 @@ impl BybitLinear {
     /// A periodic read that failed in transport keeps the healthy stream and the
     /// last good state; the next tick retries. Bad content still reconnects.
     fn hyro_read_failed(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
+        // A snapshot is atomic: any failed leg fails the commands it would answer.
+        let error = self
+            .account
+            .read_error
+            .take()
+            .unwrap_or_else(|| VenueError::new(format!("HyroTrader {message}")));
+        let key = category_code(self.category);
+        self.fresh_positions.failed(cx, key, u32::MAX, &error);
         let disposition = hyro_failure(
             self.account.ready,
             std::mem::take(&mut self.account.hyro_transient),
@@ -1354,6 +1377,8 @@ impl BybitLinear {
         self.account.hyro_local_refusal = false;
         self.account.snapshot = Some(HyroSnapshot {
             revision: self.account.revision,
+            generation: 0,
+            unlisted: Vec::new(),
             orders: None,
             positions: None,
             wallet: None,
@@ -1361,6 +1386,9 @@ impl BybitLinear {
         });
         self.fetch_orders(cx);
         self.fetch_positions(cx);
+        if let Some(snapshot) = &mut self.account.snapshot {
+            snapshot.generation = self.account.positions_generation;
+        }
         self.fetch_wallet(cx);
     }
 
@@ -1465,6 +1493,9 @@ impl BybitLinear {
         self.account.ready = true;
         // A complete committed snapshot is the fresh order read for the fence.
         cx.orders_reconciled(None);
+        let key = category_code(self.category);
+        self.fresh_positions
+            .committed(cx, key, snapshot.generation, &snapshot.unlisted);
     }
 
     fn settle_coins(&self) -> &'static [&'static str] {
@@ -1567,6 +1598,7 @@ impl BybitLinear {
             rows: Vec::new(),
             invalid: false,
             rejected: RowAdmission::default(),
+            unlisted: Vec::new(),
         };
         let rest = Rest::get("/v5/position/list", query).streamed().signed();
         self.send_page(cx, generation, rest, Then::Account(request));
@@ -1697,6 +1729,9 @@ impl BybitLinear {
         }
         self.account.positions_generation += 1;
         let generation = self.account.positions_generation;
+        if !self.variant.is_hyro() {
+            self.account.read_error = None;
+        }
         let coins = self.settle_coins();
         let root = self.account_read_root(cx);
         self.account.positions = Some(PositionsJoin {
@@ -1710,6 +1745,7 @@ impl BybitLinear {
             failed: false,
             rejected: RowAdmission::default(),
             cursors: HashSet::new(),
+            unlisted: Vec::new(),
         });
         for coin in coins {
             self.request_positions_page(cx, generation, coin, String::new());
@@ -2555,12 +2591,21 @@ impl BybitLinear {
                 rows,
                 invalid,
                 rejected,
+                unlisted,
                 ..
             } => {
                 let Ok(row) = serde_json::from_str::<PositionRow>(item) else {
                     if self.variant.is_hyro() {
                         *invalid = true;
                     } else {
+                        // Its size is unreadable, so an uncatalogued row is listed.
+                        if let Some(identity) = rejected_identity(item)
+                            && let Some(symbol) = identity.symbol.filter(|s| !s.is_empty())
+                            && !self.trades_row(&identity.category.map(Into::into), &symbol)
+                            && cx.store.market(&symbol).is_none()
+                        {
+                            unlisted.push(symbol);
+                        }
                         self.reject_position_item(cx, rejected, item);
                     }
                     return;
@@ -2574,6 +2619,10 @@ impl BybitLinear {
                     return;
                 }
                 if !self.trades_row(&row.category, &row.symbol) {
+                    let flat = present(&row.size).is_some_and(|s| s.parse() == Ok(0.0));
+                    if !flat && cx.store.market(&row.symbol).is_none() {
+                        unlisted.push(row.symbol.to_string());
+                    }
                     return;
                 }
                 if !admitted_position_numbers(&row, self.variant.is_hyro()) {
@@ -2742,11 +2791,13 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.retried_failure_error(
-                            "bybit.account:2216",
-                            &failed(format!("Bybit orders: {message}")),
-                        );
+                        let error = failed(format!("Bybit orders: {message}"));
+                        cx.retried_failure_error("bybit.account:2216", &error);
                         join.failed = true;
+                        if self.variant.is_hyro() {
+                            let typed = self.account.read_error.take();
+                            self.account.read_error = Some(typed.unwrap_or(error));
+                        }
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
                 }
@@ -2762,6 +2813,7 @@ impl BybitLinear {
                 rows,
                 invalid,
                 rejected,
+                unlisted,
             } => {
                 let malformed = invalid
                     || outcome
@@ -2788,6 +2840,7 @@ impl BybitLinear {
                     Ok(_) => {
                         join.rows.extend(rows);
                         join.rejected.extend(rejected);
+                        join.unlisted.extend(unlisted);
                         if let Some(next) = next {
                             if !join.cursors.insert(next.clone()) || join.cursors.len() > 100 {
                                 join.failed = true;
@@ -2799,11 +2852,11 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.retried_failure_error(
-                            "bybit.account:2269",
-                            &failed(format!("Bybit positions: {message}")),
-                        );
+                        let error = failed(format!("Bybit positions: {message}"));
+                        cx.retried_failure_error("bybit.account:2269", &error);
                         join.failed = true;
+                        let typed = self.account.read_error.take();
+                        self.account.read_error = Some(typed.unwrap_or(error));
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
                 }
@@ -2871,11 +2924,10 @@ impl BybitLinear {
                         }
                     }
                     Err(message) => {
-                        cx.retried_failure_error(
-                            "bybit.account:2342",
-                            &failed(format!("Bybit balance: {message}")),
-                        );
+                        let error = failed(format!("Bybit balance: {message}"));
+                        cx.retried_failure_error("bybit.account:2342", &error);
                         if self.variant.is_hyro() {
+                            self.account.read_error = Some(error);
                             self.hyro_read_failed(cx, "wallet reconciliation failed");
                         }
                     }
@@ -3096,23 +3148,36 @@ impl BybitLinear {
         if join.failed {
             if self.variant.is_hyro() {
                 self.hyro_read_failed(cx, "positions reconciliation failed");
+                return;
             }
+            let error = self
+                .account
+                .read_error
+                .take()
+                .unwrap_or_else(|| VenueError::new("Bybit positions: unusable page cursor"));
+            let key = category_code(self.category);
+            self.fresh_positions
+                .failed(cx, key, join.generation, &error);
+            self.read_fresh_positions_again(cx, join.generation);
             return;
         }
         if self.variant.is_hyro() {
             if let Some(snapshot) = &mut self.account.snapshot {
                 snapshot.positions = Some(join.rows);
+                snapshot.unlisted = join.unlisted;
             }
             self.finish_hyro_snapshot(cx);
             return;
         }
         if join.version != self.account.position_version {
             // A stream event landed after these reads went out; it is newer.
+            self.read_fresh_positions_again(cx, join.generation);
             return;
         }
         // Issued too soon after a symbol's frame: this read cannot speak for it.
         let frames = &mut self.account.position_frames_at;
         frames.retain(|_, at| join.issued_at - *at < POSITION_FRAME_GUARD_MS);
+        let frame_held = !frames.is_empty();
         let frame_guarded = frames.clone();
         let frame_guarded = |symbol: &str| frame_guarded.contains_key(symbol);
         let mut best = best_positions(
@@ -3201,6 +3266,81 @@ impl BybitLinear {
             cx.store.set_positions(cx.store.positions().to_vec());
         }
         self.commit_balance(cx);
+        let key = category_code(self.category);
+        if join.rejected.any() {
+            let error = VenueError::new("Bybit positions: a row could not be mapped");
+            self.fresh_positions
+                .failed(cx, key, join.generation, &error);
+        } else if !frame_held {
+            self.fresh_positions
+                .committed(cx, key, join.generation, &join.unlisted);
+        }
+        self.read_fresh_positions_again(cx, join.generation);
+    }
+
+    /// The engine's typed cause of a failed read, for the command it answers.
+    pub(crate) fn keep_read_error(&mut self, then: &Then, error: &VenueError) {
+        if self.variant.is_hyro() || matches!(then, Then::Account(Request::Positions { .. })) {
+            self.account.read_error = Some(error.clone());
+        }
+    }
+
+    /// `readPositions`: wait on every product's next read. A read already out
+    /// may predate the close, so it is followed by a new one, never joined.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        let selected = self.category;
+        let mut legs = Vec::new();
+        let mut started = !self.credentials_rejected;
+        for category in self.required_categories() {
+            self.select_category(category);
+            started &= self.account.started;
+            legs.push((
+                category_code(category),
+                self.account.positions_generation + 1,
+            ));
+        }
+        self.select_category(selected);
+        if !started {
+            let error =
+                VenueError::new("Bybit account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        if !self.fresh_positions.admit(cx, legs) {
+            return;
+        }
+        for category in self.required_categories() {
+            self.select_category(category);
+            if self.variant.is_hyro() {
+                self.reconcile_hyro_snapshot(cx);
+            } else {
+                self.account.positions_follow_up = self.account.positions.is_some();
+                self.fetch_positions(cx);
+            }
+        }
+        self.select_category(selected);
+    }
+
+    /// A read that left a waiter on this product is followed: at once when it
+    /// predates the waiter, else once a stream frame's guard can have passed.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, generation: u32) {
+        let key = category_code(self.category);
+        if self.fresh_positions.predates(key, generation) {
+            self.fetch_positions(cx);
+        } else if self.fresh_positions.owed(key) && self.fresh_positions_timer.is_none() {
+            self.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
+    }
+
+    pub(crate) fn retry_fresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        let selected = self.category;
+        for category in self.required_categories() {
+            self.select_category(category);
+            if self.fresh_positions.owed(category_code(category)) {
+                self.fetch_positions(cx);
+            }
+        }
+        self.select_category(selected);
     }
 }
 

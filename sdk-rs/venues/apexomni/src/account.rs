@@ -3,6 +3,7 @@ use crate::{ApexOmni, Pending, private_wire as wire, read, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::credential_selection::CredentialUnavailable;
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -45,6 +46,7 @@ pub enum Request {
         generation: Option<u64>,
         revision: u64,
         rows: SnapshotBuilder<String, Position>,
+        read: u32,
     },
     Orders {
         read_epoch: u64,
@@ -154,6 +156,9 @@ pub(crate) struct Execution {
 struct Snapshot {
     generation: u64,
     revision: u64,
+    /// The number of this snapshot's positions read, and whether it rejected a row.
+    read: u32,
+    rejected: bool,
     positions: Option<Vec<Position>>,
     orders: Option<Vec<Order>>,
     metadata: Option<(String, String, String)>,
@@ -186,6 +191,9 @@ pub struct Account {
     positions_heal: Option<TimerId>,
     balance_pending: bool,
     positions_pending: bool,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
     orders_pending: bool,
     /// An uncertain placement asked for an orders read dispatched after its mark.
     reconcile_owed: bool,
@@ -727,6 +735,8 @@ impl ApexOmni {
         self.account.snapshot = Some(Snapshot {
             generation,
             revision: self.account.revision,
+            read: self.account.positions_read + 1,
+            rejected: false,
             positions: None,
             orders: None,
             metadata: None,
@@ -760,10 +770,12 @@ impl ApexOmni {
 
     fn request_positions(&mut self, cx: &mut Cx<'_, Pending>, generation: Option<u64>) {
         self.account.positions_pending = true;
+        self.account.positions_read += 1;
         let pending = Request::Positions {
             generation,
             revision: self.account.revision,
             rows: SnapshotBuilder::default(),
+            read: self.account.positions_read,
         };
         self.snapshot_read(
             cx,
@@ -829,9 +841,11 @@ impl ApexOmni {
     }
 
     fn snapshot_refused(&mut self, cx: &mut Cx<'_, Pending>, leg: Request, error: String) {
+        let fresh = VenueError::new(error.clone());
         let snapshot = match leg {
-            Request::Positions { .. } => {
+            Request::Positions { read, .. } => {
                 self.account.positions_pending = false;
+                self.account.fresh_positions.failed(cx, 0, read, &fresh);
                 true
             }
             Request::Orders { .. } => {
@@ -844,8 +858,9 @@ impl ApexOmni {
             }
             Request::Identity => return,
         };
-        if snapshot {
-            self.account.snapshot = None;
+        if snapshot && let Some(dropped) = self.account.snapshot.take() {
+            let read = dropped.read;
+            self.account.fresh_positions.failed(cx, 0, read, &fresh);
         }
         cx.notice(Level::Error, code::CONFIG_INVALID, error);
     }
@@ -965,6 +980,7 @@ impl ApexOmni {
                 generation,
                 revision,
                 rows,
+                read,
             } => {
                 self.account.positions_pending = false;
                 let metadata = data
@@ -972,9 +988,12 @@ impl ApexOmni {
                 let Some(metadata) =
                     metadata.filter(|m| m.positions.get().starts_with('[') && !m.id.is_empty())
                 else {
+                    let error = VenueError::new("ApeX positions: invalid account snapshot");
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
                     self.snapshot_failed(cx, generation, "invalid account snapshot");
                     return;
                 };
+                let rejected = rows.rejected() != 0;
                 let rows = rows.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                 let fees = metadata
                     .contract_account
@@ -993,11 +1012,13 @@ impl ApexOmni {
                         .filter(|s| s.generation == generation)
                     {
                         snapshot.positions = Some(rows);
+                        snapshot.rejected = rejected;
                         snapshot.metadata = Some((metadata.id, fees.0, fees.1));
                     }
                     self.commit_snapshot(cx);
                 } else {
-                    self.commit_positions(cx, rows, revision);
+                    let held = self.commit_positions(cx, rows, revision);
+                    self.settle_fresh_positions(cx, read, rejected, held);
                     self.account.account_id = metadata.id;
                     self.account.maker_fee = fees.0;
                     self.account.taker_fee = fees.1;
@@ -1107,8 +1128,12 @@ impl ApexOmni {
                 .snapshot
                 .as_ref()
                 .is_some_and(|s| s.generation == generation)
-        }) {
-            self.account.snapshot = None;
+        }) && let Some(dropped) = self.account.snapshot.take()
+        {
+            let fresh = VenueError::new(format!("ApeX positions: {error}"));
+            self.account
+                .fresh_positions
+                .failed(cx, 0, dropped.read, &fresh);
         }
         cx.notice(
             Level::Warn,
@@ -1134,12 +1159,25 @@ impl ApexOmni {
                 let _ = cx.fail_context(context, error);
                 return;
             }
-            Request::Positions { generation, .. } => {
+            Request::Positions {
+                generation, read, ..
+            } => {
                 self.account.positions_pending = false;
+                self.account.fresh_positions.failed(cx, 0, read, &error);
                 generation
             }
             Request::Orders { generation, .. } => {
                 self.account.orders_pending = false;
+                // The positions half of this snapshot commits only with its orders.
+                if let Some(snapshot) = self
+                    .account
+                    .snapshot
+                    .as_ref()
+                    .filter(|s| Some(s.generation) == generation)
+                {
+                    let read = snapshot.read;
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
+                }
                 generation
             }
             Request::Balance => {
@@ -1169,11 +1207,12 @@ impl ApexOmni {
             );
             return false;
         }
-        self.commit_positions(
+        let held = self.commit_positions(
             cx,
             snapshot.positions.expect("positions"),
             snapshot.revision,
         );
+        self.settle_fresh_positions(cx, snapshot.read, snapshot.rejected, held);
         self.commit_orders(cx, snapshot.orders.expect("orders"), snapshot.revision);
         if let Some((id, maker, taker)) = snapshot.metadata {
             self.account.account_id = id;
@@ -1186,16 +1225,64 @@ impl ApexOmni {
         true
     }
 
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started || self.options.public_data_only || self.options.identity.is_none()
+        {
+            let error = VenueError::new("ApeX account is not loaded")
+                .kind(safe_cex_engine::ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.positions_read + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.refresh_positions(cx);
+        }
+    }
+
+    fn settle_fresh_positions(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: u32,
+        rejected: bool,
+        held: bool,
+    ) {
+        if rejected {
+            let error = VenueError::new("ApeX positions: a row could not be mapped");
+            self.account.fresh_positions.failed(cx, 0, read, &error);
+        } else if !held {
+            self.account.fresh_positions.committed(cx, 0, read, &[]);
+        }
+    }
+
+    /// With the delivered read's context retired: at once for a waiter it predates,
+    /// else once the stream frame that held it is past its guard.
+    pub(crate) fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        let fresh = &self.account.fresh_positions;
+        if self.account.positions_pending || self.account.snapshot.is_some() || !fresh.owed(0) {
+            return;
+        }
+        if fresh.predates(0, self.account.positions_read) {
+            self.refresh_positions(cx);
+        } else if self.account.positions_heal.is_none() {
+            self.account.positions_heal = Some(cx.set_timer(1000.0));
+        }
+    }
+
+    /// Whether a newer or too recent stream row overrode this read.
     fn commit_positions(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut rows: Vec<Position>,
         revision: u64,
-    ) {
+    ) -> bool {
+        let mut held = false;
         for row in &mut rows {
             if let Some((version, at, last)) = self.account.position_versions.get(&row.id)
                 && (*version > revision || cx.now - at < 1000.0)
             {
+                held = true;
                 *row = cx.store.position(&row.id).unwrap_or(last).clone();
             }
         }
@@ -1207,6 +1294,7 @@ impl ApexOmni {
                     .get(&current.id)
                     .is_some_and(|(version, at, _)| *version > revision || cx.now - at < 1000.0)
             {
+                held = true;
                 rows.push(current.clone());
             }
         }
@@ -1219,6 +1307,7 @@ impl ApexOmni {
             }
         }
         Self::apply_positions(cx, rows);
+        held
     }
 
     fn apply_positions(cx: &mut Cx<'_, Pending>, rows: Vec<Position>) {

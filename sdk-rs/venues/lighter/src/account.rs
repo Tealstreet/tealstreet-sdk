@@ -3,11 +3,12 @@ use crate::{Lighter, Pending, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::de::number;
+use safe_cex_engine::fresh_positions::{self, FreshPositions};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json};
+use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, SocketId, TimerId, VenueError, json};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::{
@@ -111,6 +112,9 @@ struct OrderBatch {
 }
 const STREAMED_POLL_MS: f64 = 5_000.0;
 const RATE_LIMITED_POLL_HOLD_MS: f64 = 30_000.0;
+/// How soon `readPositions` tries again after a read a newer stream frame held.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
+const FRESH_PAUSED: &str = "Lighter account reads are paused after a rate limit";
 #[derive(Default)]
 pub struct Account {
     pub account_index: Option<u64>,
@@ -135,6 +139,10 @@ pub struct Account {
     suppressed: HashSet<String>,
     pub snapshot_inflight: bool,
     snapshot_serial: u64,
+    pub(crate) fresh_positions: FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     orders_inflight: bool,
     /// An uncertainty reconcile arrived while a read was in flight; that read may
     /// predate the write, so another follows once it settles.
@@ -1186,6 +1194,11 @@ impl Lighter {
         );
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.fresh_positions_timer == Some(timer) {
+            self.account.fresh_positions_timer = None;
+            self.retry_fresh_positions(cx);
+            return true;
+        }
         if self.account.lookup_retry == Some(timer) {
             self.account.lookup_retry = None;
             self.next_lookup(cx, self.lookup_candidates());
@@ -1954,7 +1967,19 @@ impl Lighter {
             },
         }
     }
-    fn commit_snapshot(&mut self, cx: &mut Cx<'_, Pending>, revision: u64, snapshot: Snapshot) {
+    /// Whether the read rejected a row, and whether a newer stream frame held any.
+    fn commit_snapshot(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        revision: u64,
+        snapshot: Snapshot,
+    ) -> (bool, bool) {
+        let rejected = snapshot.coverage.rejected() != 0;
+        let held = self
+            .account
+            .position_revision
+            .values()
+            .any(|changed| *changed > revision);
         let mut positions = snapshot
             .positions
             .into_iter()
@@ -2073,7 +2098,7 @@ impl Lighter {
                     code::VALUATION_UNAVAILABLE,
                     "Lighter position PnL invalid; preserving previous balance",
                 );
-                return;
+                return (rejected, held);
             };
             cx.store.set_balance(Balance {
                 total: snapshot.equity - upnl,
@@ -2085,6 +2110,7 @@ impl Lighter {
         if self.account.revision != revision {
             self.schedule_heal(cx);
         }
+        (rejected, held)
     }
     fn commit_orders(
         &mut self,
@@ -2236,11 +2262,18 @@ impl Lighter {
                         account.coverage.allows_absence(symbol)
                             && !account.unconfirmed_positions.contains(symbol)
                     });
-                    self.commit_snapshot(cx, revision, account);
+                    let (rejected, held) = self.commit_snapshot(cx, revision, account);
                     if self.account.identity.is_none() && !cx.store.loaded().orders {
                         cx.store.set_orders(vec![]);
                     }
                     self.trade_account_ready(cx, serial, confirmed);
+                    let read = serial as u32;
+                    if rejected {
+                        let error = VenueError::new("Lighter positions: a row could not be mapped");
+                        self.account.fresh_positions.failed(cx, 0, read, &error);
+                    } else if !held {
+                        self.account.fresh_positions.committed(cx, 0, read, &[]);
+                    }
                 } else {
                     self.trade_account_ready(cx, serial, false);
                     cx.notice(
@@ -2248,7 +2281,11 @@ impl Lighter {
                         code::SNAPSHOT_DISCARDED,
                         "Lighter account snapshot failed; preserving account state",
                     );
+                    let error = snapshot_read_error(&response, ok);
+                    let read = serial as u32;
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
                 }
+                self.read_fresh_positions_again(cx, serial as u32);
             }
             Request::Orders {
                 revision,
@@ -2365,6 +2402,14 @@ impl Lighter {
                     code::REQUEST_FAILED,
                     format!("Lighter account snapshot failed: {error}"),
                 );
+                let fresh = self
+                    .account
+                    .read_error
+                    .take()
+                    .unwrap_or_else(|| VenueError::new(error));
+                let read = serial as u32;
+                self.account.fresh_positions.failed(cx, 0, read, &fresh);
+                self.read_fresh_positions_again(cx, read);
             }
             Request::Orders { .. } => {
                 self.account.batch = None;
@@ -2377,6 +2422,48 @@ impl Lighter {
             }
         }
     }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.account_index.is_none() {
+            let error =
+                VenueError::new("Lighter account is not loaded").kind(ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        if cx.now < self.account.polls_held_until {
+            let wait = self.account.polls_held_until - cx.now;
+            fresh_positions::refuse(cx, fresh_positions::rate_limited(FRESH_PAUSED, wait));
+            return;
+        }
+        let need = self.account.snapshot_serial as u32 + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.refresh_account(cx);
+        }
+    }
+
+    /// At once for a waiter the read predates, else once a newer stream frame
+    /// that held the read can have been overtaken.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, read: u32) {
+        if self.account.fresh_positions.predates(0, read) {
+            self.retry_fresh_positions(cx);
+        } else if self.account.fresh_positions.owed(0)
+            && self.account.fresh_positions_timer.is_none()
+        {
+            self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
+    }
+
+    fn retry_fresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now < self.account.polls_held_until {
+            let wait = self.account.polls_held_until - cx.now;
+            let error = fresh_positions::rate_limited(FRESH_PAUSED, wait);
+            self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
+            return;
+        }
+        self.refresh_account(cx);
+    }
+
     pub(crate) fn account_message(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -2725,5 +2812,21 @@ impl Lighter {
             },
             Some(sign::AuthPlacement::Header),
         );
+    }
+}
+
+/// The reply's own error for a positions read that cannot answer.
+fn snapshot_read_error(response: &Response<'_>, ok: bool) -> VenueError {
+    if ok {
+        return VenueError::new("Lighter positions: malformed account snapshot");
+    }
+    let error = VenueError::new(format!(
+        "Lighter positions HTTP {}: {}",
+        response.status, response.body
+    ));
+    if matches!(response.status, 405 | 429) {
+        error.kind(ErrorKind::RateLimited)
+    } else {
+        error
     }
 }

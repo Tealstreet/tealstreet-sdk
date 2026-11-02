@@ -5,13 +5,14 @@ use safe_cex_venue_bitunix::{BitunixFutures, Options};
 #[test]
 fn bitunix_uses_the_shared_engine_clock_without_a_capability_opt_in() {
     let venue = BitunixFutures::new(Options::default());
-    // Only the reported closed-position axis differs from the base record.
+    // Only the reported closed-position axis and fresh reads differ from the base record.
     assert_eq!(
         venue.capabilities(),
         safe_cex_engine::Capabilities {
             closed_positions: true,
             position_history: safe_cex_engine::PositionHistory::Bitunix,
             closed_position_format: safe_cex_engine::ClosedPositionFormat::Bitunix,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     );

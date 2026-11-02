@@ -960,6 +960,7 @@ impl Venue for Okx {
             client_order_lookup: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             closed_positions: true,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -1652,6 +1653,7 @@ impl Venue for Okx {
     ) {
         self.retire_history(owner);
         self.retire_closed(owner);
+        self.account.fresh_positions.retired(owner);
     }
 
     /// The managed leverage read keeps the engine's typed failure, e.g. Timeout.
@@ -1710,6 +1712,7 @@ impl Venue for Okx {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

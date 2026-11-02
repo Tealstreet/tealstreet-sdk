@@ -6,6 +6,7 @@ use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::execution::ObservedProgress;
+use safe_cex_engine::fresh_positions::{self, FreshPositions};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::num::parse_decimal;
@@ -45,6 +46,11 @@ pub struct AccountState {
     last_orders: f64,
     last_balance: f64,
     positions_in_flight: bool,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     orders_in_flight: bool,
     /// An uncertain write wants a read that starts after it; the in-flight
     /// one predates it, so its completion starts the fresh read at once.
@@ -120,6 +126,7 @@ pub enum Request {
         version: u64,
         rows: SnapshotBuilder<String, Position>,
         settings: Vec<(String, MarketSetting)>,
+        read: u32,
     },
     Orders {
         version: u64,
@@ -495,6 +502,7 @@ impl AsterDex {
             return;
         }
         self.account.positions_in_flight = true;
+        self.account.positions_read += 1;
         let path = self.path("positionRisk");
         self.signed_streamed(
             cx,
@@ -504,8 +512,40 @@ impl AsterDex {
                 version: self.account.position_version,
                 rows: SnapshotBuilder::default(),
                 settings: Vec::new(),
+                read: self.account.positions_read,
             }),
         );
+    }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.feed.is_none() {
+            let error = VenueError::new("Aster account is not loaded")
+                .kind(safe_cex_engine::ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.positions_read + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.refresh_positions(cx);
+        }
+    }
+    /// The venue's error for a positions read that could not answer.
+    fn positions_read_error(response: &Result<Response<'_>, &str>) -> VenueError {
+        let Ok(response) = response else {
+            return VenueError::new(response.err().unwrap_or_default());
+        };
+        let (code, message) = venue_error(response)
+            .unwrap_or_else(|| (0, "Aster positions: malformed reply".to_owned()));
+        let kind = match (code, response.status) {
+            (-2014 | -2015, _) => safe_cex_engine::ErrorKind::AuthInvalid,
+            (_, 429) | (-1003, _) => safe_cex_engine::ErrorKind::RateLimited,
+            _ => return VenueError::new(message).venue_code(code.to_string()),
+        };
+        VenueError::new(message.clone())
+            .kind(kind)
+            .venue_code(code.to_string())
+            .venue_message(message)
     }
     /// A fresh authoritative order read for an uncertain write: now, or as
     /// soon as the read already in flight (which predates it) completes.
@@ -918,11 +958,13 @@ impl AsterDex {
                 version,
                 rows,
                 settings,
+                read,
             } => {
                 self.account.positions_in_flight = false;
                 self.account.last_positions = cx.now;
                 if valid && version == self.account.position_version {
-                    if rows.rejected() == 0 {
+                    let rejected = rows.rejected() != 0;
+                    if !rejected {
                         self.account.skip_logged.clear();
                     }
                     // A skipped row cannot prove its leg flat; keep what the store knows.
@@ -931,13 +973,33 @@ impl AsterDex {
                     for (symbol, setting) in settings {
                         cx.store.update_setting(&symbol, |s| *s = setting);
                     }
+                    if rejected {
+                        let error = VenueError::new("Aster positions: a row could not be mapped");
+                        self.account.fresh_positions.failed(cx, 0, read, &error);
+                    } else {
+                        self.account.fresh_positions.committed(cx, 0, read, &[]);
+                    }
                 } else if version != self.account.position_version
                     && self.account.positions_timer.is_none()
                 {
                     self.account.positions_timer = Some(cx.set_timer(1_000.0));
                 }
-                if std::mem::take(&mut self.account.positions_requery) {
+                if !valid {
+                    let error = self
+                        .account
+                        .read_error
+                        .take()
+                        .unwrap_or_else(|| Self::positions_read_error(&response));
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
+                }
+                if std::mem::take(&mut self.account.positions_requery)
+                    || self.account.fresh_positions.predates(0, read)
+                {
                     self.refresh_positions(cx);
+                } else if self.account.fresh_positions.owed(0)
+                    && self.account.positions_timer.is_none()
+                {
+                    self.account.positions_timer = Some(cx.set_timer(1_000.0));
                 }
             }
             Request::Orders { version, rows } => {

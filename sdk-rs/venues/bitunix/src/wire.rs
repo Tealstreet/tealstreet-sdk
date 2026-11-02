@@ -344,17 +344,17 @@ pub struct PositionRow<'a> {
     pub position_mode: Str<'a>,
     #[serde(borrow, default, deserialize_with = "text")]
     pub event: Str<'a>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "checked_quantity")]
     pub qty: Option<Num>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "checked_quantity")]
     pub max_qty: Option<Num>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "checked_quantity")]
     pub size: Option<Num>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "checked_quantity")]
     pub position_amt: Option<Num>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "checked_quantity")]
     pub amount: Option<Num>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "checked_quantity")]
     pub contracts: Option<Num>,
     #[serde(default)]
     pub avg_open_price: Option<Num>,
@@ -448,7 +448,45 @@ pub struct OrderRow<'a> {
     pub reduce_only: Option<Supported<'a>>,
 }
 
+// A quantity that cannot be read must fail the row, never read as flat.
+fn checked_quantity<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Num>, D::Error> {
+    struct Quantity;
+    impl Visitor<'_> for Quantity {
+        type Value = Option<Num>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a number or decimal string")
+        }
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+            Ok(Some(Num(v)))
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(Some(Num(v as f64)))
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(Some(Num(v as f64)))
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            safe_cex_engine::num::parse_decimal(v)
+                .map(|quantity| Some(Num(quantity)))
+                .ok_or_else(|| E::custom("position quantity is not a number"))
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+    }
+    d.deserialize_any(Quantity)
+}
+
 impl PositionRow<'_> {
+    pub fn has_quantity(&self) -> bool {
+        self.qty
+            .or(self.max_qty)
+            .or(self.size)
+            .or(self.position_amt)
+            .or(self.amount)
+            .or(self.contracts)
+            .is_some()
+    }
     pub fn quantity(&self) -> f64 {
         self.qty
             .or(self.max_qty)

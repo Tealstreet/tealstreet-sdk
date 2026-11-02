@@ -59,6 +59,7 @@ const CAPABILITY_FLAGS = [
   'stpControls', 'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
   'finiteHistoryBounds', 'rejectOrderHistoryFilters', 'publicCatalogueValidation',
   'isolatedBookSubscriptions', 'inverseClosedPositions', 'scheduleCancel', 'orderHistoryNeedsSymbol',
+  'freshPositions',
 ];
 const CAPABILITY_ENUMS = [
   ['account', ['unsupported', 'query', 'afterLoad']],

@@ -313,7 +313,9 @@ impl BitunixFutures {
                 return;
             }
             other => {
+                self.account.read_error = Some(error.clone());
                 self.on_request_failed(cx, other, &error.message);
+                self.account.read_error = None;
                 return;
             }
         };
@@ -607,6 +609,7 @@ impl Venue for BitunixFutures {
             closed_positions: true,
             position_history: safe_cex_engine::PositionHistory::Bitunix,
             closed_position_format: safe_cex_engine::ClosedPositionFormat::Bitunix,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -617,6 +620,7 @@ impl Venue for BitunixFutures {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,
@@ -1072,6 +1076,13 @@ impl Venue for BitunixFutures {
                 VenueError::new(error).kind(ErrorKind::Internal),
             );
         }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         self.public_typed_failed(cx, pending, error);

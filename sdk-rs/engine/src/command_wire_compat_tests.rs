@@ -146,6 +146,9 @@ mod legacy {
             #[serde(default)]
             symbol: Option<String>,
         },
+        ReadPositions {
+            command: u32,
+        },
         FetchClosedPositions {
             command: u32,
             #[serde(default)]
@@ -355,6 +358,10 @@ mod legacy {
                     command,
                     action: crate::VenueAction::RefreshSettings { symbol },
                 },
+                CommandIn::ReadPositions { command } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::ReadPositions,
+                },
                 CommandIn::FetchClosedPositions {
                     command,
                     symbol,
@@ -548,6 +555,7 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
             ("command", "12"),
             ("symbol", r#""BTCUSDT""#),
         ],
+        vec![("op", r#""readPositions""#), ("command", "12")],
         vec![
             ("op", r#""fetchClosedPositions""#),
             ("command", "13"),

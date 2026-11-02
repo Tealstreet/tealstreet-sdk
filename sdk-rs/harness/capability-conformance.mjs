@@ -47,6 +47,7 @@ const conditional = {
   marketRefresh: () => [{ op: 'refreshMarkets' }],
   stpControls: () => [{ op: 'fetchStpMode' }, { op: 'setStpMode', mode: 'EXPIRE_TAKER' }],
   scheduleCancel: () => [{ op: 'scheduleCancel', time: 5000 }, { op: 'scheduleCancel', time: null }],
+  freshPositions: () => [{ op: 'readPositions' }],
 };
 const fields = [...new Set([...Object.keys(enums), ...Object.keys(conditional), ...policies])];
 

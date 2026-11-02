@@ -137,6 +137,7 @@ pub enum Request {
         product: usize,
         rows: SnapshotBuilder<String, (Position, RiskValues)>,
         invalid: bool,
+        unlisted: Vec<String>,
     },
     Orders {
         context: Option<Context>,
@@ -208,6 +209,8 @@ pub struct RiskValues {
 }
 struct Join {
     generation: u64,
+    /// Owned rows on a market the catalogue does not list.
+    unlisted: Vec<String>,
     positions: Option<SnapshotBuilder<String, (Position, RiskValues)>>,
     equity: Option<SnapshotBuilder<String, (String, f64)>>,
     position_version: u64,
@@ -257,6 +260,8 @@ pub struct AccountState {
     /// Consecutive 50113 answers to the config read; two in a row reject the key.
     signature_rejections: u8,
     pub startup_rejected: bool,
+    pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
 }
 impl AccountState {
     pub(crate) fn order_final(&self, id: &str) -> bool {
@@ -265,6 +270,9 @@ impl AccountState {
             .is_some_and(|(_, _, final_state)| *final_state)
     }
 }
+
+/// How soon `readPositions` tries again after a read a stream frame overrode.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
 
 impl Okx {
     pub(crate) fn account_after_uncertain_write(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -417,6 +425,7 @@ impl Okx {
             let generation = self.account.generation;
             self.account.join = Some(Join {
                 generation,
+                unlisted: Vec::new(),
                 positions: None,
                 equity: None,
                 position_version: version,
@@ -444,6 +453,7 @@ impl Okx {
                     product: 0,
                     rows: SnapshotBuilder::default(),
                     invalid: false,
+                    unlisted: Vec::new(),
                 },
             );
         }
@@ -653,6 +663,7 @@ impl Okx {
                 product,
                 rows,
                 invalid,
+                unlisted,
                 ..
             } => match serde_json::from_str::<PositionRow<'_>>(
                 readable_position
@@ -678,6 +689,7 @@ impl Okx {
                             cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "OKX owned position market unavailable; preserving account snapshot");
                         } else {
                             self.unlisted_skipped(cx, p.inst_id);
+                            unlisted.push(p.inst_id.to_owned());
                         }
                         return;
                     }
@@ -703,6 +715,7 @@ impl Okx {
                             *invalid = true;
                         } else {
                             self.unlisted_skipped(cx, inst_id);
+                            unlisted.push(inst_id.to_owned());
                         }
                         return;
                     }
@@ -999,6 +1012,7 @@ impl Okx {
                 product,
                 rows,
                 invalid: false,
+                unlisted,
             } => {
                 let product = product + 1;
                 if let Some(kind) = self.instrument_types().get(product) {
@@ -1014,6 +1028,7 @@ impl Okx {
                             product,
                             rows,
                             invalid: false,
+                            unlisted,
                         },
                     );
                     return;
@@ -1021,6 +1036,7 @@ impl Okx {
                 if let Some(join) = &mut self.account.join
                     && join.generation == generation
                 {
+                    join.unlisted = unlisted;
                     join.positions = Some(rows);
                     join.position_version = version;
                 }
@@ -1177,6 +1193,7 @@ impl Okx {
         let join = self.account.join.take().expect("join ready");
         let mut positions = Vec::new();
         let builder = join.positions.expect("positions ready");
+        let rejected = builder.rejected() != 0;
         let mapped: Vec<String> = builder
             .rows()
             .iter()
@@ -1246,6 +1263,43 @@ impl Okx {
         self.account.equity_loaded = true;
         self.recalculate(cx);
         self.account.ready = cx.store.loaded().orders && cx.store.loaded().balance;
+        let read = join.generation as u32;
+        if rejected {
+            let error = VenueError::new("OKX positions: a row could not be mapped");
+            self.account.fresh_positions.failed(cx, 0, read, &error);
+        } else if changed.is_empty() {
+            self.account
+                .fresh_positions
+                .committed(cx, 0, read, &join.unlisted);
+        }
+    }
+
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.credentials.is_none() || !self.account.configured || self.account.startup_rejected {
+            let error = VenueError::new("OKX account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.generation as u32 + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.reconcile(cx, false);
+        }
+    }
+
+    /// At once for a waiter the last read predates, else once a stream frame that
+    /// held the read can have passed. Called with the read's page already retired.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        let fresh = &self.account.fresh_positions;
+        if self.account.join.is_some() || !fresh.owed(0) {
+            return;
+        }
+        if fresh.predates(0, self.account.generation as u32) {
+            self.reconcile(cx, false);
+        } else if self.account.fresh_positions_timer.is_none() {
+            self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
     }
 
     pub(crate) fn account_failed(
@@ -1284,6 +1338,8 @@ impl Okx {
                     .is_some_and(|j| j.generation == generation)
                 {
                     self.account.join = None;
+                    let read = generation as u32;
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
                 }
             }
             Request::Orders { .. } => self.account.orders_in_flight = false,
@@ -1305,6 +1361,7 @@ impl Okx {
         if self.account.retry.is_none() {
             self.account.retry = Some(cx.set_timer(5_000.0));
         }
+        self.read_fresh_positions_again(cx);
     }
 
     /// Clearing the in-flight flag lets the backoff timer re-enter account_start.
@@ -1368,6 +1425,7 @@ impl Okx {
             self.account.read_again = false;
             self.account_refresh(cx);
         }
+        self.read_fresh_positions_again(cx);
     }
 
     pub(crate) fn socket_account_ready(&mut self, cx: &mut Cx<'_, Pending>, reopened: bool) {
@@ -1398,6 +1456,7 @@ impl Okx {
             return;
         }
         self.account.startup.succeeded(cx, &());
+        self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
         if let Some(timer) = self.account.retry.take() {
             cx.clear_timer(timer);
         }
@@ -1415,6 +1474,13 @@ impl Okx {
     }
 
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.fresh_positions_timer == Some(timer) {
+            self.account.fresh_positions_timer = None;
+            if self.account.fresh_positions.owed(0) {
+                self.reconcile(cx, false);
+            }
+            return true;
+        }
         if self.account.tick == Some(timer) {
             self.account.tick = Some(cx.set_timer(2_000.0));
             if self.account.configured && cx.now - self.account.config_read_at >= CONFIG_POLL_MS {
