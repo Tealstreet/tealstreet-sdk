@@ -796,3 +796,55 @@ async fn each_stopped_chase_and_twap_is_its_own_notice_naming_its_algo() {
         })
         .await;
 }
+
+/// One notice per user action: a TWAP's slice chase names its TWAP on its row, and
+/// a stop tells the TWAP, not the slice too.
+#[tokio::test]
+async fn a_twap_slice_chase_names_its_twap_and_its_stop_is_told_by_the_twap() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("chaser:start", web_chase(None));
+            let mut twap = web_twap();
+            twap["useChaserOrders"] = true.into();
+            algos.op("twap:start", twap);
+            let store = algos
+                .next("store", |data| {
+                    active_chasers(data).len() == 2 && active_twaps(data).len() == 1
+                })
+                .await;
+            let twap_id = active_twaps(&store["data"])[0]["id"].clone();
+            let chasers = active_chasers(&store["data"]);
+            let (slices, own): (Vec<&Value>, Vec<&Value>) =
+                chasers.iter().partition(|row| row.get("twapId").is_some());
+            assert_eq!(slices.len(), 1, "{chasers:?}");
+            assert_eq!(slices[0]["twapId"], twap_id);
+            assert_eq!(own.len(), 1, "{chasers:?}");
+            algos
+                .inbox
+                .send(AlgoInput::Dispose {
+                    reason: "the server is restarting".into(),
+                    stopped: None,
+                })
+                .unwrap();
+            let mut told = Vec::new();
+            let _ = tokio::time::timeout(Duration::from_secs(5), async {
+                while let Some(text) = algos.out.recv().await {
+                    let message: Value = serde_json::from_str(&text).unwrap();
+                    let d = &message["d"];
+                    if d["op"] == "error" && !d["data"][1]["algo"].is_null() {
+                        told.push(d["data"][1]["algo"].clone());
+                    }
+                }
+            })
+            .await;
+            assert_eq!(
+                told,
+                vec![
+                    json!({"kind": "chase", "id": own[0]["id"]}),
+                    json!({"kind": "twap", "id": twap_id}),
+                ]
+            );
+        })
+        .await;
+}

@@ -336,6 +336,7 @@ impl TwapInstance {
             max_attempts: SLICE_CHASER_MAX_ATTEMPTS,
             reduce_only: self.options.reduce_only,
             delay: self.options.chaser_delay,
+            twap_id: self.id.clone(),
         };
         if let Err(message) = view.start_chaser(&request) {
             effects.push(TwapEffect::Log { message });

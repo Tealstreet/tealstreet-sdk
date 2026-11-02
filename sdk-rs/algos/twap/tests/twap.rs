@@ -526,13 +526,14 @@ fn start_chase(overrides: Value) -> (TwapBook, Env, View, String, String) {
 fn chaser_slice_request_matches_ts() {
     let (mut env, view) = (Env::new(), View::default());
     let mut book = TwapBook::new("test-account");
-    start(
+    let (twap_id, _) = start(
         &mut book,
         &mut env,
         &view,
         chase(json!({ "reduceOnly": true, "chaserDelay": 750 })),
     );
     let request = view.started.borrow()[0].clone();
+    assert_eq!(request.twap_id, twap_id, "a slice names its TWAP");
     assert_eq!(
         (
             request.size,
