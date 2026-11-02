@@ -17,6 +17,7 @@ export interface RoutingOptions {
   bybitSiteId?: 'BRA_BTL';
   // lighter's WS proxy is gated by this separate flag, NOT tealstreetProxy.
   tealstreetWsRoute?: boolean;
+  testnet?: boolean;
 }
 
 // Reproduces getPrivateProxy: grvt's 'tiny' pool always wins; otherwise
@@ -53,6 +54,8 @@ const resolveWsKind = (strategy: WsStrategy, o: RoutingOptions): ResolvedWs => {
       return { tunnelled: true, host: strategy.host };
     case 'proxyConditional':
       return o.tealstreetProxy ? { tunnelled: true, host: strategy.host } : { tunnelled: false };
+    case 'mainnetProxyConditional':
+      return o.tealstreetProxy && !o.testnet ? { tunnelled: true, host: strategy.host } : { tunnelled: false };
     case 'regionConditional':
       return o.tealstreetProxy
         ? { tunnelled: true, host: o.proxyRegion === 'JA' ? strategy.ja : strategy.other }

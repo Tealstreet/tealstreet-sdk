@@ -188,7 +188,7 @@ const buildRoutingTable = (WS: WsHosts): RoutingTable => {
     blofin: { private: { kind: 'proxyConditional', host: WS.blofin } },
     coinbase: coinbaseWs,
     coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange
-    apexomni: { private: { kind: 'proxyConditional', host: WS.apexPrivate } },
+    apexomni: { private: { kind: 'mainnetProxyConditional', host: WS.apexPrivate } },
     bitget: bitgetWs,
     bitgetinverse: bitgetWs, // BitgetInverseExchange extends BitgetExchange
     bitgetusdc: bitgetWs, // BitgetUSDCExchange extends BitgetExchange

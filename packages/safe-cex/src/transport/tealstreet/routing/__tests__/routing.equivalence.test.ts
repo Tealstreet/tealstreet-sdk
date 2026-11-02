@@ -123,8 +123,11 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('coinbase', proxy).wsPrivate.host).toBe(
       relayOf('wss://advanced-trade-ws-user.coinbase.com/'),
     );
-    // Was the AWS ws-proxy `…asia…/apex/private`; apex connects directly since 3e (5c).
-    expect(resolveExchangeRouting('apexomni', proxy).wsPrivate).toEqual({ tunnelled: false });
+    // Was the AWS ws-proxy `…asia…/apex/private`, then direct (5c); its login refuses
+    // IP-bound keys from a browser, so it rides the relay like okx/bitget/blofin/coinbase.
+    expect(resolveExchangeRouting('apexomni', proxy).wsPrivate.host).toBe(
+      relayOf('wss://quote.omni.apex.exchange/realtime_private?v=2'),
+    );
 
     // bitget private moved from fallbackOnly to proxyConditional + a relay that
     // also rides the tunnelled route (40018 IP-bound logins, 2026-10-21); public
