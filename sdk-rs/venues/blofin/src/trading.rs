@@ -349,6 +349,15 @@ fn trigger(value: Option<StopTriggerType>) -> &'static str {
         _ => "last",
     }
 }
+/// A code the table cannot call a refusal (busy, internal, unlisted): the write may be live.
+fn outcome_unknown(code: &str, message: &str) -> bool {
+    !code.is_empty()
+        && code != "0"
+        && matches!(
+            CODES.verdict(&native(code, message), Intent::Place),
+            Verdict::Unknown(_)
+        )
+}
 fn native_side(side: OrderSide) -> &'static str {
     if side == OrderSide::Buy {
         "buy"
@@ -1191,22 +1200,34 @@ impl Blofin {
                     let mut preserved = Vec::new();
                     let mut seen = HashSet::new();
                     for id in &ids {
+                        let real = id.split("__").next().unwrap_or(id);
+                        // A leg of a pending entry is the entry's own; only a tpsl order's legs are siblings.
+                        let entry_leg = cx.store.order(real).is_some_and(|o| {
+                            !matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                        });
                         if let Some(order) = cx.store.order(id)
+                            && !entry_leg
                             && !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
-                            && order.amount <= 0.0
                             && matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
                         {
-                            let real = id.split("__").next().unwrap_or(id);
+                            // One tpsl id carries both legs: cancelling one cancels the other, which
+                            // goes back at its own size (ruled), or at full size when it was positional.
                             for sibling in cx.store.orders().iter().filter(|o| {
                                 !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
                                     && o.id != *id
                                     && !ids.contains(&o.id)
                                     && o.id.split("__").next() == Some(real)
-                                    && o.amount <= 0.0
+                                    && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
                             }) {
                                 if seen.insert(sibling.id.clone()) {
-                                    let mut rows =
-                                        self.replacement(cx, sibling, None, Some(0.0))?;
+                                    let size = (sibling.amount <= 0.0).then_some(0.0);
+                                    job.replacing_stop = Some((
+                                        sibling.id.clone(),
+                                        sibling.symbol.clone(),
+                                        sibling.side,
+                                        sibling.kind,
+                                    ));
+                                    let mut rows = self.replacement(cx, sibling, None, size)?;
                                     for (_, p, _) in &mut rows {
                                         p.protection.retain_leg(sibling.kind);
                                         p.attach_algo_orders.clear();
@@ -1970,11 +1991,16 @@ impl Blofin {
                 if rows.len() != *count {
                     if reply.code != "0" && rows.is_empty() {
                         record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
-                        return Err(VenueError::new(message));
+                        return Err(if outcome_unknown(&reply.code, &reply.msg) {
+                            unknown(message)
+                        } else {
+                            VenueError::new(message)
+                        });
                     }
                     let _ = cx.http_write_unproven(context, message.clone());
                     return Err(unknown(message));
                 }
+                let mut maybe_live = false;
                 let mut items = Vec::with_capacity(rows.len());
                 let mut seen = HashSet::new();
                 let mut error = None;
@@ -2005,6 +2031,7 @@ impl Blofin {
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else if refused && !gone {
                         items.push(BatchItem::Native(native(&row.code, &row.msg)));
+                        maybe_live |= outcome_unknown(&row.code, &row.msg);
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else if refused
                         || id.is_empty()
@@ -2056,7 +2083,7 @@ impl Blofin {
                 }
                 let error = error.or_else(|| unproven.then_some(message));
                 match error {
-                    Some(error) if unproven => Err(unknown(error)),
+                    Some(error) if unproven || maybe_live => Err(unknown(error)),
                     Some(error) => Err(VenueError::new(error)),
                     None => Ok(()),
                 }
@@ -2103,14 +2130,28 @@ impl Blofin {
                     let Some(row) = row else {
                         continue;
                     };
-                    // Code-only: the "does not exist" text is 102068's own message.
-                    let gone = matches!(&*row.code, "1000" | "102068");
+                    // BloFin's tpsl and algo cancels answer code 500 with this text for an order
+                    // already filled, triggered, canceled or missing; legacy counts it done too.
+                    // Only under the documented code: the same text under an unlisted one stays unproven.
+                    let gone_text = row.code == "500"
+                        && row
+                            .msg
+                            .to_ascii_lowercase()
+                            .contains("filled, triggered, canceled or does not exist");
+                    let gone = matches!(&*row.code, "1000" | "102068") || gone_text;
                     // Each row speaks for itself: code 2 is "partially succeeded".
                     let accepted = row.code == "0" || (reply.code == "0" && row.code.is_empty());
-                    if gone && !job.replacement_targets.is_empty() {
-                        error = Some("BloFin replacement requires a confirmed cancellation".into());
+                    let replacing = !job.replacement_targets.is_empty();
+                    if gone && replacing {
+                        // Nothing to move: the old order ended first, and no replacement goes out.
+                        job.replacing_stop = None;
+                        job.replacing_order = None;
+                        error = Some(
+                            "The order was already filled, triggered or canceled before the move; no replacement was sent"
+                                .into(),
+                        );
                     }
-                    if accepted {
+                    if accepted || (gone_text && !replacing) {
                         items.push(BatchItem::Accepted(&target.id));
                     } else {
                         items.push(BatchItem::Native(native(&row.code, &row.msg)));

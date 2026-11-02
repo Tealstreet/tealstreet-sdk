@@ -227,7 +227,7 @@ fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
     let r = h.take("order-tpsl");
     h.respond(
         r,
-        r#"{"code":"102000","msg":"trigger refused","data":null}"#,
+        r#"{"code":"102014","msg":"trigger refused","data":null}"#,
     );
     let error = h
         .actions
@@ -328,7 +328,7 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     let r = h.take("batch-orders");
     h.respond(
         r,
-        r#"{"code":"102000","msg":"replacement refused","data":null}"#,
+        r#"{"code":"102014","msg":"replacement refused","data":null}"#,
     );
     let error = h
         .actions
