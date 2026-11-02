@@ -462,6 +462,8 @@ impl Venue for PhemexPerpetuals {
             account: safe_cex_engine::AccountLookup::Query,
             order_history_needs_symbol: true,
             fresh_positions: true,
+            nuke_account_cancel: true,
+            symbol_cancel_misses_unseen: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -1095,6 +1097,14 @@ impl Venue for PhemexPerpetuals {
     ) {
         match action {
             safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            action @ safe_cex_engine::VenueAction::CancelAccountOrders => {
+                if self
+                    .trade_command(cx, Command::Venue { command, action })
+                    .is_some()
+                {
+                    safe_cex_engine::unsupported_venue_action(cx, command);
+                }
+            }
             _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
