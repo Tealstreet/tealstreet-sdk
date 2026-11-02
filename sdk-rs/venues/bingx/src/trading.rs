@@ -843,7 +843,15 @@ impl Trading {
                 code: NativeCode::Int(e.code),
                 message: &e.msg,
             });
-            let fact = match cx.classify_write(&request.context, &TABLE, native.as_ref(), message) {
+            let table = if native
+                .as_ref()
+                .is_some_and(|n| context::names_duplicate_client_id(n.message))
+            {
+                &context::DUPLICATE_TABLE
+            } else {
+                &TABLE
+            };
+            let fact = match cx.classify_write(&request.context, table, native.as_ref(), message) {
                 Ok(fact) => fact,
                 Err(error) => {
                     let _ = cx.fail_plan(&request.plan, error.venue_error());

@@ -71,8 +71,6 @@ pub enum Request {
         rows: Vec<Position>,
         settings: Vec<(String, MarketSetting)>,
         skipped: Vec<String>,
-        // An owned row outside the catalogue makes the snapshot incomplete.
-        unavailable: bool,
         read: u32,
         /// Owned rows on a market the catalogue does not list.
         unlisted: Vec<String>,
@@ -86,7 +84,6 @@ pub enum Request {
         skipped: Vec<String>,
         /// Markets of the skipped rows, which stay fenced.
         unproven: Vec<String>,
-        unavailable: bool,
     },
 }
 
@@ -649,7 +646,6 @@ impl Account {
                 rows: Vec::new(),
                 settings: Vec::new(),
                 skipped: Vec::new(),
-                unavailable: false,
                 read: self.positions_read,
                 unlisted: Vec::new(),
             },
@@ -739,7 +735,6 @@ impl Account {
                 metas: Vec::new(),
                 skipped: Vec::new(),
                 unproven: Vec::new(),
-                unavailable: false,
             },
             true,
             primary,
@@ -1054,7 +1049,6 @@ impl Account {
                 rows,
                 settings,
                 skipped,
-                unavailable,
                 unlisted,
                 ..
             } => {
@@ -1065,10 +1059,12 @@ impl Account {
                 let symbol = row.symbol.replace('-', "");
                 if self.untracked_market(cx, &symbol) {
                     if row.position_amt != 0.0 {
+                        // Ruled: one unreadable market must not hide every other position.
                         if self.skipped_markets.contains(&symbol) {
-                            *unavailable = true;
-                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
-                                "BingX owned position market unavailable; preserving previous snapshot",
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
+                                format!("Skipping BingX position on unreadable market {symbol}"),
                             );
                         } else {
                             cx.notice(
@@ -1089,13 +1085,8 @@ impl Account {
                 }
                 let mode = reported.unwrap_or(known);
                 let side = position_side(&row.position_side, row.position_amt);
-                if row.leverage <= 0.0 {
-                    // A flat row closes its position whatever its leverage.
-                    if row.position_amt != 0.0 {
-                        skipped.push(position_id(&symbol, side, mode));
-                    }
-                    return;
-                }
+                // As legacy, a held row without leverage still shows; only its margin is unknown.
+                let leverage = (row.leverage > 0.0).then_some(row.leverage);
                 let margin = if row.isolated {
                     MarginType::Isolated
                 } else {
@@ -1106,25 +1097,27 @@ impl Account {
                     .position(|(s, _)| s == &symbol)
                     .unwrap_or_else(|| {
                         let mut setting = cx.store.setting(&symbol).unwrap_or_default();
-                        if !setting.leverage.is_finite() {
-                            setting.leverage = row.leverage;
+                        if let Some(leverage) = leverage.filter(|_| !setting.leverage.is_finite()) {
+                            setting.leverage = leverage;
                         }
                         settings.push((symbol.clone(), setting));
                         settings.len() - 1
                     });
                 let setting = &mut settings[index].1;
                 setting.margin_type = Some(margin);
-                if mode == PositionMode::Oneway {
-                    setting.leverage = row.leverage;
-                    setting.buy_leverage = Some(row.leverage);
-                    setting.sell_leverage = Some(row.leverage);
-                } else {
-                    match side {
-                        PositionSide::Long => {
-                            setting.leverage = row.leverage;
-                            setting.buy_leverage = Some(row.leverage);
+                if let Some(leverage) = leverage {
+                    if mode == PositionMode::Oneway {
+                        setting.leverage = leverage;
+                        setting.buy_leverage = Some(leverage);
+                        setting.sell_leverage = Some(leverage);
+                    } else {
+                        match side {
+                            PositionSide::Long => {
+                                setting.leverage = leverage;
+                                setting.buy_leverage = Some(leverage);
+                            }
+                            PositionSide::Short => setting.sell_leverage = Some(leverage),
                         }
-                        PositionSide::Short => setting.sell_leverage = Some(row.leverage),
                     }
                 }
                 if row.position_amt == 0.0 {
@@ -1132,11 +1125,11 @@ impl Account {
                 }
                 let notional = row.position_amt.abs() * row.avg_price + row.unrealized_profit;
                 let margin_size = if row.isolated_margin > 0.0 {
-                    row.isolated_margin
+                    Some(row.isolated_margin)
                 } else if row.initial_margin > 0.0 {
-                    row.initial_margin
+                    Some(row.initial_margin)
                 } else {
-                    notional / row.leverage
+                    leverage.map(|leverage| notional / leverage)
                 };
                 rows.push(Position {
                     id: position_id(&symbol, side, mode),
@@ -1151,7 +1144,7 @@ impl Account {
                     realized_pnl: None,
                     contracts: row.position_amt.abs(),
                     liquidation_price: row.liquidation_price,
-                    margin_size: Some(margin_size),
+                    margin_size,
                     last_update: None,
                 });
             }
@@ -1160,7 +1153,6 @@ impl Account {
                 metas,
                 skipped,
                 unproven,
-                unavailable,
                 ..
             } => {
                 let Some(order) = serde_json::from_str::<NativeOrder<'_>>(item)
@@ -1178,9 +1170,13 @@ impl Account {
                 if self.untracked_market(cx, &order.symbol) {
                     if order.status == OrderStatus::Open {
                         if self.skipped_markets.contains(&order.symbol) {
-                            *unavailable = true;
-                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
-                                "BingX working order market unavailable; preserving previous orders",
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
+                                format!(
+                                    "Skipping BingX order on unreadable market {}",
+                                    order.symbol
+                                ),
                             );
                         } else {
                             cx.notice(
@@ -1387,20 +1383,10 @@ impl Account {
                 mut rows,
                 settings,
                 skipped,
-                unavailable,
                 read,
                 unlisted,
             } => {
                 self.positions_in_flight = None;
-                if unavailable {
-                    for id in &skipped {
-                        log_skip(cx, &mut self.skip_logged, "position", id, true);
-                    }
-                    let error = VenueError::new("BingX positions: a row's market is unavailable");
-                    self.fresh_positions.failed(cx, 0, read, &error);
-                    self.read_fresh_positions_again(cx, read, credentials);
-                    return;
-                }
                 if revision == self.positions_revision {
                     let rejected = !skipped.is_empty();
                     let unidentified = skipped.iter().any(String::is_empty);
@@ -1452,7 +1438,6 @@ impl Account {
                 metas,
                 skipped,
                 unproven,
-                unavailable,
             } => {
                 if self.orders_in_flight == Some(owner) {
                     self.orders_in_flight = None;
@@ -1464,12 +1449,6 @@ impl Account {
                         .is_some_and(|token| cx.store.orders_snapshot_current(token))
                     {
                         self.fetch_orders(cx, credentials);
-                    }
-                    return;
-                }
-                if unavailable {
-                    for id in &skipped {
-                        log_skip(cx, &mut self.skip_logged, "open order", id, true);
                     }
                     return;
                 }
@@ -2222,7 +2201,6 @@ mod sign_failure_owners {
                     rows: vec![],
                     settings: vec![],
                     skipped: vec![],
-                    unavailable: false,
                 },
                 2 => Request::OpenOrders {
                     owner: 1,
@@ -2232,7 +2210,6 @@ mod sign_failure_owners {
                     metas: vec![],
                     skipped: vec![],
                     unproven: vec![],
-                    unavailable: false,
                 },
                 3 => Request::ListenKey { epoch: 4 },
                 _ => Request::Keepalive { epoch: 4 },
