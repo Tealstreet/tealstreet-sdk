@@ -279,7 +279,6 @@ pub fn jittered(actual: f64, nominal: f64) -> bool {
 
 #[derive(Clone, Default)]
 pub struct FixtureOptions {
-    pub fixed_public_sockets: bool,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
@@ -336,7 +335,6 @@ pub fn try_engine(
             testnet: options.testnet,
             public_data_only: options.public_data_only,
             product: options.product,
-            fixed_public_sockets: options.fixed_public_sockets,
         }));
     engine
         .set_signer(Some(std::sync::Arc::new(provider)))
