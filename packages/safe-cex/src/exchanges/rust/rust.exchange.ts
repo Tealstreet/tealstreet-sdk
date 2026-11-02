@@ -3307,6 +3307,15 @@ export class RustEngineExchange extends BaseExchange {
     this.subscriptionCommand({ op: subscribe ? 'subscribeCandles' : 'unsubscribeCandles', symbol, interval });
   };
 
+  /** The engine re-sends the venue's subscribe for this live stream; a venue that cannot logs why. */
+  repairOHLCV = (opts: Pick<OHLCVOptions, 'symbol' | 'interval'>) => {
+    if (!this.publicDemandReady || !this.candleListeners.has(`${opts.symbol}:${opts.interval}`)) return;
+    this.subscriptionCommand({
+      op: 'repairSubscription',
+      topic: { kind: 'candles', symbol: opts.symbol, interval: opts.interval },
+    });
+  };
+
   listenOHLCVForFeed = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     const listener = (candle: Candle) => callback(candle);
     this.feedCandleListeners.add(listener);

@@ -106,6 +106,8 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   listenOrderBookForFeed: 'mirror',
   listenOHLCV: 'mirror',
   listenOHLCVForFeed: 'mirror',
+  // A mirror holds no candle demand, so a repair there is a no-op.
+  repairOHLCV: 'mirror',
   listenOHLCVs: 'mirror',
   listenOrderBookWebworker: 'mirror',
   listenOHLCVWebworker: 'mirror',

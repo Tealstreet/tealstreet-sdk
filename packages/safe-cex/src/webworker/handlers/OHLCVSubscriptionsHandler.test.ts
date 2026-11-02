@@ -91,6 +91,23 @@ describe('OHLCVSubscriptionsHandler', () => {
         );
       });
 
+      it('a reset asks the exchange to repair the stream, new or already held, and is not passed on', () => {
+        const repairOHLCV = vi.fn();
+        (mockExchange as { repairOHLCV?: unknown }).repairOHLCV = repairOHLCV;
+        handler.handle({ op: 'subscribeOHLCV', data: { subId: 'a', symbol: 'BTCUSDT', interval: '1h', reset: true } });
+        expect(mockListenOHLCV).toHaveBeenCalledWith(
+          { subId: 'a', symbol: 'BTCUSDT', interval: '1h' },
+          expect.any(Function),
+        );
+        handler.handle({ op: 'subscribeOHLCV', data: { subId: 'b', symbol: 'BTCUSDT', interval: '1h', reset: true } });
+        handler.handle({ op: 'subscribeOHLCV', data: { subId: 'c', symbol: 'BTCUSDT', interval: '1h' } });
+        expect(mockListenOHLCV).toHaveBeenCalledOnce();
+        expect(repairOHLCV.mock.calls).toEqual([
+          [{ symbol: 'BTCUSDT', interval: '1h' }],
+          [{ symbol: 'BTCUSDT', interval: '1h' }],
+        ]);
+      });
+
       it('should skip subscription for symbol not on exchange', () => {
         const payload: StoreWorkerPayload = {
           op: 'subscribeOHLCV',
