@@ -76,6 +76,8 @@ read('trade/get_pending_orders', '', { orderList: [resting, regular('1004', 'ETH
 t += 1200;
 command({ op: 'cancelSymbolOrders', symbol: 'ETHUSDT' });
 http('POST', 'trade/cancel_orders', '', { successList: [{ orderId: '1004' }, { orderId: '1005' }], failureList: [] }, { symbol: 'ETHUSDT', orderList: [{ orderId: '1004' }, { orderId: '1005' }] });
+// The symbol cancel then sweeps the venue for orders the store has not seen.
+http('POST', 'trade/cancel_all_orders', '', { successList: [], failureList: [] }, { symbol: 'ETHUSDT' });
 read('trade/get_pending_orders', '', { orderList: [resting] }, t);
 ws(PRIVATE, orderEvent('CLOSE', { ...batchA, orderStatus: 'CANCELED' }));
 ws(PRIVATE, orderEvent('CLOSE', { ...batchB, orderStatus: 'CANCELED' }));
