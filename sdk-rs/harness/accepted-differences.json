@@ -8149,6 +8149,130 @@
           "evidence": "Live SOL market row from deaws2; venues/paradex/tests/public.rs."
         }
       ]
+    },
+    {
+      "venue": "lighter",
+      "tape": "sdk-rs/harness/tapes/lighter-private.jsonl",
+      "tapeSha256": "571163c7038b4a0e7af8d1bf868837f32dffb894e53aa494efdf9b9124f9fd66",
+      "diagnostics": [
+        {
+          "failures": [
+            "account orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "account orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "account orders[2].clientOrderId: ts=null rust=\"8001\"",
+            "checkpoint 1 account.orders[0].clientOrderId: ts=null rust=\"7001\"",
+            "checkpoint 10 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 10 account.orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 11 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 11 account.orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 11 account.orders[2].clientOrderId: ts=null rust=\"8001\"",
+            "checkpoint 7 account.orders[0].clientOrderId: ts=null rust=\"7002\"",
+            "checkpoint 7 account.orders[1].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 7 account.orders[2].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 8 account.orders[0].clientOrderId: ts=null rust=\"179245440400025\"",
+            "checkpoint 8 account.orders[1].clientOrderId: ts=null rust=\"179245440400058\"",
+            "checkpoint 8 account.orders[2].clientOrderId: ts=null rust=\"179245440400059\"",
+            "checkpoint 9 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 9 account.orders[1].clientOrderId: ts=null rust=\"7004\""
+          ],
+          "category": "rust-better",
+          "rationale": "Rust reports the client index so the chaser can adopt the row; the TS adapter leaves clientOrderId null.",
+          "evidence": "sdk-rs/venues/lighter/tests/account.rs pins client_order_index on the row (#2781); sdk-rs/harness/tapes/lighter-private.jsonl rows carry client_order_index."
+        }
+      ]
+    },
+    {
+      "venue": "lighter",
+      "tape": "sdk-rs/harness/tapes/lighter-testnet-private.jsonl",
+      "tapeSha256": "d760332065998f88a7573908f19e23f150e13ad4e15f5a1b7262e95e808edb31",
+      "diagnostics": [
+        {
+          "failures": [
+            "account orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "account orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "account orders[2].clientOrderId: ts=null rust=\"8001\"",
+            "checkpoint 1 account.orders[0].clientOrderId: ts=null rust=\"7001\"",
+            "checkpoint 10 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 10 account.orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 11 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 11 account.orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 11 account.orders[2].clientOrderId: ts=null rust=\"8001\"",
+            "checkpoint 7 account.orders[0].clientOrderId: ts=null rust=\"7002\"",
+            "checkpoint 7 account.orders[1].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 7 account.orders[2].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 8 account.orders[0].clientOrderId: ts=null rust=\"179245440400008\"",
+            "checkpoint 8 account.orders[1].clientOrderId: ts=null rust=\"179245440400025\"",
+            "checkpoint 8 account.orders[2].clientOrderId: ts=null rust=\"179245440400077\"",
+            "checkpoint 9 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 9 account.orders[1].clientOrderId: ts=null rust=\"7004\""
+          ],
+          "category": "rust-better",
+          "rationale": "Rust reports the client index so the chaser can adopt the row; the TS adapter leaves clientOrderId null.",
+          "evidence": "sdk-rs/venues/lighter/tests/account.rs pins client_order_index on the row (#2781); sdk-rs/harness/tapes/lighter-testnet-private.jsonl rows carry client_order_index."
+        }
+      ]
+    },
+    {
+      "venue": "lighter-robinhood",
+      "tape": "sdk-rs/harness/tapes/lighter-robinhood-private.jsonl",
+      "tapeSha256": "9551e40e52319361392bf8634ff47b4a2dc5f1164edcfb1115dad7681d9720cc",
+      "diagnostics": [
+        {
+          "failures": [
+            "account orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "account orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "account orders[2].clientOrderId: ts=null rust=\"8001\"",
+            "checkpoint 1 account.orders[0].clientOrderId: ts=null rust=\"7001\"",
+            "checkpoint 10 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 10 account.orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 11 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 11 account.orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 11 account.orders[2].clientOrderId: ts=null rust=\"8001\"",
+            "checkpoint 7 account.orders[0].clientOrderId: ts=null rust=\"7002\"",
+            "checkpoint 7 account.orders[1].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 7 account.orders[2].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 8 account.orders[0].clientOrderId: ts=null rust=\"179245440400069\"",
+            "checkpoint 8 account.orders[1].clientOrderId: ts=null rust=\"179245440400070\"",
+            "checkpoint 8 account.orders[2].clientOrderId: ts=null rust=\"179245440400095\"",
+            "checkpoint 9 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 9 account.orders[1].clientOrderId: ts=null rust=\"7004\""
+          ],
+          "category": "rust-better",
+          "rationale": "Rust reports the client index so the chaser can adopt the row; the TS adapter leaves clientOrderId null.",
+          "evidence": "sdk-rs/venues/lighter/tests/account.rs pins client_order_index on the row (#2781); sdk-rs/harness/tapes/lighter-robinhood-private.jsonl rows carry client_order_index."
+        }
+      ]
+    },
+    {
+      "venue": "lighter-robinhood",
+      "tape": "sdk-rs/harness/tapes/lighter-testnet-private.jsonl",
+      "tapeSha256": "d53b7425944c0284d7d2bc37a9b27a95fce949ad35b0a4ae0576b60251068f8f",
+      "diagnostics": [
+        {
+          "failures": [
+            "account orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "account orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "account orders[2].clientOrderId: ts=null rust=\"8001\"",
+            "checkpoint 1 account.orders[0].clientOrderId: ts=null rust=\"7001\"",
+            "checkpoint 10 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 10 account.orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 11 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 11 account.orders[1].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 11 account.orders[2].clientOrderId: ts=null rust=\"8001\"",
+            "checkpoint 7 account.orders[0].clientOrderId: ts=null rust=\"7002\"",
+            "checkpoint 7 account.orders[1].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 7 account.orders[2].clientOrderId: ts=null rust=\"7004\"",
+            "checkpoint 8 account.orders[0].clientOrderId: ts=null rust=\"179245440400064\"",
+            "checkpoint 8 account.orders[1].clientOrderId: ts=null rust=\"179245440400065\"",
+            "checkpoint 8 account.orders[2].clientOrderId: ts=null rust=\"179245440400066\"",
+            "checkpoint 9 account.orders[0].clientOrderId: ts=null rust=\"7003\"",
+            "checkpoint 9 account.orders[1].clientOrderId: ts=null rust=\"7004\""
+          ],
+          "category": "rust-better",
+          "rationale": "Rust reports the client index so the chaser can adopt the row; the TS adapter leaves clientOrderId null.",
+          "evidence": "sdk-rs/venues/lighter/tests/account.rs pins client_order_index on the row (#2781); sdk-rs/harness/tapes/lighter-testnet-private.jsonl rows carry client_order_index."
+        }
+      ]
     }
   ]
 }
