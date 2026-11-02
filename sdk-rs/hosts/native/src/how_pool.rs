@@ -24,6 +24,9 @@ const BASE_BACKOFF: Duration = Duration::from_millis(500);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// A socket that drops sooner than this after opening counts as a failed open.
 const SHORT_LIVED: Duration = Duration::from_secs(10);
+/// One write to an open socket (a request, a pong, a ping, a close) may take this
+/// long; a stalled one is a drop, so it cannot wedge every request on the route.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Opening and authenticating one socket may take this long.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
 /// Tunnel opens per process: a burst of this many, refilled at this rate per second.
@@ -350,11 +353,12 @@ async fn run(route: Route, mut commands: mpsc::UnboundedReceiver<Command>) {
                         let _ = job.done.send(Err("HTTP tunnel handoff failed".into()));
                         continue;
                     };
-                    match open.send(Message::text(job.packet.clone())).await {
-                        Ok(()) => {
+                    let sent = tokio::time::timeout(WRITE_TIMEOUT, open.send(Message::text(job.packet.clone()))).await;
+                    match sent {
+                        Ok(Ok(())) => {
                             in_flight.insert(job.nonce.clone(), job);
                         }
-                        Err(_) => {
+                        Ok(Err(_)) | Err(_) => {
                             let _ = job.done.send(Err("HTTP tunnel handoff failed".into()));
                             socket = None;
                             after_drop(opened_at, &mut failures, &mut next_open, route.base_backoff);
@@ -370,8 +374,12 @@ async fn run(route: Route, mut commands: mpsc::UnboundedReceiver<Command>) {
                         .map_err(|error| error.to_string()),
                     Some(Ok(Message::Binary(bytes))) => decode_binary(&bytes),
                     Some(Ok(Message::Ping(_))) => {
-                        if let Some(open) = socket.as_mut() {
-                            let _ = open.flush().await;
+                        if let Some(open) = socket.as_mut()
+                            && !matches!(tokio::time::timeout(WRITE_TIMEOUT, open.flush()).await, Ok(Ok(())))
+                        {
+                            socket = None;
+                            after_drop(opened_at, &mut failures, &mut next_open, route.base_backoff);
+                            fail_all(&mut in_flight, "HTTP tunnel closed");
                         }
                         continue;
                     }
@@ -383,7 +391,7 @@ async fn run(route: Route, mut commands: mpsc::UnboundedReceiver<Command>) {
                     Ok((message, binary)) => {
                         if message.kind == "heartbeat" {
                             if let Some(open) = socket.as_mut()
-                                && ping(open).await.is_err()
+                                && !matches!(tokio::time::timeout(WRITE_TIMEOUT, ping(open)).await, Ok(Ok(())))
                             {
                                 socket = None;
                                 after_drop(opened_at, &mut failures, &mut next_open, route.base_backoff);
@@ -405,7 +413,7 @@ async fn run(route: Route, mut commands: mpsc::UnboundedReceiver<Command>) {
                     Err(error) => {
                         // A malformed frame is the socket's fault as much as a drop: start over.
                         if let Some(mut open) = socket.take() {
-                            let _ = open.close(None).await;
+                            let _ = tokio::time::timeout(WRITE_TIMEOUT, open.close(None)).await;
                         }
                         after_drop(opened_at, &mut failures, &mut next_open, route.base_backoff);
                         fail_all(&mut in_flight, &format!("HTTP tunnel closed: {error}"));
@@ -419,7 +427,7 @@ async fn run(route: Route, mut commands: mpsc::UnboundedReceiver<Command>) {
         }
     }
     if let Some(mut open) = socket {
-        let _ = open.close(None).await;
+        let _ = tokio::time::timeout(WRITE_TIMEOUT, open.close(None)).await;
     }
 }
 
@@ -608,6 +616,39 @@ mod tests {
             "waited {:?}",
             attempts[1].duration_since(attempts[0])
         );
+    }
+
+    #[tokio::test]
+    async fn a_stalled_write_fails_its_request_as_a_drop_instead_of_wedging_the_route() {
+        let (url, opened) = tunnel(|socket| async move {
+            // Authenticated, then never reads again: the request's write backs up.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            drop(socket);
+        })
+        .await;
+        let pool = HowPool::default();
+        let connection = pool.connection_with(
+            &url,
+            vec![],
+            tokens(),
+            Arc::new(OpenCap::new(10.0, 10.0)),
+            BASE_BACKOFF,
+        );
+        connection.ready().await.unwrap();
+        let (events, _received) = mpsc::unbounded_channel();
+        let huge = "x".repeat(64 * 1024 * 1024);
+        let packet =
+            serde_json::json!({"type": "rpc.http", "nonce": "native-1", "pad": huge}).to_string();
+        let started = std::time::Instant::now();
+        let failed = tokio::time::timeout(
+            Duration::from_secs(15),
+            connection.request(RequestId(1), packet, events),
+        )
+        .await
+        .expect("a stalled write must not wedge the request");
+        assert!(failed.unwrap_err().starts_with("HTTP tunnel"));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(opened.load(Ordering::SeqCst), 1);
     }
 
     #[test]

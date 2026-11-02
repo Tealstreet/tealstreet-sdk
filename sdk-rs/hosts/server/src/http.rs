@@ -412,6 +412,9 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
         .as_ref()
         .map(|(_, expires_at_ms)| *expires_at_ms);
     let user = identity.user.clone();
+    if let Some(user) = &user {
+        app.registry.user_connected(user);
+    }
     let mut session = Session::new(app.registry.clone(), app.metrics.clone(), identity, out);
     let mut loaded = session.take_loaded();
     let mut dropped = session.take_dropped();
