@@ -1084,6 +1084,15 @@ fn live_fill_price_and_amount_drop_binary_noise() {
 
 /// Starts without sockets, answering every startup read; returns the timers set.
 fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, f64)>) {
+    let (e, timers, _) = started_recording_private_socket();
+    (e, timers)
+}
+
+fn started_recording_private_socket() -> (
+    TestEngine,
+    Vec<(safe_cex_engine::TimerId, f64)>,
+    Option<safe_cex_engine::SocketId>,
+) {
     let mut e = support::engine(support::Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
@@ -1099,14 +1108,18 @@ fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, 
         .unwrap();
     reply(&mut e, r.id, PAIRS);
     let mut timers = vec![];
+    let mut private = None;
     loop {
         let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
         if actions.is_empty() {
-            return (e, timers);
+            return (e, timers, private);
         }
         for a in actions {
             match a {
                 Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::WsConnect { socket, url, .. } if url.contains("private") => {
+                    private = Some(socket);
+                }
                 Action::Http(r) => {
                     let body = if r.url.ends_with("/tickers") {
                         TICKERS
@@ -1202,6 +1215,61 @@ fn balance_read_lost_without_any_answer_is_abandoned_after_ten_seconds() {
             .any(is_balance_read),
         "a lost read must not stall balance polling forever"
     );
+}
+
+#[test]
+fn a_live_private_socket_slows_the_balance_poll_and_losing_it_restores_it() {
+    let (mut e, mut timers, socket) = started_recording_private_socket();
+    let socket = socket.expect("the private socket connects");
+    e.handle(0.0, Event::WsOpened { socket });
+    e.handle(
+        0.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    for action in safe_cex_engine::test_support::prepared_now(&mut e) {
+        match action {
+            Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+            Action::Http(r) => reply(&mut e, r.id, ACCOUNT),
+            _ => {}
+        }
+    }
+    let mut balance_reads = 0;
+    let mut at = 500.0;
+    while at <= 30_000.0 {
+        for read in fire_account_tick(&mut e, &mut timers, at) {
+            balance_reads += usize::from(is_balance_read(&read));
+            reply(&mut e, read.id, ACCOUNT);
+        }
+        at += 500.0;
+    }
+    assert!(
+        (5..=7).contains(&balance_reads),
+        "one read every 5 s over 30 s, got {balance_reads}"
+    );
+    e.handle(at, Event::WsClosed { socket, code: 1006 });
+    for action in safe_cex_engine::test_support::prepared_now(&mut e) {
+        match action {
+            Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+            Action::Http(r) => reply(&mut e, r.id, ACCOUNT),
+            _ => {}
+        }
+    }
+    let mut after_close = 0;
+    let end = at + 2_000.0;
+    let mut tick = at;
+    while tick <= end {
+        if timers.iter().any(|(_, when)| *when == tick) {
+            for read in fire_account_tick(&mut e, &mut timers, tick) {
+                after_close += usize::from(is_balance_read(&read));
+                reply(&mut e, read.id, ACCOUNT);
+            }
+        }
+        tick += 500.0;
+    }
+    assert!(after_close >= 3, "every tick again, got {after_close}");
 }
 
 fn subscribe_candles_settings_read(
