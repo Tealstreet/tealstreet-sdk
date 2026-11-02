@@ -1218,6 +1218,59 @@ fn balance_read_lost_without_any_answer_is_abandoned_after_ten_seconds() {
 }
 
 #[test]
+fn a_private_event_reads_balance_at_the_next_tick_while_slowed() {
+    let (mut e, mut timers, socket) = started_recording_private_socket();
+    let socket = socket.expect("the private socket connects");
+    e.handle(0.0, Event::WsOpened { socket });
+    e.handle(
+        0.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    for action in safe_cex_engine::test_support::prepared_now(&mut e) {
+        match action {
+            Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+            Action::Http(r) => reply(&mut e, r.id, ACCOUNT),
+            _ => {}
+        }
+    }
+    for at in [500.0, 1000.0, 1500.0] {
+        for read in fire_account_tick(&mut e, &mut timers, at) {
+            reply(&mut e, read.id, ACCOUNT);
+        }
+    }
+    for text in [
+        r#"{"ch":"order","ts":1,"data":{"event":"CREATE","orderId":"x","symbol":"BTCUSDT"}}"#,
+        r#"{"ch":"balance","data":{"coin":"USDT","available":"4900"}}"#,
+    ] {
+        e.handle(
+            1600.0,
+            Event::WsMessage {
+                socket,
+                text: text.into(),
+            },
+        );
+        for action in safe_cex_engine::test_support::prepared_now(&mut e) {
+            if let Action::SetTimer { timer, at_ms } = action {
+                timers.push((timer, at_ms));
+            }
+        }
+        let tick = if text.contains("balance") {
+            2500.0
+        } else {
+            2000.0
+        };
+        let reads = fire_account_tick(&mut e, &mut timers, tick);
+        assert!(reads.iter().any(is_balance_read), "{text}");
+        for read in reads {
+            reply(&mut e, read.id, ACCOUNT);
+        }
+    }
+}
+
+#[test]
 fn a_live_private_socket_slows_the_balance_poll_and_losing_it_restores_it() {
     let (mut e, mut timers, socket) = started_recording_private_socket();
     let socket = socket.expect("the private socket connects");
