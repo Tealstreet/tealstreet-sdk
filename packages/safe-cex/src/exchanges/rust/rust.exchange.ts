@@ -363,6 +363,14 @@ const PRIVATE_HISTORY_READS: ReadonlySet<string> = new Set([
   'fetchIncomeHistoryRange',
 ]);
 
+/** The engine commands behind those reads, refused the same way after the caller's input is checked. */
+const PRIVATE_HISTORY_OPS: ReadonlySet<string> = new Set(['fetchFills', 'fetchOrderHistory', 'fetchIncome']);
+
+const notReadOnPublicData = (what: string): ExchangeError => {
+  const message = `${what} was not read: this account is on public data`;
+  return new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+};
+
 /** Rust-only engine methods (not on BaseExchange) a mirror forwards whole. */
 const RUST_FORWARDED_METHODS = ['fetchStpMode', 'changeStpMode', 'fetchOrderBook', 'readPositions'] as const;
 
@@ -1668,10 +1676,8 @@ export class RustEngineExchange extends BaseExchange {
       // An engine-owning instance calls straight through, keeping its own synchronous refusals.
       members[method] = (...args: unknown[]) => {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
-        if (this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method)) {
-          const message = `${method} was not read: this account is on public data`;
-          return Promise.reject(new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' }));
-        }
+        if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
+          return Promise.reject(notReadOnPublicData(method));
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
         const viaWorker = () =>
           this.callWorker(method, ...args).then(
@@ -2236,6 +2242,9 @@ export class RustEngineExchange extends BaseExchange {
     command: { op: string; [field: string]: unknown },
     { report = true, timing }: { report?: boolean; timing?: WriteTiming } = {},
   ): Promise<T> => {
+    // Unreported: the account has nothing to read, which is not an error the user caused.
+    if (this.options.publicDataOnly === true && PRIVATE_HISTORY_OPS.has(command.op))
+      return Promise.reject(notReadOnPublicData(command.op));
     try {
       if (this.engineFailure) throw this.engineFailure;
       if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
