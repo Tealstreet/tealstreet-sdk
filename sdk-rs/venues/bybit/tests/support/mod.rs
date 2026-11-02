@@ -84,9 +84,18 @@ impl Harness {
     }
 
     pub fn load_public(&mut self) {
-        self.respond("status=PreLaunch", 200, PRELAUNCH);
-        self.respond("/v5/market/instruments-info", 200, INSTRUMENTS);
-        self.respond("/v5/market/tickers", 200, TICKERS);
+        self.load_public_mapped(str::to_owned);
+    }
+
+    /// Public startup on the host's own clock: no envelope `time` calibrates it.
+    pub fn load_public_untimed(&mut self) {
+        self.load_public_mapped(untimed);
+    }
+
+    fn load_public_mapped(&mut self, answer: fn(&str) -> String) {
+        self.respond("status=PreLaunch", 200, &answer(PRELAUNCH));
+        self.respond("/v5/market/instruments-info", 200, &answer(INSTRUMENTS));
+        self.respond("/v5/market/tickers", 200, &answer(TICKERS));
         let socket = self.socket("/v5/public/linear").expect("public socket");
         self.event(Event::WsOpened { socket });
         self.flush_subscriptions();
@@ -311,6 +320,22 @@ impl Harness {
             .iter()
             .find(|(k, _)| *k == name)
             .map(|(_, v)| v.clone())
+    }
+}
+
+/// The fixture without its trailing envelope `time`, which would calibrate
+/// the protocol clock to the documented example's date.
+pub fn untimed(body: &str) -> String {
+    match body.rfind(r#","time":"#) {
+        Some(at)
+            if body[at + 8..]
+                .trim_end_matches('}')
+                .bytes()
+                .all(|b| b.is_ascii_digit()) =>
+        {
+            format!("{}}}", &body[..at])
+        }
+        _ => body.to_owned(),
     }
 }
 

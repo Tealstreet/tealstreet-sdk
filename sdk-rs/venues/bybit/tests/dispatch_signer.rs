@@ -393,10 +393,19 @@ fn ready_options(options: Options) -> (Harness, Arc<Gate>) {
         if h.has_request("status=PreLaunch") {
             h.respond("status=PreLaunch", 200, EMPTY);
         }
-        h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
-        h.respond("/v5/market/tickers", 200, support::TICKERS);
+        // Signing stamps here follow the host clock, so no answer calibrates it.
+        h.respond(
+            "/v5/market/instruments-info",
+            200,
+            &support::untimed(support::INSTRUMENTS),
+        );
+        h.respond(
+            "/v5/market/tickers",
+            200,
+            &support::untimed(support::TICKERS),
+        );
     } else {
-        h.load_public();
+        h.load_public_untimed();
     }
     if variant.is_hyro() {
         let socket = h.socket("/v5/private").unwrap();
