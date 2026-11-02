@@ -250,12 +250,13 @@ describe('Orderly Rust transport boundary', () => {
       const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
       adoptEngineCapabilities(exchange);
       try {
+        // Past the filter guard to the command, where a public-only account's history is not read.
         await expect(
           exchange.fetchHistoricalOrders({ symbol: 'BTCUSDC', from: 1000, to: 2000, limit: 5 }),
-        ).rejects.toThrow('engine is not started');
+        ).rejects.toThrow('fetchOrderHistory was not read');
         if (name === 'binance') {
           await expect(exchange.fetchHistoricalOrders({ orderId: '42', status: [OrderStatus.Closed] })).rejects.toThrow(
-            'engine is not started',
+            'fetchOrderHistory was not read',
           );
         }
       } finally {
