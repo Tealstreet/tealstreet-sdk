@@ -120,7 +120,9 @@ enum Call {
         require_ack: bool,
     },
     /// Reaches orders the store has not seen; their rows follow from the stream.
-    CancelSymbol,
+    CancelSymbol {
+        symbol: String,
+    },
     ReconcileReplacement {
         parent: String,
         id: String,
@@ -555,7 +557,9 @@ impl BitunixFutures {
                         job.steps.push_back(Step {
                             path: CANCEL_ALL,
                             body: text(&payload),
-                            call: Call::CancelSymbol,
+                            call: Call::CancelSymbol {
+                                symbol: symbol.clone(),
+                            },
                             delay: 0.0,
                         });
                     }
@@ -862,12 +866,13 @@ impl BitunixFutures {
             p.sl_stop_type = Some(stop(o.sl_trigger_type));
             p.sl_order_type = Some("MARKET".into());
         }
-        let sizes = split_quantities(
-            amount,
-            m.precision.amount,
-            m.limits.amount.min,
-            m.limits.amount.max,
-        )?;
+        // A MARKET order (a Nuke close included) answers to maxMarketOrderVolume.
+        let maximum = self
+            .market_maxima
+            .get(&o.symbol)
+            .filter(|_| o.kind == OrderType::Market)
+            .map_or(m.limits.amount.max, |max| *max);
+        let sizes = split_quantities(amount, m.precision.amount, m.limits.amount.min, maximum)?;
         if o.client_order_id.is_some() && sizes.len() != 1 {
             return Err("Bitunix clientOrderId cannot be split".into());
         }
@@ -1942,9 +1947,18 @@ impl BitunixFutures {
                 batch: true,
             } => self.batch_answer(cx, &request, data, clients.len()),
             Call::Cancel { ids, require_ack } => {
-                self.cancel_answer(cx, &request, data, ids, *require_ack)
+                self.cancel_answer(cx, &request, data, ids, *require_ack, false)
             }
-            Call::CancelSymbol => Ok(()),
+            Call::CancelSymbol { symbol } => {
+                let ids: Vec<_> = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| o.symbol == *symbol)
+                    .map(|o| o.id.clone())
+                    .collect();
+                self.cancel_answer(cx, &request, data, &ids, false, true)
+            }
             Call::Amend {
                 id, parent, leg, ..
             } => self.amend_answer(cx, &request, data, id, parent, *leg),
@@ -1991,10 +2005,7 @@ impl BitunixFutures {
         if accepted.is_ok()
             && matches!(
                 request.step.call,
-                Call::CancelSymbol
-                    | Call::Leverage { .. }
-                    | Call::Margin { .. }
-                    | Call::Mode { .. }
+                Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
             )
             && cx
                 .http_write_fact(
@@ -2057,8 +2068,6 @@ impl BitunixFutures {
         // which the venue resends past, proves a batch sent nothing.
         let batch_unproven = matches!(request.step.call, Call::Place { batch: true, .. })
             && code.is_some_and(|code| code != 10007);
-        let mut error = error;
-        self.kept_gone(command, &mut error);
         if batch_unproven {
             error = error.outcome(Outcome::Unknown);
         }
@@ -2407,6 +2416,7 @@ impl BitunixFutures {
         data: &str,
         ids: &[String],
         require_ack: bool,
+        sweep: bool,
     ) -> Result<(), Option<VenueError>> {
         #[derive(Deserialize, Default)]
         #[serde(rename_all = "camelCase")]
@@ -2452,7 +2462,7 @@ impl BitunixFutures {
             Ok(rows) => (rows, true),
             Err(_) => (Vec::new(), false),
         };
-        let succeeded: HashSet<String> = successes
+        let echoed: Vec<String> = successes
             .iter()
             .filter_map(|raw| match ack_identity(raw.get(), false) {
                 Ok((Some(id), false)) if serde_json::from_str::<Item<'_>>(raw.get()).is_ok() => {
@@ -2461,6 +2471,7 @@ impl BitunixFutures {
                 _ => None,
             })
             .collect();
+        let succeeded: HashSet<&String> = echoed.iter().collect();
         let failures: Vec<_> = rejected
             .iter()
             .filter_map(|raw| serde_json::from_str::<Item<'_>>(raw.get()).ok())
@@ -2470,8 +2481,9 @@ impl BitunixFutures {
             || successes.len() != succeeded.len()
             || failures.len() != rejected.len();
         // Native: a clean code-0 answer cancels every target unless an ACK is
-        // required; otherwise only the echoed IDs are proven.
-        let all = !require_ack && !malformed && rejected.is_empty();
+        // required; otherwise only the echoed IDs are proven. A sweep's targets are its rows.
+        let clean = !require_ack && !malformed && rejected.is_empty();
+        let all = clean && !sweep;
         let mut canceled = Vec::new();
         for id in ids {
             if all || succeeded.contains(&raw_id(id)) {
@@ -2483,10 +2495,14 @@ impl BitunixFutures {
                 });
             }
         }
-        if all {
+        if clean {
             return Self::record(cx, request, Ok(canceled));
         }
-        let raws: Vec<_> = canceled.iter().map(raw_id).collect();
+        let raws: Vec<_> = if sweep {
+            echoed
+        } else {
+            canceled.iter().map(raw_id).collect()
+        };
         let mut items: Vec<_> = raws.iter().map(|id| BatchItem::Accepted(id)).collect();
         items.extend(failures.iter().map(|f| {
             BatchItem::Native(Native {
@@ -2497,13 +2513,15 @@ impl BitunixFutures {
         if malformed {
             items.push(BatchItem::Accepted(""));
         }
+        // A sweep has no caller list to count against: its rows are the answer.
+        let expected = if sweep { items.len() } else { ids.len() };
         let message = failures
             .iter()
             .map(|f| {
                 if f.error_msg.is_empty() {
                     format!("Bitunix cancel failed for {}", f.order_id)
                 } else {
-                    f.error_msg.to_string()
+                    format!("Bitunix cancel failed for {}: {}", f.order_id, f.error_msg)
                 }
             })
             .collect::<Vec<_>>();
@@ -2518,7 +2536,7 @@ impl BitunixFutures {
         match cx.http_write_batch(
             &request.context,
             &codes::BITUNIX,
-            ids.len(),
+            expected,
             &items,
             message,
             None,
