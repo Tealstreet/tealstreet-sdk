@@ -657,6 +657,67 @@ fn income_uses_shared_span_walk_across_short_pages_and_both_settlements() {
         assert_eq!(e.store().balance().total, 0.);
     }
 }
+/// The live route wraps its list: `{"code":0,"msg":"OK","data":[]}` is a read with no rows.
+#[test]
+fn income_reads_the_venues_envelope_including_an_empty_list() {
+    for streamed in [false, true] {
+        let mut e = engine(true);
+        let row = ledger(1100, "-0.01", "99.99", "REALIZED_PNL", "USDT");
+        let a = query(&mut e, income(1000., 2000., None));
+        respond(
+            &mut e,
+            &a,
+            &format!(r#"{{"code":0,"msg":"OK","data":[{row}]}}"#),
+            streamed,
+        );
+        let mut result = None;
+        for _ in 0..100 {
+            let output = actions(&mut e);
+            if let Some(done) = output.iter().find_map(|a| match a {
+                Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+                _ => None,
+            }) {
+                result = Some(done);
+                break;
+            }
+            let next = output
+                .into_iter()
+                .find(|a| matches!(a, Action::Http(_)))
+                .expect("remaining span probe");
+            respond(
+                &mut e,
+                &next,
+                r#"{"code":0,"msg":"OK","data":[]}"#,
+                streamed,
+            );
+        }
+        let rows: serde_json::Value =
+            serde_json::from_str(&result.expect("query settles")).unwrap();
+        assert_eq!(
+            rows.as_array().map(Vec::len),
+            Some(1),
+            "streamed={streamed}"
+        );
+    }
+}
+/// A refusal in the same envelope is not an empty ledger.
+#[test]
+fn income_still_fails_a_venue_refusal() {
+    for streamed in [false, true] {
+        let mut e = engine(true);
+        let a = query(&mut e, income(1000., 2000., None));
+        respond(
+            &mut e,
+            &a,
+            r#"{"code":10500,"msg":"Refused","data":[]}"#,
+            streamed,
+        );
+        let failed = actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })));
+        assert!(failed, "streamed={streamed}");
+    }
+}
 #[test]
 fn income_keeps_distinct_equal_time_postings_and_filters_after_coverage() {
     let mut e = engine(true);
