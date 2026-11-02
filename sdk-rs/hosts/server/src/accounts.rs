@@ -943,15 +943,10 @@ impl Registry {
             ));
         }
         let stopped: crate::algos::StopNotice = Box::new(move |kept| {
+            let frames = kept.frames(&name);
             for outbox in &live {
-                if !kept.text.is_empty() {
-                    outbox(crate::envelope::algo_error(
-                        &name,
-                        Value::String(kept.text.clone()),
-                    ));
-                }
-                for end in &kept.ends {
-                    outbox(end.clone());
+                for frame in &frames {
+                    outbox(frame.clone());
                 }
             }
         });
@@ -1260,84 +1255,17 @@ pub fn resume_id() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+/// Test accounts on a test venue, for this crate's tests and the two-box harness
+/// (`tests/boxes.rs`); built only for tests or the `test-support` feature.
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing {
     use super::*;
 
-    /// A venue that does nothing: the registry tests need only its handle.
-    struct Idle;
-    impl safe_cex_engine::Venue for Idle {
-        type Pending = ();
-        fn start(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>) {}
-        fn on_open(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::SocketId) {}
-        fn on_message(
-            &mut self,
-            _: &mut safe_cex_engine::Cx<'_, ()>,
-            _: safe_cex_engine::SocketId,
-            _: &str,
-        ) {
-        }
-        fn on_close(
-            &mut self,
-            _: &mut safe_cex_engine::Cx<'_, ()>,
-            _: safe_cex_engine::SocketId,
-            _: u16,
-        ) {
-        }
-        fn on_response(
-            &mut self,
-            _: &mut safe_cex_engine::Cx<'_, ()>,
-            _: (),
-            _: safe_cex_engine::Response<'_>,
-        ) {
-        }
-        fn on_request_failed(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: (), _: &str) {}
-        fn on_timer(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::TimerId) {}
-        fn on_command(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::Command) {
-        }
-        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
-            None
-        }
-        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
-            Box::new(std::iter::empty())
-        }
-    }
-
-    #[derive(Clone)]
-    struct NoIo;
-    impl safe_cex_native::Transport for NoIo {
-        fn connect(
-            &self,
-            _: safe_cex_engine::SocketId,
-            _: String,
-            _: safe_cex_native::Events,
-        ) -> mpsc::UnboundedSender<String> {
-            mpsc::unbounded_channel().0
-        }
-        fn request(&self, _: safe_cex_engine::HttpRequest, _: safe_cex_native::Events) {}
-    }
-
-    /// A private account held by socket 7, and the inbox its algo host would read.
-    fn held_account() -> (
-        Arc<Account>,
-        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
-    ) {
-        held_account_with(None, String::new())
-    }
-
-    /// `held_account` with a signer link and the fingerprint it was built from.
-    pub(crate) fn held_account_with(
-        link: Option<Arc<SignerLink>>,
-        fingerprint: String,
-    ) -> (
-        Arc<Account>,
-        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
-    ) {
-        held_account_on(Idle, link, fingerprint, Arc::default())
-    }
-
-    fn held_account_on<V: safe_cex_engine::Venue + 'static>(
+    /// A private account of `user` named `name` on `venue`, held by no socket yet,
+    /// and the inbox its algo host would read.
+    pub fn account_on<V: safe_cex_engine::Venue + 'static>(
         venue: V,
+        (user, name, venue_name): (&str, &str, &str),
         link: Option<Arc<SignerLink>>,
         fingerprint: String,
         running: Arc<crate::algos::Running>,
@@ -1353,9 +1281,9 @@ pub(crate) mod tests {
         .unwrap();
         let (algos, inbox) = mpsc::unbounded_channel();
         let account = Arc::new(Account {
-            user: "u".into(),
-            name: "acct".into(),
-            venue: "bitget".into(),
+            user: user.into(),
+            name: name.into(),
+            venue: venue_name.into(),
             handle,
             link,
             token: ProxyToken::new(),
@@ -1370,89 +1298,128 @@ pub(crate) mod tests {
             metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
             running,
         });
-        account.hold(
-            7,
-            Live {
-                outbox: Arc::new(|_| true),
-                token: None,
-            },
-        );
         (account, inbox)
     }
 
-    /// `held_account_with` plus its real algo host, emitting as `build` wires it.
-    pub(crate) fn held_account_running_algos(
-        link: Arc<SignerLink>,
-        fingerprint: String,
-    ) -> Arc<Account> {
-        let (account, inbox) = held_account_with(Some(link.clone()), fingerprint);
-        run_algos(account, link, inbox)
-    }
-
-    /// A private account whose startup is held until `HeldLoad` releases it, as a
-    /// silent signer holds it, with one long open on BTCUSDT.
-    pub(crate) fn held_load_account(
-        link: Arc<SignerLink>,
-        load_after_ms: Option<f64>,
-    ) -> (Arc<Account>, Arc<std::sync::atomic::AtomicUsize>) {
-        let placed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let venue = HeldLoad {
-            placed: placed.clone(),
-            load_after_ms,
-            ticker: false,
-        };
-        let (account, inbox) =
-            held_account_on(venue, Some(link.clone()), String::new(), Arc::default());
-        (run_algos(account, link, inbox), placed)
-    }
-
-    /// An unloaded account's actor on its own thread, so a test can keep the engine
-    /// busy without blocking the test's own tasks.
-    pub(crate) fn idle_handle_on_own_thread() -> safe_cex_native::AccountHandle {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            tokio::task::LocalSet::new().block_on(&runtime, async move {
-                let engine = safe_cex_engine::test_support::seeded_engine(Idle);
-                let (handle, task) = safe_cex_native::spawn_account(
-                    safe_cex_native::Host::new(engine, NoIo),
-                    ServerConfig::default(),
-                )
-                .unwrap();
-                tx.send(handle).unwrap();
-                let _ = task.await;
-            });
-        });
-        rx.recv().unwrap()
-    }
-
-    /// A loaded BTCUSDT account under `registry` running its algo host and
-    /// counting its algos there, as `build` wires it. Placements never settle.
-    pub(crate) fn held_account_counted(
-        registry: &Registry,
-        link: Arc<SignerLink>,
-        fingerprint: String,
-    ) -> Arc<Account> {
+    /// `user`'s loaded BTCUSDT account under `registry`, as `build` would leave it
+    /// for `init`: no socket holds it until one sends that init, its algo host runs
+    /// and is counted, and every command is answered at once. Call in a `LocalSet`.
+    pub fn trading_account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> {
+        let link = SignerLink::new(0, Arc::new(|_| false));
         let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
         let venue = HeldLoad {
             placed: Arc::default(),
             load_after_ms: Some(0.),
             ticker: true,
         };
-        let (account, inbox) = held_account_on(venue, Some(link.clone()), fingerprint, running);
+        let names = (
+            user,
+            init.account_name.as_str(),
+            init.exchange_name.as_str(),
+        );
+        let (account, inbox) = account_on(
+            venue,
+            names,
+            Some(link.clone()),
+            init.fingerprint(),
+            running,
+        );
         let account = run_algos(account, link, inbox);
         register(registry, &account);
         account
     }
 
-    struct HeldLoad {
-        placed: Arc<std::sync::atomic::AtomicUsize>,
-        load_after_ms: Option<f64>,
+    /// Sends the web's algo `op` to `account`'s algo host.
+    pub fn algo_op(account: &Account, op: &str, data: &str) {
+        let input = crate::algos::AlgoInput::Op {
+            op: op.into(),
+            data: data.into(),
+            origin: "test".into(),
+        };
+        let sent = account.algos.as_ref().map(|algos| algos.send(input));
+        assert!(
+            matches!(sent, Some(Ok(()))),
+            "{} runs no algo host",
+            account.name
+        );
+    }
+
+    /// Who holds one account on this box, and whether it can sign.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct Held {
+        pub live: Vec<u64>,
+        pub parked: bool,
+        /// The live socket signing goes through.
+        pub signing: Option<u64>,
+        /// Its signer link would send a sign-req now (no suspended or ended session).
+        pub can_sign: bool,
+        pub chases: usize,
+        pub twaps: usize,
+    }
+
+    /// Every account `registry` holds.
+    pub fn accounts(registry: &Registry) -> Vec<Arc<Account>> {
+        registry
+            .accounts
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Every account `registry` holds, by (user, account), live or parked.
+    pub fn holdings(registry: &Registry) -> std::collections::BTreeMap<(String, String), Held> {
+        let accounts = registry.accounts.lock().unwrap();
+        accounts
+            .iter()
+            .map(|(key, account)| {
+                let holders = account.holders.lock().unwrap();
+                let mut live: Vec<u64> = holders
+                    .by_id
+                    .iter()
+                    .filter(|(_, holder)| holder.is_some())
+                    .map(|(id, _)| *id)
+                    .collect();
+                live.sort_unstable();
+                let (chases, twaps) = account.running.counts();
+                let held = Held {
+                    live,
+                    parked: holders.by_id.values().any(Option::is_none),
+                    signing: holders.signing,
+                    can_sign: account
+                        .link
+                        .as_ref()
+                        .is_some_and(|link| link.is_available()),
+                    chases,
+                    twaps,
+                };
+                (key.clone(), held)
+            })
+            .collect()
+    }
+
+    #[derive(Clone)]
+    pub struct NoIo;
+    impl safe_cex_native::Transport for NoIo {
+        fn connect(
+            &self,
+            _: safe_cex_engine::SocketId,
+            _: String,
+            _: safe_cex_native::Events,
+        ) -> mpsc::UnboundedSender<String> {
+            mpsc::unbounded_channel().0
+        }
+        fn request(&self, _: safe_cex_engine::HttpRequest, _: safe_cex_native::Events) {}
+    }
+
+    /// A BTCUSDT venue that loads after `load_after_ms`, if ever.
+    pub struct HeldLoad {
+        /// Placements seen while `ticker` is off; they never settle.
+        pub placed: Arc<std::sync::atomic::AtomicUsize>,
+        pub load_after_ms: Option<f64>,
         /// A BTCUSDT ticker, and every command answered: chases run as on a trading venue.
-        ticker: bool,
+        pub ticker: bool,
     }
     impl safe_cex_engine::Venue for HeldLoad {
         type Pending = ();
@@ -1590,7 +1557,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn run_algos(
+    /// Runs `account`'s algo host on this `LocalSet`, wired as `build` wires it.
+    pub fn run_algos(
         account: Arc<Account>,
         link: Arc<SignerLink>,
         inbox: mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
@@ -1617,6 +1585,168 @@ pub(crate) mod tests {
         account
     }
 
+    /// `account` as the registry's account for its (user, name).
+    pub fn register(registry: &Registry, account: &Arc<Account>) {
+        registry.accounts.lock().unwrap().insert(
+            (account.user.clone(), account.name.clone()),
+            account.clone(),
+        );
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    pub(crate) use super::testing::register;
+    use super::testing::{HeldLoad, NoIo, account_on, run_algos};
+    use super::*;
+
+    /// A venue that does nothing: the registry tests need only its handle.
+    struct Idle;
+    impl safe_cex_engine::Venue for Idle {
+        type Pending = ();
+        fn start(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>) {}
+        fn on_open(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::SocketId) {}
+        fn on_message(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: &str,
+        ) {
+        }
+        fn on_close(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: u16,
+        ) {
+        }
+        fn on_response(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: (),
+            _: safe_cex_engine::Response<'_>,
+        ) {
+        }
+        fn on_request_failed(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::TimerId) {}
+        fn on_command(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::Command) {
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    /// A private account held by socket 7, and the inbox its algo host would read.
+    fn held_account() -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        held_account_with(None, String::new())
+    }
+
+    /// `held_account` with a signer link and the fingerprint it was built from.
+    pub(crate) fn held_account_with(
+        link: Option<Arc<SignerLink>>,
+        fingerprint: String,
+    ) -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        held_account_on(Idle, link, fingerprint, Arc::default())
+    }
+
+    fn held_account_on<V: safe_cex_engine::Venue + 'static>(
+        venue: V,
+        link: Option<Arc<SignerLink>>,
+        fingerprint: String,
+        running: Arc<crate::algos::Running>,
+    ) -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        let (account, inbox) =
+            account_on(venue, ("u", "acct", "bitget"), link, fingerprint, running);
+        account.hold(
+            7,
+            Live {
+                outbox: Arc::new(|_| true),
+                token: None,
+            },
+        );
+        (account, inbox)
+    }
+
+    /// `held_account_with` plus its real algo host, emitting as `build` wires it.
+    pub(crate) fn held_account_running_algos(
+        link: Arc<SignerLink>,
+        fingerprint: String,
+    ) -> Arc<Account> {
+        let (account, inbox) = held_account_with(Some(link.clone()), fingerprint);
+        run_algos(account, link, inbox)
+    }
+
+    /// A private account whose startup is held until `HeldLoad` releases it, as a
+    /// silent signer holds it, with one long open on BTCUSDT.
+    pub(crate) fn held_load_account(
+        link: Arc<SignerLink>,
+        load_after_ms: Option<f64>,
+    ) -> (Arc<Account>, Arc<std::sync::atomic::AtomicUsize>) {
+        let placed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let venue = HeldLoad {
+            placed: placed.clone(),
+            load_after_ms,
+            ticker: false,
+        };
+        let (account, inbox) =
+            held_account_on(venue, Some(link.clone()), String::new(), Arc::default());
+        (run_algos(account, link, inbox), placed)
+    }
+
+    /// An unloaded account's actor on its own thread, so a test can keep the engine
+    /// busy without blocking the test's own tasks.
+    pub(crate) fn idle_handle_on_own_thread() -> safe_cex_native::AccountHandle {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            tokio::task::LocalSet::new().block_on(&runtime, async move {
+                let engine = safe_cex_engine::test_support::seeded_engine(Idle);
+                let (handle, task) = safe_cex_native::spawn_account(
+                    safe_cex_native::Host::new(engine, NoIo),
+                    ServerConfig::default(),
+                )
+                .unwrap();
+                tx.send(handle).unwrap();
+                let _ = task.await;
+            });
+        });
+        rx.recv().unwrap()
+    }
+
+    /// A loaded BTCUSDT account under `registry` running its algo host and
+    /// counting its algos there, as `build` wires it. Placements never settle.
+    pub(crate) fn held_account_counted(
+        registry: &Registry,
+        link: Arc<SignerLink>,
+        fingerprint: String,
+    ) -> Arc<Account> {
+        let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
+        let venue = HeldLoad {
+            placed: Arc::default(),
+            load_after_ms: Some(0.),
+            ticker: true,
+        };
+        let (account, inbox) = held_account_on(venue, Some(link.clone()), fingerprint, running);
+        let account = run_algos(account, link, inbox);
+        register(registry, &account);
+        account
+    }
+
     /// Another live socket holding `account`, which then signs through it.
     pub(crate) fn hold_live(account: &Account, id: u64, outbox: Outbox) {
         account.hold(
@@ -1631,14 +1761,6 @@ pub(crate) mod tests {
     /// The socket `account` signs through.
     pub(crate) fn signing(account: &Account) -> Option<u64> {
         account.holders.lock().unwrap().signing
-    }
-
-    /// `account` as the registry's account for its (user, name).
-    pub(crate) fn register(registry: &Registry, account: &Arc<Account>) {
-        registry.accounts.lock().unwrap().insert(
-            (account.user.clone(), account.name.clone()),
-            account.clone(),
-        );
     }
 
     #[tokio::test]
@@ -1735,7 +1857,7 @@ pub(crate) mod tests {
                 assert_eq!(
                     registry
                         .take_notice("u", "acct", None)
-                        .map(|kept| kept.text)
+                        .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "a second device, or a reopened tab, is told"
@@ -1748,7 +1870,7 @@ pub(crate) mod tests {
                 assert_eq!(
                     registry
                         .take_notice("u", "acct", Some("owner"))
-                        .map(|kept| kept.text)
+                        .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "the device that owned the chase still is"
@@ -1763,7 +1885,7 @@ pub(crate) mod tests {
                 assert_eq!(
                     registry
                         .take_notice("u", "acct", Some("owner"))
-                        .map(|kept| kept.text)
+                        .map(|kept| kept.summary())
                         .as_deref(),
                     Some("second"),
                     "one per account"

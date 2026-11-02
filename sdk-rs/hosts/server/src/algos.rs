@@ -54,18 +54,64 @@ pub struct Holding {
 /// Sends a frame, if given, to every live holder; says who holds the account.
 pub type Broadcast = Box<dyn Fn(Option<String>) -> Holding + Send>;
 
+/// The algo a stop notice is about, as the page's `activeChasers` or
+/// `activeTWAPs` row names it, so the page can dedupe the notice exactly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AlgoRef {
+    /// `"chase"` or `"twap"`.
+    pub kind: &'static str,
+    pub id: String,
+}
+
+/// One error notice for the page: one algo's stop, or errors it may have missed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Notice {
+    pub text: String,
+    pub algo: Option<AlgoRef>,
+}
+
+impl Notice {
+    pub fn frame(&self, account_name: &str) -> String {
+        crate::envelope::algo_notice(account_name, &self.text, self.algo.as_ref())
+    }
+}
+
 /// What a client that is not there to see it is told on its next init: why its
 /// algos stopped, and the ends of chases it missed, as replayable frames.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Kept {
-    pub text: String,
+    pub notices: Vec<Notice>,
     pub ends: Vec<String>,
+}
+
+impl Kept {
+    /// The notices, then the replayed chase ends, as frames for the page.
+    pub fn frames(&self, account_name: &str) -> Vec<String> {
+        self.notices
+            .iter()
+            .map(|notice| notice.frame(account_name))
+            .chain(self.ends.iter().cloned())
+            .collect()
+    }
+
+    /// The notices' text, for the log.
+    pub fn summary(&self) -> String {
+        let texts: Vec<&str> = self
+            .notices
+            .iter()
+            .map(|notice| notice.text.as_str())
+            .collect();
+        texts.join("\n")
+    }
 }
 
 impl From<&str> for Kept {
     fn from(text: &str) -> Self {
         Self {
-            text: text.to_owned(),
+            notices: vec![Notice {
+                text: text.to_owned(),
+                algo: None,
+            }],
             ends: Vec::new(),
         }
     }
@@ -307,15 +353,15 @@ fn algo_error(account_name: &str, data: &str) -> String {
     crate::envelope::algo_error(account_name, data)
 }
 
-/// Which algos stopped, and with `may_rest` that their orders may still be open:
-/// with no browser, a cancel cannot be signed.
-fn stop_notice(
+/// One notice per stopped algo, and with `may_rest` that its orders may still be
+/// open: with no browser, a cancel cannot be signed.
+fn stop_notices(
     chasers: &[ActiveChaser],
     twaps: &[Value],
     store: &AlgoStore,
     reason: &str,
     may_rest: bool,
-) -> Option<String> {
+) -> Vec<Notice> {
     let chases = chasers.iter().map(|chase| {
         let resting = may_rest
             && chase.current_order_ids.iter().any(|id| {
@@ -328,7 +374,13 @@ fn stop_notice(
         } else {
             ""
         };
-        format!("Chase on {} stopped: {reason}.{check}", chase.symbol)
+        Notice {
+            text: format!("Chase on {} stopped: {reason}.{check}", chase.symbol),
+            algo: Some(AlgoRef {
+                kind: "chase",
+                id: chase.id.clone(),
+            }),
+        }
     });
     let twaps = twaps.iter().map(|twap| {
         let market = twap["activeMarket"]["symbol"]
@@ -339,10 +391,23 @@ fn stop_notice(
         } else {
             ""
         };
-        format!("TWAP on {market} stopped: {reason}.{check}")
+        Notice {
+            text: format!("TWAP on {market} stopped: {reason}.{check}"),
+            algo: Some(AlgoRef {
+                kind: "twap",
+                id: twap["id"].as_str().unwrap_or_default().to_owned(),
+            }),
+        }
     });
-    let lines: Vec<String> = chases.chain(twaps).collect();
-    (!lines.is_empty()).then(|| lines.join("\n"))
+    chases.chain(twaps).collect()
+}
+
+/// Errors a page may have missed, as one notice the way they were always told.
+fn errors_notice(errors: Vec<String>) -> Option<Notice> {
+    (!errors.is_empty()).then(|| Notice {
+        text: errors.join("\n"),
+        algo: None,
+    })
 }
 
 /// A command's audit line, also written if its waiter gives up before the
@@ -907,36 +972,31 @@ pub async fn run(
     };
     let reason = reason.as_str();
     let (chasers, twaps) = (book.active_chasers(), twap.active_twaps(&name));
-    let stop_notice = |may_rest| stop_notice(&chasers, &twaps, &port.store(), reason, may_rest);
-    let (stopped_notice, unsettled_notice) = (stop_notice(false), stop_notice(true));
+    let stop_notices = |may_rest| stop_notices(&chasers, &twaps, &port.store(), reason, may_rest);
+    let (stopped_notices, unsettled_notices) = (stop_notices(false), stop_notices(true));
     // Kept for the next init only when no browser is there to be sent them.
-    let unheard_notices = || -> (Vec<String>, Vec<String>) {
+    let unheard_notices = || -> (Option<Notice>, Vec<String>) {
         let (errors, ends) = port.take_unheard_for_dispose();
         let errors = errors
             .into_iter()
             .map(|data| serde_json::from_str(&data).unwrap_or(data))
             .collect();
-        (errors, ends)
+        (errors_notice(errors), ends)
     };
-    let mut notices = Vec::new();
-    let mut ends = Vec::new();
+    let mut kept = Kept::default();
     match &stopped {
         Some(stopped) => {
-            (notices, ends) = unheard_notices();
-            notices.extend(unsettled_notice.clone());
-            if !notices.is_empty() || !ends.is_empty() {
-                stopped(Kept {
-                    text: notices.join("\n"),
-                    ends: ends.clone(),
-                });
+            let (errors, ends) = unheard_notices();
+            kept.notices.extend(errors);
+            kept.notices.extend(unsettled_notices.iter().cloned());
+            kept.ends = ends;
+            if kept != Kept::default() {
+                stopped(kept.clone());
             }
         }
         None => {
-            if let Some(notice) = stopped_notice {
-                (port.broadcast)(Some(crate::envelope::algo_error(
-                    &name,
-                    Value::String(notice),
-                )));
+            for notice in &stopped_notices {
+                (port.broadcast)(Some(notice.frame(&name)));
             }
         }
     }
@@ -992,13 +1052,10 @@ pub async fn run(
             "{name}: chaser shutdown passed its deadline; cancels may be unsettled and orders may rest"
         ));
         // A live browser was told they stopped; now it must check the orders.
-        if stopped.is_none()
-            && let Some(notice) = unsettled_notice
-        {
-            (port.broadcast)(Some(crate::envelope::algo_error(
-                &name,
-                Value::String(notice),
-            )));
+        if stopped.is_none() {
+            for notice in &unsettled_notices {
+                (port.broadcast)(Some(notice.frame(&name)));
+            }
         }
     }
     crate::audit::log(
@@ -1010,13 +1067,10 @@ pub async fn run(
     // Its cancels can fail too, with no browser to tell: a fuller notice replaces the first.
     if let Some(stopped) = &stopped {
         let (raised, ended) = unheard_notices();
-        if !raised.is_empty() || !ended.is_empty() {
-            notices.extend(raised);
-            ends.extend(ended);
-            stopped(Kept {
-                text: notices.join("\n"),
-                ends: ends.clone(),
-            });
+        if raised.is_some() || !ended.is_empty() {
+            kept.notices.extend(raised);
+            kept.ends.extend(ended);
+            stopped(kept);
         }
     }
     scope.dispose();

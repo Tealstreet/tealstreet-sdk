@@ -34,13 +34,27 @@ struct Claims {
 
 pub struct Verifier {
     key: DecodingKey,
+    #[cfg(feature = "test-support")]
+    unsigned: bool,
 }
 
 impl Verifier {
     pub fn new(public_key_pem: &str) -> Result<Self, jsonwebtoken::errors::Error> {
         Ok(Self {
             key: DecodingKey::from_rsa_pem(public_key_pem.as_bytes())?,
+            #[cfg(feature = "test-support")]
+            unsigned: false,
         })
+    }
+
+    /// Loopback test servers: claims are checked as ever, the signature is not,
+    /// so tests need no private key ([`unsigned_token`]).
+    #[cfg(feature = "test-support")]
+    pub fn unsigned() -> Self {
+        Self {
+            unsigned: true,
+            ..Self::new(PROXY_PUBLIC_KEY).expect("the bundled key parses")
+        }
     }
 
     /// RS256 only, `exp` required and unexpired, `userId` a nonempty string.
@@ -48,6 +62,10 @@ impl Verifier {
         let mut validation = Validation::new(Algorithm::RS256);
         validation.leeway = 0;
         validation.set_required_spec_claims(&["exp"]);
+        #[cfg(feature = "test-support")]
+        if self.unsigned {
+            validation.insecure_disable_signature_validation();
+        }
         let claims = decode::<Claims>(token, &self.key, &validation).ok()?.claims;
         let expires_at_ms = claims.exp.checked_mul(1000)?;
         (!claims.user_id.is_empty() && expires_at_ms > now_ms).then_some(Verified {
@@ -55,4 +73,16 @@ impl Verifier {
             expires_at_ms,
         })
     }
+}
+
+/// A proxy token for `user` that only [`Verifier::unsigned`] accepts.
+#[cfg(feature = "test-support")]
+pub fn unsigned_token(user: &str, exp_seconds: u64) -> String {
+    use base64::Engine as _;
+    let part = |value: serde_json::Value| {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string())
+    };
+    let header = part(serde_json::json!({"alg": "RS256", "typ": "JWT"}));
+    let claims = part(serde_json::json!({"userId": user, "exp": exp_seconds}));
+    format!("{header}.{claims}.unsigned")
 }

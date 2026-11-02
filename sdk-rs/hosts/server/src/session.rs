@@ -514,17 +514,11 @@ impl Session {
                         "algo stop notice {} to socket {}: {} ({} chase ends)",
                         init.account_name,
                         self.socket,
-                        kept.text,
+                        kept.summary(),
                         kept.ends.len()
                     ));
-                    if !kept.text.is_empty() {
-                        self.send(envelope::algo_error(
-                            &init.account_name,
-                            Value::String(kept.text),
-                        ));
-                    }
-                    for end in kept.ends {
-                        self.send(end);
+                    for frame in kept.frames(&init.account_name) {
+                        self.send(frame);
                     }
                 }
             }
@@ -1668,6 +1662,7 @@ mod tests {
     use super::*;
 
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
+    const WEB_TWAP: &str = r#"{"accountName":"acct","activeMarket":{"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true},"size":0.1,"duration":600,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"}"#;
 
     fn acct_init() -> InitPayload {
         InitPayload {
@@ -2586,7 +2581,7 @@ mod tests {
                 crate::accounts::tests::register(&registry, &account);
                 let end = r#"{"t":"msg","d":{"op":"chaser:complete","data":{"id":"c1","filled":0.001,"replayed":true}}}"#;
                 (registry.keep_notice(&account, "r1"))(crate::algos::Kept {
-                    text: String::new(),
+                    notices: Vec::new(),
                     ends: vec![end.to_owned()],
                 });
                 let (out, mut sent, _) = Out::channel(64);
@@ -2613,6 +2608,104 @@ mod tests {
                     !frames.iter().any(|frame| frame.contains(r#""op":"error""#)),
                     "{frames:?}"
                 );
+            })
+            .await;
+    }
+
+    /// Grace expiry stops a chase and a TWAP with no browser to tell; the owner's
+    /// next init is told once per algo, each notice naming its kind and the id
+    /// its store row had, so the page can dedupe it against its own backstop.
+    #[tokio::test(start_paused = true)]
+    async fn the_next_init_is_told_each_stopped_algo_by_kind_and_id() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (account, session, mut sent) = chasing_session(&registry).await;
+                algo_op(&account, "twap:start", WEB_TWAP);
+                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                assert_eq!(registry.running_algos(), (1, 1));
+                let (mut chase, mut twap) = (Value::Null, Value::Null);
+                while let Ok(frame) = sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&frame).unwrap();
+                    let rows = &frame["d"]["data"];
+                    if frame["d"]["op"] == "store" {
+                        if let Some(row) = rows["activeChasers"].get(0) {
+                            chase = row["id"].clone();
+                        }
+                        if let Some(row) = rows["activeTWAPs"].get(0) {
+                            twap = row["id"].clone();
+                        }
+                    }
+                }
+                assert!(chase.is_string() && twap.is_string(), "{chase} {twap}");
+                // The helper's stand-in socket: the page's own is the only holder.
+                registry.release(&account, 7);
+                let owner = session.resume_id.clone();
+                session.close();
+                tokio::time::sleep(std::time::Duration::from_secs(80)).await;
+                assert_eq!(
+                    registry.running_algos(),
+                    (0, 0),
+                    "grace expiry stopped them"
+                );
+                // The rebuilt account the next init finds.
+                let init = acct_init();
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let (rebuilt, _algos) =
+                    crate::accounts::tests::held_account_with(Some(link), init.fingerprint());
+                crate::accounts::tests::register(&registry, &rebuilt);
+                let (out, mut sent, _) = Out::channel(256);
+                let identity = Identity {
+                    user: Some("u".into()),
+                    token: Some(("t".into(), u64::MAX)),
+                    resume_from: Some(owner),
+                    resumable: true,
+                };
+                let mut next = Session::new(
+                    registry.clone(),
+                    Arc::new(Metrics::default()),
+                    identity,
+                    out,
+                );
+                next.open().await;
+                let wire = format!(
+                    r#"{{"t":"init","d":{}}}"#,
+                    serde_json::to_string(&init).unwrap()
+                );
+                assert!(next.handle(&wire).await.is_ok());
+                let mut notices = Vec::new();
+                while let Ok(frame) = sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&frame).unwrap();
+                    if frame["d"]["op"] == "error" {
+                        notices.push(frame["d"]["data"].clone());
+                    }
+                }
+                for (kind, id, text) in [
+                    (
+                        "chase",
+                        &chase,
+                        "Chase on BTCUSDT stopped: no browser for 60s.",
+                    ),
+                    (
+                        "twap",
+                        &twap,
+                        "TWAP on BTCUSDT stopped: no browser for 60s.",
+                    ),
+                ] {
+                    let algo = serde_json::json!({"kind": kind, "id": id});
+                    let told: Vec<&Value> = notices
+                        .iter()
+                        .filter(|data| data[1]["algo"] == algo)
+                        .collect();
+                    assert_eq!(told.len(), 1, "{algo} told once: {notices:?}");
+                    assert!(
+                        told[0][0]
+                            .as_str()
+                            .is_some_and(|told| told.starts_with(text)),
+                        "{told:?}"
+                    );
+                    assert_eq!(told[0][1]["forceToast"], true);
+                }
             })
             .await;
     }

@@ -273,6 +273,7 @@ Sessions and resume (same semantics as today):
   - A different fingerprint disposes the account and rebuilds it.
 - **Resume alias:** a used `resumeId` stays valid as an alias for 120s, which is `RESUME_ALIAS_MS`.
 - **Grace expiry:** parked accounts are disposed with the reason `no browser for 60s`, recorded in the order audit log. No browser is attached to tell, so when chases or TWAPs were running the registry keeps one notice per (user, account) and sends it as an `error` on that account's next init; it is dropped once delivered or after 24 hours.
+- **Stop notices name their algo.** Every "Chase on X stopped: …" or "TWAP on X stopped: …" (live, break-glass, SIGTERM, grace expiry, failed signer) is its own `error`, `data: [message, {forceToast: true, algo: {kind: "chase"|"twap", id}}]`, where `id` is the algo's `activeChasers`/`activeTWAPs` row id, so the page dedupes exactly. Errors the page missed still arrive joined in one notice without `algo`.
 
 ## Remote signer (claude-4yjlw0)
 
