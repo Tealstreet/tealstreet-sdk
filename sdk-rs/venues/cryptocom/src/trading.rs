@@ -72,6 +72,22 @@ pub struct Request {
     identity: Identity,
 }
 impl Request {
+    /// A documented refusal code in the body proves nothing executed, whatever the status.
+    pub(crate) fn refused_by_body(&self, body: &str) -> bool {
+        use safe_cex_engine::classify::{Native, NativeCode};
+        serde_json::from_str::<crate::wire::RestEnvelope<'_>>(body).is_ok_and(|e| {
+            let native = Native {
+                code: NativeCode::Int(e.code),
+                message: e.message,
+            };
+            // A resendable refusal at 5xx stays unproven: only a plain refusal is exempt.
+            e.code != 0
+                && matches!(
+                    ERRORS.verdict(&native, self.step.call.intent()),
+                    safe_cex_engine::classify::Verdict::Refused(_)
+                )
+        })
+    }
     pub(crate) fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
         match &self.physical {
             Physical::Prerequisite { preflight, context } => {
@@ -1015,9 +1031,10 @@ pub(crate) const ERRORS: CodeTable = CodeTable {
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
+        // INVALID_NONCE: a clock or ordering fault, not the key.
         Row {
             key: Key::Int(40102),
-            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            verdict: Verdict::NonceRefused,
             only: None,
         },
         Row {
@@ -1057,6 +1074,37 @@ pub(crate) const ERRORS: CodeTable = CodeTable {
         },
         Row {
             key: Key::Int(309),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        // Documented refusals; 415 and 43005 come at HTTP 500.
+        Row {
+            key: Key::Int(415),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(43005),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(213),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(315),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(1110),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40004),
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },
