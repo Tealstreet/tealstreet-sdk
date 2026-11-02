@@ -225,7 +225,8 @@ impl Hyperliquid {
             identity,
             claim,
             action,
-            self.options.vault.clone(),
+            // As legacy, an empty saved vault is no vault.
+            self.options.vault.clone().filter(|vault| !vault.is_empty()),
             self.options.testnet,
         )
         .map_err(|e| e.venue_error())?;

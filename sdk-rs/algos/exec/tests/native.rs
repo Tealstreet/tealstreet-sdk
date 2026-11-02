@@ -1472,6 +1472,23 @@ async fn a_nuke_warns_of_unseen_orders_only_where_no_cancel_reaches_them() {
 }
 
 #[tokio::test]
+async fn a_failed_account_wide_cancel_says_orders_may_remain() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            port.nuke_account_cancel.set(true);
+            port.fail_cancels.set(true);
+            let error = nuke_answered(&port, "all").await.unwrap_err();
+            let message = error["message"].as_str().unwrap();
+            assert!(
+                message.contains("including triggers and TP/SL, may remain on this venue"),
+                "{message}"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn cli_chart_uses_one_typed_engine_candle_query_and_its_correlated_result() {
     LocalSet::new().run_until(async {
         let port=Rc::new(Port::default());wait_market(&port);let cx=AlgoCx::new(port.clone(),Scope::new());let factory=ExecFactory::default();

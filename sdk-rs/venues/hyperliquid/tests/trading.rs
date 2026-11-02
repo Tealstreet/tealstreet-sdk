@@ -166,8 +166,11 @@ fn full_position_stop_without_oid_is_an_accepted_setting() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
+    // Ruled: never [], which the page reads as nothing placed. The pending id is its cloid.
+    let sent_cloid = b["action"]["orders"][0]["c"].as_str().unwrap().to_owned();
     assert!(actions.iter().any(|a| matches!(a,
-        Action::Notice(Notice::CommandDone { command: 1, result }) if result == "[]")));
+        Action::Notice(Notice::CommandDone { command: 1, result }) if *result == format!(r#"["{sent_cloid}"]"#))),
+        "{actions:?}");
     assert!(
         !actions
             .iter()
@@ -280,7 +283,8 @@ fn amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only() {
             _ => None,
         })
         .expect("confirmed full-position replacement succeeds");
-    assert_eq!(result["orderIds"], serde_json::json!([]));
+    // Ruled: the rested replacement's cloid is its pending id, never an empty list.
+    assert_eq!(result["orderIds"], serde_json::json!([wire["c"]]));
     assert_eq!(result["clientOrderId"], wire["c"]);
     assert!(e.store().order("9").is_none());
     assert!(!actions.iter().any(|action| matches!(
@@ -1580,4 +1584,65 @@ fn settings_engine_seal_joins_old_read_but_only_a_post_write_read_recovers() {
     let recovered = write(&mut e);
     assert_eq!(body(&recovered)["action"]["leverage"], 5);
     assert_eq!(body(&recovered)["action"]["isCross"], false);
+}
+
+/// As legacy, an empty saved vault is no vault: signing must not refuse every write over it.
+#[test]
+fn an_empty_vault_signs_as_the_account_itself() {
+    let (mut e, _) = ready_identity("disabled", false, None, "30", Some(String::new()));
+    e.handle(
+        2000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 901,
+            orders: vec![opts(
+                r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","amount":1,"price":100}"#,
+            )],
+        }),
+    );
+    let b = body(&write(&mut e));
+    assert!(
+        b.get("vaultAddress").is_none_or(serde_json::Value::is_null),
+        "{b}"
+    );
+}
+
+/// Live Hyperliquid rows carry no tpsl field: a "Take Profit Limit" is a take profit by its name.
+/// Read as a stop, a drag re-placed it as an sl trigger on the take-profit side, which fires at once.
+#[test]
+fn a_take_profit_limit_is_read_and_moved_as_a_take_profit() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.0,
+        &format!(
+            r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"B","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Limit","triggerPx":"87"}},"status":"open"}}]}}"#
+        ),
+    );
+    assert_eq!(
+        e.store().order("9").unwrap().kind,
+        safe_cex_engine::model::OrderType::TakeProfit
+    );
+    e.handle(
+        2001.0,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "9".into(),
+            price: Some(85.0),
+            amount: None,
+        }),
+    );
+    let r = write(&mut e);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let r = write(&mut e);
+    let b = body(&r);
+    assert_eq!(
+        b["action"]["orders"][0]["t"]["trigger"]["tpsl"], "tp",
+        "{b}"
+    );
 }
