@@ -333,3 +333,20 @@ fn stale_provider_reprepares_from_original_intent_and_old_attempt_cannot_send() 
     assert_eq!(body["clientOrderID"], "a b+/%");
     assert_eq!(body["orderId"].as_u64(), Some(9007199254740993));
 }
+
+/// BingX refuses a timestamp older than its 5000 ms recvWindow, its maximum. A request signed
+/// and then held must be re-signed well inside that, leaving the network its share.
+#[test]
+fn a_signed_request_is_re_signed_before_bingx_would_call_its_timestamp_stale() {
+    use safe_cex_engine::SignStep;
+    let step = Http::new(
+        Identity::new(
+            safe_cex_engine::signing::KeyRef("ref:credential".into()),
+            Some(safe_cex_engine::signing::KeyRef("ref:signing".into())),
+        ),
+        Method::Get,
+        "/openApi/swap/v3/user/balance",
+        Params::new(),
+    );
+    assert!(step.freshness_ms() <= 2_000.0, "{}", step.freshness_ms());
+}

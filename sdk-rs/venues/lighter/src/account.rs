@@ -1079,7 +1079,10 @@ impl Lighter {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.connection.read_only {
             // Legacy's degraded cadence; set before connecting so no live ping is rearmed.
-            self.account.connection.supervisor.set_ping_interval(cx, Some(20_000.0));
+            self.account
+                .connection
+                .supervisor
+                .set_ping_interval(cx, Some(20_000.0));
         }
         self.account.connection.open = false;
         self.account.connection.supervisor.connecting(cx);
