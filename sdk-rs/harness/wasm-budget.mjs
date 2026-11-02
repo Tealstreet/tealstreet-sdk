@@ -80,24 +80,25 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #2650 Bitget flat leverage read: CI 2,140,041 B; ddi's rule, CI + 10 KiB, rounded up to a KiB.
 // #2700 Phemex replacement condition wait: CI 1,931,732 B; ddi's rule, CI + 10 KiB, rounded up to a KiB.
 // #2812 readPositions: CI run 41375427208; Sam's order, CI + 10 KiB, rounded up to a KiB, for every family over its cap.
+// #2819 hosted Nuke fresh read: CI run 41378308674; ddi's fix-forward, CI + 10 KiB, rounded up to a KiB, for every family over its cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_921_024,
-  asterdex: 2_056_192,
+  asterdex: 2_066_432,
   backpack: 1_826_816,
-  binance: 2_115_584,
+  binance: 2_125_824,
   bingx: 1_933_312,
   bitget: 2_225_152,
   bitgetusdc: 2_225_152,
   bitrue: 1_770_496,
-  bitunix: 1_779_712,
+  bitunix: 1_792_000,
   blofin: 1_882_112,
   breakoutprop: 1_467_392,
-  bybit: 2_106_368,
+  bybit: 2_117_632,
   coinbase: 1_770_496,
   cryptocom: 1_666_048,
   grvt: 1_736_704,
-  hyperliquid: 2_022_400,
-  hyperliquidspot: 2_022_400,
+  hyperliquid: 2_035_712,
+  hyperliquidspot: 2_035_712,
   kraken: 2_058_240,
   krakenspot: 2_058_240,
   kucoin: 1_548_288,
@@ -105,14 +106,14 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   lighter: 1_929_216,
   'lighter-robinhood': 1_929_216,
   mexc: 1_681_408,
-  okx: 1_871_872,
+  okx: 1_882_112,
   orderly: 1_679_360,
-  paradex: 2_156_544,
-  phemex: 1_978_368,
+  paradex: 2_167_808,
+  phemex: 1_990_656,
   polymarket: 1_557_504,
   txflow: 1_786_880,
   weex: 1_883_136,
-  woo: 2_315_264,
+  woo: 2_326_528,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
