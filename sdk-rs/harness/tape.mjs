@@ -272,6 +272,7 @@ export const expectedCheckpointPlan = (records, venue = {}, impl) => {
 
 export class Tape {
   constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = 30000, impl, books = [], options, settings = {}) {
+    this.impl = impl;
     this.auditEnabled = settings.performance !== true;
     // Minimal receipts share the same recorder in both modes. They retain
     // routing-computed keys and send references, with all normalization after
@@ -1095,6 +1096,8 @@ export class Tape {
         this.settledCommands = this.commandIndex;
       } else if (frame.type === 'wait' || frame.type === 'http') {
         // Advance explicit horizons; real requests select HTTP responses.
+      } else if (this.venue.notDelivered?.(frame, this.impl)) {
+        // Counted like any frame, so both implementations checkpoint on the same ordinals.
       } else if (this.startupDelivered.has(frame) || this.earlyDelivered.has(frame)) {
         // Still advance tape time, frame count and tick callbacks below.
       } else {
