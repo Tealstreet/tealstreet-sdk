@@ -1685,6 +1685,8 @@ fn a_nuke_account_cancel_sends_both_venue_cancels_without_a_symbol() {
         json!({"code":0,"data":0,"msg":""}),
         json!({"code":0,"data":2,"msg":""}),
         json!({"code":0,"data":null,"msg":""}),
+        json!({"code":0,"data":{"rows":[]},"msg":""}),
+        json!({"code":0,"data":"ok","msg":""}),
         json!({"code":10002,"data":null,"msg":"OM_ORDER_NOT_FOUND"}),
     ] {
         let mut e = rejection_engine(vec![live_row("old-live")]);
@@ -1706,7 +1708,6 @@ fn a_failed_account_cancel_fails_the_command() {
         (200, r#"{"code":10500,"msg":"internal","data":null}"#),
         (200, r#"{"code":11085,"msg":"duplicate","data":null}"#),
         (200, r#"{"code":11107,"msg":"cross engine","data":null}"#),
-        (200, r#"{"code":0,"data":{"rows":[]}}"#),
         (503, r#"{"code":503,"msg":"busy"}"#),
     ] {
         let mut e = rejection_engine(vec![]);

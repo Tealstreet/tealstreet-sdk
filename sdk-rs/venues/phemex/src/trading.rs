@@ -2173,12 +2173,8 @@ impl PhemexPerpetuals {
                     }
                 }
                 // Documented `"data":0`: a bare number that names no order.
-                Call::CancelAccount => {
-                    let data = env.data.as_ref().map_or("null", |raw| raw.get());
-                    if data != "null" && serde_json::from_str::<u64>(data).is_err() {
-                        return Err("Phemex malformed cancel-all acknowledgement".into());
-                    }
-                }
+                // Code 0 is the acknowledgement; data is not a count (shown live).
+                Call::CancelAccount => {}
                 Call::Settings {
                     symbol,
                     leverage,
