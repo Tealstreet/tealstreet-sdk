@@ -6,7 +6,7 @@ use safe_cex_engine::request_context::Owner;
 use safe_cex_engine::selected_read::{
     LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
 };
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError, json::ArrayAt};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -246,7 +246,7 @@ impl PhemexPerpetuals {
                 method: Method::Get,
                 url,
                 body: None,
-                stream: Some(ArrayAt::Root),
+                stream: Some(crate::history::HISTORY_ROWS),
             },
             |identity| {
                 Box::new(crate::dispatch_signing::Http::new(
@@ -343,11 +343,12 @@ impl PhemexPerpetuals {
             self.income_failed(cx, request, "Phemex income HTTP failure");
             return;
         }
-        let parsed =
-            safe_cex_engine::json::each::<&serde_json::value::RawValue>(response.body, |row| {
+        let parsed = crate::history::history_rows(response.body).is_some_and(|rows| {
+            safe_cex_engine::json::each::<&serde_json::value::RawValue>(rows, |row| {
                 self.income_item(cx, &mut request, row.get())
             })
-            .is_ok();
+            .is_ok()
+        });
         if !parsed || request.invalid {
             self.income_failed(cx, request, "Malformed or oversized Phemex income response");
             return;

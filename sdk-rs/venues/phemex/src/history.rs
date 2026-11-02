@@ -85,10 +85,10 @@ enum Rows {
 }
 
 /// The venue answers `{"code":0,"data":{"rows":[...]}}`; a bare array also reads.
-const HISTORY_ROWS: ArrayAt =
+pub(crate) const HISTORY_ROWS: ArrayAt =
     ArrayAt::Envelope(&[&["data", "rows"], &["data", "list"], &["data"], &[]]);
 /// The row array of a whole or stream-emptied history body.
-fn history_rows(body: &str) -> Option<&str> {
+pub(crate) fn history_rows(body: &str) -> Option<&str> {
     use serde_json::value::RawValue;
     #[derive(Deserialize)]
     struct Page<'a> {
