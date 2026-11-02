@@ -175,6 +175,7 @@ impl Algos {
             None,
             PlacedSymbols::default(),
             Arc::new(AtomicBool::new(true)),
+            Default::default(),
             inbox_rx,
         ));
         // The feed's join snapshot loads the market before any op.

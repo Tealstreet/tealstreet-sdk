@@ -78,6 +78,8 @@ pub struct Account {
     pub reads: Arc<tokio::sync::Semaphore>,
     /// Metadata refreshes waiting for load, one per selected symbol.
     pub metadata_refreshes: Arc<tokio::sync::Semaphore>,
+    /// Chases and TWAPs its algo host is running; none for public accounts.
+    pub running: Arc<crate::algos::Running>,
 }
 
 /// Concurrent waiting store reads per account; more are refused, not queued.
@@ -312,12 +314,27 @@ pub struct Registry {
     engine_config: ServerConfig,
     pub resume_grace: Duration,
     /// The process is going away: no new account starts.
-    draining: AtomicBool,
+    stopping: AtomicBool,
+    /// The operator's drain before a restart (see DESIGN "Drain and roll").
+    drain: tokio::sync::watch::Sender<Drain>,
+    /// Bumped as any account's chases or TWAPs end.
+    algos_ended: Arc<tokio::sync::watch::Sender<u64>>,
     /// 5-10 account starts per second per egress IP, with jitter (DESIGN sizing).
     pacer: crate::pacing::Pacer,
     /// Why algos stopped while no browser was there to see it, one per
     /// (user, account), for that account's next init.
     notices: Notices,
+}
+
+/// The operator's drain of this box before a restart.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Drain {
+    #[default]
+    Off,
+    /// Sockets move as their accounts' chases and TWAPs end; users new here are moved.
+    Waiting,
+    /// Break-glass: algos were stopped and told; every socket moves.
+    Now,
 }
 
 /// A still-open resumable session, as a resume of its id reaches it.
@@ -575,7 +592,9 @@ impl Registry {
                 ..ServerConfig::default()
             },
             resume_grace,
-            draining: AtomicBool::new(false),
+            stopping: AtomicBool::new(false),
+            drain: tokio::sync::watch::channel(Drain::Off).0,
+            algos_ended: Arc::new(tokio::sync::watch::channel(0).0),
             pacer: crate::pacing::Pacer::new(7, Duration::from_millis(60)),
             notices: Arc::default(),
         }
@@ -644,7 +663,7 @@ impl Registry {
         token: Option<(String, u64)>,
         outbox: Outbox,
     ) -> Result<Arc<Account>, String> {
-        if self.draining.load(Ordering::Relaxed) {
+        if self.stopping.load(Ordering::Relaxed) {
             return Err("The server is restarting; reconnecting".into());
         }
         let key = (user.to_owned(), init.account_name.clone());
@@ -738,6 +757,8 @@ impl Registry {
         let algo_placed = placed_symbols.clone();
         let held = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let algo_held = held.clone();
+        let running = Arc::new(crate::algos::Running::new(self.algos_ended.clone()));
+        let algo_running = running.clone();
         let (algos, algo_inbox) = if public_only {
             (None, None)
         } else {
@@ -773,6 +794,7 @@ impl Registry {
                                 algo_signer,
                                 algo_placed,
                                 algo_held,
+                                algo_running,
                                 inbox,
                             ));
                         }
@@ -802,6 +824,7 @@ impl Registry {
             frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
             reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
             metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
+            running,
         };
         Ok((account, remote))
     }
@@ -980,7 +1003,7 @@ impl Registry {
     /// within `deadline`. Holders stay, so browsers still sign those cancels and
     /// are told. False if some account had not ended by then.
     pub async fn drain(&self, deadline: Duration) -> bool {
-        self.draining.store(true, Ordering::Relaxed);
+        self.stopping.store(true, Ordering::Relaxed);
         let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
         for account in &accounts {
             Self::stop(account, "the server is restarting", None);
@@ -993,6 +1016,78 @@ impl Registry {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         true
+    }
+
+    /// The operator drains the box: sockets move as their algos end, and only
+    /// users already live here may init. Running algos are never stopped for it.
+    pub fn start_drain(&self) {
+        self.drain.send_if_modified(|drain| {
+            let starts = *drain == Drain::Off;
+            if starts {
+                *drain = Drain::Waiting;
+            }
+            starts
+        });
+    }
+
+    /// Break-glass: stop every chase and TWAP through the SIGTERM path, which tells
+    /// each live page what stopped, and only then move every socket. False if some
+    /// account had not ended within `deadline`.
+    pub async fn break_glass(&self, deadline: Duration) -> bool {
+        self.start_drain();
+        let until = tokio::time::Instant::now() + deadline;
+        let mut settled = self.drain(deadline).await;
+        // A host zeroes its counts only after telling its pages what stopped.
+        while settled && self.running_algos() != (0, 0) {
+            if tokio::time::Instant::now() >= until {
+                settled = false;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        self.drain.send_replace(Drain::Now);
+        settled
+    }
+
+    /// Ends a drain that did not end in a restart.
+    pub fn undrain(&self) {
+        self.stopping.store(false, Ordering::Relaxed);
+        self.drain.send_replace(Drain::Off);
+    }
+
+    pub fn drain_state(&self) -> Drain {
+        *self.drain.borrow()
+    }
+
+    /// Changes as a drain starts, goes break-glass or ends.
+    pub fn watch_drain(&self) -> tokio::sync::watch::Receiver<Drain> {
+        self.drain.subscribe()
+    }
+
+    /// Changes as any account's chases or TWAPs end.
+    pub fn watch_algos_ended(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.algos_ended.subscribe()
+    }
+
+    /// `(chases, twaps)` running on this box, parked accounts included.
+    pub fn running_algos(&self) -> (usize, usize) {
+        self.accounts
+            .lock()
+            .unwrap()
+            .values()
+            .map(|account| account.running.counts())
+            .fold((0, 0), |(chases, twaps), (more_chases, more_twaps)| {
+                (chases + more_chases, twaps + more_twaps)
+            })
+    }
+
+    /// Whether `user` holds any private account here, live or parked.
+    pub fn live_here(&self, user: &str) -> bool {
+        self.accounts
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|(holder, _)| holder == user)
     }
 
     /// Moves a closing socket's private accounts under `resume_id` for the grace
@@ -1238,13 +1333,14 @@ pub(crate) mod tests {
         Arc<Account>,
         mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
     ) {
-        held_account_on(Idle, link, fingerprint)
+        held_account_on(Idle, link, fingerprint, Arc::default())
     }
 
     fn held_account_on<V: safe_cex_engine::Venue + 'static>(
         venue: V,
         link: Option<Arc<SignerLink>>,
         fingerprint: String,
+        running: Arc<crate::algos::Running>,
     ) -> (
         Arc<Account>,
         mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
@@ -1272,6 +1368,7 @@ pub(crate) mod tests {
             frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
             reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
             metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
+            running,
         });
         account.hold(
             7,
@@ -1302,14 +1399,37 @@ pub(crate) mod tests {
         let venue = HeldLoad {
             placed: placed.clone(),
             load_after_ms,
+            ticker: false,
         };
-        let (account, inbox) = held_account_on(venue, Some(link.clone()), String::new());
+        let (account, inbox) =
+            held_account_on(venue, Some(link.clone()), String::new(), Arc::default());
         (run_algos(account, link, inbox), placed)
+    }
+
+    /// A loaded BTCUSDT account under `registry` running its algo host and
+    /// counting its algos there, as `build` wires it. Placements never settle.
+    pub(crate) fn held_account_counted(
+        registry: &Registry,
+        link: Arc<SignerLink>,
+        fingerprint: String,
+    ) -> Arc<Account> {
+        let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
+        let venue = HeldLoad {
+            placed: Arc::default(),
+            load_after_ms: Some(0.),
+            ticker: true,
+        };
+        let (account, inbox) = held_account_on(venue, Some(link.clone()), fingerprint, running);
+        let account = run_algos(account, link, inbox);
+        register(registry, &account);
+        account
     }
 
     struct HeldLoad {
         placed: Arc<std::sync::atomic::AtomicUsize>,
         load_after_ms: Option<f64>,
+        /// A BTCUSDT ticker, and every command answered: chases run as on a trading venue.
+        ticker: bool,
     }
     impl safe_cex_engine::Venue for HeldLoad {
         type Pending = ();
@@ -1346,6 +1466,20 @@ pub(crate) mod tests {
             cx: &mut safe_cex_engine::Cx<'_, ()>,
             command: safe_cex_engine::Command,
         ) {
+            if self.ticker {
+                if let Some(id) = command.completion_id() {
+                    let result = match &command {
+                        safe_cex_engine::Command::PlaceOrders { orders, .. } => {
+                            let ids: Vec<String> =
+                                (0..orders.len()).map(|i| format!("o-{i}")).collect();
+                            serde_json::to_string(&ids).unwrap()
+                        }
+                        _ => "null".into(),
+                    };
+                    cx.done(id, result);
+                }
+                return;
+            }
             match command {
                 safe_cex_engine::Command::PlaceOrders { .. } => {
                     self.placed.fetch_add(1, Ordering::SeqCst);
@@ -1389,6 +1523,24 @@ pub(crate) mod tests {
                 taker_fee: None,
                 maker_fee: None,
             }]);
+            if self.ticker {
+                cx.store.set_tickers(vec![safe_cex_engine::model::Ticker {
+                    id: "BTCUSDT".into(),
+                    symbol: "BTCUSDT".into(),
+                    bid: 77_000.,
+                    ask: 77_000.1,
+                    last: 77_000.,
+                    mark: 77_000.,
+                    index: 77_000.,
+                    mid_price: None,
+                    percentage: 0.,
+                    open_interest: 0.,
+                    funding_rate: 0.,
+                    funding_time: 0.,
+                    volume: 0.,
+                    quote_volume: 0.,
+                }]);
+            }
             cx.store.set_orders(Vec::new());
             cx.store.set_positions(vec![Position {
                 id: "BTCUSDT-long".into(),
@@ -1436,6 +1588,7 @@ pub(crate) mod tests {
             Some(link),
             account.placed.clone(),
             account.held.clone(),
+            account.running.clone(),
             inbox,
         ));
         account
