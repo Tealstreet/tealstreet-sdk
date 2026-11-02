@@ -122,18 +122,38 @@ impl Harness {
         );
     }
     fn reply(&mut self, request: HttpRequest, body: &str) {
+        self.reply_status(request, 200, body);
+    }
+    fn reply_status(&mut self, request: HttpRequest, status: u16, body: &str) {
         self.engine.handle(
             1700000000000.0,
             Event::HttpResponse {
                 request: request.id,
                 response: Response {
-                    status: 200,
+                    status,
                     headers: "",
                     body,
                 },
             },
         );
         self.collect();
+    }
+    /// Starts the venue on `info` as its exchangeInfo, settling the one-way mode read.
+    fn load(&mut self, info: &str) {
+        self.engine.start(1700000000000.0);
+        self.collect();
+        for (path, body) in [
+            ("/exchangeInfo", info),
+            ("/positionSide/dual", r#"{"dualSidePosition":false}"#),
+        ] {
+            let index = self
+                .requests
+                .iter()
+                .position(|r| r.url.contains(path))
+                .unwrap_or_else(|| panic!("missing {path}: {:?}", self.requests));
+            let request = self.requests.remove(index);
+            self.reply(request, body);
+        }
     }
     fn place(&mut self, order: serde_json::Value) {
         self.command(Command::PlaceOrders {
@@ -1259,4 +1279,190 @@ fn symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
     });
     h.sweep("BTCUSDT");
     assert!(h.result(4).is_ok());
+}
+
+/// Aster's Cancel All Open Orders documents its success as
+/// `{"code":"200","msg":"The operation of cancel all open order is done."}`;
+/// any other answer leaves orders resting, so cancel-all (and a Nuke leg) fails.
+#[test]
+fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
+    const LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests; current limit of IP(1.2.3.4) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API."}"#;
+    let refusals = [
+        (429, LIMITED, "Too many requests"),
+        (200, LIMITED, "Too many requests"),
+        (
+            400,
+            r#"{"code":-1102,"msg":"Mandatory parameter 'symbol' was not sent, was empty/null, or malformed."}"#,
+            "Mandatory parameter",
+        ),
+        (
+            200,
+            r#"{"code":"500","msg":"Cancel all open order failed."}"#,
+            "Cancel all open order failed.",
+        ),
+    ];
+    for v3 in [false, true] {
+        for (status, body, told) in refusals {
+            for with_row in [false, true] {
+                let mut h = if v3 {
+                    Harness::options(v3_options())
+                } else {
+                    Harness::new()
+                };
+                if with_row {
+                    h.engine
+                        .store_mut()
+                        .set_orders(vec![order("283194212", OrderType::Limit)]);
+                }
+                h.command(Command::CancelSymbolOrders {
+                    command: 7,
+                    symbol: "BTCUSDT".into(),
+                });
+                if with_row {
+                    let cancel = h.take(Method::Delete);
+                    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+                }
+                let index = h
+                    .requests
+                    .iter()
+                    .position(|r| r.url.contains("/allOpenOrders?"))
+                    .expect("the sweep follows the row cancels");
+                let sweep = h.requests.remove(index);
+                h.reply_status(sweep, status, body);
+                let message = h.result(7).as_ref().expect_err(body);
+                assert!(message.contains(told), "{v3} {status} {body}: {message}");
+            }
+        }
+    }
+}
+
+/// Aster's live BTCUSDT row (2026-11-02): LOT_SIZE allows 1000 but MARKET_LOT_SIZE only 120.
+const BTC_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","filters":[{"minPrice":"1","maxPrice":"1000000","filterType":"PRICE_FILTER","tickSize":"0.1"},{"stepSize":"0.001","filterType":"LOT_SIZE","maxQty":"1000","minQty":"0.001"},{"stepSize":"0.001","filterType":"MARKET_LOT_SIZE","maxQty":"120","minQty":"0.001"},{"limit":200,"filterType":"MAX_NUM_ORDERS"},{"limit":10,"filterType":"MAX_NUM_ALGO_ORDERS"},{"notional":"5","filterType":"MIN_NOTIONAL"},{"multiplierDown":"0.9800","multiplierUp":"1.0200","ltMultiplierDown":"0","multiplierDecimal":"4","filterType":"PERCENT_PRICE","ltMultiplierUp":"0"}],"orderTypes":["LIMIT","MARKET","STOP","STOP_MARKET","TAKE_PROFIT","TAKE_PROFIT_MARKET","TRAILING_STOP_MARKET"],"timeInForce":["GTC","IOC","GTX","HIDDEN"],"createTime":1630045468108,"pair":"BTCUSDT","contractType":"PERPETUAL","deliveryDate":4133404800000,"onboardDate":1627628400000,"status":"TRADING","maintMarginPercent":"2.5000","requiredMarginPercent":"5.0000","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":3,"baseAssetPrecision":8,"quotePrecision":8,"underlyingType":"COIN","underlyingSubType":["Top"],"symbolType":0,"tradingMode":0,"name":"","channel":"","sequenceNo":10,"twapMinNotional":"1000","imn":"16000.00","tags":[],"settlePlan":0,"triggerProtect":"0.0200","liquidationFee":"0.025000","marketTakeBound":"0.02"}]}"#;
+
+fn quantities(h: &mut Harness) -> Vec<String> {
+    let mut sent = Vec::new();
+    while let Some(index) = h
+        .requests
+        .iter()
+        .position(|r| r.method == Method::Post && r.url.contains("/order?"))
+    {
+        let request = h.requests.remove(index);
+        let quantity = request
+            .url
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("quantity="))
+            .unwrap_or_default()
+            .to_owned();
+        sent.push(quantity);
+        h.reply(request, &format!(r#"{{"orderId":{}}}"#, 900 + sent.len()));
+    }
+    sent
+}
+
+/// Market orders, a Nuke's reduce-only close among them, split at
+/// MARKET_LOT_SIZE.maxQty; a limit order keeps LOT_SIZE.maxQty.
+#[test]
+fn market_orders_split_at_the_market_lot_maximum_and_limits_at_the_lot_maximum() {
+    for v3 in [false, true] {
+        for reduce_only in [false, true] {
+            let mut h = if v3 {
+                Harness::options(v3_options())
+            } else {
+                Harness::new()
+            };
+            h.load(BTC_INFO);
+            h.place(json!({"symbol":"BTCUSDT","type":"market","side":"sell","amount":250.0,"reduceOnly":reduce_only}));
+            assert_eq!(
+                quantities(&mut h),
+                ["120", "120", "10"],
+                "{v3} {reduce_only}"
+            );
+            assert!(h.result(1).is_ok());
+            h.done.clear();
+            h.place(json!({"symbol":"BTCUSDT","type":"limit","side":"sell","amount":250.0,"price":70000.0,"reduceOnly":reduce_only}));
+            assert_eq!(quantities(&mut h), ["250"], "{v3} {reduce_only}");
+        }
+    }
+}
+
+/// A market remainder below MARKET_LOT_SIZE.minQty borrows from the chunk before
+/// it, on MARKET_LOT_SIZE.stepSize. Live filters share LOT_SIZE's step and minimum;
+/// this body changes only those two to show which filter governs.
+#[test]
+fn a_market_split_keeps_every_chunk_on_the_market_lot_step_and_minimum() {
+    let info = BTC_INFO.replace(
+        r#"{"stepSize":"0.001","filterType":"MARKET_LOT_SIZE","maxQty":"120","minQty":"0.001"}"#,
+        r#"{"stepSize":"0.01","filterType":"MARKET_LOT_SIZE","maxQty":"120","minQty":"0.05"}"#,
+    );
+    let mut h = Harness::new();
+    h.load(&info);
+    h.place(json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":240.024}));
+    assert_eq!(quantities(&mut h), ["120", "119.97", "0.05"]);
+    h.place(
+        json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":240.0234,"price":70000.0}),
+    );
+    assert_eq!(quantities(&mut h), ["240.023"]);
+}
+
+/// Aster's exchangeInfo says of quantityPrecision "please do not use it as
+/// stepSize"; CFXUSDT reports quantityPrecision 1 with LOT_SIZE stepSize 1.
+const CFX_INFO: &str = r#"{"symbols":[{"symbol":"CFXUSDT","filters":[{"minPrice":"0.000100","maxPrice":"2000","filterType":"PRICE_FILTER","tickSize":"0.000010"},{"stepSize":"1","filterType":"LOT_SIZE","maxQty":"20000000","minQty":"1"},{"stepSize":"1","filterType":"MARKET_LOT_SIZE","maxQty":"2000000","minQty":"1"},{"limit":200,"filterType":"MAX_NUM_ORDERS"},{"limit":10,"filterType":"MAX_NUM_ALGO_ORDERS"},{"notional":"5","filterType":"MIN_NOTIONAL"},{"multiplierDown":"0.9000","multiplierUp":"1.1000","ltMultiplierDown":"0","multiplierDecimal":"4","filterType":"PERCENT_PRICE","ltMultiplierUp":"0"}],"orderTypes":["LIMIT","MARKET","STOP","STOP_MARKET","TAKE_PROFIT","TAKE_PROFIT_MARKET","TRAILING_STOP_MARKET"],"timeInForce":["GTC","IOC","GTX","HIDDEN"],"createTime":1683200686304,"pair":"CFXUSDT","contractType":"PERPETUAL","deliveryDate":4133404800000,"onboardDate":1778082000000,"status":"TRADING","maintMarginPercent":"2.5000","requiredMarginPercent":"5.0000","baseAsset":"CFX","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":6,"quantityPrecision":1,"baseAssetPrecision":8,"quotePrecision":8,"underlyingType":"COIN","underlyingSubType":[],"symbolType":0,"tradingMode":0,"name":"","channel":"{}","sequenceNo":0,"twapMinNotional":"1000","imn":"4000.00","tags":[],"settlePlan":0,"triggerProtect":"0.1000","liquidationFee":"0.025000","marketTakeBound":"0.10"}]}"#;
+
+fn cfx_order() -> Order {
+    let mut resting = order("5104447791", OrderType::Limit);
+    resting.symbol = "CFXUSDT".into();
+    resting.price = 0.15;
+    resting.amount = 100.0;
+    resting.remaining = 100.0;
+    resting
+}
+
+#[test]
+fn the_amount_step_is_the_lot_step_not_quantity_precision() {
+    let mut h = Harness::new();
+    h.load(CFX_INFO);
+    let market = h.engine.store().market("CFXUSDT").unwrap();
+    assert_eq!(market.precision.amount, 1.0);
+    assert_eq!(market.limits.amount.min, 1.0);
+}
+
+/// An amend whose size is off the lot step is rounded onto it before the cancel;
+/// one that rounds to nothing is refused before any cancel is sent.
+#[test]
+fn an_off_step_amend_is_rounded_or_refused_before_the_cancel() {
+    for v3 in [false, true] {
+        let mut h = if v3 {
+            Harness::options(v3_options())
+        } else {
+            Harness::new()
+        };
+        h.load(CFX_INFO);
+        h.engine.store_mut().set_orders(vec![cfx_order()]);
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: "5104447791".into(),
+            price: None,
+            amount: Some(0.4),
+        });
+        assert!(
+            !h.requests.iter().any(|r| r.method == Method::Delete),
+            "{v3}: {:?}",
+            h.requests
+        );
+        assert!(h.result(1).is_err());
+        h.command(Command::AmendOrder {
+            command: 2,
+            id: "5104447791".into(),
+            price: None,
+            amount: Some(150.4),
+        });
+        let cancel = h.take(Method::Delete);
+        h.reply(cancel, r#"{"orderId":5104447791,"status":"CANCELED"}"#);
+        let place = h.take(Method::Post);
+        assert!(
+            place.url.contains("quantity=150&reduceOnly=true&"),
+            "{v3}: {}",
+            place.url
+        );
+    }
 }
