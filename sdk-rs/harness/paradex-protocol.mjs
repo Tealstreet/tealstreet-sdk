@@ -100,13 +100,15 @@ const createSocketAudit = (_impl, { isPrivate, books = [], tickers = [] }) => {
     return sockets.get(key);
   };
   const requiredPrivate = ['orders.ALL', 'fills.ALL', 'positions', 'balance_events', 'account'];
-  const requiredPublic = [...tickers.flatMap((s) => [`bbo.${s}`, `trades.${s}`]), ...books.map((s) => `order_book.${s}.deltas`)];
+  const requiredPublic = [...tickers.map((s) => `bbo.${s}`), ...books.map((s) => `order_book.${s}.deltas`)];
   const check = () => {
     const all = [...states.values()].flatMap((sockets) => [...sockets.values()]);
     if (!requiredPublic.every((topic) => all.some((s) => s.channels.has(topic)))) return false;
-    // The TS oracle takes the global channel; the engine takes one per market.
-    if (!all.some((s) => s.channels.has('markets_summary'))
-      && !tickers.every((t) => all.some((s) => s.channels.has(`markets_summary.${t}`)))) return false;
+    // The TS oracle takes the global summary and every market's trades; the engine takes
+    // one summary per market and trades only for charted markets, under the 200 cap.
+    if (all.some((s) => s.channels.has('markets_summary'))) {
+      if (!tickers.every((t) => all.some((s) => s.channels.has(`trades.${t}`)))) return false;
+    } else if (!tickers.every((t) => all.some((s) => s.channels.has(`markets_summary.${t}`)))) return false;
     return !isPrivate || all.some((s) => s.auth && requiredPrivate.every((topic) => s.channels.has(topic)));
   };
   return {

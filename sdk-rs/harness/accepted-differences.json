@@ -7691,7 +7691,7 @@
     {
       "venue": "paradex",
       "tape": "sdk-rs/harness/tapes/paradex-private.jsonl",
-      "tapeSha256": "43938d9213e62945e1ab74b7a67d043f3ae49038b0697d76b740cda88894c586",
+      "tapeSha256": "4e5ed76534e50143e3279b6e2aa17eb457019188f0b4fd7f5f308bc8e4024125",
       "diagnostics": [
         {
           "failures": [

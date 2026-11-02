@@ -2008,6 +2008,10 @@ impl BybitLinear {
             self.account.handshake = Some("auth");
             self.account.handshake_timer = Some(cx.set_timer(10_000.0));
         }
+        // Hyro never reads the clock, so its handshake bookkeeping above never waits.
+        if self.auth_waits_for_clock(socket) {
+            return;
+        }
         if let Some(credentials) = &self.credentials {
             let request_id = self
                 .variant
@@ -2303,6 +2307,10 @@ impl BybitLinear {
                     },
                     format!("[WS]{op}:{message}"),
                 );
+                // Bybit's clock, read before the re-auth, corrects a slow host.
+                if op == "auth" {
+                    self.read_auth_clock(cx);
+                }
                 // An unauthenticated socket answers pings but carries no topics.
                 if op == "auth"
                     && let Some(feed) = self.private.feed

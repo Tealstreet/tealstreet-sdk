@@ -234,8 +234,11 @@ fn the_private_socket_authenticates_before_it_subscribes() {
     h.event(Event::WsOpened { socket });
     let auth = h.sent_on("/v5/private");
     assert_eq!(auth.len(), 1);
-    // "Authentication": expires is ten seconds past now.
-    let expires = h.now + 10_000.0;
+    // "Authentication": expires is ten seconds past Bybit's clock, which
+    // the answers' own `time` calibrated, not the host's.
+    let (bybit_now, _) = h.engine.signing_clock(h.now);
+    assert_ne!(bybit_now, h.now);
+    let expires = bybit_now.floor() + 10_000.0;
     let signature = hmac_sha256(
         b"secret",
         format!("GET/realtime{expires}").as_bytes(),

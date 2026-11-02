@@ -310,8 +310,10 @@ for (let run = 0; run < correctnessRuns; run++) {
     // Lighter closes a socket sending too many messages (30009), so Rust paces its
     // ticker subscribes; a Lighter unit test proves every market still gets one.
     // Kraken has no ping frame, so the Rust futures private socket keeps alive on the heartbeat feed.
+    // Paradex caps a socket at 200 subscriptions, so Rust takes trades only for charted markets.
     const paced = (key) => field === 'subscriptions' && ((values.venue.startsWith('lighter') && key.includes('"channel":"ticker/')) ||
-      (values.venue === 'kraken' && key.includes('"feed":"heartbeat"')));
+      (values.venue === 'kraken' && key.includes('"feed":"heartbeat"')) ||
+      (values.venue === 'paradex' && key.includes('"channel":"trades.')));
     const left = ts[field]?.filter((key) => !paced(key) && (field !== 'requests' || !implementationPlans.ts.has(key)));
     const right = rust[field]?.filter((key) => !paced(key) && (field !== 'requests' || !implementationPlans.rust.has(key)));
     if (!Array.isArray(left) || !Array.isArray(right) || JSON.stringify(left) !== JSON.stringify(right))
