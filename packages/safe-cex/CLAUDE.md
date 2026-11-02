@@ -291,7 +291,10 @@ readers reuse the already-applied state rather than publishing another snapshot.
 
 Rust `nukePositions` sizes one current native position snapshot with the shared
 native-unit sizing helper, preserving each hedge leg. It submits one reduce-only
-market batch and propagates partial or unknown outcomes without automatic retry.
+market batch and propagates partial or unknown outcomes. A venue with
+`freshPositions` sends a further close only after `readPositions`, a positions
+read issued after the last close. If it fails or times out, no close is sent and
+Nuke reports not confirmed flat; symbols it could not keep are reported the same way.
 `nuke` also attempts the venue's cancel-all operation after a close failure;
 the original close failure remains the result. Concurrent nukes are rejected.
 Every nuke (`nuke`, `nukePositions`, `nukeOrders`) first stops the account's

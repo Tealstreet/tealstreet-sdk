@@ -602,6 +602,15 @@ describe('Rust native current-account reads', () => {
     await expect(r.exchange.nuke()).rejects.toThrow(/^account is closed$/);
   });
 
+  it('reports not confirmed flat when the read skipped an open row', async () => {
+    const r = fixture();
+    await r.start();
+    r.exchange.readPositions = () => Promise.resolve(['DOGEUSD_PERP']);
+    await expect(r.exchange.nukePositions()).rejects.toThrow(
+      'Nuke could not confirm the account is flat: DOGEUSD_PERP on no listed market',
+    );
+  });
+
   it('does not invent a close for empty native positions despite a stale JS row', async () => {
     const r = fixture();
     await r.start();

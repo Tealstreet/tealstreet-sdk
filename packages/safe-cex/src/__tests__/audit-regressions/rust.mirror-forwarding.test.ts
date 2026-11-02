@@ -58,6 +58,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   getAccount: 'worker',
   fetchOrders: 'worker',
   fetchPositions: 'worker',
+  readPositions: 'worker',
   fetchBalance: 'worker',
   fetchPositionMode: 'worker',
   fetchStpMode: 'worker',

@@ -302,6 +302,9 @@ const NUKE_CLOSE_RETRIES = 3;
 const NUKE_CLOSE_RETRY_MS = 100;
 const NUKE_FLAT_ROUNDS = 3;
 const NUKE_FLAT_SETTLE_MS = 2_000;
+const NUKE_NOT_CONFIRMED = 'Nuke could not confirm the account is flat';
+const describeOpen = (positions: Position[]) =>
+  positions.map((p) => `${p.symbol} ${p.side} ${p.contracts}`).join(', ');
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode'] as const;
 /**
@@ -314,7 +317,7 @@ export type WorkerMirrorUnsupportedMethod = (typeof WORKER_MIRROR_UNSUPPORTED_ME
 export type WorkerMirrorExchange = Omit<RustEngineExchange, WorkerMirrorUnsupportedMethod | 'fetchFillsForOrderIds'>;
 
 /** Rust-only engine methods (not on BaseExchange) a mirror forwards whole. */
-const RUST_FORWARDED_METHODS = ['fetchStpMode', 'changeStpMode', 'fetchOrderBook'] as const;
+const RUST_FORWARDED_METHODS = ['fetchStpMode', 'changeStpMode', 'fetchOrderBook', 'readPositions'] as const;
 
 /** A frame-fed mirror signs and sends these itself; everything else still goes to the account's data source. */
 /** Placements that wait for the page engine on a mirror instead of taking the source's slower leg. */
@@ -2402,20 +2405,49 @@ export class RustEngineExchange extends BaseExchange {
       }
     });
 
-  /** A close can succeed and leave a position (a fill against a resting order), so flat is read, not assumed. */
+  /**
+   * A positions read issued after this call; resolves with the symbols of open rows it
+   * could not keep. On the engine's owner it flushes, so frames precede the answer.
+   */
+  readPositions = async (): Promise<string[]> => {
+    const skipped = await this.command<string[]>({ op: 'readPositions' }, { report: false });
+    this.host?.flush();
+    return skipped;
+  };
+
+  /**
+   * A close can succeed and leave a position (a fill against a resting order), so flat is
+   * read, not assumed. A venue with `freshPositions` sends a further close only on a read
+   * issued after the last one; if that read fails, or times out, none is sent.
+   */
   private closeUntilFlat = async (): Promise<void> => {
+    const capabilities = await this.capabilitiesFor('nuke');
+    let skipped: string[] = [];
     for (let round = 0; round < NUKE_FLAT_ROUNDS; round += 1) {
       await this.closeAllPositions();
       const settleBy = Date.now() + NUKE_FLAT_SETTLE_MS;
       while (Date.now() < settleBy && !this.isDisposed && (await this.positionsStillOpen()).length) {
         await new Promise((resolve) => setTimeout(resolve, NUKE_CLOSE_RETRY_MS));
       }
-      if (this.isDisposed || !(await this.positionsStillOpen()).length) return;
+      if (this.isDisposed) return;
+      if (capabilities.freshPositions) skipped = await this.freshNukeRead();
+      if (!(await this.positionsStillOpen()).length) break;
+      if (round === NUKE_FLAT_ROUNDS - 1) {
+        const left = await this.positionsStillOpen();
+        throw new Error(`Nuke did not leave the account flat: ${describeOpen(left)} still open`);
+      }
     }
-    const left = await this.positionsStillOpen();
-    throw new Error(
-      `Nuke did not leave the account flat: ${left.map((p) => `${p.symbol} ${p.side} ${p.contracts}`).join(', ')} still open`,
-    );
+    if (skipped.length) throw new Error(`${NUKE_NOT_CONFIRMED}: ${skipped.join(', ')} on no listed market`);
+  };
+
+  private freshNukeRead = async (): Promise<string[]> => {
+    try {
+      return await this.readPositions();
+    } catch (error) {
+      const left = await this.positionsStillOpen().catch(() => []);
+      const named = left.length ? `${describeOpen(left)} may still be open: ` : '';
+      throw Object.assign(new Error(`${NUKE_NOT_CONFIRMED}: ${named}${errorMessage(error)}`), { cause: error });
+    }
   };
 
   /**
