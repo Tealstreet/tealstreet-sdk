@@ -86,10 +86,10 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
       'bitunix', 'phemex', 'bingx', 'apexomni', 'blofin', 'cryptocom', 'asterdex',
     ),
     inverseClosedPositions: is('bybitinverse'),
-    nukeAccountCancel: is('krakenspot', 'bitget', 'bitgetinverse', 'bitgetusdc'),
+    nukeAccountCancel: is('krakenspot', 'bitget', 'bitgetinverse', 'bitgetusdc', 'phemex'),
     symbolCancelMissesUnseen: is(
       'krakenspot', 'bitget', 'bitgetinverse', 'bitgetusdc', 'hyperliquid', 'hyperliquidspot', 'lighter',
-      'lighter-robinhood', ...OKX, 'blofin', 'hyrotrader', 'paradex',
+      'lighter-robinhood', ...OKX, 'blofin', 'hyrotrader', 'paradex', 'phemex',
     ),
     ...overrides,
   };
