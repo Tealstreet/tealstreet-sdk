@@ -2288,6 +2288,37 @@ pub(crate) mod tests {
         }
     }
 
+    /// Legacy sent Lighter REST through the public CORS proxy; Hosted keeps that, unauthorized.
+    #[test]
+    fn hosted_lighter_rest_goes_through_the_public_cors_proxy() {
+        for (venue, testnet, proxy, expected) in [
+            ("lighter", None, None, true),
+            ("lighter", None, Some(false), true),
+            ("lighter", Some(true), None, true),
+            ("lighter-robinhood", None, None, true),
+            ("lighter-robinhood", Some(true), None, false),
+        ] {
+            let init = InitPayload {
+                account_name: "a".into(),
+                exchange_name: venue.into(),
+                key: "k".into(),
+                tealstreet_proxy: proxy,
+                testnet,
+                ..InitPayload::default()
+            };
+            let plan = routing_plan(&init, false).unwrap();
+            let http = serde_json::to_value(&plan).unwrap()["http"].clone();
+            let prefix = http["prefix"].as_str().unwrap();
+            let label = format!("{venue} {testnet:?} {proxy:?}: {prefix}");
+            if expected {
+                assert!(prefix.ends_with("/api/public_proxy"), "{label}");
+            } else {
+                assert_eq!(prefix, "", "{label}");
+            }
+            assert_eq!(http["authorize"], false, "{venue} {testnet:?} {proxy:?}");
+        }
+    }
+
     #[test]
     fn the_brazil_site_routes_to_its_host_and_header() {
         let venue = "bybit";

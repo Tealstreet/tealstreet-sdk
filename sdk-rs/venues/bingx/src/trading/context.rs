@@ -136,6 +136,19 @@ pub(super) const TABLE: CodeTable = CodeTable {
     status: &[],
 };
 
+/// 101400 also covers a duplicate client order id, whose original may be live.
+pub(super) const DUPLICATE_TABLE: CodeTable = CodeTable {
+    rows: &[],
+    success: &[Key::Int(0)],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+
+pub(super) fn names_duplicate_client_id(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("duplicate") && message.contains("client")
+}
+
 pub(super) enum Entry {
     Preflight(Preflight, Credential),
     Terminal(Context),

@@ -27,6 +27,7 @@ import { setDefaultTransport } from './registry';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 import {
+  getPublicCorsProxy,
   PUBLIC_CORS_PROXY,
   PRIVATE_PROXY_ASIA,
   PRIVATE_PROXY_GRVT_TINY,
@@ -555,7 +556,14 @@ describe('engine HTTP routing at the raw transport boundary', () => {
               const effectiveRouting = forceProxy
                 ? resolveExchangeRouting(exchange, { ...resolved, tealstreetProxy: true })
                 : routing;
-              const prefix = resolved.tealstreetTunnel && !forceProxy ? '' : effectiveRouting.restProxyHost;
+              // Lighter keeps legacy's public CORS proxy on its default profiles (engine.lighter-rest-proxy.test.ts).
+              const lighter = exchange === 'lighter' || exchange === 'lighter-robinhood';
+              const prefix =
+                lighter && !resolved.tealstreetTunnel
+                  ? getPublicCorsProxy()
+                  : resolved.tealstreetTunnel && !forceProxy
+                    ? ''
+                    : effectiveRouting.restProxyHost;
               expect(raw.request.mock.calls[0][0].url, label).toBe(prefix ? `${prefix}/${input.url}` : input.url);
               expect(raw.request.mock.calls[0][0].body, label).toBe(input.body);
             }

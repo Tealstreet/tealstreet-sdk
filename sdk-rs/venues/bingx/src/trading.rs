@@ -120,6 +120,8 @@ struct Job {
     replaces_cancelled: Option<(String, OrderSide, OrderType)>,
     // A limit's cancelReplace may cancel and then refuse the placement.
     replaces_order: Option<String>,
+    // A failed bracket leaves the placed entry without the protection the user asked for.
+    entry_with_brackets: Option<String>,
 }
 struct Run {
     job: Job,
@@ -128,6 +130,25 @@ struct Run {
     next: Option<Slot>,
     native_ids: Vec<String>,
     error: Option<VenueError>,
+}
+/// What a failed placement leaves the user's position without, if anything.
+fn protection_note(run: &Run, request: &Request, may_be_live: bool) -> Option<String> {
+    if !request.places_order() {
+        return None;
+    }
+    if let Some((symbol, side, kind)) = &run.job.replaces_cancelled {
+        return Some(safe_cex_engine::error::stop_gone_text(
+            symbol,
+            *side,
+            *kind,
+            may_be_live,
+        ));
+    }
+    let symbol = run.job.entry_with_brackets.as_ref()?;
+    (!run.native_ids.is_empty()).then(|| {
+        let state = if may_be_live { "may not be" } else { "is not" };
+        format!("Your {symbol} entry was placed, but its stop or take profit {state} in place")
+    })
 }
 struct Observation {
     order: Order,
@@ -672,6 +693,8 @@ impl Trading {
         else {
             return;
         };
+        // A transport loss arrives here too; only a call never sent is certainly not live.
+        let note = protection_note(run, &request, error.outcome != Some(Outcome::NotSent));
         let _ = run.error.get_or_insert(error.clone());
         if run.job.continue_on_error
             && cx
@@ -679,6 +702,8 @@ impl Trading {
                 .is_ok()
         {
             self.advance(cx, credentials, request.command);
+        } else if let Some(note) = note {
+            let _ = cx.fail_plan_noted(&request.plan, error, &note);
         } else {
             let _ = cx.fail_plan(&request.plan, error);
         }
@@ -777,14 +802,25 @@ impl Trading {
                 .err()
                 .map(|error| error.message.clone())
                 .unwrap_or_else(|| "BingX order is already absent".into());
-            if request.places_order()
-                && let Some((symbol, side, kind)) = self
-                    .jobs
-                    .get(&request.command)
-                    .and_then(|run| run.job.replaces_cancelled.as_ref())
+            let venue_refused = envelope.as_ref().is_ok_and(|e| {
+                e.code != 0
+                    && matches!(
+                        TABLE.verdict(
+                            &Native {
+                                code: NativeCode::Int(e.code),
+                                message: &e.msg,
+                            },
+                            Intent::Place,
+                        ),
+                        Verdict::Refused(_) | Verdict::RefusedResend(_)
+                    )
+            });
+            if let Some(note) = self
+                .jobs
+                .get(&request.command)
+                .and_then(|run| protection_note(run, &request, !venue_refused))
             {
-                let lost = safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, false);
-                message = format!("{lost}: {message}");
+                message = format!("{note}: {message}");
             }
             if canceled
                 && let Some(symbol) = self
@@ -807,7 +843,15 @@ impl Trading {
                 code: NativeCode::Int(e.code),
                 message: &e.msg,
             });
-            let fact = match cx.classify_write(&request.context, &TABLE, native.as_ref(), message) {
+            let table = if native
+                .as_ref()
+                .is_some_and(|n| context::names_duplicate_client_id(n.message))
+            {
+                &context::DUPLICATE_TABLE
+            } else {
+                &TABLE
+            };
+            let fact = match cx.classify_write(&request.context, table, native.as_ref(), message) {
                 Ok(fact) => fact,
                 Err(error) => {
                     let _ = cx.fail_plan(&request.plan, error.venue_error());
@@ -938,6 +982,9 @@ impl Trading {
         let mut job = Job::default();
         for o in orders {
             job.steps.extend(self.format(cx, o)?);
+            if orders.len() == 1 && (o.stop_loss.is_some() || o.take_profit.is_some()) {
+                job.entry_with_brackets = Some(o.symbol.clone());
+            }
         }
         Ok(job)
     }
@@ -1036,7 +1083,8 @@ impl Trading {
         if full && position.is_none() {
             return Err("Full-position stop requires an opposite-side position".into());
         }
-        if !full && (amount <= 0.0 || amount < market.limits.amount.min) {
+        // A close stays out, as below: dust left by a partial close must still be closable.
+        if !full && (amount <= 0.0 || (!closing && amount < market.limits.amount.min)) {
             return Err("Order quantity is below the market minimum".into());
         }
         let price = if o.kind != OrderType::Market {
@@ -1095,7 +1143,7 @@ impl Trading {
         } else {
             split(size, market.limits.amount.max, market.precision.amount)?
         };
-        if !full && lots.iter().any(|lot| *lot < market.limits.amount.min) {
+        if !full && !closing && lots.iter().any(|lot| *lot < market.limits.amount.min) {
             return Err("Split order lot is below the market minimum".into());
         }
         if o.client_order_id.is_some() && lots.len() != 1 {
@@ -1380,15 +1428,13 @@ impl Trading {
             .num("quantity", o.amount)
             .num("price", price)
             .str("timeInForce", tif(o.time_in_force.expect("checked TIF")))
-            .str("cancelReplaceMode", "STOP_ON_FAILURE")
-            .str(
-                "cancelRestrictions",
-                if meta.native_status == "PENDING" {
-                    "ONLY_PENDING"
-                } else {
-                    "ONLY_NEW"
-                },
-            );
+            .str("cancelReplaceMode", "STOP_ON_FAILURE");
+        // As legacy: a WORKING or OPEN order may still be PENDING at the venue.
+        params = match meta.native_status.as_ref() {
+            "PENDING" => params.str("cancelRestrictions", "ONLY_PENDING"),
+            "NEW" => params.str("cancelRestrictions", "ONLY_NEW"),
+            _ => params,
+        };
         if let Some(client) = o.client_order_id.as_deref().filter(|id| !id.is_empty()) {
             params = params.str("cancelClientOrderId", client);
         } else {

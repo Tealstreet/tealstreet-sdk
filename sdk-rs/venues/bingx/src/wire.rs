@@ -21,7 +21,8 @@ pub struct Contract<'a> {
     pub quantity_precision: f64,
     #[serde(deserialize_with = "number")]
     pub price_precision: f64,
-    #[serde(deserialize_with = "number")]
+    // Documented as deprecated: its absence must not empty the market list.
+    #[serde(default, deserialize_with = "number")]
     pub trade_min_limit: f64,
     #[serde(default, deserialize_with = "safe_cex_engine::de::number_or_zero")]
     pub trade_min_quantity: f64,
