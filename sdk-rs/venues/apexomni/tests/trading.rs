@@ -475,6 +475,71 @@ fn an_amend_whose_cancel_has_no_code_still_places_the_replacement() {
     assert_eq!(form(&replacement)["size"], "4");
 }
 
+fn done(out: &[Action], command: safe_cex_engine::CommandId) -> bool {
+    out.iter().any(|action| {
+        matches!(action, Action::Notice(Notice::CommandDone { command: c, .. }) if *c == command)
+    })
+}
+
+/// Live replies on a user's key (2026-11-02): these writes answer only `timeCost`, or nothing.
+#[test]
+fn a_cancel_all_answered_with_only_time_cost_is_done() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 5,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let request = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/delete-open-orders"))
+        .expect("cancel-all write");
+    response(&mut e, &request, NOW + 11.0, r#"{"timeCost":6476}"#);
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+    assert!(done(&out, 5), "{out:?}");
+}
+
+#[test]
+fn a_leverage_change_answered_with_only_time_cost_is_done() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::SetLeverage {
+            command: 9,
+            symbol: "BTCUSDT".into(),
+            leverage: 10.0,
+            side: None,
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    response(&mut e, &request, NOW + 11.0, r#"{"timeCost":5694}"#);
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+    assert!(done(&out, 9), "{out:?}");
+}
+
+/// Legacy cancels an attached TP/SL by its parent's id; the venue answers an empty body.
+#[test]
+fn a_tpsl_cancel_answered_with_an_empty_body_is_done() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["abc__stop_loss".into()],
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    assert_eq!(form(&request)["id"], "abc");
+    response(&mut e, &request, NOW + 11.0, "");
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+    assert!(done(&out, 7), "{out:?}");
+}
+
 #[test]
 fn a_failure_never_shows_empty_text() {
     for body in [
@@ -488,7 +553,9 @@ fn a_failure_never_shows_empty_text() {
         let failures = command_failures(&actions(&mut e));
         assert_eq!(failures.len(), 1, "{body}");
         assert!(!failures[0].trim_end().ends_with(':'), "{}", failures[0]);
-        assert!(failures[0].contains("no reason given"), "{}", failures[0]);
+        if body.contains("10003") {
+            assert!(failures[0].contains("no reason given"), "{}", failures[0]);
+        }
     }
 }
 

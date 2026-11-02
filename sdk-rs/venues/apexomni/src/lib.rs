@@ -75,7 +75,6 @@ struct Envelope<'a> {
     code: Option<Code>,
     #[serde(borrow, default)]
     msg: std::borrow::Cow<'a, str>,
-    data: Option<serde::de::IgnoredAny>,
 }
 
 /// The venue may refuse with an empty `msg`; the user is never shown nothing.

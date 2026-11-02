@@ -1236,11 +1236,12 @@ impl ApexOmni {
             .as_ref()
             .and_then(|e| e.code.as_ref())
             .and_then(strict_code);
-        // ApeX's success has no `code`, only `data`; a `code` present must still be 0.
-        let succeeded = envelope.as_ref().is_some_and(|e| match e.code {
-            Some(_) => code == Some(0),
-            None => e.data.is_some(),
-        });
+        // ApeX answers success with no `code`: `{data, timeCost}`, a bare `{timeCost}`
+        // (cancel-all, leverage) or an empty body (a TP/SL cancel). A `code` must be 0.
+        let succeeded = response.body.trim().is_empty()
+            || envelope
+                .as_ref()
+                .is_some_and(|e| e.code.is_none() || code == Some(0));
         if !succeeded || !(200..300).contains(&response.status) {
             let native = envelope.as_ref().map(|e| Native {
                 code: code.map_or(NativeCode::None, NativeCode::Int),
