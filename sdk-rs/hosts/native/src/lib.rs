@@ -5,6 +5,7 @@
 //! drive the same loop as the network.
 #![cfg(not(target_arch = "wasm32"))]
 
+mod how_pool;
 mod managed_http;
 mod routing;
 mod server;

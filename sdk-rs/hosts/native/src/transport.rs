@@ -154,7 +154,7 @@ impl Default for NetworkTransport {
     }
 }
 
-async fn open_socket(
+pub(crate) async fn open_socket(
     url: &str,
     headers: Vec<(String, String)>,
 ) -> Result<crate::routing::Socket, String> {
@@ -259,14 +259,14 @@ fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) {
 }
 
 /// A URL's host alone: a relay URL's query names its upstream and may carry a token.
-fn host_of(url: &str) -> String {
+pub(crate) fn host_of(url: &str) -> String {
     url.parse::<tokio_tungstenite::tungstenite::http::Uri>()
         .ok()
         .and_then(|uri| uri.host().map(str::to_owned))
         .unwrap_or_else(|| "unparsable url".to_owned())
 }
 
-fn log_open_failure(url: &str, error: &str) {
+pub(crate) fn log_open_failure(url: &str, error: &str) {
     log_failure(|failures| failures.note(url, error, std::time::Instant::now()));
 }
 
