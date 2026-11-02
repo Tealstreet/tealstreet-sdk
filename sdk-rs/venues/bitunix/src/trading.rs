@@ -2052,14 +2052,13 @@ impl BitunixFutures {
             code: NativeCode::Int(code),
             message: "",
         });
-        let mut error = error;
-        self.kept_gone(command, &mut error);
         let mut refused = false;
         // Live: a batch answered 20003 with its orders resting. Only 10007's signature refusal,
         // which the venue resends past, proves a batch sent nothing.
         let batch_unproven = matches!(request.step.call, Call::Place { batch: true, .. })
             && code.is_some_and(|code| code != 10007);
         let mut error = error;
+        self.kept_gone(command, &mut error);
         if batch_unproven {
             error = error.outcome(Outcome::Unknown);
         }

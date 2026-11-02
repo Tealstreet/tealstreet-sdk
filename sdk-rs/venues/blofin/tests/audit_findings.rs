@@ -248,12 +248,13 @@ fn a_refused_amend_falls_back_to_cancel_and_re_place() {
     let at = h.now + 2_000.0;
     h.collect_at(at);
     for a in &h.actions {
-        if let Action::SetTimer { timer, at_ms } = a {
-            if *at_ms > 1.0 && *at_ms < 3_000.0 {
-                let (t, m) = (*timer, *at_ms);
-                h.handle(m, Event::TimerFired { timer: t });
-                break;
-            }
+        if let Action::SetTimer { timer, at_ms } = a
+            && *at_ms > 1.0
+            && *at_ms < 3_000.0
+        {
+            let (t, m) = (*timer, *at_ms);
+            h.handle(m, Event::TimerFired { timer: t });
+            break;
         }
     }
     h.collect();
