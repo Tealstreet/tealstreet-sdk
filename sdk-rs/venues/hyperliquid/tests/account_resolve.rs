@@ -72,6 +72,20 @@ impl Run {
         }
         None
     }
+    // Fires due timers in order until `what` is issued, so it is answered inside its own
+    // deadline rather than after the stale 60 s discovery deadline of the failed attempt.
+    fn fire_until(&mut self, what: &str) -> Option<HttpRequest> {
+        self.timers.sort_by(|a, b| b.1.total_cmp(&a.1));
+        while let Some((timer, at)) = self.timers.pop() {
+            self.now = self.now.max(at);
+            self.engine.handle(self.now, Event::TimerFired { timer });
+            if let Some(request) = self.take(what) {
+                return Some(request);
+            }
+            self.timers.sort_by(|a, b| b.1.total_cmp(&a.1));
+        }
+        None
+    }
     fn fire_all(&mut self) {
         let mut due: Vec<_> = std::mem::take(&mut self.timers);
         due.sort_by(|a, b| a.1.total_cmp(&b.1));
@@ -109,8 +123,7 @@ fn a_failed_role_lookup_retries_and_does_not_show_the_account_flat() {
         !loaded.positions && !loaded.orders,
         "unread rows must not read as flat"
     );
-    run.fire_all();
-    let again = run.take("userRole").expect("a retry after backoff");
+    let again = run.fire_until("userRole").expect("a retry after backoff");
     reply(
         &mut run.engine,
         &again,
@@ -157,15 +170,7 @@ fn a_failed_margin_mode_read_is_retried_and_a_portfolio_account_reads_its_spot()
     };
     let mode = run.take("userAbstraction").expect("mode read");
     reply(&mut run.engine, &mode, 500, "busy");
-    let mut again = None;
-    for _ in 0..6 {
-        run.fire_all();
-        again = run.take("userAbstraction");
-        if again.is_some() {
-            break;
-        }
-    }
-    let again = again.expect("a retry");
+    let again = run.fire_until("userAbstraction").expect("a retry");
     run.answer(&again, 200, r#""portfolioMargin""#);
     for _ in 0..6 {
         run.fire_all();

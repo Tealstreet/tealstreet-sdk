@@ -12,6 +12,8 @@ use safe_cex_engine::{
 use safe_cex_venue_grvt::{Grvt, Options, Pending};
 
 const NOW: f64 = 1_700_000_000_000.;
+/// Startup catalog reads get the engine's discovery deadline, not the 20 s read bound.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
 const GOOD: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}]}"#;
 struct Probe {
     inner: Grvt,
@@ -309,10 +311,10 @@ fn startup_requires_real_public_preparation() {
     prep(&a);
 }
 #[test]
-fn managed_catalog_has_new_twenty_second_wire_bound() {
+fn managed_catalog_has_discovery_deadline_wire_bound() {
     let (mut e, a) = boot(false, false);
     let r = release_managed(&mut e, &a, NOW);
-    assert_eq!(r.timeout_ms, Some(20_000));
+    assert_eq!(r.timeout_ms, Some(DISCOVERY_DEADLINE_MS as u32));
 }
 #[test]
 fn native_mainnet_wire_and_catalog_publication() {
@@ -357,7 +359,7 @@ fn unclaimed_catalog_data_cannot_publish_or_connect() {
 fn late_data_at_the_new_bound_cannot_publish() {
     let (mut e, a) = boot(false, false);
     let r = native_release(&mut e, &a, NOW);
-    let a = reply(&mut e, &r, NOW + 20_000., 200, GOOD);
+    let a = reply(&mut e, &r, NOW + DISCOVERY_DEADLINE_MS, 200, GOOD);
     assert!(!e.store().loaded().markets);
     no_outbound(&a);
     no_commands(&a);
@@ -399,21 +401,21 @@ fn held_prepare_expires_without_bind_or_publication() {
     let (mut e, a) = boot(false, false);
     let (p, _) = prep(&a);
     let timer = a.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+        Action::SetTimer { timer, at_ms } if *at_ms == NOW + DISCOVERY_DEADLINE_MS => Some(*timer),
         _ => None,
     });
     assert!(timer.is_some(), "bound starts at admission");
     e.handle(
-        NOW + 20_000.,
+        NOW + DISCOVERY_DEADLINE_MS,
         Event::TimerFired {
             timer: timer.unwrap(),
         },
     );
     let a = drain(&mut e);
-    backoff(&a, NOW + 20_000., 1000.);
+    backoff(&a, NOW + DISCOVERY_DEADLINE_MS, 1000.);
     assert!(!e.http_preparation_pending(p));
     e.http_prepared(
-        NOW + 20_001.,
+        NOW + DISCOVERY_DEADLINE_MS + 1.,
         p,
         Prepared {
             id: 1,
@@ -429,9 +431,9 @@ fn held_bind_cannot_release_at_the_new_bound() {
     let (mut e, a) = boot(false, false);
     let (p, _) = prep(&a);
     let (permit, _) = bind(&mut e, p, NOW);
-    assert!(e.claim_http(NOW + 20_000., permit).is_err());
+    assert!(e.claim_http(NOW + DISCOVERY_DEADLINE_MS, permit).is_err());
     let a = drain(&mut e);
-    backoff(&a, NOW + 20_000., 1000.);
+    backoff(&a, NOW + DISCOVERY_DEADLINE_MS, 1000.);
     assert!(!e.store().loaded().markets);
 }
 #[test]
@@ -439,23 +441,26 @@ fn physical_timeout_yields_to_backoff_then_a_fresh_root() {
     let (mut e, a) = boot(false, false);
     let r = release_managed(&mut e, &a, NOW);
     let timer = a.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+        Action::SetTimer { timer, at_ms } if *at_ms == NOW + DISCOVERY_DEADLINE_MS => Some(*timer),
         _ => None,
     });
     assert!(timer.is_some());
     e.handle(
-        NOW + 20_000.,
+        NOW + DISCOVERY_DEADLINE_MS,
         Event::TimerFired {
             timer: timer.unwrap(),
         },
     );
     let a = drain(&mut e);
-    let timer = backoff(&a, NOW + 20_000., 1000.);
-    e.handle(NOW + 21_000., Event::TimerFired { timer });
+    let timer = backoff(&a, NOW + DISCOVERY_DEADLINE_MS, 1000.);
+    e.handle(
+        NOW + DISCOVERY_DEADLINE_MS + 1000.,
+        Event::TimerFired { timer },
+    );
     let a = drain(&mut e);
     let (next, _) = prep(&a);
     assert_ne!(r.id, next.attempt().request);
-    let a = reply(&mut e, &r, NOW + 21_001., 200, GOOD);
+    let a = reply(&mut e, &r, NOW + DISCOVERY_DEADLINE_MS + 1001., 200, GOOD);
     assert!(a.is_empty());
     assert!(!e.store().loaded().markets);
 }
@@ -711,7 +716,7 @@ fn validated_items_cannot_publish_after_mid_stream_expiry() {
         },
     );
     e.handle(
-        NOW + 19_999.,
+        NOW + DISCOVERY_DEADLINE_MS - 1.,
         Event::HttpChunk {
             request: request.id,
             data: GOOD.strip_suffix('}').unwrap().as_bytes(),
@@ -725,14 +730,14 @@ fn validated_items_cannot_publish_after_mid_stream_expiry() {
     assert!(!e.store().loaded().markets);
     drain(&mut e);
     e.handle(
-        NOW + 20_000.,
+        NOW + DISCOVERY_DEADLINE_MS,
         Event::HttpChunk {
             request: request.id,
             data: b"}",
         },
     );
     e.handle(
-        NOW + 20_000.,
+        NOW + DISCOVERY_DEADLINE_MS,
         Event::HttpEnd {
             request: request.id,
         },
@@ -830,20 +835,25 @@ fn suppressed_feed_keeps_the_unanswered_catalog_deadline_and_backoff() {
     let timer = actions
         .iter()
         .find_map(|action| match action {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + DISCOVERY_DEADLINE_MS => {
+                Some(*timer)
+            }
             _ => None,
         })
         .expect("unanswered shared-feed catalog remains bounded");
-    e.handle(NOW + 20_000., Event::TimerFired { timer });
+    e.handle(NOW + DISCOVERY_DEADLINE_MS, Event::TimerFired { timer });
     let actions = drain(&mut e);
     assert!(
         !actions
             .iter()
             .any(|action| matches!(action, Action::WsConnect { .. } | Action::WsSend { .. }))
     );
-    let retry = backoff(&actions, NOW + 20_000., 1000.);
+    let retry = backoff(&actions, NOW + DISCOVERY_DEADLINE_MS, 1000.);
     assert!(!e.store().loaded().markets);
-    e.handle(NOW + 21_000., Event::TimerFired { timer: retry });
+    e.handle(
+        NOW + DISCOVERY_DEADLINE_MS + 1000.,
+        Event::TimerFired { timer: retry },
+    );
     let actions = drain(&mut e);
     let (next, _) = prep(&actions);
     assert_ne!(first, next);

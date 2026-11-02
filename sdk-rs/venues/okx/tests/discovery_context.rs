@@ -10,7 +10,8 @@ use safe_cex_engine::{Action, Engine, Event, HttpRequest, RequestId, TimerId};
 use safe_cex_venue_okx::Okx;
 use std::collections::HashSet;
 
-const DEADLINE_MS: f64 = 20_000.0;
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.0;
 const PUBLIC_MARKETS: &str = "/api/v5/public/instruments?instType=SWAP";
 const PRIVATE_MARKETS: &str = "/api/v5/account/instruments?instType=SWAP";
 
@@ -206,7 +207,7 @@ fn public_tickers_read_releases_through_background_context() {
 fn an_unanswered_instruments_read_ends_at_the_shared_deadline_and_retries() {
     let mut cycle = Cycle::started(Options::default());
     let first = cycle.take(PUBLIC_MARKETS).expect("public instruments read");
-    cycle.advance(DEADLINE_MS + 30_000.0);
+    cycle.advance(DISCOVERY_DEADLINE_MS + 30_000.0);
     assert!(
         cycle
             .requests

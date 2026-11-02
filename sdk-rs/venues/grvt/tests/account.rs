@@ -7,6 +7,8 @@ use safe_cex_venue_grvt::{Grvt, Options};
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 60_000.0;
+/// Engine deadline for the unsigned startup catalog read.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.0;
 
 const NOW: f64 = 1_700_000_000_000.;
 const CATALOG: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}]}"#;
@@ -187,7 +189,9 @@ fn shared_quotes_match_direct_private_pnl_and_survive_native_summary_and_catalog
             .iter()
             .find_map(|action| match action {
                 Action::SetTimer { timer, at_ms }
-                    if *at_ms > NOW + 59_000. && *at_ms < NOW + 61_000. =>
+                    if *at_ms > NOW + 59_000. && *at_ms < NOW + 61_000.
+                        // The startup catalog read's discovery deadline also lands here.
+                        && *at_ms != NOW + DISCOVERY_DEADLINE_MS =>
                 {
                     Some((*timer, *at_ms))
                 }

@@ -9,6 +9,8 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_paradex::{Options, Paradex};
 const NOW: f64 = 1_700_000_000_000.;
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
 const CONFIG: &str = r#"{"starknet_chain_id":"PRIVATE_SN_PARACLEAR_MAINNET"}"#;
 fn start(testnet: bool) -> (Engine<Paradex>, Vec<Action>) {
     let mut e = support::engine(
@@ -175,7 +177,7 @@ fn expired_preparation_never_installs_config_and_retry_gets_a_fresh_root() {
     let (mut e, actions) = start(false);
     let (p, r) = preparation(&actions);
     e.http_prepared(
-        NOW + 20_000.,
+        NOW + DISCOVERY_DEADLINE_MS,
         p,
         Prepared {
             id: p.attempt().request.0,
@@ -184,19 +186,29 @@ fn expired_preparation_never_installs_config_and_retry_gets_a_fresh_root() {
     );
     let after: Vec<_> = e.drain_actions().collect();
     assert_eq!(private_effects(&after), 0);
-    let timer = retry(&after, NOW + 20_000.);
+    let timer = retry(&after, NOW + DISCOVERY_DEADLINE_MS);
     assert_eq!(
-        private_effects(&reply(&mut e, NOW + 20_001., &r, CONFIG)),
+        private_effects(&reply(&mut e, NOW + DISCOVERY_DEADLINE_MS + 1., &r, CONFIG)),
         0
     );
-    e.handle(NOW + 22_000., Event::TimerFired { timer });
+    e.handle(
+        NOW + DISCOVERY_DEADLINE_MS + 2_000.,
+        Event::TimerFired { timer },
+    );
     let next: Vec<_> = e.drain_actions().collect();
     let (fresh, fresh_request) = preparation(&next);
     assert_ne!(fresh, p);
     assert_ne!(fresh_request.id, r.id);
     assert!(!e.http_preparation_pending(p));
-    let fresh_request = release(&mut e, fresh, NOW + 22_001.);
-    assert!(private_effects(&reply(&mut e, NOW + 22_002., &fresh_request, CONFIG)) > 0);
+    let fresh_request = release(&mut e, fresh, NOW + DISCOVERY_DEADLINE_MS + 2_001.);
+    assert!(
+        private_effects(&reply(
+            &mut e,
+            NOW + DISCOVERY_DEADLINE_MS + 2_002.,
+            &fresh_request,
+            CONFIG
+        )) > 0
+    );
 }
 #[test]
 fn preparation_refusal_retires_exact_root_and_late_http_has_no_private_effect() {
@@ -242,8 +254,8 @@ fn released_config_response_after_its_original_deadline_cannot_install_credentia
     let (mut e, actions) = start(false);
     let (p, _) = preparation(&actions);
     let request = release(&mut e, p, NOW + 1.);
-    let after = reply(&mut e, NOW + 20_000., &request, CONFIG);
+    let after = reply(&mut e, NOW + DISCOVERY_DEADLINE_MS, &request, CONFIG);
     assert_eq!(private_effects(&after), 0);
     assert!(!e.http_preparation_pending(p));
-    retry(&after, NOW + 20_000.);
+    retry(&after, NOW + DISCOVERY_DEADLINE_MS);
 }

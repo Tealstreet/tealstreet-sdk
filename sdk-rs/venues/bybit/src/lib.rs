@@ -446,11 +446,14 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
 }
 
 fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
-    use safe_cex_engine::startup::{MAX_RATE_LIMIT_PAUSE_MS, rate_limit_pause_ms};
+    use safe_cex_engine::startup::{
+        MAX_RATE_LIMIT_PAUSE_MS, from_tealstreet_edge, rate_limit_pause_ms,
+    };
 
     // HTTP403 is Bybit's ten-minute IP ban; 10006 is its API rate-limit code.
     // https://bybit-exchange.github.io/docs/v5/rate-limit
-    let http_pause = if response.status == 403 {
+    // Our own edge answers 403 too; that one retries on the normal backoff.
+    let http_pause = if response.status == 403 && !from_tealstreet_edge(response) {
         600_000.0
     } else {
         rate_limit_pause_ms(response, 10_000.0)
@@ -2153,8 +2156,9 @@ impl BybitLinear {
             )
         {
             let pause = discovery_rate_limit_pause_ms(response, cx.now);
-            if pause > 0.0 {
-                self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+            // One window per streak: a repeat refusal while it runs does not extend it.
+            if pause > 0.0 && cx.now >= self.discovery_paused_until {
+                self.discovery_paused_until = cx.now + pause;
                 let remaining = self.discovery_paused_until - cx.now;
                 // Categories share this limit. Extend already-armed retries;
                 // waiting entries retain their attempt count and longer waits.
@@ -2994,8 +2998,15 @@ impl Venue for BybitLinear {
         }
         if let Some(read) = pending.read.clone() {
             // Only a live Background read may publish; the engine never
-            // delivers an answer for a retired attempt.
+            // delivers an answer for a retired attempt. A discovery read still
+            // fails through, so its in-flight flag clears and it is retried.
             if cx.validate_http_context(&read).is_err() {
+                if matches!(
+                    pending.then,
+                    Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
+                ) {
+                    self.on_public_response(cx, pending.then, Err("discovery read retired"));
+                }
                 return;
             }
             let mut pending = Some(pending);

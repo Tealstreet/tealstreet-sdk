@@ -5,7 +5,9 @@ use safe_cex_venue_polymarket::{Options, Polymarket, PolymarketOptions};
 
 type Driver = Engine<Polymarket>;
 const START: f64 = 10.;
-const DEADLINE: f64 = START + 20_000.;
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+const DEADLINE: f64 = START + DISCOVERY_DEADLINE_MS;
 const TOKEN: &str =
     "107505882767731489358349912513945399560393482969656700824895970500493757150417";
 fn row(slug: &str, ids: &[&str]) -> serde_json::Value {
@@ -210,13 +212,13 @@ fn second_page_deadline_does_not_commit_first_page_prefix() {
     let a = answer(
         &mut e,
         &second,
-        20_100.,
+        DISCOVERY_DEADLINE_MS + 100.,
         200,
         &page(vec![row("second", &["2"])], None),
     );
     no_catalogue(&e);
     no_gamma(&a);
-    retry(&a, 20_100.);
+    retry(&a, DISCOVERY_DEADLINE_MS + 100.);
 }
 #[test]
 fn wire_preserves_repeated_encoded_slug_filters_and_no_private_intent() {
@@ -279,13 +281,13 @@ fn opaque_cursor_walk_is_atomic_and_metadata_indices_survive_dedup() {
     no_command_or_sign(&a);
 }
 #[test]
-fn page_bounds_do_not_add_a_twenty_second_logical_walk_limit() {
+fn page_bounds_do_not_add_a_logical_walk_limit() {
     let mut e = public();
     let first = start(&mut e);
     let second = gamma(answer(
         &mut e,
         &first,
-        19_000.,
+        DISCOVERY_DEADLINE_MS - 1_000.,
         200,
         &page(vec![row("first", &["1"])], Some("next")),
     ));
@@ -293,7 +295,7 @@ fn page_bounds_do_not_add_a_twenty_second_logical_walk_limit() {
     answer(
         &mut e,
         &second,
-        38_000.,
+        2. * DISCOVERY_DEADLINE_MS - 2_000.,
         200,
         &page(vec![row("second", &["2"])], None),
     );
@@ -439,7 +441,7 @@ fn catalogue_retry_and_midpoint_timeout_keep_separate_current_owners() {
     let stale = actions(&mut e, 1022.);
     assert!(!stale.iter().any(|a| matches!(a, Action::SetTimer { .. })));
     assert!(e.store().tickers().is_empty());
-    let deadline = 1021. + 20_000.;
+    let deadline = 1021. + DISCOVERY_DEADLINE_MS;
     let timed_out = answer(&mut e, &midpoint, deadline, 200, r#"{"2":"0.4"}"#);
     assert!(e.store().tickers().is_empty());
     assert!(!e.store().loaded().tickers);

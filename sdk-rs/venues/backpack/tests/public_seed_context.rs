@@ -35,6 +35,9 @@ struct Packet {
     request: HttpRequest,
     preparation: Option<Preparation>,
 }
+
+/// Startup discovery's bound (the engine's DISCOVERY_TIMEOUT_MS).
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
 fn packets(e: &mut Driver) -> Vec<Packet> {
     e.drain_actions()
         .filter_map(|action| match action {
@@ -202,20 +205,21 @@ fn marks_held_prepare_cannot_accept_data() {
 }
 fn equality(seed: Seed) {
     let (mut e, packet) = issued(seed, true);
-    response(&mut e, &packet, 20_000., 200, seed.body());
+    response(&mut e, &packet, DISCOVERY_DEADLINE_MS, 200, seed.body());
     assert_unpublished(&e, seed);
 }
-// NEW policy: the legacy raw observations have no 20-second managed bound.
+// NEW policy: the legacy raw observations have no 20-second managed bound; startup
+// discovery runs on the engine's 60-second discovery bound.
 #[test]
-fn markets_new_twenty_second_equality() {
+fn markets_discovery_deadline_equality() {
     equality(Seed::Markets);
 }
 #[test]
-fn daily_new_twenty_second_equality() {
+fn daily_discovery_deadline_equality() {
     equality(Seed::Daily);
 }
 #[test]
-fn marks_new_twenty_second_equality() {
+fn marks_discovery_deadline_equality() {
     equality(Seed::Marks);
 }
 fn late_malformed(seed: Seed) {
@@ -224,7 +228,7 @@ fn late_malformed(seed: Seed) {
     response(
         &mut e,
         &packet,
-        20_000.,
+        DISCOVERY_DEADLINE_MS,
         200,
         "[{\"symbol\":\"SOL_USDC_PERP\",\"bad\":true}]",
     );
@@ -721,7 +725,7 @@ fn delayed_preparation_cannot_release_at_new_observation_deadline() {
             .preparation
             .expect("source-stage managed observation");
         e.http_prepared(
-            20_000.,
+            DISCOVERY_DEADLINE_MS,
             preparation,
             Prepared {
                 id: packet.request.id.0,
@@ -732,7 +736,7 @@ fn delayed_preparation_cannot_release_at_new_observation_deadline() {
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(**action, HttpAction::Bind { .. }))));
-        response(&mut e, &packet, 20_001., 200, seed.body());
+        response(&mut e, &packet, DISCOVERY_DEADLINE_MS + 1., 200, seed.body());
         assert_unpublished(&e, seed);
     }
 }
