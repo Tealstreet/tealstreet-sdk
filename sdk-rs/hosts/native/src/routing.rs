@@ -579,12 +579,15 @@ struct HttpArgument<'a> {
     data: Box<RawValue>,
 }
 
+/// One tunnel write may take this long; a stalled one is a failed write.
+const SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
 async fn send(socket: &mut Socket, message: &impl Serialize) -> Result<(), String> {
     let text = serde_json::to_string(message).map_err(|error| error.to_string())?;
-    socket
-        .send(Message::text(text))
-        .await
-        .map_err(|error| error.to_string())
+    match tokio::time::timeout(SOCKET_WRITE_TIMEOUT, socket.send(Message::text(text))).await {
+        Ok(sent) => sent.map_err(|error| error.to_string()),
+        Err(_) => Err("tunnel write timed out".into()),
+    }
 }
 
 /// Return only protocol data; websocket ping frames are answered while waiting.
@@ -598,7 +601,10 @@ async fn receive(socket: &mut Socket) -> Result<(TunnelMessage, Option<Vec<u8>>)
             }
             Some(Ok(Message::Binary(bytes))) => return decode_binary(&bytes),
             Some(Ok(Message::Ping(_))) => {
-                socket.flush().await.map_err(|error| error.to_string())?
+                match tokio::time::timeout(SOCKET_WRITE_TIMEOUT, socket.flush()).await {
+                    Ok(flushed) => flushed.map_err(|error| error.to_string())?,
+                    Err(_) => return Err("tunnel write timed out".into()),
+                }
             }
             Some(Ok(Message::Close(_))) | None => return Err("tunnel closed".into()),
             Some(Err(error)) => return Err(error.to_string()),

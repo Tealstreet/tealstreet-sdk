@@ -471,10 +471,16 @@ mod tests {
                         return;
                     };
                     let greeting = serde_json::json!({"type": "serverTime"}).to_string();
-                    let _ = socket.send(Message::text(greeting)).await;
+                    let _ = tokio::time::timeout(
+                        Duration::from_secs(5),
+                        socket.send(Message::text(greeting)),
+                    )
+                    .await;
                     while let Some(Ok(Message::Text(text))) = socket.next().await {
                         if text.contains("rpc.auth") {
-                            let _ = socket.send(Message::text(r#"{"type":"rpc.auth"}"#)).await;
+                            let auth = Message::text(r#"{"type":"rpc.auth"}"#);
+                            let _ = tokio::time::timeout(Duration::from_secs(5), socket.send(auth))
+                                .await;
                             break;
                         }
                     }
@@ -552,7 +558,7 @@ mod tests {
         let (url, opened) = tunnel(|mut socket| async move {
             // Takes the request, then drops without answering.
             let _ = socket.next().await;
-            let _ = socket.close(None).await;
+            let _ = tokio::time::timeout(Duration::from_secs(5), socket.close(None)).await;
         })
         .await;
         let pool = HowPool::default();
