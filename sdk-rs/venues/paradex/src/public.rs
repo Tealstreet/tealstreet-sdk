@@ -123,6 +123,7 @@ pub(crate) struct Public {
     open: bool,
     supervisor: Supervisor,
     next_rpc: u64,
+    last_ack: f64,
     subscriptions: HashMap<u64, Subscription>,
     retries: Vec<(TimerId, String, u8)>,
     seed_retry: safe_cex_engine::startup::Backoff<bool>,
@@ -362,9 +363,6 @@ impl Paradex {
         }
     }
     fn interested(&self, cx: &Cx<'_, Pending>, channel: &str) -> bool {
-        if channel == "markets_summary" {
-            return !cx.store.markets().is_empty();
-        }
         if let Some(s) = channel
             .strip_prefix("order_book.")
             .and_then(|s| s.split('.').next())
@@ -405,7 +403,9 @@ impl Paradex {
         for s in &symbols {
             self.public_subscribe(cx, "subscribe", format!("trades.{s}"), 0);
         }
-        self.public_subscribe(cx, "subscribe", "markets_summary".into(), 0);
+        for s in &symbols {
+            self.public_subscribe(cx, "subscribe", format!("markets_summary.{s}"), 0);
+        }
         for s in self.public.books.keys().cloned().collect::<Vec<_>>() {
             self.public_subscribe(cx, "subscribe", book_channel(&s), 0);
         }
@@ -463,6 +463,7 @@ impl Paradex {
             });
             if valid && let Some(sub) = self.public.subscriptions.remove(&id) {
                 self.public.supervisor.received(cx.now);
+                self.public.last_ack = cx.now;
                 if let Some(error) = message.error {
                     cx.notice(
                         safe_cex_engine::Level::Warn,
@@ -1416,11 +1417,13 @@ impl Paradex {
                 }
                 _ => {}
             }
+            let last_ack = self.public.last_ack;
             let expired: Vec<_> = self
                 .public
                 .subscriptions
                 .iter()
-                .filter(|(_, s)| cx.now - s.at >= 10_000.)
+                // Acks arriving prove the venue is working through the batch.
+                .filter(|(_, s)| cx.now - s.at.max(last_ack) >= 10_000.)
                 .map(|(id, _)| *id)
                 .collect();
             for id in expired {

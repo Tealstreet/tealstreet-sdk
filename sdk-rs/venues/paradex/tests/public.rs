@@ -41,7 +41,7 @@ fn sequential_streamed_market_seed_filters_options_spot_and_inactive() {
             && h.e.store().loaded().positions
             && h.e.store().loaded().orders
     );
-    assert_eq!(h.sent().len(), 5);
+    assert_eq!(h.sent().len(), 6);
     assert!(h.sent().iter().any(|s| s.contains("bbo.BTC-USD-PERP")));
     assert!(h.sent().iter().any(|s| s.contains("trades.ETH-USD-PERP")));
     assert!(!h.sent().iter().any(|s| s.contains("order_book")));
@@ -507,6 +507,62 @@ fn malformed_depth_does_not_clear_or_partially_apply_valid_book() {
         assert_eq!(h.e.book(BTC).unwrap().bids(), [(99., 2.)]);
     }
 }
+fn subscribe_requests(h: &Harness) -> Vec<(u64, String)> {
+    #[derive(serde::Deserialize)]
+    struct Rpc {
+        id: u64,
+        params: Channel,
+    }
+    #[derive(serde::Deserialize)]
+    struct Channel {
+        channel: String,
+    }
+    h.sent()
+        .into_iter()
+        .filter(|s| s.contains("subscribe"))
+        .map(|s| serde_json::from_str::<Rpc>(s).unwrap())
+        .map(|r| (r.id, r.params.channel))
+        .collect()
+}
+
+// The global channel carries every listed option: about 7000 frames per second.
+#[test]
+fn summaries_are_subscribed_per_listed_market() {
+    let h = Harness::new();
+    let channels: Vec<_> = subscribe_requests(&h).into_iter().map(|(_, c)| c).collect();
+    assert!(channels.contains(&"markets_summary.BTC-USD-PERP".to_owned()));
+    assert!(channels.contains(&"markets_summary.ETH-USD-PERP".to_owned()));
+    assert!(!channels.contains(&"markets_summary".to_owned()));
+}
+
+// The venue answers about 13 subscribes per second, so a full batch outlasts one ack limit.
+#[test]
+fn a_batch_still_being_acked_is_not_timed_out() {
+    let mut h = Harness::new();
+    let requests = subscribe_requests(&h);
+    let sent = requests.len();
+    let (id, channel) = &requests[0];
+    let initial = h.now;
+    h.now = initial + 9_000.;
+    h.ws(&format!(
+        r#"{{"jsonrpc":"2.0","id":{id},"result":{{"channel":"{channel}"}}}}"#
+    ));
+    let watchdog = h.timer_at(initial + 5000.);
+    h.now = initial + 10_000.;
+    h.e.handle(h.now, Event::TimerFired { timer: watchdog });
+    h.collect();
+    assert_eq!(subscribe_requests(&h).len(), sent, "nothing resent");
+    let timers: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } if *at_ms == initial + 11_000. => Some(*at_ms),
+            _ => None,
+        })
+        .collect();
+    assert!(timers.is_empty(), "no retry scheduled");
+}
+
 #[test]
 fn malformed_or_wrong_channel_ack_does_not_suppress_subscription_retry() {
     let mut h = Harness::new();
@@ -861,7 +917,8 @@ fn idle_sbe_heartbeats_preserve_liveness_without_invalid_application_pings() {
         "bbo.ETH-USD-PERP",
         "trades.BTC-USD-PERP",
         "trades.ETH-USD-PERP",
-        "markets_summary",
+        "markets_summary.BTC-USD-PERP",
+        "markets_summary.ETH-USD-PERP",
     ]
     .into_iter()
     .enumerate()
