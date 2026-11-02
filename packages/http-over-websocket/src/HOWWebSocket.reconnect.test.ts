@@ -237,6 +237,16 @@ describe('HOWWebSocket reconnect recovery (real socket stack, fake tunnel)', () 
     expect(badAuth.state(), String(badAuth.error()?.stack)).toBe('resolved');
   });
 
+  it('a proxy token that never becomes valid fails as missing proxy authorization, not a bare timeout', async () => {
+    configureHOW({ getProxyToken: async () => 'expired-jwt', isTokenExpired: () => true });
+    const request = track(adapter(instrumentsInfo()));
+    await advance(21_000);
+    expect(request.state()).toBe('rejected');
+    expect(request.error()).toMatchObject({ name: 'ProxyTokenUnavailableError' });
+    expect(String(request.error()?.message)).toContain('Tealstreet proxy authorization missing');
+    expect(FakeTunnelSocket.latest().sent.filter((f) => f.type === 'rpc.auth')).toHaveLength(0);
+  });
+
   // --- Stall: an unanswered rpc.auth pins isTokenSent for the connection's life ---
   it('an rpc.auth the server never answers is resent, so later requests do not all wait out their deadline', async () => {
     // The server only authenticates after the client resends its token.
