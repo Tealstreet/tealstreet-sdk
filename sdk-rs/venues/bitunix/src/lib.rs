@@ -1187,10 +1187,11 @@ impl Venue for BitunixFutures {
                 }
                 SocketTick::TimedOut(_) => {
                     if matches!(s.feed, Feed::Private) && !self.account.login_answered {
+                        // Silence is no refusal: auth.rejected would move the key to the refused path.
                         cx.notice(
-                            Level::Error,
-                            code::AUTH_REJECTED,
-                            "Bitunix did not answer the private socket login",
+                            Level::Warn,
+                            code::STREAM_UNAVAILABLE,
+                            "Bitunix did not answer the private socket login; reconnecting",
                         );
                     }
                     cx.close(s.id);
