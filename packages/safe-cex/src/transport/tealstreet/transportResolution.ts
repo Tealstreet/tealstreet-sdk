@@ -55,7 +55,7 @@ export interface ResolvedTransport {
 type TransportAccount = Pick<ExchangeAccountConfig, 'tealstreetProxy' | 'tealstreetTunnel' | 'proxyRegion'>;
 type TransportMetadata = Pick<
   ExchangeMetadata,
-  'requiresCors' | 'enforceWsTunnel' | 'supportsTunnel' | 'privateProxyRegions'
+  'exchangeName' | 'requiresCors' | 'enforceWsTunnel' | 'supportsTunnel' | 'privateProxyRegions'
 >;
 
 // The default region for an account that needs a region but hasn't picked one:
@@ -79,7 +79,9 @@ export const resolveAccountTransport = (account: TransportAccount, metadata: Tra
   const tealstreetTunnel =
     tealstreetProxy && (metadata.supportsTunnel !== false || metadata.enforceWsTunnel)
       ? true
-      : account.tealstreetTunnel;
+      : metadata.exchangeName === 'lighter'
+        ? false // The relay refuses Lighter's URL, so an old row's flag would stop it starting.
+        : account.tealstreetTunnel;
 
   return { tealstreetProxy, tealstreetTunnel, ...(proxyRegion ? { proxyRegion } : {}) };
 };
