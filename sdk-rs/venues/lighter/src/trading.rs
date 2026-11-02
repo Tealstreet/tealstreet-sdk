@@ -1175,6 +1175,9 @@ impl Lighter {
                         Some(21149) => APPROVAL_MESSAGE.into(),
                         Some(21613) => format!("Lighter rejected invalid margin mode; refreshing account state: {}", reply.message),
                         Some(21132) => "Lighter rejected margin mode switch: close open positions and orders on this market first".into(),
+                        _ if reply.message.to_ascii_lowercase().contains("maker-only api key") => {
+                            format!("{MAKER_ONLY_MESSAGE}: {}", reply.message)
+                        }
                         _ if !reply.message.is_empty() => reply.message,
                         _ => UNCERTAIN_RESULT.into(),
                     };
@@ -1882,6 +1885,8 @@ fn protective_kind(cx: &Cx<'_, Pending>, order: &Order, price: f64) -> OrderType
         OrderType::Limit
     }
 }
+/// Lighter lets a maker-only key send only 0ms speed-bump transactions.
+const MAKER_ONLY_MESSAGE: &str = "This Lighter API key is maker-only, which allows only post-only orders and cancels; change leverage or place market and stop orders from a key that is not maker-only";
 const UNCERTAIN_RESULT: &str =
     "Uncertain Lighter transaction result; check open orders before retrying";
 
