@@ -173,6 +173,10 @@ struct Job {
     restore: Vec<OrderStatus>,
     recover: Option<Vec<PlaceOrderOpts>>,
     created: Vec<String>,
+    /// The leg re-placed after its two-leg TP/SL was cancelled: id, symbol, side and kind.
+    kept: Option<(String, String, OrderSide, OrderType)>,
+    /// The kept leg's placement went out, so a failure leaves the position without it.
+    kept_sent: bool,
 }
 struct Prepare {
     orders: Vec<PlaceOrderOpts>,
@@ -807,7 +811,10 @@ impl BitunixFutures {
                         .account
                         .native
                         .get(&row.id)
-                        .is_some_and(|n| !n.attached && n.position_id == position_id)
+                        // Only the position's own full leg pairs; a partial stop keeps its size.
+                        .is_some_and(|n| {
+                            !n.attached && n.full_position && n.position_id == position_id
+                        })
                     {
                         if row.kind == OrderType::StopLoss {
                             p.sl_price = Some(num::format(row.price));
@@ -1035,6 +1042,7 @@ impl BitunixFutures {
         let mut seen = HashSet::new();
         let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
         let mut replacements = vec![];
+        let mut kept_steps = vec![];
         for id in ids {
             let o = cx.store.order(id).ok_or_else(|| {
                 format!("Bitunix order {id} not found; cancellation requires a reconciled order")
@@ -1097,11 +1105,31 @@ impl BitunixFutures {
                     path: CANCEL_TPSL,
                     body: text(&p),
                     call: Call::Cancel {
-                        ids: affected,
+                        ids: affected.clone(),
                         require_ack: false,
                     },
                     delay: 0.0,
                 });
+                // One order carries both legs, and no write drops just one: the
+                // cancel takes both, so the leg the caller kept goes back at its size.
+                for kept in cx.store.orders().iter().filter(|r| {
+                    affected.contains(&r.id)
+                        && !selected.contains(r.id.as_str())
+                        && r.status == OrderStatus::Open
+                        && matches!(r.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                }) {
+                    let (path, p) = self.kept_leg(cx, kept)?;
+                    job.kept = Some((kept.id.clone(), kept.symbol.clone(), kept.side, kept.kind));
+                    kept_steps.push(Step {
+                        path,
+                        body: text(&p),
+                        call: Call::Place {
+                            clients: Vec::new(),
+                            batch: false,
+                        },
+                        delay: 0.0,
+                    });
+                }
             } else {
                 if let Some((_, rows)) = regular.iter_mut().find(|(s, _)| s == &o.symbol) {
                     rows.push(n.raw_id.clone());
@@ -1147,6 +1175,7 @@ impl BitunixFutures {
                 delay: 0.0,
             });
         }
+        job.steps.extend(kept_steps);
         for (parent, p) in replacements {
             job.steps.push_back(Step {
                 path: "/api/v1/futures/trade/get_order_detail",
@@ -1161,6 +1190,49 @@ impl BitunixFutures {
             });
         }
         Ok(job)
+    }
+    /// The surviving leg of a two-leg TP/SL as its own placement, without the other leg.
+    fn kept_leg(
+        &self,
+        cx: &Cx<'_, Pending>,
+        kept: &Order,
+    ) -> Result<(&'static str, Payload), String> {
+        let o = PlaceOrderOpts {
+            symbol: kept.symbol.clone(),
+            kind: kept.kind,
+            side: kept.side,
+            amount: kept.amount.max(0.0),
+            price: Some(kept.price),
+            trigger_price: None,
+            reduce_only: Some(true),
+            trigger_type: kept.trigger_type,
+            sl_trigger_type: kept.trigger_type,
+            tp_trigger_type: kept.trigger_type,
+            max_slippage_pct: None,
+            stop_loss: None,
+            take_profit: None,
+            time_in_force: None,
+            client_order_id: None,
+            close: None,
+            stp_mode: None,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
+        };
+        let (path, mut p) = self
+            .payloads(cx, &o)?
+            .into_iter()
+            .next()
+            .ok_or("Bitunix kept TP/SL leg has no placement")?;
+        // A full leg pairs with the store's other full leg, which is the one being cancelled.
+        if kept.kind == OrderType::StopLoss {
+            (p.tp_price, p.tp_stop_type, p.tp_qty) = (None, None, None);
+            (p.tp_order_type, p.tp_order_price) = (None, None);
+        } else {
+            (p.sl_price, p.sl_stop_type, p.sl_qty) = (None, None, None);
+            (p.sl_order_type, p.sl_order_price) = (None, None);
+        }
+        Ok((path, p))
     }
     fn replacement(
         &self,
@@ -1450,6 +1522,20 @@ impl BitunixFutures {
         let Some(mut step) = live.job.steps.pop_front() else {
             return self.finish(cx, command);
         };
+        if let Some((id, ..)) = &live.job.kept
+            && matches!(step.call, Call::Place { .. })
+        {
+            // A leg that filled while its sibling was cancelled has nothing left to protect.
+            if cx
+                .store
+                .order(id)
+                .is_some_and(|o| o.status == OrderStatus::Closed)
+            {
+                live.job.kept = None;
+                return self.advance(cx, command);
+            }
+            live.job.kept_sent = true;
+        }
         // Native's gap between batch chunks: the Plan timer issues the call.
         if step.delay > 0.0
             && let Some(plan) = live.plan.clone()
@@ -1658,7 +1744,27 @@ impl BitunixFutures {
         self.reread_held(cx);
     }
     /// Fails the job under its owner; the journal projects the outcome.
-    fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, error: VenueError) {
+    /// Names the lost leg once its re-place went out and failed.
+    fn kept_gone(&mut self, command: u32, error: &mut VenueError) {
+        let Some(job) = self
+            .trading
+            .live
+            .get_mut(&command)
+            .map(|live| &mut live.job)
+        else {
+            return;
+        };
+        if !job.kept_sent {
+            return;
+        }
+        if let Some((_, symbol, side, kind)) = job.kept.take() {
+            let unknown = error.outcome == Some(Outcome::Unknown);
+            let gone = safe_cex_engine::error::stop_gone_text(&symbol, side, kind, unknown);
+            error.message = format!("{gone}: {}", error.message);
+        }
+    }
+    fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, mut error: VenueError) {
+        self.kept_gone(command, &mut error);
         let Some(live) = self.take_live(command) else {
             return;
         };
@@ -1772,8 +1878,9 @@ impl BitunixFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: VenueError,
+        mut error: VenueError,
     ) {
+        self.kept_gone(request.command, &mut error);
         // Never released: a settings scope ends with the job.
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.settings_released = false;
@@ -1945,6 +2052,8 @@ impl BitunixFutures {
             code: NativeCode::Int(code),
             message: "",
         });
+        let mut error = error;
+        self.kept_gone(command, &mut error);
         let mut refused = false;
         // Live: a batch answered 20003 with its orders resting. Only 10007's signature refusal,
         // which the venue resends past, proves a batch sent nothing.
