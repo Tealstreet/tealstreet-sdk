@@ -690,8 +690,9 @@ pub async fn run(
                 use safe_cex_exec::native::CancelAllScope;
                 match sweep_handle.capabilities().cancel_all {
                     CancelAll::Native => CancelAllScope::Native,
-                    CancelAll::EachOpenSymbol => CancelAllScope::Symbols(Vec::new()),
-                    CancelAll::EachPlacedSymbol => CancelAllScope::Symbols(placed.symbols()),
+                    CancelAll::EachOpenSymbol | CancelAll::EachPlacedSymbol => {
+                        CancelAllScope::Symbols(placed.symbols())
+                    }
                 }
             })),
     );
@@ -796,8 +797,15 @@ pub async fn run(
                         crate::audit::log(&who, "callMethod", &crate::audit::algo_op("nuke", &Value::from(mode).to_string()), audit);
                         let data = match outcome {
                             // Every leg was accepted; the result names the algos stopped first.
-                            Ok(done) => serde_json::json!({"requestId": request_id, "success": true,
-                                "result": {"stoppedChasers": done["stoppedChasers"], "stoppedTwaps": done["stoppedTwaps"]}}),
+                            Ok(done) => {
+                                let mut result = serde_json::json!({"stoppedChasers": done["stoppedChasers"], "stoppedTwaps": done["stoppedTwaps"]});
+                                for field in ["placedSymbols", "warning"] {
+                                    if let Some(value) = done.get(field) {
+                                        result[field] = value.clone();
+                                    }
+                                }
+                                serde_json::json!({"requestId": request_id, "success": true, "result": result})
+                            }
                             Err(mut error) => {
                                 if error.get("name").is_none() {
                                     error["name"] = "Error".into();

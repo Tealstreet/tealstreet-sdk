@@ -134,6 +134,7 @@ impl Venue for Paradex {
             account: safe_cex_engine::AccountLookup::Query,
             order_book_query: true,
             fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }

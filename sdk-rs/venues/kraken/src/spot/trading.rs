@@ -24,6 +24,8 @@ pub enum Step {
     Cancel {
         id: String,
     },
+    /// Every open order on the account; only a nuke asks for it.
+    CancelAll,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -300,6 +302,7 @@ impl KrakenSpot {
             Step::Place { params, .. } => ("/0/private/AddOrder", params.clone()),
             Step::Amend { params, .. } => ("/0/private/AmendOrder", params.clone()),
             Step::Cancel { id } => ("/0/private/CancelOrder", vec![("txid", id.clone())]),
+            Step::CancelAll => ("/0/private/CancelAll", vec![]),
         };
         self.trading.waiting = true;
         if let Step::Place { receipt, .. } = &step {
@@ -340,6 +343,11 @@ impl KrakenSpot {
                     }
                     job.ids.push(id);
                 }
+                // A count of zero is an answer too: nothing was open.
+                Step::CancelAll => {
+                    serde_json::from_str::<Canceled>(text)
+                        .map_err(|_| unproven("Kraken Spot missing cancel-all count"))?;
+                }
             }
             job.effective = true;
             Ok::<_, VenueError>(())
@@ -367,6 +375,10 @@ impl KrakenSpot {
             cx.fail(job.command, error);
         }
         self.trade_next(cx);
+    }
+    /// A nuke's account-wide cancel, queued behind the trading in flight.
+    pub(super) fn cancel_account_orders(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        self.enqueue(cx, command, VecDeque::from([Step::CancelAll]), true)
     }
     pub(super) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
         match command {

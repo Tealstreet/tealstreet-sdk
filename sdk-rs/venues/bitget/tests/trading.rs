@@ -416,6 +416,24 @@ fn classic_sized_stop_amend_zero_preserves_size() {
 }
 
 #[test]
+fn uta_symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
+    let mut h = uta();
+    h.command(Command::CancelSymbolOrders {
+        command: 9,
+        symbol: "BTCUSDT".into(),
+    });
+    let (request, sent) = body(&mut h, "cancel-symbol-order");
+    assert_eq!(sent["symbol"], "BTCUSDT");
+    assert_eq!(sent["category"], "USDT-FUTURES");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","msg":"success","data":{"list":[]}}"#,
+    );
+    assert!(h.done.iter().any(|(id, result)| *id == 9 && result.is_ok()));
+}
+
+#[test]
 fn uta_entry_and_strategy_use_v3_shapes_and_actual_execution_side() {
     let mut h = uta();
     let mut o = limit();
@@ -851,6 +869,16 @@ fn retained_conditional_cancels_require_their_own_semantic_ack() {
                 200,
                 r#"{"code":"00000","data":{"orderId":"retained-conditional"}}"#,
             );
+            if h.requests
+                .iter()
+                .any(|r| r.url.contains("cancel-symbol-order"))
+            {
+                h.respond(
+                    "cancel-symbol-order",
+                    200,
+                    r#"{"code":"00000","data":{"list":[]}}"#,
+                );
+            }
             assert!(h.done.iter().any(|(id, result)| *id == 3 && result.is_ok()));
             h.command(Command::CancelSymbolOrders {
                 command: 4,
@@ -1466,4 +1494,92 @@ fn split_remainder_stays_on_the_lot_step() {
         .map(|row| row["size"].as_str().unwrap().to_owned())
         .collect();
     assert_eq!(sizes, ["72000", "72000", "36000.1"]);
+}
+
+fn account_cancel(h: &mut Harness, command: u32) {
+    h.command(Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::CancelAccountOrders,
+    });
+}
+
+#[test]
+fn a_nuke_account_cancel_on_classic_sends_the_product_wide_cancel_all() {
+    let mut h = Harness::classic();
+    account_cancel(&mut h, 21);
+    let (request, sent) = body(&mut h, "/api/v2/mix/order/cancel-all-orders");
+    assert_eq!(sent["productType"], "usdt-futures");
+    assert_eq!(sent["marginCoin"], "USDT");
+    assert!(sent.get("symbol").is_none(), "{sent}");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","msg":"success","data":{"successList":[],"failureList":[]}}"#,
+    );
+    // Plan orders (triggers, TP/SL, trailing) are not normal orders: each type is
+    // cancelled product-wide, so one the store never saw is reached too.
+    for plan in [
+        "normal_plan",
+        "profit_plan",
+        "loss_plan",
+        "pos_profit",
+        "pos_loss",
+        "track_plan",
+    ] {
+        assert!(h.done.iter().all(|(id, _)| *id != 21), "{plan}");
+        let (request, sent) = body(&mut h, "/api/v2/mix/order/cancel-plan-order");
+        assert_eq!(sent["planType"], plan);
+        assert_eq!(sent["productType"], "usdt-futures");
+        assert_eq!(sent["marginCoin"], "USDT");
+        assert!(sent.get("symbol").is_none(), "{sent}");
+        h.reply(
+            request,
+            200,
+            r#"{"code":"00000","msg":"success","data":{"successList":[],"failureList":[]}}"#,
+        );
+    }
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 21 && result.is_ok()),
+        "{:?}",
+        h.done
+    );
+}
+
+#[test]
+fn a_nuke_account_cancel_on_uta_cancels_the_whole_category() {
+    let mut h = uta();
+    account_cancel(&mut h, 22);
+    let (request, sent) = body(&mut h, "cancel-symbol-order");
+    assert_eq!(sent["category"], "USDT-FUTURES");
+    assert!(sent.get("symbol").is_none(), "{sent}");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","msg":"success","data":{"list":[]}}"#,
+    );
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 22 && result.is_ok()),
+        "{:?}",
+        h.done
+    );
+}
+
+#[test]
+fn a_symbol_cancel_never_sends_the_account_wide_cancel() {
+    for mut h in [Harness::classic(), uta()] {
+        h.command(Command::CancelSymbolOrders {
+            command: 23,
+            symbol: String::new(),
+        });
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.url.contains("cancel-all-orders")
+                    || r.url.contains("cancel-symbol-order"))
+        );
+    }
 }

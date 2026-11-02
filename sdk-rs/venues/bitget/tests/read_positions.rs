@@ -2,6 +2,7 @@
 mod support;
 use safe_cex_engine::{Command, ErrorKind, Event, Outcome, Response, VenueAction};
 use support::*;
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const FLAT: &str = r#"{"code":"00000","data":[]}"#;
 const SIZE_TWO: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","holdSide":"long","total":"2","openPriceAvg":"90","markPrice":"100","leverage":"20","unrealizedPL":"10","liquidationPrice":"50","marginSize":"50","marginMode":"crossed","posMode":"one_way_mode","uTime":"200"}]}"#;
@@ -68,7 +69,13 @@ fn classic_read_commits_then_it_succeeds() {
     assert!(has(&h, CLASSIC));
     assert_eq!(result(&h, 40), None);
     h.respond(CLASSIC, 200, SIZE_TWO);
-    assert_eq!(result(&h, 40), Some(&Ok("[]".to_owned())));
+    assert_eq!(
+        result(&h, 40),
+        Some(&Ok(
+            r#"{"skipped":[],"open":[{"symbol":"BTCUSDT","side":"long","contracts":2.0}]}"#
+                .to_owned()
+        ))
+    );
     assert_eq!(size(&h), 2.0);
 }
 
@@ -89,7 +96,7 @@ fn classic_read_in_flight_is_followed_by_a_new_one() {
     assert_eq!(size(&h), 2.0, "it still commits");
     assert!(has(&h, CLASSIC), "a new read follows");
     h.respond(CLASSIC, 200, FLAT);
-    assert_eq!(result(&h, 41), Some(&Ok("[]".to_owned())));
+    assert_eq!(result(&h, 41), Some(&Ok(FLAT_ANSWER.to_owned())));
     assert_eq!(size(&h), 0.0);
 }
 
@@ -158,7 +165,7 @@ fn a_read_the_stream_held_is_not_a_commit() {
         }
     }
     assert!(h.now - framed_at > 5_000.0, "committed only past the guard");
-    assert_eq!(result(&h, 45), Some(&Ok("[]".to_owned())));
+    assert_eq!(result(&h, 45), Some(&Ok(FLAT_ANSWER.to_owned())));
     assert_eq!(size(&h), 0.0);
 }
 
@@ -190,7 +197,7 @@ fn uta_read_commits_then_it_succeeds() {
     read(&mut h, 50);
     assert!(has(&h, UTA));
     h.respond(UTA, 200, UTA_FLAT);
-    assert_eq!(result(&h, 50), Some(&Ok("[]".to_owned())));
+    assert_eq!(result(&h, 50), Some(&Ok(FLAT_ANSWER.to_owned())));
     assert_eq!(size(&h), 0.0);
 }
 
@@ -210,7 +217,7 @@ fn uta_read_in_flight_is_followed_by_a_new_one() {
     assert_eq!(result(&h, 51), None);
     assert!(has(&h, UTA));
     h.respond(UTA, 200, UTA_FLAT);
-    assert_eq!(result(&h, 51), Some(&Ok("[]".to_owned())));
+    assert_eq!(result(&h, 51), Some(&Ok(FLAT_ANSWER.to_owned())));
 }
 
 #[test]

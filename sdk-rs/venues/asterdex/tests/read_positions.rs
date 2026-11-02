@@ -7,6 +7,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_asterdex::AsterDex;
 use support::Options;
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const MARKETS: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"LOT_SIZE","minQty":"0.001","maxQty":"1000"}]}]}"#;
 const BALANCE: &str = r#"{"totalWalletBalance":"1000","availableBalance":"800","totalInitialMargin":"100","totalOpenOrderInitialMargin":"20","totalUnrealizedProfit":"5"}"#;
@@ -123,7 +124,10 @@ impl H {
         self.done.iter().find(|(c, _)| *c == id).map(|(_, r)| r)
     }
     fn succeeded(&self, id: u32) -> bool {
-        self.result(id).is_some_and(|r| r.as_deref() == Ok("[]"))
+        self.result(id).is_some_and(|r| {
+            r.as_deref()
+                .is_ok_and(|b| b.starts_with(r#"{"skipped":[],"open":["#))
+        })
     }
     fn failure(&self, id: u32) -> &VenueError {
         match self.result(id) {

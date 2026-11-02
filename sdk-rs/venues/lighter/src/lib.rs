@@ -897,6 +897,7 @@ impl Venue for Lighter {
             account_tier: true,
             account: safe_cex_engine::AccountLookup::Query,
             fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }

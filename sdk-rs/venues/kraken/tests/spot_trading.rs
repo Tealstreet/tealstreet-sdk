@@ -1463,3 +1463,36 @@ fn a_fence_an_unreadable_order_holds_says_why() {
         .expect("refused");
     assert!(held.contains("Cancel that order on Kraken"), "{held}");
 }
+
+#[test]
+fn a_nuke_account_cancel_sends_cancel_all_with_no_order_in_the_store() {
+    let (mut e, _, _) = ready(false);
+    assert!(e.capabilities().nuke_account_cancel);
+    e.handle(
+        NOW,
+        Event::Command(Command::Venue {
+            command: 85,
+            action: safe_cex_engine::VenueAction::CancelAccountOrders,
+        }),
+    );
+    let sent = requests(&mut e).pop().expect("a cancel-all request");
+    assert!(sent.url.ends_with("/0/private/CancelAll"), "{}", sent.url);
+    reply(&mut e, &sent, r#"{"error":[],"result":{"count":0}}"#);
+    assert!(
+        e.drain_plain()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 85, .. })))
+    );
+}
+
+#[test]
+fn a_symbol_cancel_never_sends_the_account_wide_cancel() {
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 86,
+            symbol: String::new(),
+        }),
+    );
+    assert!(!requests(&mut e).iter().any(|r| r.url.contains("CancelAll")));
+}

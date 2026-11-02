@@ -75,6 +75,10 @@ export interface EngineCapabilities {
   scheduleCancel: boolean;
   orderHistoryNeedsSymbol: boolean;
   freshPositions: boolean;
+  /** The `cancelAccountOrders` op, which only a nuke sends. */
+  nukeAccountCancel: boolean;
+  /** A symbol cancel can miss an order the store has not seen yet. */
+  symbolCancelMissesUnseen: boolean;
 }
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
 export const STATUS_FLAG: { HEDGED: 1 };

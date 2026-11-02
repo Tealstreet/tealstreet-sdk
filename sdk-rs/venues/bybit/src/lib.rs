@@ -2591,6 +2591,8 @@ impl Venue for BybitLinear {
             balance_info: true,
             market_refresh: true,
             fresh_positions: !self.variant.is_spot(),
+            // HyroTrader cancels the store's rows; its proxy has no by-symbol cancel here.
+            symbol_cancel_misses_unseen: self.variant.is_hyro(),
             // Hyro's snapshot replaces every setting, so a flat read would not last.
             leverage_query: if self.variant.is_spot() || self.variant.is_hyro() {
                 safe_cex_engine::LeverageQuery::Settings

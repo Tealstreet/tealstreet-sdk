@@ -15,6 +15,8 @@ struct Probe {
     steps: Vec<Vec<(u8, Vec<String>)>>,
     /// The legs a command waits on.
     keys: Vec<u8>,
+    /// Rows a response commits, as a venue's read does before answering.
+    commits: Vec<crate::model::Position>,
 }
 
 impl Probe {
@@ -57,6 +59,9 @@ impl Venue for Probe {
     fn on_close(&mut self, _: &mut Cx<'_, u32>, _: SocketId, _: u16) {}
     fn on_response(&mut self, cx: &mut Cx<'_, u32>, generation: u32, response: Response<'_>) {
         if response.status == 200 {
+            for position in self.commits.drain(..) {
+                cx.store.upsert_position(position);
+            }
             let step = self.steps.get(generation as usize - 1).cloned();
             for (key, skipped) in step.unwrap_or_else(|| vec![(0, Vec::new())]) {
                 self.fresh.committed(cx, key, generation, &skipped);
@@ -122,6 +127,8 @@ fn engine(capable: bool) -> Engine<Probe> {
     })
 }
 
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
+
 fn read_positions(engine: &mut Engine<Probe>, now: f64, command: u32) {
     engine.handle(
         now,
@@ -143,6 +150,50 @@ fn reply(engine: &mut Engine<Probe>, now: f64, request: RequestId, status: u16) 
                 body: "[]",
             },
         },
+    );
+}
+
+fn row(symbol: &str, contracts: f64) -> crate::model::Position {
+    crate::model::Position {
+        id: symbol.into(),
+        symbol: symbol.into(),
+        side: crate::model::PositionSide::Short,
+        entry_price: 10.,
+        notional: 20.,
+        leverage: 2.,
+        margin_type: None,
+        position_mode: None,
+        unrealized_pnl: 0.,
+        realized_pnl: None,
+        contracts,
+        liquidation_price: 0.,
+        margin_size: None,
+        last_update: None,
+    }
+}
+
+#[test]
+fn the_answer_lists_what_the_read_just_committed_nonzero_only() {
+    let mut engine = crate::test_support::seeded_engine(Probe {
+        capable: true,
+        commits: vec![row("OPEN", 13.8), row("FLAT", 0.)],
+        ..Probe::default()
+    });
+    let (mut done, mut requests) = (Vec::new(), Vec::new());
+    read_positions(&mut engine, 0., 1);
+    drain(&mut engine, &mut done, &mut requests);
+    assert!(done.is_empty(), "no answer before the read commits");
+    reply(&mut engine, 1., requests[0], 200);
+    drain(&mut engine, &mut done, &mut requests);
+    assert_eq!(
+        done,
+        vec![(
+            1,
+            Ok(
+                r#"{"skipped":[],"open":[{"symbol":"OPEN","side":"short","contracts":13.8}]}"#
+                    .to_owned()
+            )
+        )]
     );
 }
 
@@ -189,11 +240,11 @@ fn a_background_delivery_settles_only_the_command_its_read_postdates() {
     reply(&mut engine, 2., requests[0], 200);
     drain(&mut engine, &mut done, &mut requests);
     assert_eq!(done.len(), 1, "{done:?}");
-    assert_eq!(done[0], (1, Ok("[]".to_owned())));
+    assert_eq!(done[0], (1, Ok(FLAT_ANSWER.to_owned())));
     assert_eq!(requests.len(), 2, "read 2 follows for command 2");
     reply(&mut engine, 3., requests[1], 200);
     drain(&mut engine, &mut done, &mut requests);
-    assert_eq!(done[1], (2, Ok("[]".to_owned())));
+    assert_eq!(done[1], (2, Ok(FLAT_ANSWER.to_owned())));
 }
 
 #[test]
@@ -261,7 +312,10 @@ fn the_answer_lists_skipped_rows_as_a_json_array_of_strings() {
     drain(&mut engine, &mut done, &mut requests);
     reply(&mut engine, 1., requests[0], 200);
     drain(&mut engine, &mut done, &mut requests);
-    assert_eq!(done, vec![(1, Ok(r#"["EVIL\"SYM"]"#.to_owned()))]);
+    assert_eq!(
+        done,
+        vec![(1, Ok(r#"{"skipped":["EVIL\"SYM"],"open":[]}"#.to_owned()))]
+    );
 }
 
 #[test]
@@ -277,7 +331,10 @@ fn a_multi_leg_command_accumulates_skips_deduped_across_its_legs() {
     drain(&mut engine, &mut done, &mut requests);
     reply(&mut engine, 1., requests[0], 200);
     drain(&mut engine, &mut done, &mut requests);
-    assert_eq!(done, vec![(1, Ok(r#"["A","B","C"]"#.to_owned()))]);
+    assert_eq!(
+        done,
+        vec![(1, Ok(r#"{"skipped":["A","B","C"],"open":[]}"#.to_owned()))]
+    );
 }
 
 #[test]
@@ -290,10 +347,13 @@ fn a_read_that_does_not_satisfy_a_leg_lends_it_no_skips() {
     read_positions(&mut engine, 1., 2);
     reply(&mut engine, 2., requests[0], 200);
     drain(&mut engine, &mut done, &mut requests);
-    assert_eq!(done, vec![(1, Ok(r#"["OLD"]"#.to_owned()))]);
+    assert_eq!(
+        done,
+        vec![(1, Ok(r#"{"skipped":["OLD"],"open":[]}"#.to_owned()))]
+    );
     reply(&mut engine, 3., requests[1], 200);
     drain(&mut engine, &mut done, &mut requests);
-    assert_eq!(done[1], (2, Ok("[]".to_owned())));
+    assert_eq!(done[1], (2, Ok(FLAT_ANSWER.to_owned())));
 }
 
 #[test]
@@ -311,5 +371,11 @@ fn a_leg_already_satisfied_takes_no_skips_from_a_later_read() {
     assert!(done.is_empty(), "leg 1 is still owed");
     reply(&mut engine, 2., requests[1], 200);
     drain(&mut engine, &mut done, &mut requests);
-    assert_eq!(done, vec![(1, Ok(r#"["FIRST","SECOND"]"#.to_owned()))]);
+    assert_eq!(
+        done,
+        vec![(
+            1,
+            Ok(r#"{"skipped":["FIRST","SECOND"],"open":[]}"#.to_owned())
+        )]
+    );
 }

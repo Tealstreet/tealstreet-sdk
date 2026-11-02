@@ -7,6 +7,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_bingx::Bingx;
 use support::Options;
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const KEY: &str = "/openApi/user/auth/userDataStream";
 const MODE: &str = "/openApi/swap/v1/positionSide/dual";
@@ -126,7 +127,10 @@ impl H {
         self.done.iter().find(|(c, _)| *c == id).map(|(_, r)| r)
     }
     fn succeeded(&self, id: u32) -> bool {
-        self.result(id).is_some_and(|r| r.as_deref() == Ok("[]"))
+        self.result(id).is_some_and(|r| {
+            r.as_deref()
+                .is_ok_and(|b| b.starts_with(r#"{"skipped":[],"open":["#))
+        })
     }
     fn failure(&self, id: u32) -> &VenueError {
         match self.result(id) {
@@ -285,7 +289,7 @@ fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
     assert_eq!(
         h.result(70)
             .map(|r| r.as_deref().map_err(|e| e.message.as_str())),
-        Some(Ok(r#"["DOGEUSDT"]"#))
+        Some(Ok(r#"{"skipped":["DOGEUSDT"],"open":[]}"#))
     );
 
     let flat = unlisted.replace("\"positionAmt\":\"0.1\"", "\"positionAmt\":\"0\"");
