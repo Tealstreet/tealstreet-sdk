@@ -144,6 +144,20 @@ pub(super) const DUPLICATE_TABLE: CodeTable = CodeTable {
     status: &[],
 };
 
+/// 109400 naming the timestamp: the request aged out of BingX's window before
+/// any processing, so its one engine-granted resend, freshly stamped, cannot
+/// double-place.
+pub(super) const TIMESTAMP_TABLE: CodeTable = CodeTable {
+    rows: &[Row {
+        key: Key::Int(109400),
+        verdict: Verdict::RefusedResend(ErrorKind::InvalidInput),
+        only: None,
+    }],
+    success: &[Key::Int(0)],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+
 pub(super) fn names_duplicate_client_id(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
     message.contains("duplicate") && message.contains("client")
@@ -283,6 +297,7 @@ mod tests {
     #[test]
     fn bingx_table_is_well_formed() {
         safe_cex_engine::classify::assert_table(&super::TABLE);
+        safe_cex_engine::classify::assert_table(&super::TIMESTAMP_TABLE);
     }
 }
 

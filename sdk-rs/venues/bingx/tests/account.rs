@@ -1414,6 +1414,206 @@ fn signature_rejection_is_re_signed_and_resent_exactly_once() {
     assert!(!h.requests.iter().any(|r| r.url.contains(BALANCE)));
 }
 
+const SERVER_TIME: &str = "/openApi/swap/v2/server/time";
+const TIMESTAMP_REFUSED: &str = r#"{"code":109400,"msg":"timestamp is invalid","data":{}}"#;
+const PLACE: &str = "/openApi/swap/v2/trade/order";
+const RESENT: &str = "BingX refused a request timestamp (109400); re-signing and resending it once at clock offset +0 ms";
+const RESYNCED: &str =
+    "BingX server clock read after a timestamp refusal (109400): offset now +3005 ms";
+
+fn place_one(h: &mut Harness, command: u32) -> HttpRequest {
+    h.now += 1.0;
+    h.event(Event::Command(Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol":"BTCUSDT", "type":"limit", "side":"buy",
+                "amount":0.01, "price":60000
+            }))
+            .unwrap(),
+        ],
+    }));
+    h.take(PLACE)
+}
+fn stamp(request: &HttpRequest) -> f64 {
+    match &request.body {
+        Some(body) => serde_json::from_str::<serde_json::Value>(body).unwrap()["timestamp"]
+            .as_f64()
+            .unwrap(),
+        None => request
+            .url
+            .split(['?', '&'])
+            .find_map(|pair| pair.strip_prefix("timestamp="))
+            .unwrap()
+            .parse()
+            .unwrap(),
+    }
+}
+fn sends(h: &Harness, path: &str) -> usize {
+    h.requests.iter().filter(|r| r.url.contains(path)).count()
+}
+fn count(h: &Harness, line: &str) -> usize {
+    h.logs.iter().filter(|l| *l == line).count()
+}
+/// Answers the one server-time read 10 ms after it left, 3 s ahead of the host.
+fn answer_server_time(h: &mut Harness) {
+    let read = h.take(SERVER_TIME);
+    assert_eq!(read.method, Method::Get);
+    assert!(
+        !read.url.contains("signature="),
+        "the clock read is unsigned"
+    );
+    assert!(read.headers.iter().all(|(name, _)| *name != "X-BX-APIKEY"));
+    assert_eq!(sends(h, SERVER_TIME), 0, "one clock read at a time");
+    h.now += 10.0;
+    let body = format!(
+        r#"{{"code":0,"msg":"","data":{{"serverTime":{}}}}}"#,
+        h.now + 3_000.0
+    );
+    h.reply(read.id, 200, &body);
+}
+
+#[test]
+fn a_timestamp_refused_order_resends_once_freshly_stamped_then_the_clock_resyncs() {
+    let mut h = Harness::ready_with_orders(r#"{"code":0,"data":[]}"#);
+    let first = place_one(&mut h, 800);
+    // The request sat past BingX's 5 s window before it arrived.
+    h.now += 6_000.0;
+    h.reply(first.id, 200, TIMESTAMP_REFUSED);
+    let second = h.take(PLACE);
+    assert_eq!(stamp(&second), h.now, "re-signed on a fresh stamp");
+    assert_eq!(count(&h, RESENT), 1);
+    answer_server_time(&mut h);
+    assert_eq!(count(&h, RESYNCED), 1);
+    h.reply(
+        second.id,
+        200,
+        r#"{"code":0,"data":{"order":{"orderId":"91","status":"NEW"}}}"#,
+    );
+    assert!(
+        h.done.iter().any(|(id, r)| *id == 800 && r.is_ok()),
+        "{:?}",
+        h.done
+    );
+    assert_eq!(sends(&h, PLACE), 0, "exactly one resend");
+    assert_eq!(sends(&h, SERVER_TIME), 0);
+
+    // The measured offset applies to every later stamp on this account.
+    let next = place_one(&mut h, 801);
+    assert_eq!(stamp(&next), h.now + 3_005.0);
+}
+
+#[test]
+fn a_second_timestamp_refusal_surfaces_without_a_third_send() {
+    let mut h = Harness::ready_with_orders(r#"{"code":0,"data":[]}"#);
+    let first = place_one(&mut h, 802);
+    h.reply(first.id, 200, TIMESTAMP_REFUSED);
+    let second = h.take(PLACE);
+    h.reply(second.id, 200, TIMESTAMP_REFUSED);
+    let (_, error) = h
+        .failures
+        .iter()
+        .find(|(id, _)| *id == 802)
+        .expect("surfaced");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert!(error.message.contains("timestamp is invalid"));
+    assert_eq!(sends(&h, PLACE), 0, "no third send");
+    assert_eq!(count(&h, RESENT), 1, "only the first refusal resends");
+    answer_server_time(&mut h);
+    assert_eq!(
+        sends(&h, SERVER_TIME),
+        0,
+        "one clock read for both refusals"
+    );
+}
+
+#[test]
+fn a_109400_without_timestamp_text_is_refused_without_a_resend() {
+    let mut h = Harness::ready_with_orders(r#"{"code":0,"data":[]}"#);
+    let first = place_one(&mut h, 803);
+    h.reply(
+        first.id,
+        200,
+        r#"{"code":109400,"msg":"invalid symbol","data":{}}"#,
+    );
+    let (_, error) = h
+        .failures
+        .iter()
+        .find(|(id, _)| *id == 803)
+        .expect("surfaced");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert_eq!(sends(&h, PLACE) + sends(&h, SERVER_TIME), 0);
+
+    let mut h = Harness::new();
+    let mode = h.take(MODE);
+    h.reply(mode.id, 200, r#"{"code":109400,"msg":"invalid symbol"}"#);
+    assert_eq!(sends(&h, MODE) + sends(&h, SERVER_TIME), 0);
+}
+
+#[test]
+fn timestamp_refused_reads_resend_once_and_share_one_clock_read() {
+    let mut h = Harness::new();
+    let mode = h.take(MODE);
+    let orders = h.take(ORDERS);
+    h.now += 6_000.0;
+    h.reply(mode.id, 200, TIMESTAMP_REFUSED);
+    // A streamed read refused the same way joins the in-flight clock read.
+    h.reply(orders.id, 200, TIMESTAMP_REFUSED);
+    assert_eq!(count(&h, RESENT), 2);
+    let mode = h.take(MODE);
+    let orders = h.take(ORDERS);
+    assert_eq!((stamp(&mode), stamp(&orders)), (h.now, h.now));
+    answer_server_time(&mut h);
+
+    // A second refusal surfaces as today: no third send, no further clock read.
+    h.reply(mode.id, 200, TIMESTAMP_REFUSED);
+    assert_eq!(sends(&h, MODE), 0);
+    assert!(h.logs.iter().any(|l| l.contains("private request failed")));
+    h.reply(orders.id, 200, OPEN);
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    answer_server_time(&mut h);
+    assert_eq!(sends(&h, SERVER_TIME), 0);
+}
+
+#[test]
+fn a_failed_clock_read_keeps_the_existing_offset() {
+    let mut h = Harness::new();
+    let mode = h.take(MODE);
+    h.reply(mode.id, 200, TIMESTAMP_REFUSED);
+    let read = h.take(SERVER_TIME);
+    h.reply(read.id, 503, "unavailable");
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l.contains("failed (HTTP 503: unavailable); keeping offset +0 ms"))
+    );
+    let mode = h.take(MODE);
+    assert_eq!(stamp(&mode), h.now);
+    h.reply(
+        mode.id,
+        200,
+        r#"{"code":0,"data":{"dualSidePosition":false}}"#,
+    );
+    assert_eq!(sends(&h, MODE) + sends(&h, SERVER_TIME), 0);
+}
+
+#[test]
+fn a_timestamp_refused_metadata_read_resends_once() {
+    let mut h = Harness::ready();
+    let first = metadata(&mut h, 920);
+    h.now += 6_000.0;
+    h.reply(first.id, 200, TIMESTAMP_REFUSED);
+    let second = h.take("/trade/leverage");
+    assert_eq!(stamp(&second), h.now);
+    assert_eq!(count(&h, RESENT), 1);
+    h.reply(second.id, 200, TIMESTAMP_REFUSED);
+    assert!(h.done.iter().any(|(id, r)| *id == 920 && r.is_err()));
+    assert_eq!(sends(&h, "/trade/leverage"), 0);
+    answer_server_time(&mut h);
+    assert_eq!(sends(&h, SERVER_TIME), 0);
+}
+
 #[test]
 fn account_rows_on_a_market_skipped_at_startup_are_reported_once_as_errors() {
     let mut h = Harness::unstarted();

@@ -14,7 +14,10 @@ permitted CORS egress or a transport on a server/Worker; API allowlists must
 include that host's direct egress IP. The internal public host is not BingX's
 documented public protocol and remains a deployment dependency for TS parity.
 
-Writes are sequenced and never retried after transport failures. A batch is
+Writes are sequenced and never retried after transport failures. A refusal
+BingX makes before processing, a bad signature (100001) or a stale timestamp
+(109400 naming it), is re-signed and resent once; a timestamp refusal also reads
+BingX server time and recalibrates this account's signing clock. A batch is
 fully preflighted before any order is sent. Caller IDs are honored verbatim on
 one ordinary order or rejected before writes. Leverage changes without a side
 update both hedge sides sequentially, matching the engine's symbol-level API.

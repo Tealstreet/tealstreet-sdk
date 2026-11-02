@@ -843,11 +843,14 @@ impl Trading {
                 code: NativeCode::Int(e.code),
                 message: &e.msg,
             });
+            let timestamp = crate::sign::timestamp::refused(response.body);
             let table = if native
                 .as_ref()
                 .is_some_and(|n| context::names_duplicate_client_id(n.message))
             {
                 &context::DUPLICATE_TABLE
+            } else if timestamp {
+                &context::TIMESTAMP_TABLE
             } else {
                 &TABLE
             };
@@ -896,6 +899,9 @@ impl Trading {
                 {
                     Ok(context) => {
                         request.context = context;
+                        if timestamp {
+                            crate::sign::timestamp::note_resend(cx);
+                        }
                         self.queue(cx, credentials, request);
                     }
                     Err(error) => {

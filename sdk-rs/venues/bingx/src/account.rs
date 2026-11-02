@@ -2137,10 +2137,13 @@ impl crate::Bingx {
         response: &Response<'_>,
     ) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        // A first signature rejection is re-signed once; only the final answer counts.
+        // A first signature or timestamp refusal is re-signed once; only the
+        // final answer counts.
         let pending = match pending {
             Pending::Signed(signed)
-                if !signed.resent && crate::signature_rejected(response.body) =>
+                if !signed.resent
+                    && (crate::signature_rejected(response.body)
+                        || crate::sign::timestamp::refused(response.body)) =>
             {
                 return None;
             }
