@@ -976,3 +976,40 @@ fn a_refused_batch_stays_unknown_because_its_orders_may_rest() {
         });
     assert_eq!(outcome, Some(Some(safe_cex_engine::Outcome::Unknown)));
 }
+
+#[test]
+fn a_duplicate_client_id_stays_unknown() {
+    let (mut e, _) = startup();
+    let mut order: safe_cex_engine::model::PlaceOrderOpts =
+        serde_json::from_value(serde_json::json!({
+            "symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":9000
+        }))
+        .unwrap();
+    order.client_order_id = Some("a".into());
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 78,
+            orders: vec![order],
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    e.handle(
+        2.0,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":30042,"data":null,"msg":"Client ID duplicate"}"#,
+            },
+        },
+    );
+    let outcome = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.outcome),
+            _ => None,
+        });
+    assert_eq!(outcome, Some(Some(safe_cex_engine::Outcome::Unknown)));
+}

@@ -1626,6 +1626,16 @@ fn documented_send_statuses_refuse_and_leave_no_fence() {
 }
 
 #[test]
+fn a_duplicate_client_id_stays_unknown() {
+    let (mut e, _) = answer("clientOrderIdAlreadyExist");
+    let settled = e.drain_plain().collect::<Vec<_>>();
+    assert_eq!(
+        outcome_of(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+}
+
+#[test]
 fn a_json_parse_error_in_a_200_refuses_and_leaves_no_fence() {
     let (mut e, _) = ready();
     place(&mut e, vec![limit()]);

@@ -14,6 +14,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
 };
 
+const UNREADABLE_ORDER: &str = "Kraken returned an open order this account cannot read, so a fresh read cannot clear this. Cancel that order on Kraken to resume";
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 #[derive(Clone)]
@@ -670,7 +671,10 @@ impl KrakenSpot {
             rows.retain(|o| !self.account.terminal.contains(&o.id));
             cx.store.set_orders(rows);
             if clean {
+                cx.orders_fence_held(None);
                 cx.orders_reconciled(None);
+            } else {
+                cx.orders_fence_held(Some(UNREADABLE_ORDER));
             }
         }
         Ok(())
