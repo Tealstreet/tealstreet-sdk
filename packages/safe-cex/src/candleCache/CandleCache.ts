@@ -1,7 +1,7 @@
 import uniqBy from 'lodash/uniqBy';
 
 import { getExchangeMetadata } from '../exchangeMetadata';
-import type { ExchangeName, Timeframe } from '../types';
+import type { Candle, ExchangeName, Timeframe } from '../types';
 import { timeframeToSeconds } from '../types';
 import {
   calendarPeriodForInterval,
@@ -106,6 +106,8 @@ export const createExchangeCandleFetcher = (
     });
 };
 
+const FORMING_BAR_MEMO_MS = 5_000;
+
 export class CandleCache {
   private readonly options: CandleCacheOptions;
   private readonly chunkSize: number;
@@ -116,6 +118,12 @@ export class CandleCache {
   private readonly chunkedCandleCache = new Map<string, Map<number, CandleCacheSparseChunk>>();
   private readonly hydrationQueue: Array<() => void> = [];
   private readonly hydratedCacheKeys = new Set<string>();
+  /**
+   * The forming bar is never cached, so every caller whose range ends now asked for it
+   * again (9 identical requests in 15 s). One fetch per cacheKey and start is shared
+   * until FORMING_BAR_MEMO_MS passes or the bar closes, whichever is first.
+   */
+  private readonly formingBarFetches = new Map<string, { expiresAtMs: number; candles: Promise<Candle[]> }>();
   private hydrationRunning = 0;
   private cacheVersion = 0;
 
@@ -138,9 +146,13 @@ export class CandleCache {
     if (cacheKey) {
       this.chunkedCandleCache.delete(cacheKey);
       this.hydratedCacheKeys.delete(cacheKey);
+      for (const key of this.formingBarFetches.keys()) {
+        if (key.startsWith(`${cacheKey}|`)) this.formingBarFetches.delete(key);
+      }
     } else {
       this.chunkedCandleCache.clear();
       this.hydratedCacheKeys.clear();
+      this.formingBarFetches.clear();
     }
 
     this.cacheVersion++;
@@ -257,15 +269,18 @@ export class CandleCache {
       nowMs,
     );
 
+    const formingBarStartMs = chartCandleStartTime(interval, nowMs / 1000) * 1000;
     const newCandles =
       limit <= 0 || from > to
         ? []
-        : await fetcher({
-            interval,
-            from,
-            to,
-            limit,
-          });
+        : from >= formingBarStartMs
+          ? await this.fetchFormingBar(cacheKey, interval, from, nowMs, () => fetcher({ interval, from, to, limit }))
+          : await fetcher({
+              interval,
+              from,
+              to,
+              limit,
+            });
 
     if (newCandles.length > 0) {
       const nowSeconds = nowMs / 1000;
@@ -313,6 +328,29 @@ export class CandleCache {
     }
 
     return cleanCandles([...contiguousBehindCandles, ...newCandles, ...contiguousForwardCandles]);
+  }
+
+  private fetchFormingBar(
+    cacheKey: string,
+    interval: Timeframe,
+    fromMs: number,
+    nowMs: number,
+    fetch: () => Promise<Candle[]>,
+  ): Promise<Candle[]> {
+    for (const [key, memo] of this.formingBarFetches) {
+      if (memo.expiresAtMs <= nowMs) this.formingBarFetches.delete(key);
+    }
+    const key = `${cacheKey}|${fromMs}`;
+    const memo = this.formingBarFetches.get(key);
+    if (memo) return memo.candles;
+    const closesAtMs = chartCandleCloseTime(interval, nowMs / 1000) * 1000;
+    const candles = fetch();
+    this.formingBarFetches.set(key, { expiresAtMs: Math.min(nowMs + FORMING_BAR_MEMO_MS, closesAtMs), candles });
+    // A failed read is not shared: the next caller asks again.
+    candles.catch(() => {
+      if (this.formingBarFetches.get(key)?.candles === candles) this.formingBarFetches.delete(key);
+    });
+    return candles;
   }
 
   async fetchWithExchange(request: CandleCacheExchangeFetchRequest) {
