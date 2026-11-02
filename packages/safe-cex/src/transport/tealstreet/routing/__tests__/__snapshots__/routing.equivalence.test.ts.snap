@@ -166,7 +166,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -179,7 +180,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -192,7 +194,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -205,7 +208,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -218,7 +222,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -231,7 +236,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -244,7 +250,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -257,7 +264,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -270,7 +278,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -283,7 +292,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -296,7 +306,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,
@@ -309,7 +320,8 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "tunnelled": false,
+        "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2",
+        "tunnelled": true,
       },
       "wsPublic": {
         "tunnelled": false,

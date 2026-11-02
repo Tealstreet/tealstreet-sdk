@@ -44,7 +44,13 @@
     "apexomni": {
       "routing": {
         "restPool": "asia",
-        "howEgress": "sg"
+        "howEgress": "sg",
+        "ws": {
+          "private": {
+            "kind": "mainnetProxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fquote.omni.apex.exchange%2Frealtime_private%3Fv%3D2"
+          }
+        }
       },
       "requiresCors": true,
       "enforceWsTunnel": true,
