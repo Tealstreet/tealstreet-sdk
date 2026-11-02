@@ -135,6 +135,12 @@
       "ciHead": "227125d0d10fc0920f20f1096dd2610e1c60eb61",
       "job": 121592999947,
       "note": "All 588 newly unexpected paths are checkpoint-zero daily counters (194 percentage, 197 quoteVolume, 197 volume); zero outside. Private-tape baseline declarations are unchanged."
+    },
+    "rustOnlySymbolSweep20261102": {
+      "ciRun": 41423920329,
+      "ciHead": "0dd6d7cbbe1",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/41423920329",
+      "note": "#2831 makes a Rust symbol cancel also sweep the venue (Kraken cancelallorders, Bitunix cancel_all_orders); TS does not. Both private tapes now answer that sweep with an impl:rust record, so each transport audits only its own writes. Kraken rehashed 2bf4d2df.. -> 8142c148..; Bitunix e8d90eda.. -> fc56199e... The declared paths are unchanged: every failure line is identical locally on the new hashes."
     }
   },
   "failures": [
@@ -36028,7 +36034,7 @@
     },
     {
       "venue": "kraken",
-      "tapeSha256": "2bf4d2df43d6b7bdf10b45945bc01674367405b080fce9f0320eab288660e4ca",
+      "tapeSha256": "8142c1486a063102f3a4a73007aa362c3f66e78ff48e796804c53b4ec84326e1",
       "tape": "sdk-rs/harness/tapes/kraken-private.jsonl",
       "diagnostics": [
         {
@@ -52966,7 +52972,7 @@
     },
     {
       "venue": "bitunix",
-      "tapeSha256": "e8d90edafa93fabcbd9cefb0e84be32a077399e0e3a2f4a906999d9d48a3850c",
+      "tapeSha256": "fc56199e65164e1fa3b7181be36423d333b61769786fda41c982816de7af5d7e",
       "tape": "sdk-rs/harness/tapes/bitunix-private.jsonl",
       "diagnostics": [
         {
