@@ -2101,6 +2101,8 @@ fn preset_legs_end_when_a_terminal_row_does_not_repeat_them() {
 fn an_ip_mismatch_on_positions_ends_the_start() {
     for (status, body) in [
         (401, "Request IP mismatch"),
+        // deaws2's capture, direct signed REST on a refused key.
+        (401, r#"{"code": "401","msg": "401 Request IP mismatch."}"#),
         (
             200,
             r#"{"code":401,"msg":"Request IP mismatch","data":null}"#,
