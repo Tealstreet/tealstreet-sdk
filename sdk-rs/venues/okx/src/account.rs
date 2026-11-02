@@ -2496,7 +2496,7 @@ pub(crate) fn read_error(response: &Response<'_>, message: String) -> VenueError
 
 /// OKX REST authentication codes that no retry can fix (docs-v5 "Error Code",
 /// 501xx). Timestamp codes 50102/50112 and every other code stay transient.
-fn rest_key_rejection(code: &str) -> Option<ErrorKind> {
+pub(crate) fn rest_key_rejection(code: &str) -> Option<ErrorKind> {
     match code {
         "50100" | "50110" | "50120" => Some(ErrorKind::AuthPermission),
         "50101" | "50103" | "50104" | "50105" | "50111" | "50113" | "50114" | "50119" => {
@@ -2511,7 +2511,7 @@ fn socket_key_rejection(code: &str) -> Option<ErrorKind> {
     matches!(code, "60005" | "60024" | "60032").then_some(ErrorKind::AuthInvalid)
 }
 
-fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError {
+pub(crate) fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError {
     let mut error = VenueError::new(format!("OKX rejected the {which} ({code}): {msg}"))
         .kind(kind)
         .venue_code(code);
