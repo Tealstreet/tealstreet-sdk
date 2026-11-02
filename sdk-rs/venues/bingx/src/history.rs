@@ -592,10 +592,13 @@ impl History {
         if let Some(to) = to {
             params = params.num(end, to);
         }
-        let at = if matches!(read.native.kind, Kind::Fills) {
-            ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"])
-        } else {
-            ArrayAt::EnvelopeField("data")
+        let at = match read.native.kind {
+            Kind::Fills => {
+                ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"])
+            }
+            // Live allOrders answers {"data":{"orders":[...]}}; legacy read data.orders too.
+            Kind::Orders => ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+            _ => ArrayAt::EnvelopeField("data"),
         };
         self.send_page(
             cx,
