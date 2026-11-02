@@ -153,6 +153,14 @@ export abstract class BaseHandler {
     return true;
   }
 
+  /** An unsubscribe for a subscription still waiting on markets: it must never apply. */
+  protected cancelPending(subId: unknown): void {
+    this._pendingUntilMarkets = this._pendingUntilMarkets.filter(
+      (pending) => (pending.data as { subId?: unknown } | undefined)?.subId !== subId,
+    );
+    if (this._pendingUntilMarkets.length === 0) this._clearPendingTimers();
+  }
+
   private _schedulePendingMarketsCheck(): void {
     if (this._pendingCheckTimer || this._pendingUntilMarkets.length === 0) return;
     this._pendingCheckTimer = setTimeout(() => {
