@@ -698,6 +698,7 @@ impl Venue for BitunixFutures {
         if matches!(s.feed, Feed::Private) {
             cx.send(socket, private_ping(cx.now));
             self.account.login_answered = false;
+            self.account.private_live = false;
             self.login(cx, socket);
             // Events before this open were never delivered, the first open included. A read
             // in flight may predate it: it is marked dirty and re-read once answered. A

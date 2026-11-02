@@ -251,10 +251,15 @@ pub struct AccountState {
     pub pending_executions: HashMap<String, f64>,
     pub login_retry: Option<(TimerId, safe_cex_engine::SocketId)>,
     pub login_answered: bool,
+    /// The private socket's login succeeded since it last opened.
+    pub private_live: bool,
 }
 /// The TS Bitunix tick (exchange metadata): balance every tick, the full
 /// account every 32 ticks.
 const TICK_MS: f64 = 500.0;
+/// With the private socket live its balance events drive reads, so the poll only
+/// catches what they miss: every 5 s instead of every tick.
+const LIVE_BALANCE_TICKS: u32 = 10;
 /// An unanswered balance read is abandoned after this long.
 const BALANCE_STALL_MS: f64 = 10_000.0;
 const POSITION_STALL_MS: f64 = 10_000.0;
@@ -969,8 +974,15 @@ impl BitunixFutures {
             // A slow reply must not be superseded every tick (stale serials are
             // dropped), so poll again only once the last balance read finished.
             // A read lost without any answer cannot stall polling forever.
-            if self.account.balance_answered == self.account.serials[0]
-                || cx.now - self.account.balance_polled_at >= BALANCE_STALL_MS
+            let live = self.account.private_live
+                && self
+                    .sockets
+                    .iter()
+                    .any(|s| s.active && s.opened && matches!(s.feed, Feed::Private));
+            let due = !live || self.account.count.is_multiple_of(LIVE_BALANCE_TICKS);
+            if due
+                && (self.account.balance_answered == self.account.serials[0]
+                    || cx.now - self.account.balance_polled_at >= BALANCE_STALL_MS)
             {
                 self.read_axis(cx, Axis::Balance);
             }
@@ -1723,6 +1735,7 @@ impl BitunixFutures {
                 .and_then(|raw| serde_json::from_str::<Login>(raw.get()).ok())
                 .map(|login| login.result);
             if result == Some(true) {
+                self.account.private_live = true;
                 if let Some(socket) = self.sockets.iter_mut().find(|s| s.id == socket) {
                     socket.supervisor.authenticated(cx);
                 }
