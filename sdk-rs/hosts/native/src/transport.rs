@@ -176,7 +176,7 @@ async fn open_socket(
 /// How often one host's failed opens are logged; the line counts those in between.
 const OPEN_FAILURE_LOG_EVERY: Duration = Duration::from_secs(60);
 
-/// Failed venue socket opens and requests by host, so a refusal loop logs once a minute, not per retry.
+/// Failed venue socket opens, far-side closes and failed requests by host, so a refusal loop logs once a minute, not per retry.
 #[derive(Default)]
 struct OpenFailures {
     /// When each host last logged, and its failures since.
@@ -187,12 +187,28 @@ impl OpenFailures {
     /// The log line for a failed open of `url`, when one is due. The host only: a
     /// relay URL's query names its upstream and may carry a token.
     fn note(&mut self, url: &str, error: &str, now: std::time::Instant) -> Option<String> {
-        let host = url
-            .parse::<tokio_tungstenite::tungstenite::http::Uri>()
-            .ok()
-            .and_then(|uri| uri.host().map(str::to_owned))
-            .unwrap_or_else(|| "unparsable url".to_owned());
-        self.line(format!("venue socket open failed: {host}"), error, now)
+        self.line(
+            format!("venue socket open failed: {}", host_of(url)),
+            error,
+            now,
+        )
+    }
+
+    /// The log line for an open venue socket that closed without the engine asking.
+    fn note_close(
+        &mut self,
+        url: &str,
+        code: u16,
+        reason: &str,
+        open_for: Duration,
+        now: std::time::Instant,
+    ) -> Option<String> {
+        let detail = format!("{code} {reason}, open {}s", open_for.as_secs());
+        self.line(
+            format!("venue socket closed: {}", host_of(url)),
+            &detail,
+            now,
+        )
     }
 
     /// The log line for a venue request that failed in transport, by its route.
@@ -240,6 +256,14 @@ fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) {
     ) {
         eprintln!("{line}");
     }
+}
+
+/// A URL's host alone: a relay URL's query names its upstream and may carry a token.
+fn host_of(url: &str) -> String {
+    url.parse::<tokio_tungstenite::tungstenite::http::Uri>()
+        .ok()
+        .and_then(|uri| uri.host().map(str::to_owned))
+        .unwrap_or_else(|| "unparsable url".to_owned())
 }
 
 fn log_open_failure(url: &str, error: &str) {
@@ -399,7 +423,8 @@ impl Transport for NetworkTransport {
                         return;
                     }
                 }
-                let code = loop {
+                let opened_at = std::time::Instant::now();
+                let (code, reason) = loop {
                     tokio::select! {
                         message = ws.next() => match message {
                             Some(Ok(Message::Text(text))) => {
@@ -411,21 +436,31 @@ impl Transport for NetworkTransport {
                                 let _ = events.send(HostEvent::WsBinary(socket, bytes.to_vec()));
                             }
                             Some(Ok(Message::Binary(bytes))) => {
-                                let Ok(text) = decode_message(&bytes) else { break 1007 };
+                                let Ok(text) = decode_message(&bytes) else { break (1007, "undecodable binary frame".to_owned()) };
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                                 let _ = events.send(HostEvent::WsMessage(socket, text));
                             }
-                            Some(Ok(Message::Ping(_))) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break 1006; } }
-                            Some(Ok(Message::Close(frame))) => break frame.map_or(1005, |frame| u16::from(frame.code)),
+                            Some(Ok(Message::Ping(_))) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break (1006, "pong send failed".to_owned()); } }
+                            Some(Ok(Message::Close(frame))) => break frame.map_or((1005, String::new()), |frame| (u16::from(frame.code), frame.reason.to_string())),
                             Some(Ok(_)) => {}
-                            Some(Err(_)) | None => break 1006,
+                            Some(Err(error)) => break (1006, error.to_string()),
+                            None => break (1006, "stream ended".to_owned()),
                         },
                         text = pending.recv() => match text {
-                            Some(text) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.send(Message::text(text))).await, Ok(Ok(()))) { break 1006; } }
+                            Some(text) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.send(Message::text(text))).await, Ok(Ok(()))) { break (1006, "send failed".to_owned()); } }
                             None => { let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await; return; }
                         },
                     }
                 };
+                log_failure(|failures| {
+                    failures.note_close(
+                        &target,
+                        code,
+                        &reason,
+                        opened_at.elapsed(),
+                        std::time::Instant::now(),
+                    )
+                });
                 let _ = events.send(HostEvent::WsClosed(socket, code));
             };
             tokio::select! {
@@ -534,6 +569,32 @@ mod security_tests {
                 )
                 .is_none(),
             "throttled like socket opens"
+        );
+    }
+
+    #[test]
+    fn a_venue_socket_closed_from_the_far_side_is_logged_with_code_reason_and_age() {
+        let mut failures = OpenFailures::default();
+        let start = std::time::Instant::now();
+        let url = "wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue&token=abc";
+        let line = failures
+            .note_close(url, 1000, "idle timeout", Duration::from_secs(31), start)
+            .unwrap();
+        assert!(
+            line.contains("venue socket closed: relay.example")
+                && line.contains("1000 idle timeout")
+                && line.contains("open 31s"),
+            "{line}"
+        );
+        assert!(
+            !line.contains("token") && !line.contains("ts-relay"),
+            "{line}"
+        );
+        assert!(
+            failures
+                .note_close(url, 1000, "idle timeout", Duration::from_secs(30), start)
+                .is_none(),
+            "throttled per host"
         );
     }
 
