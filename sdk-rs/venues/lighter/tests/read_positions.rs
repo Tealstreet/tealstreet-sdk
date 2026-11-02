@@ -7,6 +7,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_lighter::Lighter;
 use support::*;
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const FLAT: &str = r#"{"code":200,"accounts":[{"index":718895,"collateral":"1000","total_asset_value":"1000","available_balance":"900","positions":[]}]}"#;
 const SNAPSHOT: &str = "/account?";
@@ -85,7 +86,10 @@ impl H {
         self.done.iter().find(|(c, _)| *c == id).map(|(_, r)| r)
     }
     fn succeeded(&self, id: u32) -> bool {
-        self.result(id).is_some_and(|r| r.as_deref() == Ok("[]"))
+        self.result(id).is_some_and(|r| {
+            r.as_deref()
+                .is_ok_and(|b| b.starts_with(r#"{"skipped":[],"open":["#))
+        })
     }
     fn failure(&self, id: u32) -> &VenueError {
         match self.result(id) {

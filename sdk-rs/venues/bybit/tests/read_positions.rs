@@ -3,6 +3,7 @@ mod support;
 use safe_cex_engine::{Command, ErrorKind, Event, Notice, Outcome, VenueAction};
 use safe_cex_venue_bybit::{Endpoints, Variant};
 use support::{Harness, Options};
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const POSITIONS: &str = "/v5/position/list";
 const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
@@ -149,7 +150,11 @@ fn a_read_issued_after_the_command_commits_then_it_succeeds() {
         assert!(h.has_request(POSITIONS), "{variant:?}: a read is issued");
         assert_eq!(h.result(40), None);
         answer_all(&mut h, POSITIONS, EMPTY);
-        assert_eq!(h.result(40), Some(&Ok("[]".to_owned())), "{variant:?}");
+        assert_eq!(
+            h.result(40),
+            Some(&Ok(FLAT_ANSWER.to_owned())),
+            "{variant:?}"
+        );
         assert_eq!(contracts(&h, symbol), 0.0, "{variant:?}: the store is flat");
     }
 }
@@ -185,7 +190,11 @@ fn a_read_in_flight_is_followed_by_a_new_one() {
         );
         assert!(h.has_request(POSITIONS), "{variant:?}: a new read follows");
         answer_all(&mut h, POSITIONS, EMPTY);
-        assert_eq!(h.result(41), Some(&Ok("[]".to_owned())), "{variant:?}");
+        assert_eq!(
+            h.result(41),
+            Some(&Ok(FLAT_ANSWER.to_owned())),
+            "{variant:?}"
+        );
         assert_eq!(contracts(&h, symbol), 0.0);
     }
 }
@@ -251,7 +260,7 @@ fn a_read_a_stream_frame_overrode_is_not_a_commit() {
     // Past the guard the read commits and answers.
     h.advance(600.0);
     h.respond(POSITIONS, 200, EMPTY);
-    assert_eq!(h.result(45), Some(&Ok("[]".to_owned())));
+    assert_eq!(h.result(45), Some(&Ok(FLAT_ANSWER.to_owned())));
     assert_eq!(contracts(&h, symbol), 0.0);
 }
 
@@ -266,7 +275,7 @@ fn a_private_socket_close_drops_the_read_and_issues_another() {
     assert_eq!(h.result(46), None);
     assert!(h.has_request(POSITIONS), "{:?}", h.paths());
     h.respond(POSITIONS, 200, EMPTY);
-    assert_eq!(h.result(46), Some(&Ok("[]".to_owned())));
+    assert_eq!(h.result(46), Some(&Ok(FLAT_ANSWER.to_owned())));
     assert_eq!(contracts(&h, symbol), 0.0);
 }
 
@@ -296,7 +305,7 @@ fn every_enabled_product_must_commit() {
     answer_all(&mut h, "category=linear", EMPTY);
     assert_eq!(h.result(47), None, "inverse is still out");
     answer_all(&mut h, inverse, EMPTY);
-    assert_eq!(h.result(47), Some(&Ok("[]".to_owned())));
+    assert_eq!(h.result(47), Some(&Ok(FLAT_ANSWER.to_owned())));
 }
 
 #[test]
@@ -312,7 +321,7 @@ fn hyro_answers_only_from_a_committed_snapshot_issued_after_the_command() {
         "the wallet leg is out: nothing committed"
     );
     answer_all(&mut h, "/v5/account/wallet-balance", WALLET);
-    assert_eq!(h.result(50), Some(&Ok("[]".to_owned())));
+    assert_eq!(h.result(50), Some(&Ok(FLAT_ANSWER.to_owned())));
     assert_eq!(contracts(&h, symbol), 0.0);
 }
 
@@ -337,7 +346,7 @@ fn hyro_abandons_a_snapshot_in_flight_for_a_new_one() {
     }
     assert_eq!(h.result(51), None, "the old snapshot cannot answer");
     hyro_or_plain_snapshot(&mut h, EMPTY);
-    assert_eq!(h.result(51), Some(&Ok("[]".to_owned())));
+    assert_eq!(h.result(51), Some(&Ok(FLAT_ANSWER.to_owned())));
     assert_eq!(contracts(&h, symbol), 0.0);
 }
 
@@ -396,20 +405,29 @@ fn an_owned_row_this_product_cannot_hold_is_named_and_a_flat_one_is_not() {
         answer_all(&mut h, POSITIONS, &foreign_row("2"));
         assert_eq!(
             h.result(70),
-            Some(&Ok(r#"["BTC-27JUN25-100000-C"]"#.to_owned())),
+            Some(&Ok(
+                r#"{"skipped":["BTC-27JUN25-100000-C"],"open":[]}"#.to_owned()
+            )),
             "{variant:?}"
         );
 
         let (mut h, _) = ready(variant);
         read(&mut h, 71);
         answer_all(&mut h, POSITIONS, &foreign_row("0"));
-        assert_eq!(h.result(71), Some(&Ok("[]".to_owned())), "{variant:?}");
+        assert_eq!(
+            h.result(71),
+            Some(&Ok(FLAT_ANSWER.to_owned())),
+            "{variant:?}"
+        );
     }
 }
 
 #[test]
 fn hyro_names_an_owned_row_outside_its_usdt_catalogue_only_on_the_snapshot() {
-    for (size, body) in [("2", r#"["BTCUSDC"]"#), ("0", "[]")] {
+    for (size, body) in [
+        ("2", r#"{"skipped":["BTCUSDC"],"open":[]}"#),
+        ("0", r#"{"skipped":[],"open":[]}"#),
+    ] {
         let (mut h, _) = ready(Variant::Hyrotrader);
         read(&mut h, 72);
         answer_all(&mut h, "/v5/order/realtime", EMPTY);

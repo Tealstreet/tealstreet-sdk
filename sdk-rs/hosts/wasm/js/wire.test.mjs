@@ -1042,6 +1042,8 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     scheduleCancel: false,
     orderHistoryNeedsSymbol: false,
     freshPositions: false,
+    nukeAccountCancel: false,
+    symbolCancelMissesUnseen: false,
     account: 'afterLoad',
     cancelAll: 'eachPlacedSymbol',
     leverageQuery: 'onMetadata',
@@ -1059,6 +1061,8 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
   assert.equal(capabilities(0, 0).scheduleCancel, false);
   assert.equal(capabilities(1 << 27, 0).freshPositions, true);
   assert.equal(capabilities(0, 0).freshPositions, false);
+  assert.equal(capabilities(1 << 28, 0).nukeAccountCancel, true);
+  assert.equal(capabilities(1 << 29, 0).symbolCancelMissesUnseen, true);
   assert.equal(capabilities(0, 3 << 8).leverageQuery, 'onReadAndMetadata');
   const bridge = capabilities(0x1ff << 16, (6 << 20) | (3 << 24) | (2 << 28));
   for (const name of ['stpControls', 'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',

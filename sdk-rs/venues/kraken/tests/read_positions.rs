@@ -7,6 +7,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_kraken::Kraken;
 use support::*;
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const FLAT: &str = r#"{"result":"success","openPositions":[]}"#;
 const ROW: &str = r#"{"result":"success","openPositions":[{"symbol":"PF_XBTUSD","side":"long","size":2,"price":100,"unrealizedPnl":40,"maxFixedLeverage":10}]}"#;
@@ -83,7 +84,10 @@ impl H {
         self.done.iter().find(|(c, _)| *c == id).map(|(_, r)| r)
     }
     fn succeeded(&self, id: u32) -> bool {
-        self.result(id).is_some_and(|r| r.as_deref() == Ok("[]"))
+        self.result(id).is_some_and(|r| {
+            r.as_deref()
+                .is_ok_and(|b| b.starts_with(r#"{"skipped":[],"open":["#))
+        })
     }
     fn failure(&self, id: u32) -> &VenueError {
         match self.result(id) {
@@ -106,6 +110,10 @@ fn a_read_issued_after_the_command_commits_then_it_succeeds() {
     h.answer(200, ROW);
     assert!(h.succeeded(40), "{:?}", h.done);
     assert_eq!(h.open(), 2.0, "the store row is updated");
+    assert_eq!(
+        h.result(40).unwrap().as_deref(),
+        Ok(r#"{"skipped":[],"open":[{"symbol":"PF_XBTUSD","side":"long","contracts":2.0}]}"#)
+    );
 }
 
 #[test]
@@ -242,7 +250,7 @@ fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
     assert_eq!(
         h.result(70)
             .map(|r| r.as_deref().map_err(|e| e.message.as_str())),
-        Some(Ok(r#"["PF_DOGEUSD"]"#))
+        Some(Ok(r#"{"skipped":["PF_DOGEUSD"],"open":[]}"#))
     );
     assert_eq!(h.open(), 0.0, "the store is unchanged");
 

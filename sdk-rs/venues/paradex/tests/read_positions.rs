@@ -94,7 +94,7 @@ fn a_read_issued_after_the_command_commits_then_it_succeeds() {
     assert!(has(&h), "a read is issued");
     assert!(!finished(&h, 40));
     h.reply("/positions", FLAT);
-    assert_eq!(h.result(40), Ok("[]"));
+    assert_eq!(h.result(40), Ok(r#"{"skipped":[],"open":[]}"#));
     assert_eq!(open(&h), 0.0, "the store is flat");
 }
 
@@ -106,12 +106,16 @@ fn a_read_in_flight_is_followed_by_a_new_one() {
     read(&mut h, 41);
     assert!(!has(&h), "no second read yet");
     h.respond(stale, 200, &format!("{{\"results\":[{POSITION}]}}"));
-    assert_eq!(h.result(39), Ok("[]"), "its own read answers it");
+    assert_eq!(
+        h.result(39),
+        Ok(r#"{"skipped":[],"open":[{"symbol":"BTC-USD-PERP","side":"long","contracts":2.0}]}"#),
+        "its own read answers it"
+    );
     assert!(!finished(&h, 41), "the older read cannot");
     assert_eq!(open(&h), 2.0);
     assert!(has(&h), "a new read follows");
     h.reply("/positions", FLAT);
-    assert_eq!(h.result(41), Ok("[]"));
+    assert_eq!(h.result(41), Ok(r#"{"skipped":[],"open":[]}"#));
     assert_eq!(open(&h), 0.0);
 }
 
@@ -205,7 +209,7 @@ fn a_read_a_newer_stream_frame_held_is_not_a_commit() {
     h.timer(now);
     assert!(has(&h), "a new read follows");
     h.reply("/positions", FLAT);
-    assert_eq!(h.result(46), Ok("[]"));
+    assert_eq!(h.result(46), Ok(r#"{"skipped":[],"open":[]}"#));
     assert_eq!(open(&h), 0.0);
 }
 
@@ -227,13 +231,16 @@ fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
         let (mut h, _) = loaded();
         read(&mut h, 70);
         h.reply("/positions", &format!("{{\"results\":[{row}]}}"));
-        assert_eq!(h.result(70), Ok(format!(r#"["{market}"]"#).as_str()));
+        assert_eq!(
+            h.result(70),
+            Ok(format!(r#"{{"skipped":["{market}"],"open":[]}}"#).as_str())
+        );
         assert_eq!(open(&h), 0.0, "the store is flat: its rows are absent");
 
         let flat = row.replace("\"size\":\"2\"", "\"size\":\"0\"");
         let (mut h, _) = loaded();
         read(&mut h, 71);
         h.reply("/positions", &format!("{{\"results\":[{flat}]}}"));
-        assert_eq!(h.result(71), Ok("[]"), "{market}");
+        assert_eq!(h.result(71), Ok(r#"{"skipped":[],"open":[]}"#), "{market}");
     }
 }

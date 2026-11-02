@@ -1343,11 +1343,18 @@ pub(crate) mod tests {
         fn on_request_failed(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: (), _: &str) {}
         fn on_command(
             &mut self,
-            _: &mut safe_cex_engine::Cx<'_, ()>,
+            cx: &mut safe_cex_engine::Cx<'_, ()>,
             command: safe_cex_engine::Command,
         ) {
-            if matches!(command, safe_cex_engine::Command::PlaceOrders { .. }) {
-                self.placed.fetch_add(1, Ordering::SeqCst);
+            match command {
+                safe_cex_engine::Command::PlaceOrders { .. } => {
+                    self.placed.fetch_add(1, Ordering::SeqCst);
+                }
+                // The nuke's cancels precede its close.
+                safe_cex_engine::Command::CancelSymbolOrders { command, .. } => {
+                    cx.done(command, "[]".to_owned());
+                }
+                _ => {}
             }
         }
         fn on_timer(&mut self, cx: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::TimerId) {

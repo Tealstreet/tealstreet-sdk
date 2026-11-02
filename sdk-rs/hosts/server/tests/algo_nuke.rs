@@ -315,7 +315,7 @@ async fn a_nuke_on_a_native_cancel_all_venue_ends_with_the_venue_wide_cancel() {
             let (done, commands) = run_nuke("all", false, safe_cex_engine::CancelAll::Native).await;
             assert_eq!(done["success"], true, "{done}");
             assert_eq!(commands.len(), 3, "{commands:?}");
-            assert_eq!(commands[0], "cancel BTCUSDT");
+            assert_eq!(commands[0], "cancel ", "venue-wide before any close");
             assert!(commands[1].starts_with("place "), "{commands:?}");
             // The venue-wide cancel-all (an empty symbol) reaches untracked orders.
             assert_eq!(commands[2], "cancel ");
@@ -331,7 +331,7 @@ async fn stop_account_algos_runs_no_leg() {
             assert_eq!(done["success"], true);
             assert_eq!(
                 done["result"],
-                json!({"stoppedChasers": [], "stoppedTwaps": []})
+                json!({"stoppedChasers": [], "stoppedTwaps": [], "placedSymbols": []})
             );
             assert!(commands.is_empty(), "{commands:?}");
         })

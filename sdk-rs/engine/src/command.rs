@@ -130,6 +130,9 @@ enum CommandIn {
     ReadPositions {
         command: u32,
     },
+    CancelAccountOrders {
+        command: u32,
+    },
     FetchClosedPositions {
         command: u32,
         symbol: Option<String>,
@@ -230,6 +233,7 @@ enum Op {
     FetchBalanceInfo,
     RefreshSettings,
     ReadPositions,
+    CancelAccountOrders,
     FetchClosedPositions,
     FetchLeverage,
     FetchMaxLeverage,
@@ -456,6 +460,12 @@ struct RefreshSettingsIn {
 #[derive(Deserialize)]
 #[serde(expecting = "struct variant CommandIn::ReadPositions with 1 element")]
 struct ReadPositionsIn {
+    command: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::CancelAccountOrders with 1 element")]
+struct CancelAccountOrdersIn {
     command: u32,
 }
 
@@ -760,6 +770,10 @@ fn decode_payload(op: Op, json: &str) -> Result<CommandIn, serde_json::Error> {
             let ReadPositionsIn { command } = payload(json)?;
             CommandIn::ReadPositions { command }
         }
+        Op::CancelAccountOrders => {
+            let CancelAccountOrdersIn { command } = payload(json)?;
+            CommandIn::CancelAccountOrders { command }
+        }
         Op::FetchClosedPositions => {
             let FetchClosedPositionsIn {
                 command,
@@ -1009,6 +1023,10 @@ impl From<CommandIn> for Command {
             CommandIn::ReadPositions { command } => Self::Venue {
                 command,
                 action: crate::VenueAction::ReadPositions,
+            },
+            CommandIn::CancelAccountOrders { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::CancelAccountOrders,
             },
             CommandIn::FetchClosedPositions {
                 command,

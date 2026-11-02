@@ -86,6 +86,11 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
       'bitunix', 'phemex', 'bingx', 'apexomni', 'blofin', 'cryptocom', 'asterdex',
     ),
     inverseClosedPositions: is('bybitinverse'),
+    nukeAccountCancel: is('krakenspot', 'bitget', 'bitgetinverse', 'bitgetusdc'),
+    symbolCancelMissesUnseen: is(
+      'krakenspot', 'bitget', 'bitgetinverse', 'bitgetusdc', 'hyperliquid', 'hyperliquidspot', 'lighter',
+      'lighter-robinhood', ...OKX, 'blofin', 'hyrotrader', 'paradex',
+    ),
     ...overrides,
   };
   return JSON.stringify(record);

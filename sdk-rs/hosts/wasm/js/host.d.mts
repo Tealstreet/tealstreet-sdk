@@ -130,6 +130,8 @@ export interface AlgoStopAllResult {
   stoppedChasers: string[];
   stoppedTwaps: string[];
   settled: boolean;
+  /** Symbols the algos attempted a placement on; their orders may not show yet. */
+  placedSymbols?: string[];
 }
 
 export interface AccountAuthResult {

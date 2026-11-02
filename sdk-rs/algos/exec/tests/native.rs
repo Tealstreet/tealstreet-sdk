@@ -17,6 +17,9 @@ struct Port {
     replies: RefCell<Vec<oneshot::Sender<Result<String, VenueError>>>>,
     events: RefCell<Vec<(String, Value)>>,
     fresh_positions: Cell<bool>,
+    nuke_account_cancel: Cell<bool>,
+    symbol_cancel_misses_unseen: Cell<bool>,
+    fail_cancels: Cell<bool>,
 }
 impl AccountPort for Port {
     fn store(&self) -> Ref<'_, AlgoStore> {
@@ -47,6 +50,8 @@ impl AccountPort for Port {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             fresh_positions: self.fresh_positions.get(),
+            nuke_account_cancel: self.nuke_account_cancel.get(),
+            symbol_cancel_misses_unseen: self.symbol_cancel_misses_unseen.get(),
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -955,6 +960,12 @@ async fn nuke_closed_once(port: &Rc<Port>, cx: &AlgoCx) {
     settle_exec().await;
 }
 
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
+
+fn open_answer(symbol: &str, contracts: f64) -> String {
+    json!({"skipped":[],"open":[{"symbol":symbol,"side":"long","contracts":contracts}]}).to_string()
+}
+
 fn nuke_result(port: &Port) -> Value {
     port.events
         .borrow()
@@ -986,7 +997,7 @@ async fn nuke_sends_a_second_close_only_after_a_fresh_read_sized_from_it() {
             port.replies
                 .borrow_mut()
                 .remove(0)
-                .send(Ok("[]".into()))
+                .send(Ok(open_answer("BTCUSDT", 0.01)))
                 .unwrap();
             settle_exec().await;
             assert!(matches!(
@@ -1001,13 +1012,13 @@ async fn nuke_sends_a_second_close_only_after_a_fresh_read_sized_from_it() {
                 .send(Ok(r#"["close-2"]"#.into()))
                 .unwrap();
             settle_exec().await;
-            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
             settle_exec().await;
             assert!(is_fresh_read(&port.commands.borrow()[3]));
             port.replies
                 .borrow_mut()
                 .remove(0)
-                .send(Ok("[]".into()))
+                .send(Ok(FLAT_ANSWER.into()))
                 .unwrap();
             settle_exec().await;
             assert_eq!(nuke_result(&port)["success"], true);
@@ -1058,13 +1069,13 @@ async fn nuke_reports_not_confirmed_when_the_read_skipped_a_row() {
             let cx = AlgoCx::new(port.clone(), Scope::new());
             nuke_closed_once(&port, &cx).await;
             port.store.borrow_mut().positions.clear();
-            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
             settle_exec().await;
             assert!(is_fresh_read(&port.commands.borrow()[1]));
             port.replies
                 .borrow_mut()
                 .remove(0)
-                .send(Ok(r#"["DOGEUSD_PERP"]"#.into()))
+                .send(Ok(r#"{"skipped":["DOGEUSD_PERP"],"open":[]}"#.into()))
                 .unwrap();
             settle_exec().await;
             let result = nuke_result(&port);
@@ -1077,6 +1088,385 @@ async fn nuke_reports_not_confirmed_when_the_read_skipped_a_row() {
             assert!(error.contains("DOGEUSD_PERP"), "{error}");
             assert_eq!(port.commands.borrow().len(), 2);
             cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_read_under_the_settle_after_a_close_is_never_issued() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            nuke_closed_once(&port, &cx).await;
+            // The store already shows flat; only the settle holds the read back.
+            port.store.borrow_mut().positions.clear();
+            tokio::time::sleep(std::time::Duration::from_millis(450)).await;
+            settle_exec().await;
+            assert_eq!(port.commands.borrow().len(), 1, "no read inside the settle");
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            settle_exec().await;
+            assert!(is_fresh_read(&port.commands.borrow()[1]));
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Ok(FLAT_ANSWER.into()))
+                .unwrap();
+            settle_exec().await;
+            assert_eq!(nuke_result(&port)["success"], true);
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn nuke_stays_unconfirmed_when_the_read_is_long_though_the_store_is_flat() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            nuke_closed_once(&port, &cx).await;
+            port.store.borrow_mut().positions.clear();
+            for _ in 0..4 {
+                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                settle_exec().await;
+                let last = port.commands.borrow().last().cloned();
+                if last.as_ref().is_some_and(is_fresh_read) && !port.replies.borrow().is_empty() {
+                    port.replies
+                        .borrow_mut()
+                        .remove(0)
+                        .send(Ok(open_answer("BTCUSDT", 13.8)))
+                        .unwrap();
+                    settle_exec().await;
+                }
+            }
+            let result = nuke_result(&port);
+            assert_eq!(result["success"], false);
+            let error = result["error"].as_str().unwrap();
+            assert!(error.contains("did not leave the account flat"), "{error}");
+            assert!(error.contains("BTCUSDT long 13.8"), "{error}");
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn nuke_reads_with_nothing_in_the_store_and_closes_what_the_read_commits() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            wait_market(&port);
+            port.fresh_positions.set(true);
+            ExecFactory::default()
+                .handle(
+                    "exec",
+                    r#"{"symbol":"BTCUSDT","command":"nuke pos","reqId":"r"}"#,
+                    &cx,
+                )
+                .unwrap();
+            settle_exec().await;
+            assert!(
+                is_fresh_read(&port.commands.borrow()[0]),
+                "read with no rows"
+            );
+            port.store.borrow_mut().positions = vec![native_position("BTCUSDT")];
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Ok(open_answer("BTCUSDT", 0.02)))
+                .unwrap();
+            settle_exec().await;
+            assert!(matches!(
+                &port.commands.borrow()[1],
+                Command::PlaceOrders { .. }
+            ));
+            port.store.borrow_mut().positions.clear();
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Ok(r#"["close"]"#.into()))
+                .unwrap();
+            settle_exec().await;
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            settle_exec().await;
+            assert!(is_fresh_read(&port.commands.borrow()[2]));
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Ok(FLAT_ANSWER.into()))
+                .unwrap();
+            settle_exec().await;
+            assert_eq!(nuke_result(&port)["success"], true);
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_old_array_answer_is_not_confirmed_flat() {
+    for body in [
+        "[]",
+        "null",
+        r#"{"skipped":[],"open":[{"symbol":"BTCUSDT"}]}"#,
+    ] {
+        LocalSet::new()
+            .run_until(async {
+                let port = Rc::new(Port::default());
+                let cx = AlgoCx::new(port.clone(), Scope::new());
+                nuke_closed_once(&port, &cx).await;
+                port.store.borrow_mut().positions.clear();
+                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                settle_exec().await;
+                port.replies
+                    .borrow_mut()
+                    .remove(0)
+                    .send(Ok(body.into()))
+                    .unwrap();
+                settle_exec().await;
+                let result = nuke_result(&port);
+                assert_eq!(result["success"], false, "{body}");
+                let error = result["error"].as_str().unwrap();
+                assert!(
+                    error.contains("could not confirm the account is flat"),
+                    "{body}: {error}"
+                );
+                assert_eq!(port.commands.borrow().len(), 2, "no further close: {body}");
+                cx.scope.dispose();
+            })
+            .await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_cancels_every_traded_symbol_before_any_close_with_no_order_in_the_store() {
+    use safe_cex_exec::native::CancelAllScope;
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            wait_market(&port);
+            port.fresh_positions.set(true);
+            port.store.borrow_mut().positions = vec![native_position("BTCUSDT")];
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default()
+                .with_cancel_all(Rc::new(|| CancelAllScope::Symbols(vec!["ETHUSDT".into()])));
+            let nuke = factory.nuke("all", &cx).unwrap();
+            let port_answers = port.clone();
+            let driver = async move {
+                loop {
+                    settle_exec().await;
+                    let next = port_answers.replies.borrow_mut().drain(..).next();
+                    if let Some(reply) = next {
+                        let last = port_answers.commands.borrow().last().cloned().unwrap();
+                        let body = match last {
+                            Command::PlaceOrders { .. } => {
+                                port_answers.store.borrow_mut().positions.clear();
+                                r#"["close"]"#
+                            }
+                            Command::Venue { .. } => FLAT_ANSWER,
+                            _ => "null",
+                        };
+                        reply.send(Ok(body.into())).unwrap();
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            };
+            let result = tokio::select! { result = nuke => result, _ = driver => unreachable!() };
+            assert!(result.is_ok(), "{result:?}");
+            let commands = port.commands.borrow();
+            let close = commands
+                .iter()
+                .position(|c| matches!(c, Command::PlaceOrders { .. }))
+                .unwrap();
+            let cancelled: Vec<&str> = commands[..close]
+                .iter()
+                .filter_map(|c| match c {
+                    Command::CancelSymbolOrders { symbol, .. } => Some(symbol.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(cancelled, ["BTCUSDT", "ETHUSDT"]);
+            drop(commands);
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_cancel_is_reported_without_blocking_the_close() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            wait_market(&port);
+            port.store.borrow_mut().positions = vec![native_position("BTCUSDT")];
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = ExecFactory::default();
+            let nuke = factory.nuke("all", &cx).unwrap();
+            let answers = port.clone();
+            let driver = async move {
+                loop {
+                    settle_exec().await;
+                    let next = answers.replies.borrow_mut().drain(..).next();
+                    if let Some(reply) = next {
+                        let last = answers.commands.borrow().last().cloned().unwrap();
+                        let body = match last {
+                            Command::CancelSymbolOrders { .. } => {
+                                Err(VenueError::new("cancel down"))
+                            }
+                            _ => Ok(r#"["close"]"#.to_owned()),
+                        };
+                        if body.is_ok() {
+                            answers.store.borrow_mut().positions.clear();
+                        }
+                        reply.send(body).unwrap();
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            };
+            let result = tokio::select! { result = nuke => result, _ = driver => unreachable!() };
+            let error = result.unwrap_err();
+            assert!(
+                error["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("BTCUSDT cancel: cancel down"),
+                "{error}"
+            );
+            assert!(
+                port.commands
+                    .borrow()
+                    .iter()
+                    .any(|c| matches!(c, Command::PlaceOrders { .. }))
+            );
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+fn is_account_cancel(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Venue {
+            action: safe_cex_engine::VenueAction::CancelAccountOrders,
+            ..
+        }
+    )
+}
+
+/// A nuke on a store with one open position, every command answered as accepted.
+async fn nuke_answered(port: &Rc<Port>, mode: &str) -> Result<Value, Value> {
+    wait_market(port);
+    port.store.borrow_mut().positions = vec![native_position("BTCUSDT")];
+    let cx = AlgoCx::new(port.clone(), Scope::new());
+    let factory = ExecFactory::default();
+    let nuke = factory.nuke(mode, &cx).unwrap();
+    let answers = port.clone();
+    let driver = async move {
+        loop {
+            settle_exec().await;
+            let next = answers.replies.borrow_mut().drain(..).next();
+            if let Some(reply) = next {
+                let last = answers.commands.borrow().last().cloned().unwrap();
+                let body = match last {
+                    Command::PlaceOrders { .. } => {
+                        answers.store.borrow_mut().positions.clear();
+                        Ok(r#"["close"]"#.to_owned())
+                    }
+                    _ if answers.fail_cancels.get()
+                        && !matches!(last, Command::PlaceOrders { .. }) =>
+                    {
+                        Err(VenueError::new("cancel down"))
+                    }
+                    _ => Ok("null".to_owned()),
+                };
+                reply.send(body).unwrap();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    };
+    let result = tokio::select! { result = nuke => result, _ = driver => unreachable!() };
+    cx.scope.dispose();
+    result
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_sends_the_account_wide_cancel_before_any_close_where_the_venue_has_one() {
+    LocalSet::new()
+        .run_until(async {
+            for mode in ["all", "orders"] {
+                let port = Rc::new(Port::default());
+                port.nuke_account_cancel.set(true);
+                port.symbol_cancel_misses_unseen.set(true);
+                let result = nuke_answered(&port, mode).await.unwrap();
+                let commands = port.commands.borrow();
+                let account = commands.iter().position(is_account_cancel).expect(mode);
+                if let Some(close) = commands
+                    .iter()
+                    .position(|c| matches!(c, Command::PlaceOrders { .. }))
+                {
+                    assert!(account < close, "{mode}: {commands:?}");
+                }
+                assert!(result.get("warning").is_none(), "{mode}: {result}");
+                assert!(
+                    !result["summary"]
+                        .as_str()
+                        .unwrap()
+                        .contains("last few seconds"),
+                    "{mode}"
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_sends_no_account_wide_cancel_on_a_venue_without_one() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            nuke_answered(&port, "all").await.unwrap();
+            assert!(!port.commands.borrow().iter().any(is_account_cancel));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_warns_of_unseen_orders_only_where_no_cancel_reaches_them() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            port.symbol_cancel_misses_unseen.set(true);
+            let result = nuke_answered(&port, "all").await.unwrap();
+            let summary = result["summary"].as_str().unwrap();
+            assert!(
+                summary.contains("Orders placed in the last few seconds may not be cancelled"),
+                "{summary}"
+            );
+            assert!(summary.contains("check open orders"), "{summary}");
+            assert_eq!(
+                result["warning"].as_str().map(|w| summary.ends_with(w)),
+                Some(true)
+            );
+
+            let failing = Rc::new(Port::default());
+            failing.symbol_cancel_misses_unseen.set(true);
+            failing.fail_cancels.set(true);
+            let error = nuke_answered(&failing, "all").await.unwrap_err();
+            let message = error["message"].as_str().unwrap();
+            assert!(
+                message.contains("may not be cancelled") && message.contains("check open orders"),
+                "{message}"
+            );
+
+            let plain = Rc::new(Port::default());
+            let result = nuke_answered(&plain, "all").await.unwrap();
+            assert!(
+                !result["summary"]
+                    .as_str()
+                    .unwrap()
+                    .contains("last few seconds")
+            );
+            assert!(result.get("warning").is_none());
         })
         .await;
 }
@@ -1224,7 +1614,10 @@ async fn a_nuke_ends_with_the_venue_cancel_all_on_a_native_venue() {
             let factory = ExecFactory::default().with_cancel_all(Rc::new(|| CancelAllScope::Native));
             let result = answering(&port, factory.nuke("all", &cx).unwrap()).await.unwrap();
             let commands = port.commands.borrow();
-            assert!(matches!(&commands[0], Command::CancelSymbolOrders { symbol, .. } if symbol == "BTCUSDT"));
+            assert!(
+                matches!(&commands[0], Command::CancelSymbolOrders { symbol, .. } if symbol.is_empty()),
+                "the first cancel is venue-wide: {commands:?}"
+            );
             assert!(
                 matches!(commands.last().unwrap(), Command::CancelSymbolOrders { symbol, .. } if symbol.is_empty()),
                 "the last command is the venue-wide cancel-all: {commands:?}"

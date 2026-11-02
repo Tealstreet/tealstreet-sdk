@@ -33,7 +33,8 @@ pub fn is_write(command: &Command) -> bool {
             | Command::SetMarginType { .. }
             | Command::SetPositionMode { .. }
             | Command::Venue {
-                action: crate::VenueAction::SetAccountTier { .. },
+                action: crate::VenueAction::SetAccountTier { .. }
+                    | crate::VenueAction::CancelAccountOrders,
                 ..
             }
     )

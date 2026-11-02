@@ -150,7 +150,19 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
       return command.command === undefined
         ? '[]'
         : JSON.stringify([
-            { op: 'done', command: command.command, result: command.op === 'placeOrders' ? '["order-1"]' : '[]' },
+            {
+              op: 'done',
+              command: command.command,
+              result:
+                command.op === 'placeOrders'
+                  ? '["order-1"]'
+                  : command.op === 'readPositions'
+                    ? JSON.stringify({
+                        skipped: [],
+                        open: (state.positions ?? []).filter((p) => p.contracts !== 0),
+                      })
+                    : '[]',
+            },
           ]);
     },
     takeFrame: () => {
@@ -525,7 +537,9 @@ describe('Rust native current-account reads', () => {
       markets: markets.map((m) => ({ ...m, contractSize: 100, isInverse: true })),
       positions: [{ ...position(), contracts: 0, notional: 40 }],
     });
-    await r.exchange.nukePositions();
+    const nuking = r.exchange.nukePositions();
+    await vi.advanceTimersByTimeAsync(600);
+    await nuking;
     expect(r.commands.find((c) => c.op === 'placeOrders')?.orders).toEqual([
       { symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 0.4, reduceOnly: true },
     ]);
@@ -549,8 +563,154 @@ describe('Rust native current-account reads', () => {
     r.update({ positions: [position()] });
     const cancel = vi.spyOn(r.exchange, 'cancelAllOrders');
     const place = vi.spyOn(r.exchange, 'placeOrders');
-    await r.exchange.nuke(3);
+    const nuking = r.exchange.nuke(3);
+    await vi.advanceTimersByTimeAsync(600);
+    await nuking;
     expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(place.mock.invocationCallOrder[0]);
+  });
+
+  const placeRead = (r: ReturnType<typeof fixture>) => r.commands.map((c) => c.op);
+
+  it('cancels a position symbol and an attempted placement with no order in the store (EachOpenSymbol)', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position('ETHUSDT')], orders: [] });
+    await r.exchange
+      .placeOrders([{ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 90 }])
+      .catch(() => undefined);
+    const before = r.commands.length;
+    const nuking = r.exchange.nuke();
+    await vi.advanceTimersByTimeAsync(600);
+    await nuking;
+    const nuke = r.commands.slice(before);
+    const close = nuke.findIndex((c) => c.op === 'placeOrders');
+    const cancelled = nuke.slice(0, close).filter((c) => c.op === 'cancelSymbolOrders');
+    expect(cancelled.map((c) => c.symbol).sort()).toEqual(['BTCUSDT', 'ETHUSDT']);
+  });
+
+  it('cancels what the stopping engine placed, and leaves it out of the result', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [], orders: [] });
+    r.exchange.stopAccountAlgos = () =>
+      Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], placedSymbols: ['ETHUSDT'] });
+    const nuking = r.exchange.nuke();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(await nuking).toEqual({ stoppedChasers: [], stoppedTwaps: [] });
+    expect(r.commands.filter((c) => c.op === 'cancelSymbolOrders').map((c) => c.symbol)).toEqual(['ETHUSDT']);
+  });
+
+  it.each(['nuke', 'nukeOrders'] as const)(
+    '%s sends the account-wide cancel where the venue has one, before any close, and does not warn',
+    async (method) => {
+      const r = fixture('bitget');
+      await r.start();
+      r.update({ positions: [position()], orders: [] });
+      const nuking = r.exchange[method]();
+      await vi.advanceTimersByTimeAsync(600);
+      const result = await nuking;
+      const ops = r.commands.map((c) => c.op);
+      expect(ops).toContain('cancelAccountOrders');
+      if (ops.includes('placeOrders')) expect(ops.indexOf('cancelAccountOrders')).toBeLessThan(ops.indexOf('placeOrders'));
+      expect(result.warning).toBeUndefined();
+    },
+  );
+
+  it('sends no account-wide cancel from a plain cancel-all, nor on a venue without one', async () => {
+    const bitget = fixture('bitget');
+    await bitget.start();
+    await bitget.exchange.cancelAllOrders();
+    expect(bitget.commands.map((c) => c.op)).not.toContain('cancelAccountOrders');
+    const bybit = fixture('bybit');
+    await bybit.start();
+    bybit.update({ positions: [position()] });
+    const nuking = bybit.exchange.nuke();
+    await vi.advanceTimersByTimeAsync(600);
+    expect((await nuking).warning).toBeUndefined();
+    expect(bybit.commands.map((c) => c.op)).not.toContain('cancelAccountOrders');
+  });
+
+  it.each(['nuke', 'nukeOrders'] as const)(
+    '%s says unseen orders may rest where no cancel reaches them, in success and in failure',
+    async (method) => {
+      const unseen = /Orders placed in the last few seconds may not be cancelled on this venue: check open orders/;
+      const r = fixture('hyperliquid');
+      await r.start();
+      r.update({ positions: [position()] });
+      const nuking = r.exchange[method]();
+      await vi.advanceTimersByTimeAsync(600);
+      expect((await nuking).warning).toMatch(unseen);
+      vi.spyOn(r.exchange, 'cancelAllOrders').mockRejectedValue(new Error('cancel down'));
+      const failing = r.exchange[method]().catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(600);
+      const message = await failing;
+      expect(message).toMatch(/cancel down/);
+      expect(message).toMatch(unseen);
+    },
+  );
+
+  it('does not warn on nukePositions, which cancels nothing', async () => {
+    const r = fixture('hyperliquid');
+    await r.start();
+    r.update({ positions: [position()] });
+    const nuking = r.exchange.nukePositions();
+    await vi.advanceTimersByTimeAsync(600);
+    expect((await nuking).warning).toBeUndefined();
+  });
+
+  it('never issues the proving read under 500 ms after a close, even with the store already flat', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position()] });
+    const nuking = r.exchange.nukePositions();
+    await vi.advanceTimersByTimeAsync(499);
+    expect(placeRead(r)).toContain('placeOrders');
+    expect(placeRead(r)).not.toContain('readPositions');
+    await vi.advanceTimersByTimeAsync(2);
+    expect(placeRead(r).filter((op) => op === 'readPositions')).toHaveLength(1);
+    await nuking;
+  });
+
+  it('does not report flat from a flat store while the read still shows a position', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position()] });
+    const open = [{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 13.8 }];
+    r.exchange.readPositions = () => Promise.resolve({ skipped: [], open });
+    const nuking = r.exchange.nukePositions().catch((thrown: Error) => thrown.message);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await nuking).toBe('Nuke did not leave the account flat: BTCUSDT long 13.8 still open');
+  });
+
+  it.each([
+    ['an old array', []],
+    ['null', null],
+    ['a partial row', { skipped: [], open: [{ symbol: 'BTCUSDT' }] }],
+  ])('treats %s from the read as not confirmed flat, with no further close', async (_name, body) => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position()] });
+    r.exchange.readPositions = () => Promise.resolve(body as never);
+    const nuking = r.exchange.nukePositions().catch((thrown: Error) => thrown.message);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await nuking).toMatch(/could not confirm the account is flat/);
+    expect(r.commands.filter((c) => c.op === 'placeOrders')).toHaveLength(1);
+  });
+
+  it('reads with nothing in the store, then closes what the read committed', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [] });
+    const read = vi.spyOn(r.exchange, 'readPositions').mockImplementationOnce(async () => {
+      r.update({ positions: [position()] });
+      await vi.advanceTimersByTimeAsync(0);
+      return { skipped: [], open: [{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 2 }] };
+    });
+    const nuking = r.exchange.nukePositions();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await nuking;
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(r.commands.filter((c) => c.op === 'placeOrders')).toHaveLength(1);
   });
 
   it('closes again when a successful close left a position, and says so if it never goes flat', async () => {
@@ -605,7 +765,7 @@ describe('Rust native current-account reads', () => {
   it('reports not confirmed flat when the read skipped an open row', async () => {
     const r = fixture();
     await r.start();
-    r.exchange.readPositions = () => Promise.resolve(['DOGEUSD_PERP']);
+    r.exchange.readPositions = () => Promise.resolve({ skipped: ['DOGEUSD_PERP'], open: [] });
     await expect(r.exchange.nukePositions()).rejects.toThrow(
       'Nuke could not confirm the account is flat: DOGEUSD_PERP on no listed market',
     );
@@ -663,7 +823,7 @@ describe('Rust native current-account reads', () => {
         return ['closed'];
       });
     const nuking = r.exchange.nukePositions();
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(700);
     await expect(nuking).resolves.toBeDefined();
     expect(place).toHaveBeenCalledTimes(2);
   });
@@ -692,7 +852,7 @@ describe('Rust native current-account reads', () => {
       throw new Error('answer lost');
     });
     const nuking = r.exchange.nukePositions();
-    await vi.advanceTimersByTimeAsync(300);
+    await vi.advanceTimersByTimeAsync(600);
     await expect(nuking).resolves.toBeDefined();
     expect(place).toHaveBeenCalledOnce();
   });
@@ -812,6 +972,7 @@ describe('Rust native current-account reads', () => {
     expect(r.exchange.isNuking).toBe(true);
     r.update({ positions: [] });
     finish(['accepted']);
+    await vi.advanceTimersByTimeAsync(600);
     await first;
     expect(r.exchange.isNuking).toBe(false);
   });

@@ -13,3 +13,9 @@ export const describeStoppedAlgos = (result: unknown): string | undefined => {
   const list = (ids: string[]) => (ids.length ? ` (${ids.join(', ')})` : '');
   return `Nuke stopped ${chasers.length} chaser(s)${list(chasers)} and ${twaps.length} TWAP(s)${list(twaps)} before closing`;
 };
+
+/** The nuke's warning for the user, such as orders it may not have reached, if any. */
+export const nukeWarning = (result: unknown): string | undefined => {
+  const warning = (result as Partial<NukeResult> | null | undefined)?.warning;
+  return typeof warning === 'string' && warning ? warning : undefined;
+};

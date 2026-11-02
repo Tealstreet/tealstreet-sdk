@@ -91,7 +91,7 @@ const RESPONSES: Record<string, string> = {
 };
 
 /** Canned Binance USD-M venue; records every request the worker's engine sends. */
-const venue = (positionRead?: (closes: number) => { status: number; body: string }) => {
+const venue = (positionRead?: (closes: number) => { status: number; body: string }, streamDelayed = false) => {
   const requests: string[] = [];
   let closes = 0;
   // A market close flattens the account: Nuke reads flat back from the stream before it reports.
@@ -114,7 +114,7 @@ const venue = (positionRead?: (closes: number) => { status: number; body: string
       const name = parsed.pathname.split('/').pop()!;
       if (method === 'POST' && parsed.searchParams.get('type') === 'MARKET') {
         closes += 1;
-        setTimeout(() => flatten.forEach((send) => send()), 0);
+        if (!streamDelayed) setTimeout(() => flatten.forEach((send) => send()), 0);
       }
       if (name === 'positionRisk' && closes > 0) {
         const { status, body } = positionRead?.(closes) ?? { status: 200, body: positionRisk('0') };
@@ -174,11 +174,11 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
   });
 
   // The web posts full `store` payloads today; `acceptsFrames` is the opt-in frame mode.
-  const start = async (frames: boolean, positionRead?: Parameters<typeof venue>[0]) => {
+  const start = async (frames: boolean, positionRead?: Parameters<typeof venue>[0], streamDelayed = false) => {
     // SDK setup supplies a minimal window in Node; the engine generates Binance
     // client order IDs from the first crypto source it finds there.
     Object.defineProperty(window, 'crypto', { configurable: true, value: webcrypto });
-    const tape = venue(positionRead);
+    const tape = venue(positionRead, streamDelayed);
     const loader = vi.fn(loadNodeEngine);
     setWasmEngineLoader(loader);
     setRustEngineTransport(() => tape.transport);
@@ -295,6 +295,22 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
     await expect(main!.nuke()).rejects.toThrow(/could not confirm the account is flat/);
     expect(closesIn(tape.writes())).toHaveLength(1);
   });
+
+  it.each([
+    ['frame', true],
+    ['store payload', false],
+  ])('Nuke with delayed frames sends a cancel for the traded symbol and never reports flat from the store (%s bridge)', async (_mode, frames) => {
+    // The close fills against a bid the store never saw, so the venue stays long.
+    const { tape } = await start(frames, () => ({ status: 200, body: positionRisk('0.5') }), true);
+    const before = tape.writes().length;
+    const outcome = await main!.nuke().then(
+      () => 'ok',
+      (error: Error) => error.message,
+    );
+    const nuke = tape.writes().slice(before);
+    expect(nuke.some((write) => write.startsWith('DELETE') && write.includes('BTCUSDT'))).toBe(true);
+    expect(outcome).toMatch(/not leave the account flat|could not confirm/);
+  }, 30_000);
 
   it('reads public trades and adopts capabilities from the worker without a main-thread engine', async () => {
     const { tape, loader } = await start(true);

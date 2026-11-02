@@ -1247,6 +1247,21 @@ impl BitgetFutures {
                     }
                     job.calls.push_back(call.clone());
                 }
+                // Reaches orders the store has not seen; their rows follow from the stream.
+                if self.account.uta && !symbol.is_empty() {
+                    job.calls.push_back(Planned {
+                        path: paths::UTA_CANCEL_SYMBOL,
+                        payload: Payload {
+                            category: Some(self.product().to_uppercase()),
+                            symbol: Some(symbol.clone()),
+                            ..Payload::default()
+                        },
+                        effect: Effect::Cancel {
+                            orders: Vec::new(),
+                            idempotent_missing: false,
+                        },
+                    });
+                }
             }
             Command::AmendOrder {
                 id, price, amount, ..
@@ -1396,6 +1411,34 @@ impl BitgetFutures {
                     },
                     payload,
                     effect: Effect::Mode(*hedged),
+                });
+            }
+            // A nuke's: the product's every pending order, unseen ones included.
+            Command::Venue {
+                action: safe_cex_engine::VenueAction::CancelAccountOrders,
+                ..
+            } => {
+                let (path, payload) = if self.account.uta {
+                    let payload = Payload {
+                        category: Some(self.product().to_uppercase()),
+                        ..Payload::default()
+                    };
+                    (paths::UTA_CANCEL_SYMBOL, payload)
+                } else {
+                    let payload = Payload {
+                        product_type: Some(self.product().into()),
+                        margin_coin: (!self.inverse()).then(|| self.coin().into()),
+                        ..Payload::default()
+                    };
+                    (paths::CANCEL_ALL, payload)
+                };
+                job.calls.push_back(Planned {
+                    path,
+                    payload,
+                    effect: Effect::Cancel {
+                        orders: Vec::new(),
+                        idempotent_missing: false,
+                    },
                 });
             }
             _ => return Err("unsupported Bitget trading command".into()),
@@ -3151,7 +3194,11 @@ fn command_id(command: &Command) -> Option<u32> {
         | Command::AmendOrder { command, .. }
         | Command::SetLeverage { command, .. }
         | Command::SetMarginType { command, .. }
-        | Command::SetPositionMode { command, .. } => Some(*command),
+        | Command::SetPositionMode { command, .. }
+        | Command::Venue {
+            command,
+            action: safe_cex_engine::VenueAction::CancelAccountOrders,
+        } => Some(*command),
         _ => None,
     }
 }
