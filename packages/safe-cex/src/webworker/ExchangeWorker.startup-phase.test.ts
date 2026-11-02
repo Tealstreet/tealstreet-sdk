@@ -183,3 +183,20 @@ describe('ExchangeWorker start that keeps timing out', () => {
     expect(error.data[1]).toEqual({ forceToast: true });
   });
 });
+
+describe('ExchangeWorker on public data only', () => {
+  it('runs no postprocessor that would publish its unread account rows as real', () => {
+    const ctx = { postMessage: vi.fn() };
+    const worker = new ExchangeWorker(ctx as any, 'a', 'bybit' as any, { publicDataOnly: true } as any, {} as any, {} as any, 's') as any;
+    const account = { readsAccountData: true, process: vi.fn() };
+    const market = { process: vi.fn() };
+    worker._postprocessors = [account, market];
+    try {
+      worker._storeUpdate({});
+    } catch {
+      // Only the postprocessor loop is under test.
+    }
+    expect(account.process).not.toHaveBeenCalled();
+    expect(market.process).toHaveBeenCalled();
+  });
+});

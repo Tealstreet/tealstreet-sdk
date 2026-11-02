@@ -144,7 +144,7 @@ export class ExchangeWorker {
     UiStateHandler,
   ];
 
-  private _postprocessors: { process(store: any): void }[] = [];
+  private _postprocessors: { process(store: any): void; readsAccountData?: boolean }[] = [];
   private _exchangeDependentPostprocessors: { process(store: any): void }[] = [];
   private _handlers: BaseHandler[] = [];
   private _lastSentMarketsVersion: number | null = null;
@@ -729,6 +729,8 @@ export class ExchangeWorker {
       this._exchangeDependentPostprocessors[i].process(processedData);
     }
     for (let i = 0; i < this._postprocessors.length; i++) {
+      // A public-only engine reports account data loaded without reading any.
+      if (this._options.publicDataOnly && this._postprocessors[i].readsAccountData) continue;
       this._postprocessors[i].process(processedData);
     }
 
