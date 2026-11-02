@@ -362,26 +362,37 @@ fn stop_notices(
     reason: &str,
     may_rest: bool,
 ) -> Vec<Notice> {
-    let chases = chasers.iter().map(|chase| {
-        let resting = may_rest
-            && chase.current_order_ids.iter().any(|id| {
-                store.order(id).is_none_or(|order| {
-                    !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
-                })
-            });
-        let check = if resting {
-            " Its order may still be open: check it."
-        } else {
-            ""
-        };
-        Notice {
-            text: format!("Chase on {} stopped: {reason}.{check}", chase.symbol),
-            algo: Some(AlgoRef {
-                kind: "chase",
-                id: chase.id.clone(),
-            }),
-        }
-    });
+    // A slice's stop is its TWAP's: one notice per user action.
+    let told_by_twap = |chase: &&ActiveChaser| {
+        chase.twap_id.as_deref().is_some_and(|twap_id| {
+            twaps
+                .iter()
+                .any(|twap| twap["id"].as_str() == Some(twap_id))
+        })
+    };
+    let chases = chasers
+        .iter()
+        .filter(|chase| !told_by_twap(chase))
+        .map(|chase| {
+            let resting = may_rest
+                && chase.current_order_ids.iter().any(|id| {
+                    store.order(id).is_none_or(|order| {
+                        !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+                    })
+                });
+            let check = if resting {
+                " Its order may still be open: check it."
+            } else {
+                ""
+            };
+            Notice {
+                text: format!("Chase on {} stopped: {reason}.{check}", chase.symbol),
+                algo: Some(AlgoRef {
+                    kind: "chase",
+                    id: chase.id.clone(),
+                }),
+            }
+        });
     let twaps = twaps.iter().map(|twap| {
         let market = twap["activeMarket"]["symbol"]
             .as_str()
