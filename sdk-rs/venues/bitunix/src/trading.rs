@@ -2063,6 +2063,8 @@ impl BitunixFutures {
             code: NativeCode::Int(code),
             message: "",
         });
+        let mut error = error;
+        self.kept_gone(command, &mut error);
         let mut refused = false;
         // Live: a batch answered 20003 with its orders resting. Only 10007's signature refusal,
         // which the venue resends past, proves a batch sent nothing.
