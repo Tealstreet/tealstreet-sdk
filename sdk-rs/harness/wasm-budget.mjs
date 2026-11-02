@@ -81,39 +81,43 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #2700 Phemex replacement condition wait: CI 1,931,732 B; ddi's rule, CI + 10 KiB, rounded up to a KiB.
 // #2812 readPositions: CI run 41375427208; Sam's order, CI + 10 KiB, rounded up to a KiB, for every family over its cap.
 // #2819 hosted Nuke fresh read: CI run 41378308674; ddi's fix-forward, CI + 10 KiB, rounded up to a KiB, for every family over its cap.
+// 11-02 nuke account cancel (#2831, #2852): CI run 41415587553 measured backpack 1,832,476, bitrue
+// 1,772,155, breakoutprop 1,471,040, coinbase 1,773,663, grvt 1,739,939, kucoin 1,550,412, kucoinspot
+// 2,063,720, mexc 1,687,491, orderly 1,682,273, polymarket 1,560,737, txflow 1,790,189, woo 2,327,820 B.
+// ddi2il ruling: each raised to CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_941_504,
   asterdex: 2_077_696,
-  backpack: 1_826_816,
+  backpack: 1_843_200,
   binance: 2_125_824,
   bingx: 1_950_080,
   bitget: 2_244_608,
   bitgetusdc: 2_225_152,
-  bitrue: 1_770_496,
+  bitrue: 1_782_784,
   bitunix: 1_802_624,
   blofin: 1_897_472,
-  breakoutprop: 1_467_392,
+  breakoutprop: 1_481_728,
   bybit: 2_128_256,
-  coinbase: 1_770_496,
+  coinbase: 1_784_832,
   cryptocom: 1_681_408,
-  grvt: 1_736_704,
+  grvt: 1_751_040,
   hyperliquid: 2_048_000,
   hyperliquidspot: 2_035_712,
   kraken: 2_075_648,
   krakenspot: 2_058_240,
-  kucoin: 1_548_288,
-  kucoinspot: 2_060_288,
+  kucoin: 1_561_600,
+  kucoinspot: 2_074_624,
   lighter: 1_948_672,
   'lighter-robinhood': 1_929_216,
-  mexc: 1_681_408,
+  mexc: 1_697_792,
   okx: 1_893_376,
-  orderly: 1_679_360,
+  orderly: 1_692_672,
   paradex: 2_179_072,
   phemex: 2_001_920,
-  polymarket: 1_557_504,
-  txflow: 1_786_880,
+  polymarket: 1_571_840,
+  txflow: 1_801_216,
   weex: 1_883_136,
-  woo: 2_326_528,
+  woo: 2_338_816,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

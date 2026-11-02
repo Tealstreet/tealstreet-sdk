@@ -216,7 +216,8 @@ it.skipIf(!algos)('a nuke stops Rust TWAPs and chases in the engine and waits fo
   const twap = lastStore(messages, 'activeTWAPs')[0];
   const stopped = (worker.exchange as RustEngineExchange).stopAccountAlgos();
   await vi.advanceTimersByTimeAsync(1_000);
-  expect(await stopped).toEqual({ stoppedChasers: [chase.id], stoppedTwaps: [twap.id] });
+  // The nuke then cancels every symbol the stopped algos placed on.
+  expect(await stopped).toEqual({ stoppedChasers: [chase.id], stoppedTwaps: [twap.id], placedSymbols: ['BTCUSDT'] });
   const limit = venue.placements.find((order: { type: string }) => order.type === 'LIMIT');
   expect(venue.cancels).toEqual([String(limit.orderId)]);
   expect(lastPersisted(messages)).toEqual({});
