@@ -1581,3 +1581,44 @@ fn settings_engine_seal_joins_old_read_but_only_a_post_write_read_recovers() {
     assert_eq!(body(&recovered)["action"]["leverage"], 5);
     assert_eq!(body(&recovered)["action"]["isCross"], false);
 }
+
+/// Live Hyperliquid rows carry no tpsl field: a "Take Profit Limit" is a take profit by its name.
+/// Read as a stop, a drag re-placed it as an sl trigger on the take-profit side, which fires at once.
+#[test]
+fn a_take_profit_limit_is_read_and_moved_as_a_take_profit() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.0,
+        &format!(
+            r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"B","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Limit","triggerPx":"87"}},"status":"open"}}]}}"#
+        ),
+    );
+    assert_eq!(
+        e.store().order("9").unwrap().kind,
+        safe_cex_engine::model::OrderType::TakeProfit
+    );
+    e.handle(
+        2001.0,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "9".into(),
+            price: Some(85.0),
+            amount: None,
+        }),
+    );
+    let r = write(&mut e);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let r = write(&mut e);
+    let b = body(&r);
+    assert_eq!(
+        b["action"]["orders"][0]["t"]["trigger"]["tpsl"], "tp",
+        "{b}"
+    );
+}
