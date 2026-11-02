@@ -87,6 +87,10 @@ const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
 /// Diagnostics must not leave a definitive startup rejection waiting on another host.
 const ENVIRONMENT_PROBE_TIMEOUT_MS: u32 = 2_000;
+/// Legacy virtualClock's threshold: an answer within a second of the
+/// calibrated clock is network delay, so it never moves the signing clock.
+const CLOCK_DRIFT_MS: f64 = 1_000.0;
+const AUTH_CLOCK_TIMEOUT_MS: u32 = 5_000;
 
 #[derive(Clone, Default)]
 pub struct Options {
@@ -155,6 +159,8 @@ pub enum Then {
     RefreshMarkets(refresh::Page),
     /// Diagnostic only: bypass ordinary retries, startup and account success handling.
     EnvironmentProbe,
+    /// Bybit's public clock, read once after a private auth refusal.
+    AuthClock,
     Tickers(Vec<Ticker>),
     OptionSeed {
         base_coin: String,
@@ -190,6 +196,12 @@ struct EnvironmentProbe {
     /// Background Read authority with the probe's native 2 s window.
     context: safe_cex_engine::request_context::Context,
     message: String,
+}
+
+/// A refused auth's clock read; a socket opened meanwhile waits for it to settle.
+struct AuthClock {
+    context: safe_cex_engine::request_context::Context,
+    waiting: Option<SocketId>,
 }
 
 // Require native integer success before attributing a key to another environment.
@@ -304,6 +316,7 @@ pub struct BybitLinear {
     environment_probe_origin: Option<&'static str>,
     environment_probe_attempted: bool,
     environment_probe: Option<EnvironmentProbe>,
+    auth_clock: Option<AuthClock>,
     public: Connection,
     private: Connection,
     books: HashMap<String, BookState>,
@@ -548,6 +561,7 @@ impl BybitLinear {
             brazil_site: options.bybit_site_id.as_deref() == Some("BRA_BTL"),
             environment_probe_attempted: false,
             environment_probe: None,
+            auth_clock: None,
             public: Connection::new(),
             private: Connection::new(),
             books: HashMap::new(),
@@ -960,6 +974,85 @@ impl BybitLinear {
         taken.rest.resent = true;
         self.queue_read(cx, retry, taken.rest, taken.then);
         true
+    }
+
+    /// Calibrate from an answer's own `time` only past network delay, so
+    /// ordinary jitter never moves the clock or restales pending signatures.
+    fn observe_answer_time(cx: &mut Cx<'_, Pending>, body: &str) {
+        let Some(server) = serde_json::from_str::<ServerStamp>(body)
+            .ok()
+            .and_then(|stamp| stamp.time)
+        else {
+            return;
+        };
+        if server > 0.0 && (server - cx.protocol_now()).abs() >= CLOCK_DRIFT_MS {
+            cx.observe_protocol_time(server);
+        }
+    }
+
+    /// One unsigned read of Bybit's public clock per private auth refusal.
+    /// Hyro's own origin is not Bybit's, so it keeps the existing clock.
+    pub(crate) fn read_auth_clock(&mut self, cx: &mut Cx<'_, Pending>) {
+        use safe_cex_engine::request_context::{Policy, Scope};
+        if self.auth_clock.is_some() || self.variant.is_hyro() {
+            return;
+        }
+        let policy = Policy {
+            timeout_ms: AUTH_CLOCK_TIMEOUT_MS,
+            ..policy::read_policy()
+        };
+        let Ok(context) = cx.http_context(Scope::Background, policy) else {
+            return;
+        };
+        let pending = Pending {
+            category: self.category,
+            rest: Rest::get("/v5/market/time", Query::new()),
+            then: Then::AuthClock,
+            read: Some(context.clone()),
+        };
+        if cx
+            .request_managed_with_headers(
+                context.clone(),
+                None,
+                Method::Get,
+                format!("{}/v5/market/time", self.paths.rest),
+                &[("X-Referer", sign::BROKER_ID)],
+                None,
+                pending,
+            )
+            .is_err()
+        {
+            let _ = cx.finish_http_context(&context);
+            return;
+        }
+        self.auth_clock = Some(AuthClock {
+            context,
+            waiting: None,
+        });
+    }
+
+    /// Whether a private socket's auth must wait for the refusal's clock read.
+    pub(crate) fn auth_waits_for_clock(&mut self, socket: SocketId) -> bool {
+        self.auth_clock
+            .as_mut()
+            .map(|clock| clock.waiting = Some(socket))
+            .is_some()
+    }
+
+    /// Settle the one clock read, then send any auth that waited for it;
+    /// a failed read re-auths on the existing clock.
+    fn settle_auth_clock(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(clock) = self.auth_clock.take() else {
+            return;
+        };
+        let _ = cx.finish_http_context(&clock.context);
+        if let Some(socket) = clock
+            .waiting
+            .filter(|socket| self.private.socket == Some(*socket) && self.private.open)
+        {
+            self.select_category(self.primary_category);
+            self.on_private_open(cx, socket);
+        }
     }
 
     fn open_feed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
@@ -2171,8 +2264,9 @@ impl BybitLinear {
             Then::Candles(_) => {}
             Then::Account(request) => self.on_account_response(cx, request, response),
             Then::Hyro(read) => self.on_hyro_response(cx, read, response),
-            // Ordinary responses and failures never reach the public path.
-            Then::Ordinary(_) => {}
+            // Ordinary responses and failures never reach the public path,
+            // nor does the auth clock read, settled wherever it is delivered.
+            Then::Ordinary(_) | Then::AuthClock => {}
             // Answers arrive with their page leg in on_response; only failures here.
             Then::History(request) => self.on_history_failed(cx, request, page_failure(response)),
             Then::Closed(request) => self.on_closed_failed(cx, *request, page_failure(response)),
@@ -2831,6 +2925,11 @@ impl Venue for BybitLinear {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        // Every answer, the auth clock read's included, calibrates here.
+        Self::observe_answer_time(cx, response.body);
+        if let Then::AuthClock = pending.then {
+            return self.settle_auth_clock(cx);
+        }
         if matches!(&pending.then, Then::RefreshMarkets(_)) {
             self.select_category(pending.category);
             let Then::RefreshMarkets(page) = pending.then else {
@@ -2919,6 +3018,7 @@ impl Venue for BybitLinear {
         pending: Pending,
         response: Response<'_>,
     ) {
+        Self::observe_answer_time(cx, response.body);
         // A native kline refusal is typed; a success without its list proves nothing.
         if let Then::Candles(read) = pending.then {
             if venue_error(&response).is_some() {
@@ -3020,6 +3120,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Then::AuthClock = pending.then {
+            return self.settle_auth_clock(cx);
+        }
         // The engine seals an ordinary preflight or plan unless an
         // independent-order leg retires alone.
         if let Then::Ordinary(request) = pending.then {
@@ -3065,6 +3168,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Then::AuthClock = pending.then {
+            return self.settle_auth_clock(cx);
+        }
         if let Then::Ordinary(request) = pending.then {
             // Transport loss arrives typed through on_http_failed; this is a
             // pre-transport (signing) failure.
