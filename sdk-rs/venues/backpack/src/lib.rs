@@ -819,6 +819,13 @@ impl Venue for Backpack {
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.released_socket_snapshots(cx, epoch, pending)
     }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
+    }
     fn encode_socket_interests(
         &self,
         _store: &safe_cex_engine::Store,

@@ -28,7 +28,7 @@ use safe_cex_engine::socket_lifecycle::{
 };
 use safe_cex_engine::{
     Command, CredentialSlot, Cx, ErrorKind, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, Venue, VenueError, json, num,
+    SubscriptionTopic, TimerId, Venue, VenueError, json, num,
 };
 use serde_json::value::RawValue;
 use sign::Version;
@@ -209,6 +209,14 @@ pub struct AsterDex {
     startup: safe_cex_engine::startup::Backoff<bool>,
     interest_cursor: usize,
     interest_fallback: VecDeque<String>,
+}
+
+fn book_topic(symbol: &str) -> String {
+    format!("{}@depth20@100ms", symbol.to_ascii_lowercase())
+}
+
+fn candle_topic(symbol: &str, interval: Interval) -> String {
+    format!("{}@kline_{interval}", symbol.to_ascii_lowercase())
 }
 
 fn slot_index(slot: CredentialSlot) -> usize {
@@ -472,20 +480,27 @@ impl AsterDex {
     /// encodes only the deltas while connected.
     fn public_interests(&self) -> Vec<SocketInterest> {
         let mut topics = vec!["!ticker@arr".to_owned(), "!markPrice@arr@1s".to_owned()];
+        topics.extend(self.books.keys().map(|symbol| book_topic(symbol)));
         topics.extend(
-            self.books
+            self.candles
                 .keys()
-                .map(|symbol| format!("{}@depth20@100ms", symbol.to_ascii_lowercase())),
-        );
-        topics.extend(
-            self.candles.keys().map(|(symbol, interval)| {
-                format!("{}@kline_{interval}", symbol.to_ascii_lowercase())
-            }),
+                .map(|(symbol, interval)| candle_topic(symbol, *interval)),
         );
         topics
             .into_iter()
             .map(SocketInterest::from_wire_args)
             .collect()
+    }
+
+    /// The public feed and interest key `topic` streams on.
+    fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => book_topic(symbol),
+            SubscriptionTopic::Candles { symbol, interval } => {
+                supported(*interval).then(|| candle_topic(symbol, *interval))?
+            }
+        };
+        Some((self.public.feed?, key))
     }
 
     fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1015,6 +1030,14 @@ impl Venue for AsterDex {
         } else {
             Err(SocketError::Stale)
         }
+    }
+
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
     }
 
     /// One `{"method","params","id"}` frame per batch, split only to stay under

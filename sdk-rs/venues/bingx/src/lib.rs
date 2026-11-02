@@ -17,8 +17,10 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::selected_read::ReadRole;
+use safe_cex_engine::socket_lifecycle::FeedId;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, Store, SubscriptionTopic,
+    TimerId, Venue, num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
@@ -377,27 +379,32 @@ impl Bingx {
         }
     }
 
-    fn symbol_id(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Option<String> {
-        cx.store.market(symbol).map(|m| m.id.clone())
+    fn symbol_id(store: &Store, symbol: &str) -> Option<String> {
+        store.market(symbol).map(|m| m.id.clone())
     }
 
-    fn topic_book(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Option<String> {
+    fn topic_book(store: &Store, symbol: &str) -> Option<String> {
         Some(format!(
             "market.depth.{}.step0.level100",
-            self.symbol_id(cx, symbol)?
+            Self::symbol_id(store, symbol)?
         ))
     }
-    fn topic_candle(
-        &self,
-        cx: &Cx<'_, Pending>,
-        symbol: &str,
-        interval: Interval,
-    ) -> Option<String> {
+    fn topic_candle(store: &Store, symbol: &str, interval: Interval) -> Option<String> {
         Some(format!(
             "market.kline.{}.{}.trade.utc+8",
-            self.symbol_id(cx, symbol)?,
+            Self::symbol_id(store, symbol)?,
             stream_interval(interval)?
         ))
+    }
+    /// The public feed and interest key `topic` streams on.
+    fn topic_interest(&self, store: &Store, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => Self::topic_book(store, symbol)?,
+            SubscriptionTopic::Candles { symbol, interval } => {
+                Self::topic_candle(store, symbol, *interval)?
+            }
+        };
+        Some((self.public.feed?, key))
     }
 
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
@@ -697,6 +704,13 @@ impl Venue for Bingx {
         event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.socket_event(cx, event)
+    }
+    fn subscription_interest(
+        &self,
+        store: &Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(store, topic)
     }
     fn encode_socket_interests(
         &self,

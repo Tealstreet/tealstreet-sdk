@@ -83,26 +83,26 @@ impl Bingx {
         let mut topics = vec![Interest::from_wire_args("market.contracts")];
         for symbol in self.books.keys() {
             if !matches!(change,Some(Change::RemoveBook(s)) if s==symbol)
-                && let Some(topic) = self.topic_book(cx, symbol)
+                && let Some(topic) = Self::topic_book(cx.store, symbol)
             {
                 topics.push(Interest::from_wire_args(topic));
             }
         }
         for (symbol, interval) in self.candles.keys() {
             if !matches!(change,Some(Change::RemoveCandle(s,i)) if s==symbol && i==interval)
-                && let Some(topic) = self.topic_candle(cx, symbol, *interval)
+                && let Some(topic) = Self::topic_candle(cx.store, symbol, *interval)
             {
                 topics.push(Interest::from_wire_args(topic));
             }
         }
         match change {
             Some(Change::AddBook(s)) => {
-                if let Some(topic) = self.topic_book(cx, s) {
+                if let Some(topic) = Self::topic_book(cx.store, s) {
                     topics.push(Interest::from_wire_args(topic));
                 }
             }
             Some(Change::AddCandle(s, i)) => {
-                if let Some(topic) = self.topic_candle(cx, s, *i) {
+                if let Some(topic) = Self::topic_candle(cx.store, s, *i) {
                     topics.push(Interest::from_wire_args(topic));
                 }
             }

@@ -585,12 +585,12 @@ impl WeexFutures {
             .books
             .iter()
             .filter(|(_, b)| b.last.is_some() && b.retry.is_none())
-            .map(|(s, _)| format!("{s}@depth200"))
+            .map(|(s, _)| socket_codec::book_topic(s))
             .collect();
         desired.extend(
             self.candles
                 .keys()
-                .map(|(s, i)| format!("{s}@kline_{i}_LAST_PRICE")),
+                .map(|(s, i)| socket_codec::candle_topic(s, *i)),
         );
         desired.sort();
         let capacity = 90.min(100usize.saturating_sub(desired.len()));
@@ -749,6 +749,13 @@ impl Venue for WeexFutures {
         event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.socket_event(cx, event)
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn encode_socket_interests(
         &self,
