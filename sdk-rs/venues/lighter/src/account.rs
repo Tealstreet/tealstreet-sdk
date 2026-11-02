@@ -83,6 +83,9 @@ struct Connection {
     last_payload: Option<f64>,
     last_recovery: Option<f64>,
     recovery_started: Option<f64>,
+    /// Early failures that read as an IP restriction; three switch to `?readonly=true`.
+    read_only_failures: u32,
+    read_only: bool,
     supervisor: Supervisor,
 }
 impl Default for Connection {
@@ -94,6 +97,8 @@ impl Default for Connection {
             last_payload: None,
             last_recovery: None,
             recovery_started: None,
+            read_only_failures: 0,
+            read_only: false,
             supervisor: Supervisor::new(Config {
                 connect_timeout_ms: 180_000.0,
                 idle_timeout_ms: 180_000.0,
@@ -1072,12 +1077,18 @@ impl Lighter {
         }
     }
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.connection.read_only {
+            // Legacy's degraded cadence; set before connecting so no live ping is rearmed.
+            self.account.connection.supervisor.set_ping_interval(cx, Some(20_000.0));
+        }
         self.account.connection.open = false;
         self.account.connection.supervisor.connecting(cx);
         self.account.connection.socket = Some(
             cx.connect(
-                safe_cex_engine::SocketSpec::new(self.ws_url())
-                    .channel(safe_cex_engine::SocketChannel::Private),
+                safe_cex_engine::SocketSpec::new(
+                    self.socket_url(self.account.connection.read_only),
+                )
+                .channel(safe_cex_engine::SocketChannel::Private),
             ),
         );
     }
@@ -1149,6 +1160,7 @@ impl Lighter {
         if self.account.connection.socket != Some(socket) {
             return false;
         }
+        self.note_private_close(cx, code);
         self.account.connection.open = false;
         self.account.connection.socket = None;
         let connection = &self.account.connection;
@@ -1157,6 +1169,28 @@ impl Lighter {
         self.account.connection.supervisor.retry_after(cx, minimum);
         self.trade_stream_lost(cx);
         true
+    }
+    /// Legacy lighter.ws-private.ts: a handshake that failed, or opened and closed
+    /// within 10 s with no account stream, as 1006 or a 1008 restriction.
+    fn note_private_close(&mut self, cx: &mut Cx<'_, Pending>, code: u16) {
+        let connection = &mut self.account.connection;
+        let early = connection.open
+            && connection.last_payload.is_none()
+            && cx.now - connection.connected_at <= 10_000.0;
+        let restricted = matches!(code, 1006 | 1008) && (!connection.open || early);
+        if !restricted || connection.read_only || self.options.ws_routed {
+            return;
+        }
+        connection.read_only_failures += 1;
+        if connection.read_only_failures < 3 {
+            return;
+        }
+        connection.read_only = true;
+        cx.notice(
+            Level::Warn,
+            code::STREAM_UNAVAILABLE,
+            "Lighter georestrictions detected; connectivity status is degraded. Private updates may rely on read-only/REST fallback from this IP. Use a VPN or Tealstreet WS proxy; account tier changes will not fix this.",
+        );
     }
     // Payload staleness is checked on the same 10s cadence as the heartbeat.
     fn private_heartbeat(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -1176,6 +1210,7 @@ impl Lighter {
             180_000.0
         };
         if payload_age >= stale_after
+            && !connection.read_only
             && connection.recovery_started.is_none()
             && connection
                 .last_recovery
@@ -2522,6 +2557,7 @@ impl Lighter {
         if meaningful {
             self.account.connection.last_payload = Some(cx.now);
             self.account.connection.recovery_started = None;
+            self.account.connection.read_only_failures = 0;
             self.account.revision += 1;
             self.schedule_heal(cx);
         }

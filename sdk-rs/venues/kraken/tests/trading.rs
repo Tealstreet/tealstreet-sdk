@@ -1528,7 +1528,7 @@ fn a_trailing_stop_amend_still_refuses() {
 }
 
 #[test]
-fn an_amend_sends_the_unfilled_size_not_the_total() {
+fn an_amend_sends_the_total_under_absolute_quantity_mode() {
     let (mut e, socket) = ready();
     inject(&mut e, "old", OrderType::Limit, None);
     message(&mut e, socket, NOW, &json!({"feed":"open_orders","order":{"order_id":"old","symbol":"PF_XBTUSD","type":"lmt","direction":1,"qty":8.0,"filled":5.0,"limit_price":90}}).to_string());
@@ -1543,7 +1543,8 @@ fn an_amend_sends_the_unfilled_size_not_the_total() {
         },
     );
     let r = http(&mut e, "editorder");
-    assert_eq!(param(&r, "size").unwrap(), "8");
+    assert_eq!(param(&r, "qtyMode").unwrap(), "ABSOLUTE");
+    assert_eq!(param(&r, "size").unwrap(), "13");
 }
 
 #[test]
@@ -1729,4 +1730,66 @@ fn an_unlisted_send_status_stays_unknown_and_clears_on_the_next_read() {
         },
     );
     http(&mut e, "sendorder");
+}
+
+/// Kraken's sendStatus enum lists partiallyFilled: the entry is live, so its brackets follow.
+#[test]
+fn a_partially_filled_entry_still_gets_its_stop() {
+    let (mut e, _) = ready();
+    let mut o = limit();
+    o.stop_loss = Some(90.0);
+    place(&mut e, vec![o]);
+    let entry = http(&mut e, "sendorder");
+    ack(&mut e, &entry, "entry", "partiallyFilled");
+    let sl = http(&mut e, "sendorder");
+    assert_eq!(param(&sl, "orderType").unwrap(), "stp");
+    assert_eq!(param(&sl, "reduceOnly").unwrap(), "true");
+    ack(&mut e, &sl, "stop", "placed");
+    assert_eq!(done(&mut e).unwrap(), r#"["entry","stop"]"#);
+}
+
+#[test]
+fn an_amended_size_is_rounded_to_the_step() {
+    let (mut e, _) = ready();
+    inject(&mut e, "old", OrderType::Limit, None);
+    let mut order = e.store().order("old").unwrap().clone();
+    order.amount = 0.3;
+    order.filled = 0.1;
+    order.remaining = 0.2;
+    e.store_mut().upsert_order(order);
+    command(
+        &mut e,
+        Command::AmendOrder {
+            command: 8,
+            id: "old".into(),
+            price: None,
+            amount: Some(0.3),
+        },
+    );
+    let r = http(&mut e, "editorder");
+    // Kraken's qtyMode ABSOLUTE: the total, fills included, so a fill not yet seen cannot grow it.
+    assert_eq!(param(&r, "qtyMode").unwrap(), "ABSOLUTE");
+    assert_eq!(param(&r, "size").unwrap(), "0.3");
+}
+
+/// An order already filled or gone cannot be cancelled, and that is not a failure.
+#[test]
+fn a_cancel_of_an_order_already_gone_is_done() {
+    for body in [
+        json!({"result":"success","cancelStatus":{"status":"notFound"}}),
+        json!({"result":"success","cancelStatus":{"status":"filled","order_id":"a"}}),
+    ] {
+        let (mut e, _) = ready();
+        inject(&mut e, "a", OrderType::Limit, None);
+        command(
+            &mut e,
+            Command::CancelOrders {
+                command: 8,
+                ids: vec!["a".into()],
+            },
+        );
+        let r = http(&mut e, "cancelorder");
+        reply(&mut e, &r, 200, &body.to_string());
+        assert!(done(&mut e).is_ok(), "{body}");
+    }
 }

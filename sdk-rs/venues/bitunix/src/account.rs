@@ -253,6 +253,8 @@ pub struct AccountState {
     pub login_answered: bool,
     /// The private socket's login succeeded since it last opened.
     pub private_live: bool,
+    /// A private event moved margin: the next tick reads balance even when slowed.
+    pub balance_due: bool,
 }
 /// The TS Bitunix tick (exchange metadata): balance every tick, the full
 /// account every 32 ticks.
@@ -979,11 +981,14 @@ impl BitunixFutures {
                     .sockets
                     .iter()
                     .any(|s| s.active && s.opened && matches!(s.feed, Feed::Private));
-            let due = !live || self.account.count.is_multiple_of(LIVE_BALANCE_TICKS);
+            let due = !live
+                || self.account.balance_due
+                || self.account.count.is_multiple_of(LIVE_BALANCE_TICKS);
             if due
                 && (self.account.balance_answered == self.account.serials[0]
                     || cx.now - self.account.balance_polled_at >= BALANCE_STALL_MS)
             {
+                self.account.balance_due = false;
                 self.read_axis(cx, Axis::Balance);
             }
             self.account.count += 1;
@@ -1789,10 +1794,12 @@ impl BitunixFutures {
         let text = raw.get();
         match operation {
             "balance" => {
+                self.account.balance_due = true;
                 self.account.generations[0] += 1;
                 self.debounce(cx, Axis::Balance);
             }
             "position" => {
+                self.account.balance_due = true;
                 if let Ok(p) = serde_json::from_str::<PositionRow<'_>>(text) {
                     let side = if p.side.eq_ignore_ascii_case("BUY")
                         || p.side.eq_ignore_ascii_case("LONG")
@@ -1814,6 +1821,7 @@ impl BitunixFutures {
                 self.debounce(cx, Axis::Positions);
             }
             "order" | "tpsl" => {
+                self.account.balance_due = true;
                 let tpsl = m.ch == "tpsl";
                 if let Ok(o) = serde_json::from_str::<OrderRow<'_>>(text) {
                     let raw = o.order_id.as_ref();

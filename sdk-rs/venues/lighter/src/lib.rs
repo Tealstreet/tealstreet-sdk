@@ -46,6 +46,9 @@ pub struct Options {
     pub api_key_index: Option<String>,
     pub integrator_account_index: Option<u64>,
     pub stop_slippage_pct: f64,
+    /// The host sends this account's sockets through Tealstreet's WS route, where
+    /// read-only promotion does not apply: legacy promoted the direct route only.
+    pub ws_routed: bool,
 }
 safe_cex_crypto::redacted_debug!(Options);
 
@@ -63,6 +66,7 @@ impl Default for Options {
             api_key_index: None,
             integrator_account_index: None,
             stop_slippage_pct: 1.0,
+            ws_routed: false,
         }
     }
 }
@@ -123,6 +127,11 @@ const TICKER_TOPICS_PER_SECOND: usize = 2;
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
+    connected_at: f64,
+    received: bool,
+    /// Failed direct-route connects; two switch the socket to `?readonly=true`.
+    failures: u32,
+    read_only: bool,
     supervisor: Supervisor,
 }
 impl Default for Connection {
@@ -130,6 +139,10 @@ impl Default for Connection {
         Self {
             socket: None,
             open: false,
+            connected_at: 0.0,
+            received: false,
+            failures: 0,
+            read_only: false,
             supervisor: Supervisor::new(Config {
                 connect_timeout_ms: 120_000.0,
                 idle_timeout_ms: 120_000.0,
@@ -223,6 +236,39 @@ impl Lighter {
     fn chain_id(&self) -> u32 {
         sign::chain_id(self.options.robinhood, self.options.testnet)
     }
+    /// Legacy lighter.ws-public.ts: a connect that failed, closed early without a
+    /// message, or closed as restricted counts; two on the direct route go read-only.
+    fn note_public_close(&mut self, cx: &mut Cx<'_, Pending>, code: u16) {
+        let public = &mut self.public;
+        let early = public.open && !public.received && cx.now - public.connected_at <= 12_000.0;
+        let failed = !public.open || early || matches!(code, 1006 | 1008 | 1011 | 1013);
+        public.failures = if failed {
+            public.failures + 1
+        } else if code == 1000 {
+            0
+        } else {
+            public.failures.saturating_sub(1)
+        };
+        if failed && public.failures >= 2 && !public.read_only && !self.options.ws_routed {
+            public.read_only = true;
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::WS_RECONNECT,
+                format!(
+                    "Lighter public WS switching to readonly direct route after {} direct-route failures",
+                    public.failures
+                ),
+            );
+        }
+    }
+    /// Legacy's degraded mode: Lighter answers a restricted IP read-only on this query.
+    fn socket_url(&self, read_only: bool) -> String {
+        if read_only {
+            format!("{}?readonly=true", self.ws_url())
+        } else {
+            self.ws_url().into()
+        }
+    }
     fn ws_url(&self) -> &'static str {
         match (self.options.robinhood, self.options.testnet) {
             (false, false) => "wss://mainnet.zklighter.elliot.ai/stream",
@@ -293,7 +339,7 @@ impl Lighter {
         }
         self.public.socket = Some(
             cx.connect(
-                safe_cex_engine::SocketSpec::new(self.ws_url())
+                safe_cex_engine::SocketSpec::new(self.socket_url(self.public.read_only))
                     .channel(safe_cex_engine::SocketChannel::Public),
             ),
         );
@@ -930,6 +976,8 @@ impl Venue for Lighter {
             return;
         }
         self.public.open = true;
+        self.public.connected_at = cx.now;
+        self.public.received = false;
         self.public.supervisor.opened(cx);
         self.topic(cx, "subscribe", "market_stats/all");
         // Displayed symbols first: the full list takes about a minute at this pace.
@@ -973,6 +1021,7 @@ impl Venue for Lighter {
             return;
         }
         self.public.supervisor.received(cx.now);
+        self.public.received = true;
         let Ok(frame) = serde_json::from_str::<Envelope<'_>>(text) else {
             return;
         };
@@ -1082,13 +1131,14 @@ impl Venue for Lighter {
             _ => {}
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.account_close(cx, socket, _code) {
+    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
+        if self.account_close(cx, socket, code) {
             return;
         }
         if self.public.socket != Some(socket) {
             return;
         }
+        self.note_public_close(cx, code);
         self.public.socket = None;
         self.public.open = false;
         self.ticker_topics.clear();

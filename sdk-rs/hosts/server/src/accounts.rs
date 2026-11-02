@@ -439,6 +439,10 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
             json!({"address": builder.address, "feeTenthsBps": builder.fee_tenths_bps as u32}),
         );
     }
+    // Lighter promotes a failing direct socket to read-only, never a routed one.
+    if init.exchange_name.starts_with("lighter") && init.tealstreet_ws_route == Some(true) {
+        options.insert("lighterWsRoute".into(), true.into());
+    }
     if public_only {
         options.insert("publicDataOnly".into(), true.into());
     }
@@ -2292,6 +2296,57 @@ pub(crate) mod tests {
                 Some(format!("bybitSiteId applies only to Bybit accounts, not {venue}").as_str())
             );
             assert_eq!(refuse_misplaced_site(&site(venue, "")), Ok(()));
+        }
+    }
+
+    #[test]
+    fn hosted_lighter_tells_the_engine_its_sockets_are_routed() {
+        for (venue, route, expected) in [
+            ("lighter", Some(true), Some(true)),
+            ("lighter-robinhood", Some(true), Some(true)),
+            ("lighter", None, None),
+            ("okx", Some(true), None),
+        ] {
+            let init = InitPayload {
+                account_name: "a".into(),
+                exchange_name: venue.into(),
+                key: "k".into(),
+                tealstreet_ws_route: route,
+                ..InitPayload::default()
+            };
+            let options = engine_options(&init, false);
+            assert_eq!(options["lighterWsRoute"].as_bool(), expected, "{venue} {route:?}");
+        }
+    }
+
+    /// Legacy sent Lighter REST through the public CORS proxy; Hosted keeps that, unauthorized.
+    #[test]
+    fn hosted_lighter_rest_goes_through_the_public_cors_proxy() {
+        for (venue, testnet, proxy, expected) in [
+            ("lighter", None, None, true),
+            ("lighter", None, Some(false), true),
+            ("lighter", Some(true), None, true),
+            ("lighter-robinhood", None, None, true),
+            ("lighter-robinhood", Some(true), None, false),
+        ] {
+            let init = InitPayload {
+                account_name: "a".into(),
+                exchange_name: venue.into(),
+                key: "k".into(),
+                tealstreet_proxy: proxy,
+                testnet,
+                ..InitPayload::default()
+            };
+            let plan = routing_plan(&init, false).unwrap();
+            let http = serde_json::to_value(&plan).unwrap()["http"].clone();
+            let prefix = http["prefix"].as_str().unwrap();
+            let label = format!("{venue} {testnet:?} {proxy:?}: {prefix}");
+            if expected {
+                assert!(prefix.ends_with("/api/public_proxy"), "{label}");
+            } else {
+                assert_eq!(prefix, "", "{label}");
+            }
+            assert_eq!(http["authorize"], false, "{venue} {testnet:?} {proxy:?}");
         }
     }
 
