@@ -1017,7 +1017,7 @@ fn cancel_symbol_rejects_retained_loaded_snapshot_while_disconnected() {
             symbol: "BTCUSDT".into(),
         },
     );
-    assert_eq!(done(&sweep(&mut e, 1001., a)).unwrap(), "[]");
+    assert_eq!(done(&a).unwrap(), "[]");
     assert!(e.store().loaded().orders);
     e.handle(1001., Event::WsClosed { socket, code: 1006 });
     e.drain_actions().for_each(drop);
@@ -1621,7 +1621,6 @@ fn cancel_all_waits_for_creating_order_and_cancels_native_ack_even_when_init() {
             &cancel,
             json!({"code":0,"data":{"orderID":"native-accepted","ordStatus":"Canceled"}}),
         );
-        let a = sweep(&mut e, 1001., a);
         assert!(a.iter().any(|a| matches!(
             a,
             Action::Notice(Notice::CommandDone {
@@ -1647,12 +1646,12 @@ fn rejection_engine(rows: Vec<Value>) -> Engine<PhemexPerpetuals> {
     e
 }
 
-fn symbol_cancel(e: &mut Engine<PhemexPerpetuals>, id: u32) -> Vec<Action> {
+fn account_cancel(e: &mut Engine<PhemexPerpetuals>, id: u32) -> Vec<Action> {
     command(
         e,
-        Command::CancelSymbolOrders {
+        Command::Venue {
             command: id,
-            symbol: "BTCUSDT".into(),
+            action: safe_cex_engine::VenueAction::CancelAccountOrders,
         },
     )
 }
@@ -1663,7 +1662,7 @@ fn venue_cancel(a: &[Action], untriggered: &str) -> HttpRequest {
     let r = sent[0].clone();
     assert_eq!(r.method, Method::Delete);
     assert!(r.url.contains("/g-orders/all?"), "{}", r.url);
-    assert_eq!(p(&r, "symbol").as_deref(), Some("BTCUSDT"));
+    assert_eq!(p(&r, "symbol"), None, "every symbol: {}", r.url);
     assert_eq!(p(&r, "untriggered").as_deref(), Some(untriggered));
     r
 }
@@ -1679,16 +1678,17 @@ fn settled(a: &[Action], id: u32) -> bool {
     })
 }
 
-// Live: a bid the store had not seen survived Nuke's symbol cancel.
+// Live: a bid the store had not seen survived Nuke's symbol cancels.
 #[test]
-fn symbol_cancel_reaches_the_venue_with_no_order_in_the_store() {
+fn a_nuke_account_cancel_sends_both_venue_cancels_without_a_symbol() {
     for answer in [
         json!({"code":0,"data":0,"msg":""}),
         json!({"code":0,"data":2,"msg":""}),
+        json!({"code":0,"data":null,"msg":""}),
         json!({"code":10002,"data":null,"msg":"OM_ORDER_NOT_FOUND"}),
     ] {
-        let mut e = rejection_engine(vec![]);
-        let a = symbol_cancel(&mut e, 80);
+        let mut e = rejection_engine(vec![live_row("old-live")]);
+        let a = account_cancel(&mut e, 80);
         assert!(!settled(&a, 80));
         let conditional = venue_cancel(&a, "true");
         let a = respond(&mut e, &conditional, answer.clone());
@@ -1701,39 +1701,16 @@ fn symbol_cancel_reaches_the_venue_with_no_order_in_the_store() {
 }
 
 #[test]
-fn symbol_cancel_sends_row_cancels_then_the_venue_cancels() {
-    let mut e = rejection_engine(vec![live_row("old-live")]);
-    let a = symbol_cancel(&mut e, 81);
-    let row = writes(&a);
-    assert_eq!(row.len(), 1);
-    assert!(row[0].url.contains("/g-orders/cancel?"), "{}", row[0].url);
-    assert_eq!(p(&row[0], "orderID").as_deref(), Some("old-live"));
-    let a = respond(
-        &mut e,
-        &row[0],
-        json!({"code":0,"data":{"orderID":"old-live","ordStatus":"Canceled"}}),
-    );
-    assert!(!settled(&a, 81));
-    assert_eq!(
-        e.store().order("old-live").unwrap().status,
-        OrderStatus::Canceled
-    );
-    let conditional = venue_cancel(&a, "true");
-    let a = respond(&mut e, &conditional, json!({"code":0,"data":0}));
-    let active = venue_cancel(&a, "false");
-    let a = respond(&mut e, &active, json!({"code":0,"data":0}));
-    assert_eq!(done(&a).unwrap(), "[]");
-}
-
-#[test]
-fn a_failed_venue_cancel_fails_the_symbol_cancel() {
+fn a_failed_account_cancel_fails_the_command() {
     for (status, body) in [
         (200, r#"{"code":10500,"msg":"internal","data":null}"#),
+        (200, r#"{"code":11085,"msg":"duplicate","data":null}"#),
+        (200, r#"{"code":11107,"msg":"cross engine","data":null}"#),
         (200, r#"{"code":0,"data":{"rows":[]}}"#),
         (503, r#"{"code":503,"msg":"busy"}"#),
     ] {
         let mut e = rejection_engine(vec![]);
-        let a = symbol_cancel(&mut e, 82);
+        let a = account_cancel(&mut e, 82);
         let conditional = venue_cancel(&a, "true");
         e.handle(
             1001.,
@@ -1748,11 +1725,49 @@ fn a_failed_venue_cancel_fails_the_symbol_cancel() {
         );
         let a: Vec<_> = e.drain_actions().collect();
         assert!(done(&a).is_err(), "{body}");
+        assert_eq!(
+            failure(&a).outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{body}"
+        );
         assert!(
             !writes(&a).iter().any(|r| r.url.contains("/g-orders/all")),
             "no further venue cancel after a failed one: {body}"
         );
     }
+}
+
+// Legacy Phemex cancelAllOrders cancelled the store's rows only.
+#[test]
+fn a_symbol_cancel_sends_no_venue_cancel_all() {
+    let mut e = rejection_engine(vec![]);
+    let a = command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 83,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert_eq!(done(&a).unwrap(), "[]");
+    let mut e = rejection_engine(vec![live_row("old-live")]);
+    let a = command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 84,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    let row = writes(&a);
+    assert_eq!(row.len(), 1);
+    assert!(row[0].url.contains("/g-orders/cancel?"), "{}", row[0].url);
+    let a = respond(
+        &mut e,
+        &row[0],
+        json!({"code":0,"data":{"orderID":"old-live","ordStatus":"Canceled"}}),
+    );
+    assert!(writes(&a).is_empty(), "{:?}", writes(&a));
+    assert_eq!(done(&a).unwrap(), "[]");
 }
 
 fn cancel_all_after_create_result(value: impl FnOnce(&HttpRequest) -> Value) -> Vec<Action> {
@@ -2239,7 +2254,6 @@ fn queued_cancel_all_continues_after_proven_rejection() {
         &cancel,
         json!({"code":0,"data":{"orderID":"old-live","ordStatus":"Canceled"}}),
     );
-    let a = sweep(&mut e, 1001., a);
     assert!(a.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone {
@@ -2738,25 +2752,6 @@ fn rows(rows: Vec<Value>) -> String {
     json!({"code":0,"data":{"rows":rows}}).to_string()
 }
 
-/// Answers the venue's by-symbol cancels that end a symbol cancel and returns every
-/// other action, so only row and late cancels show as DELETEs.
-fn sweep(e: &mut Engine<PhemexPerpetuals>, now: f64, mut next: Vec<Action>) -> Vec<Action> {
-    let mut all = Vec::new();
-    loop {
-        let venue = deletes(&next)
-            .into_iter()
-            .find(|r| r.url.contains("/g-orders/all?"));
-        all.extend(
-            next.into_iter()
-                .filter(|a| !matches!(a, Action::Http(r) if r.url.contains("/g-orders/all?"))),
-        );
-        let Some(venue) = venue else {
-            return all;
-        };
-        next = reply(e, now, &venue, 200, r#"{"code":0,"data":0,"msg":""}"#);
-    }
-}
-
 fn cancel_all_ids(
     e: &mut Engine<PhemexPerpetuals>,
     now: f64,
@@ -2770,11 +2765,6 @@ fn cancel_all_ids(
             symbol: "BTCUSDT".into(),
         }),
     );
-    let a = if deletes(&a).iter().any(|r| r.url.contains("/g-orders/all?")) {
-        sweep(e, now, a)
-    } else {
-        a
-    };
     let mut ids: Vec<_> = writes(&a)
         .iter()
         .filter(|r| r.method == Method::Delete)
@@ -3015,7 +3005,6 @@ fn transport_timeout_cancel_all_goes_out_now_and_cancels_the_late_landing_after_
         200,
         r#"{"code":0,"data":{"orderID":"old-live","ordStatus":"Canceled"}}"#,
     );
-    let a = sweep(&mut e, 2001., a);
     assert!(a.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone {
@@ -3090,7 +3079,6 @@ fn failed_late_cancel_is_reported_as_an_error() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let a = sweep(&mut e, 2000., a);
     assert_eq!(done(&a), Ok("[]".into()), "nothing known to cancel yet");
     let (timer, wake) = latest_timer(&a).unwrap();
     let a = at(&mut e, wake, Event::TimerFired { timer });
@@ -3187,7 +3175,6 @@ fn lose_then_cancel_all(
             symbol: "BTCUSDT".into(),
         }),
     );
-    let a = sweep(e, now + 2., a);
     assert_eq!(done(&a), Ok("[]".into()));
     latest_timer(&a).expect("read owed after signed expiry")
 }
@@ -3733,4 +3720,12 @@ fn a_terminal_row_does_not_stop_the_live_ones_being_canceled() {
     );
     let r = &writes(&a)[0];
     assert_eq!(p(r, "orderID").as_deref(), Some("live"));
+}
+
+#[test]
+fn a_nuke_cancels_account_wide_because_a_symbol_cancel_misses_unseen_orders() {
+    use safe_cex_engine::Venue;
+    let capabilities = PhemexPerpetuals::new(Default::default()).capabilities();
+    assert!(capabilities.nuke_account_cancel);
+    assert!(capabilities.symbol_cancel_misses_unseen);
 }

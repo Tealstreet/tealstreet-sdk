@@ -548,30 +548,14 @@ fn lost_and_canceled() -> (Engine<PhemexPerpetuals>, Engine<PhemexPerpetuals>) {
         },
     );
     e.drain_actions().for_each(drop);
-    let a = command(
+    command(
         &mut e,
         Command::CancelSymbolOrders {
             command: 2,
             symbol: "BTCUSDT".into(),
         },
     );
-    sweep(&mut e, a);
     (e, source)
-}
-
-/// Answers the venue's by-symbol cancels that end a symbol cancel.
-fn sweep(e: &mut Engine<PhemexPerpetuals>, mut next: Vec<Action>) -> Vec<Action> {
-    let mut all = Vec::new();
-    loop {
-        let sweep = requests(&next)
-            .into_iter()
-            .find(|r| r.url.contains("/g-orders/all?"));
-        all.extend(next);
-        let Some(sweep) = sweep else {
-            return all;
-        };
-        next = respond(e, &sweep, r#"{"code":0,"data":0,"msg":""}"#);
-    }
 }
 
 fn warned_about(actions: &[Action], text: &str) -> bool {
@@ -608,7 +592,6 @@ fn a_lost_placement_ends_once_a_source_frame_covers_its_signed_expiry() {
             symbol: "BTCUSDT".into(),
         },
     );
-    let a = sweep(&mut e, a);
     assert!(
         !warned_about(&a, "caller-1"),
         "no repeated unknown-outcome warning: {a:?}"

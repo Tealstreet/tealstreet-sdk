@@ -254,8 +254,8 @@ enum Call {
         before: Vec<Order>,
         ids: Vec<String>,
     },
-    /// Reaches orders the store has not seen; their rows follow from the stream.
-    CancelSymbol,
+    /// A nuke's venue cancel-all; it names no order, so no row or repair state follows it.
+    CancelAccount,
     Settings {
         symbol: String,
         leverage: Option<f64>,
@@ -939,17 +939,16 @@ impl PhemexPerpetuals {
 
     /// Untriggered first, so no conditional can trigger into an active order after that cancel.
     /// https://github.com/phemex/phemex-api-docs/blob/master/Public-Hedged-Perpetual-API.md#cancelall
-    fn venue_cancel_steps(&self, symbol: &str) -> [Step; 2] {
-        ["true", "false"].map(|untriggered| Step {
-            method: Method::Delete,
-            path: "/g-orders/all",
-            query: query(vec![
-                ("symbol", self.native_symbol(symbol).to_owned()),
-                ("untriggered", untriggered.into()),
-            ]),
-            call: Call::CancelSymbol,
-            replacement: None,
-        })
+    fn account_cancel_steps() -> VecDeque<Step> {
+        ["true", "false"]
+            .map(|untriggered| Step {
+                method: Method::Delete,
+                path: "/g-orders/all",
+                query: query(vec![("untriggered", untriggered.into())]),
+                call: Call::CancelAccount,
+                replacement: None,
+            })
+            .into()
     }
 
     fn amend_plan(
@@ -1445,6 +1444,10 @@ impl PhemexPerpetuals {
                 )
             }
             Command::CancelOrders { command, ids } => (command, self.cancel_plan(cx, ids)),
+            Command::Venue {
+                command,
+                action: safe_cex_engine::VenueAction::CancelAccountOrders,
+            } => (command, Ok(Self::account_cancel_steps())),
             Command::CancelSymbolOrders { command, symbol } => {
                 let ids = cx
                     .store
@@ -1472,10 +1475,7 @@ impl PhemexPerpetuals {
                         if !self.account.orders_ready() {
                             Err("Phemex order snapshot is not loaded; cannot cancel every symbol order".into())
                         } else {
-                            self.cancel_plan(cx, ids).map(|mut steps| {
-                                steps.extend(self.venue_cancel_steps(&symbol));
-                                steps
-                            })
+                            self.cancel_plan(cx, ids)
                         }
                     } else {
                         Err("Phemex market not found".into())
@@ -2011,7 +2011,7 @@ impl PhemexPerpetuals {
             }
             // As its open-order list does, OM_ORDER_NOT_FOUND here means nothing rests.
             if code == ORDER_NOT_FOUND
-                && let Call::CancelSymbol = &request.call
+                && let Call::CancelAccount = &request.call
             {
                 return Ok(());
             }
@@ -2173,7 +2173,7 @@ impl PhemexPerpetuals {
                     }
                 }
                 // Documented `"data":0`: a bare number that names no order.
-                Call::CancelSymbol => {
+                Call::CancelAccount => {
                     let data = env.data.as_ref().map_or("null", |raw| raw.get());
                     if data != "null" && serde_json::from_str::<u64>(data).is_err() {
                         return Err("Phemex malformed cancel-all acknowledgement".into());
