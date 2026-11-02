@@ -1540,6 +1540,17 @@ async fn pump(
     }
 }
 
+/// The engine's notice that startup is still waiting, for the journal too: while held,
+/// the page sees nothing, and a start that never finishes was otherwise silent.
+fn startup_incomplete_line(name: &str, notice: &Value) -> Option<String> {
+    (notice["code"] == safe_cex_engine::log::code::STARTUP_INCOMPLETE).then(|| {
+        format!(
+            "{name} {}",
+            notice["message"].as_str().unwrap_or("startup incomplete")
+        )
+    })
+}
+
 fn notice_to_msg(
     out: &Out,
     name: &str,
@@ -1602,6 +1613,9 @@ fn notice_to_msg(
             let _ = out.send(envelope::msg(name, "error", json!([notice["error"]])));
         }
         ("event" | "accountAuth", _) => {
+            if let Some(line) = startup_incomplete_line(name, notice) {
+                Log::warn(&line);
+            }
             let _ = out.send(envelope::msg(name, "engine-event", notice.clone()));
             if notice["code"] == "order.rejected" && notice["level"] == "error" {
                 let _ = out.send(envelope::msg(name, "error", json!([notice["message"]])));
@@ -2803,6 +2817,18 @@ mod tests {
                 assert_eq!(crate::accounts::tests::signing(&account), Some(7));
             })
             .await;
+    }
+
+    #[test]
+    fn a_startup_still_waiting_is_logged_with_what_it_waits_for() {
+        let waiting = json!({"type": "event", "level": "error", "code": "startup.incomplete",
+            "message": "Startup incomplete: still waiting for markets, tickers"});
+        assert_eq!(
+            startup_incomplete_line("bbbbb", &waiting).as_deref(),
+            Some("bbbbb Startup incomplete: still waiting for markets, tickers")
+        );
+        let other = json!({"type": "event", "code": "order.rejected", "message": "x"});
+        assert_eq!(startup_incomplete_line("bbbbb", &other), None);
     }
 
     #[test]

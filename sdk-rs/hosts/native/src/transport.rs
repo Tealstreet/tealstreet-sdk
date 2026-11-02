@@ -173,6 +173,58 @@ async fn open_socket(
         .map_err(|error| error.to_string())
 }
 
+/// How often one host's failed opens are logged; the line counts those in between.
+const OPEN_FAILURE_LOG_EVERY: Duration = Duration::from_secs(60);
+
+/// Failed venue socket opens by host, so a refusal loop logs once a minute, not per retry.
+#[derive(Default)]
+struct OpenFailures {
+    /// When each host last logged, and its failures since.
+    by_host: std::collections::HashMap<String, (Option<std::time::Instant>, u32)>,
+}
+
+impl OpenFailures {
+    /// The log line for a failed open of `url`, when one is due. The host only: a
+    /// relay URL's query names its upstream and may carry a token.
+    fn note(&mut self, url: &str, error: &str, now: std::time::Instant) -> Option<String> {
+        let host = url
+            .parse::<tokio_tungstenite::tungstenite::http::Uri>()
+            .ok()
+            .and_then(|uri| uri.host().map(str::to_owned))
+            .unwrap_or_else(|| "unparsable url".to_owned());
+        let entry = self.by_host.entry(host.clone()).or_insert((None, 0));
+        entry.1 += 1;
+        if entry
+            .0
+            .is_some_and(|logged| now.duration_since(logged) < OPEN_FAILURE_LOG_EVERY)
+        {
+            return None;
+        }
+        let failures = std::mem::take(&mut entry.1);
+        entry.0 = Some(now);
+        Some(
+            serde_json::json!({
+                "level": "warn",
+                "source": "safe-cex-native",
+                "msg": format!("venue socket open failed: {host}: {error} ({failures} failures since the last line)"),
+            })
+            .to_string(),
+        )
+    }
+}
+
+fn log_open_failure(url: &str, error: &str) {
+    static FAILURES: std::sync::Mutex<Option<OpenFailures>> = std::sync::Mutex::new(None);
+    let line = FAILURES
+        .lock()
+        .unwrap()
+        .get_or_insert_with(OpenFailures::default)
+        .note(url, error, std::time::Instant::now());
+    if let Some(line) = line {
+        eprintln!("{line}");
+    }
+}
+
 const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
 
 fn decode_message(bytes: &[u8]) -> std::io::Result<String> {
@@ -298,7 +350,8 @@ impl Transport for NetworkTransport {
                         },
                         result = &mut opening => match result {
                             Ok(Ok(ws)) => break ws,
-                            _ => { let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                            Ok(Err(error)) => { log_open_failure(&target, &error); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                            Err(_) => { log_open_failure(&target, "timed out after 15s"); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
                         },
                     }
                 };
@@ -394,6 +447,59 @@ impl Transport for NetworkTransport {
 mod security_tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn a_failed_venue_socket_open_is_logged_by_host_at_most_once_a_minute() {
+        let mut failures = OpenFailures::default();
+        let start = std::time::Instant::now();
+        let url = "wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue&token=abc";
+        let line = failures
+            .note(url, "HTTP error: 429 Too Many Requests", start)
+            .unwrap();
+        assert!(
+            line.contains("relay.example") && line.contains("429"),
+            "{line}"
+        );
+        assert!(
+            !line.contains("token") && !line.contains("ts-relay"),
+            "never the URI: {line}"
+        );
+        for second in 1..60 {
+            let at = start + Duration::from_secs(second);
+            assert!(failures.note(url, "timed out after 15s", at).is_none());
+        }
+        let other = failures.note(
+            "wss://other.example/ws",
+            "IO error",
+            start + Duration::from_secs(1),
+        );
+        assert!(other.is_some(), "each host on its own");
+        let again = failures
+            .note(url, "timed out after 15s", start + Duration::from_secs(60))
+            .unwrap();
+        assert!(again.contains("60 failures"), "{again}");
+    }
+
+    /// A refused upgrade names its status: Cloudflare's 429 or 403 is the evidence.
+    #[tokio::test]
+    async fn a_refused_websocket_upgrade_reports_its_http_status() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request).await;
+            let _ = stream
+                .write_all(b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n")
+                .await;
+        });
+        let error = open_socket(&format!("ws://127.0.0.1:{port}/tunnel"), vec![])
+            .await
+            .err()
+            .unwrap();
+        assert!(error.contains("429"), "{error}");
+    }
 
     #[test]
     fn compressed_messages_cannot_expand_past_limit() {
