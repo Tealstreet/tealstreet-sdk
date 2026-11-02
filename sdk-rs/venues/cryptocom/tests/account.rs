@@ -1268,3 +1268,44 @@ fn a_refused_key_ends_the_start_after_its_one_retry() {
     }
     assert_eq!(failures, 1);
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            401,
+            r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist"}"#,
+        ),
+        (
+            200,
+            r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist"}"#,
+        ),
+    ] {
+        let mut h = Harness::new();
+        let mut failures = 0;
+        // Its 40101 is re-signed once before it counts.
+        for _ in 0..2 {
+            let r = h.http("get-positions");
+            h.actions.clear();
+            h.event(Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            });
+            failures += h
+                .actions
+                .iter()
+                .filter(|a| {
+                    matches!(
+                        a,
+                        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                    )
+                })
+                .count();
+        }
+        assert_eq!(failures, 1, "{status} {body}");
+    }
+}

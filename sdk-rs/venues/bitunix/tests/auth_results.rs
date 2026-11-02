@@ -1014,3 +1014,25 @@ fn a_refused_read_key_does_not_end_the_start() {
         Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
     )));
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (200, r#"{"code":10004,"msg":"IP not in whitelist"}"#),
+        (403, r#"{"code":10004,"msg":"IP not in whitelist"}"#),
+        (200, r#"{"code":10003,"msg":"Invalid api key"}"#),
+        (403, "Forbidden"),
+        (401, "Unauthorized"),
+    ] {
+        let (mut e, all) = started(false);
+        let read = http(&all, "/account");
+        let actions = answer(&mut e, &read, 0.0, status, "", body);
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            )),
+            "{status} {body}"
+        );
+    }
+}

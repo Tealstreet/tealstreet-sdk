@@ -169,12 +169,14 @@ export const paradexProtocol = {
     if (['subscribe', 'unsubscribe'].includes(message?.method)) return [JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { channel: message.params.channel } })];
     return [];
   },
+  // The tape recorded the global summary channel. The TS oracle subscribes to it and carries
+  // every frame, as it would live; the engine's per-market channels never receive option rows.
+  notDelivered: (record, impl) => {
+    if (impl !== 'rust' || record.type !== 'ws' || record.binary === undefined) return false;
+    const stream = paradexStream(Uint8Array.from(Buffer.from(record.binary, 'base64')));
+    return Boolean(stream?.startsWith('markets_summary.') && !stream.endsWith('-PERP'));
+  },
   skipFrame: (record) => {
-    // The tape recorded the global summary channel; only perps reach any adapter.
-    if (record.type === 'ws' && record.binary !== undefined) {
-      const stream = paradexStream(Uint8Array.from(Buffer.from(record.binary, 'base64')));
-      return Boolean(stream?.startsWith('markets_summary.') && !stream.endsWith('-PERP'));
-    }
     if (record.type !== 'ws' || typeof record.text !== 'string') return false;
     let frame;
     try { frame = JSON.parse(record.text); } catch { return false; }

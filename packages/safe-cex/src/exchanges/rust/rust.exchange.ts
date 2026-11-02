@@ -409,6 +409,8 @@ export class RustEngineExchange extends BaseExchange {
   private engineNow = (): number => virtualClock.getCurrentTimeMs();
   private engineFailure?: Error;
   private publicFeedDisabled = false;
+  /** Why a start that never finishes has not: a venue answer is not a slow connection. */
+  lastReadFailure?: string;
 
   /** A native trap is terminal for this instance, including after disposal. */
   get isEngineDead(): boolean {
@@ -1462,7 +1464,7 @@ export class RustEngineExchange extends BaseExchange {
             this.noteAuthFailure();
             this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
             for (const wake of this.startupWaiters) wake();
-            this.emitter.emit('deactivate');
+            this.emitter.emit('deactivate', this.startupFailure.message);
           },
           onStartupFailed: (detail) => {
             // Keeps kind/venueCode so start() and validateAccount can branch on them.
@@ -2016,6 +2018,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveEvent = (event: EngineEvent) => {
+    if (event.code === 'request.failed' || event.code === 'auth.rejected') this.lastReadFailure = event.message;
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
     this.emitter.emit('engine-event', event);

@@ -122,6 +122,7 @@ export class ExchangeWorker {
   private _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private _recoveryUpdateIds: StoreData['updateIds'] | undefined;
   private _startTimedOut = false;
+  private _startAnswer: string | undefined;
   private _startRetries = 0;
   /** Runs once, when a retried start finally brings the account up. */
   onStartRetrySucceeded: (() => void) | undefined;
@@ -392,7 +393,9 @@ export class ExchangeWorker {
       const timeoutPromise = new Promise<never>((_, reject) => {
         startupTimeout = setTimeout(() => {
           this._startTimedOut = isRust;
-          reject(new Error(`Exchange start timed out after ${startTimeoutMs / 1000}s`));
+          const answered = (this._exchange as { lastReadFailure?: string } | undefined)?.lastReadFailure;
+          this._startAnswer = answered;
+          reject(new Error(`Exchange start timed out after ${startTimeoutMs / 1000}s${answered ? `; ${answered}` : ''}`));
         }, startTimeoutMs);
       });
 
@@ -1214,7 +1217,9 @@ export class ExchangeWorker {
     this._ctx.postMessage({
       op: 'warning',
       data: [
-        `${this._exchangeName} is still loading on a slow connection; retrying in ${delay / 1000}s.`,
+        this._startAnswer
+          ? `${this._exchangeName} did not load this account; retrying in ${delay / 1000}s. ${this._startAnswer}`
+          : `${this._exchangeName} is still loading on a slow connection; retrying in ${delay / 1000}s.`,
         { forceToast: true },
       ],
     });
@@ -1373,7 +1378,7 @@ export class ExchangeWorker {
       if (isCurrent()) this._ctx.postMessage({ op: 'ws-reconnected' });
     });
 
-    this._exchange!.on('deactivate', () => {
+    this._exchange!.on('deactivate', (refusal?: string) => {
       if (!isCurrent()) return;
       this.log('info', `Exchange emitted deactivate event: ${this._exchangeName}`);
       // Dispose through the worker so any in-flight start() gets cancelled.
@@ -1381,7 +1386,7 @@ export class ExchangeWorker {
       this._exchange = null;
       this._clearRuntimePipeline();
       // Notify main thread of deactivation
-      this._ctx.postMessage({ op: 'deactivate-status', data: true });
+      this._ctx.postMessage({ op: 'deactivate-status', data: true, refusal: refusal ?? 'The exchange refused this key.' });
     });
   }
 }

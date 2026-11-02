@@ -403,3 +403,20 @@ fn fractional_socket_codes_that_round_to_terminal_codes_still_reconnect() {
         }
     }
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (400, r#"{"code":"40018","msg":"Invalid IP","data":null}"#),
+        (200, r#"{"code":"40018","msg":"Invalid IP","data":null}"#),
+        (
+            401,
+            r#"{"code":"40006","msg":"Invalid ACCESS_KEY","data":null}"#,
+        ),
+    ] {
+        let mut h = expecting(keyed());
+        h.respond(SETTINGS, status, body);
+        run_for(&mut h, 120_000.);
+        assert_eq!(h.startup_failures.len(), 1, "{status} {body}");
+    }
+}
