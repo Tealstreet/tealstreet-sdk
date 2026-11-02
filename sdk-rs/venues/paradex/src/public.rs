@@ -117,6 +117,8 @@ impl Request {
         read.failed(cx, error);
     }
 }
+const MAX_SUBSCRIPTIONS: i64 = 42900;
+
 #[derive(Default)]
 pub(crate) struct Public {
     socket: Option<SocketId>,
@@ -369,9 +371,16 @@ impl Paradex {
         {
             return self.public.books.contains_key(s);
         }
+        if let Some(s) = channel.strip_prefix("trades.") {
+            return self.charted(s);
+        }
         channel
             .split_once('.')
             .is_some_and(|(_, s)| cx.store.market(s).is_some())
+    }
+    // Trades feed candles; summaries already carry last price for every market.
+    fn charted(&self, symbol: &str) -> bool {
+        self.public.candles.keys().any(|(s, _)| s == symbol)
     }
     fn retry_subscription(&mut self, cx: &mut Cx<'_, Pending>, sub: Subscription) {
         if sub.attempt < 2 && self.interested(cx, &sub.channel) {
@@ -400,7 +409,8 @@ impl Paradex {
         for s in &symbols {
             self.public_subscribe(cx, "subscribe", format!("bbo.{s}"), 0);
         }
-        for s in &symbols {
+        let charted: Vec<_> = symbols.iter().filter(|s| self.charted(s)).collect();
+        for s in charted {
             self.public_subscribe(cx, "subscribe", format!("trades.{s}"), 0);
         }
         for s in &symbols {
@@ -470,7 +480,10 @@ impl Paradex {
                         code::SUBSCRIPTION_REJECTED,
                         format!("Paradex subscription failed: {}", error.message),
                     );
-                    self.retry_subscription(cx, sub);
+                    // The cap holds on every reconnect, so recovering would only loop.
+                    if error.code != MAX_SUBSCRIPTIONS {
+                        self.retry_subscription(cx, sub);
+                    }
                 }
             }
             return;
@@ -1535,6 +1548,10 @@ impl Paradex {
                     state.subscribers += 1;
                     return None;
                 }
+                // An invalid clock schedules nothing; trade-silence recovery subscribes later.
+                if cx.now.is_finite() && !self.charted(&symbol) {
+                    self.public_subscribe(cx, "subscribe", format!("trades.{symbol}"), 0);
+                }
                 self.public.generation += 1;
                 let generation = self.public.generation;
                 let revision = 0;
@@ -1576,6 +1593,14 @@ impl Paradex {
                             cx.clear_timer(t);
                         }
                         self.public.candles.remove(&key);
+                        if !self.charted(&key.0) {
+                            self.public_subscribe(
+                                cx,
+                                "unsubscribe",
+                                format!("trades.{}", key.0),
+                                0,
+                            );
+                        }
                     }
                 }
             }

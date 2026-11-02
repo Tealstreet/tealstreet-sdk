@@ -1752,3 +1752,68 @@ fn a_refused_bracket_leg_is_reported_with_the_entry_as_partial() {
     );
     assert!(h.result(9).is_err());
 }
+
+fn with_untriggered_stop() -> Harness {
+    let mut h = private();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: private });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_MARKET","status":"UNTRIGGERED","side":"SELL","size":"2","remaining_size":"2","price":"95","trigger_price":"90","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000}}}"#});
+    h.collect();
+    h
+}
+
+#[test]
+fn a_stop_replacement_with_unknown_outcome_says_the_stop_may_be_gone() {
+    let mut h = with_untriggered_stop();
+    h.command(Command::AmendOrder {
+        command: 13,
+        id: "123".into(),
+        price: Some(91.),
+        amount: None,
+    });
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let place = h.take("/orders");
+    h.respond(place, 503, "");
+    let error = h.result(13).unwrap_err();
+    assert!(error.contains("may have no stop"), "{error}");
+    assert!(error.contains("Check Open Orders"), "{error}");
+}
+
+#[test]
+fn cancel_all_still_sweeps_the_market_when_a_stop_delete_fails() {
+    let mut h = with_untriggered_stop();
+    h.command(Command::CancelSymbolOrders {
+        command: 12,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    let stop = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(
+        stop,
+        429,
+        r#"{"error":"RATE_LIMIT_EXCEEDED","message":"rate limit exceeded"}"#,
+    );
+    let all = take_method(&mut h, Method::Delete, "/orders?market=");
+    h.respond(all, 200, r#"{"message":"cancel requests queued"}"#);
+    assert!(h.result(12).is_err(), "the stop may still be live");
+}
