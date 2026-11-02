@@ -84,9 +84,10 @@ fn ready_identity_policy(
     policy: safe_cex_engine::PublicFeedPolicy,
     hip_meta: &str,
 ) -> (Engine<Hyperliquid>, SocketId, Vec<String>) {
-    let (signer, identities) = agent(TEST_SECRET);
+    let secret = test_agent_secret(TEST_SECRET);
+    let (signer, identities) = agent(&secret);
     let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+        key: Some(safe_cex_crypto::ethereum::private_key_address(&secret).unwrap()),
         credentials: identities.primary.clone(),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         builder,
@@ -218,6 +219,17 @@ pub fn failures<V: safe_cex_engine::Venue>(
         .collect()
 }
 
+/// `scalar` as this test's own agent key, named by its libtest thread. The engine shares
+/// one nonce sequence per agent per process, so tests on one agent supersede each other.
+pub fn test_agent_secret(scalar: &str) -> String {
+    let test = std::thread::current();
+    let name = test.name().expect("libtest names each test thread");
+    let seed = [name.as_bytes(), b"\0", scalar.as_bytes()].concat();
+    format!(
+        "0x{}",
+        safe_cex_crypto::hex(&safe_cex_crypto::sha256(&seed))
+    )
+}
 pub const TEST_SECRET: &str = "0x0123456789012345678901234567890123456789012345678901234567890123";
 pub fn agent(
     scalar: &str,
@@ -236,7 +248,15 @@ pub fn agent(
 }
 
 pub fn private_engine(mut options: Options, scalar: String, spot: bool) -> Engine<Hyperliquid> {
-    let (provider, identities) = agent(&scalar);
+    let secret = test_agent_secret(&scalar);
+    let address = safe_cex_crypto::ethereum::private_key_address;
+    // A key naming the given scalar's wallet keeps naming this test's agent.
+    if let (Some(key), Ok(given)) = (options.key.as_mut(), address(&scalar))
+        && key.eq_ignore_ascii_case(&given)
+    {
+        *key = address(&secret).unwrap();
+    }
+    let (provider, identities) = agent(&secret);
     options.credentials = identities.primary.clone();
     let mut engine = safe_cex_engine::test_support::seeded_engine(if spot {
         Hyperliquid::new_spot(options)
