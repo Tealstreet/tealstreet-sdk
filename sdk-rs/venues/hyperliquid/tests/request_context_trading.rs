@@ -1331,7 +1331,12 @@ fn deferred_full_position_trigger_succeeds_without_an_order_id() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert_eq!(results(&actions, OWNER), vec![Ok("[]".into())]);
+    // A rested full-position trigger has no oid; its cloid is the pending id (#2860).
+    let cloid = wire["action"]["orders"][0]["c"].as_str().unwrap();
+    assert_eq!(
+        results(&actions, OWNER),
+        vec![Ok(serde_json::json!([cloid]).to_string())]
+    );
     assert!(e.store().orders().is_empty());
     no_trade(&actions);
 }
