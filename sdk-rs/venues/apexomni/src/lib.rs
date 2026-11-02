@@ -75,6 +75,16 @@ struct Envelope<'a> {
     code: Option<Code>,
     #[serde(borrow, default)]
     msg: std::borrow::Cow<'a, str>,
+    data: Option<serde::de::IgnoredAny>,
+}
+
+/// The venue may refuse with an empty `msg`; the user is never shown nothing.
+fn failure_text(code: i64, venue_text: &str) -> String {
+    let reason = match venue_text.trim() {
+        "" => "no reason given",
+        text => text,
+    };
+    format!("ApeX Omni request failed [{code}]: {reason}")
 }
 
 enum ApiResponse {
@@ -104,13 +114,12 @@ fn api_response(response: Response<'_>) -> ApiResponse {
     let error = trading::failure(
         code,
         response.status,
-        format!(
-            "ApeX Omni request failed [{}]: {}",
+        failure_text(
             code.unwrap_or(i64::from(response.status)),
             envelope
                 .as_ref()
                 .map(|e| e.msg.as_ref())
-                .unwrap_or("invalid response")
+                .unwrap_or("invalid response"),
         ),
     );
     if signature {

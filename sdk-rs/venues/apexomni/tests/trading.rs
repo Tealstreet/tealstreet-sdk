@@ -421,12 +421,86 @@ fn signature_rejection_retries_once_with_same_l2_body_and_fresh_legacy_auth() {
     assert!(requests(&mut e).is_empty());
 }
 
+fn command_failures(out: &[Action]) -> Vec<String> {
+    out.iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ApeX's documented success has no `code`: `{"data":{...},"timeCost":3}`.
+#[test]
+fn a_success_with_no_code_is_a_placed_order_not_a_failure() {
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(
+        &mut e,
+        &first,
+        NOW + 11.0,
+        r#"{"data":{"id":"840131576042881384"},"timeCost":3}"#,
+    );
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+}
+
+#[test]
+fn a_cancel_answered_with_no_code_succeeds() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["abc".into()],
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    response(&mut e, &cancel, NOW + 11.0, r#"{"data":"abc"}"#);
+    assert_eq!(command_failures(&actions(&mut e)), Vec::<String>::new());
+}
+
+#[test]
+fn an_amend_whose_cancel_has_no_code_still_places_the_replacement() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    response(
+        &mut e,
+        &cancel,
+        NOW + 15.0,
+        r#"{"data":"parent","timeCost":3}"#,
+    );
+    let replacement = requests(&mut e).remove(0);
+    assert_eq!(form(&replacement)["size"], "4");
+}
+
+#[test]
+fn a_failure_never_shows_empty_text() {
+    for body in [
+        r#"{"timeCost":3}"#,
+        r#"{"code":10003,"msg":""}"#,
+        r#"{"data":null}"#,
+    ] {
+        let mut e = ready();
+        let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+        response(&mut e, &first, NOW + 11.0, body);
+        let failures = command_failures(&actions(&mut e));
+        assert_eq!(failures.len(), 1, "{body}");
+        assert!(!failures[0].trim_end().ends_with(':'), "{}", failures[0]);
+        assert!(failures[0].contains("no reason given"), "{}", failures[0]);
+    }
+}
+
 #[test]
 fn http_and_business_rejections_never_cancel_replace_or_retry_writes() {
     for (status, body) in [
         (500, r#"{"msg":"server error"}"#),
         (200, r#"{"code":10003,"msg":"insufficient funds"}"#),
         (200, r#"{"code":0,"data":{}}"#),
+        (200, r#"{"data":{}}"#),
+        (200, r#"{"timeCost":3}"#),
         (200, r#"{"code":"broken","data":{"id":"must-not-accept"}}"#),
         (200, r#"{"code":{},"data":{"id":"must-not-accept"}}"#),
         (200, r#"{"code":0.5,"data":{"id":"must-not-accept"}}"#),
