@@ -2573,9 +2573,21 @@ impl BitgetFutures {
                         format!("{} {side} {kind} {}", o.symbol, o.id)
                     })
                     .collect();
+                // What Bitget did list, and the plan type asked for, tell an unlisted
+                // success from a cancel aimed at the wrong plan type.
+                let mut listed: Vec<_> = accepted.iter().cloned().collect();
+                listed.sort_unstable();
+                let plan = request
+                    .call
+                    .payload
+                    .plan_type
+                    .as_deref()
+                    .map(|plan| format!(", planType {plan}"))
+                    .unwrap_or_default();
                 error = Some(format!(
-                    "Bitget batch cancel did not acknowledge every order; these may still be open: {}",
-                    rest.join(", ")
+                    "Bitget batch cancel did not acknowledge every order; these may still be open: {} (acknowledged [{}]{plan})",
+                    rest.join(", "),
+                    listed.join(", ")
                 ));
             }
         }
