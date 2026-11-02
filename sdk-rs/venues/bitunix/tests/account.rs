@@ -1245,13 +1245,7 @@ fn a_private_event_reads_balance_at_the_next_tick_while_slowed() {
         r#"{"ch":"order","ts":1,"data":{"event":"CREATE","orderId":"x","symbol":"BTCUSDT"}}"#,
         r#"{"ch":"balance","data":{"coin":"USDT","available":"4900"}}"#,
     ] {
-        e.handle(
-            1600.0,
-            Event::WsMessage {
-                socket,
-                text: text.into(),
-            },
-        );
+        e.handle(1600.0, Event::WsMessage { socket, text });
         for action in safe_cex_engine::test_support::prepared_now(&mut e) {
             if let Action::SetTimer { timer, at_ms } = action {
                 timers.push((timer, at_ms));
