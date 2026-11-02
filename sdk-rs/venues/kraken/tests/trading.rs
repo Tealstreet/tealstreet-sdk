@@ -1491,7 +1491,7 @@ fn a_trailing_stop_amend_still_refuses() {
 }
 
 #[test]
-fn an_amend_sends_the_unfilled_size_not_the_total() {
+fn an_amend_sends_the_total_under_absolute_quantity_mode() {
     let (mut e, socket) = ready();
     inject(&mut e, "old", OrderType::Limit, None);
     message(&mut e, socket, NOW, &json!({"feed":"open_orders","order":{"order_id":"old","symbol":"PF_XBTUSD","type":"lmt","direction":1,"qty":8.0,"filled":5.0,"limit_price":90}}).to_string());
@@ -1506,7 +1506,8 @@ fn an_amend_sends_the_unfilled_size_not_the_total() {
         },
     );
     let r = http(&mut e, "editorder");
-    assert_eq!(param(&r, "size").unwrap(), "8");
+    assert_eq!(param(&r, "qtyMode").unwrap(), "ABSOLUTE");
+    assert_eq!(param(&r, "size").unwrap(), "13");
 }
 
 #[test]
@@ -1729,7 +1730,9 @@ fn an_amended_size_is_rounded_to_the_step() {
         },
     );
     let r = http(&mut e, "editorder");
-    assert_eq!(param(&r, "size").unwrap(), "0.2");
+    // Kraken's qtyMode ABSOLUTE: the total, fills included, so a fill not yet seen cannot grow it.
+    assert_eq!(param(&r, "qtyMode").unwrap(), "ABSOLUTE");
+    assert_eq!(param(&r, "size").unwrap(), "0.3");
 }
 
 /// An order already filled or gone cannot be cancelled, and that is not a failure.

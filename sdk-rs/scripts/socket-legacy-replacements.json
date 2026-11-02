@@ -1,8 +1,14 @@
 {
-  "venues/bitget/src/lib.rs": [
+  "venues/lighter/src/account.rs": [
     {
-      "old": "704e3037e3c7c4eb59c2231c2278deb5d1db0ebea6e55a92b963166f94a34dc2",
-      "new": "cfc6b7fbf7585d64ea3fd3339ba6b3b6d5313a14039f353d8d8f2ab25f5795dc"
+      "old": "32c99b76d67bb3a1e28961ec12ac6c84fcebf54acd8370f7a623cc9c4b97368c",
+      "new": "be4ae7498ff0397e2fc47240cbd41040182c112562364fc9d7044e907169e600"
+    }
+  ],
+  "venues/lighter/src/lib.rs": [
+    {
+      "old": "9c4c61bb86514a42d66f7759e997851b94250fc5a10ae1cfd919af3324c07cba",
+      "new": "ea3cd61f2f9f9bb9f955dbc0c94f97694342d0cb658213c05a034f8572a31ab2"
     }
   ]
 }

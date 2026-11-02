@@ -439,6 +439,10 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
             json!({"address": builder.address, "feeTenthsBps": builder.fee_tenths_bps as u32}),
         );
     }
+    // Lighter promotes a failing direct socket to read-only, never a routed one.
+    if init.exchange_name.starts_with("lighter") && init.tealstreet_ws_route == Some(true) {
+        options.insert("lighterWsRoute".into(), true.into());
+    }
     if public_only {
         options.insert("publicDataOnly".into(), true.into());
     }
@@ -2285,6 +2289,26 @@ pub(crate) mod tests {
                 Some(format!("bybitSiteId applies only to Bybit accounts, not {venue}").as_str())
             );
             assert_eq!(refuse_misplaced_site(&site(venue, "")), Ok(()));
+        }
+    }
+
+    #[test]
+    fn hosted_lighter_tells_the_engine_its_sockets_are_routed() {
+        for (venue, route, expected) in [
+            ("lighter", Some(true), Some(true)),
+            ("lighter-robinhood", Some(true), Some(true)),
+            ("lighter", None, None),
+            ("okx", Some(true), None),
+        ] {
+            let init = InitPayload {
+                account_name: "a".into(),
+                exchange_name: venue.into(),
+                key: "k".into(),
+                tealstreet_ws_route: route,
+                ..InitPayload::default()
+            };
+            let options = engine_options(&init, false);
+            assert_eq!(options["lighterWsRoute"].as_bool(), expected, "{venue} {route:?}");
         }
     }
 

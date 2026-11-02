@@ -447,8 +447,9 @@ impl Kraken {
                 replacement.amount - original.filled,
                 market.precision.amount,
             )?;
-            // Kraken's edit size is the unfilled size, not the total.
-            params.push(("size", number(replacement.remaining)));
+            // ABSOLUTE sets the total including fills: a fill the socket has not reported cannot grow it.
+            params.push(("qtyMode", "ABSOLUTE".into()));
+            params.push(("size", number(replacement.amount)));
         }
         let protective = matches!(original.kind, OrderType::StopLoss | OrderType::TakeProfit);
         if let Some(price) = price {
