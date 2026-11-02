@@ -370,6 +370,11 @@ impl AsterDex {
                 );
                 if at_start {
                     cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
+                    // Every signed read would only retry: end the start so public data takes over.
+                    cx.startup_failed(
+                        safe_cex_engine::VenueError::new(error.clone())
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                    );
                 }
                 self.signer_mismatch[slot_index(slot)] = Some(error);
             }

@@ -20,6 +20,7 @@ struct H {
     requests: Vec<HttpRequest>,
     signed: Vec<HttpRequest>,
     logs: Vec<String>,
+    startup_failures: usize,
 }
 
 impl H {
@@ -30,6 +31,7 @@ impl H {
             requests: vec![],
             signed: vec![],
             logs: vec![],
+            startup_failures: 0,
         };
         h.engine.start(h.now);
         h.collect();
@@ -58,6 +60,7 @@ impl H {
                     self.requests.push(request)
                 }
                 Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
+                Action::Notice(Notice::StartupFailed { .. }) => self.startup_failures += 1,
                 _ => {}
             }
         }
@@ -126,6 +129,7 @@ fn n1_mismatched_configured_signer_is_refused_at_startup_naming_both_addresses()
         ..wallet()
     });
     assert!(h.signed.is_empty(), "nothing signs: {:?}", h.signers());
+    assert_eq!(h.startup_failures, 1, "the start ends, so public data can take over");
     assert!(
         h.logs.iter().any(|log| log.contains(OTHER)
             && log.contains(WALLET)
