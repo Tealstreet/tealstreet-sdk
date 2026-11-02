@@ -1341,3 +1341,78 @@ fn slow_reconcile(held_completes_cleanly: bool) {
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder")))
     );
 }
+
+fn add_order_answer(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>,
+    command: u32,
+    body: &str,
+) -> Vec<Action> {
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    let write = requests(e)
+        .into_iter()
+        .find(|r| r.url.ends_with("AddOrder"))
+        .unwrap();
+    reply(e, &write, body);
+    e.drain_plain().collect()
+}
+fn spot_outcome(actions: &[Action]) -> Option<safe_cex_engine::Outcome> {
+    actions.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { error, .. }) => error.outcome,
+        _ => None,
+    })
+}
+
+#[test]
+fn documented_spot_errors_refuse_and_leave_no_fence() {
+    for code in [
+        "ETrade:Invalid request",
+        "EService:Market in cancel_only mode",
+        "EService:Market in post_only mode",
+    ] {
+        let (mut e, _, _) = ready(false);
+        let body = format!(r#"{{"error":["{code}"]}}"#);
+        let settled = add_order_answer(&mut e, 90, &body);
+        assert_eq!(
+            spot_outcome(&settled),
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{code}"
+        );
+        let _ = add_order_answer(&mut e, 91, r#"{"error":["EOrder:Insufficient funds"]}"#);
+    }
+}
+
+#[test]
+fn an_unlisted_spot_error_stays_unknown_and_clears_on_the_next_read() {
+    let (mut e, _, _) = ready(false);
+    let settled = add_order_answer(&mut e, 90, r#"{"error":["EFuture:Unlisted"]}"#);
+    assert_eq!(
+        spot_outcome(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    let read = settled
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("OpenOrders") => Some(r.clone()),
+            _ => None,
+        })
+        .expect("the read starts with the answer");
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    assert!(
+        !requests(&mut e).iter().any(|r| r.url.ends_with("AddOrder")),
+        "fenced"
+    );
+    reply(&mut e, &read, r#"{"error":[],"result":{"open":{}}}"#);
+    let _ = add_order_answer(&mut e, 92, r#"{"error":["EOrder:Insufficient funds"]}"#);
+}
