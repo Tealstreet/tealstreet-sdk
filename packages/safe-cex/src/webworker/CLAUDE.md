@@ -190,10 +190,11 @@ fix at `_sanitizeForPostMessage` restores the invariant.
 
 ## Market-load subscription buffering telemetry
 
-`handlers/BaseHandler.ts` buffers orderbook/OHLCV subscriptions while
-`exchange.store.markets` is empty. If markets still have not loaded after 30 s,
-it drops the pending subscriptions and posts an `op: 'error'` payload with
-`sendToSentry: true`. This is intentionally still app-neutral: safe-cex does
+`handlers/BaseHandler.ts` buffers subscriptions while `exchange.store.markets`
+is empty, and applies them whenever markets load, however late. If markets still
+have not loaded after 30 s, it keeps the queue and posts an `op: 'error'` payload
+with `sendToSentry: true`. A repeat replaces its earlier copy, and the queue keeps
+the newest 200; a late apply is logged with its count and wait. This is intentionally still app-neutral: safe-cex does
 not import Sentry, it only sends structured data for the web app to sanitize.
 
 The wait-for-markets check is a self-rescheduling `setTimeout`, not
