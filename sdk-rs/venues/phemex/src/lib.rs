@@ -808,6 +808,11 @@ impl Venue for PhemexPerpetuals {
             self.account.read_error = account::read_refusal(&r);
         }
         if r.status >= 400 {
+            if matches!(p, Pending::Account(_))
+                && let Some(error) = account::key_refusal(&r)
+            {
+                cx.startup_read_refused(&error);
+            }
             self.fail_pending(cx, p, &format!("HTTP {}: {}", r.status, r.body));
             return;
         }

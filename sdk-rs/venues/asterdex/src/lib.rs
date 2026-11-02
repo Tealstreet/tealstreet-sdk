@@ -370,6 +370,11 @@ impl AsterDex {
                 );
                 if at_start {
                     cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
+                    // Every signed read would only retry: end the start so public data takes over.
+                    cx.startup_failed(
+                        safe_cex_engine::VenueError::new(error.clone())
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                    );
                 }
                 self.signer_mismatch[slot_index(slot)] = Some(error);
             }
@@ -1478,6 +1483,14 @@ impl Venue for AsterDex {
                 if let Some(from) = from_ms {
                     path.push_str(&format!("&startTime={}", num::format(from)));
                 }
+                // Aster refuses startTime == endTime (-1023), so one candle asks through its close.
+                let to_ms = to_ms.map(|to| {
+                    if from_ms == Some(to) {
+                        to + interval.ms() - 1.
+                    } else {
+                        to
+                    }
+                });
                 if let Some(to) = to_ms {
                     path.push_str(&format!("&endTime={}", num::format(to)));
                 }

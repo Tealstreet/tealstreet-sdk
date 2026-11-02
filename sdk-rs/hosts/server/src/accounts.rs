@@ -407,7 +407,6 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     }
     // The page sets this in production; BloFin refuses orders without its broker id.
     options.insert("brokerAttribution".into(), true.into());
-    options.insert("fixedPublicSockets".into(), true.into());
     let hyperliquid = HYPERLIQUID_VENUES.contains(&init.exchange_name.as_str());
     if let Some(vault) = init.vault.as_ref().filter(|vault| !vault.is_empty())
         && !public_only
@@ -2242,14 +2241,6 @@ pub(crate) mod tests {
                 assert!(algos.try_recv().is_err(), "never disposed");
             })
             .await;
-    }
-
-    #[test]
-    fn a_server_account_keeps_its_fixed_public_sockets() {
-        for public_only in [false, true] {
-            let options = engine_options(&InitPayload::default(), public_only);
-            assert_eq!(options["fixedPublicSockets"], true);
-        }
     }
 
     #[test]

@@ -1502,10 +1502,10 @@ pub(crate) fn failure(code: Option<i64>, status: u16, message: String) -> VenueE
     let error = VenueError::new(message);
     let error = match (code, status) {
         (_, 408 | 500..) | (None, 200..=299) => error.outcome(Outcome::Unknown),
-        (Some(401), _) | (None, 401) => error
+        (Some(401), _) | (_, 401) => error
             .kind(ErrorKind::AuthInvalid)
             .outcome(Outcome::Rejected),
-        (None, 403) => error
+        (Some(403), _) | (_, 403) => error
             .kind(ErrorKind::AuthPermission)
             .outcome(Outcome::Rejected),
         // "Api credential is invalid": the key will not start working on a retry.

@@ -156,14 +156,18 @@ pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::Ve
     if !matches!(response.status, 401 | 403) && !matches!(code, Some(401 | 403)) {
         return None;
     }
+    // Phemex answers a key bound to another IP in plain text: 401 Request IP mismatch.
     let detail = evidence
         .as_ref()
-        .map_or(String::new(), |e| e.msg.to_string());
-    Some(
-        safe_cex_engine::VenueError::new(format!("Phemex refused the API key: {detail}"))
-            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
-            .venue_message(detail),
-    )
+        .map_or_else(|| response.body.to_owned(), |e| e.msg.to_string());
+    let error = safe_cex_engine::VenueError::new(format!("Phemex refused the API key: {detail}"))
+        .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+        .venue_message(detail.clone());
+    Some(if detail.contains("IP mismatch") {
+        error.ip_whitelist_refused()
+    } else {
+        error
+    })
 }
 /// How soon `readPositions` tries again after a read a newer stream frame overrode.
 const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;

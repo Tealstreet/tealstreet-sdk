@@ -763,7 +763,11 @@ impl AsterDex {
     ) {
         let error = match &response {
             Ok(r) => venue_error(r).map(|(code, m)| {
-                if matches!(code, -2014 | -2015) {
+                // Aster's whitelist refusal does not always carry a key code; its words do.
+                if matches!(code, -2014 | -2015)
+                    || safe_cex_engine::error::ip_whitelist_text(&m, None)
+                        .is_some_and(|(_, named)| named)
+                {
                     cx.startup_read_refused(
                         &safe_cex_engine::VenueError::new(m.clone())
                             .kind(safe_cex_engine::ErrorKind::AuthInvalid)

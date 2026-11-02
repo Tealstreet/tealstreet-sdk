@@ -2095,3 +2095,35 @@ fn preset_legs_end_when_a_terminal_row_does_not_repeat_them() {
         OrderStatus::Canceled
     );
 }
+
+// deaws2's load test: positions answered 401 Request IP mismatch, and the start ran to its timeout.
+#[test]
+fn an_ip_mismatch_on_positions_ends_the_start() {
+    for (status, body) in [
+        (401, "Request IP mismatch"),
+        // deaws2's capture, direct signed REST on a refused key.
+        (401, r#"{"code": "401","msg": "401 Request IP mismatch."}"#),
+        (
+            200,
+            r#"{"code":401,"msg":"Request IP mismatch","data":null}"#,
+        ),
+        (401, r#"{"code":401,"msg":"Request IP mismatch"}"#),
+    ] {
+        let (mut e, a, _) = started();
+        let read = request(&a, "currency=USDT");
+        response(&mut e, NOW, read.id, status, body);
+        let failed: Vec<_> = e
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::StartupFailed { error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failed.len(), 1, "{status} {body}");
+        assert!(
+            failed[0].message.contains("IP mismatch"),
+            "{}",
+            failed[0].message
+        );
+    }
+}

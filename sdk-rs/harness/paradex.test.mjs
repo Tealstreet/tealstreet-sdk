@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { paradexProtocol } from './paradex-protocol.mjs';
 import { requestKey, subscriptionKey } from './requests.mjs';
 import { Tape } from './tape.mjs';
 import { venueOf } from './venues.mjs';
@@ -139,4 +140,11 @@ test('Paradex account settings read the configured cache independently of effect
   assert.equal(venue.tsSettings(exchange, store)[0].leverage, 30);
   exchange.leverageSettings.clear();
   assert.equal(venue.tsSettings(exchange, store)[0].leverage, 10);
+});
+
+test('per-market summaries compare equal to the global channel', () => {
+  const { subscriptionMessage } = paradexProtocol;
+  const channel = (name) => subscriptionMessage({ method: 'subscribe', params: { channel: name } }).params.channel;
+  assert.equal(channel('markets_summary.BTC-USD-PERP'), 'markets_summary');
+  assert.equal(channel('bbo.BTC-USD-PERP'), 'bbo.BTC-USD-PERP');
 });

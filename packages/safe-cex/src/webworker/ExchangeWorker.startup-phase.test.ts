@@ -157,3 +157,46 @@ it('forwards coded diagnostics and legacy metadata only from the current worker 
   listener(event);
   expect(messages.filter((message) => message.op === 'engine-event')).toHaveLength(1);
 });
+
+describe('ExchangeWorker start that keeps timing out', () => {
+  const timedOut = (retries: number) => {
+    const { messages, worker } = createWorker();
+    Object.assign(worker, { _startTimedOut: true, _startRetries: retries });
+    return { messages, retried: vi.useFakeTimers() && worker.retryTimedOutStart() };
+  };
+
+  it('forces its retry notice past the not-yet-connected toast gate', () => {
+    const { messages, retried } = timedOut(0);
+    vi.useRealTimers();
+    expect(retried).toBe(true);
+    const warning = messages.find((m) => m.op === 'warning');
+    expect(warning.data[0]).toContain('retrying');
+    expect(warning.data[1]).toEqual({ forceToast: true });
+  });
+
+  it('says so, forced, when the retries are spent', () => {
+    const { messages, retried } = timedOut(4);
+    vi.useRealTimers();
+    expect(retried).toBe(false);
+    const error = errorPayloads(messages)[0];
+    expect(error.data[0]).toContain('did not finish loading');
+    expect(error.data[1]).toEqual({ forceToast: true });
+  });
+});
+
+describe('ExchangeWorker on public data only', () => {
+  it('runs no postprocessor that would publish its unread account rows as real', () => {
+    const ctx = { postMessage: vi.fn() };
+    const worker = new ExchangeWorker(ctx as any, 'a', 'bybit' as any, { publicDataOnly: true } as any, {} as any, {} as any, 's') as any;
+    const account = { readsAccountData: true, process: vi.fn() };
+    const market = { process: vi.fn() };
+    worker._postprocessors = [account, market];
+    try {
+      worker._storeUpdate({});
+    } catch {
+      // Only the postprocessor loop is under test.
+    }
+    expect(account.process).not.toHaveBeenCalled();
+    expect(market.process).toHaveBeenCalled();
+  });
+});
