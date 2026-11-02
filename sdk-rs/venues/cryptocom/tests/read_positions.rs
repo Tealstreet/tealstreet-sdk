@@ -65,7 +65,7 @@ fn failure(h: &Harness, id: u32) -> VenueError {
 }
 
 fn succeeded(h: &Harness, id: u32) -> bool {
-    matches!(done(h, id), Some(Ok(result)) if result == "[]")
+    matches!(done(h, id), Some(Ok(result)) if result.starts_with(r#"{"skipped":[],"open":["#))
 }
 
 fn open(h: &Harness) -> f64 {
@@ -209,7 +209,7 @@ fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
     read(&mut h, 70);
     h.reply(POSITIONS, &row("2"));
     assert!(
-        matches!(done(&h, 70), Some(Ok(body)) if body == r#"["DOGEUSD-PERP"]"#),
+        matches!(done(&h, 70), Some(Ok(body)) if body == r#"{"skipped":["DOGEUSD-PERP"],"open":[]}"#),
         "{:?}",
         done(&h, 70)
     );

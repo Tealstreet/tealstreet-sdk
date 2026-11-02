@@ -70,7 +70,7 @@ fn failure(h: &Harness, id: u32) -> VenueError {
 }
 
 fn succeeded(h: &Harness, id: u32) -> bool {
-    matches!(done(h, id), Some(Ok(result)) if result == "[]")
+    matches!(done(h, id), Some(Ok(result)) if result.starts_with(r#"{"skipped":[],"open":["#))
 }
 
 fn open(h: &Harness) -> f64 {
@@ -218,7 +218,7 @@ fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
     h.reply(POSITIONS, &format!(r#"{{"code":"0","data":[{row}]}}"#));
     h.reply(BALANCES, WALLET);
     assert!(
-        matches!(done(&h, 70), Some(Ok(body)) if body == r#"["DOGE-USDT"]"#),
+        matches!(done(&h, 70), Some(Ok(body)) if body == r#"{"skipped":["DOGE-USDT"],"open":[]}"#),
         "{:?}",
         done(&h, 70)
     );

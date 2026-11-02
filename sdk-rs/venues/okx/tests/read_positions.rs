@@ -8,6 +8,7 @@ use safe_cex_engine::{
 use safe_cex_venue_okx::Okx;
 use support::FixtureOptions as Options;
 use support::*;
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const POSITION: &str = r#"{"instId":"BTC-USDT-SWAP","pos":"5","posSide":"net","avgPx":"39000","lever":"10","upl":"50","liqPx":"30000","mgnMode":"cross","imr":"200","mmr":"20"}"#;
 const RISK: &str = r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#;
@@ -100,7 +101,10 @@ impl H {
         self.done.iter().find(|(c, _)| *c == id).map(|(_, r)| r)
     }
     fn succeeded(&self, id: u32) -> bool {
-        self.result(id).is_some_and(|r| r.as_deref() == Ok("[]"))
+        self.result(id).is_some_and(|r| {
+            r.as_deref()
+                .is_ok_and(|b| b.starts_with(r#"{"skipped":[],"open":["#))
+        })
     }
     fn failure(&self, id: u32) -> &VenueError {
         match self.result(id) {
@@ -334,7 +338,7 @@ fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
         assert_eq!(
             h.result(70)
                 .map(|r| r.as_deref().map_err(|e| e.message.as_str())),
-            Some(Ok(r#"["DOGE-USDT-SWAP"]"#)),
+            Some(Ok(r#"{"skipped":["DOGE-USDT-SWAP"],"open":[]}"#)),
             "{name}"
         );
         assert_eq!(h.open(), 0.0, "{name}: the store is unchanged");

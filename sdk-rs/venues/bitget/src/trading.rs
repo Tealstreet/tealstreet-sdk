@@ -1247,6 +1247,21 @@ impl BitgetFutures {
                     }
                     job.calls.push_back(call.clone());
                 }
+                // Reaches orders the store has not seen; their rows follow from the stream.
+                if self.account.uta && !symbol.is_empty() {
+                    job.calls.push_back(Planned {
+                        path: paths::UTA_CANCEL_SYMBOL,
+                        payload: Payload {
+                            category: Some(self.product().to_uppercase()),
+                            symbol: Some(symbol.clone()),
+                            ..Payload::default()
+                        },
+                        effect: Effect::Cancel {
+                            orders: Vec::new(),
+                            idempotent_missing: false,
+                        },
+                    });
+                }
             }
             Command::AmendOrder {
                 id, price, amount, ..

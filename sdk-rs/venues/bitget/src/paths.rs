@@ -28,6 +28,7 @@ pub const SET_MODE: &str = "/api/v2/mix/account/set-position-mode";
 pub const UTA_PLACE: &str = "/api/v3/trade/place-order";
 pub const UTA_STRATEGY: &str = "/api/v3/trade/place-strategy-order";
 pub const UTA_CANCEL: &str = "/api/v3/trade/cancel-order";
+pub const UTA_CANCEL_SYMBOL: &str = "/api/v3/trade/cancel-symbol-order";
 pub const UTA_CANCEL_STRATEGY: &str = "/api/v3/trade/cancel-strategy-order";
 pub const UTA_SET_LEVERAGE: &str = "/api/v3/account/set-leverage";
 pub const UTA_SET_MODE: &str = "/api/v3/account/set-hold-mode";

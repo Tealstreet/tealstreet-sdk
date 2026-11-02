@@ -291,10 +291,17 @@ readers reuse the already-applied state rather than publishing another snapshot.
 
 Rust `nukePositions` sizes one current native position snapshot with the shared
 native-unit sizing helper, preserving each hedge leg. It submits one reduce-only
-market batch and propagates partial or unknown outcomes. A venue with
-`freshPositions` sends a further close only after `readPositions`, a positions
-read issued after the last close. If it fails or times out, no close is sent and
-Nuke reports not confirmed flat; symbols it could not keep are reported the same way.
+market batch and propagates partial or unknown outcomes. On a venue with
+`freshPositions`, flat comes only from a `readPositions` body
+`{"skipped":[symbols],"open":[{"symbol","side","contracts"}]}`, the store rows the
+read committed; the read runs even with no rows in the store, and at least
+`NUKE_READ_SETTLE_MS` after a close round. A nonempty `open` closes again, within the
+rounds, then reports did not leave flat. A failed, timed-out, malformed or old array
+read sends no close and reports not confirmed flat, as do skipped symbols.
+`nuke` and `nukeOrders` first cancel every traded symbol (known orders, open
+positions, attempted placements on either engine), or the venue-wide cancel on a
+`native` venue; a failed cancel is reported and does not block the close. Whether a
+symbol cancel reaches orders the store has not seen is per venue.
 `nuke` also attempts the venue's cancel-all operation after a close failure;
 the original close failure remains the result. Concurrent nukes are rejected.
 Every nuke (`nuke`, `nukePositions`, `nukeOrders`) first stops the account's

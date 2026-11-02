@@ -416,6 +416,24 @@ fn classic_sized_stop_amend_zero_preserves_size() {
 }
 
 #[test]
+fn uta_symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
+    let mut h = uta();
+    h.command(Command::CancelSymbolOrders {
+        command: 9,
+        symbol: "BTCUSDT".into(),
+    });
+    let (request, sent) = body(&mut h, "cancel-symbol-order");
+    assert_eq!(sent["symbol"], "BTCUSDT");
+    assert_eq!(sent["category"], "USDT-FUTURES");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","msg":"success","data":{"list":[]}}"#,
+    );
+    assert!(h.done.iter().any(|(id, result)| *id == 9 && result.is_ok()));
+}
+
+#[test]
 fn uta_entry_and_strategy_use_v3_shapes_and_actual_execution_side() {
     let mut h = uta();
     let mut o = limit();
@@ -851,6 +869,16 @@ fn retained_conditional_cancels_require_their_own_semantic_ack() {
                 200,
                 r#"{"code":"00000","data":{"orderId":"retained-conditional"}}"#,
             );
+            if h.requests
+                .iter()
+                .any(|r| r.url.contains("cancel-symbol-order"))
+            {
+                h.respond(
+                    "cancel-symbol-order",
+                    200,
+                    r#"{"code":"00000","data":{"list":[]}}"#,
+                );
+            }
             assert!(h.done.iter().any(|(id, result)| *id == 3 && result.is_ok()));
             h.command(Command::CancelSymbolOrders {
                 command: 4,

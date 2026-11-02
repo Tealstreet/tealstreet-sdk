@@ -7,6 +7,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 use support::*;
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const FLAT: &str = r#"{"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":2000}"#;
 const LATER_FLAT: &str = r#"{"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":9000}"#;
@@ -84,7 +85,10 @@ impl H {
         self.done.iter().find(|(c, _)| *c == id).map(|(_, r)| r)
     }
     fn succeeded(&self, id: u32) -> bool {
-        self.result(id).is_some_and(|r| r.as_deref() == Ok("[]"))
+        self.result(id).is_some_and(|r| {
+            r.as_deref()
+                .is_ok_and(|b| b.starts_with(r#"{"skipped":[],"open":["#))
+        })
     }
     fn failure(&self, id: u32) -> &VenueError {
         match self.result(id) {
@@ -273,7 +277,7 @@ fn an_owned_row_on_a_hidden_coin_is_named_and_a_flat_one_is_not() {
     assert_eq!(
         h.result(70)
             .map(|r| r.as_deref().map_err(|e| e.message.as_str())),
-        Some(Ok(r#"["xyz:OLD"]"#))
+        Some(Ok(r#"{"skipped":["xyz:OLD"],"open":[]}"#))
     );
 
     let mut h = H::new(ready_with_hip3_meta(HIDDEN_META));

@@ -28,6 +28,8 @@ struct Job {
 enum Step {
     Place(Box<Prepared>),
     Cancel(Vec<String>),
+    /// Reaches orders the store has not seen; their rows follow from the stream.
+    CancelSymbol(String),
     Edit {
         original: Box<Order>,
         replacement: Box<Order>,
@@ -130,7 +132,13 @@ impl Kraken {
                     .filter(|o| o.symbol == *symbol)
                     .map(|o| o.id.clone())
                     .collect::<Vec<_>>();
-                (*command, self.prepare_cancel(&ids))
+                let mut steps = self.prepare_cancel(&ids);
+                if let Ok(steps) = &mut steps
+                    && !symbol.is_empty()
+                {
+                    steps.push_back(Step::CancelSymbol(symbol.clone()));
+                }
+                (*command, steps)
             }
             Command::AmendOrder {
                 command,
@@ -572,6 +580,11 @@ impl Kraken {
                         ),
                     )
                 }
+                Step::CancelSymbol(symbol) => (
+                    Method::Post,
+                    "/derivatives/api/v3/cancelallorders",
+                    sign::form(&[("symbol", symbol.to_uppercase())]),
+                ),
                 Step::Edit { form, .. } => {
                     (Method::Post, "/derivatives/api/v3/editorder", form.clone())
                 }
@@ -646,7 +659,7 @@ impl Kraken {
         let leverage_read = matches!(request.step, Step::Leverage { .. });
         let intent = match &request.step {
             Step::Place(_) => Intent::Place,
-            Step::Cancel(_) => Intent::Cancel,
+            Step::Cancel(_) | Step::CancelSymbol(_) => Intent::Cancel,
             Step::Edit { .. } => Intent::Amend,
             Step::Setting { .. } => Intent::Setting,
             Step::Leverage { .. } => Intent::Read,
@@ -763,6 +776,17 @@ impl Kraken {
                     .unwrap()
                     .ids
                     .push(status.order_id);
+            }
+            Step::CancelSymbol(_) => {
+                let status = reply
+                    .cancel
+                    .ok_or_else(|| unproven("Kraken cancel-all missing cancelStatus"))?;
+                if !matches!(status.status.as_str(), "cancelled" | "noOrdersToCancel") {
+                    return Err(unproven(format!(
+                        "Kraken cancel-all not confirmed: {}",
+                        status.status
+                    )));
+                }
             }
             Step::Cancel(ids) => {
                 let statuses = if ids.len() == 1 {

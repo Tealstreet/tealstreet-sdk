@@ -28,7 +28,7 @@ pub struct ExecFactory {
 }
 
 /// How the venue's cancel-all reaches every order, decided by the host that
-/// knows the venue's capabilities; read when a nuke's final sweep runs.
+/// knows the venue's capabilities; read for a nuke's first cancels and final sweep.
 pub enum CancelAllScope {
     /// One venue-wide cancel-all.
     Native,
