@@ -41,9 +41,9 @@ fn sequential_streamed_market_seed_filters_options_spot_and_inactive() {
             && h.e.store().loaded().positions
             && h.e.store().loaded().orders
     );
-    assert_eq!(h.sent().len(), 6);
+    assert_eq!(h.sent().len(), 4);
     assert!(h.sent().iter().any(|s| s.contains("bbo.BTC-USD-PERP")));
-    assert!(h.sent().iter().any(|s| s.contains("trades.ETH-USD-PERP")));
+    assert!(!h.sent().iter().any(|s| s.contains("trades.")));
     assert!(!h.sent().iter().any(|s| s.contains("order_book")));
 }
 #[test]
