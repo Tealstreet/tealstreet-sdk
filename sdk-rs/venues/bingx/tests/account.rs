@@ -1173,7 +1173,7 @@ fn owned_position_and_order_on_uncatalogued_market_are_skipped_and_the_snapshot_
 }
 
 #[test]
-fn owned_position_on_malformed_market_preserves_the_previous_snapshot() {
+fn a_position_on_a_malformed_market_is_skipped_and_the_rest_show() {
     let mut h = with_markets(PARTIAL_MARKETS);
     h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
     h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
@@ -1185,18 +1185,20 @@ fn owned_position_on_malformed_market_preserves_the_previous_snapshot() {
     let changed = POSITION.replace("\"0.1\"", "\"0.4\"");
     h.respond(POSITIONS, 200, &two_rows(&changed, "ETH-USDT", ORDER_ID));
     assert_eq!(h.engine.store().positions().len(), 1);
-    assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.4);
     assert!(
         h.logs
             .iter()
-            .any(|log| log.contains("owned position market unavailable"))
+            .any(|log| log.contains("Skipping BingX position on unreadable market ETHUSDT")),
+        "{:?}",
+        h.logs
     );
 }
 
 #[test]
-fn working_order_on_malformed_market_rejects_snapshot_but_other_missing_rows_do_not() {
+fn a_working_order_on_a_malformed_market_is_skipped_and_the_snapshot_loads() {
     for (symbol, status, loaded) in [
-        ("ETH-USDT", "NEW", false),
+        ("ETH-USDT", "NEW", true),
         ("ETH-USDT", "FILLED", true),
         ("MISSING-USDT", "NEW", true),
     ] {
@@ -1845,7 +1847,7 @@ fn repeated_explicit_leverage_reads_request_a_new_atomic_pair_despite_cached_rai
 }
 
 #[test]
-fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
+fn a_market_without_a_positive_step_is_skipped_and_the_rest_show() {
     let markets = PARTIAL_MARKETS.replace(
         r#"{"symbol":"ETH-USDT","asset":"ETH"}"#,
         r#"{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":400,"pricePrecision":2,"tradeMinLimit":"0.001","maxLongLeverage":100}"#,
@@ -1860,11 +1862,11 @@ fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
     h.fire_at(3000.0);
     let changed = POSITION.replace("\"0.1\"", "\"0.4\"");
     h.respond(POSITIONS, 200, &two_rows(&changed, "ETH-USDT", ORDER_ID));
-    assert_eq!(h.engine.store().positions()[0].contracts, 0.1);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.4);
     assert!(
         h.logs
             .iter()
-            .any(|log| log.contains("owned position market unavailable"))
+            .any(|log| log.contains("Skipping BingX position on unreadable market ETHUSDT"))
     );
 }
 
@@ -3266,4 +3268,20 @@ fn the_balance_read_is_signed_over_exactly_the_query_it_sends() {
     let expected =
         safe_cex_crypto::hmac_sha256(b"secret", signed.as_bytes(), safe_cex_crypto::Encoding::Hex);
     assert_eq!(signature, expected);
+}
+
+/// As legacy: a held position with no leverage still shows, its margin unknown.
+#[test]
+fn a_position_with_leverage_zero_is_shown() {
+    let mut h = Harness::new();
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(
+        POSITIONS,
+        200,
+        &POSITION.replace("\"leverage\":20", "\"leverage\":0"),
+    );
+    let positions = h.engine.store().positions();
+    assert_eq!(positions.len(), 1, "{:?}", h.logs);
+    assert_eq!(positions[0].contracts, 0.1);
 }
