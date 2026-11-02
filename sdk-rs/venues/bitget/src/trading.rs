@@ -2559,7 +2559,24 @@ impl BitgetFutures {
             {
                 unproven = true;
                 answer = Answer::Unproven;
-                error = Some("Bitget batch cancel did not acknowledge every order".into());
+                // Name them: the user otherwise believes every order is gone.
+                let rest: Vec<_> = orders
+                    .iter()
+                    .filter(|o| !accepted.contains(&native_id(o)))
+                    .map(|o| {
+                        let side = if o.side == OrderSide::Buy {
+                            "buy"
+                        } else {
+                            "sell"
+                        };
+                        let kind = format!("{:?}", o.kind).to_ascii_lowercase();
+                        format!("{} {side} {kind} {}", o.symbol, o.id)
+                    })
+                    .collect();
+                error = Some(format!(
+                    "Bitget batch cancel did not acknowledge every order; these may still be open: {}",
+                    rest.join(", ")
+                ));
             }
         }
         if error.is_none() {
