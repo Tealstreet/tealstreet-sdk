@@ -149,6 +149,9 @@ mod legacy {
         ReadPositions {
             command: u32,
         },
+        CancelAccountOrders {
+            command: u32,
+        },
         FetchClosedPositions {
             command: u32,
             #[serde(default)]
@@ -362,6 +365,10 @@ mod legacy {
                     command,
                     action: crate::VenueAction::ReadPositions,
                 },
+                CommandIn::CancelAccountOrders { command } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::CancelAccountOrders,
+                },
                 CommandIn::FetchClosedPositions {
                     command,
                     symbol,
@@ -556,6 +563,7 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
             ("symbol", r#""BTCUSDT""#),
         ],
         vec![("op", r#""readPositions""#), ("command", "12")],
+        vec![("op", r#""cancelAccountOrders""#), ("command", "12")],
         vec![
             ("op", r#""fetchClosedPositions""#),
             ("command", "13"),

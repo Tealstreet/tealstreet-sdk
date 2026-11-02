@@ -40,6 +40,7 @@ impl Request {
         let data = match &self.call {
             Call::Place { symbol, .. } => format!("place:{symbol}"),
             Call::Cancel { id, .. } => format!("cancel:{id}"),
+            Call::CancelSymbol(symbol) => format!("cancel-all:{symbol}"),
             _ => "setting".to_owned(),
         };
         safe_cex_engine::request_context::ReconciliationData::new(data)
@@ -61,7 +62,7 @@ impl Request {
                 filled_at_amend: Some(_),
                 ..
             } => Intent::Amend,
-            Call::Cancel { .. } => Intent::Cancel,
+            Call::Cancel { .. } | Call::CancelSymbol(_) => Intent::Cancel,
             _ => Intent::Setting,
         }
     }
@@ -209,6 +210,8 @@ enum Call {
         id: String,
         filled_at_amend: Option<f64>,
     },
+    /// Reaches orders the store has not seen; their rows follow from the stream.
+    CancelSymbol(String),
     Leverage(String, f64),
     Margin(String, bool),
     Mode(bool),
@@ -462,7 +465,18 @@ impl AsterDex {
                             symbol: symbol.clone(),
                         }),
                 );
-                (command, self.plan_cancel_refs(&orders))
+                let mut job = self.plan_cancel_refs(&orders);
+                if let Ok(job) = &mut job
+                    && !symbol.is_empty()
+                {
+                    job.steps.push_back(Planned {
+                        method: Method::Delete,
+                        endpoint: "allOpenOrders",
+                        query: Query::new().str("symbol", &symbol),
+                        call: Call::CancelSymbol(symbol.clone()),
+                    });
+                }
+                (command, job)
             }
             Command::AmendOrder {
                 command,
@@ -984,6 +998,11 @@ impl AsterDex {
                     result = serde_json::to_string(&row.stp_mode).ok();
                 }),
             (Call::StpWrite, Ok(_)) => Ok(()),
+            (Call::CancelSymbol(_), Ok(_)) => {
+                self.account.order_revision = self.account.order_revision.wrapping_add(1);
+                self.request_refresh_orders(cx);
+                Ok(())
+            }
             (_, Err(error)) => Err(error),
         };
         if let Some(root) = root {

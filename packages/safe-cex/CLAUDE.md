@@ -300,8 +300,11 @@ rounds, then reports did not leave flat. A failed, timed-out, malformed or old a
 read sends no close and reports not confirmed flat, as do skipped symbols.
 `nuke` and `nukeOrders` first cancel every traded symbol (known orders, open
 positions, attempted placements on either engine), or the venue-wide cancel on a
-`native` venue; a failed cancel is reported and does not block the close. Whether a
-symbol cancel reaches orders the store has not seen is per venue.
+`native` venue; a failed cancel is reported and does not block the close. Where a
+symbol cancel misses orders the store has not seen (`symbolCancelMissesUnseen`), a
+venue with `nukeAccountCancel` also gets the account-wide `cancelAccountOrders`,
+which nothing but a nuke sends; any other such venue's nuke result carries a warning
+(`NukeResult.warning`, and the end of a failure message) to check open orders.
 `nuke` also attempts the venue's cancel-all operation after a close failure;
 the original close failure remains the result. Concurrent nukes are rejected.
 Every nuke (`nuke`, `nukePositions`, `nukeOrders`) first stops the account's

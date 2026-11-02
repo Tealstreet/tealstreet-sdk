@@ -600,6 +600,64 @@ describe('Rust native current-account reads', () => {
     expect(r.commands.filter((c) => c.op === 'cancelSymbolOrders').map((c) => c.symbol)).toEqual(['ETHUSDT']);
   });
 
+  it.each(['nuke', 'nukeOrders'] as const)(
+    '%s sends the account-wide cancel where the venue has one, before any close, and does not warn',
+    async (method) => {
+      const r = fixture('bitget');
+      await r.start();
+      r.update({ positions: [position()], orders: [] });
+      const nuking = r.exchange[method]();
+      await vi.advanceTimersByTimeAsync(600);
+      const result = await nuking;
+      const ops = r.commands.map((c) => c.op);
+      expect(ops).toContain('cancelAccountOrders');
+      if (ops.includes('placeOrders')) expect(ops.indexOf('cancelAccountOrders')).toBeLessThan(ops.indexOf('placeOrders'));
+      expect(result.warning).toBeUndefined();
+    },
+  );
+
+  it('sends no account-wide cancel from a plain cancel-all, nor on a venue without one', async () => {
+    const bitget = fixture('bitget');
+    await bitget.start();
+    await bitget.exchange.cancelAllOrders();
+    expect(bitget.commands.map((c) => c.op)).not.toContain('cancelAccountOrders');
+    const bybit = fixture('bybit');
+    await bybit.start();
+    bybit.update({ positions: [position()] });
+    const nuking = bybit.exchange.nuke();
+    await vi.advanceTimersByTimeAsync(600);
+    expect((await nuking).warning).toBeUndefined();
+    expect(bybit.commands.map((c) => c.op)).not.toContain('cancelAccountOrders');
+  });
+
+  it.each(['nuke', 'nukeOrders'] as const)(
+    '%s says unseen orders may rest where no cancel reaches them, in success and in failure',
+    async (method) => {
+      const unseen = /Orders placed in the last few seconds may not be cancelled on this venue: check open orders/;
+      const r = fixture('hyperliquid');
+      await r.start();
+      r.update({ positions: [position()] });
+      const nuking = r.exchange[method]();
+      await vi.advanceTimersByTimeAsync(600);
+      expect((await nuking).warning).toMatch(unseen);
+      vi.spyOn(r.exchange, 'cancelAllOrders').mockRejectedValue(new Error('cancel down'));
+      const failing = r.exchange[method]().catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(600);
+      const message = await failing;
+      expect(message).toMatch(/cancel down/);
+      expect(message).toMatch(unseen);
+    },
+  );
+
+  it('does not warn on nukePositions, which cancels nothing', async () => {
+    const r = fixture('hyperliquid');
+    await r.start();
+    r.update({ positions: [position()] });
+    const nuking = r.exchange.nukePositions();
+    await vi.advanceTimersByTimeAsync(600);
+    expect((await nuking).warning).toBeUndefined();
+  });
+
   it('never issues the proving read under 500 ms after a close, even with the store already flat', async () => {
     const r = fixture();
     await r.start();

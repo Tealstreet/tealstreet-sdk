@@ -799,8 +799,10 @@ pub async fn run(
                             // Every leg was accepted; the result names the algos stopped first.
                             Ok(done) => {
                                 let mut result = serde_json::json!({"stoppedChasers": done["stoppedChasers"], "stoppedTwaps": done["stoppedTwaps"]});
-                                if let Some(placed) = done.get("placedSymbols") {
-                                    result["placedSymbols"] = placed.clone();
+                                for field in ["placedSymbols", "warning"] {
+                                    if let Some(value) = done.get(field) {
+                                        result[field] = value.clone();
+                                    }
                                 }
                                 serde_json::json!({"requestId": request_id, "success": true, "result": result})
                             }

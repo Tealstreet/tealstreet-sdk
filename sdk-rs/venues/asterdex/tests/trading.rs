@@ -103,6 +103,24 @@ impl Harness {
             .unwrap_or_else(|| panic!("missingorder: {:?}", self.requests));
         self.requests.remove(index)
     }
+    /// The by-symbol cancel that follows a symbol's row cancels, answered as Aster does.
+    fn sweep(&mut self, symbol: &str) {
+        let index = self
+            .requests
+            .iter()
+            .position(|r| r.method == Method::Delete && r.url.contains("/allOpenOrders?"))
+            .unwrap_or_else(|| panic!("missing allOpenOrders: {:?}", self.requests));
+        let request = self.requests.remove(index);
+        assert!(
+            request.url.contains(&format!("symbol={symbol}&")),
+            "{}",
+            request.url
+        );
+        self.reply(
+            request,
+            r#"{"code":"200","msg":"The operation of cancel all open order is done."}"#,
+        );
+    }
     fn reply(&mut self, request: HttpRequest, body: &str) {
         self.engine.handle(
             1700000000000.0,
@@ -826,12 +844,14 @@ fn symbol_cancel_includes_acknowledged_order_before_rest_or_private_new() {
     let cancel = h.take(Method::Delete);
     assert!(cancel.url.contains("symbol=BTCUSDT&orderId=22542179&"));
     h.reply(cancel, r#"{"orderId":22542179,"status":"CANCELED"}"#);
+    h.sweep("BTCUSDT");
     assert!(h.result(2).is_ok());
     h.command(Command::CancelSymbolOrders {
         command: 3,
         symbol: "BTCUSDT".into(),
     });
-    assert!(!h.requests.iter().any(|r| r.method == Method::Delete));
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+    h.sweep("BTCUSDT");
     assert!(h.result(3).is_ok());
 }
 
@@ -850,7 +870,8 @@ fn symbol_cancel_retires_ack_provenance_when_store_has_seen_the_order() {
     });
     let cancel = h.take(Method::Delete);
     h.reply(cancel, r#"{"orderId":22542179,"status":"CANCELED"}"#);
-    assert!(!h.requests.iter().any(|r| r.method == Method::Delete));
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+    h.sweep("BTCUSDT");
     assert!(h.result(2).is_ok());
 }
 
@@ -1227,4 +1248,15 @@ fn a_refused_limit_replacement_says_the_order_is_gone() {
     );
     let message = h.result(1).as_ref().unwrap_err();
     assert!(message.contains("order is gone"), "{message}");
+}
+
+#[test]
+fn symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
+    let mut h = Harness::new();
+    h.command(Command::CancelSymbolOrders {
+        command: 4,
+        symbol: "BTCUSDT".into(),
+    });
+    h.sweep("BTCUSDT");
+    assert!(h.result(4).is_ok());
 }

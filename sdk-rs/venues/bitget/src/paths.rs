@@ -20,6 +20,7 @@ pub const PLACE_TPSL: &str = "/api/v2/mix/order/place-tpsl-order";
 pub const PLACE_TRAILING: &str = "/api/v2/mix/order/place-plan-order";
 pub const BATCH_CANCEL: &str = "/api/v2/mix/order/batch-cancel-orders";
 pub const CANCEL_PLAN: &str = "/api/v2/mix/order/cancel-plan-order";
+pub const CANCEL_ALL: &str = "/api/v2/mix/order/cancel-all-orders";
 pub const MODIFY_ORDER: &str = "/api/v2/mix/order/modify-order";
 pub const MODIFY_TPSL: &str = "/api/v2/mix/order/modify-tpsl-order";
 pub const SET_LEVERAGE: &str = "/api/v2/mix/account/set-leverage";

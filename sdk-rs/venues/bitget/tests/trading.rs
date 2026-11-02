@@ -1495,3 +1495,69 @@ fn split_remainder_stays_on_the_lot_step() {
         .collect();
     assert_eq!(sizes, ["72000", "72000", "36000.1"]);
 }
+
+fn account_cancel(h: &mut Harness, command: u32) {
+    h.command(Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::CancelAccountOrders,
+    });
+}
+
+#[test]
+fn a_nuke_account_cancel_on_classic_sends_the_product_wide_cancel_all() {
+    let mut h = Harness::classic();
+    account_cancel(&mut h, 21);
+    let (request, sent) = body(&mut h, "/api/v2/mix/order/cancel-all-orders");
+    assert_eq!(sent["productType"], "usdt-futures");
+    assert_eq!(sent["marginCoin"], "USDT");
+    assert!(sent.get("symbol").is_none(), "{sent}");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","msg":"success","data":{"successList":[],"failureList":[]}}"#,
+    );
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 21 && result.is_ok()),
+        "{:?}",
+        h.done
+    );
+}
+
+#[test]
+fn a_nuke_account_cancel_on_uta_cancels_the_whole_category() {
+    let mut h = uta();
+    account_cancel(&mut h, 22);
+    let (request, sent) = body(&mut h, "cancel-symbol-order");
+    assert_eq!(sent["category"], "USDT-FUTURES");
+    assert!(sent.get("symbol").is_none(), "{sent}");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","msg":"success","data":{"list":[]}}"#,
+    );
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 22 && result.is_ok()),
+        "{:?}",
+        h.done
+    );
+}
+
+#[test]
+fn a_symbol_cancel_never_sends_the_account_wide_cancel() {
+    for mut h in [Harness::classic(), uta()] {
+        h.command(Command::CancelSymbolOrders {
+            command: 23,
+            symbol: String::new(),
+        });
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.url.contains("cancel-all-orders")
+                    || r.url.contains("cancel-symbol-order"))
+        );
+    }
+}

@@ -292,6 +292,8 @@ export type ExchangeOptions = {
 export interface NukeResult {
   stoppedChasers: string[];
   stoppedTwaps: string[];
+  /** Set where the venue's cancels can miss orders placed seconds ago: the user should check. */
+  warning?: string;
 }
 
 export interface ValidateAccountResult {

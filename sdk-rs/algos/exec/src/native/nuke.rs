@@ -217,8 +217,18 @@ impl Adapter {
             }
         }
         let stopped_count = stopped_chasers.len() + stopped_twaps.len();
+        let warning = (!matches!(mode, "positions" | "pos"))
+            .then(|| unseen_orders_warning(&self.cx.port.capabilities()))
+            .flatten();
+        let warned = |text: String| match warning {
+            Some(warning) => format!("{text}. {warning}"),
+            None => text,
+        };
         if failures.is_empty() {
-            let mut result = json!({"summary":format!("Nuke completed: {stopped_count} algo(s) stopped, {closed} position close(s) accepted, {cancelled} symbol cancel(s) and {swept} cancel-all sweep(s) accepted")});
+            let mut result = json!({"summary":warned(format!("Nuke completed: {stopped_count} algo(s) stopped, {closed} position close(s) accepted, {cancelled} symbol cancel(s) and {swept} cancel-all sweep(s) accepted"))});
+            if let Some(warning) = warning {
+                result["warning"] = json!(warning);
+            }
             result["stoppedChasers"] = stopped["stoppedChasers"].clone();
             result["stoppedTwaps"] = stopped["stoppedTwaps"].clone();
             Ok(result)
@@ -241,7 +251,7 @@ impl Adapter {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            error["message"] = json!(format!(
+            error["message"] = json!(warned(format!(
                 "Nuke completed {completed} operation(s), {} failed: {}. Open orders: {}",
                 failures.len(),
                 failures
@@ -250,7 +260,7 @@ impl Adapter {
                     .collect::<Vec<_>>()
                     .join("; "),
                 if open.is_empty() { "none" } else { &open }
-            ));
+            )));
             error["partialOrderIds"] = json!(ids);
             error["failedOperationCount"] = json!(failures.len());
             error["failedLegs"] = json!(failures);
@@ -310,7 +320,7 @@ impl Adapter {
                 symbols
             }
         };
-        symbols
+        let mut cancels: Vec<_> = symbols
             .into_iter()
             .filter_map(|symbol| {
                 let command = json!({"op":"cancelSymbolOrders","command":self.cx.port.next_command_id(),"symbol":symbol});
@@ -318,7 +328,16 @@ impl Adapter {
                 let target = if symbol.is_empty() { "all symbols".into() } else { symbol };
                 Some((target, command))
             })
-            .collect()
+            .collect();
+        // Nuke means everything: the account-wide cancel reaches what a symbol cancel misses.
+        if self.cx.port.capabilities().nuke_account_cancel {
+            let command =
+                json!({"op":"cancelAccountOrders","command":self.cx.port.next_command_id()});
+            if let Ok(command) = decode_command(&command.to_string()) {
+                cancels.push(("the account".into(), command));
+            }
+        }
+        cancels
     }
     async fn nuke_command(&self, method: &str, args: Value) -> Result<Value, Value> {
         let capabilities = self.cx.port.capabilities();
@@ -351,6 +370,14 @@ const NUKE_FLAT_SETTLE_MS: u64 = 2_000;
 /// The least wait after a close round before the read that can prove flat.
 const NUKE_READ_SETTLE_MS: u64 = 500;
 const NUKE_NOT_CONFIRMED: &str = "Nuke could not confirm the account is flat";
+const NUKE_UNSEEN_ORDERS: &str =
+    "Orders placed in the last few seconds may not be cancelled on this venue: check open orders";
+
+/// The one rule for when a nuke warns that unseen orders may rest.
+fn unseen_orders_warning(capabilities: &safe_cex_engine::Capabilities) -> Option<&'static str> {
+    (capabilities.symbol_cancel_misses_unseen && !capabilities.nuke_account_cancel)
+        .then_some(NUKE_UNSEEN_ORDERS)
+}
 
 struct FreshRead {
     skipped: Vec<String>,

@@ -662,7 +662,9 @@ fn an_unknown_placement_fences_cancel_all_but_not_cancel_by_id() {
     answer(&mut e, &fresh, 200, "[]");
     answer(&mut e, &delete, 200, r#"{"status":"CANCELED"}"#);
     // Admitted now; the fresh read showed no open orders, so there is nothing to cancel.
-    let admitted = command(&mut e, cancel_all());
+    let mut admitted = command(&mut e, cancel_all());
+    let sweep = write(&admitted, Method::Delete, "/allOpenOrders").clone();
+    admitted = answer(&mut e, &sweep, 200, r#"{"code":"200","msg":"done"}"#);
     assert!(
         terminal(&admitted).expect("one terminal").is_ok(),
         "cancel-all is admitted after the fresh read: {:?}",

@@ -629,6 +629,7 @@ impl Venue for Blofin {
             account_margin_type: true,
             closed_positions: true,
             fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }

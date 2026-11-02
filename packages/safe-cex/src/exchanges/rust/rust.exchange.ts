@@ -327,6 +327,21 @@ const isFreshPositionsRead = (body: unknown): body is FreshPositionsRead => {
     )
   );
 };
+const NUKE_UNSEEN_ORDERS =
+  'Orders placed in the last few seconds may not be cancelled on this venue: check open orders';
+/** The one rule for when a nuke warns that unseen orders may rest. */
+const unseenOrdersWarning = (capabilities: EngineCapabilities): string | undefined =>
+  capabilities.symbolCancelMissesUnseen && !capabilities.nukeAccountCancel ? NUKE_UNSEEN_ORDERS : undefined;
+/** The failure, its message ending with the warning; a frozen error is wrapped, not changed. */
+const withWarning = (error: unknown, warning: string | undefined): unknown => {
+  if (!warning) return error;
+  const message = `${errorMessage(error)}. ${warning}`;
+  if (error instanceof Error && !Object.isFrozen(error)) {
+    error.message = message;
+    return error;
+  }
+  return Object.assign(new Error(message), error instanceof Error ? { ...error } : {}, { cause: error });
+};
 /** A stop's own result, plus the placements the stopping engine attempted. */
 type AlgoStopWithPlacements = NukeResult & { placedSymbols?: string[] };
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -2382,13 +2397,30 @@ export class RustEngineExchange extends BaseExchange {
     this.assertEngineAlive();
     if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
     this.isNuking = true;
+    let warning: string | undefined;
     try {
       const { placedSymbols, ...stopped } = await this.stopAlgosForNuke();
-      await this.cancelAllOrders(await this.nukeCancelSymbols(placedSymbols));
-      return stopped;
+      warning = unseenOrdersWarning(await this.capabilitiesFor('nuke'));
+      await this.cancelNukeOrders(placedSymbols);
+      return warning ? { ...stopped, warning } : stopped;
+    } catch (error) {
+      throw withWarning(error, warning);
     } finally {
       this.isNuking = false;
     }
+  };
+
+  /**
+   * Every traded symbol's cancel, then, where the venue has one, its account-wide cancel:
+   * nuke means everything. Each runs whatever the other did; failures are named together.
+   */
+  private cancelNukeOrders = async (placedSymbols?: string[]): Promise<void> => {
+    const failures: unknown[] = [];
+    await this.cancelAllOrders(await this.nukeCancelSymbols(placedSymbols)).catch((error) => failures.push(error));
+    if ((await this.capabilitiesFor('nuke')).nukeAccountCancel)
+      await this.command({ op: 'cancelAccountOrders' }).catch((error) => failures.push(error));
+    if (failures.length === 1) throw failures[0];
+    if (failures.length) throw new Error(failures.map(errorMessage).join('; '));
   };
 
   /** Running chasers and TWAPs would place again behind the nuke: stop them first. */
@@ -2434,13 +2466,14 @@ export class RustEngineExchange extends BaseExchange {
         }
       };
       // Orders first: a market close otherwise fills against the user's own resting bid.
-      if (cancelOrders) await leg(async () => this.cancelAllOrders(await this.nukeCancelSymbols(placedSymbols)));
+      if (cancelOrders) await leg(() => this.cancelNukeOrders(placedSymbols));
       await leg(() => this.closeUntilFlat());
+      const warning = cancelOrders ? unseenOrdersWarning(await this.capabilitiesFor('nuke')) : undefined;
       if (failed) {
         this.logNukeRemainder();
-        throw failure;
+        throw withWarning(failure, warning);
       }
-      return stopped;
+      return warning ? { ...stopped, warning } : stopped;
     } finally {
       this.isNuking = false;
     }

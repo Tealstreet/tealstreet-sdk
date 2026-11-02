@@ -17,6 +17,9 @@ struct Port {
     replies: RefCell<Vec<oneshot::Sender<Result<String, VenueError>>>>,
     events: RefCell<Vec<(String, Value)>>,
     fresh_positions: Cell<bool>,
+    nuke_account_cancel: Cell<bool>,
+    symbol_cancel_misses_unseen: Cell<bool>,
+    fail_cancels: Cell<bool>,
 }
 impl AccountPort for Port {
     fn store(&self) -> Ref<'_, AlgoStore> {
@@ -47,6 +50,8 @@ impl AccountPort for Port {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             fresh_positions: self.fresh_positions.get(),
+            nuke_account_cancel: self.nuke_account_cancel.get(),
+            symbol_cancel_misses_unseen: self.symbol_cancel_misses_unseen.get(),
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -1334,6 +1339,134 @@ async fn a_failed_cancel_is_reported_without_blocking_the_close() {
                     .any(|c| matches!(c, Command::PlaceOrders { .. }))
             );
             cx.scope.dispose();
+        })
+        .await;
+}
+
+fn is_account_cancel(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Venue {
+            action: safe_cex_engine::VenueAction::CancelAccountOrders,
+            ..
+        }
+    )
+}
+
+/// A nuke on a store with one open position, every command answered as accepted.
+async fn nuke_answered(port: &Rc<Port>, mode: &str) -> Result<Value, Value> {
+    wait_market(port);
+    port.store.borrow_mut().positions = vec![native_position("BTCUSDT")];
+    let cx = AlgoCx::new(port.clone(), Scope::new());
+    let factory = ExecFactory::default();
+    let nuke = factory.nuke(mode, &cx).unwrap();
+    let answers = port.clone();
+    let driver = async move {
+        loop {
+            settle_exec().await;
+            let next = answers.replies.borrow_mut().drain(..).next();
+            if let Some(reply) = next {
+                let last = answers.commands.borrow().last().cloned().unwrap();
+                let body = match last {
+                    Command::PlaceOrders { .. } => {
+                        answers.store.borrow_mut().positions.clear();
+                        Ok(r#"["close"]"#.to_owned())
+                    }
+                    _ if answers.fail_cancels.get()
+                        && !matches!(last, Command::PlaceOrders { .. }) =>
+                    {
+                        Err(VenueError::new("cancel down"))
+                    }
+                    _ => Ok("null".to_owned()),
+                };
+                reply.send(body).unwrap();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    };
+    let result = tokio::select! { result = nuke => result, _ = driver => unreachable!() };
+    cx.scope.dispose();
+    result
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_sends_the_account_wide_cancel_before_any_close_where_the_venue_has_one() {
+    LocalSet::new()
+        .run_until(async {
+            for mode in ["all", "orders"] {
+                let port = Rc::new(Port::default());
+                port.nuke_account_cancel.set(true);
+                port.symbol_cancel_misses_unseen.set(true);
+                let result = nuke_answered(&port, mode).await.unwrap();
+                let commands = port.commands.borrow();
+                let account = commands.iter().position(is_account_cancel).expect(mode);
+                if let Some(close) = commands
+                    .iter()
+                    .position(|c| matches!(c, Command::PlaceOrders { .. }))
+                {
+                    assert!(account < close, "{mode}: {commands:?}");
+                }
+                assert!(result.get("warning").is_none(), "{mode}: {result}");
+                assert!(
+                    !result["summary"]
+                        .as_str()
+                        .unwrap()
+                        .contains("last few seconds"),
+                    "{mode}"
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_sends_no_account_wide_cancel_on_a_venue_without_one() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            nuke_answered(&port, "all").await.unwrap();
+            assert!(!port.commands.borrow().iter().any(is_account_cancel));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_nuke_warns_of_unseen_orders_only_where_no_cancel_reaches_them() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            port.symbol_cancel_misses_unseen.set(true);
+            let result = nuke_answered(&port, "all").await.unwrap();
+            let summary = result["summary"].as_str().unwrap();
+            assert!(
+                summary.contains("Orders placed in the last few seconds may not be cancelled"),
+                "{summary}"
+            );
+            assert!(summary.contains("check open orders"), "{summary}");
+            assert_eq!(
+                result["warning"].as_str().map(|w| summary.ends_with(w)),
+                Some(true)
+            );
+
+            let failing = Rc::new(Port::default());
+            failing.symbol_cancel_misses_unseen.set(true);
+            failing.fail_cancels.set(true);
+            let error = nuke_answered(&failing, "all").await.unwrap_err();
+            let message = error["message"].as_str().unwrap();
+            assert!(
+                message.contains("may not be cancelled") && message.contains("check open orders"),
+                "{message}"
+            );
+
+            let plain = Rc::new(Port::default());
+            let result = nuke_answered(&plain, "all").await.unwrap();
+            assert!(
+                !result["summary"]
+                    .as_str()
+                    .unwrap()
+                    .contains("last few seconds")
+            );
+            assert!(result.get("warning").is_none());
         })
         .await;
 }
