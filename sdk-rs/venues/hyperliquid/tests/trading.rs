@@ -1602,6 +1602,9 @@ fn an_empty_vault_signs_as_the_account_itself() {
     let b = body(&write(&mut e));
     assert!(
         b.get("vaultAddress").is_none_or(serde_json::Value::is_null),
+        "{b}"
+    );
+}
 
 /// Live Hyperliquid rows carry no tpsl field: a "Take Profit Limit" is a take profit by its name.
 /// Read as a stop, a drag re-placed it as an sl trigger on the take-profit side, which fires at once.
