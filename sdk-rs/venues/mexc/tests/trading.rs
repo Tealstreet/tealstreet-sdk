@@ -748,6 +748,53 @@ fn optimistic_quantity_matches_minimum_snapped_submission() {
     );
 }
 
+/// MEXC's stop placement answers per row; a row with `errorCode` placed nothing.
+#[test]
+fn a_stop_row_with_an_error_code_is_a_failure_not_order_zero() {
+    let (mut e, _, reads, _) = private_started();
+    for r in reads {
+        let body = if r.url.contains("open_positions") {
+            r#"{"success":true,"code":0,"data":[{"positionId":739113577038255616,"symbol":"BTC_USDT","positionType":1,"positionMode":2,"holdVol":60,"holdAvgPrice":60000,"leverage":10,"openType":1}]}"#
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#
+        };
+        response(&mut e, &r, body);
+    }
+    e.drain_actions().for_each(drop);
+    let mut opts = order();
+    opts.kind = safe_cex_engine::model::OrderType::StopLoss;
+    opts.side = safe_cex_engine::model::OrderSide::Sell;
+    opts.amount = 0.0;
+    opts.price = Some(55000.0);
+    e.handle(
+        500.0,
+        Event::Command(Command::PlaceOrders {
+            command: 2,
+            orders: vec![opts],
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.ends_with("/stoporder/place"));
+    reply(
+        &mut e,
+        &r,
+        600.0,
+        r#"{"success":true,"code":0,"message":"","data":[{"id":0,"symbol":"BTC_USDT","orderId":0,"errorCode":2009}]}"#,
+    );
+    let out: Vec<_> = e.drain_actions().collect();
+    assert!(e.store().order("0").is_none());
+    assert!(
+        out.iter().any(|a| matches!(
+            a,
+            safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandFailed {
+                command: 2,
+                ..
+            })
+        )),
+        "{out:?}"
+    );
+}
+
 #[test]
 fn open_position_writes_keep_native_ids_and_full_stops_have_their_own_route() {
     let (mut e, _, reads, _) = private_started();
