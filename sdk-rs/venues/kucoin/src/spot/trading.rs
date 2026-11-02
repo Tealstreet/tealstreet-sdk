@@ -206,7 +206,23 @@ impl KucoinSpot {
                     return;
                 }
             },
-            WriteKind::Cancel => {}
+            WriteKind::Cancel => {
+                // cancelAll answers per symbol; a failed one kept its orders.
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct PerSymbol {
+                    #[serde(default)]
+                    failed_symbols: Vec<serde::de::IgnoredAny>,
+                }
+                if serde_json::from_str::<PerSymbol>(data.get())
+                    .is_ok_and(|reply| !reply.failed_symbols.is_empty())
+                {
+                    let error = VenueError::new("KuCoin Spot cancel-all failed for some symbols");
+                    job.effective = true;
+                    self.write_failed(cx, job, error.outcome(Outcome::Unknown));
+                    return;
+                }
+            }
         }
         job.effective = true;
         self.revision += 1;
