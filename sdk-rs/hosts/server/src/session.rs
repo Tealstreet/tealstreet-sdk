@@ -1540,10 +1540,11 @@ async fn pump(
     }
 }
 
-/// The engine's notice that startup is still waiting, for the journal too: while held,
-/// the page sees nothing, and a start that never finishes was otherwise silent.
-fn startup_incomplete_line(name: &str, notice: &Value) -> Option<String> {
-    (notice["code"] == safe_cex_engine::log::code::STARTUP_INCOMPLETE).then(|| {
+/// The engine's notices that startup is still waiting or retrying a read, for the journal
+/// too: while held, the page sees nothing, and a start that never finished was silent.
+fn startup_waiting_line(name: &str, notice: &Value) -> Option<String> {
+    use safe_cex_engine::log::code::{STARTUP_DEGRADED, STARTUP_INCOMPLETE};
+    (notice["code"] == STARTUP_INCOMPLETE || notice["code"] == STARTUP_DEGRADED).then(|| {
         format!(
             "{name} {}",
             notice["message"].as_str().unwrap_or("startup incomplete")
@@ -1613,7 +1614,7 @@ fn notice_to_msg(
             let _ = out.send(envelope::msg(name, "error", json!([notice["error"]])));
         }
         ("event" | "accountAuth", _) => {
-            if let Some(line) = startup_incomplete_line(name, notice) {
+            if let Some(line) = startup_waiting_line(name, notice) {
                 Log::warn(&line);
             }
             let _ = out.send(envelope::msg(name, "engine-event", notice.clone()));
@@ -2824,11 +2825,17 @@ mod tests {
         let waiting = json!({"type": "event", "level": "error", "code": "startup.incomplete",
             "message": "Startup incomplete: still waiting for markets, tickers"});
         assert_eq!(
-            startup_incomplete_line("bbbbb", &waiting).as_deref(),
+            startup_waiting_line("bbbbb", &waiting).as_deref(),
             Some("bbbbb Startup incomplete: still waiting for markets, tickers")
         );
+        let retrying = json!({"type": "event", "level": "warn", "code": "startup.degraded",
+            "message": "Public startup delayed; still retrying: transport request timed out"});
+        assert_eq!(
+            startup_waiting_line("bbbbb", &retrying).as_deref(),
+            Some("bbbbb Public startup delayed; still retrying: transport request timed out")
+        );
         let other = json!({"type": "event", "code": "order.rejected", "message": "x"});
-        assert_eq!(startup_incomplete_line("bbbbb", &other), None);
+        assert_eq!(startup_waiting_line("bbbbb", &other), None);
     }
 
     #[test]

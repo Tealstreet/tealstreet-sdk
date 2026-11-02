@@ -176,7 +176,7 @@ async fn open_socket(
 /// How often one host's failed opens are logged; the line counts those in between.
 const OPEN_FAILURE_LOG_EVERY: Duration = Duration::from_secs(60);
 
-/// Failed venue socket opens by host, so a refusal loop logs once a minute, not per retry.
+/// Failed venue socket opens and requests by host, so a refusal loop logs once a minute, not per retry.
 #[derive(Default)]
 struct OpenFailures {
     /// When each host last logged, and its failures since.
@@ -192,7 +192,23 @@ impl OpenFailures {
             .ok()
             .and_then(|uri| uri.host().map(str::to_owned))
             .unwrap_or_else(|| "unparsable url".to_owned());
-        let entry = self.by_host.entry(host.clone()).or_insert((None, 0));
+        self.line(format!("venue socket open failed: {host}"), error, now)
+    }
+
+    /// The log line for a venue request that failed in transport, by its route.
+    fn note_request(
+        &mut self,
+        route: &str,
+        error: &str,
+        elapsed: Duration,
+        now: std::time::Instant,
+    ) -> Option<String> {
+        let error = format!("{error} after {:.1}s", elapsed.as_secs_f64());
+        self.line(format!("venue request failed: {route}"), &error, now)
+    }
+
+    fn line(&mut self, what: String, error: &str, now: std::time::Instant) -> Option<String> {
+        let entry = self.by_host.entry(what.clone()).or_insert((None, 0));
         entry.1 += 1;
         if entry
             .0
@@ -206,23 +222,33 @@ impl OpenFailures {
             serde_json::json!({
                 "level": "warn",
                 "source": "safe-cex-native",
-                "msg": format!("venue socket open failed: {host}: {error} ({failures} failures since the last line)"),
+                "msg": format!("{what}: {error} ({failures} failures since the last line)"),
             })
             .to_string(),
         )
     }
 }
 
-fn log_open_failure(url: &str, error: &str) {
-    static FAILURES: std::sync::Mutex<Option<OpenFailures>> = std::sync::Mutex::new(None);
-    let line = FAILURES
-        .lock()
-        .unwrap()
-        .get_or_insert_with(OpenFailures::default)
-        .note(url, error, std::time::Instant::now());
-    if let Some(line) = line {
+static FAILURES: std::sync::Mutex<Option<OpenFailures>> = std::sync::Mutex::new(None);
+
+fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) {
+    if let Some(line) = note(
+        FAILURES
+            .lock()
+            .unwrap()
+            .get_or_insert_with(OpenFailures::default),
+    ) {
         eprintln!("{line}");
     }
+}
+
+fn log_open_failure(url: &str, error: &str) {
+    log_failure(|failures| failures.note(url, error, std::time::Instant::now()));
+}
+
+/// A venue request that failed in transport (a timeout, a refused connection), by route.
+pub(crate) fn log_request_failure(route: &str, error: &str, elapsed: Duration) {
+    log_failure(|failures| failures.note_request(route, error, elapsed, std::time::Instant::now()));
 }
 
 const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
@@ -478,6 +504,37 @@ mod security_tests {
             .note(url, "timed out after 15s", start + Duration::from_secs(60))
             .unwrap();
         assert!(again.contains("60 failures"), "{again}");
+    }
+
+    #[test]
+    fn a_failed_venue_request_is_logged_by_route_with_its_elapsed_time() {
+        let mut failures = OpenFailures::default();
+        let start = std::time::Instant::now();
+        let line = failures
+            .note_request(
+                "api.bitget.com via proxy-jp.example",
+                "transport request timed out",
+                Duration::from_millis(20_004),
+                start,
+            )
+            .unwrap();
+        assert!(
+            line.contains("venue request failed: api.bitget.com via proxy-jp.example")
+                && line.contains("timed out")
+                && line.contains("after 20.0s"),
+            "{line}"
+        );
+        assert!(
+            failures
+                .note_request(
+                    "api.bitget.com via proxy-jp.example",
+                    "x",
+                    Duration::ZERO,
+                    start
+                )
+                .is_none(),
+            "throttled like socket opens"
+        );
     }
 
     /// A refused upgrade names its status: Cloudflare's 429 or 403 is the evidence.
