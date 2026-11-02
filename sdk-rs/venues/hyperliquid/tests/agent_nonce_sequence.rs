@@ -75,20 +75,38 @@ fn release_write(e: &mut Engine<Hyperliquid>, command: u32, now: f64) -> HttpReq
 }
 
 #[test]
-fn same_agent_release_between_bind_and_claim_exhausts_the_repair_budget_as_state() {
+fn same_agent_releases_supersede_a_bound_write_only_past_the_venues_window() {
     let (mut held, _) = ready("disabled");
     place(&mut held, 1, 2000.);
-    let mut permit = bound_exchange_write(&mut held);
-    for round in 0..9 {
-        // A fresh engine on the same agent, as a parallel test used to be.
+    let permit = bound_exchange_write(&mut held);
+    // Hyperliquid keeps a signer's 100 highest nonces: 99 higher releases leave
+    // this write valid; the 100th puts it below the lowest kept one.
+    for _ in 0..100 {
         release_write(&mut ready("disabled").0, 10, 2000.);
-        let now = safe_cex_engine::test_support::dispatch_now(&held);
-        match held.claim_http(now, permit) {
-            Err(Error::Stale) if round < 8 => permit = bound_exchange_write(&mut held),
-            Err(Error::State) if round == 8 => return,
-            other => panic!("round {round}: {other:?}"),
-        }
     }
+    let now = safe_cex_engine::test_support::dispatch_now(&held);
+    assert!(matches!(held.claim_http(now, permit), Err(Error::Stale)));
+    let permit = bound_exchange_write(&mut held);
+    let now = safe_cex_engine::test_support::dispatch_now(&held);
+    assert!(matches!(
+        held.claim_http(now, permit),
+        Ok(Claim::Released(_))
+    ));
+}
+
+#[test]
+fn ninety_nine_same_agent_releases_leave_a_bound_write_valid() {
+    let (mut held, _) = ready("disabled");
+    place(&mut held, 1, 2000.);
+    let permit = bound_exchange_write(&mut held);
+    for _ in 0..99 {
+        release_write(&mut ready("disabled").0, 10, 2000.);
+    }
+    let now = safe_cex_engine::test_support::dispatch_now(&held);
+    assert!(matches!(
+        held.claim_http(now, permit),
+        Ok(Claim::Released(_))
+    ));
 }
 
 #[test]
