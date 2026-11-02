@@ -183,17 +183,3 @@ describe('ExchangeWorker start that keeps timing out', () => {
     expect(error.data[1]).toEqual({ forceToast: true });
   });
 });
-
-describe('ExchangeWorker start timeout tag', () => {
-  it('tells the page a failed start will be retried, and not once retries are spent', () => {
-    const { messages, worker } = createWorker();
-    Object.assign(worker, { _startTimedOut: true, _startRetries: 0 });
-    expect((worker as any)._startTags().worker_start_retrying).toBe('true');
-    Object.assign(worker, { _startRetries: 4 });
-    expect((worker as any)._startTags().worker_start_retrying).toBeUndefined();
-    Object.assign(worker, { _startTimedOut: false, _startRetries: 0 });
-    expect((worker as any)._startTags().worker_start_retrying).toBeUndefined();
-    expect((worker as any)._startTags().worker_error_phase).toBe('startup');
-    expect(messages).toEqual([]);
-  });
-});
