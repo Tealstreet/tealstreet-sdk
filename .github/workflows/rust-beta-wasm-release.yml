@@ -128,7 +128,7 @@ jobs:
     needs: roster
     if: needs.roster.outputs.publish == 'true'
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         family: ${{ fromJSON(needs.roster.outputs.families) }}
     runs-on: ubuntu-latest
