@@ -448,13 +448,50 @@ mod tests {
         .to_string()
     }
 
+    type ServerSocket = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
+
+    /// The tunnel side of an upgrade: greets, then accepts the token.
+    async fn greet_and_authenticate(stream: tokio::net::TcpStream) -> Option<ServerSocket> {
+        let mut socket = tokio_tungstenite::accept_async(stream).await.ok()?;
+        let greeting = serde_json::json!({"type": "serverTime"}).to_string();
+        let _ = tokio::time::timeout(Duration::from_secs(5), socket.send(Message::text(greeting)))
+            .await;
+        while let Some(Ok(Message::Text(text))) = socket.next().await {
+            if text.contains("rpc.auth") {
+                let auth = Message::text(r#"{"type":"rpc.auth"}"#);
+                let _ = tokio::time::timeout(Duration::from_secs(5), socket.send(auth)).await;
+                break;
+            }
+        }
+        Some(socket)
+    }
+
+    /// Answers every `rpc.http` with its own nonce as the body, until the socket ends.
+    async fn answer_each_request(mut socket: ServerSocket) {
+        while let Some(Ok(Message::Text(text))) = socket.next().await {
+            let packet: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let nonce = packet["nonce"].as_str().unwrap().to_owned();
+            let reply = Message::text(answer(&nonce, &format!("body {nonce}")));
+            let _ = tokio::time::timeout(Duration::from_secs(5), socket.send(reply)).await;
+        }
+    }
+
+    fn http_body(received: &mut mpsc::UnboundedReceiver<HostEvent>, id: u64) -> String {
+        let mut body = Vec::new();
+        while let Ok(event) = received.try_recv() {
+            if let HostEvent::HttpChunk(request, chunk) = event
+                && request.0 == id
+            {
+                body.extend(chunk);
+            }
+        }
+        String::from_utf8(body).unwrap()
+    }
+
     /// A tunnel that greets, accepts the token, and hands each socket to `serve`.
     async fn tunnel<F, Fut>(serve: F) -> (String, Arc<AtomicUsize>)
     where
-        F: Fn(tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>) -> Fut
-            + Send
-            + Sync
-            + 'static,
+        F: Fn(ServerSocket) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -467,24 +504,9 @@ mod tests {
                 counted.fetch_add(1, Ordering::SeqCst);
                 let serve = serve.clone();
                 tokio::spawn(async move {
-                    let Ok(mut socket) = tokio_tungstenite::accept_async(stream).await else {
-                        return;
-                    };
-                    let greeting = serde_json::json!({"type": "serverTime"}).to_string();
-                    let _ = tokio::time::timeout(
-                        Duration::from_secs(5),
-                        socket.send(Message::text(greeting)),
-                    )
-                    .await;
-                    while let Some(Ok(Message::Text(text))) = socket.next().await {
-                        if text.contains("rpc.auth") {
-                            let auth = Message::text(r#"{"type":"rpc.auth"}"#);
-                            let _ = tokio::time::timeout(Duration::from_secs(5), socket.send(auth))
-                                .await;
-                            break;
-                        }
+                    if let Some(socket) = greet_and_authenticate(stream).await {
+                        serve(socket).await;
                     }
-                    serve(socket).await;
                 });
             }
         });
@@ -625,11 +647,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_stalled_write_fails_its_request_as_a_drop_instead_of_wedging_the_route() {
-        let (url, opened) = tunnel(|socket| async move {
-            // Authenticated, then never reads again: the request's write backs up.
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            drop(socket);
+    async fn a_stalled_write_fails_within_the_write_timeout_and_the_next_request_reopens() {
+        let served = Arc::new(AtomicUsize::new(0));
+        let (url, opened) = tunnel(move |socket| {
+            let first = served.fetch_add(1, Ordering::SeqCst) == 0;
+            async move {
+                if first {
+                    // Authenticated, then never reads again: the request's write backs up.
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    drop(socket);
+                } else {
+                    answer_each_request(socket).await;
+                }
+            }
         })
         .await;
         let pool = HowPool::default();
@@ -641,20 +671,161 @@ mod tests {
             BASE_BACKOFF,
         );
         connection.ready().await.unwrap();
-        let (events, _received) = mpsc::unbounded_channel();
+        let (events, mut received) = mpsc::unbounded_channel();
         let huge = "x".repeat(64 * 1024 * 1024);
         let packet =
             serde_json::json!({"type": "rpc.http", "nonce": "native-1", "pad": huge}).to_string();
         let started = std::time::Instant::now();
         let failed = tokio::time::timeout(
-            Duration::from_secs(15),
-            connection.request(RequestId(1), packet, events),
+            WRITE_TIMEOUT * 3,
+            connection.request(RequestId(1), packet, events.clone()),
         )
         .await
         .expect("a stalled write must not wedge the request");
-        assert!(failed.unwrap_err().starts_with("HTTP tunnel"));
-        assert!(started.elapsed() < Duration::from_secs(10));
+        let waited = started.elapsed();
+        assert_eq!(failed, Err("HTTP tunnel handoff failed".into()));
+        assert!(
+            waited >= WRITE_TIMEOUT && waited < WRITE_TIMEOUT + Duration::from_secs(3),
+            "failed after {waited:?}"
+        );
         assert_eq!(opened.load(Ordering::SeqCst), 1);
+
+        // The stalled socket is gone; the next request opens a fresh one on the same route.
+        let again = pool.connection(&url, vec![], tokens());
+        assert!(again.commands.same_channel(&connection.commands));
+        tokio::time::timeout(OPEN_TIMEOUT, again.ready())
+            .await
+            .expect("the reopen must not hang")
+            .unwrap();
+        assert_eq!(opened.load(Ordering::SeqCst), 2, "a fresh socket");
+        let packet = serde_json::json!({"type": "rpc.http", "nonce": "native-2"}).to_string();
+        let answered =
+            tokio::time::timeout(WRITE_TIMEOUT, again.request(RequestId(2), packet, events))
+                .await
+                .expect("the fresh socket answers");
+        assert_eq!(answered, Ok(()));
+        assert_eq!(http_body(&mut received, 2), "body native-2");
+    }
+
+    /// Paused time moved in steps paced by real time: a running blocking task stops
+    /// auto-advance, so loopback IO lands before a virtual timeout can fire over it.
+    async fn stepped<F: std::future::Future>(future: F) -> F::Output {
+        const STEP: Duration = Duration::from_millis(100);
+        tokio::pin!(future);
+        loop {
+            let pace = tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(1)));
+            tokio::select! {
+                biased;
+                output = &mut future => return output,
+                _ = pace => tokio::time::advance(STEP).await,
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_five_minute_tunnel_outage_fails_each_attempt_with_backoff_then_recovers() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/tunnel", listener.local_addr().unwrap());
+        let up = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let attempts = Arc::new(Mutex::new(Vec::new()));
+        let (serving, seen) = (up.clone(), attempts.clone());
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                seen.lock().unwrap().push(Instant::now());
+                if !serving.load(Ordering::SeqCst) {
+                    // Down: every connect is closed before the upgrade.
+                    drop(stream);
+                    continue;
+                }
+                tokio::spawn(async move {
+                    if let Some(socket) = greet_and_authenticate(stream).await {
+                        answer_each_request(socket).await;
+                    }
+                });
+            }
+        });
+        let pool = HowPool::default();
+        let connection = pool.connection_with(
+            &url,
+            vec![],
+            tokens(),
+            Arc::new(OpenCap::new(10.0, 10.0)),
+            BASE_BACKOFF,
+        );
+        let (events, mut received) = mpsc::unbounded_channel();
+        let outage = Duration::from_secs(5 * 60);
+        let started = Instant::now();
+        let mut tries = 0usize;
+        while started.elapsed() < outage {
+            let asked = Instant::now();
+            let failed = stepped(tokio::time::timeout(
+                MAX_BACKOFF + OPEN_TIMEOUT,
+                connection.ready(),
+            ))
+            .await
+            .expect("an attempt during the outage must end");
+            let error = failed.unwrap_err();
+            assert!(
+                error.starts_with("HTTP tunnel connection failed"),
+                "{error}"
+            );
+            assert!(
+                asked.elapsed() <= MAX_BACKOFF + Duration::from_secs(1),
+                "{:?}",
+                asked.elapsed()
+            );
+            tries += 1;
+            assert_eq!(attempts.lock().unwrap().len(), tries, "one open per ask");
+            // A request without an open socket is refused at once, not queued.
+            let packet = serde_json::json!({"type": "rpc.http", "nonce": "native-0"}).to_string();
+            let refused = connection
+                .request(RequestId(0), packet, events.clone())
+                .await;
+            assert_eq!(refused, Err("HTTP tunnel handoff failed".into()));
+        }
+        let opens = attempts.lock().unwrap().clone();
+        for (failures, pair) in opens.windows(2).enumerate() {
+            let floor = BASE_BACKOFF
+                .saturating_mul(1 << failures.min(16))
+                .min(MAX_BACKOFF)
+                / 2;
+            let gap = pair[1].duration_since(pair[0]);
+            assert!(gap >= floor, "open {} after {gap:?}", failures + 1);
+        }
+        assert!((10..=30).contains(&opens.len()), "{} opens", opens.len());
+        // Nobody asking: the route does not retry on its own.
+        stepped(tokio::time::sleep(Duration::from_secs(120))).await;
+        assert_eq!(attempts.lock().unwrap().len(), opens.len());
+
+        up.store(true, Ordering::SeqCst);
+        let back = Instant::now();
+        let again = pool.connection(&url, vec![], tokens());
+        assert!(
+            again.commands.same_channel(&connection.commands),
+            "the route was not restarted"
+        );
+        stepped(tokio::time::timeout(
+            MAX_BACKOFF + OPEN_TIMEOUT,
+            again.ready(),
+        ))
+        .await
+        .expect("the first ask after the outage must end")
+        .unwrap();
+        assert!(
+            back.elapsed() <= MAX_BACKOFF + Duration::from_secs(1),
+            "{:?}",
+            back.elapsed()
+        );
+        let packet = serde_json::json!({"type": "rpc.http", "nonce": "native-1"}).to_string();
+        let answered = stepped(tokio::time::timeout(
+            WRITE_TIMEOUT,
+            again.request(RequestId(1), packet, events),
+        ))
+        .await
+        .expect("the reopened socket answers");
+        assert_eq!(answered, Ok(()));
+        assert_eq!(http_body(&mut received, 1), "body native-1");
+        assert_eq!(attempts.lock().unwrap().len(), opens.len() + 1);
     }
 
     #[test]
