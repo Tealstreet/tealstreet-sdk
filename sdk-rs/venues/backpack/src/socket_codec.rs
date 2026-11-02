@@ -33,6 +33,14 @@ enum InterestChange {
     RemoveCandle(String, Interval),
 }
 
+fn depth_topic(symbol: &str) -> String {
+    format!("depth.{symbol}")
+}
+
+fn kline_topic(symbol: &str, interval: Interval) -> String {
+    format!("kline.{interval}.{symbol}")
+}
+
 fn policy(role: SocketChannel) -> FeedPolicy {
     FeedPolicy {
         invalidation: if role == SocketChannel::Public {
@@ -123,27 +131,40 @@ impl Backpack {
             .collect();
         for symbol in self.books.keys() {
             if !matches!(change, Some(InterestChange::RemoveBook(s)) if s == symbol) {
-                topics.push(Interest::from_wire_args(format!("depth.{symbol}")));
+                topics.push(Interest::from_wire_args(depth_topic(symbol)));
             }
         }
         for (symbol, interval) in self.candles.keys() {
             if !matches!(change, Some(InterestChange::RemoveCandle(s, i)) if s == symbol && i == interval)
             {
-                topics.push(Interest::from_wire_args(format!(
-                    "kline.{interval}.{symbol}"
-                )));
+                topics.push(Interest::from_wire_args(kline_topic(symbol, *interval)));
             }
         }
         match change {
             Some(InterestChange::AddBook(s)) => {
-                topics.push(Interest::from_wire_args(format!("depth.{s}")))
+                topics.push(Interest::from_wire_args(depth_topic(s)))
             }
             Some(InterestChange::AddCandle(s, i)) => {
-                topics.push(Interest::from_wire_args(format!("kline.{i}.{s}")))
+                topics.push(Interest::from_wire_args(kline_topic(s, *i)))
             }
             _ => {}
         }
         topics
+    }
+
+    /// The public feed and interest key `topic` streams on.
+    pub(super) fn topic_interest(
+        &self,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        use safe_cex_engine::SubscriptionTopic;
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => depth_topic(symbol),
+            SubscriptionTopic::Candles { symbol, interval } => {
+                supported(*interval).then(|| kline_topic(symbol, *interval))?
+            }
+        };
+        Some((self.public.feed?, key))
     }
 
     fn commit_interest_change(&mut self, change: InterestChange) {
@@ -333,7 +354,7 @@ impl Backpack {
             .cloned()
             .collect();
         for symbol in symbols {
-            let key = format!("depth.{symbol}");
+            let key = depth_topic(&symbol);
             match cx.set_socket_interests_then(
                 feed,
                 self.public_topics(None),

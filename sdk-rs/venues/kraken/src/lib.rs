@@ -10,6 +10,7 @@ pub mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::Level;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -616,6 +617,13 @@ impl Venue for Kraken {
         ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.managed_encode(feed, subscribe, items, emit)
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials

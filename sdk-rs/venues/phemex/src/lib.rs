@@ -550,6 +550,13 @@ impl Venue for PhemexPerpetuals {
             self.public_socket_event(cx, event)
         }
     }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
+    }
     fn encode_socket_interests(
         &self,
         _store: &safe_cex_engine::Store,

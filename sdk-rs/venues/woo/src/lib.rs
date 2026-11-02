@@ -624,6 +624,13 @@ impl Venue for Woo {
         }
         Ok(())
     }
+    fn subscription_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(store, topic)
+    }
     fn encode_socket_interests(
         &self,
         store: &safe_cex_engine::Store,

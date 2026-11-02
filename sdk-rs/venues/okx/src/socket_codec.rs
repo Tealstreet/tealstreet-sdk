@@ -1,5 +1,6 @@
 //! Native codecs and store invalidation; Engine owns auth, epochs and replay.
 use super::*;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
     Interest, Invalidation, LifecycleEvent, SocketError, TrafficPolicy,
@@ -17,7 +18,37 @@ struct TopicArgs<'a> {
     #[serde(rename = "instType", default)]
     inst_type: Option<&'a str>,
 }
+/// The interest key, and wire args, of one native topic.
+pub(super) fn interest_key(topic: &Topic<'_>) -> String {
+    serde_json::to_string(topic).expect("native topic")
+}
+pub(super) fn book_topic(inst_id: &str) -> Topic<'_> {
+    Topic::instrument("books", inst_id)
+}
+fn candle_channel(interval: Interval) -> Option<String> {
+    bar(interval).map(|bar| format!("candle{bar}"))
+}
 impl Okx {
+    /// The feed and key `desired_socket_interests` streams `topic` under.
+    pub(super) fn topic_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        match topic {
+            SubscriptionTopic::OrderBook { symbol } => {
+                let market = store.market(symbol)?;
+                let key = interest_key(&book_topic(&market.id));
+                Some((self.connections[PUBLIC].feed?, key))
+            }
+            SubscriptionTopic::Candles { symbol, interval } => {
+                let market = store.market(symbol)?;
+                let channel = candle_channel(*interval)?;
+                let key = interest_key(&Topic::instrument(&channel, &market.id));
+                Some((self.connections[BUSINESS].feed?, key))
+            }
+        }
+    }
     pub(super) fn feed_channel(&self, feed: FeedId) -> Option<usize> {
         self.connections.iter().position(|c| c.feed == Some(feed))
     }
@@ -27,10 +58,8 @@ impl Okx {
         channel: usize,
     ) -> Vec<Interest> {
         let mut values = Vec::new();
-        let mut add = |topic: Topic<'_>| {
-            let text = serde_json::to_string(&topic).expect("native topic");
-            values.push(Interest::from_wire_args(text));
-        };
+        let mut add =
+            |topic: Topic<'_>| values.push(Interest::from_wire_args(interest_key(&topic)));
         if channel == PUBLIC {
             for name in [
                 "tickers",
@@ -55,7 +84,7 @@ impl Okx {
             }
             for symbol in self.books.keys() {
                 if let Some(m) = store.market(symbol) {
-                    add(Topic::instrument("books", &m.id));
+                    add(book_topic(&m.id));
                 }
             }
         } else {
@@ -83,8 +112,10 @@ impl Okx {
             }
             if channel == BUSINESS {
                 for (symbol, interval) in self.candles.keys() {
-                    if let (Some(m), Some(bar)) = (store.market(symbol), bar(*interval)) {
-                        add(Topic::instrument(&format!("candle{bar}"), &m.id));
+                    if let (Some(m), Some(channel)) =
+                        (store.market(symbol), candle_channel(*interval))
+                    {
+                        add(Topic::instrument(&channel, &m.id));
                     }
                 }
             }

@@ -7,6 +7,7 @@ mod trading;
 mod wire;
 
 use base64::Engine as _;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
@@ -1265,6 +1266,13 @@ impl Venue for Hyperliquid {
         ) -> Result<(), SocketError>,
     ) -> Result<(), SocketError> {
         self.managed_socket_encode(store, feed, subscribe, interests, emit)
+    }
+    fn subscription_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(store, topic)
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self

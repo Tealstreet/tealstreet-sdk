@@ -7,7 +7,34 @@ use safe_cex_engine::socket_lifecycle::{
     Interest, Invalidation, LifecycleEvent, RetireReason, SocketError, TrafficPolicy,
 };
 
+/// The interest key, and wire topic, of a market's depth stream.
+fn book_topic(market: &Market) -> String {
+    format!("{}@orderbookupdate", native(market))
+}
+/// The interest key, and wire topic, of a market's candle stream.
+fn candle_topic(market: &Market, interval: Interval) -> String {
+    format!("{}@kline_{interval}", native(market))
+}
+
 impl Woo {
+    /// The public feed and key `desired_interests` streams `topic` under.
+    pub(super) fn topic_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        let key = match topic {
+            safe_cex_engine::SubscriptionTopic::OrderBook { symbol } => {
+                book_topic(store.market(symbol)?)
+            }
+            // A candle's shared trade topic is not part of its kline repair.
+            safe_cex_engine::SubscriptionTopic::Candles { symbol, interval } => {
+                candle_topic(store.market(symbol)?, *interval)
+            }
+        };
+        Some((self.public.feed?, key))
+    }
+
     fn private_feed(&self, feed: FeedId) -> Result<bool, SocketError> {
         if self.public.feed == Some(feed) {
             Ok(false)
@@ -36,12 +63,12 @@ impl Woo {
         ];
         for symbol in self.depth.keys() {
             if let Some(market) = store.market(symbol) {
-                topics.push(format!("{}@orderbookupdate", native(market)));
+                topics.push(book_topic(market));
             }
         }
         for (symbol, interval) in self.candles.keys() {
             if let Some(market) = store.market(symbol) {
-                topics.push(format!("{}@kline_{interval}", native(market)));
+                topics.push(candle_topic(market, *interval));
             }
         }
         if !self.options.public_data_only {
@@ -172,12 +199,7 @@ impl Woo {
         let result = if self.public.open && !seeds.is_empty() {
             let required: Vec<_> = seeds
                 .iter()
-                .map(|(symbol, _)| {
-                    format!(
-                        "{}@orderbookupdate",
-                        native(cx.store.market(symbol).unwrap())
-                    )
-                })
+                .map(|(symbol, _)| book_topic(cx.store.market(symbol).unwrap()))
                 .collect();
             let keys: Vec<_> = required.iter().map(String::as_str).collect();
             cx.set_socket_interests_then(feed, desired, &keys, Pending::SocketBookSeeds(seeds))

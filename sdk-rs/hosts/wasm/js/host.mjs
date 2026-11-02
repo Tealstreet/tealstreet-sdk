@@ -470,7 +470,7 @@ export class EngineHost {
       if (onStage !== undefined && typeof onStage !== 'function') throw new TypeError('Command stage observer must be a function');
     } catch (error) { return Promise.reject(error); }
     const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'networkRestored' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
-      || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
+      || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles' || command.op === 'repairSubscription'
       ? undefined
       : this.nextCommand++;
     const clientOrderIds = reply !== undefined && Array.isArray(command.orders)

@@ -47,7 +47,9 @@ use safe_cex_engine::socket_lifecycle::{
     TrafficPolicy,
 };
 use safe_cex_engine::time;
-use safe_cex_engine::{Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue};
+use safe_cex_engine::{
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue,
+};
 use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet};
@@ -360,6 +362,15 @@ fn interval_code(interval: Interval) -> Option<&'static str> {
     })
 }
 
+/// Order book depth per category.
+fn book_depth_for(category: Category) -> u32 {
+    match category {
+        Category::Option => 25,
+        Category::Spot => 200,
+        Category::Linear | Category::Inverse => 1000,
+    }
+}
+
 /// Seconds intervals have no native kline; they are built from trades alone.
 fn seconds_interval(interval: Interval) -> Option<f64> {
     use Interval::*;
@@ -617,13 +628,45 @@ impl BybitLinear {
         if let Some((prefix, _)) = self.paths.public_ws.rsplit_once('/') {
             self.paths.public_ws = format!("{prefix}/{}", self.paths.category);
         }
-        self.paths.book_depth = if self.category == Category::Option {
-            25
-        } else if self.category == Category::Spot {
-            200
-        } else {
-            1000
+        self.paths.book_depth = book_depth_for(self.category);
+    }
+
+    /// The public feed and interest key `topic` streams on, whichever
+    /// category is selected now; `None` when its product has no live feed.
+    fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let symbol = match topic {
+            SubscriptionTopic::Candles { symbol, .. } | SubscriptionTopic::OrderBook { symbol } => {
+                symbol
+            }
         };
+        let category = self.category_for(symbol);
+        let selected = category == self.category;
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => {
+                let depth = if selected {
+                    self.paths.book_depth
+                } else {
+                    book_depth_for(category)
+                };
+                Self::book_topic(depth, symbol)
+            }
+            // Seconds bars are built from trades alone.
+            SubscriptionTopic::Candles { symbol, interval } => Self::kline_topic(symbol, *interval)
+                .or_else(|| {
+                    (!self.variant.is_hyro() && seconds_interval(*interval).is_some())
+                        .then(|| format!("publicTrade.{symbol}"))
+                })?,
+        };
+        let connection = if selected {
+            &self.public
+        } else {
+            &self
+                .products
+                .iter()
+                .find(|state| state.category == category)?
+                .public
+        };
+        Some((connection.feed?, key))
     }
 
     fn category_for(&self, symbol: &str) -> Category {
@@ -2886,6 +2929,14 @@ impl Venue for BybitLinear {
             _ => {}
         }
         Ok(())
+    }
+
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
     }
 
     fn encode_socket_interests(

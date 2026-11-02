@@ -1319,7 +1319,8 @@ impl Venue for Grvt {
             return;
         }
         match command {
-            Command::SetTickerSymbols { .. } => {}
+            // The engine repairs subscriptions itself; it never forwards this.
+            Command::SetTickerSymbols { .. } | Command::RepairSubscription(_) => {}
             Command::Venue { command, .. } => {
                 safe_cex_engine::unsupported_venue_action(cx, command)
             }

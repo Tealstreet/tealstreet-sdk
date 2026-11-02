@@ -622,6 +622,23 @@ pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
     cx.fail(command, UNSUPPORTED_VENUE_ACTION);
 }
 
+/// One live public stream, named the way hosts subscribe to it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SubscriptionTopic {
+    Candles { symbol: String, interval: Interval },
+    OrderBook { symbol: String },
+}
+
+impl std::fmt::Display for SubscriptionTopic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Candles { symbol, interval } => write!(f, "candles {symbol} {interval}"),
+            Self::OrderBook { symbol } => write!(f, "order book {symbol}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     FetchOptionChain {
@@ -652,6 +669,9 @@ pub enum Command {
         symbol: String,
         interval: Interval,
     },
+    /// Re-send the venue's native subscribe for one live topic without
+    /// changing subscription intent; replyless, like the subscribe commands.
+    RepairSubscription(SubscriptionTopic),
     PlaceOrders {
         command: CommandId,
         orders: Vec<PlaceOrderOpts>,
@@ -3880,6 +3900,16 @@ pub trait Venue {
     ) -> Result<(), crate::socket_lifecycle::SocketError> {
         Err(crate::socket_lifecycle::SocketError::NotPermitted)
     }
+    /// The managed feed and interest key this venue streams `topic` on, for
+    /// `Command::RepairSubscription`. `None` means the venue cannot name it.
+    #[cfg(feature = "managed-sockets")]
+    fn subscription_interest(
+        &self,
+        _store: &Store,
+        _topic: &SubscriptionTopic,
+    ) -> Option<(crate::socket_lifecycle::FeedId, String)> {
+        None
+    }
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
@@ -5099,6 +5129,9 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
+            Event::Command(Command::RepairSubscription(topic)) => {
+                self.repair_subscription(now, &topic);
+            }
             // Before the frame-fed refusal: an unimplemented read is Unsupported there too.
             Event::Command(Command::Venue {
                 command,
@@ -5395,6 +5428,61 @@ impl<V: Venue> Engine<V> {
             }
         }
         self.finish_event_scope(now);
+    }
+
+    /// Re-sends the venue's native subscribe for one live topic; every
+    /// refusal is a visible `subscription.rejected` warning, never a panic.
+    #[inline(never)]
+    fn repair_subscription(&mut self, now: f64, topic: &SubscriptionTopic) {
+        let Err(reason) = self.try_repair_subscription(now, topic) else {
+            return;
+        };
+        let venue = std::any::type_name::<V>()
+            .rsplit("::")
+            .next()
+            .unwrap_or_default();
+        Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        }
+        .event(
+            Level::Warn,
+            log_code::SUBSCRIPTION_REJECTED,
+            format!("{venue} cannot repair the {topic} subscription: {reason}"),
+            vec![("venue", venue.into()), ("topic", topic.to_string().into())],
+        );
+    }
+
+    fn try_repair_subscription(
+        &mut self,
+        now: f64,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        if self.io.core.frame_fed || self.public_feed_policy() != PublicFeedPolicy::Direct {
+            return Err("public data comes from the host feed".into());
+        }
+        #[cfg(feature = "managed-sockets")]
+        if V::managed_sockets() {
+            let (feed, key) = self
+                .venue
+                .subscription_interest(&self.store, topic)
+                .ok_or("the venue cannot name its stream for this topic")?;
+            if !self.io.core.socket_driver.state.desires(feed, &key) {
+                return Err(format!("{key} is not subscribed"));
+            }
+            let mut cx = Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            };
+            return cx
+                .repair_socket_interests(feed, vec![key])
+                .map(drop)
+                .map_err(|error| format!("repair refused: {error:?}"));
+        }
+        let _ = (now, topic);
+        Err("the venue has no managed sockets".into())
     }
 
     fn begin_event_scope(&mut self) {

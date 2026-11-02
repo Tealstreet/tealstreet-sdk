@@ -3,6 +3,8 @@ use safe_cex_engine::request_context::{Error, HttpAction, Preparation, RoutingIn
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, VenueError};
 use safe_cex_venue_kucoin::{Options, spot::KucoinSpot};
 
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
 const MARKETS: &str = r#"{"code":"200000","data":[{"symbol":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.001","priceIncrement":"0.1","baseMinSize":"0.001","baseMaxSize":"100"}]}"#;
 const TICKERS: &str = r#"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100","buy":"99","sell":"101"}]}}"#;
 
@@ -147,7 +149,12 @@ fn expired_released_catalogue_cannot_set_markets() {
     let mut e = engine(false);
     e.start(100.);
     let request = released(&mut e, 100., "/api/v2/symbols");
-    reply(&mut e, 20_101., request.id, MARKETS);
+    reply(
+        &mut e,
+        100. + DISCOVERY_DEADLINE_MS + 1.,
+        request.id,
+        MARKETS,
+    );
     assert!(!e.store().loaded().markets);
     assert!(e.store().markets().is_empty());
 }
@@ -186,11 +193,16 @@ fn parked_ticker_expiry_retries_only_tickers_and_keeps_catalogue() {
     let deadline = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 20_101. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == 101. + DISCOVERY_DEADLINE_MS => {
+                Some(*timer)
+            }
             _ => None,
         })
         .expect("ticker preparation retains its original deadline");
-    e.handle(20_101., Event::TimerFired { timer: deadline });
+    e.handle(
+        101. + DISCOVERY_DEADLINE_MS,
+        Event::TimerFired { timer: deadline },
+    );
     assert!(e.store().loaded().markets);
     assert!(!e.store().loaded().tickers);
     assert_eq!(e.store().markets().len(), 1);
@@ -198,13 +210,21 @@ fn parked_ticker_expiry_retries_only_tickers_and_keeps_catalogue() {
     let (timer, at) = actions
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms > 20_101. && at_ms < 25_101. => {
+            Action::SetTimer { timer, at_ms }
+                if at_ms > 101. + DISCOVERY_DEADLINE_MS
+                    && at_ms < 5_101. + DISCOVERY_DEADLINE_MS =>
+            {
                 Some((timer, at_ms))
             }
             _ => None,
         })
         .expect("ticker-only native recovery");
-    reply(&mut e, 20_102., token.attempt().request, TICKERS);
+    reply(
+        &mut e,
+        102. + DISCOVERY_DEADLINE_MS,
+        token.attempt().request,
+        TICKERS,
+    );
     assert!(!e.store().loaded().tickers);
     e.handle(at, Event::TimerFired { timer });
     let tickers = released(&mut e, at, "/api/v1/market/allTickers");

@@ -6,6 +6,7 @@ mod trading;
 mod wire;
 use crate::{Options, sign};
 use safe_cex_engine::Level;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::log::code;
 use safe_cex_engine::request_context::{
     Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
@@ -455,6 +456,13 @@ impl Venue for KrakenSpot {
         ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.managed_encode(feed, subscribe, items, emit)
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.options.public_data_only && self.signer.is_none() {

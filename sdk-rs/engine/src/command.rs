@@ -4,7 +4,7 @@ use crate::model::CancelOrderRef;
 #[cfg(feature = "command-asterdex")]
 use crate::model::StpMode;
 use crate::model::{Interval, PlaceOrderOpts, PositionSide};
-use crate::{Command, Query};
+use crate::{Command, Query, SubscriptionTopic};
 use serde::Deserialize;
 
 /// Commands shared by JavaScript and native WebSocket clients.
@@ -42,6 +42,9 @@ enum CommandIn {
     UnsubscribeCandles {
         symbol: String,
         interval: Interval,
+    },
+    RepairSubscription {
+        topic: SubscriptionTopic,
     },
     PlaceOrders {
         command: u32,
@@ -207,6 +210,7 @@ enum Op {
     UnsubscribeOrderBook,
     SubscribeCandles,
     UnsubscribeCandles,
+    RepairSubscription,
     PlaceOrders,
     CancelOrders,
     #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
@@ -304,6 +308,12 @@ struct SubscribeCandlesIn {
 struct UnsubscribeCandlesIn {
     symbol: String,
     interval: Interval,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::RepairSubscription with 1 element")]
+struct RepairSubscriptionIn {
+    topic: SubscriptionTopic,
 }
 
 #[derive(Deserialize)]
@@ -632,6 +642,10 @@ fn decode_payload(op: Op, json: &str) -> Result<CommandIn, serde_json::Error> {
             let UnsubscribeCandlesIn { symbol, interval } = payload(json)?;
             CommandIn::UnsubscribeCandles { symbol, interval }
         }
+        Op::RepairSubscription => {
+            let RepairSubscriptionIn { topic } = payload(json)?;
+            CommandIn::RepairSubscription { topic }
+        }
         Op::PlaceOrders => {
             let PlaceOrdersIn { command, orders } = payload(json)?;
             CommandIn::PlaceOrders { command, orders }
@@ -931,6 +945,7 @@ impl From<CommandIn> for Command {
             CommandIn::UnsubscribeCandles { symbol, interval } => {
                 Self::UnsubscribeCandles { symbol, interval }
             }
+            CommandIn::RepairSubscription { topic } => Self::RepairSubscription(topic),
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
             #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
@@ -1649,6 +1664,49 @@ mod tests {
             }
         );
         assert!(decode_command(r#"{"op":"fetchMaxLeverage","command":82}"#).is_err());
+    }
+
+    #[test]
+    fn repair_subscription_names_one_candle_or_book_topic() {
+        assert_eq!(
+            decode_command(
+                r#"{"op":"repairSubscription","topic":{"kind":"candles","symbol":"BTCUSDT","interval":"1m"}}"#
+            )
+            .unwrap(),
+            Command::RepairSubscription(SubscriptionTopic::Candles {
+                symbol: "BTCUSDT".into(),
+                interval: Interval::M1,
+            })
+        );
+        // A host's reply ID is ignored: the command is replyless.
+        assert_eq!(
+            decode_host_input(
+                r#"{"op":"repairSubscription","command":9,"topic":{"kind":"orderBook","symbol":"BTCUSDT"}}"#
+            )
+            .unwrap(),
+            HostInput::Command {
+                command: Command::RepairSubscription(SubscriptionTopic::OrderBook {
+                    symbol: "BTCUSDT".into(),
+                }),
+                timeout_ms: None,
+            }
+        );
+        for bad in [
+            r#"{"op":"repairSubscription"}"#,
+            r#"{"op":"repairSubscription","kind":"orderBook","symbol":"BTCUSDT"}"#,
+            r#"{"op":"repairSubscription","topic":{"kind":"candles","symbol":"BTCUSDT"}}"#,
+            r#"{"op":"repairSubscription","topic":{"kind":"trades","symbol":"BTCUSDT"}}"#,
+            r#"{"op":"repairSubscription","topic":{"symbol":"BTCUSDT"}}"#,
+        ] {
+            assert!(decode_command(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            decode_subscription(
+                r#"{"op":"repairSubscription","topic":{"kind":"orderBook","symbol":"BTCUSDT"}}"#
+            )
+            .unwrap(),
+            None
+        );
     }
 
     fn assert_subscription_decoders_match(json: &str) {
