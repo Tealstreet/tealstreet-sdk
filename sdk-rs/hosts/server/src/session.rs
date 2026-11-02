@@ -96,6 +96,8 @@ pub struct Session {
     /// Chart and book subscriptions that arrived before their account joined,
     /// applied at join: the page sends them whenever its chart asks.
     early: HashMap<String, Vec<Topic>>,
+    /// Moved off a draining box: its accounts are released, never parked here.
+    moved: bool,
 }
 
 /// A chart or book subscription, by its page op.
@@ -133,8 +135,33 @@ const PUBLIC_OPS: [&str; 5] = [
     "unsubscribeOHLCV",
 ];
 
-/// Why the socket must close with 1008.
-pub struct PolicyViolation(pub &'static str);
+/// The close a drained box sends: this box is going away, reconnect elsewhere.
+pub const MOVED_CODE: u16 = 4100;
+pub const MOVED_REASON: &str = "draining: reconnect";
+
+/// Why the socket must close now.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Close {
+    /// 1008, with the reason.
+    Policy(&'static str),
+    /// The box is draining: [`MOVED_CODE`].
+    Moved,
+}
+
+impl Close {
+    pub fn code(&self) -> u16 {
+        match self {
+            Self::Policy(_) => 1008,
+            Self::Moved => MOVED_CODE,
+        }
+    }
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Self::Policy(reason) => reason,
+            Self::Moved => MOVED_REASON,
+        }
+    }
+}
 
 impl Session {
     pub fn new(
@@ -162,6 +189,35 @@ impl Session {
             taken_over: Arc::new(tokio::sync::Notify::new()),
             refused: HashMap::new(),
             early: HashMap::new(),
+            moved: false,
+        }
+    }
+
+    /// Whether a drain moves this socket now: break-glass moves every socket,
+    /// a waiting drain only one whose accounts run no chase or TWAP.
+    pub fn drain_close(&mut self) -> Option<Close> {
+        let moves = match self.registry.drain_state() {
+            crate::accounts::Drain::Off => false,
+            crate::accounts::Drain::Now => true,
+            crate::accounts::Drain::Waiting => !self
+                .joined
+                .values()
+                .any(|joined| joined.account.running.any()),
+        };
+        self.moved |= moves;
+        moves.then_some(Close::Moved)
+    }
+
+    /// A draining box admits inits only from users already live on it.
+    fn moved_by_drain(&self) -> bool {
+        match self.registry.drain_state() {
+            crate::accounts::Drain::Off => false,
+            crate::accounts::Drain::Now => true,
+            crate::accounts::Drain::Waiting => !self
+                .identity
+                .user
+                .as_deref()
+                .is_some_and(|user| self.registry.live_here(user)),
         }
     }
 
@@ -293,7 +349,7 @@ impl Session {
         self.send(envelope::session(&self.resume_id, resumed));
     }
 
-    pub async fn handle(&mut self, text: &str) -> Result<(), PolicyViolation> {
+    pub async fn handle(&mut self, text: &str) -> Result<(), Close> {
         let Ok(message) = serde_json::from_str::<Inbound>(text) else {
             Log::warn("invalid envelope");
             return Ok(());
@@ -306,7 +362,7 @@ impl Session {
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
                         && PUBLIC_OPS.contains(&msg.op.as_str()))
                 {
-                    return Err(PolicyViolation(
+                    return Err(Close::Policy(
                         "Unauthenticated exchange-server message rejected",
                     ));
                 }
@@ -314,7 +370,7 @@ impl Session {
             }
             Inbound::SignRes(response) => {
                 if !authenticated {
-                    return Err(PolicyViolation(
+                    return Err(Close::Policy(
                         "Unauthenticated exchange-server sessions cannot sign",
                     ));
                 }
@@ -367,7 +423,7 @@ impl Session {
             Inbound::Perf(_) => {}
             Inbound::Verbose(_) => {
                 if !authenticated {
-                    return Err(PolicyViolation(
+                    return Err(Close::Policy(
                         "Unauthenticated exchange-server sessions cannot enable diagnostics",
                     ));
                 }
@@ -376,12 +432,20 @@ impl Session {
         Ok(())
     }
 
-    async fn init(&mut self, init: InitPayload) -> Result<(), PolicyViolation> {
+    async fn init(&mut self, init: InitPayload) -> Result<(), Close> {
         let authenticated = self.identity.user.is_some();
         let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
         if !authenticated && let Some(reason) = unauthenticated_init_refusal(&init) {
             self.send(envelope::error(Some(&init.account_name), reason));
-            return Err(PolicyViolation(reason));
+            return Err(Close::Policy(reason));
+        }
+        if self.moved_by_drain() {
+            Log::info(&format!(
+                "init {} on socket {} moved: this box is draining",
+                init.account_name, self.socket
+            ));
+            self.moved = true;
+            return Err(Close::Moved);
         }
         Log::info(&format!(
             "init {} ({}) socket {} session {}",
@@ -1142,6 +1206,7 @@ impl Session {
                 joined.account.handle.leave(client.id);
             }
             if self.identity.resumable
+                && !self.moved
                 && self.identity.user.is_some()
                 && !joined.account.is_public()
             {
@@ -1587,6 +1652,154 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
+
+    fn acct_init() -> InitPayload {
+        InitPayload {
+            account_name: "acct".into(),
+            exchange_name: "bybit".into(),
+            key: "k".into(),
+            ..InitPayload::default()
+        }
+    }
+
+    fn algo_op(account: &Account, op: &str, data: &str) {
+        account
+            .algos
+            .as_ref()
+            .unwrap()
+            .send(crate::algos::AlgoInput::Op {
+                op: op.into(),
+                data: data.into(),
+                origin: "test".into(),
+            })
+            .unwrap();
+    }
+
+    fn user_session(
+        registry: Arc<Registry>,
+        user: &str,
+    ) -> (Session, tokio::sync::mpsc::Receiver<String>) {
+        let (out, sent, _) = Out::channel(256);
+        let identity = Identity {
+            user: Some(user.into()),
+            token: Some(("t".into(), u64::MAX)),
+            resume_from: None,
+            resumable: true,
+        };
+        let session = Session::new(registry, Arc::new(Metrics::default()), identity, out);
+        (session, sent)
+    }
+
+    /// User u's account under `registry`, with a chase running and a socket of u joined to it.
+    async fn chasing_session(
+        registry: &Arc<Registry>,
+    ) -> (Arc<Account>, Session, tokio::sync::mpsc::Receiver<String>) {
+        let init = acct_init();
+        let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+        let account =
+            crate::accounts::tests::held_account_counted(registry, link, init.fingerprint());
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let (mut session, sent) = user_session(registry.clone(), "u");
+        assert!(session.init(init).await.is_ok());
+        algo_op(&account, "chaser:start", WEB_CHASE);
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        assert_eq!(registry.running_algos(), (1, 0), "the chase runs");
+        (account, session, sent)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_drain_moves_an_idle_socket_at_once() {
+        let registry = crate::accounts::tests::registry();
+        let (mut idle, _sent) = user_session(registry.clone(), "u");
+        assert_eq!(idle.drain_close(), None, "nothing moves before a drain");
+        registry.start_drain();
+        assert_eq!(idle.drain_close(), Some(Close::Moved));
+        assert_eq!(Close::Moved.code(), 4100);
+        assert_eq!(Close::Moved.reason(), "draining: reconnect");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_drained_socket_running_a_chase_stays_until_the_chase_ends_then_moves() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (account, mut session, _sent) = chasing_session(&registry).await;
+                let mut ended = registry.watch_algos_ended();
+                registry.start_drain();
+                assert_eq!(session.drain_close(), None, "kept while its chase runs");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                assert_eq!(
+                    session.drain_close(),
+                    None,
+                    "the drain never stops the chase"
+                );
+                assert_eq!(registry.running_algos(), (1, 0));
+                algo_op(&account, "chaser:terminateAll", "{}");
+                tokio::time::timeout(std::time::Duration::from_secs(60), ended.changed())
+                    .await
+                    .expect("told as the chase ends")
+                    .unwrap();
+                assert_eq!(registry.running_algos(), (0, 0));
+                assert_eq!(session.drain_close(), Some(Close::Moved));
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_drain_refuses_users_new_here_and_admits_a_live_users_second_socket() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (_account, _first, _sent) = chasing_session(&registry).await;
+                registry.start_drain();
+                let (mut stranger, _) = user_session(registry.clone(), "v");
+                assert_eq!(stranger.init(acct_init()).await, Err(Close::Moved));
+                assert!(!stranger.joined.contains_key("acct"));
+                let (mut second_tab, _) = user_session(registry.clone(), "u");
+                assert_eq!(second_tab.init(acct_init()).await, Ok(()));
+                assert!(second_tab.joined.contains_key("acct"));
+                assert_eq!(second_tab.drain_close(), None, "its account runs a chase");
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn break_glass_tells_the_page_what_stopped_before_it_moves_every_socket() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (_account, mut session, mut sent) = chasing_session(&registry).await;
+                while sent.try_recv().is_ok() {}
+                let mut drain = registry.watch_drain();
+                // What the page had been sent when every socket was told to move.
+                let before_move = tokio::task::spawn_local(async move {
+                    while *drain.borrow_and_update() != crate::accounts::Drain::Now {
+                        drain.changed().await.unwrap();
+                    }
+                    let mut frames = Vec::new();
+                    while let Ok(frame) = sent.try_recv() {
+                        frames.push(frame);
+                    }
+                    frames
+                });
+                assert!(
+                    registry
+                        .break_glass(std::time::Duration::from_secs(25))
+                        .await
+                );
+                let frames = before_move.await.unwrap();
+                assert!(
+                    frames.iter().any(|frame| frame.contains(r#""op":"error""#)
+                        && frame.contains("Chase on BTCUSDT stopped")),
+                    "the chase's own final notice first: {frames:?}"
+                );
+                assert_eq!(registry.running_algos(), (0, 0));
+                assert_eq!(session.drain_close(), Some(Close::Moved));
+            })
+            .await;
+    }
 
     #[test]
     fn metadata_refreshes_wait_in_their_own_pool() {

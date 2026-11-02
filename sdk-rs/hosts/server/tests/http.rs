@@ -72,10 +72,97 @@ async fn a_drain_closes_sockets_1001() {
     assert_eq!(u16::from(closed.unwrap().code), 1001);
 }
 
+/// The next close frame, or a panic naming what came instead.
+async fn next_close(
+    socket: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> (u16, String) {
+    loop {
+        match tokio::time::timeout(Duration::from_secs(5), socket.next()).await {
+            Ok(Some(Ok(Message::Close(Some(frame))))) => {
+                break (u16::from(frame.code), frame.reason.to_string());
+            }
+            Ok(Some(Ok(_))) => {}
+            other => panic!("no close frame: {other:?}"),
+        }
+    }
+}
+
+const PUBLIC_INIT: &str =
+    r#"{"t":"init","d":{"accountName":"__pub_bybit","exchangeName":"bybit","publicOnly":true}}"#;
+
+#[tokio::test]
+async fn a_drain_moves_an_idle_socket_and_refuses_new_users_with_4100() {
+    let (address, _app) = server_app().await;
+    let url = format!("ws://{address}/account");
+    let (mut idle, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (status, body) = post(&address, "/admin/drain", "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        next_close(&mut idle).await,
+        (4100, "draining: reconnect".to_owned())
+    );
+    let (mut newcomer, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    newcomer.send(Message::text(PUBLIC_INIT)).await.unwrap();
+    assert_eq!(
+        next_close(&mut newcomer).await,
+        (4100, "draining: reconnect".to_owned())
+    );
+    let (status, body) = get(&address, "/health").await;
+    assert_eq!(status, 503, "{body}");
+    assert!(
+        body.contains(r#""draining":true"#) && body.contains(r#""algos":{"chases":0,"twaps":0}"#),
+        "{body}"
+    );
+    let (status, _) = post(&address, "/admin/undrain", "").await;
+    assert_eq!(status, 200);
+    let (status, body) = get(&address, "/health").await;
+    assert_eq!(status, 200);
+    assert!(body.contains(r#""draining":false"#), "{body}");
+}
+
+#[tokio::test]
+async fn break_glass_moves_every_socket_with_4100() {
+    let (address, _app) = server_app().await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}/account"))
+        .await
+        .unwrap();
+    let (status, body) = post(&address, "/admin/drain?now=1", "").await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains(r#""settled":true"#), "{body}");
+    assert_eq!(
+        next_close(&mut socket).await,
+        (4100, "draining: reconnect".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn admin_routes_refuse_a_request_the_edge_forwarded() {
+    let (address, _app) = server_app().await;
+    for path in ["/admin/drain", "/admin/drain?now=1", "/admin/undrain"] {
+        let (status, _) = post(&address, path, "cf-connecting-ip: 1.2.3.4\r\n").await;
+        assert_eq!(status, 403, "{path}");
+    }
+    let (status, body) = get(&address, "/health").await;
+    assert_eq!(status, 200);
+    assert!(body.contains(r#""draining":false"#), "{body}");
+}
+
+async fn post(address: &str, path: &str, headers: &str) -> (u16, String) {
+    request(address, "POST", path, headers).await
+}
+
 async fn get(address: &str, path: &str) -> (u16, String) {
+    request(address, "GET", path, "").await
+}
+
+async fn request(address: &str, method: &str, path: &str, headers: &str) -> (u16, String) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
-    let request = format!("GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n{headers}Connection: close\r\n\r\n"
+    );
     stream.write_all(request.as_bytes()).await.unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).await.unwrap();

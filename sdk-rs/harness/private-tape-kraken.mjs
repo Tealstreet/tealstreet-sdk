@@ -61,6 +61,8 @@ command(2300,'setPositionMode',{hedged:false});
 ws(2400,{feed:'open_orders_snapshot',orders});
 command(2500,'cancelSymbolOrders',{symbol:'PF_XBTUSD'});
 http('POST','/derivatives/api/v3/batchorder',ok({batchStatus:orders.map(o=>({status:'cancelled',order_id:o.order_id}))}),{},'json='+encodeURIComponent(JSON.stringify({batchOrder:orders.map(o=>({order:'cancel',order_id:o.order_id}))})));
+// Rust-only: the symbol cancel then sweeps the venue for orders the store has not seen (#2831).
+http('POST','/derivatives/api/v3/cancelallorders',ok({cancelStatus:{receivedTime:new Date(EPOCH+2500).toISOString(),cancelOnly:'PF_XBTUSD',status:'cancelled',cancelledOrders:[],orderEvents:[]},serverTime:new Date(EPOCH+2500).toISOString()}),{},{symbol:'PF_XBTUSD'},{impl:'rust'});
 for(const o of orders)ws(2550,{feed:'open_orders',is_cancel:true,order_id:o.order_id});orders=[];snapshot();
 ws(2700,{feed:'open_orders_snapshot',orders:[]});ws(2750,{feed:'open_positions',positions:[]});
 command(3000,'fetchFills',{from:EPOCH-1000,to:EPOCH+3500,limit:100});http('GET','/derivatives/api/v3/fills',ok({fills:[{fill_id:'fill-1',order_id:'100',symbol:'PF_XBTUSD',side:'buy',size:0.5,price:90,fillTime:new Date(EPOCH+100).toISOString(),fillType:'taker',realized_pnl:0,realized_funding:0}]}),{},undefined,stage());

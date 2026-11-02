@@ -85,14 +85,16 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // 1,772,155, breakoutprop 1,471,040, coinbase 1,773,663, grvt 1,739,939, kucoin 1,550,412, kucoinspot
 // 2,063,720, mexc 1,687,491, orderly 1,682,273, polymarket 1,560,737, txflow 1,790,189, woo 2,327,820 B.
 // ddi2il ruling: each raised to CI size plus 10 KiB, rounded up to the KiB.
+// CI run 41423920329: bitgetusdc 2,242,622, hyperliquidspot 2,037,311, krakenspot 2,065,964, lighter-robinhood
+// 1,938,379 B; each CI size plus 10 KiB, rounded up to the KiB, and its shared-family sibling to the same.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_941_504,
   asterdex: 2_077_696,
   backpack: 1_843_200,
   binance: 2_125_824,
   bingx: 1_950_080,
-  bitget: 2_244_608,
-  bitgetusdc: 2_225_152,
+  bitget: 2_253_824,
+  bitgetusdc: 2_253_824,
   bitrue: 1_782_784,
   bitunix: 1_802_624,
   blofin: 1_897_472,
@@ -102,13 +104,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   cryptocom: 1_681_408,
   grvt: 1_751_040,
   hyperliquid: 2_048_000,
-  hyperliquidspot: 2_035_712,
-  kraken: 2_075_648,
-  krakenspot: 2_058_240,
+  hyperliquidspot: 2_048_000,
+  kraken: 2_076_672,
+  krakenspot: 2_076_672,
   kucoin: 1_561_600,
   kucoinspot: 2_074_624,
   lighter: 1_948_672,
-  'lighter-robinhood': 1_929_216,
+  'lighter-robinhood': 1_948_672,
   mexc: 1_697_792,
   okx: 1_893_376,
   orderly: 1_692_672,

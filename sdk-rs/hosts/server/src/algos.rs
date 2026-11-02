@@ -12,7 +12,7 @@ use std::cell::{Cell, Ref, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 
@@ -73,6 +73,54 @@ impl From<&str> for Kept {
 
 /// Keeps a stop notice for a client that is not there to see it.
 pub type StopNotice = Box<dyn Fn(Kept) + Send>;
+
+/// The chases and TWAPs running on one account, readable off its engine thread.
+pub struct Running {
+    chases: AtomicUsize,
+    twaps: AtomicUsize,
+    /// Bumped whenever an account's count falls, so drained sockets recheck.
+    ended: Arc<tokio::sync::watch::Sender<u64>>,
+}
+
+impl Running {
+    pub fn new(ended: Arc<tokio::sync::watch::Sender<u64>>) -> Self {
+        Self {
+            chases: AtomicUsize::new(0),
+            twaps: AtomicUsize::new(0),
+            ended,
+        }
+    }
+
+    /// `(chases, twaps)`.
+    pub fn counts(&self) -> (usize, usize) {
+        (
+            self.chases.load(Ordering::Relaxed),
+            self.twaps.load(Ordering::Relaxed),
+        )
+    }
+
+    pub fn any(&self) -> bool {
+        self.counts() != (0, 0)
+    }
+
+    fn set(&self, chases: usize, twaps: usize) {
+        let before =
+            self.chases.swap(chases, Ordering::Relaxed) + self.twaps.swap(twaps, Ordering::Relaxed);
+        if chases + twaps < before {
+            self.ended
+                .send_modify(|ended| *ended = ended.wrapping_add(1));
+        }
+    }
+}
+
+impl Default for Running {
+    fn default() -> Self {
+        Self::new(Arc::new(tokio::sync::watch::channel(0).0))
+    }
+}
+
+/// How often the algo host recounts its chases and TWAPs: a chase ends on its own task.
+const RECOUNT_EVERY: Duration = Duration::from_millis(250);
 
 /// Errors kept for a browser that may not have seen them, oldest dropped first.
 const UNHEARD_ERRORS: usize = 32;
@@ -639,6 +687,7 @@ pub async fn run(
     link_signer: Option<Arc<safe_cex_remote_signer::SignerLink>>,
     placed: crate::accounts::PlacedSymbols,
     held: Arc<AtomicBool>,
+    running: Arc<Running>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     // An algo host that cannot run never takes the account with it: the account's
@@ -702,6 +751,20 @@ pub async fn run(
         Box::new(exec.clone()),
     ]);
     let mut published = String::new();
+    // On its own task, since `feed.next()` must not be cancelled by a timer. Stopped
+    // chases count until their cleanup ends: it may still need a signature.
+    {
+        let (book, twap, name) = (book.clone(), twap.clone(), name.clone());
+        let running = running.clone();
+        cx.spawn(async move {
+            let mut every = tokio::time::interval(RECOUNT_EVERY);
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                running.set(book.active_chasers().len(), twap.active_twaps(&name).len());
+            }
+        });
+    }
     // `store` rows the frames do not carry (`activeChasers`, `activeTWAPs`).
     let publish = |published: &mut String| {
         let rows = serde_json::json!({
@@ -958,6 +1021,7 @@ pub async fn run(
     }
     scope.dispose();
     handle.leave(feed.client());
+    running.set(0, 0);
     if !disposing {
         crate::state::Log::warn(&format!(
             "{name}: algo feed ended; algos stopped, the account keeps running"

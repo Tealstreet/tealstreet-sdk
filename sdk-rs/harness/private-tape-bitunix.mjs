@@ -13,7 +13,7 @@ const records = [
   { t: 0, type: 'connect', url: PRIVATE, connection: 0, initial: true },
   { t: 0, type: 'open', url: PRIVATE, connection: 0 },
 ];
-const http = (method, path, query, data, requestBody, after) => records.push({ t: 0, type: 'http', method, url: `${REST}/api/v1/futures/${path}${query ? `?${query}` : ''}`, requestBody, availableAfter: after, status: 200, body: JSON.stringify({ code: 0, data, msg: 'Success' }) });
+const http = (method, path, query, data, requestBody, after, extra = {}) => records.push({ t: 0, type: 'http', method, url: `${REST}/api/v1/futures/${path}${query ? `?${query}` : ''}`, requestBody, availableAfter: after, status: 200, body: JSON.stringify({ code: 0, data, msg: 'Success' }), ...extra });
 const read = (path, query, data, after = 0) => http('GET', path, query, data, undefined, after);
 let t = 0;
 let privateConnection = 0;
@@ -76,8 +76,8 @@ read('trade/get_pending_orders', '', { orderList: [resting, regular('1004', 'ETH
 t += 1200;
 command({ op: 'cancelSymbolOrders', symbol: 'ETHUSDT' });
 http('POST', 'trade/cancel_orders', '', { successList: [{ orderId: '1004' }, { orderId: '1005' }], failureList: [] }, { symbol: 'ETHUSDT', orderList: [{ orderId: '1004' }, { orderId: '1005' }] });
-// The symbol cancel then sweeps the venue for orders the store has not seen.
-http('POST', 'trade/cancel_all_orders', '', { successList: [], failureList: [] }, { symbol: 'ETHUSDT' });
+// Rust-only: the symbol cancel then sweeps the venue for orders the store has not seen (#2831).
+http('POST', 'trade/cancel_all_orders', '', { successList: [], failureList: [] }, { symbol: 'ETHUSDT' }, undefined, { impl: 'rust' });
 read('trade/get_pending_orders', '', { orderList: [resting] }, t);
 ws(PRIVATE, orderEvent('CLOSE', { ...batchA, orderStatus: 'CANCELED' }));
 ws(PRIVATE, orderEvent('CLOSE', { ...batchB, orderStatus: 'CANCELED' }));
