@@ -198,7 +198,7 @@ impl Account {
     }
 
     /// Live (not parked) sockets holding this account, other than `holder`.
-    fn live_holders_besides(&self, holder: u64) -> Vec<u64> {
+    pub(crate) fn live_holders_besides(&self, holder: u64) -> Vec<u64> {
         self.holders
             .lock()
             .unwrap()
@@ -506,6 +506,24 @@ fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, St
 /// differing fields stay readable). Two inits that would build the same engine
 /// share it, whatever else differs between the clients that sent them: a field
 /// another venue reads, a default sent explicitly, flags resolving alike.
+/// Hands a disposed account's stop notices and chase ends to one socket. A later,
+/// fuller `Kept` repeats what came before it, so only what is new is sent.
+fn tell_through(account: &Account, outbox: Outbox) -> crate::algos::StopNotice {
+    let name = account.name.clone();
+    let told = Mutex::new((0, 0));
+    Box::new(move |kept: crate::algos::Kept| {
+        let mut told = told.lock().unwrap();
+        let new = crate::algos::Kept {
+            notices: kept.notices.get(told.0..).unwrap_or_default().to_vec(),
+            ends: kept.ends.get(told.1..).unwrap_or_default().to_vec(),
+        };
+        *told = (kept.notices.len(), kept.ends.len());
+        for frame in new.frames(&name) {
+            outbox(frame);
+        }
+    })
+}
+
 pub fn build_fingerprint(init: &InitPayload) -> String {
     let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
     let mut fields = match engine_options(init, public_only) {
@@ -697,7 +715,15 @@ impl Registry {
             token: token.clone(),
         };
         let (account, remote) = self
-            .build(user, init, public_only, fingerprint, token, holder, outbox)
+            .build(
+                user,
+                init,
+                public_only,
+                fingerprint,
+                token,
+                holder,
+                outbox.clone(),
+            )
             .await?;
         let account = Arc::new(account);
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
@@ -715,7 +741,11 @@ impl Registry {
         if let Some(replaced) = replaced {
             // A concurrent init of the same name won the race; the later build stands.
             // Its holders go too, so the losing socket stops calling a stopped account.
-            self.dispose_for(&replaced, "account replaced by a newer init", None);
+            self.dispose_for(
+                &replaced,
+                "account replaced by a newer init",
+                Some(tell_through(&replaced, outbox)),
+            );
         }
         Ok(account)
     }
@@ -961,6 +991,16 @@ impl Registry {
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
     pub fn dispose(&self, account: &Arc<Account>) {
         self.dispose_for(account, "account disposed", None);
+    }
+
+    /// New settings rebuild `account`: its algos stop now, their finals told through
+    /// `outbox`, rather than left running for a page told they stopped.
+    pub fn stop_for_new_settings(&self, account: &Arc<Account>, outbox: Outbox) {
+        self.dispose_for(
+            account,
+            "its key or connection settings changed",
+            Some(tell_through(account, outbox)),
+        );
     }
 
     fn dispose_for(

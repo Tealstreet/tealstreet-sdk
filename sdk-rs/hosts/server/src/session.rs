@@ -485,7 +485,15 @@ impl Session {
         }
         self.refused.remove(&init.account_name);
         if let Some(joined) = self.joined.remove(&init.account_name) {
-            self.leave(joined);
+            // New settings rebuild it. Unless another live socket keeps it, its algos stop
+            // here and this page hears their finals; leaving first would tell no one.
+            if joined.account.live_holders_besides(self.socket).is_empty() {
+                self.registry
+                    .stop_for_new_settings(&joined.account, self.outbox());
+                Self::leave_engine(joined);
+            } else {
+                self.leave(joined);
+            }
         }
         let token = self.identity.token.clone();
         let account = self
@@ -1716,6 +1724,49 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert_eq!(registry.running_algos(), (1, 0), "the chase runs");
         (account, session, sent)
+    }
+
+    /// A key or routing edit rebuilds the account: the old one's algos stop on purpose,
+    /// with their finals to this page, never left repricing for a page told they stopped.
+    #[tokio::test(start_paused = true)]
+    async fn a_rebuild_for_new_settings_stops_the_old_accounts_algos_and_tells_the_page() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (account, mut session, mut sent) = chasing_session(&registry).await;
+                let mut chase = Value::Null;
+                while let Ok(frame) = sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&frame).unwrap();
+                    if frame["d"]["op"] == "store"
+                        && let Some(row) = frame["d"]["data"]["activeChasers"].get(0)
+                    {
+                        chase = row["id"].clone();
+                    }
+                }
+                assert!(chase.is_string(), "{chase}");
+                // The helper's stand-in socket: the page's own is the only holder.
+                registry.release(&account, 7);
+                let edited = InitPayload {
+                    key: "k2".into(),
+                    ..acct_init()
+                };
+                let _ = session.init(edited).await;
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                assert_eq!(registry.running_algos(), (0, 0), "the old chase stopped");
+                let mut told = Vec::new();
+                while let Ok(frame) = sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&frame).unwrap();
+                    if frame["d"]["op"] == "error" && frame["d"]["data"][1]["algo"]["id"] == chase {
+                        told.push(frame["d"]["data"][0].clone());
+                    }
+                }
+                assert_eq!(
+                    told.len(),
+                    1,
+                    "the page is told the chase stopped: {told:?}"
+                );
+            })
+            .await;
     }
 
     #[tokio::test(start_paused = true)]
