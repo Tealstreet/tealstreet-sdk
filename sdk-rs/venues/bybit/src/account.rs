@@ -18,6 +18,9 @@ use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, ErrorKind, Fill, Response, SocketId, Store, TimerId, VenueError, num};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// Account info that got no answer is read again after this wait, doubling to the cap.
+const ACCOUNT_INFO_RETRY_MIN_MS: f64 = 5_000.0;
+const ACCOUNT_INFO_RETRY_MAX_MS: f64 = 60_000.0;
 /// Positions and the wallet are re-read this often; the stream carries
 /// changes in between, so this only repairs what a dropped frame missed.
 const RECONCILE_INTERVAL_MS: f64 = 5_000.0;
@@ -261,6 +264,9 @@ pub struct AccountState {
     pub margin_type: Option<MarginType>,
     /// `unifiedMarginStatus` 1 is a classic account: USDT only, CONTRACT wallet.
     classic: bool,
+    /// The wait before reading account info again after it got no answer; 0 when answered.
+    info_retry_ms: f64,
+    info_retry_timer: Option<TimerId>,
     tick_timer: Option<TimerId>,
     partial_stop_refresh: Option<TimerId>,
     position_version: u32,
@@ -1512,6 +1518,23 @@ impl BybitLinear {
         self.account.margin_type.unwrap_or(MarginType::Cross)
     }
 
+    /// Reads made on an assumed mode went to the wrong wallet and settle coins.
+    fn account_mode_corrected(&mut self, cx: &mut Cx<'_, Pending>) {
+        let margin = self.margin_type();
+        cx.store.update_positions(|p| p.margin_type = Some(margin));
+        let category = self.category;
+        for other in self.categories() {
+            self.select_category(other);
+            self.account.wallet_follow_up |= self.account.wallet_in_flight;
+            self.account.orders_follow_up |= self.account.orders.is_some();
+            self.account.positions_follow_up |= self.account.positions.is_some();
+            self.fetch_wallet(cx);
+            self.fetch_orders(cx);
+            self.fetch_positions(cx);
+        }
+        self.select_category(category);
+    }
+
     pub(crate) fn request_account_info(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.variant.is_hyro() {
             self.account.margin_type = Some(MarginType::Cross);
@@ -1924,6 +1947,13 @@ impl BybitLinear {
         if self.account.handshake_timer == Some(timer) {
             self.account.handshake_timer = None;
             self.fail_hyro(cx, "private handshake acknowledgement timed out");
+            return;
+        }
+        if self.account.info_retry_timer == Some(timer) {
+            self.account.info_retry_timer = None;
+            if !self.credentials_rejected {
+                self.request_account_info(cx);
+            }
             return;
         }
         if self.account.tick_timer != Some(timer) {
@@ -2697,6 +2727,8 @@ impl BybitLinear {
                 }
             }
             Request::AccountInfo => {
+                let assumed = (self.account.classic, self.margin_type());
+                let reread = self.account.info_retry_ms > 0.0;
                 match outcome {
                     Ok(body) => {
                         if let Ok(info) = serde_json::from_str::<AccountInfoEnvelope>(body)
@@ -2724,9 +2756,34 @@ impl BybitLinear {
                                 self.reject_credentials(cx, code, &venue_message);
                             }
                             // Public data still loads; the private failure is an Error.
-                            None => cx.notice_error(Level::Error, code::REQUEST_FAILED,
-                                &failed(format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable")),
-                            ),
+                            // No answer is not a refusal, and markets may still be loading.
+                            None => {
+                                let lost = response.is_err();
+                                if lost {
+                                    let told = reread;
+                                    let wait = (self.account.info_retry_ms * 2.0).clamp(
+                                        ACCOUNT_INFO_RETRY_MIN_MS,
+                                        ACCOUNT_INFO_RETRY_MAX_MS,
+                                    );
+                                    self.account.info_retry_ms = wait;
+                                    self.account.info_retry_timer = Some(cx.set_timer(wait));
+                                    if told {
+                                        return;
+                                    }
+                                }
+                                let text = if lost {
+                                    format!("Bybit could not read this account: {message}")
+                                } else if cx.store.loaded().markets {
+                                    format!(
+                                        "Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable"
+                                    )
+                                } else {
+                                    format!(
+                                        "Bybit: the private API was rejected ({message}) — trading is unavailable"
+                                    )
+                                };
+                                cx.notice_error(Level::Error, code::REQUEST_FAILED, &failed(text));
+                            }
                         }
                     }
                 }
@@ -2744,6 +2801,12 @@ impl BybitLinear {
                     self.try_start_account(cx);
                 }
                 self.select_category(category);
+                if reread && self.account.info_retry_timer.is_none() {
+                    self.account.info_retry_ms = 0.0;
+                    if assumed != (classic, self.margin_type()) {
+                        self.account_mode_corrected(cx);
+                    }
+                }
             }
             Request::Orders {
                 generation,
