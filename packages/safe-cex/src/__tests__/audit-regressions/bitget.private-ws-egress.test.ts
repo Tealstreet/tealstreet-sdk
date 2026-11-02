@@ -26,7 +26,13 @@ afterEach(() => live.splice(0).forEach((exchange) => exchange.dispose()));
 
 const fakeSocket = (tunnel: boolean) => {
   const socket = tunnel ? Object.create(ReconnectingWebSocket.prototype) : {};
-  return Object.assign(socket, { addEventListener: vi.fn(), removeEventListener: vi.fn(), close: vi.fn() });
+  // A prototype-only fake: it never ran the constructor, so it must not run the real teardown either.
+  return Object.assign(socket, {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    close: vi.fn(),
+    terminate: vi.fn(),
+  });
 };
 
 const setup = ({ proxy = true, uta = false } = {}) => {
