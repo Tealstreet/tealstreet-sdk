@@ -141,10 +141,13 @@ pub struct BitgetFutures {
     candles: HashMap<(String, Interval), usize>,
     /// Topics Bitget answered with event:error, by (channel, instId): retries made, pending timer.
     refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
+    /// When an unreadable public message was last logged; at most one per minute.
+    public_parse_logged_at: Option<f64>,
 }
 
 /// A refused subscription is sent again after 1 s, 2 s and 4 s, then left refused.
 const SUBSCRIBE_RETRIES: u32 = 3;
+const PUBLIC_PARSE_LOG_MS: f64 = 60_000.0;
 
 fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
     let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body).ok();
@@ -211,6 +214,7 @@ impl BitgetFutures {
             books: HashMap::new(),
             candles: HashMap::new(),
             refused_topics: HashMap::new(),
+            public_parse_logged_at: None,
         }
     }
 
@@ -422,7 +426,19 @@ impl BitgetFutures {
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         let message = match serde_json::from_str::<PublicMessage<'_>>(text) {
             Ok(message) => message,
-            Err(_) => {
+            Err(error) => {
+                if self
+                    .public_parse_logged_at
+                    .is_none_or(|at| cx.now - at >= PUBLIC_PARSE_LOG_MS)
+                {
+                    self.public_parse_logged_at = Some(cx.now);
+                    let head: String = text.chars().take(200).collect();
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        format!("Bitget public message unreadable ({error}): {head}"),
+                    );
+                }
                 if let Ok(header) = serde_json::from_str::<PublicHeader<'_>>(text)
                     && header.arg.channel == "books"
                 {

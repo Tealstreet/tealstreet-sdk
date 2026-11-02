@@ -539,3 +539,38 @@ fn data_on_a_refused_subscription_resets_its_retries() {
     h.timer_after(1_000.0);
     assert_eq!(candle_subscribes(&h), 3);
 }
+
+/// Captured live push (2026-11-02): eight fields per row, the last a USDT volume.
+const CANDLE_PUSH_CAPTURE: &str = r#"{"action":"update","arg":{"instType":"USDT-FUTURES","channel":"candle1m","instId":"BTCUSDT"},"data":[["1793630880000","77943.9","77944","77821.4","77844.3","8.3108","647145.6036","647145.6036"]],"ts":1793630899000}"#;
+
+#[test]
+fn eight_field_live_candle_push_reaches_the_frame() {
+    let mut h = Harness::public();
+    h.command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    });
+    h.engine.take_frame(h.now);
+    h.message(CANDLE_PUSH_CAPTURE);
+    let frame = h.engine.take_frame(h.now).expect("a candle frame").to_vec();
+    assert!(safe_cex_engine::wire::sections(&frame).any(|(kind, _)| kind == 6));
+    assert!(h.logs.iter().all(|l| !l.contains("unreadable")));
+}
+
+#[test]
+fn unreadable_public_messages_log_once_a_minute() {
+    let mut h = Harness::public();
+    let short = r#"{"action":"update","arg":{"instType":"USDT-FUTURES","channel":"candle1m","instId":"BTCUSDT"},"data":[["1000","1"]]}"#;
+    h.message(short);
+    h.message(short);
+    assert_eq!(
+        h.logs.iter().filter(|l| l.contains("unreadable")).count(),
+        1
+    );
+    h.now += 60_000.0;
+    h.message(short);
+    assert_eq!(
+        h.logs.iter().filter(|l| l.contains("unreadable")).count(),
+        2
+    );
+}
