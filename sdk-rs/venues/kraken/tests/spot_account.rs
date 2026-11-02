@@ -1119,3 +1119,45 @@ fn a_refused_key_ends_the_start_with_the_reason() {
     }
     assert_eq!(failures, 1);
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (200, r#"{"error":["EAPI:Invalid key"],"result":{}}"#),
+        (403, r#"{"error":["EAPI:Invalid key"],"result":{}}"#),
+        (
+            200,
+            r#"{"error":["EGeneral:Permission denied"],"result":{}}"#,
+        ),
+        (
+            403,
+            r#"{"error":["EGeneral:Permission denied"],"result":{}}"#,
+        ),
+    ] {
+        let (mut e, _, private) = ready(false);
+        message(
+            &mut e,
+            private.unwrap(),
+            r#"{"channel":"balances","type":"update","data":[]}"#,
+        );
+        let first = requests(&mut e).pop().unwrap();
+        e.handle(
+            1.0,
+            Event::HttpResponse {
+                request: first.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions = e.drain_plain().collect::<Vec<_>>();
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate))),
+            "{status} {body}"
+        );
+    }
+}

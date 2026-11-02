@@ -1675,6 +1675,11 @@ fn row_report_stale_ws_snapshot_does_not_rearm_but_a_current_clean_update_does()
 
 #[test]
 fn a_refused_key_ends_the_start_with_the_reason() {
+    refused_with(200, r#"{"result":"error","error":"authenticationError"}"#);
+    refused_with(401, r#"{"result":"error","error":"authenticationError"}"#);
+}
+
+fn refused_with(status: u16, refusal: &str) {
     let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(support::options()));
     e.start(support::NOW);
     let mut failures = vec![];
@@ -1691,9 +1696,10 @@ fn a_refused_key_ends_the_start_with_the_reason() {
                     } else if r.url.contains("/tickers") {
                         support::TICKERS
                     } else {
-                        r#"{"result":"error","error":"authenticationError"}"#
+                        refusal
                     };
-                    support::reply(&mut e, &r, 200, body);
+                    let status = if body == refusal { status } else { 200 };
+                    support::reply(&mut e, &r, status, body);
                 }
                 Action::WsConnect { socket, .. } => {
                     e.handle(support::NOW, Event::WsOpened { socket })

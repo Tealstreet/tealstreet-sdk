@@ -1729,3 +1729,23 @@ fn a_read_in_flight_at_private_ready_is_read_again_after_the_cycle_settles() {
     h.take("/orders");
     assert!(h.pending.is_empty(), "{:?}", h.pending);
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for status in [401, 403] {
+        let (mut h, _) = seed();
+        let auth = h.take("/auth/");
+        h.respond(
+            auth,
+            status,
+            r#"{"error":"INVALID_TOKEN","message":"Unauthorized"}"#,
+        );
+        assert!(
+            h.actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            )),
+            "{status}"
+        );
+    }
+}
