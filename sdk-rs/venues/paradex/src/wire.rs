@@ -146,6 +146,8 @@ pub struct Params<'a> {
 }
 #[derive(Deserialize)]
 pub struct RpcError<'a> {
+    #[serde(default)]
+    pub code: i64,
     #[serde(borrow, default)]
     pub message: Str<'a>,
 }

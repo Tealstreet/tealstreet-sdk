@@ -553,3 +553,18 @@ fn fills_stream_error_metadata_and_truncation_discard_already_decoded_rows() {
         assert!(h.results[0].is_err());
     }
 }
+
+/// A live user's answer on d5649b9a: the order list sits under data.orders, here empty.
+#[test]
+fn order_history_reads_its_list_under_data_orders() {
+    let mut h = Harness::new(true);
+    h.query(Query::OrderHistory {
+        symbol: None,
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    h.reply(r#"{"code":0,"msg":"","data":{"orders":[]}}"#);
+    let rows: Vec<Order> = h.result();
+    assert!(rows.is_empty());
+}

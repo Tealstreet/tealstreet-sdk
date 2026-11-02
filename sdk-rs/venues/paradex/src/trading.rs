@@ -109,6 +109,8 @@ enum Kind {
         /// The bracket leg this request places, `None` for an entry.
         leg: Option<&'static str>,
         batch: bool,
+        /// The stop this placement replaces after its cancel: symbol, side and kind.
+        replaces: Option<Box<(String, OrderSide, OrderType)>>,
     },
     Amend {
         id: String,
@@ -427,6 +429,7 @@ fn place_operations(
                     expected,
                     leg: None,
                     batch: true,
+                    replaces: None,
                 },
             });
             Ok(())
@@ -481,6 +484,7 @@ fn place_operations(
                 expected,
                 leg: None,
                 batch: false,
+                replaces: None,
             },
         });
         for (kind, leg, price) in [
@@ -523,6 +527,7 @@ fn place_operations(
                         expected: vec![None],
                         leg: Some(leg),
                         batch: false,
+                        replaces: None,
                     },
                 });
             }
@@ -698,7 +703,8 @@ impl Trading {
                         });
                         operations
                     }),
-                false,
+                // A failed stop delete must not skip the sweep of orders the store never saw.
+                true,
                 false,
             ),
             Command::SetLeverage {
@@ -1086,17 +1092,20 @@ impl Trading {
                 job.results.extend(ids);
             }
             Err(mut error) => {
-                if matches!(
-                    request.kind,
-                    Kind::Place {
-                        leg: Some(STOP_REPLACEMENT),
-                        ..
-                    }
-                ) {
-                    error.message = format!(
-                        "The old stop was canceled and its replacement refused, so this position has no stop: {}",
-                        error.message
-                    );
+                if let Kind::Place {
+                    replaces: Some(stop),
+                    ..
+                } = &request.kind
+                {
+                    let (symbol, side, kind) = &**stop;
+                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    let gone =
+                        safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown);
+                    error.message = if error.message.is_empty() {
+                        gone
+                    } else {
+                        format!("{gone}: {}", error.message)
+                    };
                 }
                 if let Kind::Place { leg, expected, .. } = &request.kind {
                     let next_leg = match job.operations.front().map(|op| &op.kind) {
@@ -1445,8 +1454,9 @@ fn replace_trigger(
         false,
     )?;
     for operation in &mut operations {
-        if let Kind::Place { leg, .. } = &mut operation.kind {
+        if let Kind::Place { leg, replaces, .. } = &mut operation.kind {
             *leg = Some(STOP_REPLACEMENT);
+            *replaces = Some(Box::new((order.symbol.clone(), order.side, order.kind)));
         }
     }
     operations.push_front(Operation {
