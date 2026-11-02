@@ -79,6 +79,26 @@ struct Bound {
     packet: Packet,
     /// Sent through the Tealstreet REST proxy, whose own 401 is not the venue's.
     proxied: bool,
+    /// Venue host and the way it went, for a transport failure's log line; never a URL.
+    route: String,
+}
+
+/// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`.
+fn route_label(origin: &str, packet: &Packet) -> String {
+    let host = |url: &str| {
+        reqwest::Url::parse(url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .unwrap_or_else(|| "unparsable url".to_owned())
+    };
+    let venue = host(origin);
+    match packet {
+        Packet::How(..) => format!("{venue} via HTTP tunnel"),
+        Packet::Direct(_, request) => match request.url().host_str() {
+            Some(sent) if sent != venue => format!("{venue} via {sent}"),
+            _ => format!("{venue} direct"),
+        },
+    }
 }
 impl fmt::Debug for Bound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -293,11 +313,13 @@ impl PreparedHttp for Prepared {
                 ),
             )
         };
+        let route = route_label(&self.origin, &packet);
         Ok(Box::new(Bound {
             request: self.request,
             deadline: self.deadline,
             packet,
             proxied,
+            route,
         }))
     }
 }
@@ -313,7 +335,9 @@ impl BoundHttp for Bound {
             deadline,
             packet,
             proxied,
+            route,
         } = *self;
+        let started = Instant::now();
         // These are the last controllable transport API calls. Route/token/HOW
         // preparation and packet validation have all finished before this point.
         let response: Pin<Box<dyn Future<Output = Result<(), String>> + Send>> = match packet {
@@ -347,6 +371,7 @@ impl BoundHttp for Bound {
                 Ok(Err(error)) => error,
                 Err(_) => "transport request timed out".into(),
             };
+            super::log_request_failure(&route, &error, started.elapsed());
             let _ = events.send(HostEvent::HttpFailed(request, error));
         })
         .abort_handle()
@@ -432,6 +457,32 @@ async fn direct_response(
 mod tests {
     use super::*;
     use crate::{ProxyTokenProvider, RoutingPlan, Transport};
+
+    #[test]
+    fn a_failed_request_is_named_by_venue_host_and_route_never_its_url() {
+        let client = NetworkTransport::new().http.clone();
+        let direct = client
+            .get("https://api.bitget.com/api/v2/mix/market/contracts?productType=x")
+            .build();
+        assert_eq!(
+            route_label(
+                "https://api.bitget.com",
+                &Packet::Direct(client.clone(), Box::new(direct.unwrap()))
+            ),
+            "api.bitget.com direct"
+        );
+        let proxied = client
+            .get("https://proxy-jp.example/https://api.bitget.com/api/v2/mix/market/contracts?token=t")
+            .build()
+            .unwrap();
+        assert_eq!(
+            route_label(
+                "https://api.bitget.com",
+                &Packet::Direct(client, Box::new(proxied))
+            ),
+            "api.bitget.com via proxy-jp.example"
+        );
+    }
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::{mpsc, oneshot};
