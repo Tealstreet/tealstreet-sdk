@@ -121,6 +121,13 @@ mod tests {
             .expect("the lane still runs jobs")
             .unwrap();
         assert_eq!(threads.panics(), 1);
-        assert_eq!(threads.accounts(), 0);
+        // The second job's placement drops only after its send, on the lane's thread.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while threads.accounts() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("both placements released");
     }
 }
