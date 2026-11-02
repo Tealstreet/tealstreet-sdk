@@ -616,6 +616,18 @@ describe('Rust native current-account reads', () => {
     },
   );
 
+  it('a failed account-wide cancel says orders may remain', async () => {
+    const r = fixture('bitget');
+    await r.start();
+    r.update({ positions: [], orders: [] });
+    const exchange = r.exchange as unknown as { command: (c: { op: string }) => Promise<unknown> };
+    const command = exchange.command;
+    exchange.command = (c) => (c.op === 'cancelAccountOrders' ? Promise.reject(new Error('refused')) : command(c));
+    const nuking = r.exchange.nukeOrders().catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(((await nuking) as Error).message).toContain('including triggers and TP/SL, may remain on this venue');
+  });
+
   it('sends no account-wide cancel from a plain cancel-all, nor on a venue without one', async () => {
     const bitget = fixture('bitget');
     await bitget.start();
