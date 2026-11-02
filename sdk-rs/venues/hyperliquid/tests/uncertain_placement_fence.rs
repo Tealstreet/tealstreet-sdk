@@ -303,3 +303,39 @@ fn failed_reconciliation_is_reasked_without_replaying_the_write() {
         unknown_then_stale_then_fresh(spot, ReconcileReply::Lost);
     }
 }
+
+#[test]
+fn a_fence_an_unreadable_order_holds_says_why() {
+    let spot = false;
+    let (mut engine, old_read) = boot(spot);
+    let first = place(&mut engine, 2_000.0, 101, spot);
+    let first = write(&first);
+    engine.handle(
+        2_400.0,
+        Event::HttpFailed {
+            request: first.id,
+            error: "placement reply lost after dispatch",
+        },
+    );
+    prepared_now(&mut engine).into_iter().for_each(drop);
+    response(&mut engine, 2_900.0, &old_read, "[]");
+    let fresh = prepared_now(&mut engine)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if support::kind(&request) == "frontendOpenOrders" => {
+                Some(request)
+            }
+            _ => None,
+        })
+        .expect("a fresh read follows");
+    response(&mut engine, 4_000.0, &fresh, r#"[{"oid":7}]"#);
+    let held = place(&mut engine, 6_500.0, 105, spot);
+    refused(&held, 105);
+    assert!(
+        held.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandFailed { command: 105, error })
+            if error.message.contains("Cancel that order on Hyperliquid")
+        )),
+        "{held:?}"
+    );
+}

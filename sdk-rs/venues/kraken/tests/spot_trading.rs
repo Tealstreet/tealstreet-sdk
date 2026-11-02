@@ -1416,3 +1416,50 @@ fn an_unlisted_spot_error_stays_unknown_and_clears_on_the_next_read() {
     reply(&mut e, &read, r#"{"error":[],"result":{"open":{}}}"#);
     let _ = add_order_answer(&mut e, 92, r#"{"error":["EOrder:Insufficient funds"]}"#);
 }
+
+#[test]
+fn reduce_only_position_is_closed_stays_unknown() {
+    let (mut e, _, _) = ready(false);
+    let settled = add_order_answer(
+        &mut e,
+        90,
+        r#"{"error":["EOrder:Reduce only:Position is closed"]}"#,
+    );
+    assert_eq!(
+        spot_outcome(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+}
+
+#[test]
+fn a_fence_an_unreadable_order_holds_says_why() {
+    let (mut e, _, _) = ready(false);
+    let settled = add_order_answer(&mut e, 90, r#"{"error":["EFuture:Unlisted"]}"#);
+    let read = settled
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("OpenOrders") => Some(r.clone()),
+            _ => None,
+        })
+        .expect("the read starts with the answer");
+    reply(
+        &mut e,
+        &read,
+        r#"{"error":[],"result":{"open":{"O1":{"status":"open","descr":{"pair":"XBT/USD","type":"sideways","ordertype":"limit","price":"1"},"vol":"1","vol_exec":"0"}}}}"#,
+    );
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    let held = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message),
+            _ => None,
+        })
+        .expect("refused");
+    assert!(held.contains("Cancel that order on Kraken"), "{held}");
+}

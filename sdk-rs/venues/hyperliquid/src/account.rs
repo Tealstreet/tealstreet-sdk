@@ -14,6 +14,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// How soon `readPositions` tries again after a read a newer stream frame held.
+const UNREADABLE_ORDER: &str = "Hyperliquid returned an open order this account cannot read, so a fresh read cannot clear this. Cancel that order on Hyperliquid to resume";
 const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
 
 /// What a state read did to the store, for the `readPositions` waiting on it.
@@ -1090,8 +1091,10 @@ impl Hyperliquid {
                             every_dex_clean(&self.dex_names, &self.account.clean_dexes)
                     {
                         cx.orders_reconciled_since(None, epoch);
+                        cx.orders_fence_held(None);
                     }
                 } else {
+                    cx.orders_fence_held(Some(UNREADABLE_ORDER));
                     self.account.clean_dexes.remove(&dex);
                 }
                 self.account

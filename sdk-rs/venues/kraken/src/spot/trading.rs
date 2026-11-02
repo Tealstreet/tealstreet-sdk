@@ -539,6 +539,8 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         | "EService:Busy"
         | "EService:Deadline elapsed"
         | "EGeneral:Internal error" => error.outcome(Outcome::Unknown),
+        // Documented to partially fill and cancel the remainder, so nothing proves no fill.
+        "EOrder:Reduce only:Position is closed" => error.outcome(Outcome::Unknown),
         code if code.starts_with("EOrder:") || code.starts_with("EGeneral:Invalid arguments") => {
             rejected(error, ErrorKind::Rejected)
         }

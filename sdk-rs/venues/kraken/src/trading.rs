@@ -1124,7 +1124,6 @@ fn status_failure(message: String, status: &str, edit: bool) -> VenueError {
             | "tooManySmallOrders"
             | "insufficientAvailableFunds"
             | "wouldCauseLiquidation"
-            | "clientOrderIdAlreadyExist"
             | "clientOrderIdTooBig"
             | "clientOrderIdInvalid"
             | "maxPositionViolation"
