@@ -3,7 +3,7 @@ import { bindGroup } from './managed-http-group.mjs';
 /** Closed transport preparation errors; arbitrary provider text never crosses the wire. */
 export class HttpPreparationError extends Error {
   constructor(reason) {
-    super(reason === 'timedOut' ? 'HTTP transport request timed out' : 'HTTP transport preparation failed');
+    super(reason === 'timedOut' ? 'Relay or network request timed out' : 'HTTP transport preparation failed');
     this.code = `HTTP_PREPARATION_${reason.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`;
   }
 }

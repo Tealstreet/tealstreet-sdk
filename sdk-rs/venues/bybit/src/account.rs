@@ -2675,9 +2675,21 @@ impl BybitLinear {
                                 self.reject_credentials(cx, code, &venue_message);
                             }
                             // Public data still loads; the private failure is an Error.
-                            None => cx.notice_error(Level::Error, code::REQUEST_FAILED,
-                                &failed(format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable")),
-                            ),
+                            // No answer is not a refusal, and markets may still be loading.
+                            None => {
+                                let text = if response.is_err() {
+                                    format!("Bybit could not read this account: {message}")
+                                } else if cx.store.loaded().markets {
+                                    format!(
+                                        "Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable"
+                                    )
+                                } else {
+                                    format!(
+                                        "The Bybit private API was rejected ({message}) — trading is unavailable"
+                                    )
+                                };
+                                cx.notice_error(Level::Error, code::REQUEST_FAILED, &failed(text));
+                            }
                         }
                     }
                 }

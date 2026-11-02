@@ -572,6 +572,42 @@ fn an_account_info_ip_refusal_fails_startup_visibly_with_the_allowlist_hint() {
     assert!(!h.deactivated);
 }
 
+// A deployed report: a relay timeout during start read as a refused key, beside
+// "market data is ready" with markets still outstanding.
+#[test]
+fn a_relay_timeout_on_account_info_says_so_and_claims_no_refusal() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    let request = h.take("/v5/account/info").id;
+    h.event(Event::HttpFailed {
+        request,
+        error: "Relay or network request timed out",
+    });
+    let logged = errors(&h);
+    let (_, message) = logged
+        .iter()
+        .find(|(_, message)| message.contains("could not read this account"))
+        .unwrap_or_else(|| panic!("{:?}", h.logs));
+    assert!(message.contains("timed out"), "{message}");
+    for false_claim in ["rejected", "trading is unavailable", "market data is ready"] {
+        assert!(!message.contains(false_claim), "{message}");
+    }
+}
+
+#[test]
+fn a_refused_account_info_does_not_call_market_data_ready_while_markets_are_out() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 503, "Service Unavailable");
+    assert!(
+        errors(&h)
+            .iter()
+            .all(|(_, message)| !message.contains("market data is ready")),
+        "{:?}",
+        h.logs
+    );
+}
+
 #[test]
 fn any_other_account_info_failure_is_an_error_not_a_warning() {
     let mut h = private();

@@ -196,7 +196,7 @@ impl WasmEngine {
             now,
             token,
             reason,
-            safe_cex_engine::VenueError::new("HTTP transport preparation failed").kind(kind),
+            safe_cex_engine::VenueError::new(preparation_failure_text(code)).kind(kind),
         );
         Ok(self.flush())
     }
@@ -599,5 +599,13 @@ mod sign_meta_wire_tests {
             }),
             r#"{"task":7,"owner":{"kind":"setup","generation":3},"deadlineMs":20001.25,"setup":{"operation":"publicKey","algorithm":"starkDigest","slot":"primary"}}"#
         );
+    }
+}
+
+/// A request that got no answer must not read as a preparation fault or a refusal.
+fn preparation_failure_text(code: &str) -> &'static str {
+    match code {
+        "timedOut" => "Relay or network request timed out",
+        _ => "HTTP transport preparation failed",
     }
 }
