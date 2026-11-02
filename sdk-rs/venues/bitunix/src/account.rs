@@ -301,11 +301,16 @@ pub fn order_type(s: &str) -> OrderType {
     }
 }
 pub fn tif(s: &str) -> TimeInForce {
+    known_tif(s).unwrap_or(TimeInForce::GoodTillCancel)
+}
+/// Live socket frames carry "effect":"SHORT", which names no TIF.
+pub fn known_tif(s: &str) -> Option<TimeInForce> {
     match s.to_ascii_uppercase().as_str() {
-        "IOC" => TimeInForce::ImmediateOrCancel,
-        "FOK" => TimeInForce::FillOrKill,
-        "POST_ONLY" => TimeInForce::PostOnly,
-        _ => TimeInForce::GoodTillCancel,
+        "GTC" => Some(TimeInForce::GoodTillCancel),
+        "IOC" => Some(TimeInForce::ImmediateOrCancel),
+        "FOK" => Some(TimeInForce::FillOrKill),
+        "POST_ONLY" => Some(TimeInForce::PostOnly),
+        _ => None,
     }
 }
 pub fn trigger(s: &str) -> StopTriggerType {
@@ -1934,10 +1939,10 @@ impl BitunixFutures {
                             || o.side.eq_ignore_ascii_case("SELL"))
                     {
                         let (rows, native) = self.map_orders(cx, &o, tpsl, true);
-                        if !o.client_id.is_empty() && !o.effect.is_empty() {
-                            self.account
-                                .tifs
-                                .insert(o.client_id.to_string(), tif(&o.effect));
+                        if !o.client_id.is_empty()
+                            && let Some(effect) = known_tif(&o.effect)
+                        {
+                            self.account.tifs.insert(o.client_id.to_string(), effect);
                         }
                         for row in rows {
                             cx.store.upsert_order(row);
