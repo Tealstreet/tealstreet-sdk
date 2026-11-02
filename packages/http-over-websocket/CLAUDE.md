@@ -171,3 +171,12 @@ yarn test           # Vitest
   while legacy servers may return both fields. Browser `ArrayBuffer`/`Blob` and
   Node/Bun buffer views are supported, and every older text response remains a
   valid fallback.
+
+**A connection that never finishes authenticating is recovered, not waited on.**
+An `rpc.auth` left unanswered for 5 s on an open, time-synced socket is resent
+through the shared refresh (one frame for concurrent requests); `isTokenSent`
+alone would bar every later request from resending for the connection's life.
+The 25 s silence watchdog that redials starts on open as well as on each pong,
+so a socket that opens and never speaks is replaced. Both stalls ran every
+request out to its deadline for the connection's lifetime
+(`src/HOWWebSocket.reconnect.test.ts`).
