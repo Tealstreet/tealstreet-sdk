@@ -1421,6 +1421,7 @@ export class RustEngineExchange extends BaseExchange {
         lighterSignerProvider: (options.extra as { lighterSignerProvider?: string } | undefined)?.lighterSignerProvider,
         lighterIntegratorAccountIndex: options.extra?.lighterIntegratorAccountIndex,
         lighterStopSlippagePct: options.extra?.lighterStopSlippagePct,
+        lighterWsRoute: Boolean(options.tealstreetWsRoute),
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),

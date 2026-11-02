@@ -1760,6 +1760,7 @@ pub fn build_with_signer<T: Visit>(
                     api_key_index: options.api_key_index.take(),
                     integrator_account_index: options.lighter_integrator_account_index.take(),
                     stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
+                    ws_routed: options.lighter_ws_route,
                 }),
                 entropy,
             )?;
@@ -2419,6 +2420,9 @@ pub struct EngineOptions {
     #[cfg(feature = "lighter")]
     #[serde(default)]
     pub lighter_stop_slippage_pct: Option<f64>,
+    /// The account's sockets go through Tealstreet's WS route (`tealstreetWsRoute`).
+    #[serde(default)]
+    pub lighter_ws_route: bool,
     #[cfg(feature = "lighter")]
     #[serde(default)]
     pub lighter_remote_signer: bool,
