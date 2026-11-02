@@ -1,6 +1,8 @@
 //! Sorted HMAC query signing; POST parameters retain their native JSON types.
 #[path = "sign/dispatch.rs"]
 pub mod dispatch;
+#[path = "sign/timestamp.rs"]
+pub(crate) mod timestamp;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
 use serde::Serialize;

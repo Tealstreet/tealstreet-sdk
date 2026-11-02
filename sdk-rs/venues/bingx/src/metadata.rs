@@ -197,12 +197,17 @@ impl Account {
         if cx.validate_plan_delivery(&leg.plan, &leg.context).is_err() {
             return;
         }
-        if !leg.resent && crate::signature_rejected(response.body) {
-            cx.notice(
-                Level::Warn,
-                code::REQUEST_FAILED,
-                "BingX rejected a request signature; re-signing it once",
-            );
+        let timestamp = crate::sign::timestamp::refused(response.body);
+        if !leg.resent && (timestamp || crate::signature_rejected(response.body)) {
+            if timestamp {
+                crate::sign::timestamp::note_resend(cx);
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    "BingX rejected a request signature; re-signing it once",
+                );
+            }
             match cx.plan_retry_context(
                 &leg.plan,
                 &leg.slot,

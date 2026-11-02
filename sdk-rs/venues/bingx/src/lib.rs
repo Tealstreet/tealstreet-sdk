@@ -1,6 +1,7 @@
 //! BingX stablecoin-margined perpetual swaps on the sans-I/O engine.
 pub mod account;
 pub mod account_wire;
+mod clock;
 mod history;
 mod identity;
 mod managed;
@@ -57,6 +58,8 @@ pub enum Pending {
         valid: bool,
     },
     Signed(Box<Signed>),
+    /// The unsigned server-time read after a 109400 timestamp refusal.
+    Clock(clock::Probe),
     /// One FetchLeverage read under its engine-admitted metadata Plan.
     Metadata(Box<account::MetadataLeg>),
 }
@@ -93,6 +96,16 @@ pub(crate) fn signature_rejected(body: &str) -> bool {
                 .to_ascii_lowercase()
                 .contains("signature verification failed")
     })
+}
+
+/// Refused before processing for its signature or timestamp: a signed read is
+/// re-signed and resent once. Notes a timestamp resend, so call it only then.
+pub(crate) fn resend_refused(cx: &mut Cx<'_, Pending>, body: &str) -> bool {
+    if sign::timestamp::refused(body) {
+        sign::timestamp::note_resend(cx);
+        return true;
+    }
+    signature_rejected(body)
 }
 
 /// Logs a read's skipped rows once, by identity only.
@@ -159,6 +172,7 @@ pub struct Bingx {
     live_priced: Vec<bool>,
     // Rows created only to hold live fields before the REST seed commits.
     staged_tickers: Vec<String>,
+    clock_reading: bool,
 }
 
 impl Bingx {
@@ -209,6 +223,7 @@ impl Bingx {
             tickers_committed: false,
             live_priced: Vec::new(),
             staged_tickers: Vec::new(),
+            clock_reading: false,
         }
     }
 
@@ -779,7 +794,7 @@ impl Venue for Bingx {
     fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Identity(_) | Pending::Metadata(_) => {}
+            Pending::Identity(_) | Pending::Metadata(_) | Pending::Clock(_) => {}
             Pending::Signed(signed) => {
                 if signed
                     .context()
@@ -914,6 +929,13 @@ impl Venue for Bingx {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Clock(probe) = pending {
+            self.clock_response(cx, probe, response);
+            return;
+        }
+        if sign::timestamp::refused(response.body) {
+            self.resync_clock(cx);
+        }
         if let Pending::Metadata(leg) = pending {
             match &self.credentials {
                 Some(credentials) => {
@@ -938,7 +960,7 @@ impl Venue for Bingx {
                 {
                     return;
                 }
-                if !signed.resent && signature_rejected(response.body) {
+                if !signed.resent && resend_refused(cx, response.body) {
                     self.resend_managed(cx, *signed);
                 } else {
                     let context = signed.context().cloned();
@@ -1117,8 +1139,15 @@ impl Venue for Bingx {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if sign::timestamp::refused(response.body) {
+            self.resync_clock(cx);
+        }
         match pending {
-            Pending::Signed(signed) if !signed.resent && signature_rejected(response.body) => {
+            Pending::Clock(probe) => {
+                let error = format!("HTTP {}: {}", response.status, response.body);
+                self.clock_failed(cx, probe, &error);
+            }
+            Pending::Signed(signed) if !signed.resent && resend_refused(cx, response.body) => {
                 self.resend_managed(cx, *signed);
             }
             Pending::Signed(signed) => {
@@ -1173,6 +1202,7 @@ impl Venue for Bingx {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Clock(probe) => self.clock_failed(cx, probe, &error.message),
             Pending::Identity(read) => self.identity_failed(cx, read, error),
             Pending::History(request) => self.history.on_http_failed(cx, request, error),
             Pending::Trade(request) => {
@@ -1244,6 +1274,7 @@ impl Venue for Bingx {
                 self.on_sign_error(cx, signed.inner, error);
                 managed::finish(cx, context);
             }
+            Pending::Clock(probe) => self.clock_failed(cx, probe, &error.message),
             Pending::Identity(read) => self.identity_failed(cx, read, error),
             Pending::History(request) => self.history.on_sign_failed(cx, request, error),
             Pending::Trade(request) => {
@@ -1266,6 +1297,10 @@ impl Venue for Bingx {
             Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
         );
         match pending {
+            Pending::Clock(probe) => {
+                self.clock_failed(cx, probe, error);
+                return;
+            }
             Pending::Metadata(leg) => {
                 // A failing private read surfaces as an Error at the retried-failure cadence.
                 cx.retried_failure(
