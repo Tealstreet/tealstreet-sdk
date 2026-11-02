@@ -2315,7 +2315,11 @@ pub(crate) mod tests {
                 ..InitPayload::default()
             };
             let options = engine_options(&init, false);
-            assert_eq!(options["lighterWsRoute"].as_bool(), expected, "{venue} {route:?}");
+            assert_eq!(
+                options["lighterWsRoute"].as_bool(),
+                expected,
+                "{venue} {route:?}"
+            );
         }
     }
 
