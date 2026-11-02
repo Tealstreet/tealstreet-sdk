@@ -560,6 +560,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -1638,6 +1639,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -2770,6 +2772,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -3848,6 +3851,7 @@
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
       "proxyRegion": "JA",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -5035,6 +5039,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -6116,6 +6121,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -7079,6 +7085,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -8016,6 +8023,7 @@
     "options": {
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -8935,6 +8943,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -9901,6 +9910,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -10907,6 +10917,7 @@
     "options": {
       "tealstreetProxy": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -11870,6 +11881,7 @@
     "options": {
       "tealstreetProxy": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -12821,6 +12833,7 @@
     "options": {
       "tealstreetProxy": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -13846,6 +13859,7 @@
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -14944,6 +14958,7 @@
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -16042,6 +16057,7 @@
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -17031,6 +17047,7 @@
     "options": {
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -17942,6 +17959,7 @@
     "options": {
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -18916,6 +18934,7 @@
     "options": {
       "tealstreetProxy": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -19849,6 +19868,7 @@
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -20269,13 +20289,14 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "tealstreetTunnel": false,
       "hasKey": true,
       "payloadSigner": false
     },
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -20327,6 +20348,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": true,
+      "tealstreetTunnel": false,
       "proxyRegion": "SG",
       "hasKey": true,
       "payloadSigner": false
@@ -20334,17 +20356,10 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
+        "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
+        "headers": {}
       },
       "ws": {
         "public": {},
@@ -20394,6 +20409,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": true,
+      "tealstreetTunnel": false,
       "proxyRegion": "JA",
       "hasKey": true,
       "payloadSigner": false
@@ -20401,17 +20417,10 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
+        "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
+        "headers": {}
       },
       "ws": {
         "public": {},
@@ -20461,6 +20470,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": true,
+      "tealstreetTunnel": false,
       "proxyRegion": "SG",
       "hasKey": true,
       "payloadSigner": false
@@ -20468,17 +20478,10 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
+        "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
+        "headers": {}
       },
       "ws": {
         "public": {},
@@ -20527,18 +20530,17 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
-      "tealstreetTunnel": true,
+      "tealstreetTunnel": false,
       "hasKey": true,
       "payloadSigner": false
     },
     "plan": {
       "http": {
-        "mode": "how",
-        "prefix": "",
+        "mode": "direct",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
+        "headers": {}
       },
       "ws": {
         "public": {},
@@ -20594,7 +20596,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -20648,19 +20650,18 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": true,
-      "tealstreetTunnel": true,
+      "tealstreetTunnel": false,
       "proxyRegion": "JA",
       "hasKey": true,
       "payloadSigner": false
     },
     "plan": {
       "http": {
-        "mode": "how",
-        "prefix": "",
+        "mode": "direct",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
+        "headers": {}
       },
       "ws": {
         "public": {},
@@ -20709,6 +20710,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "tealstreetTunnel": false,
       "tealstreetWsRoute": true,
       "hasKey": true,
       "payloadSigner": false
@@ -20716,7 +20718,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -20773,13 +20775,15 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "tealstreetTunnel": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -20834,7 +20838,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -21012,7 +21016,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -21121,17 +21125,10 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
+        "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
+        "headers": {}
       },
       "ws": {
         "public": {
@@ -21201,7 +21198,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -21260,17 +21257,10 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
+        "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
+        "headers": {}
       },
       "ws": {
         "public": {},
@@ -21327,17 +21317,10 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
+        "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
+        "headers": {}
       },
       "ws": {
         "public": {},
@@ -21394,17 +21377,10 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
+        "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
+        "headers": {}
       },
       "ws": {
         "public": {},
@@ -21520,7 +21496,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -21642,7 +21618,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -21699,6 +21675,7 @@
     "provider": "tealstreet",
     "options": {
       "tealstreetProxy": false,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -21760,7 +21737,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -21938,7 +21915,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -22047,17 +22024,10 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
+        "authorize": false,
         "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
+        "headers": {}
       },
       "ws": {
         "public": {
@@ -22612,6 +22582,7 @@
     "options": {
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -23528,6 +23499,7 @@
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -24486,6 +24458,7 @@
     "options": {
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -25482,6 +25455,7 @@
     "options": {
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },
@@ -26496,6 +26470,7 @@
       "tealstreetProxy": true,
       "tealstreetTunnel": true,
       "proxyRegion": "SG",
+      "testnet": true,
       "hasKey": true,
       "payloadSigner": false
     },

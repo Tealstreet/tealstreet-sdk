@@ -97,6 +97,7 @@ const transportOptions = (options: Partial<ExchangeOptions>) => ({
   proxyRegion: options.proxyRegion,
   bybitSiteId: options.bybitSiteId,
   publicDataOnly: options.publicDataOnly,
+  testnet: options.testnet,
   hasKey: Boolean(options.key),
   payloadSigner: Boolean(options.payloadSigner),
 });
