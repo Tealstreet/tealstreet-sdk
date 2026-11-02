@@ -34,6 +34,8 @@ const RELAY_UPSTREAM = {
   blofinPrivate: 'wss://openapi.blofin.com/ws/private',
   // The host root: the tunnel matches it since #8265 (an entry ending in `/`).
   coinbasePrivate: 'wss://advanced-trade-ws-user.coinbase.com/',
+  // ApeX's login refuses an IP-bound key from a browser (live, 2026-11-02).
+  apexPrivate: 'wss://quote.omni.apex.exchange/realtime_private?v=2',
 } as const;
 const relay = (upstream: string): string => buildRelayUrl('jp', upstream);
 
@@ -50,6 +52,7 @@ export const BROWSER_WS_HOSTS = {
   okxeuBusiness: relay(RELAY_UPSTREAM.okxeuBusiness),
   blofin: relay(RELAY_UPSTREAM.blofinPrivate),
   coinbase: relay(RELAY_UPSTREAM.coinbasePrivate),
+  apexPrivate: relay(RELAY_UPSTREAM.apexPrivate),
   bitgetPrivate: relay(RELAY_UPSTREAM.bitgetPrivate),
   bitgetPrivateUta: relay(RELAY_UPSTREAM.bitgetPrivateUta),
   bitgetPublic: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',
@@ -72,8 +75,8 @@ export const BROWSER_WS_HOSTS = {
   bitunixFutures: 'wss://bitunix-api-proxy-ja.tealstreet.io/ws-futures/?from=contract&compress=2',
 } as const;
 
-// Every WS host the table names. apexomni has none: its private socket connects
-// directly (AWS_EXIT.md 5c) — it answers a browser-origin upgrade and binds no IP.
+// Every WS host the table names. apexomni's private socket goes through the relay:
+// AWS_EXIT.md 5c sent it direct, but its login refuses IP-bound keys from a browser.
 export type WsHosts = Record<keyof typeof BROWSER_WS_HOSTS, string>;
 
 // Exchanges whose REST CORS pool is the Tokyo (jp) box — getPrivateProxy's
@@ -185,6 +188,7 @@ const buildRoutingTable = (WS: WsHosts): RoutingTable => {
     blofin: { private: { kind: 'proxyConditional', host: WS.blofin } },
     coinbase: coinbaseWs,
     coinbasespot: coinbaseWs, // CoinbaseSpotExchange extends CoinbaseExchange
+    apexomni: { private: { kind: 'mainnetProxyConditional', host: WS.apexPrivate } },
     bitget: bitgetWs,
     bitgetinverse: bitgetWs, // BitgetInverseExchange extends BitgetExchange
     bitgetusdc: bitgetWs, // BitgetUSDCExchange extends BitgetExchange

@@ -76,6 +76,7 @@ enum Kind {
     Direct,
     AlwaysProxy { host: String },
     ProxyConditional { host: String },
+    MainnetProxyConditional { host: String },
     RegionConditional { ja: String, other: String },
     BybitBrazilConditional { host: String },
     FallbackOnly,
@@ -416,6 +417,9 @@ fn resolve_ws(strategy: Option<&Strategy>, o: &RoutingInputs, egress: &str) -> R
         Kind::Direct => ResolvedWs::default(),
         Kind::AlwaysProxy { host } => tunnelled(host),
         Kind::ProxyConditional { host } if proxy => tunnelled(host),
+        Kind::MainnetProxyConditional { host } if proxy && !o.testnet.unwrap_or(false) => {
+            tunnelled(host)
+        }
         Kind::RegionConditional { ja, other } if proxy => {
             tunnelled(if o.proxy_region.as_deref() == Some("JA") {
                 ja
