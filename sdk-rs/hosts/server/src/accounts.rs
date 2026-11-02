@@ -1974,6 +1974,37 @@ pub(crate) mod tests {
             .await;
     }
 
+    /// The page starts a chase on what its frames show; the algo host's store may
+    /// not have caught up with that frame yet, and the chase must not fail on it.
+    #[tokio::test(start_paused = true)]
+    async fn a_chase_started_before_the_algo_host_read_the_loaded_market_runs() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for _ in 0..16 {
+                    let link = SignerLink::new(7, Arc::new(|_| true));
+                    let running = Arc::new(crate::algos::Running::default());
+                    let venue = HeldLoad {
+                        placed: Arc::default(),
+                        load_after_ms: Some(0.),
+                        ticker: true,
+                    };
+                    let (account, inbox) =
+                        held_account_on(venue, Some(link.clone()), String::new(), running.clone());
+                    // The engine loads; the op is queued before the algo host has read a frame.
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    super::testing::algo_op(
+                        &account,
+                        "chaser:start",
+                        r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#,
+                    );
+                    let _account = run_algos(account, link, inbox);
+                    tokio::time::sleep(Duration::from_millis(600)).await;
+                    assert_eq!(running.counts(), (1, 0), "the chase runs");
+                }
+            })
+            .await;
+    }
+
     pub(crate) fn registry() -> Arc<Registry> {
         Arc::new(Registry::new(
             EngineThreads::start(1).unwrap(),
