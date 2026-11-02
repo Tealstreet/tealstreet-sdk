@@ -4,6 +4,7 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 });
 
 import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/host';
+import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
 import type { ExchangeName } from '../../types';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
@@ -21,7 +22,8 @@ const order = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, a
 const make = (name: ExchangeName, capabilities: Partial<EngineCapabilities>) => {
   const exchange = new RustEngineExchange(name, { key: 'fixture', secret: 'fixture' }, new DefaultStore());
   const command = vi.fn().mockResolvedValue([]);
-  Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  // Markets loaded, as a running engine's are: candle reads wait for them first.
+  Object.assign(exchange, { host: { command, dispose: vi.fn() }, nativeLoaded: LOADED_FLAG.MARKETS });
   adoptEngineCapabilities(exchange, capabilities);
   running.push(exchange);
   return { exchange, command };
