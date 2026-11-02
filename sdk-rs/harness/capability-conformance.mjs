@@ -20,6 +20,7 @@ const policies = new Set([
   'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
   'finiteHistoryBounds', 'rejectOrderHistoryFilters', 'publicCatalogueValidation',
   'isolatedBookSubscriptions', 'inverseClosedPositions', 'orderHistoryNeedsSymbol',
+  'symbolCancelMissesUnseen',
 ]);
 const conditional = {
   account: (v) => v !== 'unsupported' ? [{ op: 'fetchAccount' }] : [],
@@ -48,6 +49,7 @@ const conditional = {
   stpControls: () => [{ op: 'fetchStpMode' }, { op: 'setStpMode', mode: 'EXPIRE_TAKER' }],
   scheduleCancel: () => [{ op: 'scheduleCancel', time: 5000 }, { op: 'scheduleCancel', time: null }],
   freshPositions: () => [{ op: 'readPositions' }],
+  nukeAccountCancel: () => [{ op: 'cancelAccountOrders' }],
 };
 const fields = [...new Set([...Object.keys(enums), ...Object.keys(conditional), ...policies])];
 
