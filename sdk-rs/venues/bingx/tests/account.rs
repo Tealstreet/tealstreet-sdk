@@ -3188,6 +3188,67 @@ fn an_unreadable_order_event_re_reads_orders() {
     );
 }
 
+const SHORT_ROW: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"0.2","positionSide":"SHORT","avgPrice":"60000","unrealizedProfit":"10","leverage":20,"isolated":false,"liquidationPrice":70000,"initialMargin":"300"}]}"#;
+
+/// The user switched mode on BingX's site: the row is believed, and the mode is read again.
+#[test]
+fn a_row_from_the_other_position_mode_keeps_its_side_and_rereads_the_mode() {
+    let mut h = Harness::ready();
+    h.fire_at(3000.0);
+    h.respond(POSITIONS, 200, SHORT_ROW);
+    let p = &h.engine.store().positions()[0];
+    assert_eq!(p.side, PositionSide::Short);
+    assert_eq!(p.id, "BTCUSDT:short");
+    h.fire_at(5000.0);
+    assert!(h.requests.iter().any(|r| r.url.contains(MODE)));
+    h.respond(
+        MODE,
+        200,
+        r#"{"code":0,"data":{"dualSidePosition":"true"}}"#,
+    );
+    assert!(h.engine.store().hedged());
+}
+
+#[test]
+fn a_one_way_short_row_on_a_stale_hedged_account_is_short() {
+    let mut h = Harness::new();
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(
+        MODE,
+        200,
+        r#"{"code":0,"data":{"dualSidePosition":"true"}}"#,
+    );
+    h.respond(
+        POSITIONS,
+        200,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"-0.1","positionSide":"BOTH","avgPrice":"60000","unrealizedProfit":"10","leverage":20,"isolated":false,"liquidationPrice":70000,"initialMargin":"300"}]}"#,
+    );
+    let p = &h.engine.store().positions()[0];
+    assert_eq!(p.side, PositionSide::Short);
+    assert_eq!(p.id, "BTCUSDT");
+}
+
+/// A new account may hold no balance row; it must still finish loading.
+#[test]
+fn an_empty_balance_list_still_loads_the_account() {
+    let mut h = Harness::new();
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(BALANCE, 200, r#"{"code":0,"data":[]}"#);
+    assert!(h.engine.store().loaded().balance);
+}
+
+/// BingX documents tradeMinLimit as deprecated: its absence must not empty the market list.
+#[test]
+fn a_contract_without_the_deprecated_minimum_still_lists() {
+    let mut h = Harness::unstarted();
+    h.respond(
+        "/quote/contracts",
+        200,
+        &MARKETS.replace(r#""tradeMinLimit":"0.0001","#, ""),
+    );
+    assert_eq!(h.engine.store().markets().len(), 1);
+}
+
 /// A known answer through the real signing provider, not the test oracle.
 #[test]
 fn the_balance_read_is_signed_over_exactly_the_query_it_sends() {

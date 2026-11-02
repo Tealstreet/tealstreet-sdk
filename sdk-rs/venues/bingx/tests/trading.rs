@@ -1746,3 +1746,96 @@ fn a_limit_replace_that_cancels_and_refuses_says_the_order_is_gone() {
     let error = h.done[0].as_ref().unwrap_err();
     assert!(error.contains("order is gone"), "{error}");
 }
+
+fn moved_stop() -> Harness {
+    let mut stop = order();
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = 90.0;
+    stop.reduce_only = true;
+    stop.client_order_id = None;
+    stop.trigger_type = Some(StopTriggerType::MarkPrice);
+    let mut h = Harness::new(Some((stop, "TRIGGER_MARKET")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(91.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":0,"data":{}}"#);
+    h
+}
+
+#[test]
+fn a_moved_stop_whose_replacement_is_lost_says_the_position_may_have_no_stop() {
+    let mut h = moved_stop();
+    h.failed();
+    let error = h.done[0].as_ref().unwrap_err();
+    assert!(error.contains("may have no stop"), "{error}");
+}
+
+#[test]
+fn a_moved_stop_whose_replacement_answer_is_unclear_does_not_claim_no_stop() {
+    for body in [r#"{"code":110500,"msg":"busy"}"#, "not json"] {
+        let mut h = moved_stop();
+        h.reply(body);
+        let error = h.done[0].as_ref().unwrap_err();
+        assert!(error.contains("may have no stop"), "{body}: {error}");
+    }
+}
+
+#[test]
+fn a_refused_bracket_says_the_entry_was_placed() {
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        stop_loss: Some(90.0),
+        ..opts()
+    }]);
+    h.reply(r#"{"code":0,"data":{"order":{"orderId":9223372036854775806}}}"#);
+    h.reply(r#"{"code":110411,"msg":"stop price on the wrong side"}"#);
+    let error = format!("{:?}", (&h.failures, &h.done));
+    assert!(error.contains("entry was placed"), "{error}");
+    assert!(error.contains("BingX 110411"), "{error}");
+}
+
+#[test]
+fn a_close_below_the_market_minimum_is_sent_but_an_open_is_not() {
+    let dust = |reduce_only: bool| -> PlaceOrderOpts {
+        serde_json::from_value(serde_json::json!({
+            "symbol": "BTCUSDT", "type": "limit", "side": "sell", "amount": 0.005,
+            "price": 100000.0, "reduceOnly": reduce_only,
+        }))
+        .unwrap()
+    };
+    let harness = || {
+        let mut h = Harness::new(None);
+        let mut market = market();
+        market.limits.amount.min = 0.01;
+        h.engine.store_mut().set_markets(vec![market]);
+        h
+    };
+    let mut h = harness();
+    h.place(vec![dust(false)]);
+    assert!(h.requests.is_empty(), "{:?}", h.requests.len());
+    let mut h = harness();
+    h.place(vec![dust(true)]);
+    assert_eq!(h.requests.len(), 1, "{:?}", (&h.failures, &h.done));
+}
+
+#[test]
+fn a_price_move_on_a_working_order_sends_no_status_restriction() {
+    for status in ["WORKING", "OPEN"] {
+        let mut h = Harness::with_status(Some((order(), "LIMIT")), status);
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price: Some(96.0),
+            amount: None,
+        });
+        assert!(
+            !h.body().contains("cancelRestrictions"),
+            "{status}: {}",
+            h.body()
+        );
+    }
+}

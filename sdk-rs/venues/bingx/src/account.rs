@@ -290,17 +290,22 @@ fn mode(cx: &Cx<'_, Pending>) -> PositionMode {
         PositionMode::Oneway
     }
 }
-fn position_side(text: &str, quantity: f64, mode: PositionMode) -> PositionSide {
-    if mode == PositionMode::Oneway {
-        if quantity < 0.0 {
-            PositionSide::Short
-        } else {
-            PositionSide::Long
-        }
-    } else if text == "SHORT" {
-        PositionSide::Short
-    } else {
-        PositionSide::Long
+/// As legacy: the venue's side first, and the sign only for a one-way row.
+fn position_side(text: &str, quantity: f64) -> PositionSide {
+    match text {
+        "LONG" => PositionSide::Long,
+        "SHORT" => PositionSide::Short,
+        _ if quantity < 0.0 => PositionSide::Short,
+        _ => PositionSide::Long,
+    }
+}
+/// The mode a held row was reported under; a flat or unlabelled row says nothing.
+fn row_mode(text: &str, quantity: f64) -> Option<PositionMode> {
+    match text {
+        _ if quantity == 0.0 => None,
+        "LONG" | "SHORT" => Some(PositionMode::Hedged),
+        "BOTH" => Some(PositionMode::Oneway),
+        _ => None,
     }
 }
 fn time_in_force(text: &str) -> Option<TimeInForce> {
@@ -1076,8 +1081,14 @@ impl Account {
                     }
                     return;
                 }
-                let mode = mode(cx);
-                let side = position_side(&row.position_side, row.position_amt, mode);
+                let known = mode(cx);
+                let reported = row_mode(&row.position_side, row.position_amt);
+                // The mode changed outside the app: believe the row and read the mode again.
+                if reported.is_some_and(|reported| reported != known) {
+                    self.mode_known = false;
+                }
+                let mode = reported.unwrap_or(known);
+                let side = position_side(&row.position_side, row.position_amt);
                 if row.leverage <= 0.0 {
                     // A flat row closes its position whatever its leverage.
                     if row.position_amt != 0.0 {
@@ -1361,11 +1372,9 @@ impl Account {
                     if let Some(balance) = usdt.or(first) {
                         cx.store.set_balance(balance);
                     } else {
-                        cx.notice(
-                            Level::Error,
-                            code::SNAPSHOT_DISCARDED,
-                            "BingX balance snapshot contained no settlement asset",
-                        );
+                        // A new account may hold no row: as legacy, the stored balance stands.
+                        let stored = cx.store.balance().clone();
+                        cx.store.set_balance(stored);
                     }
                 }
                 if !current {
@@ -1945,14 +1954,18 @@ impl Account {
         if self.untracked_market(cx, &symbol) {
             return;
         }
+        let reported = row_mode(&p.ps, quantity);
         let current_mode = if self.mode_known {
-            mode(cx)
+            if reported.is_some_and(|reported| reported != mode(cx)) {
+                self.mode_known = false;
+            }
+            reported.unwrap_or_else(|| mode(cx))
         } else if p.ps == "BOTH" {
             PositionMode::Oneway
         } else {
             PositionMode::Hedged
         };
-        let side = position_side(&p.ps, quantity, current_mode);
+        let side = position_side(&p.ps, quantity);
         let expected = position_id(&symbol, side, current_mode);
         let existing = cx
             .store
