@@ -223,3 +223,22 @@ fn a_rejected_spot_user_data_subscription_retires_for_authentication_and_resubsc
     assert!(sent[0].contains("userDataStream.subscribe.signature"));
     assert!(sent[0].contains("\"id\":\"tealstreet-user-data-11\""));
 }
+
+#[test]
+fn public_data_only_streams_live_bid_and_ask() {
+    let mut h = Harness::started(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    let socket = h.socket("/public/ws").unwrap();
+    h.event(Event::WsOpened { socket });
+    assert!(
+        h.sent
+            .iter()
+            .any(|(s, text)| *s == socket && text.contains("!bookTicker"))
+    );
+}
