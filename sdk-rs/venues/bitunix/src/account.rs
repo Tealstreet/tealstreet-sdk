@@ -204,6 +204,8 @@ pub struct OrderReadProgress {
 }
 #[derive(Default)]
 pub struct AccountState {
+    /// A startup read already met one 10007; legacy re-signs once, so the next is final.
+    pub signature_retried: bool,
     pub(crate) recovery: crate::recovery::State,
     /// Set while an uncertain write's census is issued: it supersedes an
     /// ordinary census in flight and joins an owed one.
@@ -1150,7 +1152,13 @@ impl BitunixFutures {
         response: Option<&Response<'_>>,
     ) {
         if let Some(response) = response {
-            cx.startup_read_refused(&crate::recovery::failed(response));
+            let signature = crate::recovery::native(response) == Some(10007);
+            if signature && !self.account.signature_retried {
+                // The read recovery below sends it again, freshly signed.
+                self.account.signature_retried = true;
+            } else {
+                cx.startup_read_refused(&crate::recovery::failed(response));
+            }
         }
         self.position_answered(cx, &read);
         self.order_answered(cx, &read);
