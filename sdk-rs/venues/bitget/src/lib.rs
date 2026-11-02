@@ -343,6 +343,10 @@ impl BitgetFutures {
         }
     }
 
+    fn open_feed(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
+        self.connect(cx, index);
+    }
+
     fn channel(&self, socket: SocketId) -> Option<usize> {
         self.sockets.iter().position(|c| c.socket == Some(socket))
     }
@@ -1006,8 +1010,8 @@ impl Venue for BitgetFutures {
                 let _ = cx.finish_http_context(&context);
                 if tickers {
                     self.discovery.succeeded(cx, DiscoveryRead::Tickers);
-                    self.connect(cx, 1);
-                    self.connect(cx, 2);
+                    self.open_feed(cx, 1);
+                    self.open_feed(cx, 2);
                 } else if cx.frame_fed() {
                     // The page engine loads instruments only; its data source streams.
                     self.discovery.succeeded(cx, DiscoveryRead::Markets);
@@ -1198,7 +1202,7 @@ impl Venue for BitgetFutures {
             };
             match tick {
                 Tick::Unhandled => continue,
-                Tick::Reconnect => self.connect(cx, index),
+                Tick::Reconnect => self.open_feed(cx, index),
                 Tick::Ping => {
                     if let Some(socket) = self.sockets[index].socket {
                         cx.send(socket, "ping");
