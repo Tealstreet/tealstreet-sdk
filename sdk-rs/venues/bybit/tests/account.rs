@@ -2973,8 +2973,9 @@ fn unsupported_reports_wait_for_admitted_join_and_never_rearm_on_clean_rows() {
     let mut healthy = snapshot_rows(OPEN_ORDERS).remove(0);
     healthy["orderId"] = serde_json::json!("healthy-report-peer");
     let rows = [unsupported, healthy];
-    let expected =
-        format!("Bybit order {ORDER_ID} has an unsupported type; its last known state is kept");
+    let expected = format!(
+        "Bybit order {ORDER_ID} has an unsupported type (orderType Some(\"FutureType\"), stopOrderType Some(\"UNKNOWN\"), createType None, tpslMode Some(\"Full\"), side Some(\"Buy\"), triggerPrice Some(\"0.00\")); its last known state is kept"
+    );
     let reports = |h: &Harness| {
         h.logs
             .iter()
@@ -3080,8 +3081,10 @@ fn stale_join_discards_staged_unsupported_diagnostics_without_consuming_memory()
     assert_eq!(
         h.logs
             .iter()
-            .filter(|m| m.as_str()
-                == "Bybit order staged-unsupported has an unsupported type and is not shown")
+            .filter(
+                |m| m.starts_with("Bybit order staged-unsupported has an unsupported type (")
+                    && m.ends_with(") and is not shown")
+            )
             .count(),
         1
     );
