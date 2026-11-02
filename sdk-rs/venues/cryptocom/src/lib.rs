@@ -537,6 +537,13 @@ impl Venue for Cryptocom {
     }
 
     type Pending = Pending;
+    fn status_exempt_refusal(
+        &self,
+        pending: &Pending,
+        response: safe_cex_engine::Response<'_>,
+    ) -> bool {
+        matches!(pending, Pending::Trade(request) if request.refused_by_body(response.body))
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(Err(error)) = self.options.secondary_validation {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
@@ -583,7 +590,19 @@ impl Venue for Cryptocom {
                 );
             } else if channel == 1 && envelope.method == "public/auth" {
                 let code = serde_json::from_str::<AuthenticationReply>(text)?.code;
-                if code != 0 {
+                // Only these name the key; busy, internal and nonce answers retry on reconnect.
+                if code != 0 && !matches!(code, 40101 | 40103 | 40104) {
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_UNAVAILABLE,
+                        format!(
+                            "Crypto.com private login not accepted, reconnecting: {} {}",
+                            envelope.code, envelope.message
+                        ),
+                    );
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1011);
+                } else if code != 0 {
                     cx.notice(
                         Level::Error,
                         code::AUTH_REJECTED,
