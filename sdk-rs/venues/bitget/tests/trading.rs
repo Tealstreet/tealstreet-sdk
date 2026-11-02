@@ -1516,6 +1516,28 @@ fn a_nuke_account_cancel_on_classic_sends_the_product_wide_cancel_all() {
         200,
         r#"{"code":"00000","msg":"success","data":{"successList":[],"failureList":[]}}"#,
     );
+    // Plan orders (triggers, TP/SL, trailing) are not normal orders: each type is
+    // cancelled product-wide, so one the store never saw is reached too.
+    for plan in [
+        "normal_plan",
+        "profit_plan",
+        "loss_plan",
+        "pos_profit",
+        "pos_loss",
+        "track_plan",
+    ] {
+        assert!(h.done.iter().all(|(id, _)| *id != 21), "{plan}");
+        let (request, sent) = body(&mut h, "/api/v2/mix/order/cancel-plan-order");
+        assert_eq!(sent["planType"], plan);
+        assert_eq!(sent["productType"], "usdt-futures");
+        assert_eq!(sent["marginCoin"], "USDT");
+        assert!(sent.get("symbol").is_none(), "{sent}");
+        h.reply(
+            request,
+            200,
+            r#"{"code":"00000","msg":"success","data":{"successList":[],"failureList":[]}}"#,
+        );
+    }
     assert!(
         h.done
             .iter()
