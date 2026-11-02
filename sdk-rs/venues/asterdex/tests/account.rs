@@ -1571,7 +1571,16 @@ fn reporter_once_does_not_upgrade_a_remembered_warning_after_its_stored_copy_dis
 
 #[test]
 fn a_refused_key_ends_the_start_with_the_reason() {
-    let refused = r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#;
+    for refused in [
+        r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#,
+        // daxx's start: the venue's own words, under a code the read did not recognise.
+        r#"{"code":-1000,"msg":"Ip not in whitelist"}"#,
+    ] {
+        a_refused_key_ends_the_start_with(refused);
+    }
+}
+
+fn a_refused_key_ends_the_start_with(refused: &str) {
     let mut e = support::engine(Options {
         key: Some("documented-key".into()),
         secret: Some("synthetic-secret".into()),
@@ -1618,5 +1627,6 @@ fn a_refused_key_ends_the_start_with_the_reason() {
         }
     }
     assert_eq!(failures.len(), 1, "{failures:?}");
-    assert!(failures[0].message.contains("Invalid API-key"));
+    let words = serde_json::from_str::<serde_json::Value>(refused).unwrap();
+    assert!(failures[0].message.contains(words["msg"].as_str().unwrap()));
 }
