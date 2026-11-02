@@ -2726,7 +2726,12 @@ pub(crate) fn infer(row: &OrderRow<'_>) -> (OrderType, f64) {
     // A triggered stop reports triggerPx 0.0; its limit price is what it works at.
     let trigger = row.trigger_px.filter(|px| *px > 0.0);
     let price = trigger.unwrap_or(row.limit_px);
-    if row.order_type == "Take Profit Market" || (trigger.is_some() && row.tpsl == "tp") {
+    // Live rows carry no tpsl, so "Take Profit Limit" is known only by its name.
+    if matches!(
+        row.order_type.as_ref(),
+        "Take Profit Market" | "Take Profit Limit"
+    ) || (trigger.is_some() && row.tpsl == "tp")
+    {
         return (OrderType::TakeProfit, price);
     }
     if row.order_type == "Stop Market" || trigger.is_some() {
