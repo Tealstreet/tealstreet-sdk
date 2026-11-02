@@ -74,7 +74,7 @@ test('synchronous completions, validation errors and no-reply events allocate no
     setTimeout() { timerCalls++; throw new Error('unnecessary timer'); }, clearTimeout() {} });
   assert.equal(await host.command({ op: 'getAccount' }), 42);
   await assert.rejects(host.command({ op: 'bad' }), /native validation/);
-  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setPollScale', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles']) {
+  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setPollScale', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles', 'repairSubscription']) {
     await host.command({ op });
   }
   assert.equal(timerCalls, 0);

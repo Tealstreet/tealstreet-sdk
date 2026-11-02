@@ -4,7 +4,7 @@ use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::command::HostInput;
 use safe_cex_engine::model::Interval;
-use safe_cex_engine::{Command, Event, Level, Notice, Value, Venue, VenueError};
+use safe_cex_engine::{Command, Event, Level, Notice, SubscriptionTopic, Value, Venue, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -1247,6 +1247,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 self.tickers();
                 return;
             }
+            // Shared and intent-neutral: the engine warns when nothing is live.
+            Command::RepairSubscription(_) => {
+                self.handle(command);
+                return;
+            }
             _ => {}
         }
         let id = command_id(&mut command).expect("all non-subscription commands have an ID");
@@ -1344,6 +1349,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 per_account += usize::from(!self.candles.contains_key(&key));
             }
             Command::SetTickerSymbols { .. } => {}
+            Command::RepairSubscription(
+                SubscriptionTopic::Candles { symbol, .. } | SubscriptionTopic::OrderBook { symbol },
+            ) => return valid_symbol(symbol),
             _ => return true,
         }
         per_client <= self.config.max_subscriptions_per_client
@@ -1413,7 +1421,8 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
         | Command::SubscribeOrderBook { .. }
         | Command::UnsubscribeOrderBook { .. }
         | Command::SubscribeCandles { .. }
-        | Command::UnsubscribeCandles { .. } => None,
+        | Command::UnsubscribeCandles { .. }
+        | Command::RepairSubscription(_) => None,
     }
 }
 

@@ -620,6 +620,12 @@ impl Lifecycle {
     pub(crate) fn epoch(&self, feed: FeedId) -> Option<Epoch> {
         self.feeds.get(feed.0)?.epoch
     }
+    /// Whether a live (unstopped) feed currently wants `key`.
+    pub(crate) fn desires(&self, feed: FeedId, key: &str) -> bool {
+        self.feeds
+            .get(feed.0)
+            .is_some_and(|f| !f.stopped && f.interests.desired.contains_key(key))
+    }
     pub(crate) fn current(&self, epoch: Epoch) -> bool {
         self.epoch(epoch.feed) == Some(epoch)
     }

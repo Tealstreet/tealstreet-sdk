@@ -10,7 +10,7 @@ mod legacy {
     #[cfg(feature = "command-asterdex")]
     use crate::model::StpMode;
     use crate::model::{Interval, PlaceOrderOpts, PositionSide};
-    use crate::{Command, Query};
+    use crate::{Command, Query, SubscriptionTopic};
     use serde::Deserialize;
 
     /// Commands shared by JavaScript and native WebSocket clients.
@@ -50,6 +50,9 @@ mod legacy {
         UnsubscribeCandles {
             symbol: String,
             interval: Interval,
+        },
+        RepairSubscription {
+            topic: SubscriptionTopic,
         },
         PlaceOrders {
             command: u32,
@@ -272,6 +275,7 @@ mod legacy {
                 CommandIn::UnsubscribeCandles { symbol, interval } => {
                     Self::UnsubscribeCandles { symbol, interval }
                 }
+                CommandIn::RepairSubscription { topic } => Self::RepairSubscription(topic),
                 CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
                 CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
                 #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
@@ -506,6 +510,17 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
             ("op", r#""unsubscribeCandles""#),
             ("symbol", r#""BTCUSDT""#),
             ("interval", r#""1m""#),
+        ],
+        vec![
+            ("op", r#""repairSubscription""#),
+            (
+                "topic",
+                r#"{"kind":"candles","symbol":"BTCUSDT","interval":"1m"}"#,
+            ),
+        ],
+        vec![
+            ("op", r#""repairSubscription""#),
+            ("topic", r#"{"kind":"orderBook","symbol":"BTCUSDT"}"#),
         ],
         vec![
             ("op", r#""placeOrders""#),
