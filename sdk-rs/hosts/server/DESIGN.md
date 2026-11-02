@@ -84,6 +84,22 @@ connections.
   - An invalid or expired token gets a 401 before the upgrade.
 - **Any other request:** 426 if it is not a WebSocket, otherwise 404.
 
+## Drain and roll
+
+A box is drained before a restart, so no Hosted session is dropped and no
+chase or TWAP is cut short. `scripts/roll.sh` runs the whole roll on the box.
+
+- **Admin routes:** `POST /admin/drain`, `POST /admin/drain?now=1` (break-glass) and `POST /admin/undrain`.
+  - They answer only a loopback peer whose request carries no proxy header (`cf-connecting-ip`, `cf-ray`, `cdn-loop`, `x-forwarded-for`, `x-real-ip`, `forwarded`); anything else gets 403. cloudflared dials the port from loopback, so the peer alone proves nothing.
+  - Each answers `{drain: "off"|"waiting"|"now", algos: {chases, twaps}}`; break-glass adds `settled`.
+- **`/health` while draining:** 503 with `ok:false` and `draining:true`, so the load balancer pool fails over. `algos: {chases, twaps}` counts the chases and TWAPs on this box, parked accounts included. A stopped chase counts until its cleanup ends, since that may still need a signature; a paused TWAP counts too.
+- **The moved close:** `4100` with reason `draining: reconnect`. It means this box is going away and the page should reconnect.
+- **While waiting:** a socket whose accounts run no chase or TWAP gets the moved close when the drain starts, and again as each algo ends. A socket with a running algo stays until those algos end. The drain never stops an algo.
+  - An `init` from a user with no account on this box gets the moved close. A user already here (a second tab, a resume) is still accepted.
+  - A moved socket releases its accounts instead of parking them: its page is reconnecting elsewhere.
+- **Break-glass:** it stops every account through the SIGTERM path. Each live page gets the algo host's own stop notice ("Chase on X stopped: the server is restarting."), and the cancels settle while browsers can still sign. Only then does every socket get the moved close, with the stop notice flushed first.
+- **`roll.sh [--now] [--ceiling SECONDS] [--unit NAME] [ADMIN_URL]`:** drains, then polls `/health` until no chase or TWAP runs. The ceiling defaults to 1800s; past it the script fails and leaves the box drained. It then runs `systemctl restart exchange-server`, waits up to 120s for `/health` ok, and undrains. `--now` uses break-glass instead of waiting.
+
 ## Authentication
 
 - **Token check:** `proxyToken` is an RS256 JWT, verified with today's `PROXY_PUBLIC_KEY`. That key is copied verbatim into `src/auth.rs`.
