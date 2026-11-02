@@ -772,19 +772,37 @@ fn a_refusal_ends_the_start_however_it_arrives() {
 #[test]
 fn startup_reads_lost_to_the_tunnel_load_markets_once_retried() {
     let mut h = private();
-    for path in ["/v5/account/fee-rate", "status=PreLaunch", "/v5/market/instruments-info"] {
-        if let Some(request) = h.requests.iter().find(|r| r.url.contains(path)).map(|r| r.id) {
-            h.event(Event::HttpFailed { request, error: "TradeTunnel connection lost" });
+    for path in [
+        "/v5/account/fee-rate",
+        "status=PreLaunch",
+        "/v5/market/instruments-info",
+    ] {
+        if let Some(request) = h
+            .requests
+            .iter()
+            .find(|r| r.url.contains(path))
+            .map(|r| r.id)
+        {
+            h.event(Event::HttpFailed {
+                request,
+                error: "TradeTunnel connection lost",
+            });
         }
     }
-    h.requests.retain(|r| !r.url.contains("/v5/market/instruments-info") && !r.url.contains("/v5/account/fee-rate"));
+    h.requests.retain(|r| {
+        !r.url.contains("/v5/market/instruments-info") && !r.url.contains("/v5/account/fee-rate")
+    });
     for _ in 0..12 {
         h.advance(60_000.0);
         if h.has_request("/v5/market/instruments-info") {
             break;
         }
     }
-    assert!(h.has_request("/v5/market/instruments-info"), "{:?}", h.paths());
+    assert!(
+        h.has_request("/v5/market/instruments-info"),
+        "{:?}",
+        h.paths()
+    );
     if h.has_request("/v5/account/fee-rate") {
         h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
     }
