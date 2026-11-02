@@ -316,7 +316,7 @@ export type WorkerMirrorUnsupportedMethod = (typeof WORKER_MIRROR_UNSUPPORTED_ME
 /** The main-thread exchange's surface: everything else forwards or is correct locally. */
 export type WorkerMirrorExchange = Omit<RustEngineExchange, WorkerMirrorUnsupportedMethod | 'fetchFillsForOrderIds'>;
 
-/** Account history a public-only account does not have: answered empty, as the TS venues did. */
+/** Account history a public-only account cannot read: refused as not read, never answered empty. */
 const PRIVATE_HISTORY_READS: ReadonlySet<string> = new Set([
   'fetchHistoricalFills',
   'fetchHistoricalOrders',
@@ -1620,7 +1620,10 @@ export class RustEngineExchange extends BaseExchange {
       // An engine-owning instance calls straight through, keeping its own synchronous refusals.
       members[method] = (...args: unknown[]) => {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
-        if (this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method)) return Promise.resolve([]);
+        if (this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method)) {
+          const message = `${method} was not read: this account is on public data`;
+          return Promise.reject(new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' }));
+        }
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
         const viaWorker = () =>
           this.callWorker(method, ...args).then(
