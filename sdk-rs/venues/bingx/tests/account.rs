@@ -3248,3 +3248,22 @@ fn a_contract_without_the_deprecated_minimum_still_lists() {
     );
     assert_eq!(h.engine.store().markets().len(), 1);
 }
+
+/// A known answer through the real signing provider, not the test oracle.
+#[test]
+fn the_balance_read_is_signed_over_exactly_the_query_it_sends() {
+    let h = Harness::new();
+    let request = h
+        .requests
+        .iter()
+        .find(|r| r.url.contains(BALANCE))
+        .expect("balance read");
+    eprintln!("URL {} {:?}", request.url, request.body);
+    let query = request.url.split_once('?').expect("query").1;
+    let (signed, signature) = query.rsplit_once("&signature=").expect("signature last");
+    assert!(signed.starts_with("timestamp="), "{query}");
+    assert!(!signed.contains('&') && !signature.contains('&'), "{query}");
+    let expected =
+        safe_cex_crypto::hmac_sha256(b"secret", signed.as_bytes(), safe_cex_crypto::Encoding::Hex);
+    assert_eq!(signature, expected);
+}
