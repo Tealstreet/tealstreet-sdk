@@ -611,9 +611,9 @@ impl BinanceFutures {
                 if self.is_spot() {
                     topics.extend(self.kline_topics());
                 } else {
-                    if !self.options.public_data_only {
-                        topics.push("!bookTicker".to_owned());
-                    }
+                    // Bid and ask are public: a guest account without this
+                    // stream would keep the startup REST quote forever.
+                    topics.push("!bookTicker".to_owned());
                     if self.shared_public_socket() {
                         topics.push("!ticker@arr".to_owned());
                         topics.push("!markPrice@arr@1s".to_owned());
