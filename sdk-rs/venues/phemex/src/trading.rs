@@ -2301,7 +2301,7 @@ impl PhemexPerpetuals {
                                 job.effective = true;
                             }
                             self.account_write(cx);
-                            self.account_refresh(cx);
+                            self.replace_wait_refresh(cx);
                             return;
                         }
                         Err(error) => {
