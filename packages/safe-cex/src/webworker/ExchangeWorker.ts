@@ -1186,8 +1186,14 @@ export class ExchangeWorker {
   retryTimedOutStart(): boolean {
     const delay = START_RETRY_DELAYS_MS[this._startRetries];
     // A shared port needs a fresh provider attachment, as after an engine failure.
-    if (!this._startTimedOut || this._stopped || delay === undefined || this._options.publicFeed?.mode === 'shared')
+    if (!this._startTimedOut || this._stopped || delay === undefined || this._options.publicFeed?.mode === 'shared') {
+      if (this._startTimedOut && !this._stopped) {
+        const message = `${this._exchangeName} did not finish loading after ${this._startRetries + 1} attempts. Check your connection and reload the account.`;
+        // Forced: a start that never connected would otherwise fail the page's connected gate.
+        this._ctx.postMessage({ op: 'error', data: [message, { forceToast: true }] });
+      }
       return false;
+    }
     this._startTimedOut = false;
     this._startRetries++;
     this._recoveryUpdateIds = { ...this._store.updateIds };
@@ -1205,7 +1211,10 @@ export class ExchangeWorker {
     this._invalidateReadiness();
     this._ctx.postMessage({
       op: 'warning',
-      data: [`${this._exchangeName} is still loading on a slow connection; retrying in ${delay / 1000}s.`],
+      data: [
+        `${this._exchangeName} is still loading on a slow connection; retrying in ${delay / 1000}s.`,
+        { forceToast: true },
+      ],
     });
     const token = this._startupToken;
     this._recoveryTimer = setTimeout(() => {
