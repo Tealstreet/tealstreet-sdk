@@ -129,7 +129,10 @@ fn n1_mismatched_configured_signer_is_refused_at_startup_naming_both_addresses()
         ..wallet()
     });
     assert!(h.signed.is_empty(), "nothing signs: {:?}", h.signers());
-    assert_eq!(h.startup_failures, 1, "the start ends, so public data can take over");
+    assert_eq!(
+        h.startup_failures, 1,
+        "the start ends, so public data can take over"
+    );
     assert!(
         h.logs.iter().any(|log| log.contains(OTHER)
             && log.contains(WALLET)
