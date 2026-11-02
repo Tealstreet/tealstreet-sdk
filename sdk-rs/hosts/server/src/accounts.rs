@@ -326,7 +326,12 @@ pub struct Registry {
     notices: Notices,
     /// When each user last opened a socket, and was last logged as not returning.
     presence: Arc<Mutex<HashMap<String, Presence>>>,
+    /// The last forced-reset repair of each (user, account, topic) in this process.
+    repairs: Mutex<HashMap<(String, String, String), std::time::Instant>>,
 }
+
+/// A chart's forced reset repairs its upstream stream at most this often per account and topic.
+pub const REPAIR_EVERY: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy)]
 struct Presence {
@@ -638,7 +643,27 @@ impl Registry {
             pacer: crate::pacing::Pacer::new(7, Duration::from_millis(60)),
             notices: Arc::default(),
             presence: Arc::default(),
+            repairs: Mutex::default(),
         }
+    }
+
+    /// Whether a forced reset may repair `topic` on `account` now, and records it if so.
+    /// Each user's engine has its own venue socket, so the limit is per account, not per topic.
+    pub fn allow_repair(
+        &self,
+        user: &str,
+        account: &str,
+        topic: &str,
+        now: std::time::Instant,
+    ) -> bool {
+        let mut repairs = self.repairs.lock().unwrap();
+        repairs.retain(|_, at| now.duration_since(*at) < REPAIR_EVERY);
+        let key = (user.to_owned(), account.to_owned(), topic.to_owned());
+        if repairs.contains_key(&key) {
+            return false;
+        }
+        repairs.insert(key, now);
+        true
     }
 
     /// Server-allocated, process-unique IDs for sockets, park holders and clients.

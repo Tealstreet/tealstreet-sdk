@@ -106,6 +106,8 @@ struct Topic {
     op: String,
     symbol: String,
     interval: Option<String>,
+    /// A chart's forced reset: the upstream stream may be dead, so it is repaired too.
+    reset: bool,
 }
 
 /// Per account; a page re-sends its live topics on every init, so this only
@@ -762,6 +764,8 @@ impl Session {
             _ => return None,
         }
         Some(Topic {
+            reset: msg.op.starts_with("subscribe")
+                && msg.data.get("reset").and_then(Value::as_bool) == Some(true),
             op: msg.op.clone(),
             symbol,
             interval,
@@ -804,20 +808,46 @@ impl Session {
     fn apply_topic(&mut self, name: &str, topic: &Topic) {
         let symbol = &topic.symbol;
         let add = topic.op.starts_with("subscribe");
-        match topic.interval.as_deref() {
-            Some(interval) if topic.op.ends_with("OHLCV") => self.subscribe(
-                name,
+        let (subscribe, unsubscribe, repair) = match topic.interval.as_deref() {
+            Some(interval) if topic.op.ends_with("OHLCV") => (
                 json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
                 json!({"op": "unsubscribeCandles", "symbol": symbol, "interval": interval}),
-                add,
+                json!({"kind": "candles", "symbol": symbol, "interval": interval}),
             ),
-            _ => self.subscribe(
-                name,
+            _ => (
                 json!({"op": "subscribeOrderBook", "symbol": symbol}),
                 json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
-                add,
+                json!({"kind": "orderBook", "symbol": symbol}),
             ),
+        };
+        let key = subscribe.to_string();
+        self.subscribe(name, subscribe, unsubscribe, add);
+        if topic.reset {
+            self.repair(name, topic, &key, repair);
         }
+    }
+
+    /// Re-sends the venue's subscribe for a topic this socket holds, rate limited per
+    /// account and topic: refcounts above the venue absorb a chart's own resubscribe.
+    fn repair(&mut self, name: &str, topic: &Topic, key: &str, repair: Value) {
+        let joined = &self.joined[name];
+        if !joined.subscriptions.contains_key(key) {
+            return;
+        }
+        let account = &joined.account;
+        if !self
+            .registry
+            .allow_repair(&account.user, &account.name, key, std::time::Instant::now())
+        {
+            Log::info(&self.topic_line(
+                "subscription repair skipped: repaired recently",
+                name,
+                topic,
+            ));
+            return;
+        }
+        Log::info(&self.topic_line("subscription repair requested", name, topic));
+        self.input(name, json!({"op": "repairSubscription", "topic": repair}));
     }
 
     fn subscribe(&mut self, name: &str, subscribe: Value, unsubscribe: Value, add: bool) {
@@ -1999,6 +2029,61 @@ mod tests {
                 let second = session.joined["acct"].client.id;
                 session.client_dropped("acct", second).await;
                 assert_eq!(session.joined["acct"].client.id, second);
+            })
+            .await;
+    }
+
+    /// A chart's forced reset after its own unsubscribe repairs the stream it holds again,
+    /// once per window per account and topic.
+    #[tokio::test]
+    async fn a_reset_subscribe_repairs_its_held_topic_once_per_window() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account =
+                    crate::accounts::tests::held_account_running_algos(link, init.fingerprint());
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                let (mut session, _sent) = sign_silent_session(registry.clone());
+                assert!(session.init(init).await.is_ok());
+                settle().await;
+                let candle = |op: &str, reset: bool| AccountMsg {
+                    op: op.into(),
+                    data: json!({"symbol": "BTCUSDT", "interval": "1m", "reset": reset}),
+                    account_name: Some("acct".into()),
+                };
+                let key = json!({"op": "subscribeCandles", "symbol": "BTCUSDT", "interval": "1m"})
+                    .to_string();
+                // A probe records a repair when it allows one: ask once, after the reset.
+                let recorded = |key: &str| {
+                    !registry.allow_repair(
+                        &account.user,
+                        &account.name,
+                        key,
+                        std::time::Instant::now(),
+                    )
+                };
+
+                session.msg(candle("subscribeOHLCV", false)).await;
+                session.msg(candle("unsubscribeOHLCV", true)).await;
+                assert!(session.joined["acct"].subscriptions.is_empty());
+
+                session.msg(candle("subscribeOHLCV", true)).await;
+                assert!(recorded(&key), "the reset of a held topic was repaired");
+                let later = std::time::Instant::now() + crate::accounts::REPAIR_EVERY;
+                assert!(registry.allow_repair(&account.user, &account.name, &key, later));
+                assert!(
+                    registry.allow_repair(&account.user, "other", &key, std::time::Instant::now()),
+                    "another account's same topic has its own window"
+                );
             })
             .await;
     }
