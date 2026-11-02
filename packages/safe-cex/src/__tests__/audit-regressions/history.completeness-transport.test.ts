@@ -22,7 +22,7 @@ const transport = (
   clone: (value: StoreWorkerPayload) => StoreWorkerPayload,
   method: 'fetchHistoricalFills' | 'fetchClosedPnl',
 ) => {
-  const main = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const main = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
   exchanges.push(main);
   const calls: StoreWorkerPayload[] = [];
   const reply = (message: StoreWorkerPayload) => {
