@@ -87,38 +87,54 @@ fn open(spot: bool) -> Engine<Hyperliquid> {
     panic!("discovery did not connect");
 }
 
+fn unsubscribe_frame(key: &str) -> String {
+    key.replacen(r#""method":"subscribe""#, r#""method":"unsubscribe""#, 1)
+}
+
+/// Repairing `topic` re-sends exactly `keys`, each unsubscribed once before it
+/// is subscribed once, and leaves the topic's single subscriber in place.
 fn assert_repair_resubscribes_once(
     spot: bool,
     subscribe: Command,
     unsubscribe: Command,
     topic: SubscriptionTopic,
-    key: &str,
+    keys: &[&str],
 ) {
     let mut engine = open(spot);
     let subscribed = step(&mut engine, 2000.0, Some(subscribe));
-    assert!(
-        subscribed.sent.iter().any(|f| f == key),
-        "{:?}",
-        subscribed.sent
-    );
+    for key in keys {
+        assert!(
+            subscribed.sent.iter().any(|f| f == key),
+            "{key} in {:?}",
+            subscribed.sent
+        );
+    }
 
     let repaired = step(
         &mut engine,
         2001.0,
         Some(Command::RepairSubscription(topic)),
     );
-    let unsubscribe_frame = key.replacen(r#""method":"subscribe""#, r#""method":"unsubscribe""#, 1);
-    assert_eq!(repaired.sent, [unsubscribe_frame.as_str(), key]);
     assert!(repaired.warnings.is_empty(), "{:?}", repaired.warnings);
+    assert_eq!(repaired.sent.len(), 2 * keys.len(), "{:?}", repaired.sent);
+    for key in keys {
+        let position = |frame: &str| {
+            let at: Vec<_> = (0..repaired.sent.len())
+                .filter(|i| repaired.sent[*i] == frame)
+                .collect();
+            assert_eq!(at.len(), 1, "{frame} in {:?}", repaired.sent);
+            at[0]
+        };
+        assert!(position(&unsubscribe_frame(key)) < position(key));
+    }
 
-    // Intent is unchanged: the one subscriber still releases the topic once.
+    // Intent is unchanged: the one subscriber still releases each stream once.
     let released = step(&mut engine, 2002.0, Some(unsubscribe));
-    let naming: Vec<_> = released
-        .sent
-        .iter()
-        .filter(|f| f.replacen("unsubscribe", "subscribe", 1) == key)
-        .collect();
-    assert_eq!(naming, [&unsubscribe_frame], "{:?}", released.sent);
+    for key in keys {
+        let frame = unsubscribe_frame(key);
+        let naming = released.sent.iter().filter(|f| **f == frame).count();
+        assert_eq!(naming, 1, "{frame} in {:?}", released.sent);
+    }
     assert!(step(&mut engine, 2003.0, None).sent.is_empty());
 }
 
@@ -148,13 +164,14 @@ fn repairing_a_live_candle_resubscribes_exactly_that_topic() {
             interval: Interval::M5,
         },
         candles(),
-        r#"{"method":"subscribe","subscription":{"type":"candle","coin":"BTC","interval":"5m"}}"#,
+        &[
+            r#"{"method":"subscribe","subscription":{"type":"candle","coin":"BTC","interval":"5m"}}"#,
+        ],
     );
 }
 
 #[test]
-fn repairing_a_live_perps_book_resubscribes_its_l2_book_alone() {
-    // `bbo` is a sibling topic; the book's depth is the `l2Book` stream.
+fn repairing_a_live_perps_book_resubscribes_its_l2_book_and_bbo() {
     assert_repair_resubscribes_once(
         false,
         Command::SubscribeOrderBook {
@@ -164,12 +181,15 @@ fn repairing_a_live_perps_book_resubscribes_its_l2_book_alone() {
             symbol: "BTC-PERP".into(),
         },
         book("BTC-PERP"),
-        r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#,
+        &[
+            r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#,
+            r#"{"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}"#,
+        ],
     );
 }
 
 #[test]
-fn repairing_a_live_spot_book_resubscribes_its_full_precision_depth() {
+fn repairing_a_live_spot_book_resubscribes_every_depth_tier() {
     assert_repair_resubscribes_once(
         true,
         Command::SubscribeOrderBook {
@@ -179,7 +199,13 @@ fn repairing_a_live_spot_book_resubscribes_its_full_precision_depth() {
             symbol: "PURR/USDC".into(),
         },
         book("PURR/USDC"),
-        r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"PURR/USDC","nSigFigs":null}}"#,
+        &[
+            r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"PURR/USDC","nSigFigs":null}}"#,
+            r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"PURR/USDC","nSigFigs":2}}"#,
+            r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"PURR/USDC","nSigFigs":3}}"#,
+            r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"PURR/USDC","nSigFigs":4}}"#,
+            r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"PURR/USDC","nSigFigs":5}}"#,
+        ],
     );
 }
 

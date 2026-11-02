@@ -1267,12 +1267,12 @@ impl Venue for Hyperliquid {
     ) -> Result<(), SocketError> {
         self.managed_socket_encode(store, feed, subscribe, interests, emit)
     }
-    fn subscription_interest(
+    fn subscription_interests(
         &self,
         store: &safe_cex_engine::Store,
         topic: &SubscriptionTopic,
-    ) -> Option<(FeedId, String)> {
-        self.topic_interest(store, topic)
+    ) -> Vec<(FeedId, String)> {
+        self.topic_interests(store, topic)
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self

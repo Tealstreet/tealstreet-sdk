@@ -7,7 +7,8 @@ use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    SubscriptionTopic, TimerId,
 };
 use std::collections::{BTreeMap, HashMap};
 const INTX: &str = "https://api.international.coinbase.com/api/v1/instruments/";
@@ -367,6 +368,56 @@ impl Coinbase {
             .unwrap(),
         );
     }
+    /// The level2 frame every book subscribe, unsubscribe and repair sends.
+    fn book_subscription(&self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>, add: bool) {
+        self.subscription(cx, "level2", symbols, add);
+    }
+    /// Every candle interval streams from both channels: candles, and trades below five minutes.
+    fn candle_subscription(&self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>, add: bool) {
+        self.subscription(cx, "candles", symbols.clone(), add);
+        self.subscription(cx, "market_trades", symbols, add);
+    }
+    /// Level2 resubscribes answer with a fresh snapshot, which replaces the book;
+    /// the socket-wide sequence continues across the resubscribe.
+    pub(crate) fn public_repair(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        type Resubscribe = fn(&Coinbase, &mut Cx<'_, Pending>, Vec<String>, bool);
+        let (symbol, live, channel, resubscribe): (_, _, _, Resubscribe) = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => (
+                symbol,
+                self.public
+                    .candles
+                    .keys()
+                    .any(|(s, i)| i == interval && ws_symbol(s) == ws_symbol(symbol)),
+                "candles",
+                Self::candle_subscription,
+            ),
+            SubscriptionTopic::OrderBook { symbol } => (
+                symbol,
+                self.public
+                    .books
+                    .keys()
+                    .any(|s| ws_symbol(s) == ws_symbol(symbol)),
+                "level2",
+                Self::book_subscription,
+            ),
+        };
+        if !live {
+            return Err(format!("{topic} is not subscribed"));
+        }
+        let product = ws_symbol(symbol);
+        if !self.public.open || self.public.socket.is_none() {
+            return Err(format!(
+                "the public socket carrying {channel} {product} is not open"
+            ));
+        }
+        resubscribe(self, cx, vec![product.clone()], false);
+        resubscribe(self, cx, vec![product], true);
+        Ok(())
+    }
     pub(crate) fn public_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.public.socket != Some(socket) {
             return false;
@@ -389,7 +440,7 @@ impl Coinbase {
         );
         let symbols: Vec<_> = self.public.books.keys().map(|s| ws_symbol(s)).collect();
         if !symbols.is_empty() {
-            self.subscription(cx, "level2", symbols, true);
+            self.book_subscription(cx, symbols, true);
         }
         let mut symbols: Vec<_> = self
             .public
@@ -400,8 +451,7 @@ impl Coinbase {
         symbols.sort();
         symbols.dedup();
         if !symbols.is_empty() {
-            self.subscription(cx, "candles", symbols.clone(), true);
-            self.subscription(cx, "market_trades", symbols, true);
+            self.candle_subscription(cx, symbols, true);
         }
         let refresh: Vec<_> = self
             .public
@@ -1486,7 +1536,7 @@ impl Coinbase {
                 state.subscribers += 1;
                 state.waiting_since = cx.now;
                 if first {
-                    self.subscription(cx, "level2", vec![ws_symbol(&symbol)], true);
+                    self.book_subscription(cx, vec![ws_symbol(&symbol)], true);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1500,7 +1550,7 @@ impl Coinbase {
                             .keys()
                             .any(|s| ws_symbol(s) == ws_symbol(&symbol))
                         {
-                            self.subscription(cx, "level2", vec![ws_symbol(&symbol)], false);
+                            self.book_subscription(cx, vec![ws_symbol(&symbol)], false);
                         }
                     }
                 }
@@ -1535,8 +1585,7 @@ impl Coinbase {
                     }
                 }
                 if first {
-                    self.subscription(cx, "candles", vec![ws_symbol(&symbol)], true);
-                    self.subscription(cx, "market_trades", vec![ws_symbol(&symbol)], true);
+                    self.candle_subscription(cx, vec![ws_symbol(&symbol)], true);
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
@@ -1562,8 +1611,7 @@ impl Coinbase {
                     .keys()
                     .any(|(s, _)| ws_symbol(s) == ws_symbol(&symbol))
                 {
-                    self.subscription(cx, "candles", vec![ws_symbol(&symbol)], false);
-                    self.subscription(cx, "market_trades", vec![ws_symbol(&symbol)], false);
+                    self.candle_subscription(cx, vec![ws_symbol(&symbol)], false);
                 }
             }
             Command::FetchCandles {

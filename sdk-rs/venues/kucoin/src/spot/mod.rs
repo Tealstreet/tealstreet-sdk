@@ -17,7 +17,7 @@ use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, Method, PublicFeedPolicy, Query, Response, SocketChannel,
-    SocketId, TimerId, Venue, VenueError,
+    SocketId, SubscriptionTopic, TimerId, Venue, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -354,6 +354,35 @@ impl KucoinSpot {
             );
         }
     }
+    fn repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        let live = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => self
+                .candles
+                .contains_key(&(symbol.clone(), *interval))
+                .then(|| candle_topic(symbol, *interval))
+                .flatten(),
+            SubscriptionTopic::OrderBook { symbol } => self
+                .books
+                .get(symbol)
+                .is_some_and(|b| b.subscribers > 0)
+                .then(|| book_topic(symbol)),
+        };
+        let Some(native) = live else {
+            return Err(format!("{topic} is not subscribed"));
+        };
+        let public = &self.sockets[0];
+        if !public.ready || public.socket.is_none() {
+            return Err(format!("the public socket carrying {native} is not open"));
+        }
+        // Depth50 frames are whole snapshots, so resubscribing loses no book state.
+        self.topic(cx, 0, &native, false);
+        self.topic(cx, 0, &native, true);
+        Ok(())
+    }
     fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         if channel == 1 {
             for t in ["/spotMarket/tradeOrdersV2", "/account/balance"] {
@@ -365,12 +394,8 @@ impl KucoinSpot {
                 .books
                 .iter()
                 .filter(|(_, b)| b.subscribers > 0)
-                .map(|(s, _)| format!("/spotMarket/level2Depth50:{s}"))
-                .chain(
-                    self.candles
-                        .keys()
-                        .map(|(s, i)| format!("/market/candles:{s}_{}", interval(*i).unwrap().1)),
-                )
+                .map(|(s, _)| book_topic(s))
+                .chain(self.candles.keys().filter_map(|(s, i)| candle_topic(s, *i)))
                 .collect::<Vec<_>>();
             for t in topics {
                 self.topic(cx, 0, &t, true);
@@ -915,6 +940,14 @@ fn lookup_output(symbol: &str, id: &str, rows: &[Order]) -> String {
     })
     .unwrap()
 }
+/// The depth topic every book subscribe, unsubscribe and repair names.
+fn book_topic(symbol: &str) -> String {
+    format!("/spotMarket/level2Depth50:{symbol}")
+}
+/// The candle topic every subscribe, unsubscribe and repair names.
+fn candle_topic(symbol: &str, i: Interval) -> Option<String> {
+    Some(format!("/market/candles:{symbol}_{}", interval(i).ok()?.1))
+}
 fn candle(text: &str) -> Result<Candle, String> {
     let r: Vec<Number> = serde_json::from_str(text).map_err(|e| e.to_string())?;
     if r.len() < 6 {
@@ -936,6 +969,13 @@ fn candle(text: &str) -> Result<Candle, String> {
 
 impl Venue for KucoinSpot {
     type Pending = Pending;
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
@@ -1582,14 +1622,14 @@ impl Venue for KucoinSpot {
                 let b = self.books.entry(symbol.clone()).or_default();
                 b.subscribers += 1;
                 if b.subscribers == 1 {
-                    self.topic(cx, 0, &format!("/spotMarket/level2Depth50:{symbol}"), true);
+                    self.topic(cx, 0, &book_topic(&symbol), true);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
                 if let Some(b) = self.books.get_mut(&symbol) {
                     b.subscribers = b.subscribers.saturating_sub(1);
                     if b.subscribers == 0 {
-                        self.topic(cx, 0, &format!("/spotMarket/level2Depth50:{symbol}"), false);
+                        self.topic(cx, 0, &book_topic(&symbol), false);
                         self.books.remove(&symbol);
                     }
                 }
@@ -1608,13 +1648,10 @@ impl Venue for KucoinSpot {
                 }
                 let n = self.candles.entry((symbol.clone(), i)).or_default();
                 *n += 1;
-                if *n == 1 {
-                    self.topic(
-                        cx,
-                        0,
-                        &format!("/market/candles:{symbol}_{}", interval(i).unwrap().1),
-                        true,
-                    );
+                if *n == 1
+                    && let Some(topic) = candle_topic(&symbol, i)
+                {
+                    self.topic(cx, 0, &topic, true);
                 }
             }
             Command::UnsubscribeCandles {
@@ -1625,12 +1662,9 @@ impl Venue for KucoinSpot {
                     *n = n.saturating_sub(1);
                     if *n == 0 {
                         self.candles.remove(&(symbol.clone(), i));
-                        self.topic(
-                            cx,
-                            0,
-                            &format!("/market/candles:{symbol}_{}", interval(i).unwrap().1),
-                            false,
-                        );
+                        if let Some(topic) = candle_topic(&symbol, i) {
+                            self.topic(cx, 0, &topic, false);
+                        }
                     }
                 }
             }

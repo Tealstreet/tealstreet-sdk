@@ -19,7 +19,7 @@ use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, Store,
-    TimerId, Venue,
+    SubscriptionTopic, TimerId, Venue,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -190,6 +190,18 @@ pub(crate) fn api_symbol(store: &Store, symbol: &str) -> String {
     store
         .market(symbol)
         .map_or_else(|| symbol.into(), |m| m.id.clone())
+}
+/// The level2 topic every book subscribe, unsubscribe and repair names.
+fn book_topic(store: &Store, symbol: &str) -> String {
+    format!("/contractMarket/level2:{}", api_symbol(store, symbol))
+}
+/// The candle topic every subscribe, unsubscribe and repair names.
+fn candle_topic(store: &Store, symbol: &str, timeframe: Interval) -> Option<String> {
+    let (_, ws) = interval(timeframe).ok()?;
+    Some(format!(
+        "/contractMarket/limitCandle:{}_{ws}",
+        api_symbol(store, symbol)
+    ))
 }
 // Callers supply raw query values for signing; only their wire representation is escaped.
 fn encoded_path(path: &str) -> String {
@@ -484,14 +496,43 @@ impl Kucoin {
         if self.connections.is_empty() {
             return;
         }
+        let book = book_topic(cx.store, symbol);
+        self.subscription(cx, 0, &book, subscribe);
         let api = api_symbol(cx.store, symbol);
-        for prefix in [
-            "/contractMarket/level2",
-            "/contractMarket/tickerV2",
-            "/contract/instrument",
-        ] {
+        for prefix in ["/contractMarket/tickerV2", "/contract/instrument"] {
             self.subscription(cx, 0, &format!("{prefix}:{api}"), subscribe);
         }
+    }
+    fn repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        let live = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => self
+                .candles
+                .contains_key(&(symbol.clone(), *interval))
+                .then(|| candle_topic(cx.store, symbol, *interval))
+                .flatten(),
+            SubscriptionTopic::OrderBook { symbol } => self
+                .books
+                .contains_key(symbol)
+                .then(|| book_topic(cx.store, symbol)),
+        };
+        let Some(native) = live else {
+            return Err(format!("{topic} is not subscribed"));
+        };
+        if !self
+            .connections
+            .first()
+            .is_some_and(|c| c.ready && c.socket.is_some())
+        {
+            return Err(format!("the public socket carrying {native} is not open"));
+        }
+        // A missed level2 delta shows as a sequence gap, which re-snapshots the book.
+        self.subscription(cx, 0, &native, false);
+        self.subscription(cx, 0, &native, true);
+        Ok(())
     }
     fn subscribe_all(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         if !self.connections[channel].ready || self.connections[channel].subscribed {
@@ -536,14 +577,8 @@ impl Kucoin {
                     self.fetch_depth(cx, &symbol);
                 }
                 for (symbol, timeframe) in self.candles.keys().cloned().collect::<Vec<_>>() {
-                    if let Ok((_, ws)) = interval(timeframe) {
-                        let api = api_symbol(cx.store, &symbol);
-                        self.subscription(
-                            cx,
-                            channel,
-                            &format!("/contractMarket/limitCandle:{api}_{ws}"),
-                            true,
-                        );
+                    if let Some(topic) = candle_topic(cx.store, &symbol, timeframe) {
+                        self.subscription(cx, channel, &topic, true);
                     }
                 }
             }
@@ -815,6 +850,13 @@ impl Venue for Kucoin {
     }
 
     type Pending = Pending;
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
@@ -1299,17 +1341,14 @@ impl Venue for Kucoin {
                 symbol,
                 interval: timeframe,
             } => match interval(timeframe) {
-                Ok((_, ws)) => {
+                Ok(_) => {
                     let n = self.candles.entry((symbol.clone(), timeframe)).or_default();
                     *n += 1;
-                    if *n == 1 && !self.connections.is_empty() {
-                        let api = api_symbol(cx.store, &symbol);
-                        self.subscription(
-                            cx,
-                            0,
-                            &format!("/contractMarket/limitCandle:{api}_{ws}"),
-                            true,
-                        );
+                    if *n == 1
+                        && !self.connections.is_empty()
+                        && let Some(topic) = candle_topic(cx.store, &symbol, timeframe)
+                    {
+                        self.subscription(cx, 0, &topic, true);
                     }
                 }
                 Err(e) => cx.notice(Level::Error, code::COMMAND_UNSUPPORTED, e),
@@ -1323,16 +1362,10 @@ impl Venue for Kucoin {
                     *n = n.saturating_sub(1);
                     if *n == 0 {
                         self.candles.remove(&key);
-                        if let Ok((_, ws)) = interval(timeframe)
-                            && !self.connections.is_empty()
+                        if !self.connections.is_empty()
+                            && let Some(topic) = candle_topic(cx.store, &symbol, timeframe)
                         {
-                            let api = api_symbol(cx.store, &symbol);
-                            self.subscription(
-                                cx,
-                                0,
-                                &format!("/contractMarket/limitCandle:{api}_{ws}"),
-                                false,
-                            );
+                            self.subscription(cx, 0, &topic, false);
                         }
                     }
                 }
