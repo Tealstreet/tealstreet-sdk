@@ -1839,3 +1839,28 @@ fn a_price_move_on_a_working_order_sends_no_status_restriction() {
         );
     }
 }
+
+#[test]
+fn a_duplicate_client_order_id_is_unknown_not_refused() {
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        client_order_id: Some("again".into()),
+        ..opts()
+    }]);
+    h.reply(r#"{"code":101400,"msg":"duplicate clientOrderID"}"#);
+    assert_ne!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected),
+        "{:?}",
+        h.failures
+    );
+    let mut h = Harness::new(None);
+    h.place(vec![opts()]);
+    h.reply(r#"{"code":101400,"msg":"quantity is invalid"}"#);
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected),
+        "{:?}",
+        h.failures
+    );
+}

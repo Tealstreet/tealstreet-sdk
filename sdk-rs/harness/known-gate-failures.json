@@ -140,7 +140,7 @@
   "failures": [
     {
       "venue": "apexomni",
-      "tapeSha256": "3bf3f70a031963d04b00a8df27a37fe4bd1b8b53b9ec97690245af9ccdeb5d0e",
+      "tapeSha256": "92aeb5da0edbc708b87b262f0fe646935306ad040a5a41233ba38d8e3520ba09",
       "tape": "sdk-rs/harness/tapes/apexomni-private.jsonl",
       "diagnostics": [
         {

@@ -145,7 +145,14 @@ impl ApexOmni {
         let Ok(message) = serde_json::from_str::<ControlHeader<'_>>(text) else {
             return Control::Other;
         };
-        if message.op.as_deref() == Some("login") {
+        if message.op.as_deref() == Some("login")
+            || (!authenticated
+                && message.success == Some(false)
+                && documented_login_refusal(
+                    message.op.as_deref().unwrap_or(""),
+                    message.ret_msg.as_deref().unwrap_or(""),
+                ))
+        {
             return match message.success {
                 Some(true) => Control::Auth(AuthEvidence::Accepted),
                 Some(false) => Control::Auth(AuthEvidence::Rejected(VenueError::new(format!(
@@ -341,4 +348,10 @@ fn encode_public_batches(
         emit(EncodedBatch { text, covered_keys })?;
     }
     Ok(())
+}
+
+/// ApeX documents the login refusal as `{"success":false,"ret_msg":"login authority err"}`, with no op.
+pub(crate) fn documented_login_refusal(op: &str, ret_msg: &str) -> bool {
+    let text = ret_msg.to_ascii_lowercase();
+    op.is_empty() && (text.contains("login") || text.contains("authority"))
 }
