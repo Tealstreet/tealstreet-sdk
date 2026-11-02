@@ -41,6 +41,10 @@ fn public_topic(
     .expect("native public topic")
 }
 
+fn candle_topic(coin: &str, interval: Interval) -> String {
+    public_topic("candle", Some(coin), Some(interval.as_str()), None)
+}
+
 /// Spot depth names its significant figures, `null` for full precision.
 fn spot_depth_topic(coin: &str, n_sig_figs: Option<u8>) -> String {
     #[derive(Serialize)]
@@ -76,30 +80,43 @@ struct DepthOrder<'a> {
 }
 
 impl Hyperliquid {
-    /// The feed and key `topic` streams on: a candle's own topic, or a book's
-    /// full-precision `l2Book` (perps' `bbo` and spot's rounded depths are siblings).
-    pub(super) fn topic_interest(
+    /// Every native stream one book on `coin` subscribes: perps' `l2Book` and
+    /// `bbo`, or spot's full-precision depth and each rounded tier.
+    fn book_topics(&self, coin: &str, push: &mut dyn FnMut(String)) {
+        if self.spot {
+            for n_sig_figs in [None, Some(2), Some(3), Some(4), Some(5)] {
+                push(spot_depth_topic(coin, n_sig_figs));
+            }
+        } else {
+            for kind in ["l2Book", "bbo"] {
+                push(public_topic(kind, Some(coin), None, None));
+            }
+        }
+    }
+
+    /// The feed and every key `topic` streams on, as `desired_socket_interests` subscribes them.
+    pub(super) fn topic_interests(
         &self,
         store: &safe_cex_engine::Store,
         topic: &SubscriptionTopic,
-    ) -> Option<(FeedId, String)> {
-        let key = match topic {
-            SubscriptionTopic::Candles { symbol, interval } => public_topic(
-                "candle",
-                Some(store.market(symbol)?.id.as_str()),
-                Some(interval.as_str()),
-                None,
-            ),
-            SubscriptionTopic::OrderBook { symbol } => {
-                let coin = store.market(symbol)?.id.as_str();
-                if self.spot {
-                    spot_depth_topic(coin, None)
-                } else {
-                    public_topic("l2Book", Some(coin), None, None)
+    ) -> Vec<(FeedId, String)> {
+        let mut interests = Vec::new();
+        let Some(feed) = self.connection.feed else {
+            return interests;
+        };
+        match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                if let Some(market) = store.market(symbol) {
+                    interests.push((feed, candle_topic(&market.id, *interval)));
                 }
             }
-        };
-        Some((self.connection.feed?, key))
+            SubscriptionTopic::OrderBook { symbol } => {
+                if let Some(market) = store.market(symbol) {
+                    self.book_topics(&market.id, &mut |key| interests.push((feed, key)));
+                }
+            }
+        }
+        interests
     }
 
     pub(super) fn socket_refused(cx: &mut Cx<'_, Pending>, error: SocketError) {
@@ -137,27 +154,15 @@ impl Hyperliquid {
             let Some(market) = store.market(symbol) else {
                 continue;
             };
-            if self.spot {
-                for n_sig_figs in [None, Some(2), Some(3), Some(4), Some(5)] {
-                    interests.push(Interest::from_wire_args(spot_depth_topic(
-                        &market.id, n_sig_figs,
-                    )));
-                }
-            } else {
-                for kind in ["l2Book", "bbo"] {
-                    add(&mut interests, kind, Some(market.id.as_str()), None, None);
-                }
-            }
+            self.book_topics(&market.id, &mut |key| {
+                interests.push(Interest::from_wire_args(key));
+            });
         }
         for (symbol, interval) in self.candles.keys() {
             if let Some(market) = store.market(symbol) {
-                add(
-                    &mut interests,
-                    "candle",
-                    Some(market.id.as_str()),
-                    Some(interval.as_str()),
-                    None,
-                );
+                interests.push(Interest::from_wire_args(candle_topic(
+                    &market.id, *interval,
+                )));
             }
         }
         interests

@@ -3910,6 +3910,18 @@ pub trait Venue {
     ) -> Option<(crate::socket_lifecycle::FeedId, String)> {
         None
     }
+    /// Every managed feed and interest key `topic` streams on, for a venue
+    /// whose one topic subscribes several native streams.
+    #[cfg(feature = "managed-sockets")]
+    fn subscription_interests(
+        &self,
+        store: &Store,
+        topic: &SubscriptionTopic,
+    ) -> Vec<(crate::socket_lifecycle::FeedId, String)> {
+        self.subscription_interest(store, topic)
+            .into_iter()
+            .collect()
+    }
     /// `Command::RepairSubscription` for a venue that owns its sockets: re-send
     /// the native unsubscribe then subscribe for `topic`, intent unchanged.
     /// `None` means unsupported; `Some(Err)` names why this repair was refused.
@@ -5474,22 +5486,35 @@ impl<V: Venue> Engine<V> {
         }
         #[cfg(feature = "managed-sockets")]
         if V::managed_sockets() {
-            let (feed, key) = self
-                .venue
-                .subscription_interest(&self.store, topic)
-                .ok_or("the venue cannot name its stream for this topic")?;
-            if !self.io.core.socket_driver.state.desires(feed, &key) {
-                return Err(format!("{key} is not subscribed"));
+            let interests = self.venue.subscription_interests(&self.store, topic);
+            if interests.is_empty() {
+                return Err("the venue cannot name its stream for this topic".into());
+            }
+            // An optional stream that is not live is skipped; the rest still repair.
+            let mut by_feed: Vec<(crate::socket_lifecycle::FeedId, Vec<String>)> = Vec::new();
+            let mut skipped = Vec::new();
+            for (feed, key) in interests {
+                if !self.io.core.socket_driver.state.desires(feed, &key) {
+                    skipped.push(key);
+                } else if let Some((_, keys)) = by_feed.iter_mut().find(|(f, _)| *f == feed) {
+                    keys.push(key);
+                } else {
+                    by_feed.push((feed, vec![key]));
+                }
+            }
+            if by_feed.is_empty() {
+                return Err(format!("{} is not subscribed", skipped.join(", ")));
             }
             let mut cx = Cx {
                 now,
                 store: &mut self.store,
                 io: &mut self.io,
             };
-            return cx
-                .repair_socket_interests(feed, vec![key])
-                .map(drop)
-                .map_err(|error| format!("repair refused: {error:?}"));
+            for (feed, keys) in by_feed {
+                cx.repair_socket_interests(feed, keys)
+                    .map_err(|error| format!("repair refused: {error:?}"))?;
+            }
+            return Ok(());
         }
         let mut cx = Cx {
             now,

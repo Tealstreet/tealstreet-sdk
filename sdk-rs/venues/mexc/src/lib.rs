@@ -17,7 +17,7 @@ use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, 
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, PublicFeedPolicy, Response, SocketId,
-    TimerId, Venue, VenueError,
+    SubscriptionTopic, TimerId, Venue, VenueError,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 use wire::*;
@@ -373,17 +373,73 @@ impl MexcFutures {
             }
         });
     }
-    fn subscribe_depth(&self, cx: &mut Cx<'_, Pending>, symbol: &str) {
-        if let (Some(socket), Some(market)) = (self.public.socket, cx.store.market(symbol))
-            && self.public.open
-        {
+    /// Every depth subscribe, unsubscribe and repair; false when the market is unknown.
+    fn depth_subscription(&self, cx: &mut Cx<'_, Pending>, subscribe: bool, symbol: &str) -> bool {
+        let Some(id) = cx.store.market(symbol).map(|m| m.id.clone()) else {
+            return false;
+        };
+        if !subscribe {
+            self.send(cx, "unsub.depth", &id, None);
+        } else if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
             cx.send(
                 socket,
-                format!(
-                    r#"{{"method":"sub.depth","param":{{"symbol":"{}","compress":false}}}}"#,
-                    market.id
-                ),
+                format!(r#"{{"method":"sub.depth","param":{{"symbol":"{id}","compress":false}}}}"#),
             );
+        }
+        true
+    }
+    /// Every kline subscribe, unsubscribe and repair; false when the stream cannot be named.
+    fn kline_subscription(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        subscribe: bool,
+        symbol: &str,
+        interval: Interval,
+    ) -> bool {
+        let (Some(m), Some(i)) = (cx.store.market(symbol), wire::interval(interval)) else {
+            return false;
+        };
+        let id = m.id.clone();
+        let method = if subscribe {
+            "sub.kline"
+        } else {
+            "unsub.kline"
+        };
+        self.send(cx, method, &id, Some(("interval", i)));
+        true
+    }
+    fn repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        let live = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                self.candles.contains_key(&(symbol.clone(), *interval))
+            }
+            SubscriptionTopic::OrderBook { symbol } => self.books.contains_key(symbol),
+        };
+        if !live {
+            return Err(format!("{topic} is not subscribed"));
+        }
+        if !self.public.open || self.public.socket.is_none() {
+            return Err(format!("the public socket carrying {topic} is not open"));
+        }
+        // A missed depth delta shows as a version gap, which re-snapshots the book.
+        let named = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                self.kline_subscription(cx, false, symbol, *interval)
+                    && self.kline_subscription(cx, true, symbol, *interval)
+            }
+            SubscriptionTopic::OrderBook { symbol } => {
+                self.depth_subscription(cx, false, symbol)
+                    && self.depth_subscription(cx, true, symbol)
+            }
+        };
+        if named {
+            Ok(())
+        } else {
+            Err(format!("MEXC cannot name the stream for {topic}"))
         }
     }
     fn snapshot(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -660,6 +716,13 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn account_auth_outcome(
         &self,
         pending: &Self::Pending,
@@ -721,14 +784,11 @@ impl Venue for MexcFutures {
         self.reconcile_tickers(cx);
         let symbols: Vec<_> = self.books.keys().cloned().collect();
         for symbol in symbols {
-            self.subscribe_depth(cx, &symbol);
+            self.depth_subscription(cx, true, &symbol);
             self.snapshot(cx, &symbol);
         }
         for (symbol, interval) in self.candles.keys() {
-            if let (Some(m), Some(i)) = (cx.store.market(symbol), wire::interval(*interval)) {
-                let id = m.id.clone();
-                self.send(cx, "sub.kline", &id, Some(("interval", i)));
-            }
+            self.kline_subscription(cx, true, symbol, *interval);
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
@@ -1235,7 +1295,7 @@ impl Venue for MexcFutures {
                         failures: 0,
                     },
                 );
-                self.subscribe_depth(cx, &symbol);
+                self.depth_subscription(cx, true, &symbol);
                 self.snapshot(cx, &symbol);
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1250,10 +1310,7 @@ impl Venue for MexcFutures {
                 {
                     cx.clear_timer(t);
                 }
-                if let Some(m) = cx.store.market(&symbol) {
-                    let id = m.id.clone();
-                    self.send(cx, "unsub.depth", &id, None);
-                }
+                self.depth_subscription(cx, false, &symbol);
             }
             Command::UnsubscribeCandles { symbol, interval } => {
                 let key = (symbol.clone(), interval);
@@ -1261,32 +1318,24 @@ impl Venue for MexcFutures {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.candles.remove(&key);
-                        if let (Some(m), Some(i)) =
-                            (cx.store.market(&symbol), wire::interval(interval))
-                        {
-                            let id = m.id.clone();
-                            self.send(cx, "unsub.kline", &id, Some(("interval", i)));
-                        }
+                        self.kline_subscription(cx, false, &symbol, interval);
                     }
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let Some(i) = wire::interval(interval) else {
+                if wire::interval(interval).is_none() {
                     cx.notice(
                         Level::Error,
                         code::COMMAND_UNSUPPORTED,
                         interval.unsupported("MEXC"),
                     );
                     return;
-                };
+                }
                 let key = (symbol.clone(), interval);
                 let n = self.candles.entry(key).or_insert(0);
                 *n += 1;
-                if *n == 1
-                    && let Some(m) = cx.store.market(&symbol)
-                {
-                    let id = m.id.clone();
-                    self.send(cx, "sub.kline", &id, Some(("interval", i)));
+                if *n == 1 {
+                    self.kline_subscription(cx, true, &symbol, interval);
                 }
             }
             Command::FetchOrderBook {

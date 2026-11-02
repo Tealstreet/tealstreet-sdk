@@ -117,6 +117,13 @@ impl Venue for Coinbase {
     }
 
     type Pending = Pending;
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.public_repair(cx, topic))
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,

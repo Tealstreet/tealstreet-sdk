@@ -1271,6 +1271,11 @@ mod tests {
         route_auth: bool,
         /// The interest key `subscription_interest` names; `None` keeps the default.
         repair_key: Option<&'static str>,
+        /// Registers and connects `second_feed` alongside `feed`.
+        two_feeds: bool,
+        second_feed: Option<FeedId>,
+        /// Keys `subscription_interests` names, `true` on `second_feed`; empty keeps `repair_key`.
+        repair_keys: Vec<(bool, &'static str)>,
     }
     fn policy() -> FeedPolicy {
         FeedPolicy {
@@ -1300,6 +1305,11 @@ mod tests {
             let feed = cx.register_socket_feed(declared).unwrap();
             self.feed = Some(feed);
             cx.connect_socket(feed, self.spec()).unwrap();
+            if self.two_feeds {
+                let second = cx.register_socket_feed(policy()).unwrap();
+                self.second_feed = Some(second);
+                cx.connect_socket(second, self.spec()).unwrap();
+            }
         }
         fn socket_control(&self, _: &Store, _: FeedId, _: bool, text: &str) -> Control {
             self.control_calls.set(self.control_calls.get() + 1);
@@ -1369,6 +1379,24 @@ mod tests {
             _: &crate::SubscriptionTopic,
         ) -> Option<(FeedId, String)> {
             Some((self.feed?, self.repair_key?.into()))
+        }
+        fn subscription_interests(
+            &self,
+            store: &Store,
+            topic: &crate::SubscriptionTopic,
+        ) -> Vec<(FeedId, String)> {
+            if self.repair_keys.is_empty() {
+                return self
+                    .subscription_interest(store, topic)
+                    .into_iter()
+                    .collect();
+            }
+            let mut interests = Vec::new();
+            for (second, key) in &self.repair_keys {
+                let feed = if *second { self.second_feed } else { self.feed };
+                interests.push((feed.unwrap(), (*key).into()));
+            }
+            interests
         }
         fn on_signing_receipt(&mut self, _: SigningTarget<'_, ()>, _: crate::signing::SignReceipt) {
             self.receipts += 1;
@@ -2352,6 +2380,78 @@ mod tests {
         let warnings = repair_warnings(&actions);
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.ends_with("other is not subscribed"));
+    }
+    #[test]
+    fn repair_subscription_groups_several_keys_by_feed_and_skips_undesired_ones() {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            two_feeds: true,
+            repair_keys: vec![
+                (false, "book"),
+                (true, "trades"),
+                (false, "bbo"),
+                (false, "tier"),
+            ],
+            ..Probe::default()
+        });
+        e.start(0.);
+        let sockets: Vec<_> = e
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sockets.len(), 2);
+        for socket in sockets {
+            e.handle(0., Event::WsOpened { socket });
+        }
+        e.drain_actions().for_each(drop);
+        let (first, second) = (e.venue.feed.unwrap(), e.venue.second_feed.unwrap());
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        for (feed, keys) in [(first, &["book", "bbo"][..]), (second, &["trades"][..])] {
+            let interests = keys.iter().map(|k| Interest::from_wire_args(*k)).collect();
+            cx.set_socket_interests(feed, interests).unwrap();
+        }
+        assert_eq!(sent(&mut e), ["true:bbo", "true:book", "true:trades"]);
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(repair_warnings(&actions).is_empty());
+        let frames: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            frames,
+            [
+                "false:bbo",
+                "false:book",
+                "true:bbo",
+                "true:book",
+                "false:trades",
+                "true:trades"
+            ]
+        );
+        let state = &e.io.core.socket_driver.state;
+        assert_eq!(state.desired(first).unwrap().len(), 2);
+        assert_eq!(state.desired(second).unwrap().len(), 1);
+    }
+    #[test]
+    fn repair_subscription_names_every_key_when_none_is_desired() {
+        let (mut e, _) = subscribed_probe(None);
+        e.venue.repair_keys = vec![(false, "bbo"), (false, "tier")];
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+        let warnings = repair_warnings(&actions);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.ends_with("bbo, tier is not subscribed"));
     }
     #[test]
     fn auth_progress_invalid_deadlines_leave_watch_and_auth_bound_unchanged() {

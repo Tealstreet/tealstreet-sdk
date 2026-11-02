@@ -18,7 +18,8 @@ use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, 
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue,
+    num,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
@@ -154,6 +155,16 @@ pub(crate) fn interval(value: Interval) -> Result<&'static str, String> {
         .find(|(i, _)| *i == value)
         .map(|(_, native)| *native)
         .ok_or_else(|| value.unsupported("Crypto.com"))
+}
+
+/// The channel every book subscribe, unsubscribe and repair names.
+fn book_channel(symbol: &str) -> String {
+    format!("book.{symbol}.50")
+}
+
+/// The channel every candle subscribe, unsubscribe and repair names.
+fn candle_channel(symbol: &str, value: Interval) -> Result<String, String> {
+    Ok(format!("candlestick.{}.{symbol}", interval(value)?))
 }
 
 fn quoted(s: &str) -> String {
@@ -328,6 +339,30 @@ impl Cryptocom {
                 self.subscribe(cx, &[channel], "unsubscribe");
             }
         }
+    }
+
+    fn repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        let channel = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                candle_channel(symbol, *interval).ok()
+            }
+            SubscriptionTopic::OrderBook { symbol } => Some(book_channel(symbol)),
+        }
+        .filter(|channel| self.subscriptions.contains_key(channel))
+        .ok_or_else(|| format!("{topic} is not subscribed"))?;
+        if !self.sockets[0].open || self.sockets[0].ready.is_some() {
+            return Err(format!("the market socket carrying {channel} is not open"));
+        }
+        // The resubscribe answers with history again, as after an unsubscribe.
+        self.candles_live.remove(&channel);
+        let channels = [channel];
+        self.subscribe(cx, &channels, "unsubscribe");
+        self.subscribe(cx, &channels, "subscribe");
+        Ok(())
     }
 
     fn market_channels(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -549,6 +584,13 @@ impl Venue for Cryptocom {
     }
 
     type Pending = Pending;
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn status_exempt_refusal(
         &self,
         pending: &Pending,
@@ -1186,7 +1228,7 @@ impl Venue for Cryptocom {
                         synced: false,
                     });
                 state.subscribers += 1;
-                self.add_channel(cx, format!("book.{symbol}.50"));
+                self.add_channel(cx, book_channel(&symbol));
             }
             Command::UnsubscribeOrderBook { symbol } => {
                 if let Some(state) = self.books.get_mut(&symbol) {
@@ -1195,21 +1237,21 @@ impl Venue for Cryptocom {
                         self.books.remove(&symbol);
                     }
                 }
-                self.remove_channel(cx, format!("book.{symbol}.50"));
+                self.remove_channel(cx, book_channel(&symbol));
             }
             Command::SubscribeCandles {
                 symbol,
                 interval: timeframe,
-            } => match interval(timeframe) {
-                Ok(timeframe) => self.add_channel(cx, format!("candlestick.{timeframe}.{symbol}")),
+            } => match candle_channel(&symbol, timeframe) {
+                Ok(channel) => self.add_channel(cx, channel),
                 Err(error) => cx.notice(Level::Error, code::COMMAND_UNSUPPORTED, error),
             },
             Command::UnsubscribeCandles {
                 symbol,
                 interval: timeframe,
             } => {
-                if let Ok(timeframe) = interval(timeframe) {
-                    self.remove_channel(cx, format!("candlestick.{timeframe}.{symbol}"));
+                if let Ok(channel) = candle_channel(&symbol, timeframe) {
+                    self.remove_channel(cx, channel);
                 }
             }
             Command::FetchCandles {

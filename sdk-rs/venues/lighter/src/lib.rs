@@ -16,8 +16,8 @@ use safe_cex_engine::model::{
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketId, TimerId,
-    Venue, VenueError,
+    Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketId, Store,
+    SubscriptionTopic, TimerId, Venue, VenueError,
 };
 use std::collections::{HashMap, HashSet};
 use wire::*;
@@ -174,6 +174,14 @@ struct CandleState {
     last: Option<Candle>,
     last_received: f64,
     in_flight: bool,
+}
+/// The channel every book subscribe, unsubscribe and repair names.
+fn book_channel(store: &Store, symbol: &str) -> Option<String> {
+    Some(format!("order_book/{}", store.market(symbol)?.id))
+}
+/// The channel every candle subscribe, unsubscribe and repair names.
+fn candle_channel(store: &Store, symbol: &str, interval: Interval) -> Option<String> {
+    Some(format!("candle/{}/{interval}", store.market(symbol)?.id))
 }
 pub struct Lighter {
     options: Options,
@@ -371,6 +379,36 @@ impl Lighter {
                 serde_json::to_string(&Subscription { kind: op, channel }).unwrap(),
             );
         }
+    }
+    fn repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        let live = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => self
+                .candles
+                .get(&(symbol.clone(), *interval))
+                .is_some_and(|s| s.subscribers > 0)
+                .then(|| candle_channel(cx.store, symbol, *interval))
+                .flatten(),
+            SubscriptionTopic::OrderBook { symbol } => self
+                .books
+                .get(symbol)
+                .is_some_and(|s| s.subscribers > 0)
+                .then(|| book_channel(cx.store, symbol))
+                .flatten(),
+        };
+        let Some(channel) = live else {
+            return Err(format!("{topic} is not subscribed"));
+        };
+        if !self.public.open || self.public.socket.is_none() {
+            return Err(format!("the public socket carrying {channel} is not open"));
+        }
+        // A book resubscribe answers with a full snapshot, which replaces the book.
+        self.topic(cx, "unsubscribe", &channel);
+        self.topic(cx, "subscribe", &channel);
+        Ok(())
     }
     fn ticker_seed(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.ticker_in_flight || self.startup.waiting(&false) {
@@ -695,9 +733,9 @@ impl Lighter {
                 state.nonce = None;
                 state.book.clear();
                 cx.book_changed(symbol);
-                let id = cx.store.market(symbol).unwrap().id.clone();
-                self.topic(cx, "unsubscribe", &format!("order_book/{id}"));
-                self.topic(cx, "subscribe", &format!("order_book/{id}"));
+                let channel = book_channel(cx.store, symbol).unwrap();
+                self.topic(cx, "unsubscribe", &channel);
+                self.topic(cx, "subscribe", &channel);
                 return;
             }
         } else {
@@ -829,6 +867,13 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn on_http_owner_retired_preflight(
         &mut self,
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
@@ -997,14 +1042,15 @@ impl Venue for Lighter {
             })
             .collect();
         for symbol in symbols {
-            let id = cx.store.market(&symbol).unwrap().id.clone();
-            self.topic(cx, "subscribe", &format!("order_book/{id}"));
+            let channel = book_channel(cx.store, &symbol).unwrap();
+            self.topic(cx, "subscribe", &channel);
             self.depth_seed(cx, &symbol);
         }
         for ((symbol, interval), s) in &self.candles {
             if s.subscribers > 0 {
                 let id = cx.store.market(symbol).unwrap().id.clone();
-                self.topic(cx, "subscribe", &format!("candle/{id}/{interval}"));
+                let channel = candle_channel(cx.store, symbol, *interval).unwrap();
+                self.topic(cx, "subscribe", &channel);
                 if !self.options.public_data_only {
                     self.topic(cx, "subscribe", &format!("trade/{id}"));
                 }
@@ -1835,8 +1881,8 @@ impl Lighter {
                     state.generation = self.subscription_generation;
                     state.waiting = true;
                     state.last_received = cx.now;
-                    if let Some(market) = cx.store.market(&symbol) {
-                        self.topic(cx, "subscribe", &format!("order_book/{}", market.id));
+                    if let Some(channel) = book_channel(cx.store, &symbol) {
+                        self.topic(cx, "subscribe", &channel);
                         self.depth_seed(cx, &symbol);
                     }
                 }
@@ -1845,8 +1891,8 @@ impl Lighter {
                 if let Some(s) = self.books.get_mut(&symbol) {
                     s.subscribers = s.subscribers.saturating_sub(1);
                     if s.subscribers == 0 {
-                        if let Some(market) = cx.store.market(&symbol) {
-                            self.topic(cx, "unsubscribe", &format!("order_book/{}", market.id));
+                        if let Some(channel) = book_channel(cx.store, &symbol) {
+                            self.topic(cx, "unsubscribe", &channel);
                         }
                         self.books.remove(&symbol);
                     }
@@ -1861,7 +1907,10 @@ impl Lighter {
                     );
                     return;
                 }
-                let Some(m) = cx.store.market(&symbol) else {
+                let (Some(m), Some(channel)) = (
+                    cx.store.market(&symbol),
+                    candle_channel(cx.store, &symbol, interval),
+                ) else {
                     return;
                 };
                 let id = m.id.clone();
@@ -1871,7 +1920,7 @@ impl Lighter {
                     self.subscription_generation = self.subscription_generation.wrapping_add(1);
                     state.generation = self.subscription_generation;
                     state.last_received = cx.now;
-                    self.topic(cx, "subscribe", &format!("candle/{id}/{interval}"));
+                    self.topic(cx, "subscribe", &channel);
                     if !self.options.public_data_only {
                         self.topic(cx, "subscribe", &format!("trade/{id}"));
                     }
@@ -1882,7 +1931,8 @@ impl Lighter {
                     s.subscribers = s.subscribers.saturating_sub(1);
                     if s.subscribers == 0 {
                         let id = cx.store.market(&symbol).unwrap().id.clone();
-                        self.topic(cx, "unsubscribe", &format!("candle/{id}/{interval}"));
+                        let channel = candle_channel(cx.store, &symbol, interval).unwrap();
+                        self.topic(cx, "unsubscribe", &channel);
                         self.candles.remove(&(symbol.clone(), interval));
                         if !self.candles.keys().any(|(s, _)| *s == symbol) {
                             self.topic(cx, "unsubscribe", &format!("trade/{id}"));
