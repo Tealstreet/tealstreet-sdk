@@ -3910,6 +3910,16 @@ pub trait Venue {
     ) -> Option<(crate::socket_lifecycle::FeedId, String)> {
         None
     }
+    /// `Command::RepairSubscription` for a venue that owns its sockets: re-send
+    /// the native unsubscribe then subscribe for `topic`, intent unchanged.
+    /// `None` means unsupported; `Some(Err)` names why this repair was refused.
+    fn repair_subscription(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        None
+    }
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
@@ -5481,8 +5491,14 @@ impl<V: Venue> Engine<V> {
                 .map(drop)
                 .map_err(|error| format!("repair refused: {error:?}"));
         }
-        let _ = (now, topic);
-        Err("the venue has no managed sockets".into())
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        self.venue
+            .repair_subscription(&mut cx, topic)
+            .unwrap_or_else(|| Err("the venue has no managed sockets".into()))
     }
 
     fn begin_event_scope(&mut self) {
