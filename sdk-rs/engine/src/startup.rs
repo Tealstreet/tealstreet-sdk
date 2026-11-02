@@ -243,6 +243,19 @@ pub fn public_response_error(
 /// absurd or overflowing value must not stall an account indefinitely.
 pub const MAX_RATE_LIMIT_PAUSE_MS: f64 = 3_600_000.0;
 
+/// A refusal from Tealstreet's own edge rather than the venue: a Cloudflare challenge,
+/// our proxy's authorization refusal, or an error page naming our zone. A venue's IP
+/// ban must not be inferred from one, since that would hold startup for its window.
+pub fn from_tealstreet_edge(response: &crate::Response<'_>) -> bool {
+    if response.header("cf-mitigated").is_some() {
+        return true;
+    }
+    let body = response.body.to_ascii_lowercase();
+    body.contains("tealstreet")
+        || body.contains("authorization header is missing")
+        || body.contains("invalid jwt")
+}
+
 /// The pause a rate-limited response asks for: `Retry-After` seconds on a 418
 /// or 429 (capped at an hour), else `default_ms` for those statuses, else none.
 pub fn rate_limit_pause_ms(response: &crate::Response<'_>, default_ms: f64) -> f64 {

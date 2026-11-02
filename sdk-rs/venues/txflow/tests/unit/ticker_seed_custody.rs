@@ -2,6 +2,9 @@ use super::*;
 use safe_cex_engine::request_context::{Claim, Error, HttpAction, Preparation, Prepared};
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice};
 
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+
 struct Fixture {
     inner: TxFlow,
     peers: Vec<HttpContext>,
@@ -225,7 +228,7 @@ fn late_prepare_expires_once_and_leaves_no_seed_credit() {
     let mut e = engine(false, 1000.);
     let (old, _) = preparation(&mut e);
     e.http_prepared(
-        21000.,
+        DISCOVERY_DEADLINE_MS + 1000.,
         old,
         Prepared {
             id: 7,
@@ -236,7 +239,7 @@ fn late_prepare_expires_once_and_leaves_no_seed_credit() {
     no_send(&actions);
     assert!(e.venue().inner.ticker_contexts.is_empty());
     assert!(!e.http_preparation_pending(old));
-    command(&mut e, 21000., "credits");
+    command(&mut e, DISCOVERY_DEADLINE_MS + 1000., "credits");
     assert_eq!(e.venue().recovered_credits, 256);
 }
 #[test]
@@ -362,11 +365,11 @@ fn unclaimed_bind_cannot_release_at_the_physical_bound() {
             _ => None,
         })
         .unwrap();
-    assert!(e.claim_http(21000., permit).is_err());
+    assert!(e.claim_http(DISCOVERY_DEADLINE_MS + 1000., permit).is_err());
     let actions = e.drain_actions().collect::<Vec<_>>();
     no_send(&actions);
     assert!(e.venue().inner.ticker_contexts.is_empty());
-    command(&mut e, 21000., "credits");
+    command(&mut e, DISCOVERY_DEADLINE_MS + 1000., "credits");
     assert_eq!(e.venue().recovered_credits, 256);
 }
 
@@ -399,7 +402,7 @@ fn deadline_data_uses_typed_timeout_without_entering_the_data_callback() {
     e.drain_actions().for_each(drop);
     for _ in 0..2 {
         e.handle(
-            21000.,
+            DISCOVERY_DEADLINE_MS + 1000.,
             Event::HttpResponse {
                 request: request.id,
                 response: Response {
@@ -422,11 +425,11 @@ fn deadline_data_uses_typed_timeout_without_entering_the_data_callback() {
     assert_eq!(
         actions
             .iter()
-            .filter(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 21025.))
+            .filter(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == DISCOVERY_DEADLINE_MS + 1025.))
             .count(),
         1
     );
-    assert_eq!(actions.iter().filter(|a| matches!(a, Action::SetTimer { at_ms, .. } if (21750. ..=22000.).contains(at_ms))).count(), 1);
-    command(&mut e, 21000., "credits");
+    assert_eq!(actions.iter().filter(|a| matches!(a, Action::SetTimer { at_ms, .. } if (DISCOVERY_DEADLINE_MS + 1750. ..=DISCOVERY_DEADLINE_MS + 2000.).contains(at_ms))).count(), 1);
+    command(&mut e, DISCOVERY_DEADLINE_MS + 1000., "credits");
     assert_eq!(e.venue().recovered_credits, 256);
 }

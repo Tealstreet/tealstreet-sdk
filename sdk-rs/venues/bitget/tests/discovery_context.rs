@@ -10,7 +10,8 @@ use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, RequestId, Tim
 use safe_cex_venue_bitget::{BitgetFutures, Product};
 use std::collections::HashSet;
 
-const DEADLINE_MS: f64 = 20_000.0;
+/// Startup discovery's deadline: a catalogue can be most of a megabyte through a slow relay.
+const DEADLINE_MS: f64 = 60_000.0;
 const MARKETS: &str = "https://api.bitget.com/api/v2/mix/market/contracts?productType=usdt-futures";
 const TICKER_URL: &str =
     "https://api.bitget.com/api/v2/mix/market/tickers?productType=usdt-futures";
@@ -194,6 +195,24 @@ fn tickers_read_releases_through_background_context() {
     assert!(
         cycle.managed.contains(&tickers.id),
         "tickers released outside managed Context custody"
+    );
+}
+
+#[test]
+fn startup_discovery_reads_carry_the_longer_discovery_deadline() {
+    let mut cycle = Cycle::started(Options::default());
+    let contracts = cycle
+        .requests
+        .iter()
+        .find(|r| r.url == MARKETS)
+        .expect("contracts read");
+    assert_eq!(contracts.timeout_ms, Some(60_000));
+    cycle.answer(MARKETS, CONTRACTS, 1.0);
+    let tickers = cycle.take(TICKER_URL).expect("tickers read");
+    assert!(
+        tickers.timeout_ms.is_some_and(|ms| ms > 59_000),
+        "{:?}",
+        tickers.timeout_ms
     );
 }
 

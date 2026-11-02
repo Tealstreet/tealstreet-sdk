@@ -1349,7 +1349,8 @@ fn option_seeds_are_managed_background_reads() {
         .collect();
     assert!(!seeds.is_empty(), "option seeds requested");
     for seed in seeds {
-        assert_eq!(seed.timeout_ms, Some(20_000), "{} is managed", seed.url);
+        // The startup ticker snapshot, on the engine's 60 s discovery bound.
+        assert_eq!(seed.timeout_ms, Some(60_000), "{} is managed", seed.url);
     }
 }
 

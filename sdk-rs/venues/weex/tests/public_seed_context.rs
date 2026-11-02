@@ -17,6 +17,8 @@ use support::setup::Options;
 
 const NOW: f64 = 1_000.;
 const LIMIT: f64 = 20_000.;
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
 const DAILY: &str = r#"[{"symbol":"BTCUSDT","lastPrice":"100","priceChangePercent":"2","volume":"3","quoteVolume":"300"}]"#;
 const BOOK: &str = r#"[{"symbol":"BTCUSDT","bidPrice":"99","askPrice":"101"}]"#;
@@ -497,7 +499,7 @@ fn ticker_pair_requires_two_prepares_before_any_http() {
     assert_eq!(out.iter().filter(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. }))).count(), 2);
 }
 #[test]
-fn released_wire_is_unsigned_primary_with_twenty_second_bound() {
+fn released_wire_is_unsigned_primary_with_the_discovery_bound() {
     for kind in 0..3 {
         let (_, r, out) = started(kind);
         assert_eq!(r.method, Method::Get);
@@ -512,7 +514,7 @@ fn released_wire_is_unsigned_primary_with_twenty_second_bound() {
         assert!(r.headers.is_empty());
         assert!(r.signer_headers.is_empty());
         assert!(r.body.is_none());
-        assert_eq!(r.timeout_ms, Some(20_000));
+        assert_eq!(r.timeout_ms, Some(DISCOVERY_DEADLINE_MS as u32));
         assert_eq!(out.legacy, 0);
         assert_eq!(out.prepares.len(), out.requests.len());
         assert_eq!(out.claimed, out.requests.len());
@@ -823,23 +825,29 @@ fn failed_seed_sibling_is_inert_before_and_after_generation_reset() {
 #[test]
 fn catalogue_final_at_physical_equality_cannot_publish_or_start_tickers() {
     let (mut e, r, _) = started(0);
-    respond(&mut e, &r, NOW + LIMIT, 200, INFO);
-    let out = drain(&mut e, NOW + LIMIT);
+    respond(&mut e, &r, NOW + DISCOVERY_DEADLINE_MS, 200, INFO);
+    let out = drain(&mut e, NOW + DISCOVERY_DEADLINE_MS);
     assert!(
         e.store().markets().is_empty(),
         "expired catalogue published"
     );
     assert!(!e.store().loaded().markets);
     assert!(out.requests.is_empty());
-    retry(&out.actions, NOW + LIMIT);
+    retry(&out.actions, NOW + DISCOVERY_DEADLINE_MS);
 }
 #[test]
 fn late_ticker_final_cannot_publish_or_open_a_socket() {
     let (mut e, _, out) = started(1);
     respond(&mut e, &request(&out, 1), NOW + 2., 200, DAILY);
     drain(&mut e, NOW + 2.);
-    respond(&mut e, &request(&out, 2), NOW + 1. + LIMIT, 200, BOOK);
-    let out = drain(&mut e, NOW + 1. + LIMIT);
+    respond(
+        &mut e,
+        &request(&out, 2),
+        NOW + 1. + DISCOVERY_DEADLINE_MS,
+        200,
+        BOOK,
+    );
+    let out = drain(&mut e, NOW + 1. + DISCOVERY_DEADLINE_MS);
     assert!(!e.store().loaded().tickers, "expired ticker published");
     assert!(e.store().tickers().is_empty());
     assert!(
@@ -847,13 +855,13 @@ fn late_ticker_final_cannot_publish_or_open_a_socket() {
             .iter()
             .any(|a| matches!(a, Action::WsConnect { .. }))
     );
-    retry(&out.actions, NOW + 1. + LIMIT);
+    retry(&out.actions, NOW + 1. + DISCOVERY_DEADLINE_MS);
 }
 #[test]
 fn late_429_cannot_pause_an_unrelated_current_book_query() {
     let (mut e, r, _) = started(0);
     e.handle(
-        NOW + LIMIT,
+        NOW + DISCOVERY_DEADLINE_MS,
         Event::HttpResponse {
             request: r.id,
             response: Response {
@@ -863,9 +871,9 @@ fn late_429_cannot_pause_an_unrelated_current_book_query() {
             },
         },
     );
-    drain(&mut e, NOW + LIMIT);
+    drain(&mut e, NOW + DISCOVERY_DEADLINE_MS);
     e.handle_command(
-        NOW + LIMIT + 1.,
+        NOW + DISCOVERY_DEADLINE_MS + 1.,
         Command::FetchOrderBook {
             command: 91,
             symbol: "BTCUSDT".into(),
@@ -874,7 +882,7 @@ fn late_429_cannot_pause_an_unrelated_current_book_query() {
         Some(100_000),
     )
     .unwrap();
-    let out = drain(&mut e, NOW + LIMIT + 1.);
+    let out = drain(&mut e, NOW + DISCOVERY_DEADLINE_MS + 1.);
     assert_eq!(
         out.requests.len(),
         1,
@@ -940,7 +948,7 @@ fn finite_physical_timeout_recovers_through_native_backoff_once() {
         let timer = resource(&initial, r.id).and_then(|owned| {
             initial.actions.iter().find_map(|a| match a {
                 Action::SetTimer { timer, at_ms }
-                    if *timer == owned.timer && *at_ms == issued + LIMIT =>
+                    if *timer == owned.timer && *at_ms == issued + DISCOVERY_DEADLINE_MS =>
                 {
                     Some(*timer)
                 }
@@ -949,24 +957,27 @@ fn finite_physical_timeout_recovers_through_native_backoff_once() {
         });
         assert!(timer.is_some(), "physical bound starts before host work");
         e.handle(
-            issued + LIMIT,
+            issued + DISCOVERY_DEADLINE_MS,
             Event::TimerFired {
                 timer: timer.unwrap(),
             },
         );
-        let out = drain(&mut e, issued + LIMIT);
+        let out = drain(&mut e, issued + DISCOVERY_DEADLINE_MS);
         assert!(out.requests.is_empty());
-        let again = retry(&out.actions, issued + LIMIT);
+        let again = retry(&out.actions, issued + DISCOVERY_DEADLINE_MS);
         e.handle(
-            issued + LIMIT,
+            issued + DISCOVERY_DEADLINE_MS,
             Event::HttpFailed {
                 request: r.id,
                 error: "late duplicate",
             },
         );
         assert!(e.drain_actions().next().is_none());
-        e.handle(issued + LIMIT + 1000., Event::TimerFired { timer: again });
-        let next = drain(&mut e, issued + LIMIT + 1000.);
+        e.handle(
+            issued + DISCOVERY_DEADLINE_MS + 1000.,
+            Event::TimerFired { timer: again },
+        );
+        let next = drain(&mut e, issued + DISCOVERY_DEADLINE_MS + 1000.);
         assert_eq!(next.requests.len(), if kind == 0 { 1 } else { 2 });
         assert!(!next.requests.iter().any(|new| new.id == r.id));
     }
@@ -977,7 +988,7 @@ fn held_catalogue_preparation_expires_and_late_completion_is_inert() {
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     let timer = actions.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } if *at_ms == NOW + LIMIT => Some(*timer),
+        Action::SetTimer { timer, at_ms } if *at_ms == NOW + DISCOVERY_DEADLINE_MS => Some(*timer),
         _ => None,
     });
     assert!(
@@ -999,7 +1010,7 @@ fn held_catalogue_preparation_expires_and_late_completion_is_inert() {
         })
         .expect("genuine held preparation");
     e.handle(
-        NOW + LIMIT,
+        NOW + DISCOVERY_DEADLINE_MS,
         Event::TimerFired {
             timer: timer.unwrap(),
         },
@@ -1008,9 +1019,9 @@ fn held_catalogue_preparation_expires_and_late_completion_is_inert() {
     assert!(!e.http_preparation_pending(token));
     assert!(expired.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { preparation, .. } if *preparation == token))));
     assert!(!expired.iter().any(|a| matches!(a, Action::Http(_))));
-    let backoff = retry(&expired, NOW + LIMIT);
+    let backoff = retry(&expired, NOW + DISCOVERY_DEADLINE_MS);
     e.http_prepared(
-        NOW + LIMIT + 1.,
+        NOW + DISCOVERY_DEADLINE_MS + 1.,
         token,
         Prepared {
             id: id.0,
@@ -1018,8 +1029,11 @@ fn held_catalogue_preparation_expires_and_late_completion_is_inert() {
         },
     );
     assert!(e.drain_actions().next().is_none());
-    e.handle(NOW + LIMIT + 1000., Event::TimerFired { timer: backoff });
-    let fresh = drain(&mut e, NOW + LIMIT + 1000.);
+    e.handle(
+        NOW + DISCOVERY_DEADLINE_MS + 1000.,
+        Event::TimerFired { timer: backoff },
+    );
+    let fresh = drain(&mut e, NOW + DISCOVERY_DEADLINE_MS + 1000.);
     assert_ne!(request(&fresh, 0).id, id);
     assert_eq!(fresh.prepares.len(), 1);
 }
@@ -1408,7 +1422,11 @@ fn finite_failed_or_timed_out_seed_retires_before_private_start_once() {
         let (mut e, pair) = private_seed_pair(249);
         let daily = request(&pair, 1);
         let old = resource(&pair, daily.id).unwrap();
-        let now = if timeout { NOW + 1. + LIMIT } else { NOW + 2. };
+        let now = if timeout {
+            NOW + 1. + DISCOVERY_DEADLINE_MS
+        } else {
+            NOW + 2.
+        };
         let event = if timeout {
             Event::TimerFired { timer: old.timer }
         } else {

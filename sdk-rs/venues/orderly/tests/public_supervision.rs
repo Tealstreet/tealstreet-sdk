@@ -5,6 +5,8 @@ use safe_cex_engine::{
 use safe_cex_venue_orderly::{Options, Orderly};
 use support::{Clock, Driver, POSITIONS, options};
 
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
 const PING: &str = r#"{"event":"ping"}"#;
 const PONG: &str = r#"{"event":"pong"}"#;
 const AUTH: &str = r#"{"event":"auth","success":true}"#;
@@ -392,7 +394,7 @@ fn suppressed_public_feed_is_not_supervised() {
     assert!(h.connects(Feed::Market).is_empty());
     assert!(h.connects(Feed::Funding).is_empty());
     let seed_deadlines: Vec<_> = h.log.iter().filter_map(|(at, action)| match action {
-        Action::SetTimer { timer, at_ms } if *at == 1000.0 && *at_ms == 21_000.0
+        Action::SetTimer { timer, at_ms } if *at == 1000.0 && *at_ms == 1000.0 + DISCOVERY_DEADLINE_MS
             && h.log.iter().any(|(cleared_at, action)| *cleared_at == *at
                 && matches!(action, Action::ClearTimer { timer: cleared } if cleared == timer)) => Some(*timer),
         _ => None,

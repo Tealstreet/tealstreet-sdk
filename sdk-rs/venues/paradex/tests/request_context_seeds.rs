@@ -9,6 +9,8 @@ use safe_cex_engine::{
 use safe_cex_venue_paradex::{Options, Paradex};
 
 const NOW: f64 = 1000.;
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
 fn start(testnet: bool) -> (Engine<Paradex>, Vec<Action>) {
     let mut e = safe_cex_engine::test_support::seeded_engine(Paradex::new(Options {
         public_data_only: true,
@@ -49,7 +51,9 @@ fn prepare(actions: &[Action], url: &str, issued_at: f64) -> (Preparation, HttpR
     let timers: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == issued_at + 20_000. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == issued_at + DISCOVERY_DEADLINE_MS => {
+                Some(*timer)
+            }
             _ => None,
         })
         .collect();
@@ -220,12 +224,17 @@ fn original_deadline_retires_parked_and_released_seed_without_publication() {
         if claimed {
             release(&mut e, p, NOW + 15_000.);
         }
-        e.handle(NOW + 20_000., Event::TimerFired { timer });
+        e.handle(NOW + DISCOVERY_DEADLINE_MS, Event::TimerFired { timer });
         let actions: Vec<_> = e.drain_actions().collect();
-        retry_timer(&actions, NOW + 20_000.);
+        retry_timer(&actions, NOW + DISCOVERY_DEADLINE_MS);
         assert!(!e.http_preparation_pending(p));
         assert!(!e.store().loaded().markets);
-        reply(&mut e, NOW + 20_001., &unsigned, support::MARKETS);
+        reply(
+            &mut e,
+            NOW + DISCOVERY_DEADLINE_MS + 1.,
+            &unsigned,
+            support::MARKETS,
+        );
         assert!(!e.store().loaded().markets);
     }
 }

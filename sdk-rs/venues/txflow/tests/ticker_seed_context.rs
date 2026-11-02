@@ -7,6 +7,8 @@ use support::{META, TICKER};
 
 type Driver = Engine<TxFlow>;
 const NOW: f64 = 1000.;
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
 
 fn response(e: &mut Driver, r: &HttpRequest, now: f64, body: &str) {
     e.handle(
@@ -89,7 +91,7 @@ fn ticker_seed_arms_its_bound_before_host_preparation() {
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(
         actions.iter().any(|a| matches!(a,
-        Action::SetTimer { at_ms, .. } if *at_ms == NOW + 20_000.)),
+        Action::SetTimer { at_ms, .. } if *at_ms == NOW + DISCOVERY_DEADLINE_MS)),
         "unprepared ticker seed needs its real admission expiry timer"
     );
 }
@@ -98,8 +100,8 @@ fn ticker_seed_arms_its_bound_before_host_preparation() {
 fn exact_deadline_ticker_data_cannot_publish_a_seed() {
     let mut e = metadata_ready(META);
     let r = ticker(&mut e, NOW);
-    response(&mut e, &r, NOW + 20_000., TICKER);
-    advance_25ms(&mut e, NOW + 20_000.);
+    response(&mut e, &r, NOW + DISCOVERY_DEADLINE_MS, TICKER);
+    advance_25ms(&mut e, NOW + DISCOVERY_DEADLINE_MS);
     assert!(
         !e.store().loaded().tickers,
         "DATA at the new physical deadline cannot become a ticker seed"
@@ -203,9 +205,11 @@ fn separate_physical_bounds_do_not_cap_the_whole_seed_walk() {
     let metadata = META.replace("}]}}", &format!("}}{second}]}}}}"));
     let mut e = metadata_ready(&metadata);
     let r = ticker(&mut e, NOW);
-    response(&mut e, &r, 19_000., TICKER);
-    advance_25ms(&mut e, 19_000.);
-    let r = ticker(&mut e, 19_025.);
+    let first_reply = NOW + DISCOVERY_DEADLINE_MS - 1_000.;
+    response(&mut e, &r, first_reply, TICKER);
+    advance_25ms(&mut e, first_reply);
+    let r = ticker(&mut e, first_reply + 25.);
+    let second_reply = NOW + 2. * DISCOVERY_DEADLINE_MS - 2_000.;
     assert_eq!(
         r.body.as_deref(),
         Some(r#"{"type":"activeAssetCtx","coin":"2"}"#)
@@ -213,10 +217,10 @@ fn separate_physical_bounds_do_not_cap_the_whole_seed_walk() {
     response(
         &mut e,
         &r,
-        38_000.,
+        second_reply,
         &TICKER.replace("\"instrumentId\":1", "\"instrumentId\":2"),
     );
-    advance_25ms(&mut e, 38_000.);
+    advance_25ms(&mut e, second_reply);
     assert!(e.store().loaded().tickers);
     assert_eq!(e.store().tickers().len(), 2);
 }
@@ -227,12 +231,14 @@ fn deadline_data_progresses_the_next_asset_once_and_retries_its_own_key() {
     let metadata = META.replace("}]}}", &format!("}}{second}]}}}}"));
     let mut e = metadata_ready(&metadata);
     let old = ticker(&mut e, NOW);
-    response(&mut e, &old, NOW + 20_000., TICKER);
+    response(&mut e, &old, NOW + DISCOVERY_DEADLINE_MS, TICKER);
     let actions = e.drain_actions().collect::<Vec<_>>();
     let next = actions
         .iter()
         .filter_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_025. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + DISCOVERY_DEADLINE_MS + 25. => {
+                Some(*timer)
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -240,7 +246,7 @@ fn deadline_data_progresses_the_next_asset_once_and_retries_its_own_key() {
         .iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms }
-                if support::jittered(*at_ms - NOW - 20_000., 1000.) =>
+                if support::jittered(*at_ms - NOW - DISCOVERY_DEADLINE_MS, 1000.) =>
             {
                 Some((*timer, *at_ms))
             }
@@ -251,9 +257,9 @@ fn deadline_data_progresses_the_next_asset_once_and_retries_its_own_key() {
     assert_eq!(retry.len(), 1, "exactly one retry for the expired asset");
     assert!(!e.store().loaded().tickers);
     assert!(e.store().tickers().is_empty());
-    response(&mut e, &old, NOW + 20_001., TICKER);
+    response(&mut e, &old, NOW + DISCOVERY_DEADLINE_MS + 1., TICKER);
     e.handle(
-        NOW + 20_001.,
+        NOW + DISCOVERY_DEADLINE_MS + 1.,
         Event::HttpFailed {
             request: old.id,
             error: "late duplicate",
@@ -267,8 +273,11 @@ fn deadline_data_progresses_the_next_asset_once_and_retries_its_own_key() {
         )),
         "no duplicate progression"
     );
-    e.handle(NOW + 20_025., Event::TimerFired { timer: next[0] });
-    let second = ticker(&mut e, NOW + 20_025.);
+    e.handle(
+        NOW + DISCOVERY_DEADLINE_MS + 25.,
+        Event::TimerFired { timer: next[0] },
+    );
+    let second = ticker(&mut e, NOW + DISCOVERY_DEADLINE_MS + 25.);
     assert_eq!(
         second.body.as_deref(),
         Some(r#"{"type":"activeAssetCtx","coin":"2"}"#)
@@ -276,10 +285,10 @@ fn deadline_data_progresses_the_next_asset_once_and_retries_its_own_key() {
     response(
         &mut e,
         &second,
-        NOW + 20_026.,
+        NOW + DISCOVERY_DEADLINE_MS + 26.,
         &TICKER.replace("\"instrumentId\":1", "\"instrumentId\":2"),
     );
-    advance_25ms(&mut e, NOW + 20_026.);
+    advance_25ms(&mut e, NOW + DISCOVERY_DEADLINE_MS + 26.);
     assert!(!e.store().loaded().tickers);
     e.drain_actions().for_each(drop);
     e.handle(retry[0].1, Event::TimerFired { timer: retry[0].0 });
