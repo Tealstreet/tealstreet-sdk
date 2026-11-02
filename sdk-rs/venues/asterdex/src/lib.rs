@@ -96,6 +96,16 @@ pub struct MarketRule {
     pub tick_size: f64,
     pub max_algo_orders: Option<u32>,
     pub min_notional: f64,
+    /// MARKET_LOT_SIZE, which governs MARKET orders in place of LOT_SIZE.
+    pub market_lot: MarketLot,
+}
+
+/// A zero `max` or `min` is a filter Aster did not send.
+#[derive(Clone, Copy)]
+pub struct MarketLot {
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
 }
 
 pub enum Pending {
@@ -796,9 +806,18 @@ fn candle(time: f64, o: &str, h: &str, l: &str, c: &str, v: &str) -> Candle {
     }
 }
 
+fn qty(text: Option<&str>) -> f64 {
+    text.map_or(0.0, num::parse)
+}
+
 fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
     let find = |kind: &str| row.filters.iter().find(|filter| filter.filter_type == kind);
     let lot = find("LOT_SIZE");
+    let market_lot = find("MARKET_LOT_SIZE");
+    // Aster: quantityPrecision "please do not use it as stepSize".
+    let step = Some(qty(lot.and_then(|f| f.step_size.as_deref())))
+        .filter(|step| *step > 0.0)
+        .unwrap_or(10f64.powi(-row.quantity_precision));
     let price = 10f64.powi(-row.price_precision);
     let rule = MarketRule {
         min_notional: find("MIN_NOTIONAL")
@@ -809,6 +828,13 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
             .map(num::parse)
             .unwrap_or(price),
         max_algo_orders: find("MAX_NUM_ALGO_ORDERS").and_then(|filter| filter.limit),
+        market_lot: MarketLot {
+            min: qty(market_lot.and_then(|f| f.min_qty.as_deref())),
+            max: qty(market_lot.and_then(|f| f.max_qty.as_deref())),
+            step: Some(qty(market_lot.and_then(|f| f.step_size.as_deref())))
+                .filter(|step| *step > 0.0)
+                .unwrap_or(step),
+        },
     };
     let market = Market {
         id: row.symbol.to_string(),
@@ -819,7 +845,7 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
         active: true,
         precision: Precision {
             price,
-            amount: 10f64.powi(-row.quantity_precision),
+            amount: step,
         },
         limits: Limits {
             amount: MinMax {
