@@ -1236,7 +1236,12 @@ impl ApexOmni {
             .as_ref()
             .and_then(|e| e.code.as_ref())
             .and_then(strict_code);
-        if code != Some(0) || !(200..300).contains(&response.status) {
+        // ApeX's success has no `code`, only `data`; a `code` present must still be 0.
+        let succeeded = envelope.as_ref().is_some_and(|e| match e.code {
+            Some(_) => code == Some(0),
+            None => e.data.is_some(),
+        });
+        if !succeeded || !(200..300).contains(&response.status) {
             let native = envelope.as_ref().map(|e| Native {
                 code: code.map_or(NativeCode::None, NativeCode::Int),
                 message: e.msg.as_ref(),
@@ -1244,11 +1249,7 @@ impl ApexOmni {
             let message = envelope
                 .as_ref()
                 .map_or("ApeX Omni malformed write response", |e| e.msg.as_ref());
-            let message = format!(
-                "ApeX Omni request failed [{}]: {}",
-                code.unwrap_or(i64::from(response.status)),
-                message
-            );
+            let message = crate::failure_text(code.unwrap_or(i64::from(response.status)), message);
             let Ok(fact) = cx.classify_write(&delivery.context, &APEX, native.as_ref(), message)
             else {
                 return;
