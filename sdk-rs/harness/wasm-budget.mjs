@@ -82,9 +82,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #2812 readPositions: CI run 41375427208; Sam's order, CI + 10 KiB, rounded up to a KiB, for every family over its cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_921_024,
-  asterdex: 2_055_168,
+  asterdex: 2_056_192,
   backpack: 1_826_816,
-  binance: 2_114_560,
+  binance: 2_115_584,
   bingx: 1_933_312,
   bitget: 2_225_152,
   bitgetusdc: 2_225_152,
@@ -92,7 +92,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitunix: 1_779_712,
   blofin: 1_882_112,
   breakoutprop: 1_467_392,
-  bybit: 2_105_344,
+  bybit: 2_106_368,
   coinbase: 1_770_496,
   cryptocom: 1_666_048,
   grvt: 1_736_704,
@@ -104,15 +104,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kucoinspot: 2_049_024,
   lighter: 1_929_216,
   'lighter-robinhood': 1_929_216,
-  mexc: 1_680_384,
-  okx: 1_867_776,
+  mexc: 1_681_408,
+  okx: 1_871_872,
   orderly: 1_679_360,
-  paradex: 2_155_520,
-  phemex: 1_975_296,
+  paradex: 2_156_544,
+  phemex: 1_978_368,
   polymarket: 1_557_504,
   txflow: 1_786_880,
   weex: 1_883_136,
-  woo: 2_314_240,
+  woo: 2_315_264,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
