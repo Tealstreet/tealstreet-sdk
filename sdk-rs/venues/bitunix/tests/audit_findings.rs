@@ -146,3 +146,89 @@ fn a_full_position_tp_does_not_copy_a_partial_stop() {
     assert_eq!(p["tpPrice"], "90000");
     assert!(p.get("slPrice").is_none_or(|v| v.is_null()), "{p}");
 }
+
+// Live trading_pairs BTCUSDT: "maxLimitOrderVolume":"1200","maxMarketOrderVolume":"120".
+const LIVE_PAIRS: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","base":"BTC","quote":"USDT","minTradeVolume":"0.0001","maxLimitOrderVolume":"1200","maxMarketOrderVolume":"120","basePrecision":4,"quotePrecision":1,"symbolStatus":"OPEN","isApiSupported":true}],"msg":"Success"}"#;
+
+fn placed_quantities(kind: &str) -> Vec<String> {
+    let (mut e, _) = startup_serving(
+        engine(Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Default::default()
+        }),
+        LIVE_PAIRS,
+        TICKERS,
+    );
+    prepared_now(&mut e);
+    let o: PlaceOrderOpts = serde_json::from_str(&format!(
+        r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"buy","price":90000,"amount":250}}"#
+    ))
+    .unwrap();
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 3,
+            orders: vec![o],
+        }),
+    );
+    let sent = requests(&mut e);
+    assert_eq!(
+        sent.len(),
+        1,
+        "{:?}",
+        sent.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    let b = body(&sent[0]);
+    match b["orderList"].as_array() {
+        Some(rows) => rows
+            .iter()
+            .map(|r| r["qty"].as_str().unwrap().to_owned())
+            .collect(),
+        None => vec![b["qty"].as_str().unwrap().to_owned()],
+    }
+}
+
+#[test]
+fn a_market_order_splits_at_the_market_maximum_and_a_limit_at_the_limit_maximum() {
+    assert_eq!(placed_quantities("market"), ["120", "120", "10"]);
+    assert_eq!(placed_quantities("limit"), ["250"]);
+}
+
+#[test]
+fn a_cancel_all_failure_list_fails_naming_the_orders_and_keeps_the_successes() {
+    let (mut e, _) = startup();
+    prepared_now(&mut e);
+    let rows = e.store().orders().to_vec();
+    e.store_mut().set_orders(Vec::new());
+    e.handle(
+        1.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 4,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let sweep = requests(&mut e).remove(0);
+    assert!(
+        sweep.url.ends_with("/trade/cancel_all_orders"),
+        "{}",
+        sweep.url
+    );
+    // "one" reached the store after the plan; only the sweep can cancel it.
+    e.store_mut().set_orders(rows);
+    // The documented answer: bitunix.com/api-docs futures "Cancel all orders".
+    reply(
+        &mut e,
+        sweep.id,
+        r#"{"code":0,"data":{"successList":[{"orderId":"one","clientId":"web"}],"failureList":[{"orderId":"11112","clientId":"22223","errorMsg":"Order status error","errorCode":10013}]},"msg":"Success"}"#,
+    );
+    let error = outcome(&prepared_now(&mut e), 4)
+        .expect("an outcome")
+        .expect_err("a refused order was not cancelled");
+    assert!(error.contains("11112"), "{error}");
+    assert!(error.contains("Order status error"), "{error}");
+    assert_eq!(
+        e.store().order("one").unwrap().status,
+        OrderStatus::Canceled
+    );
+}

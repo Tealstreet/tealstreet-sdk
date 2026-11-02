@@ -127,6 +127,9 @@ pub struct Pair<'a> {
     pub base_precision: Num,
     pub quote_precision: Num,
     pub max_limit_order_volume: Num,
+    /// MARKET orders answer to this maximum, not `maxLimitOrderVolume`.
+    #[serde(default)]
+    pub max_market_order_volume: Option<Num>,
     #[serde(borrow, default)]
     pub is_api_supported: Option<Supported<'a>>,
 }
