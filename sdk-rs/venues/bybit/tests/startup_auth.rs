@@ -594,6 +594,93 @@ fn a_relay_timeout_on_account_info_says_so_and_claims_no_refusal() {
     }
 }
 
+const CLASSIC_ISOLATED: &str = r#"{"retCode":0,"retMsg":"OK","result":{"marginMode":"ISOLATED_MARGIN","unifiedMarginStatus":1}}"#;
+
+/// Started on an assumed mode because the account info read got no answer.
+fn started_after_a_relay_timeout() -> Harness {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.load_public();
+    let request = h.take("/v5/account/info").id;
+    h.event(Event::HttpFailed {
+        request,
+        error: "Relay or network request timed out",
+    });
+    h
+}
+
+#[test]
+fn account_info_lost_to_a_relay_timeout_is_read_again_and_corrects_the_mode() {
+    let mut h = started_after_a_relay_timeout();
+    let unified = h.take("/v5/account/wallet-balance");
+    assert!(
+        unified.url.contains("accountType=UNIFIED"),
+        "{}",
+        unified.url
+    );
+    h.reply(
+        unified.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[]}}"#,
+    );
+    assert!(!h.has_request("/v5/account/info"));
+    h.advance(5_000.0);
+    assert!(h.has_request("/v5/account/info"), "{:?}", h.paths());
+    h.respond("/v5/account/info", 200, CLASSIC_ISOLATED);
+    // The tick's read went out on the assumed mode just before the answer came.
+    let assumed = h.take("/v5/account/wallet-balance");
+    assert!(
+        assumed.url.contains("accountType=UNIFIED"),
+        "{}",
+        assumed.url
+    );
+    h.reply(
+        assumed.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[]}}"#,
+    );
+    let wallet = h.take("/v5/account/wallet-balance");
+    assert!(
+        wallet.url.contains("accountType=CONTRACT"),
+        "{}",
+        wallet.url
+    );
+    let mut coins = Vec::new();
+    while h.has_request("/v5/position/list") {
+        let read = h.take("/v5/position/list");
+        coins.push(read.url.clone());
+        h.reply(
+            read.id,
+            200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#,
+        );
+    }
+    let last = coins.last().expect("positions read");
+    assert!(last.contains("settleCoin=USDT"), "{coins:?}");
+}
+
+#[test]
+fn account_info_read_again_keeps_trying_until_answered() {
+    let mut h = started_after_a_relay_timeout();
+    h.advance(5_000.0);
+    let request = h.take("/v5/account/info").id;
+    h.event(Event::HttpFailed {
+        request,
+        error: "Relay or network request timed out",
+    });
+    h.advance(10_000.0);
+    assert!(h.has_request("/v5/account/info"), "{:?}", h.paths());
+}
+
+#[test]
+fn an_answered_account_info_failure_is_not_read_again() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 503, "Service Unavailable");
+    h.advance(60_000.0);
+    assert!(!h.has_request("/v5/account/info"), "{:?}", h.paths());
+}
+
 #[test]
 fn a_refused_account_info_does_not_call_market_data_ready_while_markets_are_out() {
     let mut h = private();
