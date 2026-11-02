@@ -334,7 +334,7 @@ impl Adapter {
             let command =
                 json!({"op":"cancelAccountOrders","command":self.cx.port.next_command_id()});
             if let Ok(command) = decode_command(&command.to_string()) {
-                cancels.push(("the account".into(), command));
+                cancels.push((ACCOUNT_TARGET.into(), command));
             }
         }
         cancels
@@ -370,6 +370,10 @@ const NUKE_FLAT_SETTLE_MS: u64 = 2_000;
 /// The least wait after a close round before the read that can prove flat.
 const NUKE_READ_SETTLE_MS: u64 = 500;
 const NUKE_NOT_CONFIRMED: &str = "Nuke could not confirm the account is flat";
+/// The target an account-wide cancel is named by in a nuke's failures.
+const ACCOUNT_TARGET: &str = "the account";
+const NUKE_ORDERS_MAY_REMAIN: &str =
+    "Orders, including triggers and TP/SL, may remain on this venue: check open orders";
 const NUKE_UNSEEN_ORDERS: &str =
     "Orders placed in the last few seconds may not be cancelled on this venue: check open orders";
 
@@ -447,10 +451,12 @@ fn describe_open(positions: &[Value]) -> String {
 }
 
 fn named(mut error: Value, phase: &str, symbol: &str) -> Value {
-    error["message"] = json!(format!(
-        "{symbol} {phase}: {}",
-        error["message"].as_str().unwrap_or("command failed")
-    ));
+    let cause = error["message"].as_str().unwrap_or("command failed");
+    error["message"] = json!(if symbol == ACCOUNT_TARGET {
+        format!("{symbol} {phase}: {cause}. {NUKE_ORDERS_MAY_REMAIN}")
+    } else {
+        format!("{symbol} {phase}: {cause}")
+    });
     error["symbol"] = json!(symbol);
     error["operation"] = json!(phase);
     error
