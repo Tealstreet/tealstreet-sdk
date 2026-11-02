@@ -545,7 +545,18 @@ const createAxiosHttpOverWebsocketAdapter = (
               if (i % 10 === 0) {
                 console.log(`[HOW] Waiting for valid token... (attempt ${i + 1}/${MAX_TOKEN_RETRIES})`);
               }
-              await sleepWithinDeadline(500);
+              try {
+                await sleepWithinDeadline(500);
+              } catch (error) {
+                // A deadline spent waiting on our own token is our authorization, not the network.
+                if (!(error instanceof TradeTunnelTimeoutError)) throw error;
+                throw Object.assign(
+                  new Error(
+                    `Tealstreet proxy authorization missing: no valid proxy token before the request deadline (${config.url})`,
+                  ),
+                  { name: 'ProxyTokenUnavailableError', config },
+                );
+              }
             }
           }
           // Return whatever we have after max retries
