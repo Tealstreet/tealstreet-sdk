@@ -440,7 +440,7 @@ export class ExchangeWorker {
         this.log('warn', `Error starting exchange: ${this._exchangeName}${detail}`, { worker_error_phase: 'startup' });
       } else {
         this.logError(`Error starting exchange: ${this._exchangeName}${detail}`, e, {
-          sentryTags: { worker_error_phase: 'startup' },
+          sentryTags: this._startTags(),
         });
       }
       return false;
@@ -1177,6 +1177,16 @@ export class ExchangeWorker {
         this.logError('Rust engine recovery failed; reinitialize the account.', failure);
       });
     }, 500);
+  }
+
+  /** What the page acts on: a start about to be retried is not yet a failed start. */
+  private _startTags(): Record<string, string> {
+    const retrying =
+      this._startTimedOut &&
+      !this._stopped &&
+      START_RETRY_DELAYS_MS[this._startRetries] !== undefined &&
+      this._options.publicFeed?.mode !== 'shared';
+    return { worker_error_phase: 'startup', ...(retrying ? { worker_start_retrying: 'true' } : {}) };
   }
 
   /**
