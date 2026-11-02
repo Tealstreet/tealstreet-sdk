@@ -2366,30 +2366,31 @@ impl Blofin {
 
 /// Whether a tpsl read shows `tpsl_id` still holding the `kept` leg's trigger.
 fn tpsl_keeps_leg(response: &Response<'_>, tpsl_id: &str, kept: OrderType) -> bool {
-    if !(200..300).contains(&response.status) {
-        return false;
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Leg<'a> {
+        #[serde(borrow, default)]
+        tpsl_id: crate::wire::Str<'a>,
+        #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+        tp_trigger_price: crate::wire::Number,
+        #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+        sl_trigger_price: crate::wire::Number,
     }
-    let Ok(reply) = serde_json::from_str::<serde_json::Value>(response.body) else {
-        return false;
-    };
-    let field = if kept == OrderType::TakeProfit {
-        "tpTriggerPrice"
-    } else {
-        "slTriggerPrice"
-    };
-    let rows = match &reply["data"] {
-        serde_json::Value::Array(rows) => rows.clone(),
-        row @ serde_json::Value::Object(_) => vec![row.clone()],
-        _ => return false,
-    };
-    reply["code"] == "0"
-        && rows.iter().any(|row| {
-            row["tpslId"] == tpsl_id
-                && match &row[field] {
-                    serde_json::Value::String(text) => text.parse::<f64>().is_ok_and(|p| p > 0.0),
-                    serde_json::Value::Number(n) => n.as_f64().is_some_and(|p| p > 0.0),
-                    _ => false,
-                }
+    (200..300).contains(&response.status)
+        && check(response).is_ok()
+        && serde_json::from_str::<Data<OneOrMany<Leg<'_>>>>(response.body).is_ok_and(|reply| {
+            let rows: Vec<&Leg<'_>> = match &reply.data {
+                OneOrMany::One(row) => vec![row],
+                OneOrMany::Many(rows) => rows.iter().collect(),
+            };
+            rows.iter().any(|row| {
+                &*row.tpsl_id == tpsl_id
+                    && if kept == OrderType::TakeProfit {
+                        row.tp_trigger_price.0 > 0.0
+                    } else {
+                        row.sl_trigger_price.0 > 0.0
+                    }
+            })
         })
 }
 
