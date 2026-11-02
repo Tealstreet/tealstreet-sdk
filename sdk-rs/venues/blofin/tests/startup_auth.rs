@@ -491,3 +491,29 @@ fn a_read_failing_during_a_ban_waits_out_the_ban_too() {
 fn jittered(actual: f64, nominal: f64) -> bool {
     (0.75 * nominal..=nominal).contains(&actual)
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            200,
+            r#"{"code":"152406","msg":"Your IP is not included in your API key's IP whitelist"}"#,
+        ),
+        (
+            401,
+            r#"{"code":"152406","msg":"Your IP is not included in your API key's IP whitelist"}"#,
+        ),
+        (
+            403,
+            r#"{"code":"152401","msg":"Access key does not exist"}"#,
+        ),
+    ] {
+        let mut engine = engine(keyed());
+        let mut rig = Rig::default();
+        let (margin, _, _) = to_settings(&mut engine, &mut rig);
+        respond(&mut engine, &margin, status, body, 2.);
+        rig.take(&mut engine);
+        rig.run(&mut engine, 120_000.);
+        assert_eq!(rig.failures.len(), 1, "{status} {body}");
+    }
+}

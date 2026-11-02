@@ -273,3 +273,28 @@ fn a_refused_read_key_does_not_end_the_start() {
             .any(|x| matches!(x, Action::Notice(Notice::StartupFailed { .. })))
     );
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            200,
+            r#"{"code":100419,"msg":"your current request IP is not in the api key's ip whitelist"}"#,
+        ),
+        (
+            403,
+            r#"{"code":100419,"msg":"your current request IP is not in the api key's ip whitelist"}"#,
+        ),
+        (200, r#"{"code":100413,"msg":"Incorrect apiKey"}"#),
+    ] {
+        let (mut e, all) = started(false);
+        let balance = http(&all, "/balance");
+        let actions = reply(&mut e, &balance, status, body);
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::StartupFailed { .. }))),
+            "{status} {body}"
+        );
+    }
+}

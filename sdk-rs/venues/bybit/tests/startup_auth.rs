@@ -629,3 +629,17 @@ fn a_refused_key_is_never_used_for_private_reads_or_the_private_feed() {
         h.sockets
     );
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (200, rejection(10010, UNMATCHED_IP)),
+        (401, rejection(10010, UNMATCHED_IP)),
+        (403, rejection(10003, "API key is invalid.")),
+    ] {
+        let mut h = private();
+        h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+        h.respond("/v5/account/info", status, &body);
+        assert_eq!(h.startup_failures.len(), 1, "{status} {body}");
+    }
+}

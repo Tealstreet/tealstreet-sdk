@@ -560,3 +560,29 @@ fn an_empty_risk_read_does_not_hang_startup() {
     }
     assert!(engine.store().loaded().balance);
 }
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            401,
+            r#"{"code":"50110","msg":"Your IP is not on the API key's IP allowlist","data":[]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"50110","msg":"Your IP is not on the API key's IP allowlist","data":[]}"#,
+        ),
+        (
+            401,
+            r#"{"code":"50111","msg":"Invalid OK-ACCESS-KEY","data":[]}"#,
+        ),
+    ] {
+        let mut engine = crate::support::engine(keyed());
+        let mut rig = Rig::default();
+        let config = to_config(&mut engine, &mut rig);
+        respond(&mut engine, &config, status, body, 2.);
+        rig.take(&mut engine, 2.);
+        rig.run(&mut engine, 120_000.);
+        assert_eq!(rig.failures.len(), 1, "{status} {body}");
+    }
+}
