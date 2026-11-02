@@ -83,12 +83,35 @@ pub struct Session {
     /// A held client's account has loaded: `(account name, client id)`.
     loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     loaded_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
+    /// A client the engine removed (its queue full, or a frame too large): `(account, client)`.
+    dropped: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
+    dropped_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
+    /// When each account was last re-snapshotted after such a removal.
+    rejoined_at: HashMap<String, std::time::Instant>,
     /// Told when a resume of this session's id takes it over.
     taken_over: Arc<tokio::sync::Notify>,
     /// The settings refusal last sent per account, so the client's backoff
     /// retries show it once; cleared when that account's init succeeds.
     refused: HashMap<String, String>,
+    /// Chart and book subscriptions that arrived before their account joined,
+    /// applied at join: the page sends them whenever its chart asks.
+    early: HashMap<String, Vec<Topic>>,
 }
+
+/// A chart or book subscription, by its page op.
+#[derive(Clone, Debug)]
+struct Topic {
+    op: String,
+    symbol: String,
+    interval: Option<String>,
+}
+
+/// Per account; a page re-sends its live topics on every init, so this only
+/// needs to outlast one join.
+const EARLY_TOPICS: usize = 64;
+
+/// A page that cannot keep up is re-snapshotted at most this often.
+const REJOIN_AFTER_DROP_MIN: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// How long a resume waits for the session it takes over to park, as long as
 /// that socket loop can be stuck in one send.
@@ -122,6 +145,7 @@ impl Session {
     ) -> Self {
         let socket = registry.next_id();
         let (loaded, loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (dropped, dropped_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             registry,
             metrics,
@@ -132,8 +156,12 @@ impl Session {
             joined: HashMap::new(),
             loaded,
             loaded_rx: Some(loaded_rx),
+            dropped,
+            dropped_rx: Some(dropped_rx),
+            rejoined_at: HashMap::new(),
             taken_over: Arc::new(tokio::sync::Notify::new()),
             refused: HashMap::new(),
+            early: HashMap::new(),
         }
     }
 
@@ -160,6 +188,43 @@ impl Session {
     /// each goes to [`Session::account_loaded`].
     pub fn take_loaded(&mut self) -> tokio::sync::mpsc::UnboundedReceiver<(String, u64)> {
         self.loaded_rx.take().expect("taken once")
+    }
+
+    /// The socket loop's receiver of clients the engine removed; each goes to
+    /// [`Session::client_dropped`].
+    pub fn take_dropped(&mut self) -> tokio::sync::mpsc::UnboundedReceiver<(String, u64)> {
+        self.dropped_rx.take().expect("taken once")
+    }
+
+    /// The engine removed this client without the session asking: its queue was
+    /// full or a frame too large. Without this the page got nothing and saw no gap.
+    pub async fn client_dropped(&mut self, name: &str, client: u64) {
+        if self
+            .joined
+            .get(name)
+            .is_none_or(|joined| joined.client.id != client)
+        {
+            return;
+        }
+        let recent = self
+            .rejoined_at
+            .get(name)
+            .is_some_and(|at| at.elapsed() < REJOIN_AFTER_DROP_MIN);
+        if recent {
+            Log::warn(&format!(
+                "engine dropped client {client} of {name} on socket {} again within {}s; left to the page's resnapshot",
+                self.socket,
+                REJOIN_AFTER_DROP_MIN.as_secs()
+            ));
+            return;
+        }
+        Log::warn(&format!(
+            "engine dropped client {client} of {name} on socket {}: its queue was full or a frame too large; re-snapshotting",
+            self.socket
+        ));
+        self.rejoined_at
+            .insert(name.to_owned(), std::time::Instant::now());
+        self.resnapshot(name).await;
     }
 
     /// A held client's account loaded: its client gets a full snapshot now.
@@ -349,6 +414,7 @@ impl Session {
             if first_refusal(&mut self.refused, &init.account_name, &refusal) {
                 self.send(envelope::init_refused(&init.account_name, &refusal));
             }
+            self.drop_early(&init.account_name, "init refused for other settings");
             return Ok(());
         }
         self.refused.remove(&init.account_name);
@@ -398,6 +464,7 @@ impl Session {
             }
             Err(error) => {
                 Log::warn(&format!("init {} refused: {error}", init.account_name));
+                self.drop_early(&init.account_name, "init refused");
                 self.send(envelope::error(Some(&init.account_name), &error));
             }
         }
@@ -412,7 +479,7 @@ impl Session {
                     let _ = algos.send(crate::algos::AlgoInput::Joined);
                 }
                 self.joined.insert(
-                    name,
+                    name.clone(),
                     Joined {
                         account,
                         client,
@@ -421,8 +488,10 @@ impl Session {
                         subscriptions: HashMap::new(),
                     },
                 );
+                self.apply_early(&name);
             }
             Err(error) => {
+                self.drop_early(&name, "account did not join");
                 self.send(envelope::error(Some(&name), error));
                 self.registry.release(&account, self.socket);
             }
@@ -440,6 +509,8 @@ impl Session {
         });
         let pump = tokio::spawn(pump(
             link,
+            id,
+            self.dropped.clone(),
             account.handle.clone(),
             account.name.clone(),
             self.out.clone(),
@@ -527,6 +598,13 @@ impl Session {
             return;
         };
         self.forget_disposed();
+        let topic = Self::topic_of(&msg);
+        if !self.joined.contains_key(&name)
+            && let Some(topic) = topic.clone()
+        {
+            self.queue_early(&name, topic);
+            return;
+        }
         if !self.joined.contains_key(&name) {
             Log::warn(&format!("no joined account for op {}", msg.op));
             if msg.op == "callMethod" {
@@ -565,30 +643,7 @@ impl Session {
             ("sendSnapshot", _, _) => {
                 self.resnapshot(&name).await;
             }
-            ("subscribeOrderBook", Some(symbol), _) => self.subscribe(
-                &name,
-                json!({"op": "subscribeOrderBook", "symbol": symbol}),
-                json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
-                true,
-            ),
-            ("unsubscribeOrderBook", Some(symbol), _) => self.subscribe(
-                &name,
-                json!({"op": "subscribeOrderBook", "symbol": symbol}),
-                json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
-                false,
-            ),
-            ("subscribeOHLCV", Some(symbol), Some(interval)) => self.subscribe(
-                &name,
-                json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
-                json!({"op": "unsubscribeCandles", "symbol": symbol, "interval": interval}),
-                true,
-            ),
-            ("unsubscribeOHLCV", Some(symbol), Some(interval)) => self.subscribe(
-                &name,
-                json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
-                json!({"op": "unsubscribeCandles", "symbol": symbol, "interval": interval}),
-                false,
-            ),
+            _ if topic.is_some() => self.apply_topic(&name, topic.as_ref().unwrap()),
             ("callMethod", _, _) => self.call(&name, msg.data).await,
             ("updatePositions", _, _) => self.send(envelope::msg(
                 &name,
@@ -620,6 +675,74 @@ impl Session {
 
     /// Counts a book/candle (un)subscribe; only the first subscribe and the last
     /// unsubscribe reach the engine, whose per-client demand is a set.
+    fn topic_of(msg: &AccountMsg) -> Option<Topic> {
+        let field = |key: &str| msg.data.get(key).and_then(Value::as_str).map(str::to_owned);
+        let symbol = field("symbol")?;
+        let interval = field("interval");
+        match msg.op.as_str() {
+            "subscribeOrderBook" | "unsubscribeOrderBook" => {}
+            "subscribeOHLCV" | "unsubscribeOHLCV" if interval.is_some() => {}
+            _ => return None,
+        }
+        Some(Topic {
+            op: msg.op.clone(),
+            symbol,
+            interval,
+        })
+    }
+
+    fn topic_line(&self, verb: &str, name: &str, topic: &Topic) -> String {
+        format!(
+            "{verb}: {} account {name} symbol {} interval {} socket {}",
+            topic.op,
+            topic.symbol,
+            topic.interval.as_deref().unwrap_or("-"),
+            self.socket
+        )
+    }
+
+    fn queue_early(&mut self, name: &str, topic: Topic) {
+        Log::info(&self.topic_line("subscription queued until join", name, &topic));
+        let queue = self.early.entry(name.to_owned()).or_default();
+        queue.push(topic);
+        if queue.len() > EARLY_TOPICS {
+            let oldest = queue.remove(0);
+            Log::warn(&self.topic_line("subscription dropped: early queue full", name, &oldest));
+        }
+    }
+
+    fn apply_early(&mut self, name: &str) {
+        for topic in self.early.remove(name).unwrap_or_default() {
+            Log::info(&self.topic_line("subscription applied at join", name, &topic));
+            self.apply_topic(name, &topic);
+        }
+    }
+
+    fn drop_early(&mut self, name: &str, reason: &str) {
+        for topic in self.early.remove(name).unwrap_or_default() {
+            Log::warn(&self.topic_line(&format!("subscription dropped: {reason}"), name, &topic));
+        }
+    }
+
+    fn apply_topic(&mut self, name: &str, topic: &Topic) {
+        let symbol = &topic.symbol;
+        let add = topic.op.starts_with("subscribe");
+        match topic.interval.as_deref() {
+            Some(interval) if topic.op.ends_with("OHLCV") => self.subscribe(
+                name,
+                json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
+                json!({"op": "unsubscribeCandles", "symbol": symbol, "interval": interval}),
+                add,
+            ),
+            _ => self.subscribe(
+                name,
+                json!({"op": "subscribeOrderBook", "symbol": symbol}),
+                json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
+                add,
+            ),
+        }
+    }
+
     fn subscribe(&mut self, name: &str, subscribe: Value, unsubscribe: Value, add: bool) {
         let key = subscribe.to_string();
         let held = self.joined[name]
@@ -1214,8 +1337,11 @@ async fn release_hold(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn pump(
     mut link: ClientLink,
+    client: u64,
+    dropped: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     handle: AccountHandle,
     name: String,
     out: Out,
@@ -1259,7 +1385,13 @@ async fn pump(
         let item = tokio::select! {
             item = link.outgoing.recv() => match item {
                 Some(item) => item,
-                None => break,
+                None => {
+                    // The engine closed this client's link; a drain or leave aborts the pump first.
+                    if !draining.load(Ordering::Relaxed) {
+                        let _ = dropped.send((name.clone(), client));
+                    }
+                    break;
+                }
             },
             _ = hold_tick.tick(), if held.is_some() && hold.is_some() => {
                 release_hold(&handle, &name, &mut hold, held.expect("holding")).await;
@@ -1472,6 +1604,129 @@ mod tests {
                 .try_acquire_owned()
                 .is_err()
         );
+    }
+
+    fn chart_subscribe(op: &str) -> AccountMsg {
+        AccountMsg {
+            op: op.into(),
+            data: json!({"symbol": "BTCUSDT", "interval": "1"}),
+            account_name: Some("acct".into()),
+        }
+    }
+
+    fn early_session(registry: Arc<Registry>) -> Session {
+        let (out, _sent, _) = Out::channel(64);
+        let identity = Identity {
+            user: Some("u".into()),
+            token: Some(("t".into(), u64::MAX)),
+            resume_from: None,
+            resumable: false,
+        };
+        Session::new(registry, Arc::new(Metrics::default()), identity, out)
+    }
+
+    /// A chart's subscribe that reached the server before its account joined was
+    /// dropped (no joined account for op subscribeOHLCV), and the chart froze.
+    #[tokio::test]
+    async fn a_chart_subscribe_before_join_is_applied_at_join() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let joined_then = |early: bool| async move {
+                    let registry = crate::accounts::tests::registry();
+                    let init = InitPayload {
+                        account_name: "acct".into(),
+                        exchange_name: "bybit".into(),
+                        key: "k".into(),
+                        ..InitPayload::default()
+                    };
+                    let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                    let account = crate::accounts::tests::held_account_running_algos(
+                        link,
+                        init.fingerprint(),
+                    );
+                    crate::accounts::tests::register(&registry, &account);
+                    settle().await;
+                    let (mut session, _sent) = sign_silent_session(registry);
+                    if early {
+                        session.msg(chart_subscribe("subscribeOHLCV")).await;
+                        assert!(!session.joined.contains_key("acct"));
+                        assert_eq!(session.early["acct"].len(), 1);
+                    }
+                    assert!(session.init(init).await.is_ok());
+                    settle().await;
+                    if !early {
+                        session.msg(chart_subscribe("subscribeOHLCV")).await;
+                    }
+                    assert!(!session.early.contains_key("acct"));
+                    let mut held: Vec<_> = session.joined["acct"]
+                        .subscriptions
+                        .clone()
+                        .into_iter()
+                        .collect();
+                    held.sort();
+                    held
+                };
+                // Before join it was dropped; now it lands exactly as one sent after join.
+                assert_eq!(joined_then(true).await, joined_then(false).await);
+            })
+            .await;
+    }
+
+    /// A page whose client queue filled was removed by the engine with no log and
+    /// no frames; the session now says so and gives it a fresh client and snapshot.
+    #[tokio::test]
+    async fn a_client_the_engine_drops_is_logged_and_re_snapshotted() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account =
+                    crate::accounts::tests::held_account_running_algos(link, init.fingerprint());
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                let (mut session, _sent) = sign_silent_session(registry);
+                let mut dropped = session.take_dropped();
+                assert!(session.init(init).await.is_ok());
+                settle().await;
+                let first = session.joined["acct"].client.id;
+                // As a full queue does: the engine side removes the peer, the session did not ask.
+                account.handle.leave(first);
+                let (name, client) =
+                    tokio::time::timeout(std::time::Duration::from_secs(3), dropped.recv())
+                        .await
+                        .expect("the drop is reported")
+                        .unwrap();
+                assert_eq!((name.as_str(), client), ("acct", first));
+                session.client_dropped(&name, client).await;
+                assert_ne!(session.joined["acct"].client.id, first);
+                // A second drop within the window is logged, not re-snapshotted again.
+                let second = session.joined["acct"].client.id;
+                session.client_dropped("acct", second).await;
+                assert_eq!(session.joined["acct"].client.id, second);
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn an_early_subscribe_whose_account_never_joins_is_dropped_not_kept() {
+        let mut session = early_session(crate::accounts::tests::registry());
+        session.msg(chart_subscribe("subscribeOHLCV")).await;
+        session.msg(chart_subscribe("unsubscribeOHLCV")).await;
+        assert_eq!(session.early["acct"].len(), 2);
+        session.drop_early("acct", "init refused");
+        assert!(!session.early.contains_key("acct"));
+        for _ in 0..(EARLY_TOPICS + 5) {
+            session.msg(chart_subscribe("subscribeOHLCV")).await;
+        }
+        assert_eq!(session.early["acct"].len(), EARLY_TOPICS);
     }
 
     /// On the wire: an algo error raised during a drop, then the resume. The op is
@@ -2402,8 +2657,11 @@ mod tests {
         ) {
             let (out, sent, _) = Out::channel(256);
             let (loaded, _loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (dropped, _dropped_rx) = tokio::sync::mpsc::unbounded_channel();
             let task = tokio::task::spawn_local(pump(
                 link,
+                client,
+                dropped,
                 handle.clone(),
                 "acct".into(),
                 out,
@@ -2649,8 +2907,11 @@ mod tests {
                     let link = handle.join(1, true).await.unwrap();
                     let (out, mut sent, _) = Out::channel(64);
                     let (loaded, mut loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+                    let (dropped, _dropped_rx) = tokio::sync::mpsc::unbounded_channel();
                     let pump = tokio::task::spawn_local(pump(
                         link,
+                        1,
+                        dropped,
                         handle.clone(),
                         "acct".into(),
                         out,
