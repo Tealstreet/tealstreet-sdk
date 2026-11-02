@@ -143,6 +143,23 @@ impl Params {
     }
 }
 
+/// The rendered request with its signature as the last parameter.
+pub(crate) fn with_signature_last(
+    method: Method,
+    url: String,
+    body: Option<String>,
+    signature: &str,
+) -> (String, Option<String>) {
+    if method != Method::Post {
+        return (format!("{url}&signature={signature}"), body);
+    }
+    let body = body.map(|json| {
+        let open = json.strip_suffix('}').unwrap_or(&json);
+        format!(r#"{open},"signature":"{signature}"}}"#)
+    });
+    (url, body)
+}
+
 /// Listen-key requests carry only the API key; every other path is signed.
 pub fn signs(path: &str) -> bool {
     path != "/openApi/user/auth/userDataStream"
