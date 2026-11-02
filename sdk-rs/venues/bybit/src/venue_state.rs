@@ -93,7 +93,12 @@ fn text_at(bytes: &[u8], at: &mut usize) -> Option<String> {
 
 fn ids_at(bytes: &[u8], at: &mut usize) -> Option<BTreeSet<String>> {
     let count = u32::from_le_bytes(take(bytes, at, 4)?.try_into().ok()?);
-    (0..count).map(|_| text_at(bytes, at)).collect()
+    let mut ids = BTreeSet::new();
+    // Inserted one by one: `collect` would add its own sort and bulk build.
+    for _ in 0..count {
+        ids.insert(text_at(bytes, at)?);
+    }
+    Some(ids)
 }
 
 #[cfg(test)]
