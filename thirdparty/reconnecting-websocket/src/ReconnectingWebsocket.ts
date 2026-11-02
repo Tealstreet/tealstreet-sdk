@@ -82,6 +82,8 @@ export class ReconnectingWebSocket {
   private _connectTimeout: any;
   private _shouldReconnect = true;
   private _connectLock = false;
+  /** Bumped by every connect; a URL provider settling for an older one is ignored. */
+  private _attempt = 0;
   private _binaryType: BinaryType = 'blob';
   private _closeCalled = false;
   private _messageQueue: Message[] = [];
@@ -400,6 +402,9 @@ export class ReconnectingWebSocket {
     }
 
     this._retryCount++;
+    // A reconnect may start while an older attempt still awaits its URL provider:
+    // that one must not open a second socket or unlock this one when it settles.
+    const attempt = ++this._attempt;
 
     this._debug('connect', this._retryCount);
     this._removeListeners();
@@ -410,6 +415,7 @@ export class ReconnectingWebSocket {
     this._wait()
       .then(() => this._getNextUrl(this._url))
       .then((url) => {
+        if (attempt !== this._attempt) return;
         // close could be called before creating the ws
         if (this._closeCalled) {
           this._connectLock = false;
@@ -471,7 +477,18 @@ export class ReconnectingWebSocket {
         this._connectTimeout = setTimeout(() => this._handleTimeout(), connectionTimeout);
       })
       .catch(() => {
+        if (attempt !== this._attempt) return;
         this._connectLock = false;
+        // A URL provider that failed (no token yet, a refused key) retries through the
+        // normal bounded reconnect delay; stopping here left the socket with no loop.
+        if (!this._closeCalled && this._shouldReconnect) {
+          const event = new Events.ErrorEvent(Error('WebSocket URL provider failed'), this);
+          if (this.onerror) {
+            this.onerror(event);
+          }
+          this._listeners.error.forEach((listener) => this._callEventListener(event, listener));
+          this._connect();
+        }
       });
   }
 

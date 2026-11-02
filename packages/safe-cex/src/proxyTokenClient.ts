@@ -164,6 +164,9 @@ function scheduleRefresh(): void {
   }, delay);
 }
 
+/** One /api/proxykey request, body included, may take this long before it is aborted. */
+const PROXY_KEY_FETCH_TIMEOUT_MS = 10_000;
+
 /**
  * Fetch proxy token from /api/proxykey
  */
@@ -183,9 +186,13 @@ async function fetchProxyToken(): Promise<string> {
   lastFetchAttempt = now;
 
   fetchPromise = (async () => {
+    // Every token caller shares this one request: a hang must not block them all.
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), PROXY_KEY_FETCH_TIMEOUT_MS);
     try {
       const res = await fetch(getProxyKeyApiUrl(), {
         credentials: 'include',
+        signal: abort.signal,
       });
 
       if (!res.ok) {
@@ -219,6 +226,7 @@ async function fetchProxyToken(): Promise<string> {
     } catch {
       return cachedToken;
     } finally {
+      clearTimeout(timeout);
       isFetching = false;
       fetchPromise = null;
     }
