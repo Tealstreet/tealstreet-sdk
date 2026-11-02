@@ -212,9 +212,31 @@ impl Harness {
             symbol: "BTCUSDT".into(),
         })
     }
+    /// A symbol cancel ends with the venue's own two by-symbol cancels; this answers
+    /// them and returns every other action, so only late repairs show as DELETEs.
+    fn swept_cancel_all(&mut self) -> (u32, Vec<Action>) {
+        let (id, next) = self.cancel_all();
+        (id, self.sweep(next))
+    }
+    fn sweep(&mut self, mut next: Vec<Action>) -> Vec<Action> {
+        let mut all = Vec::new();
+        loop {
+            let sweep = deletes(&next)
+                .into_iter()
+                .find(|r| r.url.contains("/g-orders/all?"));
+            all.extend(
+                next.into_iter()
+                    .filter(|a| !matches!(a, Action::Http(r) if r.url.contains("/g-orders/all?"))),
+            );
+            let Some(sweep) = sweep else {
+                return all;
+            };
+            next = self.reply(&sweep, 200, r#"{"code":0,"data":0,"msg":""}"#);
+        }
+    }
     fn owe(&mut self, client: &str, side: OrderSide) -> (u32, HttpRequest) {
         let (_, r) = self.lose(client, side);
-        let (id, a) = self.cancel_all();
+        let (id, a) = self.swept_cancel_all();
         assert_eq!(
             terminals(&a, id),
             vec![Ok("[]".into())],
@@ -230,7 +252,7 @@ impl Harness {
         for (id, request) in pending {
             self.lose_pending(id, &request);
         }
-        let (id, actions) = self.cancel_all();
+        let (id, actions) = self.swept_cancel_all();
         assert_eq!(terminals(&actions, id), vec![Ok("[]".into())]);
     }
     fn stream(&mut self, mut rows: Vec<Value>, raw: bool) -> Vec<Action> {
@@ -586,6 +608,8 @@ fn native_nonempty_cancel_all_retains_its_result_then_repairs_only_the_owed_orde
     let r = deletes(&a).remove(0);
     assert_eq!(p(&r, "orderID").as_deref(), Some("known"));
     let a = h.reply(&r, 200, &accept("known"));
+    assert!(terminals(&a, old).is_empty(), "the venue cancels follow");
+    let a = h.sweep(a);
     assert_eq!(terminals(&a, old), vec![Ok("[]".into())]);
     let mut row = live_row("native-a");
     row["clOrdID"] = json!("owed-a");
@@ -609,7 +633,7 @@ fn native_duplicate_stream_observation_never_resends_a_late_cancel() {
 fn concurrent_lost_placements_share_one_bulk_request_after_repeated_cancel_all() {
     let mut h = boot("Hedged", true, false);
     h.owe_concurrent(&[("owed-a", OrderSide::Buy), ("owed-b", OrderSide::Buy)]);
-    let (id, again) = h.cancel_all();
+    let (id, again) = h.swept_cancel_all();
     assert_eq!(terminals(&again, id), vec![Ok("[]".into())]);
     assert!(deletes(&again).is_empty());
     let (id, refused) = h.query_command(|command| Command::PlaceOrders {
@@ -1106,7 +1130,7 @@ fn refused_repair_admission_emits_one_manual_cancel_error() {
 fn no_owed_cancel_all_mints_nothing_and_spends_no_grant() {
     let mut h = boot("OneWay", true, false);
     for _ in 0..257 {
-        let (id, actions) = h.cancel_all();
+        let (id, actions) = h.swept_cancel_all();
         assert_eq!(terminals(&actions, id), vec![Ok("[]".into())]);
         assert!(messages(&actions, Level::Error).is_empty());
         assert!(messages(&actions, Level::Warn).is_empty());

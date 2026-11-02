@@ -254,6 +254,8 @@ enum Call {
         before: Vec<Order>,
         ids: Vec<String>,
     },
+    /// Reaches orders the store has not seen; their rows follow from the stream.
+    CancelSymbol,
     Settings {
         symbol: String,
         leverage: Option<f64>,
@@ -935,6 +937,21 @@ impl PhemexPerpetuals {
         Ok(steps)
     }
 
+    /// Untriggered first, so no conditional can trigger into an active order after that cancel.
+    /// https://github.com/phemex/phemex-api-docs/blob/master/Public-Hedged-Perpetual-API.md#cancelall
+    fn venue_cancel_steps(&self, symbol: &str) -> [Step; 2] {
+        ["true", "false"].map(|untriggered| Step {
+            method: Method::Delete,
+            path: "/g-orders/all",
+            query: query(vec![
+                ("symbol", self.native_symbol(symbol).to_owned()),
+                ("untriggered", untriggered.into()),
+            ]),
+            call: Call::CancelSymbol,
+            replacement: None,
+        })
+    }
+
     fn amend_plan(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1455,7 +1472,10 @@ impl PhemexPerpetuals {
                         if !self.account.orders_ready() {
                             Err("Phemex order snapshot is not loaded; cannot cancel every symbol order".into())
                         } else {
-                            self.cancel_plan(cx, ids)
+                            self.cancel_plan(cx, ids).map(|mut steps| {
+                                steps.extend(self.venue_cancel_steps(&symbol));
+                                steps
+                            })
                         }
                     } else {
                         Err("Phemex market not found".into())
@@ -1989,6 +2009,12 @@ impl PhemexPerpetuals {
                 self.apply_cancel_ack(cx, before, &ack);
                 return Ok(());
             }
+            // As its open-order list does, OM_ORDER_NOT_FOUND here means nothing rests.
+            if code == ORDER_NOT_FOUND
+                && let Call::CancelSymbol = &request.call
+            {
+                return Ok(());
+            }
             if code != 0 {
                 // Only documented balance/parameter/risk rejects with no order data
                 // prove no placement. Duplicate/routing/internal errors stay unknown.
@@ -2144,6 +2170,13 @@ impl PhemexPerpetuals {
                     self.apply_cancel_ack(cx, before, &ack);
                     if let Some(error) = ack.problem {
                         return Err(error);
+                    }
+                }
+                // Documented `"data":0`: a bare number that names no order.
+                Call::CancelSymbol => {
+                    let data = env.data.as_ref().map_or("null", |raw| raw.get());
+                    if data != "null" && serde_json::from_str::<u64>(data).is_err() {
+                        return Err("Phemex malformed cancel-all acknowledgement".into());
                     }
                 }
                 Call::Settings {
