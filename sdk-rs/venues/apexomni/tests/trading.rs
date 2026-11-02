@@ -421,6 +421,10 @@ fn signature_rejection_retries_once_with_same_l2_body_and_fresh_legacy_auth() {
     assert!(requests(&mut e).is_empty());
 }
 
+/// Real ApeX bodies (a user's key, 2026-11-02): no `code`; a cancel's `data` is the bare id.
+const REAL_PLACE: &str = r#"{"data":{"id":"904952998325649712","clientId":"c1","orderId":"904952998325649712","status":"PENDING"},"timeCost":21}"#;
+const REAL_CANCEL: &str = r#"{"data":"904952998325649712","timeCost":5897}"#;
+
 fn command_failures(out: &[Action]) -> Vec<String> {
     out.iter()
         .filter_map(|action| match action {
@@ -435,12 +439,7 @@ fn command_failures(out: &[Action]) -> Vec<String> {
 fn a_success_with_no_code_is_a_placed_order_not_a_failure() {
     let mut e = ready();
     let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
-    response(
-        &mut e,
-        &first,
-        NOW + 11.0,
-        r#"{"data":{"id":"840131576042881384"},"timeCost":3}"#,
-    );
+    response(&mut e, &first, NOW + 11.0, REAL_PLACE);
     let out = actions(&mut e);
     assert_eq!(command_failures(&out), Vec::<String>::new());
 }
@@ -456,7 +455,7 @@ fn a_cancel_answered_with_no_code_succeeds() {
         }),
     );
     let cancel = requests(&mut e).remove(0);
-    response(&mut e, &cancel, NOW + 11.0, r#"{"data":"abc"}"#);
+    response(&mut e, &cancel, NOW + 11.0, REAL_CANCEL);
     assert_eq!(command_failures(&actions(&mut e)), Vec::<String>::new());
 }
 
@@ -622,7 +621,7 @@ fn partial_parent_and_virtual_amendments_replace_only_remaining_and_keep_sibling
         parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
         e.drain_actions().for_each(drop);
         let cancel = amend(&mut e, id, None).remove(0);
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         let replacement = requests(&mut e).remove(0);
         let fields = form(&replacement);
         assert_eq!(fields["size"], "4");
@@ -652,7 +651,7 @@ fn amend_rechecks_remaining_when_its_fifo_turn_starts() {
         },
     );
     let cancel = without_reconcile_read(requests(&mut e)).remove(0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(
         form(&without_reconcile_read(requests(&mut e)).remove(0))["size"],
         "2"
@@ -673,7 +672,7 @@ fn in_flight_amend_counts_same_execution_once_in_both_topic_orders() {
         if !fill_first {
             amend_fill(&mut e, socket, NOW + 11.0, 1.0);
         }
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         assert_eq!(form(&requests(&mut e).remove(0))["size"], "3");
     }
 }
@@ -685,7 +684,7 @@ fn delayed_pre_amend_fill_does_not_reduce_the_captured_remaining_again() {
     e.drain_actions().for_each(drop);
     let cancel = amend(&mut e, "parent", None).remove(0);
     amend_fill(&mut e, socket, NOW + 4.0, 6.0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "4");
 }
 
@@ -697,7 +696,7 @@ fn new_genuine_amend_fill_counts_despite_outstanding_old_synthetic_coverage() {
     e.drain_actions().for_each(drop);
     let cancel = amend(&mut e, "parent", None).remove(0);
     amend_fill(&mut e, socket, NOW + 11.0, 1.0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
 }
 
@@ -709,7 +708,7 @@ fn distinct_execution_after_a_cumulative_report_reduces_remaining_again() {
     let cancel = amend(&mut e, "parent", None).remove(0);
     parent_update(&mut e, socket, NOW + 11.0, 7.0, "OPEN", false);
     amend_fill(&mut e, socket, NOW + 12.0, 1.0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
 }
 
@@ -721,7 +720,7 @@ fn genuine_full_fill_during_cancel_suppresses_explicit_replacement_quantity() {
     let cancel = amend(&mut e, "parent", Some(8.5)).remove(0);
     amend_fill(&mut e, socket, NOW + 11.0, 4.0);
     e.drain_actions().for_each(drop);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     let actions = actions(&mut e);
     assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
     assert!(http(actions).is_empty());
@@ -784,7 +783,7 @@ fn own_cancel_event_keeps_replacement_but_full_fill_suppresses_it() {
         let cancel = amend(&mut e, "parent", None).remove(0);
         parent_update(&mut e, socket, NOW + 12.0, filled, status, false);
         e.drain_actions().for_each(drop);
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         let actions = actions(&mut e);
         if status == "FILLED" {
             assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
@@ -802,7 +801,7 @@ fn an_explicit_total_comes_down_by_an_additional_fill() {
     e.drain_actions().for_each(drop);
     let cancel = amend(&mut e, "parent", Some(8.5)).remove(0);
     parent_update(&mut e, socket, NOW + 12.0, 7.0, "OPEN", false);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "1.5");
 }
 
@@ -914,7 +913,7 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
     // An additional fill discards the prebuilt replacement and selects new signed IDs.
     amend_fill(&mut e, socket, NOW + 11.0, 1.0);
     e.drain_actions().for_each(drop);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     let out: Vec<_> = actions(&mut e);
     let write = out
         .iter()
@@ -952,7 +951,7 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
     e.drain_actions().for_each(drop);
     let cancel = amend(&mut e, "parent", None).remove(0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     let replacement = requests(&mut e).remove(0);
     response(
         &mut e,
@@ -990,7 +989,7 @@ fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
         parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
         e.drain_actions().for_each(drop);
         let cancel = amend(&mut e, id, None).remove(0);
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         let replacement = requests(&mut e).remove(0);
         response(
             &mut e,
@@ -1102,7 +1101,7 @@ fn default_decimal_amendment_subtracts_late_fill_without_float_noise() {
     let cancel = amend(&mut e, "parent", None).remove(0);
     ws(&mut e, socket, NOW + 12.0, &decimal_parent("0.2"));
     e.drain_actions().for_each(drop);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "0.1");
 }
 
