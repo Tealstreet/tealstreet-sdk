@@ -443,7 +443,10 @@ impl Kraken {
             {
                 return Err("Invalid Kraken amendment size".into());
             }
-            replacement.remaining = replacement.amount - original.filled;
+            replacement.remaining = adjust(
+                replacement.amount - original.filled,
+                market.precision.amount,
+            )?;
             // Kraken's edit size is the unfilled size, not the total.
             params.push(("size", number(replacement.remaining)));
         }
@@ -715,8 +718,11 @@ impl Kraken {
                 let status = reply
                     .send
                     .ok_or_else(|| unproven("Kraken placement missing sendStatus"))?;
-                if !matches!(status.status.as_str(), "placed" | "filled")
-                    || status.order_id.is_empty()
+                // The sendStatus enum lists partiallyFilled: the entry is live and its brackets follow.
+                if !matches!(
+                    status.status.as_str(),
+                    "placed" | "partiallyFilled" | "filled"
+                ) || status.order_id.is_empty()
                 {
                     return Err(status_failure(
                         format!("Kraken placement rejected or incomplete: {}", status.status),
@@ -784,9 +790,13 @@ impl Kraken {
                 let mut seen = HashSet::new();
                 let mut error: Option<VenueError> = None;
                 let mut cancelled = false;
-                for status in statuses {
+                for mut status in statuses {
                     // Already gone counts as done; the reconcile settles how it ended.
-                    let gone = status.status == "notFound";
+                    let gone = matches!(status.status.as_str(), "notFound" | "filled");
+                    // A lone cancel's notFound may omit order_id, as the docs allow.
+                    if gone && ids.len() == 1 && status.order_id.is_empty() {
+                        status.order_id = ids[0].clone();
+                    }
                     if (status.status == "cancelled" || gone)
                         && ids.contains(&status.order_id)
                         && seen.insert(status.order_id.clone())
@@ -1129,6 +1139,7 @@ fn status_failure(message: String, status: &str, edit: bool) -> VenueError {
             | "maxPositionViolation"
             | "outsidePriceCollar"
             | "wouldIncreasePriceDispersion"
+            | "wouldIncreasePriceDislocation"
             | "notFound"
             | "orderForEditNotAStop"
             | "orderForEditNotFound"
