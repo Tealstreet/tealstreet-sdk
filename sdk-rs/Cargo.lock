@@ -3908,6 +3908,7 @@ dependencies = [
  "safe-cex-chaser",
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-exchange-server",
  "safe-cex-exec",
  "safe-cex-native",
  "safe-cex-remote-signer",

@@ -27,7 +27,12 @@ getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+[features]
+# Test accounts and unsigned proxy tokens for the integration tests; never in the binary.
+test-support = ["safe-cex-engine/test-support"]
+
 [dev-dependencies]
+safe-cex-exchange-server = { path = ".", features = ["test-support"] }
 safe-cex-engine = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.53.3", features = ["test-util"] }
 safe-cex-venues = { workspace = true, features = ["hyperliquid"] }

@@ -1,14 +1,12 @@
 //! Loopback tests of the routes, auth and unauthenticated policy; no venue I/O.
+mod support;
+
 use futures_util::{SinkExt, StreamExt};
-use safe_cex_exchange_server::accounts::Registry;
 use safe_cex_exchange_server::auth::{PROXY_PUBLIC_KEY, Verifier};
-use safe_cex_exchange_server::config::Config;
-use safe_cex_exchange_server::http::{App, drain, router};
-use safe_cex_exchange_server::state::Metrics;
-use safe_cex_exchange_server::threads::EngineThreads;
-use std::net::SocketAddr;
+use safe_cex_exchange_server::http::{App, drain};
 use std::sync::Arc;
 use std::time::Duration;
+use support::{get, next_close, post};
 use tokio_tungstenite::tungstenite::Message;
 
 async fn server() -> String {
@@ -16,43 +14,11 @@ async fn server() -> String {
 }
 
 async fn server_app() -> (String, Arc<App>) {
-    let config = Config {
-        port: 0,
-        region: Some("tyo".into()),
-        release: Some("test".into()),
-        engine_threads: 1,
-        max_connections: 16,
-        max_public_per_ip: 2,
-        idle_timeout: Duration::from_secs(30),
-        resume_grace: Duration::from_secs(60),
-        account_flush: Duration::from_millis(60),
-    };
-    let app = App {
-        registry: Arc::new(Registry::new(
-            EngineThreads::start(1).unwrap(),
-            config.account_flush,
-            config.resume_grace,
-        )),
-        metrics: Arc::new(Metrics::default()),
-        verifier: Arc::new(Verifier::new(PROXY_PUBLIC_KEY).unwrap()),
-        config,
-        started: std::time::Instant::now(),
-        public_per_ip: Default::default(),
-        closing: tokio::sync::watch::channel(false).0,
-    };
-    let app = Arc::new(app);
-    let served = app.clone();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            router(served).into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await
-        .unwrap();
-    });
-    (address.to_string(), app)
+    let app = support::app(
+        support::config(Duration::from_secs(60)),
+        Verifier::new(PROXY_PUBLIC_KEY).unwrap(),
+    );
+    (support::serve(app.clone()).await, app)
 }
 
 #[tokio::test]
@@ -70,23 +36,6 @@ async fn a_drain_closes_sockets_1001() {
         }
     };
     assert_eq!(u16::from(closed.unwrap().code), 1001);
-}
-
-/// The next close frame, or a panic naming what came instead.
-async fn next_close(
-    socket: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-) -> (u16, String) {
-    loop {
-        match tokio::time::timeout(Duration::from_secs(5), socket.next()).await {
-            Ok(Some(Ok(Message::Close(Some(frame))))) => {
-                break (u16::from(frame.code), frame.reason.to_string());
-            }
-            Ok(Some(Ok(_))) => {}
-            other => panic!("no close frame: {other:?}"),
-        }
-    }
 }
 
 const PUBLIC_INIT: &str =
@@ -147,28 +96,6 @@ async fn admin_routes_refuse_a_request_the_edge_forwarded() {
     let (status, body) = get(&address, "/health").await;
     assert_eq!(status, 200);
     assert!(body.contains(r#""draining":false"#), "{body}");
-}
-
-async fn post(address: &str, path: &str, headers: &str) -> (u16, String) {
-    request(address, "POST", path, headers).await
-}
-
-async fn get(address: &str, path: &str) -> (u16, String) {
-    request(address, "GET", path, "").await
-}
-
-async fn request(address: &str, method: &str, path: &str, headers: &str) -> (u16, String) {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
-    let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n{headers}Connection: close\r\n\r\n"
-    );
-    stream.write_all(request.as_bytes()).await.unwrap();
-    let mut response = String::new();
-    stream.read_to_string(&mut response).await.unwrap();
-    let status = response[9..12].parse().unwrap();
-    let body = response.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
-    (status, body)
 }
 
 #[tokio::test]
