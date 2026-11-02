@@ -2685,7 +2685,7 @@ impl BybitLinear {
                                     )
                                 } else {
                                     format!(
-                                        "The Bybit private API was rejected ({message}) — trading is unavailable"
+                                        "Bybit: the private API was rejected ({message}) — trading is unavailable"
                                     )
                                 };
                                 cx.notice_error(Level::Error, code::REQUEST_FAILED, &failed(text));
