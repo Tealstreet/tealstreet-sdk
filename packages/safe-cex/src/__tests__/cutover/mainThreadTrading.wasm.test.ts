@@ -22,6 +22,23 @@ vi.mock('../../utils/virtualClock', async (original) => {
   return { ...actual, virtualClock: { ...actual.virtualClock, start: async () => {} } };
 });
 
+const positionRisk = (positionAmt: string) =>
+  JSON.stringify([
+    {
+      symbol: 'BTCUSDT',
+      positionSide: 'BOTH',
+      positionAmt,
+      entryPrice: '95',
+      unRealizedProfit: '2.5',
+      liquidationPrice: '0',
+      notional: '50',
+      markPrice: '100',
+      marginType: 'cross',
+      leverage: '20',
+      updateTime: 1700000000000,
+    },
+  ]);
+
 const RESPONSES: Record<string, string> = {
   exchangeInfo: JSON.stringify({
     symbols: [
@@ -47,21 +64,7 @@ const RESPONSES: Record<string, string> = {
   leverageBracket: '[{"symbol":"BTCUSDT","brackets":[{"bracket":1,"initialLeverage":125}]}]',
   listenKey: '{"listenKey":"key"}',
   dual: '{"dualSidePosition":false}',
-  positionRisk: JSON.stringify([
-    {
-      symbol: 'BTCUSDT',
-      positionSide: 'BOTH',
-      positionAmt: '0.5',
-      entryPrice: '95',
-      unRealizedProfit: '2.5',
-      liquidationPrice: '0',
-      notional: '50',
-      markPrice: '100',
-      marginType: 'cross',
-      leverage: '20',
-      updateTime: 1700000000000,
-    },
-  ]),
+  positionRisk: positionRisk('0.5'),
   symbolConfig: '[{"symbol":"BTCUSDT","marginType":"CROSSED","leverage":20}]',
   account:
     '{"assets":[{"asset":"USDT","walletBalance":"1000","availableBalance":"900","initialMargin":"100","unrealizedProfit":"0"}]}',
@@ -88,8 +91,9 @@ const RESPONSES: Record<string, string> = {
 };
 
 /** Canned Binance USD-M venue; records every request the worker's engine sends. */
-const venue = () => {
+const venue = (positionRead?: (closes: number) => { status: number; body: string }) => {
   const requests: string[] = [];
+  let closes = 0;
   // A market close flattens the account: Nuke reads flat back from the stream before it reports.
   const flatten: Array<() => void> = [];
   const transport: Transport = {
@@ -109,7 +113,12 @@ const venue = () => {
       const parsed = new URL(url);
       const name = parsed.pathname.split('/').pop()!;
       if (method === 'POST' && parsed.searchParams.get('type') === 'MARKET') {
+        closes += 1;
         setTimeout(() => flatten.forEach((send) => send()), 0);
+      }
+      if (name === 'positionRisk' && closes > 0) {
+        const { status, body } = positionRead?.(closes) ?? { status: 200, body: positionRisk('0') };
+        return { status, headers: '', body: new TextEncoder().encode(body) };
       }
       // A single cancel is acknowledged with the cancelled order, as Binance USD-M does.
       const body =
@@ -165,11 +174,11 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
   });
 
   // The web posts full `store` payloads today; `acceptsFrames` is the opt-in frame mode.
-  const start = async (frames: boolean) => {
+  const start = async (frames: boolean, positionRead?: Parameters<typeof venue>[0]) => {
     // SDK setup supplies a minimal window in Node; the engine generates Binance
     // client order IDs from the first crypto source it finds there.
     Object.defineProperty(window, 'crypto', { configurable: true, value: webcrypto });
-    const tape = venue();
+    const tape = venue(positionRead);
     const loader = vi.fn(loadNodeEngine);
     setWasmEngineLoader(loader);
     setRustEngineTransport(() => tape.transport);
@@ -253,6 +262,39 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
       expect(nuke.some((write) => write.startsWith('DELETE') && write.includes('BTCUSDT'))).toBe(true);
     },
   );
+
+  const closesIn = (writes: string[]) => writes.filter((write) => write.includes('type=MARKET'));
+
+  it.each([
+    ['frame', true],
+    ['store payload', false],
+  ])('Nuke sends a second close sized from a read after the first (%s bridge)', async (_mode, frames) => {
+    // The stream reports flat after the first close; only the venue read knows better.
+    const { tape } = await start(frames, (closes) => ({
+      status: 200,
+      body: positionRisk(closes === 1 ? '0.2' : '0'),
+    }));
+    await main!.nuke();
+    const closes = closesIn(tape.writes());
+    expect(closes).toHaveLength(2);
+    expect(closes[0]).toMatch(/quantity=0\.5/);
+    expect(closes[1]).toMatch(/quantity=0\.2/);
+    expect(closes[1]).toMatch(/reduceOnly=true/);
+    const secondClose = tape.requests.indexOf(closes[1]);
+    const firstClose = tape.requests.indexOf(closes[0]);
+    expect(tape.requests.slice(firstClose, secondClose).some((request) => request.includes('/positionRisk'))).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ['frame', true],
+    ['store payload', false],
+  ])('Nuke sends no second close when the read fails, and says not confirmed (%s bridge)', async (_mode, frames) => {
+    const { tape } = await start(frames, () => ({ status: 500, body: '{"code":-1000,"msg":"down"}' }));
+    await expect(main!.nuke()).rejects.toThrow(/could not confirm the account is flat/);
+    expect(closesIn(tape.writes())).toHaveLength(1);
+  });
 
   it('reads public trades and adopts capabilities from the worker without a main-thread engine', async () => {
     const { tape, loader } = await start(true);
