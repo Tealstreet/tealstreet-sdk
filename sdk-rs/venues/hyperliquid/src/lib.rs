@@ -1078,6 +1078,7 @@ impl Venue for Hyperliquid {
                 fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
                 client_order_lookup: true,
                 schedule_cancel: true,
+                fresh_positions: true,
                 ..safe_cex_engine::Capabilities::BASE
             }
         }
@@ -1286,11 +1287,14 @@ impl Venue for Hyperliquid {
         }
         // Trade answers keep their status so a refusal can be told from a lost write.
         if !(200..300).contains(&response.status) && !matches!(pending, Pending::Trade(_)) {
-            self.on_request_failed(
-                cx,
-                pending,
-                &format!("Hyperliquid HTTP {}: {}", response.status, response.body),
-            );
+            let message = format!("Hyperliquid HTTP {}: {}", response.status, response.body);
+            if response.status == 429 {
+                let error = safe_cex_engine::VenueError::new(message.clone())
+                    .kind(safe_cex_engine::ErrorKind::RateLimited);
+                self.account.read_error = Some(error);
+            }
+            self.on_request_failed(cx, pending, &message);
+            self.account.read_error = None;
             return;
         }
         match pending {
@@ -1626,6 +1630,7 @@ impl Venue for Hyperliquid {
         _pending: Vec<Pending>,
     ) {
         self.discard_history_owner(owner);
+        self.account.fresh_positions.retired(owner);
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
@@ -1644,7 +1649,11 @@ impl Venue for Hyperliquid {
             Pending::ManagedCandles(read) => {
                 let _ = cx.fail_context(&read.context, error);
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1665,6 +1674,7 @@ impl Venue for Hyperliquid {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::ScheduleCancel { time_ms } => {
                 self.schedule_cancel(cx, command, time_ms)
             }

@@ -648,7 +648,26 @@ impl Venue for Bingx {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
             leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match (action, &self.credentials) {
+            (safe_cex_engine::VenueAction::ReadPositions, Some(credentials)) => {
+                self.account.read_positions(cx, credentials);
+            }
+            (safe_cex_engine::VenueAction::ReadPositions, None) => {
+                let error = safe_cex_engine::VenueError::new("BingX account is not loaded")
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput);
+                safe_cex_engine::fresh_positions::refuse(cx, error);
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
     fn account_auth_outcome(
@@ -1121,6 +1140,7 @@ impl Venue for Bingx {
                 {
                     cx.startup_read_refused(&error);
                 }
+                self.account.read_error = account::read_refusal(&response);
                 self.on_request_failed(
                     cx,
                     pending,
@@ -1145,7 +1165,11 @@ impl Venue for Bingx {
                 self.trading
                     .on_sign_failed(cx, self.credentials.as_ref(), request, error)
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
     fn on_http_owner_retired(
@@ -1302,6 +1326,7 @@ impl Venue for Bingx {
         _pending: Vec<Pending>,
     ) {
         self.history.retire(owner);
+        self.account.fresh_positions.retired(owner);
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

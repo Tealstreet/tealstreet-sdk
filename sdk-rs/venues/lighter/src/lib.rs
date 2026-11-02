@@ -850,8 +850,16 @@ impl Venue for Lighter {
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             account_tier: true,
             account: safe_cex_engine::AccountLookup::Query,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn guard_order_mutations(&self) -> bool {
         true
@@ -1568,7 +1576,9 @@ impl Venue for Lighter {
             Pending::Trade(request) => self.trade_error(cx, request, error),
             Pending::Account { context, request } => {
                 let _ = cx.finish_http_context(&context);
+                self.account.read_error = Some(error.clone());
                 self.account_failed(cx, request, &error.message);
+                self.account.read_error = None;
             }
             Pending::History(request) => self.history_transport_failed(cx, request, error),
             Pending::Tier { plan, .. } => {
@@ -1724,6 +1734,10 @@ impl Venue for Lighter {
         command: safe_cex_engine::CommandId,
         action: safe_cex_engine::VenueAction,
     ) {
+        if matches!(action, safe_cex_engine::VenueAction::ReadPositions) {
+            self.read_positions(cx);
+            return;
+        }
         self.tier_action(cx, command, action);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

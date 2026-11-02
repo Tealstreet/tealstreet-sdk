@@ -628,6 +628,7 @@ impl Venue for Blofin {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account_margin_type: true,
             closed_positions: true,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -959,14 +960,15 @@ impl Venue for Blofin {
                     };
                 self.public_failure(cx, context, *pending, error);
             }
-            other => self.delivered_failure(
-                cx,
-                other,
-                &format!(
+            other => {
+                let message = format!(
                     "response did not contain the expected list: {}",
                     response.body
-                ),
-            ),
+                );
+                self.account.read_error = account::read_refusal(&response, &message);
+                self.delivered_failure(cx, other, &message);
+                self.account.read_error = None;
+            }
         }
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
@@ -990,7 +992,11 @@ impl Venue for Blofin {
             Pending::Closed(request) => Self::closed_failed(cx, request, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, true),
-            other => self.on_request_failed(cx, other, &error.message),
+            other => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, other, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1056,6 +1062,13 @@ impl Venue for Blofin {
         self.account_timer(cx, timer);
     }
 
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
+    }
     fn on_venue_action(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1063,6 +1076,7 @@ impl Venue for Blofin {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

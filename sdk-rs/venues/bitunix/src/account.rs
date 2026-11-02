@@ -17,7 +17,7 @@ use safe_cex_engine::selected_read::{
     AdmittedRead, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Method, Response, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, VenueError};
 use std::collections::{HashMap, HashSet};
 
 pub const ACCOUNT: &str = "/api/v1/futures/account";
@@ -232,6 +232,9 @@ pub struct AccountState {
     /// Current ordinary or command-owned read; background refresh cannot supersede it.
     pub position_read: Option<(u64, f64)>,
     pub position_dirty: bool,
+    pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<safe_cex_engine::VenueError>,
     pub serials: [u64; 4],
     pub initial_orders: [Option<Read>; 2],
     pub order_reads: [Option<OrderReadProgress>; 2],
@@ -692,6 +695,28 @@ impl BitunixFutures {
         }
         self.signed_request(cx, path, params, Pending::Private(read));
     }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.slots.has_primary() || self.account.tick.is_none() {
+            let error = VenueError::new("Bitunix account is not loaded")
+                .kind(safe_cex_engine::ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.serials[1] as u32 + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.read_axis(cx, Axis::Positions);
+        }
+    }
+
+    /// A waiter this read predates gets a new one at once, not the debounce.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, serial: u32) {
+        if self.account.fresh_positions.predates(0, serial) {
+            self.read_axis(cx, Axis::Positions);
+        }
+    }
+
     /// Like TS listenOHLCV: read a symbol's leverage and margin mode once,
     /// so a flat symbol reports its real settings instead of defaults.
     pub(crate) fn read_symbol_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -777,7 +802,11 @@ impl BitunixFutures {
                 };
                 self.trade_error(cx, request, crate::error::not_sent(error, kind));
             }
-            Pending::Private(read) => self.account_failed(cx, read, None),
+            Pending::Private(read) => {
+                self.account.read_error = Some(VenueError::new(error));
+                self.account_failed(cx, read, None);
+                self.account.read_error = None;
+            }
             Pending::SymbolSettings {
                 symbol,
                 write_revision,
@@ -970,7 +999,7 @@ impl BitunixFutures {
     pub(crate) fn account_item(&mut self, cx: &mut Cx<'_, Pending>, read: &mut Read, item: &str) {
         let result = match read.axis {
             Axis::Positions => serde_json::from_str::<PositionRow<'_>>(item).map(|p| {
-                if p.symbol.is_empty() {
+                if p.symbol.is_empty() || !p.has_quantity() {
                     read.reject_position(cx, item);
                     return;
                 }
@@ -1118,6 +1147,20 @@ impl BitunixFutures {
                 response.map_or(0.0, crate::recovery::pause),
             );
             crate::recovery::notice(cx, response);
+            if read.axis == Axis::Positions {
+                let error = response.map_or_else(
+                    || {
+                        self.account
+                            .read_error
+                            .take()
+                            .unwrap_or_else(|| VenueError::new("Bitunix positions read failed"))
+                    },
+                    crate::recovery::failed,
+                );
+                let serial = read.serial as u32;
+                self.account.fresh_positions.failed(cx, 0, serial, &error);
+                self.read_fresh_positions_again(cx, serial);
+            }
         }
         if let Some(command) = read.after {
             self.prepared(cx, command, false, None);
@@ -1301,7 +1344,13 @@ impl BitunixFutures {
                 }
             }
             Axis::Positions => {
-                if read.position_rejected.any() && !cx.store.loaded().positions {
+                let serial = read.serial as u32;
+                let rejected = read.position_rejected.any();
+                if rejected {
+                    let error = VenueError::new("Bitunix positions: a row could not be mapped");
+                    self.account.fresh_positions.failed(cx, 0, serial, &error);
+                }
+                if rejected && !cx.store.loaded().positions {
                     cx.notice(
                         Level::Warn,
                         code::SNAPSHOT_DISCARDED,
@@ -1372,7 +1421,11 @@ impl BitunixFutures {
                 self.account.position_ids = identities;
                 held.extend(read.positions);
                 cx.store.set_positions(held);
+                if !rejected {
+                    self.account.fresh_positions.committed(cx, 0, serial);
+                }
                 self.read_axis(cx, Axis::Tpsl);
+                self.read_fresh_positions_again(cx, serial);
             }
             Axis::Orders | Axis::Tpsl => {
                 self.commit_orders(cx, read);

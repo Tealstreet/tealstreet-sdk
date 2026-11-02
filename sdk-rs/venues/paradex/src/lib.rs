@@ -133,8 +133,27 @@ impl Venue for Paradex {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account: safe_cex_engine::AccountLookup::Query,
             order_book_query: true,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.account.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);
@@ -363,7 +382,11 @@ impl Venue for Paradex {
                 self.poll_candles_failed(cx, request, error);
                 self.failures(cx);
             }
-            other => self.on_request_failed(cx, other, &error.message),
+            other => {
+                self.account.positions_error = Some(error.clone());
+                self.on_request_failed(cx, other, &error.message);
+                self.account.positions_error = None;
+            }
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

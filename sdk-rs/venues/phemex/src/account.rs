@@ -7,6 +7,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::credential_selection::PrimaryReason;
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -133,6 +134,15 @@ struct OrdersPage<'a> {
     rows: Vec<&'a RawValue>,
 }
 /// A read refused over the key: HTTP or body 401 or 403.
+/// A typed cause for a failing account read: a refused key, or a rate limit.
+pub(crate) fn read_refusal(response: &Response<'_>) -> Option<safe_cex_engine::VenueError> {
+    key_refusal(response).or_else(|| {
+        (response.status == 429).then(|| {
+            safe_cex_engine::VenueError::new(format!("Phemex HTTP 429: {}", response.body))
+                .kind(safe_cex_engine::ErrorKind::RateLimited)
+        })
+    })
+}
 pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::VenueError> {
     #[derive(Deserialize)]
     struct Evidence<'a> {
@@ -155,8 +165,14 @@ pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::Ve
             .venue_message(detail),
     )
 }
+/// How soon `readPositions` tries again after a read a newer stream frame overrode.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
+const FRESH_PAUSED: &str = "Phemex account reads are paused after a rate limit";
 #[derive(Default)]
 pub struct State {
+    pub(crate) fresh_positions: FreshPositions,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<safe_cex_engine::VenueError>,
     started: bool,
     cycle: u64,
     pending: u8,
@@ -664,6 +680,61 @@ impl PhemexPerpetuals {
                 ..Default::default()
             },
         ));
+        self.read_fresh_positions_again(cx);
+    }
+    /// `readPositions`: wait on each currency's next read. One already out may
+    /// predate the close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started || self.credentials.is_none() || self.options.public_data_only {
+            let error = safe_cex_engine::VenueError::new("Phemex account is not loaded")
+                .kind(safe_cex_engine::ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        if cx.now < self.paused_until {
+            let wait = self.paused_until - cx.now;
+            let error = safe_cex_engine::fresh_positions::rate_limited(FRESH_PAUSED, wait);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.cycle as u32 + 1;
+        let legs = (0..CURRENCIES.len() as u8).map(|key| (key, need)).collect();
+        if self.account.fresh_positions.admit(cx, legs) {
+            self.retry_fresh_positions(cx);
+        }
+    }
+    /// At once for a waiter the last cycle predates, else once a stream frame
+    /// that held the read can have passed.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        let read = self.account.cycle as u32;
+        let keys = 0..CURRENCIES.len() as u8;
+        let fresh = &self.account.fresh_positions;
+        if keys.clone().any(|key| fresh.predates(key, read)) {
+            self.retry_fresh_positions(cx);
+        } else if keys.into_iter().any(|key| fresh.owed(key)) {
+            if let Some(timer) = self.account.refresh.take() {
+                cx.clear_timer(timer);
+            }
+            self.account.refresh = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
+    }
+    fn retry_fresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now < self.paused_until {
+            let wait = self.paused_until - cx.now;
+            let error = safe_cex_engine::fresh_positions::rate_limited(FRESH_PAUSED, wait);
+            for key in 0..CURRENCIES.len() as u8 {
+                self.account
+                    .fresh_positions
+                    .failed(cx, key, u32::MAX, &error);
+            }
+            return;
+        }
+        if self.account.pending == 0 {
+            if let Some(timer) = self.account.refresh.take() {
+                cx.clear_timer(timer);
+            }
+            self.account_cycle(cx);
+        }
     }
     fn currency_read_current(&self, read: &Background<Request>) -> bool {
         read.native.cycle == self.account.cycle
@@ -914,9 +985,12 @@ impl PhemexPerpetuals {
             return;
         }
         let currency = request.currency;
+        let read = request.cycle as u32;
+        self.account.read_error = None;
         if request.write_revision == self.account.write_revision
             && request.slice_revision == self.account.slices[currency].revision
         {
+            let rejected = request.positions.rejected() != 0;
             let (mut positions, slice): (Vec<_>, Vec<_>) =
                 cx.store.positions().iter().cloned().partition(|p| {
                     cx.store
@@ -990,6 +1064,14 @@ impl PhemexPerpetuals {
             };
             self.account.slices[currency].revision += 1;
             self.account_publish_balance(cx);
+            let key = currency as u8;
+            if rejected {
+                let error =
+                    safe_cex_engine::VenueError::new("Phemex positions: a row could not be mapped");
+                self.account.fresh_positions.failed(cx, key, read, &error);
+            } else {
+                self.account.fresh_positions.committed(cx, key, read);
+            }
         }
         self.account_finish(cx, currency, false);
     }
@@ -1002,14 +1084,17 @@ impl PhemexPerpetuals {
         if request.cycle != self.account.cycle {
             return;
         }
+        let currency = CURRENCIES[request.currency];
         cx.notice(
             Level::Warn,
             code::REQUEST_FAILED,
-            format!(
-                "Phemex {} account read: {error}",
-                CURRENCIES[request.currency]
-            ),
+            format!("Phemex {currency} account read: {error}"),
         );
+        let fresh = self.account.read_error.take().unwrap_or_else(|| {
+            safe_cex_engine::VenueError::new(format!("Phemex {currency} positions: {error}"))
+        });
+        let (key, read) = (request.currency as u8, request.cycle as u32);
+        self.account.fresh_positions.failed(cx, key, read, &fresh);
         self.account_finish(cx, request.currency, true);
     }
     fn account_publish_balance(&self, cx: &mut Cx<'_, Pending>) {
@@ -2208,6 +2293,14 @@ impl PhemexPerpetuals {
                     let _ = cx.finish_http_context(&context);
                 }
             }
+            let lost = safe_cex_engine::VenueError::new(
+                "Phemex positions read exceeded its 20-second deadline",
+            )
+            .kind(safe_cex_engine::ErrorKind::Timeout);
+            for key in 0..CURRENCIES.len() as u8 {
+                let read = self.account.cycle as u32;
+                self.account.fresh_positions.failed(cx, key, read, &lost);
+            }
             self.account.cycle += 1;
             self.account.pending = 0;
             self.account.failures = self.account.failures.saturating_add(1);
@@ -2223,6 +2316,7 @@ impl PhemexPerpetuals {
                     ..Default::default()
                 },
             ));
+            self.read_fresh_positions_again(cx);
             return true;
         }
         false

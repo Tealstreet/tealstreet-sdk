@@ -461,6 +461,7 @@ impl Venue for PhemexPerpetuals {
             client_order_lookup: true,
             account: safe_cex_engine::AccountLookup::Query,
             order_history_needs_symbol: true,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -803,6 +804,9 @@ impl Venue for PhemexPerpetuals {
             self.planned_trade_response(cx, read, r);
             return;
         }
+        if matches!(p, Pending::Account(_)) {
+            self.account.read_error = account::read_refusal(&r);
+        }
         if r.status >= 400 {
             self.fail_pending(cx, p, &format!("HTTP {}: {}", r.status, r.body));
             return;
@@ -971,7 +975,11 @@ impl Venue for PhemexPerpetuals {
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
     fn on_stream_error(
@@ -981,6 +989,9 @@ impl Venue for PhemexPerpetuals {
         response: Response<'_>,
     ) {
         self.settle_retired_trading(cx);
+        if matches!(pending, Pending::Account(_)) {
+            self.account.read_error = account::read_refusal(&response);
+        }
         if matches!(pending, Pending::Account(_))
             && let Some(error) = account::key_refusal(&response)
         {
@@ -1071,6 +1082,17 @@ impl Venue for PhemexPerpetuals {
         safe_cex_engine::request_context::ReconciliationData::new(String::new())
     }
 
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
     fn read_root_retired(
         &mut self,
         owner: safe_cex_engine::request_context::Owner,
@@ -1078,6 +1100,7 @@ impl Venue for PhemexPerpetuals {
     ) {
         self.retire_history(owner);
         self.retire_income(owner);
+        self.account.fresh_positions.retired(owner);
     }
     fn on_http_plan_ready(
         &mut self,

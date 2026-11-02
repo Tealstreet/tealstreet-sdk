@@ -3,9 +3,10 @@ use crate::{Kraken, Pending, wire};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
+use safe_cex_engine::fresh_positions::{self, FreshPositions};
 use safe_cex_engine::log::code;
 use safe_cex_engine::{
-    Cx, Fill, Method, Response, SocketId, TimerId,
+    Cx, ErrorKind, Fill, Method, Response, SocketId, TimerId, VenueError,
     json::{self, ArrayAt},
     model::*,
 };
@@ -72,6 +73,8 @@ pub struct Request {
     settings: Vec<(String, Option<f64>)>,
     /// False on a structural failure or held catalogue exposure: nothing commits.
     valid: bool,
+    /// The number of a positions read, so `readPositions` can name one it may trust.
+    read: u32,
 }
 impl Request {
     fn new(scope: Scope, revision: u64, settings_revision: u64) -> Self {
@@ -83,6 +86,7 @@ impl Request {
             positions: SnapshotBuilder::default(),
             settings: vec![],
             valid: true,
+            read: 0,
         }
     }
 }
@@ -101,6 +105,10 @@ pub struct Account {
     settings_write_revision: u64,
     orders_revision: u64,
     positions_revision: u64,
+    positions_reads: u32,
+    pub(crate) fresh_positions: FreshPositions,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     terminal: RecentIds<16384>,
     inflight: HashSet<u8>,
     orders_reconcile: bool,
@@ -660,11 +668,13 @@ impl Kraken {
                 Scope::Settings => self.account.settings_revision,
                 Scope::Balance => 0,
             };
-            let request = Pending::Account(Request::new(
-                scope,
-                revision,
-                self.account.settings_revision,
-            ));
+            let mut request = Request::new(scope, revision, self.account.settings_revision);
+            if scope == Scope::Positions {
+                self.account.positions_reads += 1;
+                request.read = self.account.positions_reads;
+            }
+            let read = request.read;
+            let request = Pending::Account(request);
             let result = if let Some(array) = array {
                 self.signed_streamed(
                     cx,
@@ -679,6 +689,10 @@ impl Kraken {
             };
             if let Err(error) = result {
                 self.account.inflight.remove(&key);
+                if scope == Scope::Positions {
+                    let fresh = VenueError::new(error.clone());
+                    self.account.fresh_positions.failed(cx, 0, read, &fresh);
+                }
                 cx.retried_failure("kraken.account:634", error);
             }
         }
@@ -1414,6 +1428,12 @@ impl Kraken {
                 "kraken.account:1266",
                 "Kraken account reconciliation failed",
             );
+            if request.scope == Scope::Positions {
+                let error = read_error(response);
+                let read = request.read;
+                self.account.fresh_positions.failed(cx, 0, read, &error);
+                self.read_fresh_positions_again(cx, read);
+            }
             self.account_schedule_heal(cx);
             return;
         }
@@ -1433,8 +1453,10 @@ impl Kraken {
                 }
             }
             Scope::Positions => {
+                let read = request.read;
                 if request.revision == self.account.positions_revision {
                     let builder = request.positions;
+                    let rejected = builder.rejected() != 0;
                     let mapped = recovered(&builder, |p| (&p.id, &p.symbol));
                     self.account
                         .rearm_skips("position:", builder.rejected() == 0, mapped);
@@ -1450,7 +1472,14 @@ impl Kraken {
                         }
                     }
                     self.account_commit_positions(cx, positions);
+                    if rejected {
+                        let error = VenueError::new("Kraken positions: a row could not be mapped");
+                        self.account.fresh_positions.failed(cx, 0, read, &error);
+                    } else {
+                        self.account.fresh_positions.committed(cx, 0, read);
+                    }
                 }
+                self.read_fresh_positions_again(cx, read);
             }
             Scope::Settings => {
                 if request.revision == self.account.settings_revision {
@@ -1497,7 +1526,7 @@ impl Kraken {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        _error: &str,
+        error: &str,
     ) {
         self.account.inflight.remove(&(request.scope as u8));
         if request.scope == Scope::Orders && self.account.orders_reconcile {
@@ -1508,8 +1537,59 @@ impl Kraken {
             "kraken.account:1343",
             "Kraken account reconciliation transport failure",
         );
+        if request.scope == Scope::Positions {
+            let fresh = self
+                .account
+                .read_error
+                .take()
+                .unwrap_or_else(|| VenueError::new(error));
+            let read = request.read;
+            self.account.fresh_positions.failed(cx, 0, read, &fresh);
+            self.read_fresh_positions_again(cx, read);
+        }
         self.account_schedule_heal(cx);
     }
+
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started {
+            let error =
+                VenueError::new("Kraken account is not loaded").kind(ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.positions_reads + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.account_refresh(cx);
+        }
+    }
+
+    /// At once for a waiter the read predates; a waiter a stream frame held
+    /// waits for the heal read.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, read: u32) {
+        if self.account.fresh_positions.predates(0, read) {
+            self.account_refresh(cx);
+        } else if self.account.fresh_positions.owed(0) {
+            self.account_schedule_heal(cx);
+        }
+    }
+}
+
+/// The reply's own error for a positions read that cannot answer.
+fn read_error(response: Response<'_>) -> VenueError {
+    if response.status == 401 || response.body.contains("authenticationError") {
+        return VenueError::new("Kraken refused the API key: authenticationError")
+            .kind(ErrorKind::AuthInvalid)
+            .venue_message("authenticationError");
+    }
+    if wire::success(response) {
+        return VenueError::new("Kraken positions: malformed reply");
+    }
+    VenueError::new(format!(
+        "Kraken positions HTTP {}: {}",
+        response.status, response.body
+    ))
 }
 fn balance(accounts: Accounts<'_>) -> (Balance, Vec<CoinBalance>) {
     let mut out = Balance::default();

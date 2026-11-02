@@ -357,5 +357,6 @@ impl ApexOmni {
                 FollowUp::Balance => self.request_balance(cx),
             }
         }
+        self.read_fresh_positions_again(cx);
     }
 }

@@ -9,6 +9,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::credential_selection::{PrimaryReason, Slots};
 use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::fence::StaleGuard;
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::log::code;
 use safe_cex_engine::metadata::{Observation, ObservedSetting};
 use safe_cex_engine::model::{
@@ -20,7 +21,9 @@ use safe_cex_engine::selected_read::ReadRole;
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket_lifecycle::{FeedId, LifecycleEvent, RetireReason, SocketError};
 use safe_cex_engine::store::{MarketSetting, OrderSnapshotToken, Store};
-use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json::ArrayAt};
+use safe_cex_engine::{
+    Cx, ErrorKind, Fill, Method, Response, SocketId, TimerId, VenueError, json::ArrayAt,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const LISTEN_KEY: &str = "/openApi/user/auth/userDataStream";
@@ -70,6 +73,7 @@ pub enum Request {
         skipped: Vec<String>,
         // An owned row outside the catalogue makes the snapshot incomplete.
         unavailable: bool,
+        read: u32,
     },
     OpenOrders {
         owner: u64,
@@ -127,6 +131,11 @@ pub struct Account {
     balance_revision: u64,
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     balance_in_flight: Option<u64>,
     mode_guard: StaleGuard,
     balance_guard: StaleGuard,
@@ -360,6 +369,15 @@ pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::Ve
                 .venue_code(evidence.code.to_string())
                 .venue_message(evidence.msg.to_string())
         })
+}
+/// A typed cause for a failing read: a refused key, or a rate limit.
+pub(crate) fn read_refusal(response: &Response<'_>) -> Option<VenueError> {
+    key_refusal(response).or_else(|| {
+        (response.status == 429).then(|| {
+            VenueError::new(format!("BingX HTTP 429: {}", response.body))
+                .kind(ErrorKind::RateLimited)
+        })
+    })
 }
 impl Account {
     pub(crate) fn with_slots(slots: Slots<Identity>) -> Self {
@@ -611,6 +629,7 @@ impl Account {
         }
         self.last_positions = cx.now;
         self.positions_in_flight = Some(self.positions_revision);
+        self.positions_read += 1;
         let settings_stamp = cx.store.metadata_observation();
         self.read_snapshot(
             cx,
@@ -624,10 +643,37 @@ impl Account {
                 settings: Vec::new(),
                 skipped: Vec::new(),
                 unavailable: false,
+                read: self.positions_read,
             },
             true,
             None,
         );
+    }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
+        if !self.mode_known {
+            let error =
+                VenueError::new("BingX account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.positions_read + 1;
+        if self.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.fetch_positions(cx, credentials);
+        }
+    }
+    fn read_fresh_positions_again(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: u32,
+        credentials: &Credentials,
+    ) {
+        if self.fresh_positions.predates(0, read) {
+            self.fetch_positions(cx, credentials);
+        } else if self.fresh_positions.owed(0) {
+            self.schedule_repair(cx);
+        }
     }
     fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
         if self.orders_in_flight.is_some() {
@@ -1161,6 +1207,7 @@ impl Account {
         if let Some(error) = key_refusal(&response) {
             cx.startup_read_refused(&error);
         }
+        self.read_error = read_refusal(&response);
         if let Some(error) = response_error(response, is_key) {
             if matches!(request, Request::Keepalive { .. })
                 && (response.status == 404 || {
@@ -1327,15 +1374,20 @@ impl Account {
                 settings,
                 skipped,
                 unavailable,
+                read,
             } => {
                 self.positions_in_flight = None;
                 if unavailable {
                     for id in &skipped {
                         log_skip(cx, &mut self.skip_logged, "position", id, true);
                     }
+                    let error = VenueError::new("BingX positions: a row's market is unavailable");
+                    self.fresh_positions.failed(cx, 0, read, &error);
+                    self.read_fresh_positions_again(cx, read, credentials);
                     return;
                 }
                 if revision == self.positions_revision {
+                    let rejected = !skipped.is_empty();
                     let unidentified = skipped.iter().any(String::is_empty);
                     // A malformed row never closes the known position it names
                     // (by id, or by symbol when its side is unreadable).
@@ -1363,12 +1415,19 @@ impl Account {
                             cx.store.observe_setting(&symbol, &settings_stamp, value);
                         }
                     }
+                    if rejected {
+                        let error = VenueError::new("BingX positions: a row could not be mapped");
+                        self.fresh_positions.failed(cx, 0, read, &error);
+                    } else {
+                        self.fresh_positions.committed(cx, 0, read);
+                    }
                 } else {
                     for id in &skipped {
                         log_skip(cx, &mut self.skip_logged, "position", id, true);
                     }
                     self.schedule_repair(cx);
                 }
+                self.read_fresh_positions_again(cx, read, credentials);
             }
             Request::OpenOrders {
                 owner,
@@ -1469,7 +1528,7 @@ impl Account {
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: &str,
-        _credentials: &Credentials,
+        credentials: &Credentials,
     ) {
         if matches!(&request,Request::ListenKey{epoch}|Request::Keepalive{epoch} if *epoch!=self.epoch)
         {
@@ -1514,7 +1573,15 @@ impl Account {
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::SymbolLeverage { .. } | Request::SymbolMarginType { .. } => {}
             Request::Balance { .. } => self.balance_in_flight = None,
-            Request::Positions { .. } => self.positions_in_flight = None,
+            Request::Positions { read, .. } => {
+                self.positions_in_flight = None;
+                let fresh = self
+                    .read_error
+                    .take()
+                    .unwrap_or_else(|| VenueError::new(format!("BingX positions: {error}")));
+                self.fresh_positions.failed(cx, 0, read, &fresh);
+                self.read_fresh_positions_again(cx, read, credentials);
+            }
             Request::OpenOrders { owner, .. } => {
                 if self.orders_in_flight == Some(owner) {
                     self.orders_in_flight = None;
@@ -2129,6 +2196,7 @@ mod sign_failure_owners {
                     failed: false,
                 },
                 1 => Request::Positions {
+                    read: 0,
                     revision: 1,
                     settings_stamp: Observation::default(),
                     rows: vec![],

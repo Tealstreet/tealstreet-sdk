@@ -9,6 +9,7 @@ use crate::{
 use alloy_primitives::U256;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
@@ -21,8 +22,8 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::signing::{Algorithm, SignError};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    CredentialSlot, Cx, Fill, Method, Response, SignStep, SocketChannel, SocketId, TimerId,
-    VenueError, json::ArrayAt,
+    CredentialSlot, Cx, ErrorKind, Fill, Method, Response, SignStep, SocketChannel, SocketId,
+    TimerId, VenueError, json::ArrayAt,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -57,6 +58,7 @@ pub enum Request {
         rows: Vec<Position>,
         coverage: SnapshotCoverage<String>,
         cycle: bool,
+        read: u32,
     },
     Balance {
         context: Context,
@@ -209,6 +211,11 @@ pub struct Account {
     /// An uncertain placement asked for a read dispatched after its write.
     orders_owed: bool,
     positions_busy: bool,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
+    /// The typed cause of the positions read failure being delivered.
+    pub(crate) positions_error: Option<VenueError>,
     balance_busy: bool,
     margins_busy: bool,
     /// The stream became live while a read ran: repeat the reads once all settle.
@@ -270,6 +277,9 @@ impl Account {
             orders_busy: false,
             orders_owed: false,
             positions_busy: false,
+            positions_read: 0,
+            fresh_positions: FreshPositions::default(),
+            positions_error: None,
             balance_busy: false,
             margins_busy: false,
             read_again: false,
@@ -686,6 +696,8 @@ impl Account {
         self.auth_rejected = true;
         self.token = None;
         self.refresh_at = 0.;
+        self.fresh_positions
+            .failed(cx, 0, u32::MAX, &auth_rejected_error());
         if let Some(session) = self.session.take() {
             // Fails every unreleased read bound to it NotSent. If the engine
             // refuses, those reads still end at their own 20 s windows.
@@ -802,7 +814,34 @@ impl Account {
         self.read_again = true;
         self.account_read_again(cx);
     }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.token.is_none() {
+            let error =
+                VenueError::new("Paradex account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.positions_read + 1;
+        if self.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.positions(cx, false);
+        }
+    }
+    /// At once for a waiter the last read predates; one a newer stream frame held
+    /// waits on the repair read. Runs with the delivered read's context retired.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.positions_busy || !self.fresh_positions.owed(0) {
+            return;
+        }
+        if self.fresh_positions.predates(0, self.positions_read) {
+            self.positions(cx, false);
+        } else if self.repair_positions.is_none() {
+            self.repair_positions = Some(cx.set_timer(500.));
+        }
+    }
     fn account_read_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.read_fresh_positions_again(cx);
         if self.read_again
             && !(self.margins_busy || self.positions_busy || self.balance_busy || self.orders_busy)
         {
@@ -1225,7 +1264,11 @@ impl Account {
             return;
         }
         self.positions_busy = true;
+        self.positions_read += 1;
+        let read = self.positions_read;
         let Some(context) = self.background_context(cx) else {
+            let error = VenueError::new("Paradex account read lifecycle is unavailable");
+            self.fresh_positions.failed(cx, 0, read, &error);
             self.positions_ended(cx, cycle);
             return;
         };
@@ -1241,6 +1284,7 @@ impl Account {
                 rows: vec![],
                 coverage: SnapshotCoverage::default(),
                 cycle,
+                read,
             }),
         );
     }
@@ -1485,7 +1529,13 @@ impl Account {
             return;
         }
         if let Err(error) = crate::success(response) {
+            self.positions_error = match response.status {
+                401 | 403 => Some(VenueError::new(&error).kind(ErrorKind::AuthInvalid)),
+                429 => Some(VenueError::new(&error).kind(ErrorKind::RateLimited)),
+                _ => None,
+            };
             self.on_failed(cx, request, &error);
+            self.positions_error = None;
             return;
         }
         match request {
@@ -1626,10 +1676,12 @@ impl Account {
                 rows,
                 coverage,
                 cycle,
+                read,
                 ..
             } => {
                 self.positions_busy = false;
-                if revision == self.positions_revision {
+                let mut held = revision != self.positions_revision;
+                if !held {
                     let mut snapshot = Vec::new();
                     for row in rows {
                         let updated = row.last_update.unwrap_or(started);
@@ -1640,6 +1692,7 @@ impl Account {
                                     *old > updated || (*old == updated && *closed)
                                 });
                         if stale {
+                            held = true;
                             if let Some(current) = cx.store.position(&row.id) {
                                 snapshot.push(current.clone());
                             }
@@ -1665,6 +1718,12 @@ impl Account {
                     }
                     cx.store.set_positions(snapshot);
                     self.update_upnl(cx);
+                    if coverage.rejected() != 0 {
+                        let error = VenueError::new("Paradex positions: a row could not be mapped");
+                        self.fresh_positions.failed(cx, 0, read, &error);
+                    } else if !held {
+                        self.fresh_positions.committed(cx, 0, read);
+                    }
                 }
                 if cycle {
                     self.balance(cx, true);
@@ -1795,7 +1854,14 @@ impl Account {
             }
             Request::Auth { .. } => self.auth_failed(cx, error),
             Request::Margins { boot, .. } => self.margins_ended(cx, boot),
-            Request::Positions { cycle, .. } => self.positions_ended(cx, cycle),
+            Request::Positions { cycle, read, .. } => {
+                let fresh = self
+                    .positions_error
+                    .take()
+                    .unwrap_or_else(|| VenueError::new(error));
+                self.fresh_positions.failed(cx, 0, read, &fresh);
+                self.positions_ended(cx, cycle);
+            }
             Request::Balance { cycle, .. } => self.balance_ended(cx, cycle),
             Request::Orders { cycle, .. } => self.orders_ended(cx, cycle),
         }

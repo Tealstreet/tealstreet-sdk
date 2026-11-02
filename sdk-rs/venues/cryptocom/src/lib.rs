@@ -471,7 +471,19 @@ impl Venue for Cryptocom {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
             order_book_query: true,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
     fn on_http_preflight_ready(
@@ -790,7 +802,10 @@ impl Venue for Cryptocom {
                     if request.retries >= 1 || !response.body.contains("40101") {
                         cx.startup_read_refused(&reads::response_failure(response, error.clone()));
                     }
-                    self.account_failed(cx, request, &error, reads::FailureRecovery::Response)
+                    self.account.read_error =
+                        Some(reads::response_failure(response, error.clone()));
+                    self.account_failed(cx, request, &error, reads::FailureRecovery::Response);
+                    self.account.read_error = None;
                 }
                 Pending::History(request) => self.history_failed(
                     cx,
@@ -944,7 +959,10 @@ impl Venue for Cryptocom {
                         missing_list().message,
                     ));
                 }
-                self.account_failed(cx, request, &missing_list().message, recovery)
+                self.account.read_error =
+                    Some(reads::response_failure(response, missing_list().message));
+                self.account_failed(cx, request, &missing_list().message, recovery);
+                self.account.read_error = None;
             }
             Pending::PublicTrades(trade) => self.public_trades_stream_failed(cx, *trade, response),
             pending => self.on_request_failed(
@@ -995,7 +1013,9 @@ impl Venue for Cryptocom {
             }
             Pending::Account(request) => {
                 let recovery = reads::FailureRecovery::released(&error);
+                self.account.read_error = Some(error.clone());
                 self.account_failed(cx, request, &error.message, recovery);
+                self.account.read_error = None;
             }
             Pending::PublicTrades(trade) => self.public_trades_failed(cx, *trade, error, true),
             Pending::BookQuery { context } | Pending::Candles { context, .. } => {
@@ -1061,6 +1081,7 @@ impl Venue for Cryptocom {
         self.public_trades
             .waiting
             .retain(|_, trade| trade.root().owner() != owner);
+        self.account.fresh_positions.retired(owner);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(trade) = self.public_trades.waiting.remove(&timer) {

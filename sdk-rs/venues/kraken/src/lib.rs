@@ -567,8 +567,27 @@ impl Venue for Kraken {
             position_history: safe_cex_engine::PositionHistory::FillsAccount,
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn socket_control(
         &self,
@@ -1181,7 +1200,11 @@ impl Venue for Kraken {
                     error.message = format!("Kraken history failed: {}", error.message);
                     self.public_trades_failed(cx, *r, child, error)
                 }
-                pending => self.on_request_failed(cx, pending, &error.message),
+                pending => {
+                    self.account.read_error = Some(error.clone());
+                    self.on_request_failed(cx, pending, &error.message);
+                    self.account.read_error = None;
+                }
             }
         }
     }
