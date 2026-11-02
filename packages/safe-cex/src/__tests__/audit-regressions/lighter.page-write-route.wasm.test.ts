@@ -122,16 +122,16 @@ const recorded = (
 
 const account = (flags: object) =>
   ({ exchange: 'lighter', name: 'row', apiKey: '', apiSecret: KEY, apiKeyIndex: '0', applicationId: '718895', ...flags }) as any;
-const TOKYO = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://mainnet.zklighter.elliot.ai/api/v1/sendTx';
-const DIRECT = 'https://mainnet.zklighter.elliot.ai/api/v1/sendTx';
+// Legacy's rule (#2833): Lighter REST goes through the public CORS proxy whatever the boxes say.
+const PUBLIC_PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai/api/v1/sendTx';
 const place = { symbol: 'ETH', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.2, price: 90 };
 
 /** The form hides the REST proxy box on Lighter (forbidCors); its one box sets tealstreetWsRoute. */
 describe('where a browser-tab Lighter write goes', () => {
   it.each([
-    ['the REST proxy flag, which the Lighter form does not offer', { tealstreetProxy: true }, TOKYO],
-    ['the WebSocket Route box, the one the Lighter form offers', { tealstreetWsRoute: true }, DIRECT],
-    ['no box', {}, DIRECT],
+    ['the REST proxy flag, which the Lighter form does not offer', { tealstreetProxy: true }, PUBLIC_PROXY],
+    ['the WebSocket Route box, the one the Lighter form offers', { tealstreetWsRoute: true }, PUBLIC_PROXY],
+    ['no box', {}, PUBLIC_PROXY],
   ])('%s', async (_label, flags, expected) => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('no network in this test'))));
     setDefaultTransport(tealstreetTransport);
