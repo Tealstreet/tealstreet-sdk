@@ -202,6 +202,25 @@ impl<V: Venue> Engine<V> {
 }
 
 impl<P> Cx<'_, P> {
+    /// Settle a tracked root whose answer is another owner's published read,
+    /// from that read's own delivery: the delivery lends this root no authority.
+    pub fn settle_caller_read_root(
+        &mut self,
+        root: &Context,
+        result: Result<String, VenueError>,
+    ) -> Result<(), Error> {
+        let Owner::Command { id, .. } = root.owner() else {
+            return Err(Error::Invalid);
+        };
+        if !self.io.core.request_contexts.tracked_owner(root) {
+            return Err(Error::Invalid);
+        }
+        let delivery = self.io.core.http_delivery.take();
+        let settled = self.finish_command(id, result, Some(root));
+        self.io.core.http_delivery = delivery;
+        settled
+    }
+
     /// Issue this command's original Read root at the caller's exact receipt
     /// deadline, tracked for engine-owned expiry. Fresh entry only. An expired
     /// wait is `Revoked` with no effect (finish it with

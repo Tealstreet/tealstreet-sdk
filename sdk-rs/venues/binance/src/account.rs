@@ -7,6 +7,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::credential_selection::CredentialRole;
+use safe_cex_engine::fresh_positions;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CoinBalance, CurrencyBalance, MarginType, Market, Order, OrderExtra, OrderSide,
@@ -15,7 +16,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::socket_lifecycle::RetireReason;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, VenueError, json, num};
+use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError, json, num};
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -36,6 +37,9 @@ const FAILED_POSITION_RETRY_MS: f64 = 5_000.0;
 /// `ACCOUNT_UPDATE` omits leverage, margin type and liquidation price; the
 /// REST repair that fills them in runs at most this often.
 const POSITION_REPAIR_THROTTLE_MS: f64 = 10_000.0;
+/// How soon `readPositions` tries again after a newer stream event discarded a read.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
+const FRESH_PAUSED: &str = "Binance background reads are paused near the weight limit";
 /// Order events trigger a full REST order snapshot this long after the last one.
 const ORDERS_REFRESH_DEBOUNCE_MS: f64 = 10_000.0;
 const ORDERS_RETRY_MS: f64 = 15_000.0;
@@ -79,6 +83,8 @@ pub enum Request {
 }
 
 struct PositionsJoin {
+    /// The venue's error for the half that failed.
+    error: Option<VenueError>,
     generation: u32,
     /// Position-state version when the reads were issued; a newer stream
     /// event makes the snapshot stale.
@@ -190,6 +196,8 @@ pub struct AccountState {
     last_repair_at: Option<f64>,
     positions_generation: u32,
     positions: Option<PositionsJoin>,
+    pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
     orders_generation: u32,
     orders: Option<OrdersJoin>,
     orders_refresh_timer: Option<TimerId>,
@@ -495,6 +503,7 @@ impl BinanceFutures {
         let generation = self.account.positions_generation;
         let symbol_config = self.paths.symbol_config;
         self.account.positions = Some(PositionsJoin {
+            error: None,
             generation,
             version: self.account.position_version,
             rows: None,
@@ -674,7 +683,10 @@ impl BinanceFutures {
 
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         let account = &mut self.account;
-        if account.listen_key_timer == Some(timer) {
+        if account.fresh_positions_timer == Some(timer) {
+            account.fresh_positions_timer = None;
+            self.retry_fresh_positions(cx);
+        } else if account.listen_key_timer == Some(timer) {
             account.listen_key_timer = None;
             if self.private.idle() {
                 self.request_listen_key(cx);
@@ -797,14 +809,13 @@ impl BinanceFutures {
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_RETRY_MAX_MS));
             }
             Request::PositionRisk { generation, .. } | Request::SymbolConfig { generation, .. } => {
-                cx.retried_failure_error(
-                    "binance.account:615",
-                    &prefixed(error, "Binance positions: "),
-                );
+                let error = prefixed(error, "Binance positions: ");
+                cx.retried_failure_error("binance.account:615", &error);
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
                 {
                     join.failed = true;
+                    join.error = Some(error);
                 }
                 self.finish_positions(cx);
             }
@@ -1427,6 +1438,14 @@ impl BinanceFutures {
             self.account.last_risk_at =
                 cx.now - POSITION_RISK_INTERVAL_MS + FAILED_POSITION_RETRY_MS;
         }
+        let generation = join.generation;
+        let current = join.version == self.account.position_version;
+        let rejected = join.skipped.rejected() != 0;
+        let failure = join.failed.then(|| {
+            join.error
+                .clone()
+                .unwrap_or_else(|| VenueError::new("Binance positions: snapshot not usable"))
+        });
         if !join.failed {
             let configs = join.configs.unwrap_or_default();
             let settings: std::collections::HashMap<&str, MarketSetting> =
@@ -1489,6 +1508,52 @@ impl BinanceFutures {
         } else if self.account.pending_position_events {
             self.schedule_position_repair(cx);
         }
+        let fresh = &mut self.account.fresh_positions;
+        if let Some(error) = failure {
+            fresh.failed(cx, 0, generation, &error);
+        } else if rejected && current {
+            let error = VenueError::new("Binance positions: a row could not be mapped");
+            fresh.failed(cx, 0, generation, &error);
+        } else if current {
+            fresh.committed(cx, 0, generation);
+        }
+        if self.account.fresh_positions.predates(0, generation) {
+            self.retry_fresh_positions(cx);
+        } else if self.account.fresh_positions.owed(0)
+            && self.account.fresh_positions_timer.is_none()
+        {
+            self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
+    }
+
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so its answer is followed by a new read and never settles this.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started || !self.credentials.has_primary() {
+            let error =
+                VenueError::new("Binance account is not loaded").kind(ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        if self.background_paused(cx.now) {
+            let wait = self.background_paused_until - cx.now;
+            fresh_positions::refuse(cx, fresh_positions::rate_limited(FRESH_PAUSED, wait));
+            return;
+        }
+        let need = self.account.positions_generation + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.fetch_positions(cx);
+        }
+    }
+
+    fn retry_fresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.background_paused(cx.now) {
+            let wait = self.background_paused_until - cx.now;
+            let error = fresh_positions::rate_limited(FRESH_PAUSED, wait);
+            self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
+            return;
+        }
+        self.fetch_positions(cx);
     }
 
     pub(crate) fn client_order_row_is_foreign(

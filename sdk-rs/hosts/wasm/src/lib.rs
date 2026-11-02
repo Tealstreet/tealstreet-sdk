@@ -2270,6 +2270,21 @@ mod tests {
                 fill_history: !no_history,
                 order_history: !no_orders_or_income,
                 order_history_needs_symbol: any(&["binance", "binancepm", "phemex"], venue),
+                fresh_positions: any(
+                    &[
+                        "bybit",
+                        "bybitinverse",
+                        "bybitdemo",
+                        "hyrotrader",
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "binance",
+                        "binancepm",
+                        "binanceinverse",
+                    ],
+                    venue,
+                ),
                 income_history: !no_orders_or_income
                     && !any(
                         &["bybitspot", "hyrotrader", "coinbase", "coinbasespot"],

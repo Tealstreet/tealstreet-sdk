@@ -14,6 +14,7 @@ pub mod error;
 pub mod execution;
 pub mod execution_group;
 pub mod fence;
+pub mod fresh_positions;
 pub mod history;
 mod id_map;
 pub(crate) use id_map::IdMap;

@@ -6,6 +6,7 @@ use safe_cex_engine::credential_selection::{
     CredentialRole, CredentialUnavailable, PrimaryReason, SlotPolicy, Slots,
 };
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
+use safe_cex_engine::fresh_positions;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -20,6 +21,9 @@ use std::collections::{HashMap, HashSet};
 /// While the private stream is live, REST re-reads the account only this often.
 const SAFETY_RECONCILE_MS: f64 = 60_000.0;
 const REST_PAUSE_MS: f64 = 30_000.0;
+/// How soon `readPositions` tries again after a read the stream's guards overrode.
+const FRESH_POSITIONS_RETRY_MS: f64 = 1_000.0;
+const FRESH_PAUSED: &str = "Bitget private reads are rate limited";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum OrderSource {
@@ -38,6 +42,7 @@ pub enum Request {
         skipped: RowAdmission<PositionKey>,
         coins: std::collections::VecDeque<String>,
         started: f64,
+        read: u32,
     },
     Balance {
         row: Option<Amounts>,
@@ -127,6 +132,10 @@ pub struct Account {
     pub startup_rejected: bool,
     tick: u32,
     positions_in_flight: bool,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
     balance_in_flight: bool,
     orders_in_flight: bool,
     orders_dirty: bool,
@@ -426,6 +435,8 @@ impl BitgetFutures {
             return;
         }
         self.account.positions_in_flight = true;
+        self.account.positions_read += 1;
+        let read = self.account.positions_read;
         let mut coins = std::collections::VecDeque::new();
         if self.inverse() {
             for market in cx.store.markets() {
@@ -463,6 +474,7 @@ impl BitgetFutures {
                 skipped: RowAdmission::default(),
                 coins,
                 started: cx.now,
+                read,
             },
         );
     }
@@ -722,6 +734,7 @@ impl BitgetFutures {
                 mut skipped,
                 mut coins,
                 started,
+                read,
             } => {
                 if let Some(coin) = coins.pop_front() {
                     self.account_request(
@@ -738,12 +751,13 @@ impl BitgetFutures {
                             skipped,
                             coins,
                             started,
+                            read,
                         },
                     );
                     return;
                 }
                 self.account.positions_in_flight = false;
-                let mut rows = self.merge_positions(cx, rows, started);
+                let (mut rows, stream_held) = self.merge_positions(cx, rows, started);
                 // Classic reads its mode per symbol, so a flat account never learned it.
                 if !self.account.uta && !self.account.mode_read && rows.is_empty() {
                     self.account.mode_read = true;
@@ -774,6 +788,7 @@ impl BitgetFutures {
                 }
                 cx.store
                     .set_positions(rows.into_iter().filter(|p| p.contracts > 0.0).collect());
+                self.settle_fresh_positions(cx, read, skipped.rejected() != 0, stream_held);
             }
             Request::Balance {
                 row,
@@ -938,6 +953,70 @@ impl BitgetFutures {
     fn account_refused(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: VenueError) {
         self.clear_in_flight(&request);
         cx.retried_failure_error("bitget.account:870", &error);
+        if let Request::Positions { read, .. } = request {
+            self.account.fresh_positions.failed(cx, 0, read, &error);
+            self.read_fresh_positions_again(cx, read);
+        }
+    }
+
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so its reply is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.detected {
+            let error =
+                VenueError::new("Bitget account is not loaded").kind(ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        if cx.now < self.account.rest_paused_until {
+            let wait = self.account.rest_paused_until - cx.now;
+            fresh_positions::refuse(cx, fresh_positions::rate_limited(FRESH_PAUSED, wait));
+            return;
+        }
+        let need = self.account.positions_read + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.refresh_positions(cx);
+        }
+    }
+
+    /// Only a clean read answers: a row held for the stream is not committed.
+    fn settle_fresh_positions(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: u32,
+        rejected: bool,
+        stream_held: bool,
+    ) {
+        if rejected {
+            let error = VenueError::new("Bitget positions: a row could not be mapped");
+            self.account.fresh_positions.failed(cx, 0, read, &error);
+        } else if !stream_held {
+            self.account.fresh_positions.committed(cx, 0, read);
+        }
+        self.read_fresh_positions_again(cx, read);
+    }
+
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, read: u32) {
+        if !self.account.fresh_positions.owed(0) {
+            return;
+        }
+        if !self.account.fresh_positions.predates(0, read) {
+            if self.account.fresh_positions_timer.is_none() {
+                self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+            }
+            return;
+        }
+        self.retry_fresh_positions(cx);
+    }
+
+    fn retry_fresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now < self.account.rest_paused_until {
+            let wait = self.account.rest_paused_until - cx.now;
+            let error = fresh_positions::rate_limited(FRESH_PAUSED, wait);
+            self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
+            return;
+        }
+        self.refresh_positions(cx);
     }
 
     pub(crate) fn account_sign_failed(
@@ -1071,6 +1150,7 @@ impl BitgetFutures {
         self.account.probe.succeeded(cx, &());
         self.account.detected = false;
         self.account.generation += 1;
+        self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
         for timer in [
             self.account.poll.take(),
             self.account.positions_timer.take(),
@@ -1378,12 +1458,14 @@ impl BitgetFutures {
         conflicts
     }
 
+    /// The read's rows under the stream's guards, and whether any guard overrode it.
     fn merge_positions(
         &self,
         cx: &Cx<'_, Pending>,
         rows: Vec<Position>,
         started: f64,
-    ) -> Vec<Position> {
+    ) -> (Vec<Position>, bool) {
+        let held = std::cell::Cell::new(false);
         let full_fresh = self.account.full_positions_at.is_some_and(|at| {
             at >= started || (!self.account.full_positions_fence_only && started - at <= 5_000.0)
         });
@@ -1428,9 +1510,11 @@ impl BitgetFutures {
                             .get(&old.id)
                             .is_some_and(|mark| mark.rejected_at.is_some_and(|at| at >= started))
                 }) {
+                    held.set(true);
                     return None;
                 }
                 if full_fresh && !self.account.full_position_ids.contains(&p.id) {
+                    held.set(true);
                     return None;
                 }
                 if let Some(mark) = self.account.ws_positions.get(&p.id) {
@@ -1444,6 +1528,7 @@ impl BitgetFutures {
                                     .is_some_and(|t| p.last_update.is_some_and(|r| t > r)))
                     });
                     if rejection || financial {
+                        held.set(true);
                         return cx.store.position(&p.id).cloned();
                     }
                 }
@@ -1457,10 +1542,11 @@ impl BitgetFutures {
                         || m.at.is_some_and(|at| started - at <= 5_000.0)
                 })
             {
+                held.set(true);
                 rows.push(current.clone());
             }
         }
-        rows
+        (rows, held.get())
     }
 
     fn order_metadata_current(
@@ -2310,6 +2396,10 @@ impl BitgetFutures {
     }
 
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.fresh_positions_timer == Some(timer) {
+            self.account.fresh_positions_timer = None;
+            self.retry_fresh_positions(cx);
+        }
         if self.account.probe.on_timer(timer).is_some() {
             self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
         }

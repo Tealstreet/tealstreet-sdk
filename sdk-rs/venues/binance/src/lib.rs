@@ -1398,6 +1398,7 @@ impl Venue for BinanceFutures {
                 client_order_lookup: true,
                 account: safe_cex_engine::AccountLookup::Query,
                 order_history_needs_symbol: true,
+                fresh_positions: true,
                 ..safe_cex_engine::Capabilities::BASE
             },
             Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
@@ -1412,6 +1413,7 @@ impl Venue for BinanceFutures {
             Variant::CoinM => safe_cex_engine::Capabilities {
                 quantity_units: safe_cex_engine::QuantityUnits::InverseContractSized,
                 balance_info: true,
+                fresh_positions: true,
                 ..safe_cex_engine::Capabilities::NO_HISTORY
             },
         }
@@ -1424,6 +1426,7 @@ impl Venue for BinanceFutures {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             // TS marks a COIN-M balance coin-margined, so an inverse market whose
             // margin coin has no row reads zero instead of the USD total.
             safe_cex_engine::VenueAction::FetchBalanceInfo
@@ -1831,6 +1834,7 @@ impl Venue for BinanceFutures {
         _pending: Vec<Pending>,
     ) {
         self.retire_history(owner);
+        self.account.fresh_positions.retired(owner);
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {

@@ -572,6 +572,9 @@ pub enum VenueAction {
     /// Data source: re-read the account settings a frame-fed engine changed
     /// (position mode, margin, leverage, venue keys), for `symbol` or the account.
     RefreshSettings { symbol: Option<String> },
+    /// Succeeds only once a positions read issued after this command has
+    /// committed to the store; `Capabilities::fresh_positions` advertises it.
+    ReadPositions,
     /// Lighter: the cached account tier as a JSON string, or `null`.
     FetchAccountTier,
     /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
@@ -5065,6 +5068,18 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
+            // Before the frame-fed refusal: an unimplemented read is Unsupported there too.
+            Event::Command(Command::Venue {
+                command,
+                action: VenueAction::ReadPositions,
+            }) if cx.io.core.frame_fed || !self.venue.capabilities().fresh_positions => {
+                cx.refuse_before_entry(
+                    command,
+                    VenueError::new(UNSUPPORTED_VENUE_ACTION)
+                        .kind(ErrorKind::Unsupported)
+                        .outcome(crate::Outcome::NotSent),
+                );
+            }
             Event::Command(command)
                 if cx.io.core.frame_fed
                     && crate::frame_fed::refusal(&command, cx.store.loaded().markets).is_some() =>
