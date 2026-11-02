@@ -44,7 +44,15 @@ export type Options = {
   headers?: Record<string, string> | HeadersProvider;
   /** A close this answers true for reconnects with no backoff wait; later failures back off as usual. */
   reconnectsAtOnce?: (event: { code: number; reason: string }) => boolean;
+  /** Called on every change of `loopState.phase`, so a supervisor can check each transition. */
+  onLoopPhase?: (phase: LoopPhase) => void;
 };
+
+/**
+ * Where the connect loop is. While it should reconnect it is always in one of the
+ * first three; `stopped` means nothing will open a socket again until `reconnect()`.
+ */
+export type LoopPhase = 'connected' | 'connecting' | 'retry-scheduled' | 'stopped';
 
 const DEFAULT = {
   maxReconnectionDelay: 10000,
@@ -87,6 +95,7 @@ export class ReconnectingWebSocket {
   private _binaryType: BinaryType = 'blob';
   private _closeCalled = false;
   private _messageQueue: Message[] = [];
+  private _loopState: { phase: LoopPhase; since: number } = { phase: 'stopped', since: Date.now() };
 
   private readonly _url: UrlProvider;
   private readonly _protocols?: string | string[];
@@ -142,6 +151,11 @@ export class ReconnectingWebSocket {
   /**
    * Returns the number or connection retries
    */
+  /** The connect loop's phase and when it entered it. */
+  get loopState(): { phase: LoopPhase; since: number } {
+    return { ...this._loopState };
+  }
+
   get retryCount(): number {
     return Math.max(this._retryCount, 0);
   }
@@ -229,6 +243,7 @@ export class ReconnectingWebSocket {
     this._closeCalled = true;
     this._shouldReconnect = false;
     this._clearTimeouts();
+    this._enterPhase('stopped');
     if (!this._ws) {
       this._debug('close enqueued: no ws instance');
       return;
@@ -244,6 +259,7 @@ export class ReconnectingWebSocket {
     this._closeCalled = true;
     this._shouldReconnect = false;
     this._clearTimeouts();
+    this._enterPhase('stopped');
     if (!this._ws) return;
     this._removeListeners();
     const ws = this._ws as any;
@@ -354,10 +370,16 @@ export class ReconnectingWebSocket {
     return delay;
   }
 
-  private _wait(): Promise<void> {
+  private _wait(delay: number): Promise<void> {
     return new Promise((resolve) => {
-      setTimeout(resolve, this._getNextDelay());
+      setTimeout(resolve, delay);
     });
+  }
+
+  private _enterPhase(phase: LoopPhase) {
+    if (this._loopState.phase === phase) return;
+    this._loopState = { phase, since: Date.now() };
+    this._options.onLoopPhase?.(phase);
   }
 
   private _getNextUrl(urlProvider: UrlProvider): Promise<string> {
@@ -392,6 +414,7 @@ export class ReconnectingWebSocket {
     if (this._retryCount >= maxRetries) {
       this._debug('max retries reached', this._retryCount, '>=', maxRetries);
       this._connectLock = false;
+      this._enterPhase('stopped');
       // Dispatch close event so listeners know we gave up
       const event = new Events.CloseEvent(4000, 'Max retries exhausted', this);
       if (this.onclose) {
@@ -412,13 +435,19 @@ export class ReconnectingWebSocket {
       this._connectLock = false;
       throw Error('No valid WebSocket class provided');
     }
-    this._wait()
-      .then(() => this._getNextUrl(this._url))
+    const delay = this._getNextDelay();
+    this._enterPhase(delay > 0 ? 'retry-scheduled' : 'connecting');
+    this._wait(delay)
+      .then(() => {
+        if (attempt === this._attempt && this._shouldReconnect) this._enterPhase('connecting');
+        return this._getNextUrl(this._url);
+      })
       .then((url) => {
         if (attempt !== this._attempt) return;
         // close could be called before creating the ws
         if (this._closeCalled) {
           this._connectLock = false;
+          this._enterPhase('stopped');
           return;
         }
         this._debug('connect', { url, protocols: this._protocols });
@@ -535,6 +564,7 @@ export class ReconnectingWebSocket {
 
     clearTimeout(this._connectTimeout);
     this._uptimeTimeout = setTimeout(() => this._acceptOpen(), minUptime);
+    this._enterPhase('connected');
 
     // Only set binaryType in browser - ws package doesn't support 'blob'
     const isNode = typeof process !== 'undefined' && process.versions?.node;

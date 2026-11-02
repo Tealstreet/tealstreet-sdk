@@ -86,3 +86,68 @@ describe('ReconnectingWebSocket URL provider', () => {
     socket.close();
   });
 });
+
+/** A fake that keeps its listeners, so a test can open and drop it. */
+class ControllableWebSocket extends FakeWebSocket {
+  static live: ControllableWebSocket[] = [];
+  private readonly handlers = new Map<string, (event: unknown) => void>();
+  constructor(url: string) {
+    super(url);
+    ControllableWebSocket.live.push(this);
+  }
+  addEventListener(type: string, handler: (event: unknown) => void) {
+    this.handlers.set(type, handler);
+  }
+  removeEventListener(type: string) {
+    this.handlers.delete(type);
+  }
+  fire(type: string, event: unknown = {}) {
+    this.handlers.get(type)?.(event);
+  }
+}
+
+describe('ReconnectingWebSocket loop phase', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    FakeWebSocket.made = [];
+    ControllableWebSocket.live = [];
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('moves through connecting, connected, retry-scheduled and stopped, reporting each change once', async () => {
+    const phases: string[] = [];
+    const socket = new ReconnectingWebSocket('wss://example.test/account', undefined, {
+      ...options,
+      WebSocket: ControllableWebSocket,
+      onLoopPhase: (phase) => phases.push(phase),
+    });
+    expect(socket.loopState.phase).toBe('connecting');
+    await vi.advanceTimersByTimeAsync(0);
+    ControllableWebSocket.live[0].fire('open');
+    expect(socket.loopState.phase).toBe('connected');
+
+    // The server drops it: the next attempt waits out its backoff first.
+    ControllableWebSocket.live[0].fire('close', { code: 1006, reason: '' });
+    expect(socket.loopState).toEqual({ phase: 'retry-scheduled', since: Date.now() });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(socket.loopState.phase).toBe('connecting');
+
+    socket.close();
+    expect(socket.loopState.phase).toBe('stopped');
+    expect(phases).toEqual(['connecting', 'connected', 'retry-scheduled', 'connecting', 'stopped']);
+  });
+
+  it('a reconnect from stopped resumes the loop', async () => {
+    const socket = new ReconnectingWebSocket('wss://example.test/account', undefined, {
+      ...options,
+      WebSocket: ControllableWebSocket,
+    });
+    socket.close();
+    expect(socket.loopState.phase).toBe('stopped');
+    socket.reconnect(4002, 'connect loop repaired');
+    expect(socket.loopState.phase).not.toBe('stopped');
+  });
+});
