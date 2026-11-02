@@ -293,3 +293,113 @@ fn malformed_current_text_retains_the_native_any_text_liveness_policy() {
     );
     assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 21000.);
 }
+
+/// Phemex's documented `kline_p` shapes: a subscribe answers with history as a
+/// `snapshot` (newest first), then live rows come as `incremental`.
+const KLINE_SNAPSHOT: &str = r#"{"kline_p":[[1666854120,60,"20735.3","20735.3","20741.0","20735.3","20740.1","0.120","2488.8"],[1666854060,60,"20730.0","20730.0","20736.0","20729.5","20735.3","0.300","6220.6"],[1666854000,60,"20725.0","20725.0","20731.0","20724.0","20730.0","0.200","4146.0"]],"sequence":62147218,"symbol":"BTCUSDT","type":"snapshot"}"#;
+const KLINE_INCREMENTAL: &str = r#"{"kline_p":[[1666854180,60,"20740.1","20740.1","20745.0","20740.1","20744.2","0.050","1037.2"]],"sequence":62147219,"symbol":"BTCUSDT","type":"incremental"}"#;
+
+fn subscribed_to_candles() -> (Engine<PhemexPerpetuals>, SocketId) {
+    use safe_cex_engine::{Command, model::Interval};
+    let (mut engine, socket, _) = opened();
+    engine.handle(
+        4.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: Interval::M1,
+        }),
+    );
+    actions(&mut engine, 4.);
+    engine.take_frame(4.);
+    (engine, socket)
+}
+
+/// Each candle in a frame's candles section, by its timestamp: rows end the section as six f64s.
+fn candle_timestamps(frame: &[u8]) -> Vec<f64> {
+    safe_cex_engine::wire::sections(frame)
+        .filter(|(kind, _)| *kind == 6)
+        .flat_map(|(_, body)| {
+            let count = u32::from_le_bytes(body[..4].try_into().unwrap()) as usize;
+            let rows = &body[body.len() - count * 48..];
+            (0..count)
+                .map(|row| f64::from_le_bytes(rows[row * 48..row * 48 + 8].try_into().unwrap()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn a_kline_snapshot_streams_only_its_newest_row_and_increments_stream_live() {
+    let (mut engine, socket) = subscribed_to_candles();
+    engine.handle(
+        5.,
+        Event::WsMessage {
+            socket,
+            text: KLINE_SNAPSHOT,
+        },
+    );
+    let snapshot = engine.take_frame(5.).expect("the forming candle").to_vec();
+    assert_eq!(
+        candle_timestamps(&snapshot),
+        [1666854120.0],
+        "history in the snapshot is not live"
+    );
+    engine.handle(
+        6.,
+        Event::WsMessage {
+            socket,
+            text: KLINE_INCREMENTAL,
+        },
+    );
+    let live = engine.take_frame(6.).expect("the live candle").to_vec();
+    assert_eq!(candle_timestamps(&live), [1666854180.0]);
+}
+
+#[test]
+fn an_unreadable_kline_message_is_logged_once_a_minute() {
+    let (mut engine, socket) = subscribed_to_candles();
+    let short = r#"{"kline_p":[[1666854180,60]],"symbol":"BTCUSDT","type":"incremental"}"#;
+    let unreadable = |output: &[Action]| {
+        output
+            .iter()
+            .filter(|a| {
+                matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.message.contains("unreadable"))
+            })
+            .count()
+    };
+    engine.handle(
+        5.,
+        Event::WsMessage {
+            socket,
+            text: short,
+        },
+    );
+    engine.handle(
+        6.,
+        Event::WsMessage {
+            socket,
+            text: short,
+        },
+    );
+    assert_eq!(unreadable(&actions(&mut engine, 6.)), 1);
+    // Live traffic keeps the socket up through the minute.
+    for at in (10_006..60_006).step_by(10_000) {
+        engine.handle(
+            at as f64,
+            Event::WsMessage {
+                socket,
+                text: TICKER,
+            },
+        );
+        actions(&mut engine, at as f64);
+    }
+    engine.handle(
+        60_006.,
+        Event::WsMessage {
+            socket,
+            text: short,
+        },
+    );
+    assert_eq!(unreadable(&actions(&mut engine, 60_006.)), 1);
+}
