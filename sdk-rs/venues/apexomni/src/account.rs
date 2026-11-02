@@ -1150,8 +1150,9 @@ impl ApexOmni {
         error: VenueError,
     ) {
         // An IP-bound key is refused here too, but it works again from an allowed IP.
-        cx.startup_read_refused(&error);
-        if error.venue_code.as_deref() == Some("10002") {
+        // Only a refused start ends the account; later reads retry, as legacy's did.
+        let refused_at_start = cx.startup_read_refused(&error);
+        if refused_at_start && error.venue_code.as_deref() == Some("10002") {
             cx.deactivate();
         }
         let generation = match request {
@@ -1448,7 +1449,9 @@ impl ApexOmni {
                 .set_latency(((cx.now - self.account.ping_at).max(0.0) / 2.0).round());
         }
         if message.success == Some(false) {
-            let rejected = if message.op == "login" {
+            let rejected = if message.op == "login"
+                || super::socket_codec::documented_login_refusal(&message.op, &message.ret_msg)
+            {
                 code::AUTH_REJECTED
             } else {
                 code::SUBSCRIPTION_REJECTED

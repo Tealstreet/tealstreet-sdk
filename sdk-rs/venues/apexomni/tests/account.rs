@@ -1260,3 +1260,43 @@ fn an_answered_key_refusal_ends_the_start() {
         assert_eq!(failures, 1, "{status} {body}");
     }
 }
+
+/// After start, one 10002 on a background read is retried as legacy did; only a start ends.
+#[test]
+fn a_refusal_on_a_later_read_does_not_switch_the_account_off() {
+    let (mut e, socket) = ready();
+    let heal = begin_position_heal(&mut e, socket, 1000.0);
+    let refused = r#"{"code":10002,"msg":"rpc error: code = InvalidArgument desc = Api credential is invalid","timeCost":3308}"#;
+    response(&mut e, &heal, 2100.0, refused);
+    let deactivated = e
+        .prepared(2100.0)
+        .any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Deactivate)));
+    assert!(!deactivated);
+}
+
+/// ApeX documents the login refusal without an op field.
+#[test]
+fn a_documented_login_refusal_ends_the_socket_as_a_refused_key() {
+    let (mut e, socket, _) = seeded();
+    e.handle(20.0, Event::WsOpened { socket });
+    e.prepared(20.0).for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        25.0,
+        r#"{"success":false,"ret_msg":"login authority err","conn_id":"c1"}"#,
+    );
+    let actions: Vec<_> = e.prepared(25.0).collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s, .. } if *s == socket)),
+        "{actions:?}"
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("auth.rejected")),
+        "{actions:?}"
+    );
+}
