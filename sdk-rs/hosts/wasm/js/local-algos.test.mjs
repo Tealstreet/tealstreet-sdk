@@ -141,13 +141,8 @@ test('algoStopAll stops TWAPs and chases, waits for the chase cancels, and keeps
     assert.equal(result, undefined, 'answers only once the cancel settles');
     for (let i = 0; i < 20 && !result; i++) await venue.advance(250);
     await stopping;
-    // placedSymbols: the symbols these algos placed, for a nuke to cancel (#2831).
-    assert.deepEqual(result, {
-      stoppedChasers: [rows.activeChasers[0].id],
-      stoppedTwaps: [rows.activeTWAPs[0].id],
-      settled: true,
-      placedSymbols: ['BTCUSDT'],
-    });
+    // placedSymbols: what the nuke then cancels on (#2831).
+    assert.deepEqual(result, { stoppedChasers: [rows.activeChasers[0].id], stoppedTwaps: [rows.activeTWAPs[0].id], settled: true, placedSymbols: ['BTCUSDT'] });
     assert.deepEqual(venue.cancels, [String(chase.orderId)]);
     assert.deepEqual(stateUpdates(emits).at(-1), {}, 'the stopped TWAP is no longer persisted');
     assert.deepEqual(lastRows(emits), { activeChasers: [], activeTWAPs: [] });
