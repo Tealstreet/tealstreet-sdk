@@ -1363,6 +1363,20 @@ impl Venue for Okx {
             if let Some(context) = &discovery {
                 let _ = cx.finish_http_context(context);
             }
+            // EEA's keyed catalogue is signed: a refused key is refused, not a retry.
+            if matches!(pending, Pending::Markets { .. })
+                && self.options.eea
+                && self.credentials.is_some()
+                && let Some((code, msg)) = serde_json::from_str::<wire::Envelope<'_>>(response.body)
+                    .ok()
+                    .map(|e| (e.code.to_owned(), e.msg.to_owned()))
+                && code != "50113"
+                && let Some(kind) = account::rest_key_rejection(&code)
+            {
+                let refused = account::rejection("API key", &code, &msg, kind);
+                self.reject_startup(cx, refused, kind == safe_cex_engine::ErrorKind::AuthInvalid);
+                return;
+            }
             if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
                 self.public_failed(
                     cx,

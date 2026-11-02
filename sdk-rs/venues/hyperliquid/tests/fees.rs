@@ -220,7 +220,7 @@ fn failed_or_malformed_role_never_queries_unresolved_fees() {
 }
 
 #[test]
-fn timed_out_role_ignores_a_late_success_without_fee_bootstrap() {
+fn a_late_role_answer_after_its_timer_still_resolves_the_account() {
     let mut h = Fees::start(agent(), 200);
     assert!(h.subjects("userFees").is_empty());
     let request = h.role.take().unwrap();
@@ -235,8 +235,8 @@ fn timed_out_role_ignores_a_late_success_without_fee_bootstrap() {
         &format!(r#"{{"role":"agent","data":{{"user":"{ACCOUNT}"}}}}"#),
     );
     h.pump();
-    assert!(h.subjects("userFees").is_empty());
-    assert!(h.subjects("userAbstraction").is_empty());
+    // Ruled: a lookup is retried, and a late answer still resolves the account.
+    assert!(!h.subjects("userFees").is_empty());
 }
 
 #[test]

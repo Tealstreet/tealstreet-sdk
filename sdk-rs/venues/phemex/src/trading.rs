@@ -254,6 +254,8 @@ enum Call {
         before: Vec<Order>,
         ids: Vec<String>,
     },
+    /// A nuke's venue cancel-all; it names no order, so no row or repair state follows it.
+    CancelAccount,
     Settings {
         symbol: String,
         leverage: Option<f64>,
@@ -935,6 +937,20 @@ impl PhemexPerpetuals {
         Ok(steps)
     }
 
+    /// Untriggered first, so no conditional can trigger into an active order after that cancel.
+    /// https://github.com/phemex/phemex-api-docs/blob/master/Public-Hedged-Perpetual-API.md#cancelall
+    fn account_cancel_steps() -> VecDeque<Step> {
+        ["true", "false"]
+            .map(|untriggered| Step {
+                method: Method::Delete,
+                path: "/g-orders/all",
+                query: query(vec![("untriggered", untriggered.into())]),
+                call: Call::CancelAccount,
+                replacement: None,
+            })
+            .into()
+    }
+
     fn amend_plan(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1428,6 +1444,10 @@ impl PhemexPerpetuals {
                 )
             }
             Command::CancelOrders { command, ids } => (command, self.cancel_plan(cx, ids)),
+            Command::Venue {
+                command,
+                action: safe_cex_engine::VenueAction::CancelAccountOrders,
+            } => (command, Ok(Self::account_cancel_steps())),
             Command::CancelSymbolOrders { command, symbol } => {
                 let ids = cx
                     .store
@@ -1989,6 +2009,12 @@ impl PhemexPerpetuals {
                 self.apply_cancel_ack(cx, before, &ack);
                 return Ok(());
             }
+            // As its open-order list does, OM_ORDER_NOT_FOUND here means nothing rests.
+            if code == ORDER_NOT_FOUND
+                && let Call::CancelAccount = &request.call
+            {
+                return Ok(());
+            }
             if code != 0 {
                 // Only documented balance/parameter/risk rejects with no order data
                 // prove no placement. Duplicate/routing/internal errors stay unknown.
@@ -2146,6 +2172,9 @@ impl PhemexPerpetuals {
                         return Err(error);
                     }
                 }
+                // Documented `"data":0`: a bare number that names no order.
+                // Code 0 is the acknowledgement; data is not a count (shown live).
+                Call::CancelAccount => {}
                 Call::Settings {
                     symbol,
                     leverage,
