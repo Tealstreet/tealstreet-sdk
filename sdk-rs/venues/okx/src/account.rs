@@ -137,6 +137,7 @@ pub enum Request {
         product: usize,
         rows: SnapshotBuilder<String, (Position, RiskValues)>,
         invalid: bool,
+        unlisted: Vec<String>,
     },
     Orders {
         context: Option<Context>,
@@ -208,6 +209,8 @@ pub struct RiskValues {
 }
 struct Join {
     generation: u64,
+    /// Owned rows on a market the catalogue does not list.
+    unlisted: Vec<String>,
     positions: Option<SnapshotBuilder<String, (Position, RiskValues)>>,
     equity: Option<SnapshotBuilder<String, (String, f64)>>,
     position_version: u64,
@@ -422,6 +425,7 @@ impl Okx {
             let generation = self.account.generation;
             self.account.join = Some(Join {
                 generation,
+                unlisted: Vec::new(),
                 positions: None,
                 equity: None,
                 position_version: version,
@@ -449,6 +453,7 @@ impl Okx {
                     product: 0,
                     rows: SnapshotBuilder::default(),
                     invalid: false,
+                    unlisted: Vec::new(),
                 },
             );
         }
@@ -658,6 +663,7 @@ impl Okx {
                 product,
                 rows,
                 invalid,
+                unlisted,
                 ..
             } => match serde_json::from_str::<PositionRow<'_>>(
                 readable_position
@@ -683,6 +689,7 @@ impl Okx {
                             cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "OKX owned position market unavailable; preserving account snapshot");
                         } else {
                             self.unlisted_skipped(cx, p.inst_id);
+                            unlisted.push(p.inst_id.to_owned());
                         }
                         return;
                     }
@@ -708,6 +715,7 @@ impl Okx {
                             *invalid = true;
                         } else {
                             self.unlisted_skipped(cx, inst_id);
+                            unlisted.push(inst_id.to_owned());
                         }
                         return;
                     }
@@ -1004,6 +1012,7 @@ impl Okx {
                 product,
                 rows,
                 invalid: false,
+                unlisted,
             } => {
                 let product = product + 1;
                 if let Some(kind) = self.instrument_types().get(product) {
@@ -1019,6 +1028,7 @@ impl Okx {
                             product,
                             rows,
                             invalid: false,
+                            unlisted,
                         },
                     );
                     return;
@@ -1026,6 +1036,7 @@ impl Okx {
                 if let Some(join) = &mut self.account.join
                     && join.generation == generation
                 {
+                    join.unlisted = unlisted;
                     join.positions = Some(rows);
                     join.position_version = version;
                 }
@@ -1257,7 +1268,9 @@ impl Okx {
             let error = VenueError::new("OKX positions: a row could not be mapped");
             self.account.fresh_positions.failed(cx, 0, read, &error);
         } else if changed.is_empty() {
-            self.account.fresh_positions.committed(cx, 0, read);
+            self.account
+                .fresh_positions
+                .committed(cx, 0, read, &join.unlisted);
         }
     }
 

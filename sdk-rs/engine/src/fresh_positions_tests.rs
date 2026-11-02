@@ -11,6 +11,10 @@ struct Probe {
     capable: bool,
     fresh: FreshPositions,
     generation: u32,
+    /// Per read number, the (key, skipped rows) it commits; one clean leg by default.
+    steps: Vec<Vec<(u8, Vec<String>)>>,
+    /// The legs a command waits on.
+    keys: Vec<u8>,
 }
 
 impl Probe {
@@ -53,12 +57,15 @@ impl Venue for Probe {
     fn on_close(&mut self, _: &mut Cx<'_, u32>, _: SocketId, _: u16) {}
     fn on_response(&mut self, cx: &mut Cx<'_, u32>, generation: u32, response: Response<'_>) {
         if response.status == 200 {
-            self.fresh.committed(cx, 0, generation);
+            let step = self.steps.get(generation as usize - 1).cloned();
+            for (key, skipped) in step.unwrap_or_else(|| vec![(0, Vec::new())]) {
+                self.fresh.committed(cx, key, generation, &skipped);
+            }
         } else {
             let error = VenueError::new("refused").kind(ErrorKind::AuthPermission);
             self.fresh.failed(cx, 0, generation, &error);
         }
-        if self.fresh.predates(0, generation) {
+        if self.fresh.predates(0, generation) || (generation as usize) < self.steps.len() {
             self.read(cx);
         }
     }
@@ -69,7 +76,14 @@ impl Venue for Probe {
         assert_eq!(action, VenueAction::ReadPositions);
         // The first command finds nothing in flight; a second joins behind it.
         let in_flight = self.generation > 0;
-        if self.fresh.admit(cx, vec![(0, self.generation + 1)]) && !in_flight {
+        let need = self.generation + 1;
+        let keys = if self.keys.is_empty() {
+            vec![0]
+        } else {
+            self.keys.clone()
+        };
+        let legs = keys.into_iter().map(|key| (key, need)).collect();
+        if self.fresh.admit(cx, legs) && !in_flight {
             self.read(cx);
         }
     }
@@ -223,4 +237,79 @@ fn the_callers_wait_bounds_a_command_whose_read_never_answers() {
         !engine.venue().fresh.owed(0),
         "the retired root leaves no waiter"
     );
+}
+
+fn scripted(keys: Vec<u8>, steps: Vec<Vec<(u8, Vec<String>)>>) -> Engine<Probe> {
+    crate::test_support::seeded_engine(Probe {
+        capable: true,
+        keys,
+        steps,
+        ..Probe::default()
+    })
+}
+
+fn names(symbols: &[&str]) -> Vec<String> {
+    symbols.iter().map(|symbol| (*symbol).to_owned()).collect()
+}
+
+#[test]
+fn the_answer_lists_skipped_rows_as_a_json_array_of_strings() {
+    let quoted = "EVIL\"SYM".to_owned();
+    let mut engine = scripted(vec![], vec![vec![(0, vec![quoted])]]);
+    let (mut done, mut requests) = (Vec::new(), Vec::new());
+    read_positions(&mut engine, 0., 1);
+    drain(&mut engine, &mut done, &mut requests);
+    reply(&mut engine, 1., requests[0], 200);
+    drain(&mut engine, &mut done, &mut requests);
+    assert_eq!(done, vec![(1, Ok(r#"["EVIL\"SYM"]"#.to_owned()))]);
+}
+
+#[test]
+fn a_multi_leg_command_accumulates_skips_deduped_across_its_legs() {
+    let step = vec![
+        (0, names(&["A", "B"])),
+        (1, names(&["B", "C"])),
+        (2, Vec::new()),
+    ];
+    let mut engine = scripted(vec![0, 1, 2], vec![step]);
+    let (mut done, mut requests) = (Vec::new(), Vec::new());
+    read_positions(&mut engine, 0., 1);
+    drain(&mut engine, &mut done, &mut requests);
+    reply(&mut engine, 1., requests[0], 200);
+    drain(&mut engine, &mut done, &mut requests);
+    assert_eq!(done, vec![(1, Ok(r#"["A","B","C"]"#.to_owned()))]);
+}
+
+#[test]
+fn a_read_that_does_not_satisfy_a_leg_lends_it_no_skips() {
+    // Command 2 joins while read 1 is out: read 1's skip answers only command 1.
+    let mut engine = scripted(vec![], vec![vec![(0, names(&["OLD"]))]]);
+    let (mut done, mut requests) = (Vec::new(), Vec::new());
+    read_positions(&mut engine, 0., 1);
+    drain(&mut engine, &mut done, &mut requests);
+    read_positions(&mut engine, 1., 2);
+    reply(&mut engine, 2., requests[0], 200);
+    drain(&mut engine, &mut done, &mut requests);
+    assert_eq!(done, vec![(1, Ok(r#"["OLD"]"#.to_owned()))]);
+    reply(&mut engine, 3., requests[1], 200);
+    drain(&mut engine, &mut done, &mut requests);
+    assert_eq!(done[1], (2, Ok("[]".to_owned())));
+}
+
+#[test]
+fn a_leg_already_satisfied_takes_no_skips_from_a_later_read() {
+    let steps = vec![
+        vec![(0, names(&["FIRST"]))],
+        vec![(0, names(&["LATE"])), (1, names(&["SECOND"]))],
+    ];
+    let mut engine = scripted(vec![0, 1], steps);
+    let (mut done, mut requests) = (Vec::new(), Vec::new());
+    read_positions(&mut engine, 0., 1);
+    drain(&mut engine, &mut done, &mut requests);
+    reply(&mut engine, 1., requests[0], 200);
+    drain(&mut engine, &mut done, &mut requests);
+    assert!(done.is_empty(), "leg 1 is still owed");
+    reply(&mut engine, 2., requests[1], 200);
+    drain(&mut engine, &mut done, &mut requests);
+    assert_eq!(done, vec![(1, Ok(r#"["FIRST","SECOND"]"#.to_owned()))]);
 }

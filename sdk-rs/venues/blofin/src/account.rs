@@ -206,6 +206,8 @@ pub enum Request {
         balance_revision: u64,
         failed: bool,
         read: u32,
+        /// Owned rows on a market the catalogue does not list.
+        unlisted: Vec<String>,
     },
     Balance {
         positions: SnapshotBuilder<String, Position>,
@@ -216,6 +218,7 @@ pub enum Request {
         balance_revision: u64,
         failed: bool,
         read: u32,
+        unlisted: Vec<String>,
     },
     Orders {
         family: u8,
@@ -768,6 +771,7 @@ impl Blofin {
                 balance_revision: self.account.balance_revision,
                 failed: false,
                 read: self.account.positions_read,
+                unlisted: Vec::new(),
             },
             true,
         );
@@ -1184,6 +1188,7 @@ impl Blofin {
                 used,
                 upnl,
                 failed,
+                unlisted,
                 ..
             } => match serde_json::from_str::<PositionRow<'_>>(item) {
                 Ok(p) => {
@@ -1208,7 +1213,11 @@ impl Blofin {
                                 p.inst_id
                             ),
                         );
+                        unlisted.push(p.inst_id.to_string());
                         return;
+                    }
+                    if p.positions.0 != 0.0 && cx.store.market_by_id(&p.inst_id).is_none() {
+                        unlisted.push(p.inst_id.to_string());
                     }
                     if let Some(position) = self.map_position(cx, &p) {
                         *used += p.maintenance_margin.0;
@@ -1216,7 +1225,7 @@ impl Blofin {
                         positions.push(position);
                     }
                 }
-                Err(_) => self.reject_position(cx, positions, failed, item),
+                Err(_) => self.reject_position(cx, positions, failed, unlisted, item),
             },
             Request::Balance { wallet, failed, .. } => match serde_json::from_str::<AssetRow>(item)
             {
@@ -1294,6 +1303,7 @@ impl Blofin {
         cx: &mut Cx<'_, Pending>,
         positions: &mut SnapshotBuilder<String, Position>,
         failed: &mut bool,
+        unlisted: &mut Vec<String>,
         item: &str,
     ) {
         let row = serde_json::from_str::<RowIdentity<'_>>(item).unwrap_or_default();
@@ -1302,6 +1312,12 @@ impl Blofin {
             .as_deref()
             .is_some_and(|t| !t.is_empty() && !t.eq_ignore_ascii_case("SWAP"))
         {
+            // Its quantity is unreadable, so an uncatalogued row is listed.
+            if let Some(inst_id) = row.inst_id.as_deref().filter(|id| !id.is_empty())
+                && cx.store.market_by_id(inst_id).is_none()
+            {
+                unlisted.push(inst_id.to_owned());
+            }
             return;
         }
         let inst_id = row.inst_id.as_deref().unwrap_or_default();
@@ -1316,6 +1332,8 @@ impl Blofin {
         let Some(symbol) = cx.store.market_by_id(inst_id).map(|m| m.symbol.clone()) else {
             if self.malformed_markets.contains(inst_id) {
                 *failed = true;
+            } else {
+                unlisted.push(inst_id.to_owned());
             }
             return;
         };
@@ -1517,6 +1535,7 @@ impl Blofin {
                 balance_revision,
                 failed: false,
                 read,
+                unlisted,
             } => self.private_read(
                 cx,
                 "/api/v1/asset/balances?accountType=futures",
@@ -1529,6 +1548,7 @@ impl Blofin {
                     balance_revision,
                     failed: false,
                     read,
+                    unlisted,
                 },
                 true,
             ),
@@ -1541,12 +1561,15 @@ impl Blofin {
                 balance_revision,
                 failed: false,
                 read,
+                unlisted,
             } => {
                 self.account.account_busy = false;
                 if positions_revision == self.account.positions_revision {
                     self.account.position_skips.clear();
                     self.commit_positions(cx, positions.commit([], |p| p.id.clone()));
-                    self.account.fresh_positions.committed(cx, 0, read);
+                    self.account
+                        .fresh_positions
+                        .committed(cx, 0, read, &unlisted);
                 }
                 self.read_fresh_positions_again(cx, read);
                 if balance_revision == self.account.balance_revision {

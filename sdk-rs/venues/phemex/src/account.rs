@@ -1074,7 +1074,7 @@ impl PhemexPerpetuals {
                     safe_cex_engine::VenueError::new("Phemex positions: a row could not be mapped");
                 self.account.fresh_positions.failed(cx, key, read, &error);
             } else {
-                self.account.fresh_positions.committed(cx, key, read);
+                self.account.fresh_positions.committed(cx, key, read, &[]);
             }
         }
         self.account_finish(cx, currency, false);

@@ -2272,7 +2272,7 @@ impl Lighter {
                         let error = VenueError::new("Lighter positions: a row could not be mapped");
                         self.account.fresh_positions.failed(cx, 0, read, &error);
                     } else if !held {
-                        self.account.fresh_positions.committed(cx, 0, read);
+                        self.account.fresh_positions.committed(cx, 0, read, &[]);
                     }
                 } else {
                     self.trade_account_ready(cx, serial, false);

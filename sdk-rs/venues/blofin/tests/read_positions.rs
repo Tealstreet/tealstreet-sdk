@@ -209,3 +209,24 @@ fn before_settings_load_the_command_refuses_without_sending() {
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     assert!(h.pending.is_empty());
 }
+
+#[test]
+fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
+    let row = POSITION.replace("BTC-USDT", "DOGE-USDT");
+    let mut h = started();
+    read(&mut h, 70);
+    h.reply(POSITIONS, &format!(r#"{{"code":"0","data":[{row}]}}"#));
+    h.reply(BALANCES, WALLET);
+    assert!(
+        matches!(done(&h, 70), Some(Ok(body)) if body == r#"["DOGE-USDT"]"#),
+        "{:?}",
+        done(&h, 70)
+    );
+
+    let flat = row.replace("\"positions\":\"4\"", "\"positions\":\"0\"");
+    let mut h = started();
+    read(&mut h, 71);
+    h.reply(POSITIONS, &format!(r#"{{"code":"0","data":[{flat}]}}"#));
+    h.reply(BALANCES, WALLET);
+    assert!(succeeded(&h, 71), "{:?}", done(&h, 71));
+}

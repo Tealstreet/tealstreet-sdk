@@ -275,3 +275,22 @@ fn a_public_engine_refuses_without_sending() {
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 60, error }) if error.kind != Some(ErrorKind::Unsupported) && error.outcome == Some(Outcome::NotSent))), "{out:?}");
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
+    let unlisted = ROW.replace("BTC-USDT", "DOGE-USDT");
+    let mut h = started();
+    h.read(70);
+    h.answer(POSITIONS, 200, &unlisted);
+    assert_eq!(
+        h.result(70)
+            .map(|r| r.as_deref().map_err(|e| e.message.as_str())),
+        Some(Ok(r#"["DOGEUSDT"]"#))
+    );
+
+    let flat = unlisted.replace("\"positionAmt\":\"0.1\"", "\"positionAmt\":\"0\"");
+    let mut h = started();
+    h.read(71);
+    h.answer(POSITIONS, 200, &flat);
+    assert!(h.succeeded(71), "{:?}", h.done);
+}

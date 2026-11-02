@@ -224,3 +224,14 @@ fn before_the_account_resolves_the_command_refuses_without_sending() {
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 60, error }) if error.kind != Some(ErrorKind::Unsupported) && error.outcome == Some(Outcome::NotSent))), "{out:?}");
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn a_flat_row_on_an_unknown_market_is_not_exposure() {
+    let mut h = started();
+    h.read(70);
+    h.answer(
+        200,
+        r#"{"code":200,"accounts":[{"index":718895,"collateral":"1000","total_asset_value":"1000","available_balance":"900","positions":[{"market_id":77,"position":"0","sign":1,"avg_entry_price":"100","unrealized_pnl":"0","realized_pnl":"3","initial_margin_fraction":1000,"margin_mode":0}]}]}"#,
+    );
+    assert!(h.succeeded(70), "{:?}", h.done);
+}

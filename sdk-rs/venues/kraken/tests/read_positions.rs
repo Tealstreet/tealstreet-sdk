@@ -228,3 +228,26 @@ fn a_public_engine_refuses_without_sending_and_spot_is_unsupported() {
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 60, error }) if error.kind != Some(ErrorKind::Unsupported) && error.outcome == Some(Outcome::NotSent))), "{out:?}");
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
+    let row = |size: &str| {
+        format!(
+            r#"{{"result":"success","openPositions":[{{"symbol":"PF_DOGEUSD","side":"long","size":{size},"price":100,"unrealizedPnl":40,"maxFixedLeverage":10}}]}}"#
+        )
+    };
+    let mut h = started();
+    h.read(70);
+    h.answer(200, &row("2"));
+    assert_eq!(
+        h.result(70)
+            .map(|r| r.as_deref().map_err(|e| e.message.as_str())),
+        Some(Ok(r#"["PF_DOGEUSD"]"#))
+    );
+    assert_eq!(h.open(), 0.0, "the store is unchanged");
+
+    let mut h = started();
+    h.read(71);
+    h.answer(200, &row("0"));
+    assert!(h.succeeded(71), "{:?}", h.done);
+}

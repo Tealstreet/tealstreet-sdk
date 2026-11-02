@@ -197,3 +197,25 @@ fn before_the_account_loads_the_command_refuses_without_sending() {
         "nothing is sent"
     );
 }
+
+#[test]
+fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
+    let row = |quantity: &str| {
+        format!(
+            r#"{{"code":0,"result":{{"data":[{{"instrument_name":"DOGEUSD-PERP","quantity":"{quantity}","cost":"99","update_timestamp_ms":1}}]}}}}"#
+        )
+    };
+    let mut h = started();
+    read(&mut h, 70);
+    h.reply(POSITIONS, &row("2"));
+    assert!(
+        matches!(done(&h, 70), Some(Ok(body)) if body == r#"["DOGEUSD-PERP"]"#),
+        "{:?}",
+        done(&h, 70)
+    );
+
+    let mut h = started();
+    read(&mut h, 71);
+    h.reply(POSITIONS, &row("0"));
+    assert!(succeeded(&h, 71), "{:?}", done(&h, 71));
+}

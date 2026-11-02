@@ -323,3 +323,26 @@ fn before_startup_loads_the_command_refuses_without_sending() {
     assert_ne!(refused.kind, Some(ErrorKind::Unsupported));
     assert_eq!(refused.outcome, Some(Outcome::NotSent));
 }
+
+#[test]
+fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
+    for (name, options) in CASES {
+        let unlisted = POSITION.replace("BTC-USDT-SWAP", "DOGE-USDT-SWAP");
+        let mut h = started(options());
+        h.read(70);
+        h.read_all(&unlisted);
+        assert_eq!(
+            h.result(70)
+                .map(|r| r.as_deref().map_err(|e| e.message.as_str())),
+            Some(Ok(r#"["DOGE-USDT-SWAP"]"#)),
+            "{name}"
+        );
+        assert_eq!(h.open(), 0.0, "{name}: the store is unchanged");
+
+        let flat = unlisted.replace("\"pos\":\"5\"", "\"pos\":\"0\"");
+        let mut h = started(options());
+        h.read(71);
+        h.read_all(&flat);
+        assert!(h.succeeded(71), "{name}: {:?}", h.done);
+    }
+}

@@ -18,7 +18,8 @@ const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
 
 /// What a state read did to the store, for the `readPositions` waiting on it.
 enum StateApplied {
-    Committed,
+    /// The symbols of owned rows on coins hidden by design.
+    Committed(Vec<String>),
     /// A newer stream frame overrode this read.
     Held,
     Unusable(&'static str),
@@ -1310,7 +1311,11 @@ impl Hyperliquid {
     ) {
         let key = self.dex_key(dex);
         match applied {
-            StateApplied::Committed => self.account.fresh_positions.committed(cx, key, read),
+            StateApplied::Committed(unlisted) => {
+                self.account
+                    .fresh_positions
+                    .committed(cx, key, read, &unlisted);
+            }
             StateApplied::Held => {}
             StateApplied::Unusable(message) => {
                 let error = VenueError::new(message);
@@ -1729,7 +1734,12 @@ impl Hyperliquid {
         if coverage.rejected() != 0 {
             return StateApplied::Unusable("Hyperliquid positions: a row could not be mapped");
         }
-        StateApplied::Committed
+        let unlisted = rows
+            .iter()
+            .filter(|row| row.position.szi != 0.0 && self.excluded_coin(&row.position.coin))
+            .map(|row| row.position.coin.to_string())
+            .collect();
+        StateApplied::Committed(unlisted)
     }
     pub(crate) fn account_prices(&mut self, cx: &mut Cx<'_, Pending>) {
         if cx.store.loaded().balance || self.account.pending_spot.is_some() {

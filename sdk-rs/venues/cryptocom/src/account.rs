@@ -63,6 +63,8 @@ pub struct Request {
     pub invalid: bool,
     /// Unreadable balance rows after the summary.
     pub skipped: Skipped,
+    /// Owned rows on a market the catalogue does not list.
+    pub unlisted: Vec<String>,
     pub retries: u8,
 }
 
@@ -503,6 +505,7 @@ impl Cryptocom {
             rows,
             invalid: false,
             skipped: Skipped::default(),
+            unlisted: Vec::new(),
             retries,
         };
         let admitted = match SelectedRead::background(
@@ -640,7 +643,10 @@ impl Cryptocom {
                         cx.notice(Level::Warn, code::ROW_SKIPPED,
                             format!("Skipping Crypto.com position on uncatalogued market {}", row.instrument_name),
                         );
+                        request.unlisted.push(row.instrument_name.to_owned());
                     }
+                } else if row.quantity.parse::<f64>().is_err() {
+                    request.unlisted.push(row.instrument_name.to_owned());
                 }
             }),
             Rows::Orders(rows) => serde_json::from_str::<OrderRow>(item).map(|row| {
@@ -669,6 +675,11 @@ impl Cryptocom {
         }
         let key = row_key(item);
         if foreign(cx, key.as_ref()) {
+            if matches!(request.rows, Rows::Positions(_))
+                && let Some(symbol) = key.as_ref().and_then(|k| k.instrument_name)
+            {
+                request.unlisted.push(symbol.to_owned());
+            }
             return;
         }
         match &mut request.rows {
@@ -836,7 +847,9 @@ impl Cryptocom {
                     let error = VenueError::new("Crypto.com positions: a row could not be mapped");
                     self.account.fresh_positions.failed(cx, 0, read, &error);
                 } else if !held {
-                    self.account.fresh_positions.committed(cx, 0, read);
+                    self.account
+                        .fresh_positions
+                        .committed(cx, 0, read, &request.unlisted);
                 }
                 self.read_account(cx, Read::Balance, 0);
             }

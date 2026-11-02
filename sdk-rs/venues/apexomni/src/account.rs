@@ -1252,7 +1252,7 @@ impl ApexOmni {
             let error = VenueError::new("ApeX positions: a row could not be mapped");
             self.account.fresh_positions.failed(cx, 0, read, &error);
         } else if !held {
-            self.account.fresh_positions.committed(cx, 0, read);
+            self.account.fresh_positions.committed(cx, 0, read, &[]);
         }
     }
 

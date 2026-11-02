@@ -219,3 +219,21 @@ fn a_public_engine_refuses_without_sending() {
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     assert!(h.pending.is_empty());
 }
+
+#[test]
+fn an_owned_row_outside_the_catalogue_is_named_and_a_flat_one_is_not() {
+    for market in ["BTC-USD-250101-100000-C", "OLD-USD-PERP"] {
+        let row = POSITION.replace("BTC-USD-PERP", market);
+        let (mut h, _) = loaded();
+        read(&mut h, 70);
+        h.reply("/positions", &format!("{{\"results\":[{row}]}}"));
+        assert_eq!(h.result(70), Ok(format!(r#"["{market}"]"#).as_str()));
+        assert_eq!(open(&h), 0.0, "the store is flat: its rows are absent");
+
+        let flat = row.replace("\"size\":\"2\"", "\"size\":\"0\"");
+        let (mut h, _) = loaded();
+        read(&mut h, 71);
+        h.reply("/positions", &format!("{{\"results\":[{flat}]}}"));
+        assert_eq!(h.result(71), Ok("[]"), "{market}");
+    }
+}

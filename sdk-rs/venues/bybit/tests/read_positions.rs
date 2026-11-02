@@ -321,7 +321,7 @@ fn hyro_abandons_a_snapshot_in_flight_for_a_new_one() {
     let (mut h, symbol) = ready(Variant::Hyrotrader);
     h.advance(5_100.0);
     assert!(h.has_request(POSITIONS), "a tick snapshot is out");
-    let stale: Vec<_> = h.requests.drain(..).collect();
+    let stale = std::mem::take(&mut h.requests);
     read(&mut h, 51);
     assert!(h.has_request(POSITIONS), "a new snapshot is issued");
     let body = sized(symbol, "1");
@@ -381,4 +381,41 @@ fn spot_and_a_public_engine_send_nothing() {
     );
     assert_eq!(outcome, Some(Outcome::NotSent));
     assert!(!h.has_request(POSITIONS));
+}
+
+fn foreign_row(size: &str) -> String {
+    sized("BTC-27JUN25-100000-C", size)
+        .replace("\"positionIdx\"", "\"category\":\"option\",\"positionIdx\"")
+}
+
+#[test]
+fn an_owned_row_this_product_cannot_hold_is_named_and_a_flat_one_is_not() {
+    for variant in PLAIN {
+        let (mut h, _) = ready(variant);
+        read(&mut h, 70);
+        answer_all(&mut h, POSITIONS, &foreign_row("2"));
+        assert_eq!(
+            h.result(70),
+            Some(&Ok(r#"["BTC-27JUN25-100000-C"]"#.to_owned())),
+            "{variant:?}"
+        );
+
+        let (mut h, _) = ready(variant);
+        read(&mut h, 71);
+        answer_all(&mut h, POSITIONS, &foreign_row("0"));
+        assert_eq!(h.result(71), Some(&Ok("[]".to_owned())), "{variant:?}");
+    }
+}
+
+#[test]
+fn hyro_names_an_owned_row_outside_its_usdt_catalogue_only_on_the_snapshot() {
+    for (size, body) in [("2", r#"["BTCUSDC"]"#), ("0", "[]")] {
+        let (mut h, _) = ready(Variant::Hyrotrader);
+        read(&mut h, 72);
+        answer_all(&mut h, "/v5/order/realtime", EMPTY);
+        answer_all(&mut h, POSITIONS, &sized("BTCUSDC", size));
+        assert_eq!(h.result(72), None, "the wallet leg is out");
+        answer_all(&mut h, "/v5/account/wallet-balance", WALLET);
+        assert_eq!(h.result(72), Some(&Ok(body.to_owned())), "size {size}");
+    }
 }

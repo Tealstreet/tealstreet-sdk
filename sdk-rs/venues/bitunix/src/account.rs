@@ -1422,7 +1422,7 @@ impl BitunixFutures {
                 held.extend(read.positions);
                 cx.store.set_positions(held);
                 if !rejected {
-                    self.account.fresh_positions.committed(cx, 0, serial);
+                    self.account.fresh_positions.committed(cx, 0, serial, &[]);
                 }
                 self.read_axis(cx, Axis::Tpsl);
                 self.read_fresh_positions_again(cx, serial);

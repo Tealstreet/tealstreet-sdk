@@ -59,6 +59,8 @@ pub enum Request {
         coverage: SnapshotCoverage<String>,
         cycle: bool,
         read: u32,
+        /// Owned rows outside this perpetual adapter's catalogue.
+        unlisted: Vec<String>,
     },
     Balance {
         context: Context,
@@ -1285,6 +1287,7 @@ impl Account {
                 coverage: SnapshotCoverage::default(),
                 cycle,
                 read,
+                unlisted: Vec::new(),
             }),
         );
     }
@@ -1409,10 +1412,18 @@ impl Account {
                     ),
                 }
             }
-            Request::Positions { rows, coverage, .. } => {
+            Request::Positions {
+                rows,
+                coverage,
+                unlisted,
+                ..
+            } => {
                 match registered {
                     // Other products, excluded perpetuals and flat unknown rows.
-                    Ok(false) => return,
+                    Ok(false) => {
+                        unlisted.extend(owned_market(item));
+                        return;
+                    }
                     Ok(true) => {
                         if let Ok(Ok(position)) = serde_json::from_str::<PositionRow<'_>>(item)
                             .map(|row| map_position(&row, cx))
@@ -1677,6 +1688,7 @@ impl Account {
                 coverage,
                 cycle,
                 read,
+                unlisted,
                 ..
             } => {
                 self.positions_busy = false;
@@ -1722,7 +1734,7 @@ impl Account {
                         let error = VenueError::new("Paradex positions: a row could not be mapped");
                         self.fresh_positions.failed(cx, 0, read, &error);
                     } else if !held {
-                        self.fresh_positions.committed(cx, 0, read);
+                        self.fresh_positions.committed(cx, 0, read, &unlisted);
                     }
                 }
                 if cycle {
@@ -2535,6 +2547,29 @@ fn row_market(raw: &str) -> Option<&str> {
         .map(|row| row.market)
         .filter(|market| !market.is_empty())
 }
+/// The market of a position row that is open: not closed, and not a readable zero.
+fn owned_market(raw: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        market: &'a str,
+        #[serde(default, borrow)]
+        size: Option<&'a serde_json::value::RawValue>,
+        #[serde(default, borrow)]
+        status: Option<&'a serde_json::value::RawValue>,
+    }
+    let row: Row<'_> = serde_json::from_str(raw).ok()?;
+    let closed = row
+        .status
+        .and_then(|status| serde_json::from_str::<&str>(status.get()).ok())
+        == Some("CLOSED");
+    let flat = row
+        .size
+        .and_then(|size| serde_json::from_str::<Number>(size.get()).ok())
+        .is_some_and(|size| size.0 == 0.0);
+    (!closed && !flat).then(|| row.market.to_owned())
+}
+
 fn registered_market(
     cx: &Cx<'_, Pending>,
     excluded_perps: &HashSet<String>,

@@ -124,6 +124,7 @@ pub enum Request {
         rows: Vec<MappedPosition>,
         invalid: bool,
         rejected: RowAdmission<String>,
+        unlisted: Vec<String>,
     },
     Wallet {
         session: u32,
@@ -178,6 +179,8 @@ struct PositionsJoin {
     failed: bool,
     rejected: RowAdmission<String>,
     cursors: HashSet<String>,
+    /// Owned rows this product does not trade, on no catalogued market.
+    unlisted: Vec<String>,
 }
 
 struct OrdersJoin {
@@ -214,6 +217,7 @@ struct HyroSnapshot {
     revision: u32,
     /// The positions read of this snapshot.
     generation: u32,
+    unlisted: Vec<String>,
     orders: Option<Vec<Mapped>>,
     positions: Option<Vec<MappedPosition>>,
     wallet: Option<Wallet>,
@@ -1374,6 +1378,7 @@ impl BybitLinear {
         self.account.snapshot = Some(HyroSnapshot {
             revision: self.account.revision,
             generation: 0,
+            unlisted: Vec::new(),
             orders: None,
             positions: None,
             wallet: None,
@@ -1489,7 +1494,8 @@ impl BybitLinear {
         // A complete committed snapshot is the fresh order read for the fence.
         cx.orders_reconciled(None);
         let key = category_code(self.category);
-        self.fresh_positions.committed(cx, key, snapshot.generation);
+        self.fresh_positions
+            .committed(cx, key, snapshot.generation, &snapshot.unlisted);
     }
 
     fn settle_coins(&self) -> &'static [&'static str] {
@@ -1592,6 +1598,7 @@ impl BybitLinear {
             rows: Vec::new(),
             invalid: false,
             rejected: RowAdmission::default(),
+            unlisted: Vec::new(),
         };
         let rest = Rest::get("/v5/position/list", query).streamed().signed();
         self.send_page(cx, generation, rest, Then::Account(request));
@@ -1738,6 +1745,7 @@ impl BybitLinear {
             failed: false,
             rejected: RowAdmission::default(),
             cursors: HashSet::new(),
+            unlisted: Vec::new(),
         });
         for coin in coins {
             self.request_positions_page(cx, generation, coin, String::new());
@@ -2583,12 +2591,21 @@ impl BybitLinear {
                 rows,
                 invalid,
                 rejected,
+                unlisted,
                 ..
             } => {
                 let Ok(row) = serde_json::from_str::<PositionRow>(item) else {
                     if self.variant.is_hyro() {
                         *invalid = true;
                     } else {
+                        // Its size is unreadable, so an uncatalogued row is listed.
+                        if let Some(identity) = rejected_identity(item)
+                            && let Some(symbol) = identity.symbol.filter(|s| !s.is_empty())
+                            && !self.trades_row(&identity.category.map(Into::into), &symbol)
+                            && cx.store.market(&symbol).is_none()
+                        {
+                            unlisted.push(symbol);
+                        }
                         self.reject_position_item(cx, rejected, item);
                     }
                     return;
@@ -2602,6 +2619,10 @@ impl BybitLinear {
                     return;
                 }
                 if !self.trades_row(&row.category, &row.symbol) {
+                    let flat = present(&row.size).is_some_and(|s| s.parse() == Ok(0.0));
+                    if !flat && cx.store.market(&row.symbol).is_none() {
+                        unlisted.push(row.symbol.to_string());
+                    }
                     return;
                 }
                 if !admitted_position_numbers(&row, self.variant.is_hyro()) {
@@ -2792,6 +2813,7 @@ impl BybitLinear {
                 rows,
                 invalid,
                 rejected,
+                unlisted,
             } => {
                 let malformed = invalid
                     || outcome
@@ -2818,6 +2840,7 @@ impl BybitLinear {
                     Ok(_) => {
                         join.rows.extend(rows);
                         join.rejected.extend(rejected);
+                        join.unlisted.extend(unlisted);
                         if let Some(next) = next {
                             if !join.cursors.insert(next.clone()) || join.cursors.len() > 100 {
                                 join.failed = true;
@@ -3141,6 +3164,7 @@ impl BybitLinear {
         if self.variant.is_hyro() {
             if let Some(snapshot) = &mut self.account.snapshot {
                 snapshot.positions = Some(join.rows);
+                snapshot.unlisted = join.unlisted;
             }
             self.finish_hyro_snapshot(cx);
             return;
@@ -3248,7 +3272,8 @@ impl BybitLinear {
             self.fresh_positions
                 .failed(cx, key, join.generation, &error);
         } else if !frame_held {
-            self.fresh_positions.committed(cx, key, join.generation);
+            self.fresh_positions
+                .committed(cx, key, join.generation, &join.unlisted);
         }
         self.read_fresh_positions_again(cx, join.generation);
     }

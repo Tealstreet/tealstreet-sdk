@@ -73,6 +73,8 @@ pub struct Request {
     settings: Vec<(String, Option<f64>)>,
     /// False on a structural failure or held catalogue exposure: nothing commits.
     valid: bool,
+    /// Owned rows on a market the catalogue does not list.
+    unlisted: Vec<String>,
     /// The number of a positions read, so `readPositions` can name one it may trust.
     read: u32,
 }
@@ -86,6 +88,7 @@ impl Request {
             positions: SnapshotBuilder::default(),
             settings: vec![],
             valid: true,
+            unlisted: Vec::new(),
             read: 0,
         }
     }
@@ -1349,6 +1352,7 @@ impl Kraken {
                 } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                     request.valid = false;
                 } else {
+                    request.unlisted.push(row.symbol.to_string());
                     self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                 }
             }
@@ -1359,6 +1363,7 @@ impl Kraken {
                 } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                     request.valid = false;
                 } else {
+                    request.unlisted.push(row.symbol.to_string());
                     self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                 }
             }
@@ -1476,7 +1481,9 @@ impl Kraken {
                         let error = VenueError::new("Kraken positions: a row could not be mapped");
                         self.account.fresh_positions.failed(cx, 0, read, &error);
                     } else {
-                        self.account.fresh_positions.committed(cx, 0, read);
+                        self.account
+                            .fresh_positions
+                            .committed(cx, 0, read, &request.unlisted);
                     }
                 }
                 self.read_fresh_positions_again(cx, read);

@@ -8,6 +8,8 @@ use crate::{ErrorKind, Outcome, VenueError};
 struct Waiter {
     root: Context,
     legs: Vec<(u8, u32)>,
+    /// Symbols of owned rows the reads that satisfied its legs could not represent.
+    skipped: Vec<String>,
 }
 
 #[derive(Default)]
@@ -33,7 +35,11 @@ impl FreshPositions {
     pub fn admit<P>(&mut self, cx: &mut Cx<'_, P>, legs: Vec<(u8, u32)>) -> bool {
         match cx.admit_caller_read_root(None, None) {
             Ok(root) => {
-                self.waiters.push(Waiter { root, legs });
+                self.waiters.push(Waiter {
+                    root,
+                    legs,
+                    skipped: Vec::new(),
+                });
                 true
             }
             Err(CommandEntryError::Revoked) => {
@@ -61,16 +67,35 @@ impl FreshPositions {
         })
     }
 
-    /// Read `generation` committed to the store.
-    pub fn committed<P>(&mut self, cx: &mut Cx<'_, P>, key: u8, generation: u32) {
+    /// Read `generation` committed to the store. `skipped` names rows it dropped
+    /// because their market is outside the catalogue; the answer lists them.
+    pub fn committed<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        key: u8,
+        generation: u32,
+        skipped: &[String],
+    ) {
         self.waiters.retain_mut(|waiter| {
+            let before = waiter.legs.len();
             waiter
                 .legs
                 .retain(|(leg, need)| *leg != key || *need > generation);
+            if waiter.legs.len() != before {
+                for symbol in skipped {
+                    if !waiter.skipped.contains(symbol) {
+                        waiter.skipped.push(symbol.clone());
+                    }
+                }
+            }
             if !waiter.legs.is_empty() {
                 return true;
             }
-            let _ = cx.settle_caller_read_root(&waiter.root, Ok("[]".into()));
+            let body = serde_json::to_string(&waiter.skipped);
+            let _ = cx.settle_caller_read_root(
+                &waiter.root,
+                body.map_err(|_| VenueError::new("positions read: unserializable skipped rows")),
+            );
             false
         });
     }

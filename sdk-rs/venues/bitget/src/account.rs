@@ -991,7 +991,7 @@ impl BitgetFutures {
             let error = VenueError::new("Bitget positions: a row could not be mapped");
             self.account.fresh_positions.failed(cx, 0, read, &error);
         } else if !stream_held {
-            self.account.fresh_positions.committed(cx, 0, read);
+            self.account.fresh_positions.committed(cx, 0, read, &[]);
         }
         self.read_fresh_positions_again(cx, read);
     }

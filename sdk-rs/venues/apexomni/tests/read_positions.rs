@@ -250,3 +250,20 @@ fn a_public_engine_refuses_without_sending() {
 fn started_public() -> (TestEngine, SocketId) {
     support::started()
 }
+
+#[test]
+fn an_owned_row_on_an_unknown_market_fails_and_a_flat_one_does_not() {
+    let row = |size: &str| {
+        format!(
+            r#"{{"code":0,"data":{{"id":"611779989544632629","positions":[{{"symbol":"DOGE-USDT","side":"LONG","entryPrice":"1","size":"{size}","customImr":"0.1"}}]}}}}"#
+        )
+    };
+    let mut h = started();
+    h.read(70);
+    h.answer(POSITIONS, &row("2"));
+    assert!(h.failure(70).message.contains("could not be mapped"));
+    let mut h = started();
+    h.read(71);
+    h.answer(POSITIONS, &row("0"));
+    assert!(h.succeeded(71), "{:?}", h.done);
+}

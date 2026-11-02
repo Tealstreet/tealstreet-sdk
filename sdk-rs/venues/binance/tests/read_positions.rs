@@ -298,3 +298,29 @@ fn spot_options_and_a_public_engine_send_nothing() {
     );
     assert_eq!(error.outcome, Some(Outcome::NotSent));
 }
+
+#[test]
+fn an_owned_row_outside_the_coinm_catalogue_is_named_and_a_flat_one_is_not() {
+    let unlisted = COIN_RISK.replace("BTCUSD_PERP", "ETHUSD_250926");
+    let mut h = coinm();
+    read(&mut h, 70);
+    answer(&mut h, COIN, &unlisted);
+    assert_eq!(h.result(70), Some(&Ok(r#"["ETHUSD_250926"]"#.to_owned())));
+
+    let flat = unlisted.replace("\"positionAmt\":\"5\"", "\"positionAmt\":\"0\"");
+    let mut h = coinm();
+    read(&mut h, 71);
+    answer(&mut h, COIN, &flat);
+    assert_eq!(h.result(71), Some(&Ok("[]".to_owned())));
+}
+
+#[test]
+fn usdm_and_pm_commit_a_row_on_an_unknown_market_rather_than_dropping_it() {
+    for (name, start, path) in [("usdm", usdm as fn() -> Harness, USDM), ("pm", pm, PM)] {
+        let mut h = start();
+        read(&mut h, 72);
+        answer(&mut h, path, &USDM_RISK.replace("BTCUSDT", "DOGEUSDT"));
+        assert_eq!(h.result(72), Some(&Ok("[]".to_owned())), "{name}");
+        assert!(open(&h) > 0.0, "{name}: the row is shown, not skipped");
+    }
+}

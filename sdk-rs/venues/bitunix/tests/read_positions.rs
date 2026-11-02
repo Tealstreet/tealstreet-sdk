@@ -208,3 +208,12 @@ fn a_public_engine_refuses_without_sending() {
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 60, error }) if error.kind != Some(ErrorKind::Unsupported) && error.outcome == Some(Outcome::NotSent))), "{out:?}");
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn a_row_on_an_unknown_market_commits_to_the_store_rather_than_being_dropped() {
+    let mut h = started();
+    h.read(70);
+    h.answer(200, &POSITIONS.replace("BTCUSDT", "DOGEUSDT"));
+    assert!(h.succeeded(70), "{:?}", h.done);
+    assert_eq!(h.open(), 0.01, "the row is shown, not skipped");
+}

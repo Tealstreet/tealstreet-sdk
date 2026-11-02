@@ -74,6 +74,8 @@ pub enum Request {
         // An owned row outside the catalogue makes the snapshot incomplete.
         unavailable: bool,
         read: u32,
+        /// Owned rows on a market the catalogue does not list.
+        unlisted: Vec<String>,
     },
     OpenOrders {
         owner: u64,
@@ -644,6 +646,7 @@ impl Account {
                 skipped: Vec::new(),
                 unavailable: false,
                 read: self.positions_read,
+                unlisted: Vec::new(),
             },
             true,
             None,
@@ -1047,6 +1050,7 @@ impl Account {
                 settings,
                 skipped,
                 unavailable,
+                unlisted,
                 ..
             } => {
                 let Ok(row) = serde_json::from_str::<PositionRow<'_>>(item) else {
@@ -1067,6 +1071,7 @@ impl Account {
                                 code::ROW_SKIPPED,
                                 format!("Skipping BingX position on uncatalogued market {symbol}"),
                             );
+                            unlisted.push(symbol);
                         }
                     }
                     return;
@@ -1375,6 +1380,7 @@ impl Account {
                 skipped,
                 unavailable,
                 read,
+                unlisted,
             } => {
                 self.positions_in_flight = None;
                 if unavailable {
@@ -1419,7 +1425,7 @@ impl Account {
                         let error = VenueError::new("BingX positions: a row could not be mapped");
                         self.fresh_positions.failed(cx, 0, read, &error);
                     } else {
-                        self.fresh_positions.committed(cx, 0, read);
+                        self.fresh_positions.committed(cx, 0, read, &unlisted);
                     }
                 } else {
                     for id in &skipped {
@@ -2197,6 +2203,7 @@ mod sign_failure_owners {
                 },
                 1 => Request::Positions {
                     read: 0,
+                    unlisted: vec![],
                     revision: 1,
                     settings_stamp: Observation::default(),
                     rows: vec![],

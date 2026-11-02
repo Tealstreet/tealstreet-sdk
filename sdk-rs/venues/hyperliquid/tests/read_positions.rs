@@ -254,3 +254,32 @@ fn spot_and_a_public_engine_send_nothing() {
     let out = prepared_now(&mut public);
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 61, error }) if error.kind != Some(ErrorKind::Unsupported) && error.outcome == Some(Outcome::NotSent))), "{out:?}");
 }
+
+const HIDDEN_META: &str = r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10},{"name":"xyz:OLD","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50","markPx":"50","oraclePx":"50"},{"midPx":null,"markPx":"50","oraclePx":"50"}]]"#;
+
+fn hidden_row(size: &str) -> String {
+    format!(
+        r#"{{"assetPositions":[{{"position":{{"coin":"xyz:OLD","szi":"{size}","entryPx":"50","positionValue":"100","unrealizedPnl":"0","marginUsed":"10","leverage":{{"type":"cross","value":10}}}}}}],"time":2000}}"#
+    )
+}
+
+#[test]
+fn an_owned_row_on_a_hidden_coin_is_named_and_a_flat_one_is_not() {
+    let mut h = H::new(ready_with_hip3_meta(HIDDEN_META));
+    h.read(70);
+    h.answer(FLAT);
+    let other = h.take(true);
+    h.reply(&other, 200, &hidden_row("2"));
+    assert_eq!(
+        h.result(70)
+            .map(|r| r.as_deref().map_err(|e| e.message.as_str())),
+        Some(Ok(r#"["xyz:OLD"]"#))
+    );
+
+    let mut h = H::new(ready_with_hip3_meta(HIDDEN_META));
+    h.read(71);
+    h.answer(FLAT);
+    let other = h.take(true);
+    h.reply(&other, 200, &hidden_row("0"));
+    assert!(h.succeeded(71), "{:?}", h.done);
+}

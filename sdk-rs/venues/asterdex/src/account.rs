@@ -977,7 +977,7 @@ impl AsterDex {
                         let error = VenueError::new("Aster positions: a row could not be mapped");
                         self.account.fresh_positions.failed(cx, 0, read, &error);
                     } else {
-                        self.account.fresh_positions.committed(cx, 0, read);
+                        self.account.fresh_positions.committed(cx, 0, read, &[]);
                     }
                 } else if version != self.account.position_version
                     && self.account.positions_timer.is_none()

@@ -66,6 +66,8 @@ pub enum Request {
         rows: Vec<Position>,
         marks: Vec<(String, f64)>,
         skipped: SnapshotCoverage<String>,
+        /// Owned rows on a contract the clean catalogue excludes.
+        unlisted: Vec<String>,
     },
     SymbolConfig {
         generation: u32,
@@ -83,6 +85,7 @@ pub enum Request {
 }
 
 struct PositionsJoin {
+    unlisted: Vec<String>,
     /// The venue's error for the half that failed.
     error: Option<VenueError>,
     generation: u32,
@@ -503,6 +506,7 @@ impl BinanceFutures {
         let generation = self.account.positions_generation;
         let symbol_config = self.paths.symbol_config;
         self.account.positions = Some(PositionsJoin {
+            unlisted: Vec::new(),
             error: None,
             generation,
             version: self.account.position_version,
@@ -523,6 +527,7 @@ impl BinanceFutures {
                 rows: Vec::new(),
                 marks: Vec::new(),
                 skipped: SnapshotCoverage::default(),
+                unlisted: Vec::new(),
             }),
         );
         if let Some(path) = symbol_config {
@@ -870,6 +875,7 @@ impl BinanceFutures {
                 generation,
                 marks,
                 skipped,
+                unlisted,
             } => {
                 let Ok(p) = serde_json::from_str::<PositionSnapshot>(item) else {
                     #[derive(Deserialize)]
@@ -897,6 +903,7 @@ impl BinanceFutures {
                 {
                     // A clean catalogue excludes delivery/non-trading contracts by design.
                     if !self.catalogue_partial {
+                        unlisted.push(p.symbol.into_owned());
                         return;
                     }
                     // Discovery is retrying the catalogue; hold the snapshot until it settles.
@@ -1086,10 +1093,12 @@ impl BinanceFutures {
                 rows,
                 marks,
                 skipped,
+                unlisted,
             } => {
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
                 {
+                    join.unlisted = unlisted;
                     if !join.failed {
                         self.account.native_asset_marks.extend(marks);
                     }
@@ -1439,6 +1448,7 @@ impl BinanceFutures {
                 cx.now - POSITION_RISK_INTERVAL_MS + FAILED_POSITION_RETRY_MS;
         }
         let generation = join.generation;
+        let unlisted = join.unlisted;
         let current = join.version == self.account.position_version;
         let rejected = join.skipped.rejected() != 0;
         let failure = join.failed.then(|| {
@@ -1515,7 +1525,7 @@ impl BinanceFutures {
             let error = VenueError::new("Binance positions: a row could not be mapped");
             fresh.failed(cx, 0, generation, &error);
         } else if current {
-            fresh.committed(cx, 0, generation);
+            fresh.committed(cx, 0, generation, &unlisted);
         }
         if self.account.fresh_positions.predates(0, generation) {
             self.retry_fresh_positions(cx);

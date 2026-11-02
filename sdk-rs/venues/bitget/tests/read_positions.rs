@@ -235,3 +235,16 @@ fn a_public_engine_refuses_without_sending() {
     assert_ne!(kind, Some(ErrorKind::Unsupported));
     assert_eq!(outcome, Some(Outcome::NotSent));
 }
+
+#[test]
+fn a_row_on_an_unknown_market_fails_the_command() {
+    for size in ["2", "0"] {
+        let row = SIZE_TWO
+            .replace("BTCUSDT", "DOGEUSDT")
+            .replace("\"total\":\"2\"", &format!("\"total\":\"{size}\""));
+        let mut h = classic();
+        read(&mut h, 70);
+        h.respond(CLASSIC, 200, &row);
+        assert!(matches!(result(&h, 70), Some(Err(_))), "size {size}");
+    }
+}

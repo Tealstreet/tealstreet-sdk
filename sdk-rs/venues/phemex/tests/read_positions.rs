@@ -259,3 +259,24 @@ fn a_public_engine_refuses_without_sending() {
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 60, error }) if error.kind != Some(ErrorKind::Unsupported) && error.outcome == Some(Outcome::NotSent))), "{out:?}");
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn an_owned_row_on_an_unknown_market_fails_and_a_flat_one_does_not() {
+    let row = |size: &str| {
+        BTC.replace("BTCUSDT", "DOGEUSDT")
+            .replace("\"0.01\"", &format!("\"{size}\""))
+    };
+    let mut h = started();
+    h.read(70);
+    h.answer(USDT, 200, &envelope("USDT", &row("0.01")));
+    assert!(
+        h.failure(70).message.contains("could not be mapped"),
+        "{:?}",
+        h.done
+    );
+    let mut h = started();
+    h.read(71);
+    h.answer(USDT, 200, &envelope("USDT", &row("0")));
+    h.answer(USDC, 200, &envelope("USDC", ""));
+    assert!(h.succeeded(71), "{:?}", h.done);
+}
