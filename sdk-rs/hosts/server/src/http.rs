@@ -296,6 +296,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
     let user = identity.user.clone();
     let mut session = Session::new(app.registry.clone(), app.metrics.clone(), identity, out);
     let mut loaded = session.take_loaded();
+    let mut dropped = session.take_dropped();
     session.open().await;
     let taken_over = session.taken_over();
     let mut closing = app.closing.subscribe();
@@ -341,6 +342,7 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
                 break;
             }
             Some((name, client)) = loaded.recv() => session.account_loaded(&name, client).await,
+            Some((name, client)) = dropped.recv() => session.client_dropped(&name, client).await,
             text = outgoing.recv() => match text {
                 Some(text) => if !send(&mut sink, Message::Text(text.into())).await { break },
                 None => break,
