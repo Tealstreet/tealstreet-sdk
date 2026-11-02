@@ -91,6 +91,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
       }
       case 'unsubscribeOHLCV': {
         const subId = payload.data.subId;
+        this.cancelPending(subId);
 
         // Find which key this subId belongs to
         for (const [key, sub] of this._subsByKey) {
