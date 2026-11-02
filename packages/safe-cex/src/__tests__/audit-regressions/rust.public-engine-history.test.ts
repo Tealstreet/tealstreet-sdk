@@ -1,12 +1,12 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import { describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 /**
  * A public-only account's history was NOT read, which is not the same as empty: ingestion
@@ -27,22 +27,25 @@ describe.each([
   ['the page mirror', { workerMirror: true }],
   ['the instance that owns the engine', {}],
 ])('history reads on a public-only account, %s', (_label, shape) => {
-  it.each(READS)('%s rejects as not read, reaches nothing and reports nothing', async (...read) => {
-    const exchange = new RustEngineExchange(
-      'bitget',
-      { key: '', secret: '', publicDataOnly: true, ...shape },
-      new DefaultStore(),
-    );
-    const forwarded = vi.fn();
-    const errors = vi.fn();
-    exchange.on('callMethod', forwarded);
-    exchange.on('error', errors);
+  it.each(READS.map((read) => [read[0], read] as const))(
+    '%s rejects as not read, reaches nothing and reports nothing',
+    async (_method, read) => {
+      const exchange = new RustEngineExchange(
+        'bitget',
+        { key: '', secret: '', publicDataOnly: true, ...shape },
+        new DefaultStore(),
+      );
+      const forwarded = vi.fn();
+      const errors = vi.fn();
+      exchange.on('callMethod', forwarded);
+      exchange.on('error', errors);
 
-    await expect(call(exchange, read)).rejects.toMatchObject({ outcome: 'notSent' });
+      await expect(call(exchange, read)).rejects.toMatchObject({ outcome: 'notSent' });
 
-    expect(forwarded).not.toHaveBeenCalled();
-    expect(errors).not.toHaveBeenCalled();
-  });
+      expect(forwarded).not.toHaveBeenCalled();
+      expect(errors).not.toHaveBeenCalled();
+    },
+  );
 });
 
 it('a keyless mirror of a keyed account still asks its worker', async () => {
