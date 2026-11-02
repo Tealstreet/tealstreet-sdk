@@ -998,6 +998,12 @@ const ERROR_CODES: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },
+        // "The request failed to pass valid JSON": docs.kraken.com send-order, Error schema.
+        Row {
+            key: Key::Text("Json Parse Error"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
         Row {
             key: Key::Text("invalidArgument"),
             verdict: Verdict::Refused(ErrorKind::Rejected),
@@ -1104,9 +1110,14 @@ fn status_failure(message: String, status: &str, edit: bool) -> VenueError {
     if edit && matches!(status, "postWouldExecute" | "iocWouldNotExecute") {
         return error.outcome(Outcome::Unknown).venue_code(status);
     }
+    // Documented: docs.kraken.com/api/docs/futures-api/trading/send-order
     let refused = matches!(
         status,
-        "marketSuspended"
+        "invalidOrderType"
+            | "invalidSide"
+            | "clientOrderIdTooLong"
+            | "invalidDomainConfiguration"
+            | "marketSuspended"
             | "marketInactive"
             | "invalidPrice"
             | "invalidSize"

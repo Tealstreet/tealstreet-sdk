@@ -1157,6 +1157,9 @@ impl Lighter {
                         || code.is_none()
                         || code == Some(200)
                         || submission.count > 1
+                        || (response.status < 300
+                            && matches!(submission.effect, Effect::Place)
+                            && !code.is_some_and(documented_place_refusal))
                         || (reply.message.is_empty()
                             && !matches!(code, Some(21520 | 21149 | 21132 | 21613)));
                     if unknown {
@@ -1887,6 +1890,23 @@ fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
 /// The submission may have executed; callers must reconcile before resending.
+/// A code in a 200 that refuses one placement; any other stays Unknown. 21728 (duplicate
+/// client index) and 29500 (internal) are not here, so they stay Unknown too.
+/// docs.lighter.xyz/developers/reference/data-structures-constants-and-errors.md
+fn documented_place_refusal(code: u64) -> bool {
+    matches!(
+        code,
+        20001 | 20008 | 20011 | 20013
+            | 21100..=21102 | 21104 | 21107..=21112 | 21120 | 21122 | 21123
+            | 21149 | 21150 | 21153..=21155 | 21159 | 21161..=21163
+            | 21301 | 21304 | 21305
+            | 21506..=21508 | 21511 | 21515 | 21518 | 21520 | 21521
+            | 21601 | 21602 | 21605 | 21613 | 21618 | 21631 | 21632 | 21638
+            | 21701..=21706 | 21710..=21712 | 21717..=21723 | 21727 | 21729
+            | 21733..=21735 | 21738..=21741 | 21743..=21745 | 21747 | 21748 | 21752
+            | 23000 | 23100 | 52001 | 52002 | 62007..=62009
+    )
+}
 fn uncertain(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }

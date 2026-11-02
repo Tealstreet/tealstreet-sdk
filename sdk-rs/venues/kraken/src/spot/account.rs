@@ -712,6 +712,13 @@ impl KrakenSpot {
                     );
                 }
                 let error = super::trading::write_failure(response.status, response.body, e);
+                // A documented code in a 200 proves nothing rested; other refusals still read.
+                if response.status < 300
+                    && error.outcome == Some(safe_cex_engine::Outcome::Rejected)
+                    && let Kind::Trade(_) = &request.kind
+                {
+                    self.trade_refused(cx);
+                }
                 self.private_failed(cx, request, error);
                 return;
             }

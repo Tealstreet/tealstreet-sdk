@@ -26,8 +26,46 @@ const fn refused(code: i64, kind: ErrorKind) -> Row {
     }
 }
 
+/// A documented bar on placing this order; other intents keep the unlisted verdict.
+const fn place_refused(key: Key, kind: ErrorKind) -> Row {
+    Row {
+        key,
+        verdict: Verdict::Refused(kind),
+        only: Some(Intent::Place),
+    }
+}
+
 pub(super) const TABLE: CodeTable = CodeTable {
     rows: &[
+        // github.com/BingX-API/api-ai-skills: skills/references/error-codes.md, Futures.
+        // Not here, so Unknown: 101481/109201 (duplicates), 102201 (canceled), busy, internal.
+        place_refused(Key::Range(101201, 101202), ErrorKind::Rejected),
+        place_refused(Key::Int(101206), ErrorKind::InsufficientBalance),
+        place_refused(Key::Range(101209, 101210), ErrorKind::Rejected),
+        place_refused(Key::Int(101214), ErrorKind::Rejected),
+        place_refused(Key::Int(101219), ErrorKind::Rejected),
+        place_refused(Key::Int(101222), ErrorKind::Rejected),
+        place_refused(Key::Range(101412, 101415), ErrorKind::Rejected),
+        place_refused(Key::Int(101419), ErrorKind::Rejected),
+        place_refused(Key::Int(101429), ErrorKind::Rejected),
+        place_refused(Key::Int(101434), ErrorKind::Rejected),
+        place_refused(Key::Range(101460, 101461), ErrorKind::Rejected),
+        place_refused(Key::Int(101479), ErrorKind::Rejected),
+        place_refused(Key::Range(101483, 101485), ErrorKind::Rejected),
+        place_refused(Key::Int(109417), ErrorKind::Rejected),
+        place_refused(Key::Int(109425), ErrorKind::InvalidInput),
+        place_refused(Key::Int(110203), ErrorKind::Rejected),
+        place_refused(Key::Int(110206), ErrorKind::Rejected),
+        place_refused(Key::Int(110280), ErrorKind::Rejected),
+        place_refused(Key::Int(110287), ErrorKind::Rejected),
+        place_refused(Key::Int(110400), ErrorKind::InvalidInput),
+        place_refused(Key::Int(110402), ErrorKind::InvalidInput),
+        place_refused(Key::Range(110406, 110407), ErrorKind::Rejected),
+        place_refused(Key::Range(110411, 110415), ErrorKind::InvalidInput),
+        place_refused(Key::Range(110418, 110420), ErrorKind::InvalidInput),
+        place_refused(Key::Int(110424), ErrorKind::InsufficientBalance),
+        place_refused(Key::Range(110426, 110428), ErrorKind::InvalidInput),
+        place_refused(Key::Int(112414), ErrorKind::Rejected),
         // Trading-rule refusals: nothing was placed.
         refused(101205, ErrorKind::Rejected),
         refused(101211, ErrorKind::InvalidInput),

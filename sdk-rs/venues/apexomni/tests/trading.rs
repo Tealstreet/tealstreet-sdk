@@ -2030,3 +2030,61 @@ fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() 
     );
     assert_eq!(cancels(&released), 1, "cancel-all is sent once released");
 }
+
+/// A coded 200: the listed code refuses and leaves no fence.
+#[test]
+fn documented_coded_refusal_leaves_no_fence() {
+    use safe_cex_engine::Outcome;
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(
+        &mut e,
+        &first,
+        NOW + 11.0,
+        r#"{"code":10002,"msg":"Your API key is wrong"}"#,
+    );
+    let settled = actions(&mut e);
+    assert!(
+        settled.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 42, error })
+            if error.outcome == Some(Outcome::Rejected))),
+        "{settled:?}"
+    );
+    let next = place_with_id(&mut e, 43, vec![order(serde_json::json!({}))]);
+    assert!(
+        next.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/order")))
+    );
+}
+
+/// An unlisted code stays Unknown, reads at once, and that read lifts the fence.
+#[test]
+fn unlisted_coded_placement_fence_clears_on_the_next_read() {
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(
+        &mut e,
+        &first,
+        NOW + 11.0,
+        r#"{"code":987654,"msg":"unlisted native failure"}"#,
+    );
+    let read = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the read starts with the answer");
+    let fenced = place_with_id(&mut e, 43, vec![order(serde_json::json!({}))]);
+    assert!(
+        fenced.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 43, error })
+            if error.message.contains("uncertain"))),
+        "{fenced:?}"
+    );
+    response(&mut e, &read, NOW + 12.0, r#"{"code":0,"data":[]}"#);
+    let _ = actions(&mut e);
+    let next = place_with_id(&mut e, 44, vec![order(serde_json::json!({}))]);
+    assert!(
+        next.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/order"))),
+        "{next:?}"
+    );
+}

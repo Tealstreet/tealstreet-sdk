@@ -23,6 +23,12 @@ const APEX: CodeTable = CodeTable {
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
+        // "Requires Login: Your API key is wrong": api-docs.pro.apex.exchange, Errors.
+        Row {
+            key: Key::Int(10002),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
         Row {
             key: Key::Int(401),
             verdict: Verdict::Refused(ErrorKind::AuthInvalid),

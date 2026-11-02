@@ -352,6 +352,11 @@ impl KrakenSpot {
             Err(e) => self.trade_failed(cx, e),
         }
     }
+    pub(super) fn trade_refused(&self, cx: &mut Cx<'_, Pending>) {
+        if let Some(job) = self.trading.active.as_ref().filter(|job| !job.effective) {
+            cx.placement_resolved(job.command);
+        }
+    }
     pub(super) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
@@ -523,6 +528,10 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
             rejected(error, ErrorKind::AuthInvalid)
         }
         "EGeneral:Permission denied" => rejected(error, ErrorKind::AuthPermission),
+        // Documented: docs.kraken.com/exchange/guides/general/errors.md
+        "ETrade:Invalid request"
+        | "EService:Market in cancel_only mode"
+        | "EService:Market in post_only mode" => rejected(error, ErrorKind::Rejected),
         "EAPI:Rate limit exceeded" | "EOrder:Rate limit exceeded" => {
             rejected(error, ErrorKind::RateLimited)
         }

@@ -1589,3 +1589,97 @@ fn order_events_of_any_shape_never_make_a_placed_order_invalid() {
         assert!(done(&mut e).is_ok(), "{events}");
     }
 }
+
+fn answer(status: &str) -> (Engine<Kraken>, HttpRequest) {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let write = http(&mut e, "sendorder");
+    let body = format!(r#"{{"result":"success","sendStatus":{{"status":"{status}"}}}}"#);
+    reply(&mut e, &write, 200, &body);
+    (e, write)
+}
+fn outcome_of(actions: &[Action]) -> Option<safe_cex_engine::Outcome> {
+    actions.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { error, .. }) => error.outcome,
+        _ => None,
+    })
+}
+
+#[test]
+fn documented_send_statuses_refuse_and_leave_no_fence() {
+    for status in [
+        "invalidOrderType",
+        "invalidSide",
+        "clientOrderIdTooLong",
+        "invalidDomainConfiguration",
+    ] {
+        let (mut e, _) = answer(status);
+        let settled = e.drain_plain().collect::<Vec<_>>();
+        assert_eq!(
+            outcome_of(&settled),
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{status}"
+        );
+        place(&mut e, vec![limit()]);
+        http(&mut e, "sendorder");
+    }
+}
+
+#[test]
+fn a_json_parse_error_in_a_200_refuses_and_leaves_no_fence() {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let write = http(&mut e, "sendorder");
+    reply(
+        &mut e,
+        &write,
+        200,
+        r#"{"result":"error","error":"Json Parse Error"}"#,
+    );
+    let settled = e.drain_plain().collect::<Vec<_>>();
+    assert_eq!(
+        outcome_of(&settled),
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
+    place(&mut e, vec![limit()]);
+    http(&mut e, "sendorder");
+}
+
+#[test]
+fn an_unlisted_send_status_stays_unknown_and_clears_on_the_next_read() {
+    let (mut e, _) = answer("wouldProcessAfterSpecifiedTime");
+    let settled = e.drain_plain().collect::<Vec<_>>();
+    assert_eq!(
+        outcome_of(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    let read = settled
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("openorders") => Some(r.clone()),
+            _ => None,
+        })
+        .expect("the read starts with the answer");
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 8,
+            orders: vec![limit()],
+        },
+    );
+    let fenced = e.drain_plain().collect::<Vec<_>>();
+    assert!(
+        !fenced
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("sendorder")))
+    );
+    reply(&mut e, &read, 200, OPEN);
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 9,
+            orders: vec![limit()],
+        },
+    );
+    http(&mut e, "sendorder");
+}
