@@ -106,7 +106,8 @@ export class HOWWebSocket {
     // 1. Use the ws package explicitly (Bun's native WebSocket doesn't support ALPNProtocols)
     // 2. Pass Origin header for CloudFront to accept the WebSocket upgrade
     // 3. Force HTTP/1.1 via ALPNProtocols (WebSocket upgrade doesn't work over HTTP/2)
-    const options: Record<string, unknown> = {};
+    // The library's own default, stated so a reader (and the network lint) can see the bound.
+    const options: Record<string, unknown> = { connectionTimeout: 4_000 };
 
     const Socket = this.WebSocketCtor ?? NodeWebSocket;
     if (Socket) {
