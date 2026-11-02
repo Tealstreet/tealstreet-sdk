@@ -88,7 +88,9 @@ fn an_admission_refused_discovery_read_retries_through_the_same_backoff() {
     let retried = h.take("/v5/market/tickers");
     // The wire bound is the context's remaining time, rounded up: float error may add 1 ms.
     assert!(
-        retried.timeout_ms.is_some_and(|ms| (60_000..=60_001).contains(&ms)),
+        retried
+            .timeout_ms
+            .is_some_and(|ms| (60_000..=60_001).contains(&ms)),
         "{:?}",
         retried.timeout_ms
     );
@@ -228,7 +230,10 @@ fn a_403_from_our_edge_retries_on_the_normal_backoff() {
     for (headers, body) in [
         ("cf-mitigated: challenge", "<html>Just a moment...</html>"),
         ("", r#"{"message":"Authorization header is missing"}"#),
-        ("", "<html>Error 1020 Access denied fsjnpy143pbz-tyo.tealstreet.io</html>"),
+        (
+            "",
+            "<html>Error 1020 Access denied fsjnpy143pbz-tyo.tealstreet.io</html>",
+        ),
     ] {
         let mut h = Harness::started(public(Variant::Linear, ""));
         h.respond("status=PreLaunch", 200, PRELAUNCH);
@@ -243,7 +248,10 @@ fn a_403_from_our_edge_retries_on_the_normal_backoff() {
             },
         });
         h.advance(35_000.);
-        assert!(h.has_request("/v5/market/tickers"), "{body}: waited out a ban");
+        assert!(
+            h.has_request("/v5/market/tickers"),
+            "{body}: waited out a ban"
+        );
     }
 }
 

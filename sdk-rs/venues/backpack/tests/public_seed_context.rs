@@ -736,7 +736,13 @@ fn delayed_preparation_cannot_release_at_new_observation_deadline() {
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(**action, HttpAction::Bind { .. }))));
-        response(&mut e, &packet, DISCOVERY_DEADLINE_MS + 1., 200, seed.body());
+        response(
+            &mut e,
+            &packet,
+            DISCOVERY_DEADLINE_MS + 1.,
+            200,
+            seed.body(),
+        );
         assert_unpublished(&e, seed);
     }
 }

@@ -201,11 +201,19 @@ fn tickers_read_releases_through_background_context() {
 #[test]
 fn startup_discovery_reads_carry_the_longer_discovery_deadline() {
     let mut cycle = Cycle::started(Options::default());
-    let contracts = cycle.requests.iter().find(|r| r.url == MARKETS).expect("contracts read");
+    let contracts = cycle
+        .requests
+        .iter()
+        .find(|r| r.url == MARKETS)
+        .expect("contracts read");
     assert_eq!(contracts.timeout_ms, Some(60_000));
     cycle.answer(MARKETS, CONTRACTS, 1.0);
     let tickers = cycle.take(TICKER_URL).expect("tickers read");
-    assert!(tickers.timeout_ms.is_some_and(|ms| ms > 59_000), "{:?}", tickers.timeout_ms);
+    assert!(
+        tickers.timeout_ms.is_some_and(|ms| ms > 59_000),
+        "{:?}",
+        tickers.timeout_ms
+    );
 }
 
 #[test]
