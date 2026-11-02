@@ -42,6 +42,8 @@ export type Options = {
    * short-lived authentication headers can be regenerated safely.
    */
   headers?: Record<string, string> | HeadersProvider;
+  /** A close this answers true for reconnects with no backoff wait; later failures back off as usual. */
+  reconnectsAtOnce?: (event: { code: number; reason: string }) => boolean;
 };
 
 const DEFAULT = {
@@ -561,6 +563,7 @@ export class ReconnectingWebSocket {
     this._clearTimeouts();
 
     if (this._shouldReconnect) {
+      if (this._options.reconnectsAtOnce?.(event)) this._retryCount = -1;
       this._connect();
     }
 

@@ -1597,7 +1597,7 @@ pub mod testing {
 #[cfg(test)]
 pub(crate) mod tests {
     pub(crate) use super::testing::register;
-    use super::testing::{HeldLoad, account_on, run_algos};
+    use super::testing::{HeldLoad, NoIo, account_on, run_algos};
     use super::*;
 
     /// A venue that does nothing: the registry tests need only its handle.
@@ -1703,6 +1703,29 @@ pub(crate) mod tests {
         let (account, inbox) =
             held_account_on(venue, Some(link.clone()), String::new(), Arc::default());
         (run_algos(account, link, inbox), placed)
+    }
+
+    /// An unloaded account's actor on its own thread, so a test can keep the engine
+    /// busy without blocking the test's own tasks.
+    pub(crate) fn idle_handle_on_own_thread() -> safe_cex_native::AccountHandle {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            tokio::task::LocalSet::new().block_on(&runtime, async move {
+                let engine = safe_cex_engine::test_support::seeded_engine(Idle);
+                let (handle, task) = safe_cex_native::spawn_account(
+                    safe_cex_native::Host::new(engine, NoIo),
+                    ServerConfig::default(),
+                )
+                .unwrap();
+                tx.send(handle).unwrap();
+                let _ = task.await;
+            });
+        });
+        rx.recv().unwrap()
     }
 
     /// A loaded BTCUSDT account under `registry` running its algo host and

@@ -126,6 +126,8 @@ const NUKE_WAITING: &str = "Nuke is waiting for this account's positions and ord
 
 pub const SNAPSHOT_HOLD_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 const SNAPSHOT_HOLD_CHECK: std::time::Duration = std::time::Duration::from_millis(250);
+/// How long a hold's load check may wait on the engine; a miss is retried next hold tick.
+const HOLD_LOAD_CHECK: std::time::Duration = std::time::Duration::from_millis(20);
 
 const PUBLIC_OPS: [&str; 5] = [
     "sendSnapshot",
@@ -661,6 +663,15 @@ impl Session {
             && let Some(topic) = topic.clone()
         {
             self.queue_early(&name, topic);
+            return;
+        }
+        // It only acks, and the page waits on it: answer it joined or not.
+        if msg.op == "updatePositions" && !self.joined.contains_key(&name) {
+            self.send(envelope::msg(
+                &name,
+                "updatePositions:done",
+                json!({"requestId": msg.data.get("requestId"), "success": true}),
+            ));
             return;
         }
         if !self.joined.contains_key(&name) {
@@ -1372,14 +1383,16 @@ struct Hold {
     loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
 }
 
+/// Bounded: a starting engine is busy, and a pump waiting on it lets its client queue fill.
 async fn account_loaded(handle: &AccountHandle) -> bool {
-    handle
-        .read(|store| {
-            let loaded = store.loaded();
-            loaded.orders && loaded.positions
-        })
-        .await
-        .unwrap_or(false)
+    let read = handle.read(|store| {
+        let loaded = store.loaded();
+        loaded.orders && loaded.positions
+    });
+    matches!(
+        tokio::time::timeout(HOLD_LOAD_CHECK, read).await,
+        Ok(Some(true))
+    )
 }
 
 /// Asks the session for a full snapshot once the account loads or the hold
@@ -1477,8 +1490,9 @@ async fn pump(
                         held = Some(std::time::Instant::now());
                     }
                 }
-                if let Some(since) = held {
-                    release_hold(&handle, &name, &mut hold, since).await;
+                // Withheld until the release re-snapshot, which carries the whole account;
+                // the hold tick checks the load, never this frame.
+                if held.is_some() {
                     continue;
                 }
                 seq += 1;
@@ -2760,6 +2774,80 @@ mod tests {
         // A successful init clears it (Session::init), so a later refusal shows again.
         refused.remove("bear5");
         assert!(first_refusal(&mut refused, "bear5", both));
+    }
+
+    /// Every Hosted init logged engine dropped client once: while startup was held the
+    /// pump awaited an engine read per frame, the engine was busy starting, and the
+    /// 32-frame queue filled. Held frames must drain without waiting on the engine.
+    #[tokio::test]
+    async fn held_startup_frames_drain_without_waiting_on_the_engine() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let handle = crate::accounts::tests::idle_handle_on_own_thread();
+                // The engine busy starting up: a turn that takes a while.
+                let busy = handle.clone();
+                tokio::task::spawn_local(async move {
+                    let _ = busy
+                        .read(|_| std::thread::sleep(std::time::Duration::from_millis(1_500)))
+                        .await;
+                });
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                let (frames, outgoing) = tokio::sync::mpsc::channel(32);
+                let (_cancel, canceled) = tokio::sync::watch::channel(false);
+                let (out, _sent, _) = Out::channel(64);
+                let (loaded, _loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+                let (dropped, _dropped_rx) = tokio::sync::mpsc::unbounded_channel();
+                tokio::task::spawn_local(pump(
+                    safe_cex_native::ClientLink { outgoing, canceled },
+                    1,
+                    dropped,
+                    handle,
+                    "acct".into(),
+                    out,
+                    Arc::default(),
+                    Arc::default(),
+                    Some(Hold { client: 1, loaded }),
+                ));
+                let mut accepted = 0;
+                for _ in 0..100 {
+                    if frames
+                        .try_send(safe_cex_native::Outgoing::Frame(Arc::from(&b"frame"[..])))
+                        .is_ok()
+                    {
+                        accepted += 1;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(3)).await;
+                }
+                assert_eq!(accepted, 100, "the held pump stalled on the busy engine");
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn update_positions_before_join_is_still_answered() {
+        let (out, mut sent, _) = Out::channel(64);
+        let identity = Identity {
+            user: Some("u".into()),
+            token: Some(("t".into(), u64::MAX)),
+            resume_from: None,
+            resumable: false,
+        };
+        let mut session = Session::new(
+            crate::accounts::tests::registry(),
+            Arc::new(Metrics::default()),
+            identity,
+            out,
+        );
+        session
+            .msg(AccountMsg {
+                op: "updatePositions".into(),
+                data: json!({"requestId": 9}),
+                account_name: Some("acct".into()),
+            })
+            .await;
+        let reply = sent.try_recv().expect("a reply");
+        assert!(reply.contains("updatePositions:done"), "{reply}");
+        assert!(reply.contains(r#""requestId":9"#), "{reply}");
     }
 
     /// The COSIGNED data-source path end to end: a source account on the native

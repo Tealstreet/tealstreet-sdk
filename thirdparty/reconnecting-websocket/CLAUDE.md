@@ -13,3 +13,7 @@ Vendored auto-reconnecting WebSocket wrapper. Used as the WS transport for sever
 - **Explicit `WebSocket` transport**: when callers provide it with headers,
   treat it as the header-capable connection path even if the global runtime
   marker is absent or unreliable (as in renderer-like hosts).
+- **`reconnectsAtOnce`**: a close the predicate answers true for resets the
+  retry count before reconnecting, so that one reconnect has no backoff wait;
+  later failures back off as usual. The exchange-server worker uses it for a
+  draining box's 4100.
