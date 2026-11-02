@@ -1124,9 +1124,9 @@ impl ApexOmni {
         context: &Context,
         error: VenueError,
     ) {
-        let refused = error.venue_code.as_deref() == Some("10002");
-        if refused {
-            cx.startup_read_refused(&error);
+        // An IP-bound key is refused here too, but it works again from an allowed IP.
+        cx.startup_read_refused(&error);
+        if error.venue_code.as_deref() == Some("10002") {
             cx.deactivate();
         }
         let generation = match request {

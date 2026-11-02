@@ -1224,3 +1224,39 @@ fn a_refused_key_ends_the_start_and_deactivates() {
     assert_eq!(failures, 1);
     assert!(deactivated);
 }
+
+// No ApeX whitelist answer is documented, so every shape a gateway or the venue could use:
+// the IP-bound user's start ran to its timeout looking like a slow connection.
+#[test]
+fn an_answered_key_refusal_ends_the_start() {
+    for (status, body) in [
+        (403, "Forbidden"),
+        (401, "Unauthorized"),
+        (403, r#"{"code":403,"msg":"IP not allowed"}"#),
+    ] {
+        let (mut e, _, http) = seeded();
+        let mut failures = 0;
+        for r in http {
+            e.handle(
+                20.0,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            for action in e.prepared(20.0) {
+                if matches!(
+                    action,
+                    Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                ) {
+                    failures += 1;
+                }
+            }
+        }
+        assert_eq!(failures, 1, "{status} {body}");
+    }
+}
