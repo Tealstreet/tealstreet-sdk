@@ -247,6 +247,8 @@ struct Job {
     continue_on_error: bool,
     /// Every order was asked for: one refused fails the command, naming what was placed.
     fails_on_refusal: bool,
+    /// The cancel-all sweep was refused: orders may rest whatever the row cancels did.
+    sweep_failed: bool,
     result: Option<String>,
     /// A refused replacement here leaves the position without its stop.
     replacing_stop: Option<(String, OrderSide, OrderType)>,
@@ -386,6 +388,12 @@ struct PlaceData {
 struct CancelAck {
     executed_qty: Option<String>,
     status: Option<String>,
+}
+/// Aster documents the sweep's success as
+/// `{"code": "200", "msg": "The operation of cancel all open order is done."}`.
+#[derive(Deserialize)]
+struct SweepAck {
+    code: Id,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -806,7 +814,10 @@ impl AsterDex {
         let job = self.trading.jobs.remove(&id).expect("present");
         let _ = match job.error {
             Some(mut error)
-                if !job.continue_on_error || job.fails_on_refusal || job.successes == 0 =>
+                if !job.continue_on_error
+                    || job.fails_on_refusal
+                    || job.sweep_failed
+                    || job.successes == 0 =>
             {
                 // A later rejection after a step took effect cannot mean nothing happened.
                 if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
@@ -836,6 +847,7 @@ impl AsterDex {
         let plan = request.plan.clone();
         let call = &request.call;
         let was_place = matches!(call, Call::Place { .. });
+        let was_sweep = matches!(call, Call::CancelSymbol(_));
         let cancelled = match &request.call {
             Call::Cancel { id, .. } => vec![id.clone()],
             _ => vec![],
@@ -998,10 +1010,13 @@ impl AsterDex {
                     result = serde_json::to_string(&row.stp_mode).ok();
                 }),
             (Call::StpWrite, Ok(_)) => Ok(()),
-            (Call::CancelSymbol(_), Ok(_)) => {
+            (Call::CancelSymbol(_), Ok(body)) => {
                 self.account.order_revision = self.account.order_revision.wrapping_add(1);
                 self.request_refresh_orders(cx);
-                Ok(())
+                match serde_json::from_str::<SweepAck>(body).map(|ack| ack.code.text()) {
+                    Ok(code) if code == "200" => Ok(()),
+                    _ => Err((0, format!("Aster cancel-all was not confirmed: {body}"))),
+                }
             }
             (_, Err(error)) => Err(error),
         };
@@ -1021,13 +1036,18 @@ impl AsterDex {
         let mut status_error = None;
         if let Some(leg) = leg.filter(|_| !reported) {
             let _ = match &outcome {
-                _ if replied && !(was_place && placed.is_none()) => cx.http_write_fact(
-                    leg,
-                    WriteFact::Accepted {
-                        order_ids: placed.iter().cloned().chain(cancelled).collect(),
-                    },
-                    None,
-                ),
+                _ if replied
+                    && !(was_place && placed.is_none())
+                    && !(was_sweep && outcome.is_err()) =>
+                {
+                    cx.http_write_fact(
+                        leg,
+                        WriteFact::Accepted {
+                            order_ids: placed.iter().cloned().chain(cancelled).collect(),
+                        },
+                        None,
+                    )
+                }
                 Err((code, message)) if !transport && !unproven && !replied => {
                     let native = Native {
                         code: NativeCode::Int(*code),
@@ -1116,6 +1136,7 @@ impl AsterDex {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     let unknown = error.outcome == Some(Outcome::Unknown);
+                    job.sweep_failed |= was_sweep;
                     if was_place && let Some(gone) = job.gone_text(unknown) {
                         error.message = format!("{gone}: {}", error.message);
                     }
@@ -1449,12 +1470,24 @@ impl AsterDex {
             };
             base = base.str("positionSide", side);
         }
-        let amount = num::adjust(opts.amount, market.precision.amount);
+        // A MARKET order answers to MARKET_LOT_SIZE; every other order to LOT_SIZE.
+        let market_lot = self
+            .market_rules
+            .get(&opts.symbol)
+            .map(|rule| &rule.market_lot)
+            .filter(|_| opts.kind == OrderType::Market);
+        let step = market_lot.map_or(market.precision.amount, |lot| lot.step);
+        let amount = num::adjust(opts.amount, step);
         if opts.amount > 0.0 && amount <= 0.0 {
             return Err("Aster order amount rounds to zero".into());
         }
         let close = conditional && opts.amount == 0.0;
-        let max = num::adjust(market.limits.amount.max, market.precision.amount);
+        let max = market_lot
+            .map(|lot| lot.max)
+            .filter(|max| *max > 0.0)
+            .unwrap_or(market.limits.amount.max);
+        let max = num::adjust(max, step);
+        let min = market_lot.map_or(0.0, |lot| lot.min);
         let mut quantities = Vec::new();
         let mut remaining = amount;
         if !conditional && max > 0.0 && remaining > max {
@@ -1464,7 +1497,15 @@ impl AsterDex {
             }
             while remaining > max {
                 quantities.push(max);
-                remaining = num::adjust(remaining - max, market.precision.amount);
+                remaining = num::adjust(remaining - max, step);
+            }
+            // A remainder under the minimum borrows it from the chunk before.
+            if remaining < min
+                && let Some(last) = quantities.last_mut()
+            {
+                let short = num::adjust(min - remaining, step);
+                *last = num::adjust(*last - short, step);
+                remaining = num::adjust(remaining + short, step);
             }
         }
         quantities.push(remaining);
