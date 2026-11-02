@@ -12,6 +12,9 @@ pub(crate) struct NonceState {
     pub(crate) reserved: u64,
     #[cfg(feature = "dispatch-nonce")]
     pub(crate) released: Option<u64>,
+    /// A windowed domain's highest released nonces, ascending, at most `window`.
+    #[cfg(feature = "dispatch-nonce")]
+    pub(crate) recent: Vec<u64>,
     #[cfg(feature = "nonce-handoff")]
     pub(crate) tracking: Option<Box<handoff::Tracking>>,
 }
@@ -67,6 +70,9 @@ pub struct NonceDomain {
     clock: NonceClock,
     scale: u64,
     pub(crate) limit: u64,
+    /// How many highest nonces the venue keeps per signer; any unused nonce above
+    /// the lowest of them is accepted. 0 means release in strictly increasing order.
+    pub(crate) window: usize,
 }
 impl NonceDomain {
     fn floor(&self) -> NonceFloor {
@@ -86,6 +92,8 @@ pub const HYPERLIQUID_AGENT: NonceDomain = NonceDomain {
     clock: NonceClock::RawMs,
     scale: 1,
     limit: (1 << 53) - 1,
+    // "the 100 highest nonces are stored per address", Hyperliquid nonce docs.
+    window: 100,
 };
 
 /// Aster V3 uses calibrated whole milliseconds scaled to microseconds.
@@ -96,6 +104,7 @@ pub const ASTERDEX_V3: NonceDomain = NonceDomain {
     clock: NonceClock::ProtocolMs,
     scale: 1000,
     limit: u64::MAX,
+    window: 0,
 };
 
 /// Kraken Spot and Futures share a counter for the same trusted stable subject.
@@ -105,6 +114,7 @@ pub const KRAKEN: NonceDomain = NonceDomain {
     clock: NonceClock::RawMs,
     scale: 1000,
     limit: u64::MAX,
+    window: 0,
 };
 
 #[path = "nonce_claim.rs"]

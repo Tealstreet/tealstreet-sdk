@@ -3285,3 +3285,28 @@ fn a_position_with_leverage_zero_is_shown() {
     assert_eq!(positions.len(), 1, "{:?}", h.logs);
     assert_eq!(positions[0].contracts, 0.1);
 }
+
+/// A gateway's HTML error is a failed HTTP status, not a malformed BingX envelope.
+#[test]
+fn a_non_json_error_page_reports_its_http_status() {
+    let mut h = Harness::new();
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 502, "<html><body>502 Bad Gateway</body></html>");
+    let text = format!("{:?}", (&h.logs, &h.errors));
+    assert!(text.contains("HTTP 502"), "{text}");
+    assert!(
+        !text.contains("malformed BingX response envelope"),
+        "{text}"
+    );
+}
+
+/// A 200 whose body is not BingX's envelope says which read it was and what came back.
+#[test]
+fn a_malformed_success_names_its_read() {
+    let mut h = Harness::new();
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, "upstream timeout");
+    let text = format!("{:?}", (&h.logs, &h.errors));
+    assert!(text.contains("malformed BingX response envelope"), "{text}");
+    assert!(text.contains("position mode"), "{text}");
+}
