@@ -96,6 +96,12 @@ struct PendingSpotCollateral {
     ws: bool,
 }
 
+/// Account lookups at start: tries before the failure is shown, and the wait before each retry.
+const LOOKUP_TRIES: u32 = 4;
+fn backoff_ms(tries: u32) -> f64 {
+    2_000.0 * f64::from(1u32 << tries.min(4).saturating_sub(1))
+}
+
 #[derive(Default)]
 pub struct Account {
     pub started: bool,
@@ -104,6 +110,11 @@ pub struct Account {
     pub(crate) mode_refresh_due: bool,
     mode_timer: Option<TimerId>,
     role_timer: Option<TimerId>,
+    // A failed lookup is retried with backoff; its timer and the tries so far.
+    role_retry: Option<TimerId>,
+    role_attempts: u32,
+    mode_retry: Option<TimerId>,
+    mode_attempts: u32,
     sync_timer: Option<TimerId>,
     last_order_refresh: f64,
     read_timer: Option<TimerId>,
@@ -469,10 +480,15 @@ impl Hyperliquid {
         }
         // Partial discovery may start real account reads, not an empty snapshot.
         // A keyed account's own reads load it: empty here would read as no open orders.
-        if self.options.public_data_only || self.user().is_none() {
+        // A key whose account is still being looked up has rows we have not read: not empty ones.
+        let resolving =
+            self.user().is_none() && self.options.key.is_some() && !self.options.public_data_only;
+        if self.options.public_data_only || (self.user().is_none() && !resolving) {
             cx.store.set_orders(Vec::new());
         }
-        if self.spot || !self.core_discovery_incomplete || self.options.public_data_only {
+        if !resolving
+            && (self.spot || !self.core_discovery_incomplete || self.options.public_data_only)
+        {
             cx.store.set_positions(Vec::new());
         }
         if self.options.public_data_only {
@@ -510,30 +526,60 @@ impl Hyperliquid {
             return;
         }
         if self.user().is_none() {
-            if let Some(key) = self.options.key.as_deref() {
-                #[derive(Serialize)]
-                struct Read<'a> {
-                    r#type: &'static str,
-                    user: &'a str,
-                }
-                self.read_body(
-                    cx,
-                    serde_json::to_string(&Read {
-                        r#type: "userRole",
-                        user: key,
-                    })
-                    .unwrap(),
-                    Request::Role,
-                );
-                self.account.role_timer = Some(cx.set_timer(6000.0));
-            }
+            self.send_role(cx);
             return;
         }
         self.private_bootstrap(cx);
     }
+    fn send_role(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(key) = self.options.key.as_deref() else {
+            return;
+        };
+        #[derive(Serialize)]
+        struct Read<'a> {
+            r#type: &'static str,
+            user: &'a str,
+        }
+        let body = serde_json::to_string(&Read {
+            r#type: "userRole",
+            user: key,
+        })
+        .unwrap();
+        self.account.role_attempts += 1;
+        self.read_body(cx, body, Request::Role);
+        self.account.role_timer = Some(cx.set_timer(6000.0));
+    }
+    /// Retries with backoff; once spent, the user is told the rows are not shown.
+    fn role_failed(&mut self, cx: &mut Cx<'_, Pending>, why: &str) {
+        if self.user().is_some() || self.account.role_retry.is_some() {
+            return;
+        }
+        let tries = self.account.role_attempts;
+        if tries < LOOKUP_TRIES {
+            self.account.role_retry = Some(cx.set_timer(backoff_ms(tries)));
+            return;
+        }
+        cx.notice(
+            Level::Error,
+            code::REQUEST_FAILED,
+            format!(
+                "Hyperliquid account identity could not be resolved after {tries} tries ({why}): positions and orders are not shown. Reconnect the account to try again."
+            ),
+        );
+    }
+    fn mode_failed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.mode_resolved {
+            self.mode_ready(cx);
+        }
+        if self.account.mode_retry.is_none() && self.account.mode_attempts < LOOKUP_TRIES {
+            self.account.mode_retry =
+                Some(cx.set_timer(backoff_ms(self.account.mode_attempts.max(1))));
+        }
+    }
     fn private_bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account_read(cx, "userFees", None, Request::Fees, false);
         self.account_read(cx, "userAbstraction", None, Request::Mode, false);
+        self.account.mode_attempts += 1;
         self.account.mode_timer = Some(cx.set_timer(6000.0));
         self.check_builder(cx);
         self.refresh_account(cx);
@@ -909,10 +955,14 @@ impl Hyperliquid {
         let raw = response.body;
         match request {
             Request::Role => {
-                if self.account.role_timer.is_none() {
+                // A late answer still counts while the account is unresolved.
+                if self.user().is_some() {
                     return;
                 }
                 if let Some(t) = self.account.role_timer.take() {
+                    cx.clear_timer(t);
+                }
+                if let Some(t) = self.account.role_retry.take() {
                     cx.clear_timer(t);
                 }
                 self.apply_role(raw);
@@ -927,14 +977,19 @@ impl Hyperliquid {
                 }
             }
             Request::Mode => {
-                if self.account.mode_resolved {
-                    return;
-                }
-                self.account.mode = match serde_json::from_str::<&str>(raw).unwrap_or("") {
+                let mode = match serde_json::from_str::<&str>(raw).unwrap_or("") {
                     "unifiedAccount" => Mode::Unified,
                     "portfolioMargin" => Mode::Portfolio,
                     _ => Mode::Standard,
                 };
+                if let Some(t) = self.account.mode_retry.take() {
+                    cx.clear_timer(t);
+                }
+                // A retried read corrects the fallback, which refreshes spot holdings and sockets.
+                if self.account.mode_resolved && mode == self.account.mode {
+                    return;
+                }
+                self.account.mode = mode;
                 self.mode_ready(cx);
             }
             Request::Builder => {
@@ -1225,15 +1280,12 @@ impl Hyperliquid {
         error: &str,
     ) {
         match request {
-            Request::Mode => {
-                if !self.account.mode_resolved {
-                    self.mode_ready(cx);
-                }
-            }
+            Request::Mode => self.mode_failed(cx),
             Request::Role => {
                 if let Some(t) = self.account.role_timer.take() {
                     cx.clear_timer(t);
                 }
+                self.role_failed(cx, error);
             }
             Request::State { dex, read, .. } => {
                 self.account.inflight.remove(&format!("state:{dex}"));
@@ -1382,15 +1434,20 @@ impl Hyperliquid {
         }
         if self.account.mode_timer == Some(timer) {
             self.account.mode_timer = None;
-            self.mode_ready(cx);
+            self.mode_failed(cx);
+        }
+        if self.account.mode_retry == Some(timer) {
+            self.account.mode_retry = None;
+            self.account_read(cx, "userAbstraction", None, Request::Mode, false);
+            self.account.mode_attempts += 1;
         }
         if self.account.role_timer == Some(timer) {
             self.account.role_timer = None;
-            cx.notice(
-                Level::Warn,
-                code::REQUEST_FAILED,
-                "Hyperliquid identity resolution timed out",
-            );
+            self.role_failed(cx, "timed out");
+        }
+        if self.account.role_retry == Some(timer) {
+            self.account.role_retry = None;
+            self.send_role(cx);
         }
         if self.account.refresh_timer == Some(timer) {
             self.account.refresh_timer = None;
