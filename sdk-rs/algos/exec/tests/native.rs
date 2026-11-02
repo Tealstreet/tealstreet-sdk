@@ -16,6 +16,7 @@ struct Port {
     commands: RefCell<Vec<Command>>,
     replies: RefCell<Vec<oneshot::Sender<Result<String, VenueError>>>>,
     events: RefCell<Vec<(String, Value)>>,
+    fresh_positions: Cell<bool>,
 }
 impl AccountPort for Port {
     fn store(&self) -> Ref<'_, AlgoStore> {
@@ -44,7 +45,10 @@ impl AccountPort for Port {
             .push((op.into(), serde_json::from_str(&data).unwrap()));
     }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        safe_cex_engine::Capabilities::BASE
+        safe_cex_engine::Capabilities {
+            fresh_positions: self.fresh_positions.get(),
+            ..safe_cex_engine::Capabilities::BASE
+        }
     }
 }
 
@@ -914,6 +918,167 @@ async fn nuke_cancels_first_and_reads_positions_again_to_close_fills_during_canc
         assert!(matches!(&port.commands.borrow()[1],Command::PlaceOrders{orders,..} if orders[0].amount==0.03 && orders[0].reduce_only==Some(true)),"fresh position includes the fill during cancel");
         port.replies.borrow_mut().remove(0).send(Ok(r#"["fresh-close"]"#.into())).unwrap();settle_exec().await;assert_eq!(port.commands.borrow().len(),2);cx.scope.dispose();
     }).await;
+}
+
+fn is_fresh_read(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Venue {
+            action: safe_cex_engine::VenueAction::ReadPositions,
+            ..
+        }
+    )
+}
+
+/// A `nuke pos` on a venue with the read, one position open, its close accepted.
+async fn nuke_closed_once(port: &Rc<Port>, cx: &AlgoCx) {
+    wait_market(port);
+    port.fresh_positions.set(true);
+    port.store.borrow_mut().positions = vec![native_position("BTCUSDT")];
+    ExecFactory::default()
+        .handle(
+            "exec",
+            r#"{"symbol":"BTCUSDT","command":"nuke pos","reqId":"r"}"#,
+            cx,
+        )
+        .unwrap();
+    settle_exec().await;
+    assert!(matches!(
+        &port.commands.borrow()[0],
+        Command::PlaceOrders { .. }
+    ));
+    port.replies
+        .borrow_mut()
+        .remove(0)
+        .send(Ok(r#"["close"]"#.into()))
+        .unwrap();
+    settle_exec().await;
+}
+
+fn nuke_result(port: &Port) -> Value {
+    port.events
+        .borrow()
+        .iter()
+        .find(|(op, e)| op == "exec-result" && e["reqId"] == "r")
+        .expect("the nuke reported")
+        .1
+        .clone()
+}
+
+#[tokio::test(start_paused = true)]
+async fn nuke_sends_a_second_close_only_after_a_fresh_read_sized_from_it() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            nuke_closed_once(&port, &cx).await;
+            // The store still shows the position, so the read runs when the settle ends.
+            assert_eq!(port.commands.borrow().len(), 1);
+            tokio::time::sleep(std::time::Duration::from_millis(2_200)).await;
+            settle_exec().await;
+            assert!(is_fresh_read(&port.commands.borrow()[1]));
+            assert_eq!(
+                port.commands.borrow().len(),
+                2,
+                "no close before the answer"
+            );
+            port.store.borrow_mut().positions[0].contracts = 0.01;
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Ok("[]".into()))
+                .unwrap();
+            settle_exec().await;
+            assert!(matches!(
+                &port.commands.borrow()[2],
+                Command::PlaceOrders { orders, .. }
+                    if orders[0].amount == 0.01 && orders[0].reduce_only == Some(true)
+            ));
+            port.store.borrow_mut().positions.clear();
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Ok(r#"["close-2"]"#.into()))
+                .unwrap();
+            settle_exec().await;
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            settle_exec().await;
+            assert!(is_fresh_read(&port.commands.borrow()[3]));
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Ok("[]".into()))
+                .unwrap();
+            settle_exec().await;
+            assert_eq!(nuke_result(&port)["success"], true);
+            assert_eq!(port.commands.borrow().len(), 4);
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn nuke_sends_no_second_close_when_the_read_fails_and_names_the_position() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            nuke_closed_once(&port, &cx).await;
+            tokio::time::sleep(std::time::Duration::from_millis(2_200)).await;
+            settle_exec().await;
+            assert!(is_fresh_read(&port.commands.borrow()[1]));
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Err(VenueError::new("read timed out")))
+                .unwrap();
+            settle_exec().await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            settle_exec().await;
+            assert_eq!(port.commands.borrow().len(), 2, "no further close");
+            let result = nuke_result(&port);
+            assert_eq!(result["success"], false);
+            let error = result["error"].as_str().unwrap();
+            assert!(
+                error.contains("could not confirm the account is flat"),
+                "{error}"
+            );
+            assert!(error.contains("BTCUSDT"), "{error}");
+            assert!(error.contains("read timed out"), "{error}");
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn nuke_reports_not_confirmed_when_the_read_skipped_a_row() {
+    LocalSet::new()
+        .run_until(async {
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            nuke_closed_once(&port, &cx).await;
+            port.store.borrow_mut().positions.clear();
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            settle_exec().await;
+            assert!(is_fresh_read(&port.commands.borrow()[1]));
+            port.replies
+                .borrow_mut()
+                .remove(0)
+                .send(Ok(r#"["DOGEUSD_PERP"]"#.into()))
+                .unwrap();
+            settle_exec().await;
+            let result = nuke_result(&port);
+            assert_eq!(result["success"], false);
+            let error = result["error"].as_str().unwrap();
+            assert!(
+                error.contains("could not confirm the account is flat"),
+                "{error}"
+            );
+            assert!(error.contains("DOGEUSD_PERP"), "{error}");
+            assert_eq!(port.commands.borrow().len(), 2);
+            cx.scope.dispose();
+        })
+        .await;
 }
 
 #[tokio::test]

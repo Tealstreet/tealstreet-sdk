@@ -70,6 +70,8 @@ impl Adapter {
             }
         }
         if !matches!(mode, "orders" | "ord") {
+            let fresh_read = self.cx.port.capabilities().fresh_positions;
+            let mut skipped = Vec::new();
             let mut positions = open_positions(&self.snapshot());
             for attempt in 0..=NUKE_CLOSE_RETRIES {
                 let mut failed = Vec::new();
@@ -106,6 +108,59 @@ impl Adapter {
                     };
                     failed.push((position, named(failure, "close", &symbol)));
                 }
+                // A venue with the read closes again only on one issued after this round.
+                if fresh_read {
+                    for _ in 0..NUKE_FLAT_SETTLE_MS / NUKE_CLOSE_RETRY_MS {
+                        if open_positions(&self.snapshot()).is_empty() {
+                            break;
+                        }
+                        safe_cex_algos::executor::sleep_ms(NUKE_CLOSE_RETRY_MS).await;
+                    }
+                    if self.cx.scope.is_disposed() {
+                        return Err(
+                            json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
+                        );
+                    }
+                    let read = self.read_fresh_positions().await;
+                    let open = open_positions(&self.snapshot());
+                    close_failures = failed
+                        .into_iter()
+                        .filter(|(position, _)| {
+                            open.iter().any(|row| {
+                                row["symbol"] == position["symbol"]
+                                    && row["side"] == position["side"]
+                            })
+                        })
+                        .map(|(_, failure)| failure)
+                        .collect();
+                    match read {
+                        Ok(rows) => skipped = rows,
+                        Err(error) => {
+                            let cause = error["message"].as_str().unwrap_or("read failed");
+                            let named = describe_open(&open);
+                            let left = if named.is_empty() {
+                                String::new()
+                            } else {
+                                format!("{named} may still be open: ")
+                            };
+                            failures.push(
+                                json!({"message":format!("{NUKE_NOT_CONFIRMED}: {left}{cause}")}),
+                            );
+                            break;
+                        }
+                    }
+                    if open.is_empty() {
+                        break;
+                    }
+                    if attempt == NUKE_CLOSE_RETRIES {
+                        if close_failures.is_empty() {
+                            failures.push(json!({"message":format!("Nuke did not leave the account flat: {} still open", describe_open(&open))}));
+                        }
+                        break;
+                    }
+                    positions = open;
+                    continue;
+                }
                 if failed.is_empty() {
                     close_failures.clear();
                     break;
@@ -135,6 +190,9 @@ impl Adapter {
                 }
             }
             failures.append(&mut close_failures);
+            if !skipped.is_empty() {
+                failures.push(json!({"message":format!("{NUKE_NOT_CONFIRMED}: {} on no listed market", skipped.join(", "))}));
+            }
         }
         // The venue's cancel-all reaches orders the store does not track, as in the browser.
         if !matches!(mode, "positions" | "pos") {
@@ -245,6 +303,15 @@ impl Adapter {
             .map_err(|message| json!({"message":message,"outcome":"notSent"}))?;
         self.run_command(command).await
     }
+    /// The symbols of open rows a read issued now could not keep.
+    async fn read_fresh_positions(&self) -> Result<Vec<String>, Value> {
+        let command = json!({"op":"readPositions","command":self.cx.port.next_command_id()});
+        let command = decode_command(&command.to_string())
+            .map_err(|error| json!({"message":error.to_string()}))?;
+        let answer = self.run_command(command).await?;
+        serde_json::from_value(answer)
+            .map_err(|_| json!({"message":"Invalid positions read result"}))
+    }
     async fn run_command(&self, command: safe_cex_engine::engine::Command) -> Result<Value, Value> {
         self.cx
             .port
@@ -258,6 +325,8 @@ impl Adapter {
 const NUKE_STOP_REASON: &str = "Stopped by nuke";
 const NUKE_CLOSE_RETRIES: u32 = 3;
 const NUKE_CLOSE_RETRY_MS: u64 = 100;
+const NUKE_FLAT_SETTLE_MS: u64 = 2_000;
+const NUKE_NOT_CONFIRMED: &str = "Nuke could not confirm the account is flat";
 
 fn open_positions(store: &Value) -> Vec<Value> {
     rows(store, "positions")
@@ -265,6 +334,21 @@ fn open_positions(store: &Value) -> Vec<Value> {
         .filter(|p| p["contracts"].as_f64().is_some_and(|v| v != 0.))
         .cloned()
         .collect()
+}
+
+fn describe_open(positions: &[Value]) -> String {
+    positions
+        .iter()
+        .map(|p| {
+            format!(
+                "{} {} {}",
+                p["symbol"].as_str().unwrap_or("unknown"),
+                p["side"].as_str().unwrap_or(""),
+                p["contracts"]
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn named(mut error: Value, phase: &str, symbol: &str) -> Value {
