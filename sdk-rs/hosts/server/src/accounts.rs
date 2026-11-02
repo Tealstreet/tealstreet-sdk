@@ -1406,6 +1406,29 @@ pub(crate) mod tests {
         (run_algos(account, link, inbox), placed)
     }
 
+    /// An unloaded account's actor on its own thread, so a test can keep the engine
+    /// busy without blocking the test's own tasks.
+    pub(crate) fn idle_handle_on_own_thread() -> safe_cex_native::AccountHandle {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            tokio::task::LocalSet::new().block_on(&runtime, async move {
+                let engine = safe_cex_engine::test_support::seeded_engine(Idle);
+                let (handle, task) = safe_cex_native::spawn_account(
+                    safe_cex_native::Host::new(engine, NoIo),
+                    ServerConfig::default(),
+                )
+                .unwrap();
+                tx.send(handle).unwrap();
+                let _ = task.await;
+            });
+        });
+        rx.recv().unwrap()
+    }
+
     /// A loaded BTCUSDT account under `registry` running its algo host and
     /// counting its algos there, as `build` wires it. Placements never settle.
     pub(crate) fn held_account_counted(
