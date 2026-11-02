@@ -171,9 +171,7 @@ fn a_stop_already_gone_before_its_move_says_no_replacement_was_sent() {
     assert!(!message.contains("replacement refused"), "{message}");
 }
 
-#[test]
-fn cancelling_one_leg_of_a_sized_bracket_re_places_the_other() {
-    let mut h = Harness::new();
+fn sized_bracket(h: &mut Harness) {
     h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"500","orderId":"","side":"sell","size":"4","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"last","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"last","state":"live"}]}"#);
@@ -185,12 +183,68 @@ fn cancelling_one_leg_of_a_sized_bracket_re_places_the_other() {
         }),
     );
     h.collect();
+}
+
+/// Ruled, after a live check that BloFin folds both legs into one tpsl order: one amend
+/// drops the cancelled leg, so the other never leaves the venue.
+#[test]
+fn cancelling_one_leg_of_a_sized_bracket_amends_it_away() {
+    let mut h = Harness::new();
+    sized_bracket(&mut h);
+    let r = h.take("amend-tpsl");
+    let body: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["tpslId"], "500");
+    assert_eq!(body["newTpTriggerPrice"], "0");
+    assert!(body.get("newSlTriggerPrice").is_none(), "{body}");
+    // deaws2's live answer, TRX-USDT, 2026-11-02, with this fixture's ids.
+    h.respond(
+        r,
+        r#"{"code":"0","msg":"success","data":{"tpslId":"500","code":"0","ts":"1762100000000"}}"#,
+    );
+    let read = h.take("tpslId=500");
+    assert!(read.url.contains("orders-tpsl-pending"), "{}", read.url);
+    h.respond(
+        read,
+        r#"{"code":"0","msg":"success","data":[{"tpslId":"500","instId":"BTC-USDT","tpTriggerPrice":null,"slTriggerPrice":"55000","state":"live"}]}"#,
+    );
+    assert!(
+        failure(&h).is_none(),
+        "{:?}",
+        failure(&h).map(|e| e.message)
+    );
+    assert!(!h.pending.iter().any(|r| r.url.contains("cancel-tpsl")));
+}
+
+/// Ruled: if the read-back does not show the kept leg, cancel and re-place put it back.
+#[test]
+fn an_amend_whose_read_back_lacks_the_kept_leg_falls_back() {
+    let mut h = Harness::new();
+    sized_bracket(&mut h);
+    let r = h.take("amend-tpsl");
+    h.respond(
+        r,
+        r#"{"code":"0","msg":"success","data":{"tpslId":"500","code":"0","ts":"1762100000000"}}"#,
+    );
+    let read = h.take("tpslId=500");
+    h.respond(read, r#"{"code":"0","msg":"success","data":[]}"#);
+    assert!(
+        h.pending.iter().any(|r| r.url.contains("cancel-tpsl")),
+        "falls back to cancel and re-place"
+    );
+}
+
+/// A refused amend falls back to cancel then re-place at the surviving leg's size.
+#[test]
+fn a_refused_amend_falls_back_to_cancel_and_re_place() {
+    let mut h = Harness::new();
+    sized_bracket(&mut h);
+    let r = h.take("amend-tpsl");
+    h.respond(r, r#"{"code":"102014","msg":"amend refused","data":null}"#);
     let r = h.take("cancel-tpsl");
     h.respond(
         r,
         r#"{"code":"0","data":[{"tpslId":"500","code":"0","msg":null}]}"#,
     );
-    // Release any pause and see whether a re-placement of the stop follows.
     let at = h.now + 2_000.0;
     h.collect_at(at);
     for a in &h.actions {
@@ -210,12 +264,11 @@ fn cancelling_one_leg_of_a_sized_bracket_re_places_the_other() {
                 .is_some_and(|b| b.contains("55000") && b.contains("\"4\""))
     });
     assert!(
-        resent || failure(&h).is_some_and(|e| e.message.contains("no stop")),
+        resent,
         "{:?}",
         h.pending
             .iter()
             .map(|r| (&r.url, &r.body))
             .collect::<Vec<_>>()
     );
-    assert!(resent, "the surviving stop is re-placed at its size");
 }

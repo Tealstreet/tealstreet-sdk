@@ -529,6 +529,11 @@ fn cancel_one_combined_leg_recreates_only_its_sibling() {
         }),
     );
     h.collect();
+    // The amend is tried first (ruled); a refused amend falls back to this path.
+    h.reply(
+        "amend-tpsl",
+        r#"{"code":"102014","msg":"amend refused","data":null}"#,
+    );
     h.reply(
         "cancel-tpsl",
         r#"{"code":"0","data":[{"tpslId":"91","code":"0","msg":null}]}"#,

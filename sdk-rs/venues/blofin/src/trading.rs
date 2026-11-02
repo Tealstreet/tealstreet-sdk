@@ -146,6 +146,10 @@ struct Job {
     replacing_stop: Option<(String, String, OrderSide, OrderType)>,
     /// The same for any other order: its id and symbol.
     replacing_order: Option<(String, String)>,
+    /// Cancel then re-place, sent only if BloFin definitely refuses an amend-tpsl.
+    amend_fallback: VecDeque<Step>,
+    /// The read-back that must show the kept leg after an accepted amend-tpsl.
+    amend_verify: Option<Step>,
 }
 struct Step {
     receipts: Vec<OrderIdentityReceipt>,
@@ -163,6 +167,14 @@ enum Effect {
         inst_id: String,
     },
     Cancel(Vec<Target>),
+    /// One leg of a two-leg tpsl order dropped by amend-tpsl; the store rows it removes.
+    AmendTpsl(Vec<String>),
+    /// After an amend-tpsl: the tpsl order must still hold the leg that was kept (live, 2026-11-02).
+    VerifyTpsl {
+        inst_id: String,
+        tpsl_id: String,
+        kept: OrderType,
+    },
     Verify(Target),
     Setting,
 }
@@ -393,12 +405,14 @@ impl Job {
             join: false,
             replacing_stop: None,
             replacing_order: None,
+            amend_fallback: VecDeque::new(),
+            amend_verify: None,
         }
     }
 }
 impl Step {
     fn read(&self) -> bool {
-        matches!(self.effect, Effect::Verify(_))
+        matches!(self.effect, Effect::Verify(_) | Effect::VerifyTpsl { .. })
     }
     fn is_place(&self) -> bool {
         matches!(self.effect, Effect::Place { .. })
@@ -407,7 +421,8 @@ impl Step {
         match self.effect {
             Effect::Place { .. } => Intent::Place,
             Effect::Cancel(_) => Intent::Cancel,
-            Effect::Verify(_) => Intent::Read,
+            Effect::AmendTpsl(_) => Intent::Amend,
+            Effect::Verify(_) | Effect::VerifyTpsl { .. } => Intent::Read,
             Effect::Setting => Intent::Setting,
         }
     }
@@ -921,6 +936,64 @@ impl Blofin {
         }
         Ok(out)
     }
+    /// An amend-tpsl that removes one leg of a two-leg tpsl order, when that is the whole cancel.
+    fn single_leg_amend(
+        cx: &Cx<'_, Pending>,
+        ids: &[String],
+        targets: &[Target],
+        sibling_survives: bool,
+    ) -> Option<(Step, Step)> {
+        let ([id], [target], true) = (ids, targets, sibling_survives) else {
+            return None;
+        };
+        let leg = cx.store.order(id)?.kind;
+        if target.family != 1 || !matches!(leg, OrderType::StopLoss | OrderType::TakeProfit) {
+            return None;
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Amend<'a> {
+            inst_id: &'a str,
+            tpsl_id: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_tp_trigger_price: Option<&'static str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_sl_trigger_price: Option<&'static str>,
+        }
+        // BloFin: a trigger price of 0 removes that leg.
+        let removing_tp = leg == OrderType::TakeProfit;
+        let body = Amend {
+            inst_id: &target.inst_id,
+            tpsl_id: &target.id,
+            new_tp_trigger_price: removing_tp.then_some("0"),
+            new_sl_trigger_price: (!removing_tp).then_some("0"),
+        };
+        let amend = Step {
+            receipts: Vec::new(),
+            orders: Vec::new(),
+            path: "/api/v1/trade/amend-tpsl",
+            body: serde_json::to_string(&body).ok()?,
+            effect: Effect::AmendTpsl(vec![id.clone()]),
+            delay: 0.0,
+        };
+        let verify = Step {
+            receipts: Vec::new(),
+            orders: Vec::new(),
+            path: "/api/v1/trade/orders-tpsl-pending",
+            body: String::new(),
+            effect: Effect::VerifyTpsl {
+                inst_id: target.inst_id.clone(),
+                tpsl_id: target.id.clone(),
+                kept: if removing_tp {
+                    OrderType::StopLoss
+                } else {
+                    OrderType::TakeProfit
+                },
+            },
+            delay: 0.0,
+        };
+        Some((amend, verify))
+    }
     fn add_cancels(job: &mut Job, targets: Vec<Target>) {
         for family in 0..3 {
             let rows: Vec<_> = targets
@@ -1237,8 +1310,18 @@ impl Blofin {
                             }
                         }
                     }
-                    Self::add_cancels(&mut job, self.cancel_targets(cx, &ids)?);
+                    let targets = self.cancel_targets(cx, &ids)?;
+                    let amend = Self::single_leg_amend(cx, &ids, &targets, !preserved.is_empty());
+                    Self::add_cancels(&mut job, targets);
                     Self::add_placements(&mut job, preserved);
+                    // Ruled: one amend drops the leg, so the other never leaves the venue; the
+                    // cancel and re-place go only if BloFin refuses the amend outright.
+                    if let Some((step, verify)) = amend {
+                        job.amend_fallback = std::mem::take(&mut job.steps);
+                        job.replacing_stop = None;
+                        job.amend_verify = Some(verify);
+                        job.steps.push_back(step);
+                    }
                 }
                 Command::CancelSymbolOrders { symbol, .. } => {
                     let ids = cx
@@ -1539,7 +1622,10 @@ impl Blofin {
                     active.job.canceling.push(id.clone());
                 }
             }
-            Effect::Verify(_) | Effect::Setting => {}
+            Effect::AmendTpsl(_)
+            | Effect::VerifyTpsl { .. }
+            | Effect::Verify(_)
+            | Effect::Setting => {}
         }
         let (method, path) = if let Effect::Verify(target) = &step.effect {
             (
@@ -1548,6 +1634,14 @@ impl Blofin {
                     "{}?instId={}&orderId={}",
                     step.path, target.inst_id, target.id
                 ),
+            )
+        } else if let Effect::VerifyTpsl {
+            inst_id, tpsl_id, ..
+        } = &step.effect
+        {
+            (
+                Method::Get,
+                format!("{}?instId={inst_id}&tpslId={tpsl_id}", step.path),
             )
         } else {
             (Method::Post, step.path.to_owned())
@@ -1915,6 +2009,17 @@ impl Blofin {
                 self.end(cx, active, current, error)
             };
         }
+        if let Effect::VerifyTpsl { tpsl_id, kept, .. } = &request.step.effect {
+            if !tpsl_keeps_leg(&response, tpsl_id, *kept) {
+                // The kept leg is not there: the cancel and re-place put it back.
+                let fallback = std::mem::take(&mut active.job.amend_fallback);
+                for step in fallback.into_iter().rev() {
+                    active.job.steps.push_front(step);
+                }
+            }
+            active.job.amend_fallback.clear();
+            return self.drive(cx, active, At::Data(&request.slot, &request.context));
+        }
         if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
             if request.step.is_place() {
                 cx.store.invalidate_order_snapshots();
@@ -2219,9 +2324,73 @@ impl Blofin {
                 let _ = cx.http_write_fact(context, accepted, None);
                 Ok(())
             }
-            Effect::Verify(_) => unreachable!("Verify is a Read call"),
+            Effect::AmendTpsl(removed) => {
+                let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
+                if reply.code == "0" && refused.is_none() {
+                    let _ = cx.http_write_fact(
+                        context,
+                        WriteFact::Accepted { order_ids: vec![] },
+                        None,
+                    );
+                    cx.store.invalidate_order_snapshots();
+                    for id in removed {
+                        cx.store.set_order_status(id, OrderStatus::Canceled);
+                    }
+                    if let Some(verify) = job.amend_verify.take() {
+                        job.steps.push_front(verify);
+                    }
+                    return Ok(());
+                }
+                let (code, msg) = match refused {
+                    Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
+                    _ => (&*reply.code, &*reply.msg),
+                };
+                let message = format!("BloFin TP/SL amend {code}: {msg}");
+                record_failed(cx, context, Some(native(code, msg)), &message);
+                // Only a definite refusal falls back; one that may have landed must not stack a cancel.
+                if outcome_unknown(code, msg) {
+                    return Err(unknown(format!(
+                        "{message}; whether the leg was removed is unknown. Check Open Orders"
+                    )));
+                }
+                let fallback = std::mem::take(&mut job.amend_fallback);
+                for step in fallback.into_iter().rev() {
+                    job.steps.push_front(step);
+                }
+                Ok(())
+            }
+            Effect::Verify(_) | Effect::VerifyTpsl { .. } => unreachable!("a Read call"),
         }
     }
+}
+
+/// Whether a tpsl read shows `tpsl_id` still holding the `kept` leg's trigger.
+fn tpsl_keeps_leg(response: &Response<'_>, tpsl_id: &str, kept: OrderType) -> bool {
+    if !(200..300).contains(&response.status) {
+        return false;
+    }
+    let Ok(reply) = serde_json::from_str::<serde_json::Value>(response.body) else {
+        return false;
+    };
+    let field = if kept == OrderType::TakeProfit {
+        "tpTriggerPrice"
+    } else {
+        "slTriggerPrice"
+    };
+    let rows = match &reply["data"] {
+        serde_json::Value::Array(rows) => rows.clone(),
+        row @ serde_json::Value::Object(_) => vec![row.clone()],
+        _ => return false,
+    };
+    reply["code"] == "0"
+        && rows.iter().any(|row| {
+            row["tpslId"] == tpsl_id
+                && match &row[field] {
+                    serde_json::Value::String(text) => text.parse::<f64>().is_ok_and(|p| p > 0.0),
+                    serde_json::Value::Number(n) => n.as_f64().is_some_and(|p| p > 0.0),
+                    _ => false,
+                }
+        })
 }
 
 /// BloFin refuses placements in Multi-Position mode with this code.
