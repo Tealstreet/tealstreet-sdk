@@ -379,6 +379,79 @@ fn a_timestamp_rejection_resyncs_then_resends_each_write_method_once() {
     }
 }
 
+/// A placed order must report placed: a failure here makes the user place it again.
+#[test]
+fn a_write_placed_by_its_timestamp_resend_reports_success() {
+    for (command_of, method, path, body) in [
+        (
+            place as fn() -> Command,
+            Method::Post,
+            "/order",
+            r#"{"orderId":12345}"#,
+        ),
+        (
+            cancel as fn() -> Command,
+            Method::Delete,
+            "/order",
+            r#"{"status":"CANCELED"}"#,
+        ),
+        (
+            leverage as fn() -> Command,
+            Method::Post,
+            "/leverage",
+            r#"{"leverage":10,"symbol":"BTCUSDT"}"#,
+        ),
+    ] {
+        let mut e = engine();
+        if path == "/order" && method == Method::Delete {
+            e.store_mut().set_orders(vec![open("777")]);
+        }
+        let sent = command(&mut e, command_of());
+        let first = write(&sent, method, path).clone();
+        let resent = answer(&mut e, &first, 400, TIMESTAMP);
+        let second = write(&resent, method, path).clone();
+        let done = answer(&mut e, &second, 200, body);
+        let result = terminal(&done).expect("one terminal");
+        assert!(result.is_ok(), "{path}: {result:?}");
+        if method == Method::Post && path == "/order" {
+            assert_eq!(
+                result.unwrap(),
+                r#"["12345"]"#,
+                "the placed id, not a partial failure"
+            );
+        }
+    }
+}
+
+/// Two orders, the first refused for its timestamp then placed by the resend: both report placed.
+#[test]
+fn a_batch_whose_first_order_needed_a_timestamp_resend_reports_every_id() {
+    let mut e = engine();
+    let order = |price: f64| {
+        serde_json::from_value(
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1.0,"price":price}),
+        )
+        .unwrap()
+    };
+    let sent = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: COMMAND,
+            orders: vec![order(9300.0), order(9200.0)],
+        },
+    );
+    let first = write(&sent, Method::Post, "/order").clone();
+    let resent = answer(&mut e, &first, 400, TIMESTAMP);
+    let second = write(&resent, Method::Post, "/order").clone();
+    let next = answer(&mut e, &second, 200, r#"{"orderId":1}"#);
+    let third = write(&next, Method::Post, "/order").clone();
+    let done = answer(&mut e, &third, 200, r#"{"orderId":2}"#);
+    assert_eq!(
+        terminal(&done).expect("one terminal").unwrap(),
+        r#"["1","2"]"#
+    );
+}
+
 #[test]
 fn a_released_gateway_failure_is_unknown_and_never_resent() {
     let mut e = engine();
