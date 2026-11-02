@@ -1034,7 +1034,7 @@ pub(crate) const ERRORS: CodeTable = CodeTable {
         // INVALID_NONCE: a clock or ordering fault, not the key.
         Row {
             key: Key::Int(40102),
-            verdict: Verdict::NonceRefused,
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
         Row {
