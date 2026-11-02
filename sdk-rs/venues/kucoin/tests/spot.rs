@@ -911,6 +911,43 @@ fn account_summary_preserves_main_sub_affiliate_and_uid_fallback() {
         assert_eq!(h.done(1).unwrap(), expected);
     }
 }
+/// Cancel-all answers per symbol; a symbol in failedSymbols kept its orders.
+#[test]
+fn cancel_all_with_a_failed_symbol_is_not_reported_done() {
+    for failed in [r#"["ETH-USDT"]"#, r#"[{"symbol":"ETH-USDT","error":"x"}]"#] {
+        let mut h = H::new(true);
+        h.command(Command::CancelSymbolOrders {
+            command: 1,
+            symbol: String::new(),
+        });
+        let r = h.http("/hf/orders/cancelAll");
+        h.respond(
+            &r,
+            200,
+            &format!(
+                r#"{{"code":"200000","data":{{"succeedSymbols":["BTC-USDT"],"failedSymbols":{failed}}}}}"#
+            ),
+        );
+        assert!(h.done(1).is_err(), "{failed}");
+    }
+}
+
+#[test]
+fn cancel_all_with_no_failed_symbol_is_done() {
+    let mut h = H::new(true);
+    h.command(Command::CancelSymbolOrders {
+        command: 1,
+        symbol: String::new(),
+    });
+    let r = h.http("/hf/orders/cancelAll");
+    h.respond(
+        &r,
+        200,
+        r#"{"code":"200000","data":{"succeedSymbols":["BTC-USDT"],"failedSymbols":[]}}"#,
+    );
+    assert_eq!(h.done(1).unwrap(), json!([]));
+}
+
 #[test]
 fn caller_symbol_cancels_an_order_before_any_snapshot_has_seen_it() {
     let mut h = H::new(true);
