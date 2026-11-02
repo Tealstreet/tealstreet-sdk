@@ -2844,8 +2844,10 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
   };
 
-  fetchOHLCV = (opts: OHLCVOptions) =>
-    this.command<Candle[]>({
+  fetchOHLCV = async (opts: OHLCVOptions) => {
+    // Before its market list an engine refuses the symbol or sends an unmapped id.
+    if (!(this.nativeLoaded & LOADED_FLAG.MARKETS)) await this.untilNativeData(LOADED_FLAG.MARKETS, 'markets');
+    return this.command<Candle[]>({
       op: 'fetchCandles',
       symbol: opts.symbol,
       interval: opts.interval,
@@ -2853,6 +2855,7 @@ export class RustEngineExchange extends BaseExchange {
       from: opts.from,
       to: opts.to,
     });
+  };
 
   fetchHistoricalFills = async (opts: ExecutionsOptions) => {
     const ready = this.capabilitiesFor('fetchHistoricalFills');
