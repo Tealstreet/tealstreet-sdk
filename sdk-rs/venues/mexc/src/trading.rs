@@ -134,6 +134,30 @@ struct ResultRow<'a> {
     #[serde(borrow, default, alias = "message", alias = "msg")]
     error_msg: Str<'a>,
 }
+/// A placement row carrying `errorCode` (stop orders) was refused: it placed nothing,
+/// and its `id`/`orderId` of 0 is not an order.
+fn row_refusal(payload: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Rows<'a> {
+        One(#[serde(borrow)] ResultRow<'a>),
+        Many(#[serde(borrow)] Vec<ResultRow<'a>>),
+    }
+    let rows = match serde_json::from_str::<Rows<'_>>(payload).ok()? {
+        Rows::One(row) => vec![row],
+        Rows::Many(rows) => rows,
+    };
+    rows.iter().find(|row| row.error_code != 0.0).map(|row| {
+        format!(
+            "MEXC refused the order [{}]: {}",
+            row.error_code,
+            match row.error_msg.trim() {
+                "" => "no reason given",
+                text => text,
+            }
+        )
+    })
+}
 fn result_id(payload: &str) -> Result<String, String> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -1366,6 +1390,10 @@ impl MexcFutures {
             let e = Envelope::checked(response.body)?;
             match request.call {
                 Call::Place { opts, scope, .. } => {
+                    if let Some(refusal) = row_refusal(e.payload()?) {
+                        refused = true;
+                        return Err(refusal);
+                    }
                     let id = result_id(e.payload()?)?;
                     self.optimistic(cx, opts, id.clone(), scope);
                     self.trading.active.as_mut().unwrap().ids.push(id);

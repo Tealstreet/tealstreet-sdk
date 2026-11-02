@@ -143,13 +143,14 @@ describe('Rust cancel-all placement scopes', () => {
     expect(submitted.clientOrderId).toBe('caller123');
   });
 
-  it('keeps the generic open-orders cancel-all behavior on unaffected venues', async () => {
+  it('cancels an open-order venue by its native read plus symbols this session placed', async () => {
     const { exchange, command, store } = setup('backpack');
-    // Generic venues select scopes from the authoritative native order read.
+    // Native open orders can lag a placement ack; the placed symbol is cancelled anyway.
     Object.defineProperty(exchange, 'fetchOrders', { value: async () => store.orders });
     await exchange.placeOrder(order());
     await exchange.cancelAllOrders();
-    expect(command).toHaveBeenCalledTimes(1);
+    expect(command).toHaveBeenCalledTimes(2);
+    expect(command.mock.calls[1][0]).toMatchObject({ op: 'cancelSymbolOrders', symbol: order().symbol });
   });
 
   it.each(['woo', 'grvt', 'polymarket', 'breakoutprop'] as const)('preserves %s global cancel-all override', async (name) => {

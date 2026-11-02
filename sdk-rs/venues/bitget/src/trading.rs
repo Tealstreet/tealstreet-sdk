@@ -1432,14 +1432,32 @@ impl BitgetFutures {
                     };
                     (paths::CANCEL_ALL, payload)
                 };
-                job.calls.push_back(Planned {
-                    path,
-                    payload,
-                    effect: Effect::Cancel {
-                        orders: Vec::new(),
-                        idempotent_missing: false,
-                    },
-                });
+                let plans = if self.account.uta {
+                    Vec::new()
+                } else {
+                    // Classic cancel-all leaves plan orders; each type is cancelled product-wide.
+                    NUKE_PLAN_TYPES
+                        .iter()
+                        .map(|plan| Payload {
+                            plan_type: Some((*plan).into()),
+                            ..payload.clone()
+                        })
+                        .collect()
+                };
+                for (path, payload) in std::iter::once((path, payload)).chain(
+                    plans
+                        .into_iter()
+                        .map(|payload| (paths::CANCEL_PLAN, payload)),
+                ) {
+                    job.calls.push_back(Planned {
+                        path,
+                        payload,
+                        effect: Effect::Cancel {
+                            orders: Vec::new(),
+                            idempotent_missing: false,
+                        },
+                    });
+                }
             }
             _ => return Err("unsupported Bitget trading command".into()),
         }
@@ -3353,6 +3371,15 @@ fn related(orders: &[Order], order: &Order) -> Vec<Order> {
         .cloned()
         .collect()
 }
+/// Every plan type `plan_type` maps, plus untyped triggers.
+const NUKE_PLAN_TYPES: [&str; 6] = [
+    "normal_plan",
+    "profit_plan",
+    "loss_plan",
+    "pos_profit",
+    "pos_loss",
+    "track_plan",
+];
 fn fallback_plan(order: &Order) -> &'static str {
     match (order.kind, order.amount > 0.0) {
         (OrderType::TakeProfit, true) => "profit_plan",
