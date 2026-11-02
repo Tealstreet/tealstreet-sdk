@@ -1563,8 +1563,7 @@ export const VENUES = {
         ([key, handlers]) => key.startsWith('orderBook_') && handlers.length,
       ).length >= count,
     privateSocket: '/ws/private',
-    // The public tape was recorded on three sockets; each frame replays on its recorded one.
-    options: { passphrase: 'replay-passphrase', fixedPublicSockets: true },
+    options: { passphrase: 'replay-passphrase' },
   },
   bitgetusdc: {
     rust: 'bitgetusdc',
