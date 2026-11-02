@@ -11590,7 +11590,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
@@ -11645,8 +11645,8 @@
           }
         },
         "expected": {
-          "url": "https://mainnet.zklighter.elliot.ai/fixture?signature=a%2Fb",
-          "prefix": "",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
           "mode": "direct",
           "authorize": false,
           "authorizationHeader": "Authorization",

@@ -192,6 +192,8 @@ pub struct RoutingInputs {
     pub proxy_region: Option<String>,
     pub bybit_site_id: Option<String>,
     pub public_data_only: Option<bool>,
+    /// Selects Lighter's profile: robinhood-testnet alone sends REST direct.
+    pub testnet: Option<bool>,
     #[serde(default)]
     pub has_key: bool,
     #[serde(default)]
@@ -335,6 +337,9 @@ pub fn account_transport(
     let tunnel = if proxy && (metadata.supports_tunnel != Some(false) || metadata.enforce_ws_tunnel)
     {
         Some(true)
+    } else if name == "lighter" {
+        // The relay refuses Lighter's URL, so an old row's flag would stop it starting.
+        Some(false)
     } else {
         account.tealstreet_tunnel
     };
@@ -343,6 +348,7 @@ pub fn account_transport(
         tealstreet_tunnel: tunnel,
         tealstreet_ws_route: account.tealstreet_ws_route,
         proxy_region,
+        testnet: account.testnet,
         has_key: true,
         ..RoutingInputs::default()
     })
@@ -572,6 +578,12 @@ fn rest_route(
         }
         Provider::Tealstreet => {
             let tunnel = o.tealstreet_tunnel.unwrap_or(false);
+            // Legacy sent all Lighter REST through the public CORS proxy on every profile but
+            // robinhood-testnet, whatever the proxy flag; a tunnel already egresses via us.
+            if lighter_uses_rest_proxy(name, o.testnet.unwrap_or(false)) && !tunnel {
+                let base = format!("{}/{origin}", table().hosts.public_cors_proxy);
+                return Ok((format!("{base}{path}"), false));
+            }
             let grvt_or_blofin = matches!(name, "grvt" | "blofin");
             let proxy = o.tealstreet_proxy.unwrap_or(false) || (grvt_or_blofin && tunnel);
             let prefix = if tunnel && !grvt_or_blofin {
@@ -593,6 +605,11 @@ fn rest_route(
         }
     };
     Ok((format!("{base}{path}"), proxied))
+}
+
+/// Legacy lighter.types.ts `usesRestProxy`; only robinhood-testnet was false.
+fn lighter_uses_rest_proxy(name: &str, testnet: bool) -> bool {
+    name == "lighter" || (name == "lighter-robinhood" && !testnet)
 }
 
 fn socket_channels() -> Vec<SocketChannelRule> {
