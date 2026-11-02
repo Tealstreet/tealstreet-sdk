@@ -323,9 +323,20 @@ async fn a_reconnect_race_parks_on_one_box_while_live_on_the_other_and_the_parke
     let (a, b) = (TestBox::start(grace), TestBox::start(grace));
     let (page, _) = chasing_page(&a, "u1").await;
     page.close().await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
     let key = ("u1".to_owned(), "acct".to_owned());
-    let on_a = a.holdings().await.remove(&key).expect("parked on A");
+    // The chase count is the algo host's 250ms recount, so wait for it rather than a fixed sleep.
+    let mut on_a = None;
+    for _ in 0..40 {
+        on_a = a.holdings().await.remove(&key);
+        if on_a
+            .as_ref()
+            .is_some_and(|held| held.parked && held.chases == 1)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let on_a = on_a.expect("parked on A");
     assert_eq!(
         on_a,
         Held {
