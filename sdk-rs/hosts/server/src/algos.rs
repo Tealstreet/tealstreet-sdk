@@ -893,6 +893,12 @@ pub async fn run(
             }
             input = inbox.recv() => match input {
                 Some(AlgoInput::Op { op, data, origin }) => {
+                    // The page acted on frames this store may not have read yet (a chase
+                    // started right after load found no market): read the engine first.
+                    if let Some(snapshot) = handle.read(projection::project).await {
+                        let change = port.apply(snapshot, Vec::new(), false);
+                        port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
+                    }
                     let dispatched = registry.dispatch(&op, &data, &cx);
                     let result = match &dispatched {
                         Some(Ok(())) => Value::from("ok"),
