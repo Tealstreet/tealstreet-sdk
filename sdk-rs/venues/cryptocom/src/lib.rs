@@ -123,6 +123,8 @@ pub struct Cryptocom {
     malformed_markets: HashSet<String>,
     reread_stalls: u8,
     subscriptions: BTreeMap<String, u32>,
+    /// Candlestick subscriptions past their first answer, which carries history.
+    candles_live: HashSet<String>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
     message_id: u64,
@@ -258,6 +260,7 @@ impl Cryptocom {
             malformed_markets: HashSet::new(),
             reread_stalls: 0,
             subscriptions: BTreeMap::new(),
+            candles_live: HashSet::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
             message_id: 0,
@@ -321,6 +324,7 @@ impl Cryptocom {
             *count -= 1;
             if *count == 0 {
                 self.subscriptions.remove(&channel);
+                self.candles_live.remove(&channel);
                 self.subscribe(cx, &[channel], "unsubscribe");
             }
         }
@@ -453,9 +457,17 @@ impl Cryptocom {
                 if !self.subscriptions.contains_key(message.subscription) {
                     return Ok(());
                 }
-                json::each::<CandleRow>(message.data.get(), |row| {
-                    cx.candle(symbol, timeframe, row.candle())
-                })?;
+                let mut candles = Vec::new();
+                json::each::<CandleRow>(message.data.get(), |row| candles.push(row.candle()))?;
+                candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                // A subscription's first answer carries history: only its newest row is live.
+                if self.candles_live.insert(message.subscription.to_owned()) {
+                    let newest = candles.pop();
+                    candles = newest.into_iter().collect();
+                }
+                for candle in candles {
+                    cx.candle(symbol, timeframe, candle);
+                }
             }
             _ => {}
         }
@@ -664,6 +676,8 @@ impl Venue for Cryptocom {
                 for state in self.books.values_mut() {
                     state.synced = false;
                 }
+                // Resubscribed on reconnect, each answers with history again.
+                self.candles_live.clear();
             }
         }
     }

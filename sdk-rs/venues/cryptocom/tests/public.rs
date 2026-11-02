@@ -483,3 +483,61 @@ fn instrument_summary_counts_duplicates_and_keeps_the_first_label() {
         assert_eq!(engine.health().rows_skipped, 1);
     }
 }
+
+/// Each candle in a frame's candles section, by its timestamp: rows end the section as six f64s.
+fn candle_timestamps(frame: &[u8]) -> Vec<f64> {
+    safe_cex_engine::wire::sections(frame)
+        .filter(|(kind, _)| *kind == 6)
+        .flat_map(|(_, body)| {
+            let count = u32::from_le_bytes(body[..4].try_into().unwrap()) as usize;
+            let rows = &body[body.len() - count * 48..];
+            (0..count)
+                .map(|row| f64::from_le_bytes(rows[row * 48..row * 48 + 8].try_into().unwrap()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The documented candlestick shapes: the first answer after a subscribe carries
+/// history; later pushes carry the forming candle. `t` is the start in milliseconds.
+const CANDLE_HISTORY: &str = r#"{"id":-1,"method":"subscribe","code":0,"result":{"instrument_name":"BTCUSD-PERP","subscription":"candlestick.1m.BTCUSD-PERP","channel":"candlestick","interval":"1m","data":[{"o":"20730.0","h":"20736.0","l":"20729.5","c":"20735.3","v":"0.3","t":1666854060000},{"o":"20725.0","h":"20731.0","l":"20724.0","c":"20730.0","v":"0.2","t":1666854000000},{"o":"20735.3","h":"20741.0","l":"20735.3","c":"20740.1","v":"0.1","t":1666854120000}]}}"#;
+const CANDLE_PUSH: &str = r#"{"id":-1,"method":"subscribe","code":0,"result":{"instrument_name":"BTCUSD-PERP","subscription":"candlestick.1m.BTCUSD-PERP","channel":"candlestick","interval":"1m","data":[{"o":"20740.1","h":"20745.0","l":"20740.1","c":"20744.2","v":"0.05","t":1666854180000}]}}"#;
+
+#[test]
+fn a_candlestick_subscribe_streams_only_the_newest_history_row_in_seconds() {
+    let (mut engine, socket) = ready();
+    engine.handle(
+        0.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSD-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    engine.drain_actions().for_each(drop);
+    engine.take_frame(0.0);
+    engine.handle(
+        10.0,
+        Event::WsMessage {
+            socket,
+            text: CANDLE_HISTORY,
+        },
+    );
+    let history = engine
+        .take_frame(10.0)
+        .expect("the forming candle")
+        .to_vec();
+    assert_eq!(
+        candle_timestamps(&history),
+        [1666854120.0],
+        "history is not live, and live candles are in seconds"
+    );
+    engine.handle(
+        20.0,
+        Event::WsMessage {
+            socket,
+            text: CANDLE_PUSH,
+        },
+    );
+    let live = engine.take_frame(20.0).expect("the live candle").to_vec();
+    assert_eq!(candle_timestamps(&live), [1666854180.0]);
+}
