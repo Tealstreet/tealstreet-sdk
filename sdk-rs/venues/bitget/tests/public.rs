@@ -494,3 +494,48 @@ fn shared_public_socket_urls_keep_independent_feed_identities() {
             .all(|(_, _, context)| !context.as_ref().unwrap().recover)
     );
 }
+
+const CANDLE_REFUSED: &str = r#"{"event":"error","arg":{"instType":"USDT-FUTURES","channel":"candle1m","instId":"BTCUSDT"},"code":30001,"msg":"channel doesn't exist"}"#;
+
+fn candle_subscribes(h: &Harness) -> usize {
+    h.sent
+        .iter()
+        .filter(|(_, t)| t.contains(r#""op":"subscribe""#) && t.contains("candle1m"))
+        .count()
+}
+
+/// A subscription Bitget refused stayed refused: the chart got no live candles.
+#[test]
+fn a_refused_subscription_is_retried_with_backoff_then_given_up() {
+    let mut h = Harness::public();
+    h.command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    });
+    assert_eq!(candle_subscribes(&h), 1);
+    for (attempt, delay) in [(2, 1_000.0), (3, 2_000.0), (4, 4_000.0)] {
+        h.message(CANDLE_REFUSED);
+        h.timer_after(delay);
+        assert_eq!(candle_subscribes(&h), attempt, "after {delay} ms");
+    }
+    h.message(CANDLE_REFUSED);
+    let before = h.timers.len();
+    h.collect();
+    assert_eq!(h.timers.len(), before, "no fourth retry");
+    assert_eq!(candle_subscribes(&h), 4);
+}
+
+#[test]
+fn data_on_a_refused_subscription_resets_its_retries() {
+    let mut h = Harness::public();
+    h.command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    });
+    h.message(CANDLE_REFUSED);
+    h.timer_after(1_000.0);
+    h.message(r#"{"action":"update","arg":{"instType":"USDT-FUTURES","channel":"candle1m","instId":"BTCUSDT"},"data":[["1000","1","2","0.5","1.5","10","15"]]}"#);
+    h.message(CANDLE_REFUSED);
+    h.timer_after(1_000.0);
+    assert_eq!(candle_subscribes(&h), 3);
+}

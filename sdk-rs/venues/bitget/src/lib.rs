@@ -139,7 +139,12 @@ pub struct BitgetFutures {
     live_tickers: safe_cex_engine::startup::LiveTickers,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), usize>,
+    /// Topics Bitget answered with event:error, by (channel, instId): retries made, pending timer.
+    refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
 }
+
+/// A refused subscription is sent again after 1 s, 2 s and 4 s, then left refused.
+const SUBSCRIBE_RETRIES: u32 = 3;
 
 fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
     let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body).ok();
@@ -205,6 +210,7 @@ impl BitgetFutures {
             live_tickers: Default::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
+            refused_topics: HashMap::new(),
         }
     }
 
@@ -432,12 +438,48 @@ impl BitgetFutures {
             }
         };
         if message.event == "error" {
+            let topic = (
+                message.arg.channel.to_string(),
+                message.arg.inst_id.to_string(),
+            );
+            let retry = (!topic.0.is_empty() && !topic.1.is_empty())
+                .then(|| {
+                    self.refused_topics
+                        .entry(topic.clone())
+                        .or_insert((0, None))
+                })
+                .filter(|(made, timer)| *made < SUBSCRIBE_RETRIES && timer.is_none());
+            let detail = match retry {
+                Some((made, timer)) => {
+                    *timer = Some(cx.set_timer(1_000.0 * f64::from(1u32 << *made)));
+                    *made += 1;
+                    format!(
+                        "{} {}: retry {made} of {SUBSCRIBE_RETRIES}",
+                        topic.0, topic.1
+                    )
+                }
+                None if !topic.0.is_empty() => format!("{} {}: not retried", topic.0, topic.1),
+                None => String::new(),
+            };
             cx.notice(
                 Level::Error,
                 code::SUBSCRIPTION_REJECTED,
-                format!("Bitget WS: {}", message.msg),
+                if detail.is_empty() {
+                    format!("Bitget WS: {}", message.msg)
+                } else {
+                    format!("Bitget WS: {} ({detail})", message.msg)
+                },
             );
             return;
+        }
+        if !self.refused_topics.is_empty()
+            && let Some((_, timer)) = self.refused_topics.remove(&(
+                message.arg.channel.to_string(),
+                message.arg.inst_id.to_string(),
+            ))
+            && let Some(timer) = timer
+        {
+            cx.clear_timer(timer);
         }
         match message.data {
             PublicData::Tickers(rows) => {
@@ -1206,6 +1248,18 @@ impl Venue for BitgetFutures {
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_write(cx);
+        if let Some(topic) = self
+            .refused_topics
+            .iter_mut()
+            .find(|(_, (_, pending))| *pending == Some(timer))
+            .map(|(topic, (_, pending))| {
+                *pending = None;
+                topic.clone()
+            })
+        {
+            self.subscribe(cx, "subscribe", &[topic]);
+            return;
+        }
         if let Some(read) = self.discovery.on_timer(timer) {
             self.discovery_read(cx, read == DiscoveryRead::Tickers);
             return;
