@@ -179,7 +179,42 @@ pub struct Depth<'a> {
     pub pseq: Option<i64>,
 }
 
-pub type CandleRow = [Number; 7];
+/// The first seven fields of a candle row. The live push appends a USDT volume
+/// as an eighth field, so trailing fields are ignored rather than refused.
+pub struct CandleRow(pub [Number; 7]);
+
+impl std::ops::Deref for CandleRow {
+    type Target = [Number; 7];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for CandleRow {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Row;
+        impl<'de> serde::de::Visitor<'de> for Row {
+            type Value = CandleRow;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a Bitget candle row of at least 7 fields")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<CandleRow, A::Error> {
+                let mut row = [Number::default(); 7];
+                for (index, field) in row.iter_mut().enumerate() {
+                    *field = seq
+                        .next_element()?
+                        .ok_or_else(|| serde::de::Error::invalid_length(index, &self))?;
+                }
+                while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+                Ok(CandleRow(row))
+            }
+        }
+        d.deserialize_seq(Row)
+    }
+}
 
 fn sequence<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
     #[derive(Deserialize)]

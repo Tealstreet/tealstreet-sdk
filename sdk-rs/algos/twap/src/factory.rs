@@ -451,6 +451,7 @@ impl TwapChasers for Rc<ChaserBook> {
             account_name: None,
             terminate: None,
             client_id: None,
+            twap_id: Some(request.twap_id.clone()),
         };
         ChaserBook::start_with_id(self, request.id.clone(), options)
     }

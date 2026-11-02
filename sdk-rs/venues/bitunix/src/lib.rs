@@ -51,6 +51,7 @@ pub enum Pending {
     Markets {
         context: Context,
         rows: Vec<Market>,
+        market_maxima: HashMap<String, f64>,
         invalid: bool,
     },
     Tickers {
@@ -152,6 +153,8 @@ pub struct BitunixFutures {
     candles: HashSet<(String, Interval)>,
     discovery: PublicRetries,
     funding_times: HashMap<String, f64>,
+    /// `maxMarketOrderVolume` by symbol; absent or zero falls back to the limit maximum.
+    market_maxima: HashMap<String, f64>,
 }
 impl BitunixFutures {
     pub fn new(options: Options) -> Self {
@@ -175,6 +178,7 @@ impl BitunixFutures {
             candles: HashSet::new(),
             discovery: PublicRetries::default(),
             funding_times: HashMap::new(),
+            market_maxima: HashMap::new(),
         }
     }
     fn read_policy() -> Policy {
@@ -213,6 +217,7 @@ impl BitunixFutures {
                 Pending::Markets {
                     context: context.clone(),
                     rows: Vec::new(),
+                    market_maxima: HashMap::new(),
                     invalid: false,
                 },
             ),
@@ -762,52 +767,58 @@ impl Venue for BitunixFutures {
         match pending {
             Pending::Private(read) => self.account_item(cx, read, item),
             Pending::History(read) => self.history_item(cx, read, item),
-            Pending::Markets { rows, invalid, .. } => {
-                match serde_json::from_str::<Pair<'_>>(item) {
-                    Ok(m) => {
-                        if m.symbol_status == "OPEN"
-                            && m.quote == "USDT"
-                            && m.is_api_supported.as_ref().is_none_or(Supported::allowed)
-                        {
-                            rows.push(Market {
-                                id: format!("{}/{}", m.base, m.quote),
-                                symbol: m.symbol.into_owned(),
-                                base: m.base.into_owned(),
-                                quote: m.quote.into_owned(),
-                                active: true,
-                                precision: Precision {
-                                    amount: 10f64.powi(m.base_precision.0 as i32).recip(),
-                                    price: 10f64.powi(m.quote_precision.0 as i32).recip(),
-                                },
-                                limits: Limits {
-                                    amount: MinMax {
-                                        min: 0.0,
-                                        max: m.max_limit_order_volume.0,
-                                    },
-                                    leverage: MinMax {
-                                        min: 1.0,
-                                        max: 100.0,
-                                    },
-                                    price: None,
-                                },
-                                pretty_symbol: None,
-                                contract_size: None,
-                                is_expiring: None,
-                                is_inverse: None,
-                                is_spot: None,
-                                is_perpetual: None,
-                                is_read_only: None,
-                                taker_fee: None,
-                                maker_fee: None,
-                            });
+            Pending::Markets {
+                rows,
+                market_maxima,
+                invalid,
+                ..
+            } => match serde_json::from_str::<Pair<'_>>(item) {
+                Ok(m) => {
+                    if m.symbol_status == "OPEN"
+                        && m.quote == "USDT"
+                        && m.is_api_supported.as_ref().is_none_or(Supported::allowed)
+                    {
+                        if let Some(max) = m.max_market_order_volume.filter(|max| max.0 > 0.0) {
+                            market_maxima.insert(m.symbol.to_string(), max.0);
                         }
-                    }
-                    Err(_) => {
-                        *invalid = true;
-                        safe_cex_engine::startup::skipped_row(cx);
+                        rows.push(Market {
+                            id: format!("{}/{}", m.base, m.quote),
+                            symbol: m.symbol.into_owned(),
+                            base: m.base.into_owned(),
+                            quote: m.quote.into_owned(),
+                            active: true,
+                            precision: Precision {
+                                amount: 10f64.powi(m.base_precision.0 as i32).recip(),
+                                price: 10f64.powi(m.quote_precision.0 as i32).recip(),
+                            },
+                            limits: Limits {
+                                amount: MinMax {
+                                    min: 0.0,
+                                    max: m.max_limit_order_volume.0,
+                                },
+                                leverage: MinMax {
+                                    min: 1.0,
+                                    max: 100.0,
+                                },
+                                price: None,
+                            },
+                            pretty_symbol: None,
+                            contract_size: None,
+                            is_expiring: None,
+                            is_inverse: None,
+                            is_spot: None,
+                            is_perpetual: None,
+                            is_read_only: None,
+                            taker_fee: None,
+                            maker_fee: None,
+                        });
                     }
                 }
-            }
+                Err(_) => {
+                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
+            },
             Pending::Tickers { rows, invalid, .. } => match serde_json::from_str::<Daily<'_>>(item)
             {
                 Ok(t) => {
@@ -921,10 +932,14 @@ impl Venue for BitunixFutures {
         }
         match pending {
             Pending::Markets {
-                context, mut rows, ..
+                context,
+                mut rows,
+                market_maxima,
+                ..
             } if !rows.is_empty() => {
                 rows.shrink_to_fit();
                 cx.store.set_markets(rows);
+                self.market_maxima = market_maxima;
                 if cx.finish_http_context(&context).is_err() {
                     return;
                 }
@@ -1172,10 +1187,11 @@ impl Venue for BitunixFutures {
                 }
                 SocketTick::TimedOut(_) => {
                     if matches!(s.feed, Feed::Private) && !self.account.login_answered {
+                        // Silence is no refusal: auth.rejected would move the key to the refused path.
                         cx.notice(
-                            Level::Error,
-                            code::AUTH_REJECTED,
-                            "Bitunix did not answer the private socket login",
+                            Level::Warn,
+                            code::STREAM_UNAVAILABLE,
+                            "Bitunix did not answer the private socket login; reconnecting",
                         );
                     }
                     cx.close(s.id);

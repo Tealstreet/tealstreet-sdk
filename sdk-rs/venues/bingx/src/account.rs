@@ -315,6 +315,23 @@ fn time_in_force(text: &str) -> Option<TimeInForce> {
     })
 }
 
+impl Request {
+    /// Which read an envelope failure came from, so the report can name it.
+    fn named(&self, error: String) -> String {
+        let read = match self {
+            Self::ListenKey { .. } => "listen key",
+            Self::Keepalive { .. } => "listen key renewal",
+            Self::PositionMode { .. } => "position mode",
+            Self::SymbolLeverage { .. } => "leverage",
+            Self::SymbolMarginType { .. } => "margin type",
+            Self::Balance { .. } => "balance",
+            Self::Positions { .. } => "positions",
+            Self::OpenOrders { .. } => "open orders",
+        };
+        format!("{error} ({read} read)")
+    }
+}
+
 /// A success whose list is null, which is how BingX answers an empty one.
 pub(crate) fn null_list(body: &str) -> bool {
     use serde_json::value::RawValue;
@@ -348,6 +365,10 @@ fn response_error(response: Response<'_>, allow_missing_code: bool) -> Option<St
             return Some(format!("{} ({})", s.msg, s.code));
         }
     } else if !allow_missing_code || serde_json::from_str::<KeyStatus>(response.body).is_err() {
+        // A gateway's error page is its HTTP status; only a 2xx body is BingX's to malform.
+        if !(200..300).contains(&response.status) {
+            return Some(format!("HTTP {}", response.status));
+        }
         return Some("malformed BingX response envelope".into());
     }
     if !(200..300).contains(&response.status) {
@@ -1220,7 +1241,7 @@ impl Account {
             cx.startup_read_refused(&error);
         }
         self.read_error = read_refusal(&response);
-        if let Some(error) = response_error(response, is_key) {
+        if let Some(error) = response_error(response, is_key).map(|error| request.named(error)) {
             if matches!(request, Request::Keepalive { .. })
                 && (response.status == 404 || {
                     let m = error.to_ascii_lowercase();
@@ -2116,10 +2137,13 @@ impl crate::Bingx {
         response: &Response<'_>,
     ) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        // A first signature rejection is re-signed once; only the final answer counts.
+        // A first signature or timestamp refusal is re-signed once; only the
+        // final answer counts.
         let pending = match pending {
             Pending::Signed(signed)
-                if !signed.resent && crate::signature_rejected(response.body) =>
+                if !signed.resent
+                    && (crate::signature_rejected(response.body)
+                        || crate::sign::timestamp::refused(response.body)) =>
             {
                 return None;
             }

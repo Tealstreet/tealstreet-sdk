@@ -963,6 +963,8 @@ export type ActiveChaser = {
   stopReason: string;
   currentOrderIds?: string[];
   origin?: ChaserOrigin;
+  /** Set on a TWAP's slice chase: the TWAP it belongs to. */
+  twapId?: string;
 };
 
 export type OrderRiskProfile = {

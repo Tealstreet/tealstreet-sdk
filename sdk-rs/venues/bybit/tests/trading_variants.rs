@@ -3997,21 +3997,22 @@ fn a_refused_position_mode_is_forgotten() {
 // TS treats this as done.
 #[test]
 fn amend_answered_order_not_modified_succeeds() {
-    let mut h = ready(Variant::Demo);
-    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
-    h.command(Command::AmendOrder {
-        command: 2,
-        id: "parent".into(),
-        price: Some(100.0),
-        amount: None,
-    });
-    resolve_mode(&mut h, "BTCUSDT");
-    h.respond(
-        "/v5/order/amend",
-        200,
+    for answer in [
         r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
-    );
-    assert!(h.result(2).unwrap().is_ok(), "{:?}", h.result(2));
+        r#"{"retCode":34040,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+        h.command(Command::AmendOrder {
+            command: 2,
+            id: "parent".into(),
+            price: Some(100.0),
+            amount: None,
+        });
+        resolve_mode(&mut h, "BTCUSDT");
+        h.respond("/v5/order/amend", 200, answer);
+        assert!(h.result(2).unwrap().is_ok(), "{answer} {:?}", h.result(2));
+    }
 }
 
 #[test]

@@ -114,7 +114,8 @@ export class RelayWebSocket extends EventTarget {
           protocols ?? [],
           nodeOptions,
         )
-      : new WebSocket(tunnelUrl);
+      : // eslint-disable-next-line network/require-fetch-signal -- bounded by handshakeTimer (HANDSHAKE_TIMEOUT_MS) below
+        new WebSocket(tunnelUrl);
     this.inner.addEventListener('open', this.onInnerOpen);
     this.inner.addEventListener('message', this.onInnerMessage);
     this.inner.addEventListener('close', this.onInnerClose as EventListener);

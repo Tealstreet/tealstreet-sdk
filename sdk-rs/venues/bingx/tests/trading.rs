@@ -1864,3 +1864,46 @@ fn a_duplicate_client_order_id_is_unknown_not_refused() {
         h.failures
     );
 }
+
+fn protected_limit() -> Order {
+    let mut o = order();
+    o.stop_loss = Some(90.0);
+    o.take_profit = Some(110.0);
+    o
+}
+
+/// As legacy: a size change on a limit with TP/SL is a native amend, which keeps them.
+#[test]
+fn a_size_change_on_a_limit_with_tp_sl_is_amended() {
+    let mut h = Harness::new(Some((protected_limit(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: None,
+        amount: Some(order().amount * 2.0),
+    });
+    assert_eq!(h.requests.len(), 1, "{:?}", (&h.failures, &h.done));
+    assert!(
+        h.requests[0].url.contains("/trade/amend"),
+        "{}",
+        h.requests[0].url
+    );
+}
+
+/// As legacy: a price move would drop the TP/SL, so it is refused with what to do instead.
+#[test]
+fn a_price_move_on_a_limit_with_tp_sl_says_what_to_do() {
+    let mut h = Harness::new(Some((protected_limit(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    assert!(h.requests.is_empty());
+    let error = h.done[0].as_ref().unwrap_err();
+    assert!(
+        error.contains("without dropping its TP/SL") && error.contains("Cancel it"),
+        "{error}"
+    );
+}

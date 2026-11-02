@@ -7,6 +7,7 @@ mod trading;
 mod wire;
 
 use base64::Engine as _;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
@@ -648,20 +649,8 @@ impl Hyperliquid {
                         let Some(market) = cx.store.market(&symbol) else {
                             return;
                         };
-                        let Some((a, b)) = depth.levels[0].first().zip(depth.levels[0].get(1))
-                        else {
-                            return;
-                        };
-                        let gap = safe_cex_engine::num::adjust(
-                            (a.px - b.px).abs(),
-                            market.precision.price,
-                        );
-                        let multiple = (gap / market.precision.price).floor();
-                        let group = multiple.log10().round();
-                        if !group.is_finite() || !(0.0..=6.0).contains(&group) {
-                            return;
-                        }
-                        ladder.spot_depth[group as usize] = Some(depth.levels);
+                        let group = spot_depth_tier(&depth.levels, market.precision.price);
+                        ladder.spot_depth[group] = Some(depth.levels);
                         ladder.depth_time = Some(depth.time);
                         for (side, index) in [(BookSide::Bids, 0), (BookSide::Asks, 1)] {
                             let mut levels = Vec::new();
@@ -771,6 +760,22 @@ impl Hyperliquid {
             self.propose_socket_interests(cx);
         }
     }
+}
+/// Spot frames do not say which nSigFigs subscription sent them. A tier's
+/// prices are all multiples of its bucket, so the coarsest power-of-ten tick
+/// multiple dividing every price names the tier; the native tier is 0.
+fn spot_depth_tier(levels: &[Vec<Level>; 2], tick: f64) -> usize {
+    let prices = || levels.iter().flatten().map(|l| l.px);
+    (1..=6)
+        .rev()
+        .find(|&decade| {
+            let step = tick * 10f64.powi(decade);
+            prices().all(|px| {
+                let steps = px / step;
+                (steps - steps.round()).abs() < 1e-6
+            })
+        })
+        .unwrap_or(0) as usize
 }
 fn price_decimals(price: f64, size: i32) -> i32 {
     let significant = if price == 0.0 {
@@ -1261,6 +1266,13 @@ impl Venue for Hyperliquid {
         ) -> Result<(), SocketError>,
     ) -> Result<(), SocketError> {
         self.managed_socket_encode(store, feed, subscribe, interests, emit)
+    }
+    fn subscription_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(store, topic)
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self

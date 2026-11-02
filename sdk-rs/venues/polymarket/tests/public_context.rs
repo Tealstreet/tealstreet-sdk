@@ -2,6 +2,10 @@ use safe_cex_engine::model::Interval;
 use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, Notice, Response};
 use safe_cex_venue_polymarket::{Options, Polymarket};
 
+// A Background Read issued before markets and tickers load carries the engine's
+// 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+
 fn engine_with_market() -> Engine<Polymarket> {
     use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
     let mut e = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options::default()));
@@ -160,7 +164,7 @@ fn a_host_that_never_prepares_still_gets_one_caller_timeout() {
 }
 #[test]
 fn expired_background_candles_cannot_publish_but_live_rows_do() {
-    for (delay, expected) in [(1., true), (20_000., false)] {
+    for (delay, expected) in [(1., true), (DISCOVERY_DEADLINE_MS, false)] {
         let mut e = engine_with_market();
         let now = 100_000.;
         e.handle(

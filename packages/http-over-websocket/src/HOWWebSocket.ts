@@ -46,6 +46,7 @@ export class HOWWebSocket {
   isInitialized = false;
   isTimeSynced = false;
   isTokenSent = false;
+  tokenSentAt = 0;
   authState = HOWWebSocketAuthState.Unknown;
 
   lastGoodPong = +new Date();
@@ -105,7 +106,8 @@ export class HOWWebSocket {
     // 1. Use the ws package explicitly (Bun's native WebSocket doesn't support ALPNProtocols)
     // 2. Pass Origin header for CloudFront to accept the WebSocket upgrade
     // 3. Force HTTP/1.1 via ALPNProtocols (WebSocket upgrade doesn't work over HTTP/2)
-    const options: Record<string, unknown> = {};
+    // The library's own default, stated so a reader (and the network lint) can see the bound.
+    const options: Record<string, unknown> = { connectionTimeout: 4_000 };
 
     const Socket = this.WebSocketCtor ?? NodeWebSocket;
     if (Socket) {
@@ -217,10 +219,21 @@ export class HOWWebSocket {
       this.isOpen = true;
 
       this.pingTimeoutId = setTimeout(() => this.ping(), 5_000);
+      // A socket that opens and then never pongs must be redialed too, not only one that stops.
+      this.armSilenceReconnect();
 
       // Start latency checks after a short delay to let connection stabilize
       this.startLatencyChecks();
     }
+  };
+
+  private armSilenceReconnect = () => {
+    clearTimeout(this.lastMessageTimeout);
+    this.lastMessageTimeout = setTimeout(() => {
+      if (!this.isDisposed) {
+        this.ws?.reconnect?.();
+      }
+    }, 25_000);
   };
 
   ping = () => {
@@ -238,6 +251,7 @@ export class HOWWebSocket {
   sendToken = (data: any) => {
     this.epoch++;
     this.isTokenSent = true;
+    this.tokenSentAt = Date.now();
     this.authState = HOWWebSocketAuthState.Unknown;
     const message = JSON.stringify(data);
     this.validateAndSend(message, data, true);
@@ -274,12 +288,7 @@ export class HOWWebSocket {
             }
           }
 
-          clearTimeout(this.lastMessageTimeout);
-          this.lastMessageTimeout = setTimeout(() => {
-            if (!this.isDisposed) {
-              this.ws?.reconnect?.();
-            }
-          }, 25_000);
+          this.armSilenceReconnect();
         }
         if (json?.type === 'serverTime') {
           this.isTimeSynced = true;

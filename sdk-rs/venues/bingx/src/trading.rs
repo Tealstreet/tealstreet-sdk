@@ -843,11 +843,14 @@ impl Trading {
                 code: NativeCode::Int(e.code),
                 message: &e.msg,
             });
+            let timestamp = crate::sign::timestamp::refused(response.body);
             let table = if native
                 .as_ref()
                 .is_some_and(|n| context::names_duplicate_client_id(n.message))
             {
                 &context::DUPLICATE_TABLE
+            } else if timestamp {
+                &context::TIMESTAMP_TABLE
             } else {
                 &TABLE
             };
@@ -896,6 +899,9 @@ impl Trading {
                 {
                     Ok(context) => {
                         request.context = context;
+                        if timestamp {
+                            crate::sign::timestamp::note_resend(cx);
+                        }
                         self.queue(cx, credentials, request);
                     }
                     Err(error) => {
@@ -1383,15 +1389,21 @@ impl Trading {
         if o.kind != OrderType::Limit
             || meta.native_kind != "LIMIT"
             || o.close == Some(true)
-            || meta.attached
-            || o.stop_loss.is_some()
-            || o.take_profit.is_some()
             || !matches!(
                 o.time_in_force,
                 Some(TimeInForce::GoodTillCancel | TimeInForce::PostOnly)
             )
         {
-            return Err("Native amendment requires unprotected GTC/PostOnly LIMIT order".into());
+            return Err("BingX amends only an open GTC or PostOnly LIMIT order".into());
+        }
+        // As legacy: a size change keeps the order and its TP/SL; a price move replaces the
+        // order, and BingX's cancel-replace cannot carry attached TP/SL across.
+        let protected = meta.attached || o.stop_loss.is_some() || o.take_profit.is_some();
+        if amount.is_some() && price.is_some() {
+            return Err("BingX changes a limit order's size or its price, not both at once".into());
+        }
+        if amount.is_none() && protected {
+            return Err("BingX cannot move this limit order's price without dropping its TP/SL. Cancel it and place it again at the new price with its TP/SL, or change its size instead".into());
         }
         let base = Params::new().str("symbol", &market.id);
         if let Some(amount) = amount {

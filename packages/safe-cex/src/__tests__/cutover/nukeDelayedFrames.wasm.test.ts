@@ -1,7 +1,10 @@
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,13 +16,18 @@ import { prepareRecordedHttp } from '../support/managedHttp';
 
 type TapeRow = { type: string; method?: string; url?: string; body?: string };
 
-const TAPE: TapeRow[] = readFileSync(
-  new URL('../../../../../sdk-rs/harness/tapes/bybit-private.jsonl', import.meta.url),
-  'utf8',
-)
-  .split('\n')
-  .filter(Boolean)
-  .map((line) => JSON.parse(line) as TapeRow);
+// The tape is generated, not checked in: build it here, as CI has no copy.
+const TAPE: TapeRow[] = (() => {
+  const dir = mkdtempSync(join(tmpdir(), 'bybit-tape-'));
+  const out = join(dir, 'bybit-private.jsonl');
+  execFileSync(process.execPath, [resolve(__dirname, '../../../../../sdk-rs/harness/private-tape-bybit.mjs'), '--out', out]);
+  const rows = readFileSync(out, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as TapeRow);
+  rmSync(dir, { recursive: true });
+  return rows;
+})();
 
 const tapeBody = (url: string) =>
   TAPE.find((row) => row.type === 'http' && row.url === url)?.body;

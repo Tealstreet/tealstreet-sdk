@@ -408,6 +408,9 @@ struct ReplyData<'a> {
     success_list: Vec<ReplyItem<'a>>,
     #[serde(default)]
     failure_list: Vec<Failure>,
+    /// UTA cancel-symbol-order answers one result per order here, each with its own code.
+    #[serde(default)]
+    list: Vec<ListResult>,
     #[serde(default, alias = "state", alias = "orderStatus")]
     status: String,
     #[serde(default, alias = "filledQty", alias = "cumExecQty")]
@@ -418,6 +421,26 @@ struct ReplyData<'a> {
 struct ReplyItem<'a> {
     #[serde(borrow)]
     order_id: Identifier<'a>,
+}
+#[derive(Deserialize)]
+struct ListResult {
+    #[serde(default)]
+    code: Number,
+    #[serde(default)]
+    msg: String,
+}
+/// A per-order result that is a failure; 24056, not existed, is already gone and so done.
+fn listed_failures(list: &[ListResult]) -> Vec<(Option<i64>, String)> {
+    list.iter()
+        .filter_map(|item| {
+            let code = item
+                .code
+                .0
+                .filter(|code| code.fract() == 0.0)
+                .map(|code| code as i64)?;
+            (code != 0 && code != 24056).then(|| (Some(code), item.msg.clone()))
+        })
+        .collect()
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1432,14 +1455,32 @@ impl BitgetFutures {
                     };
                     (paths::CANCEL_ALL, payload)
                 };
-                job.calls.push_back(Planned {
-                    path,
-                    payload,
-                    effect: Effect::Cancel {
-                        orders: Vec::new(),
-                        idempotent_missing: false,
-                    },
-                });
+                let plans = if self.account.uta {
+                    Vec::new()
+                } else {
+                    // Classic cancel-all leaves plan orders; each type is cancelled product-wide.
+                    NUKE_PLAN_TYPES
+                        .iter()
+                        .map(|plan| Payload {
+                            plan_type: Some((*plan).into()),
+                            ..payload.clone()
+                        })
+                        .collect()
+                };
+                for (path, payload) in std::iter::once((path, payload)).chain(
+                    plans
+                        .into_iter()
+                        .map(|payload| (paths::CANCEL_PLAN, payload)),
+                ) {
+                    job.calls.push_back(Planned {
+                        path,
+                        payload,
+                        effect: Effect::Cancel {
+                            orders: Vec::new(),
+                            idempotent_missing: false,
+                        },
+                    });
+                }
             }
             _ => return Err("unsupported Bitget trading command".into()),
         }
@@ -2343,10 +2384,19 @@ impl BitgetFutures {
         let explicit_rejection = parsed.as_ref().is_ok_and(|reply| {
             status < 500
                 && status != 408
-                && !reply
-                    .code
-                    .0
-                    .is_some_and(|code| [40010.0, 40725.0, 45001.0].contains(&code))
+                // Every code the table marks unknown (busy, timeout), not a hand-kept subset.
+                && !reply.code.0.is_some_and(|code| {
+                    matches!(
+                        CODES.verdict(
+                            &safe_cex_engine::classify::Native {
+                                code: safe_cex_engine::classify::NativeCode::Int(code as i64),
+                                message: "",
+                            },
+                            safe_cex_engine::classify::Intent::Amend,
+                        ),
+                        safe_cex_engine::classify::Verdict::Unknown(_)
+                    )
+                })
                 && (status >= 400 || reply.code.0.is_some_and(|code| code != 0.0))
         });
         // The one native resend: a fresh Context re-signed under the same owner.
@@ -2475,17 +2525,27 @@ impl BitgetFutures {
                 }
             }
             if let Some(failures) = data
-                .map(|d| failure_messages(&d.failure_list))
+                .map(|d| {
+                    let mut failures = failure_messages(&d.failure_list);
+                    failures.extend(listed_failures(&d.list));
+                    failures
+                })
                 .filter(|f| !f.is_empty())
             {
                 error = Some(format!(
                     "Bitget cancel failure: {}",
                     failure_text(&failures)
                 ));
-                answer = Answer::Batch {
-                    expected: orders.len(),
-                    accepted: accepted.into_iter().collect(),
-                    failures,
+                answer = if orders.is_empty() {
+                    // An account-wide cancel names no orders to count: some may still be live.
+                    unproven = true;
+                    Answer::Unproven
+                } else {
+                    Answer::Batch {
+                        expected: orders.len(),
+                        accepted: accepted.into_iter().collect(),
+                        failures,
+                    }
                 };
             } else if request.call.path == paths::UTA_CANCEL_STRATEGY && data.is_none() {
                 // One strategy's cancel: a success code is its acknowledgement, data null.
@@ -2499,7 +2559,36 @@ impl BitgetFutures {
             {
                 unproven = true;
                 answer = Answer::Unproven;
-                error = Some("Bitget batch cancel did not acknowledge every order".into());
+                // Name them: the user otherwise believes every order is gone.
+                let rest: Vec<_> = orders
+                    .iter()
+                    .filter(|o| !accepted.contains(&native_id(o)))
+                    .map(|o| {
+                        let side = if o.side == OrderSide::Buy {
+                            "buy"
+                        } else {
+                            "sell"
+                        };
+                        let kind = format!("{:?}", o.kind).to_ascii_lowercase();
+                        format!("{} {side} {kind} {}", o.symbol, o.id)
+                    })
+                    .collect();
+                // What Bitget did list, and the plan type asked for, tell an unlisted
+                // success from a cancel aimed at the wrong plan type.
+                let mut listed: Vec<_> = accepted.iter().cloned().collect();
+                listed.sort_unstable();
+                let plan = request
+                    .call
+                    .payload
+                    .plan_type
+                    .as_deref()
+                    .map(|plan| format!(", planType {plan}"))
+                    .unwrap_or_default();
+                error = Some(format!(
+                    "Bitget batch cancel did not acknowledge every order; these may still be open: {} (acknowledged [{}]{plan})",
+                    rest.join(", "),
+                    listed.join(", ")
+                ));
             }
         }
         if error.is_none() {
@@ -3353,6 +3442,15 @@ fn related(orders: &[Order], order: &Order) -> Vec<Order> {
         .cloned()
         .collect()
 }
+/// Every plan type `plan_type` maps, plus untyped triggers.
+const NUKE_PLAN_TYPES: [&str; 6] = [
+    "normal_plan",
+    "profit_plan",
+    "loss_plan",
+    "pos_profit",
+    "pos_loss",
+    "track_plan",
+];
 fn fallback_plan(order: &Order) -> &'static str {
     match (order.kind, order.amount > 0.0) {
         (OrderType::TakeProfit, true) => "profit_plan",

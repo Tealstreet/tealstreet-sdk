@@ -592,10 +592,13 @@ impl History {
         if let Some(to) = to {
             params = params.num(end, to);
         }
-        let at = if matches!(read.native.kind, Kind::Fills) {
-            ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"])
-        } else {
-            ArrayAt::EnvelopeField("data")
+        let at = match read.native.kind {
+            Kind::Fills => {
+                ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"])
+            }
+            // Live allOrders answers {"data":{"orders":[...]}}; legacy read data.orders too.
+            Kind::Orders => ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+            _ => ArrayAt::EnvelopeField("data"),
         };
         self.send_page(
             cx,
@@ -772,12 +775,18 @@ impl History {
             Leg::Signed(_) => true,
             Leg::Public(_) => false,
         };
-        if signed && !request.page.resent && crate::signature_rejected(response.body) {
-            cx.notice(
-                Level::Warn,
-                safe_cex_engine::log::code::REQUEST_FAILED,
-                "BingX rejected a request signature; re-signing it once",
-            );
+        let timestamp = crate::sign::timestamp::refused(response.body);
+        if signed && !request.page.resent && (timestamp || crate::signature_rejected(response.body))
+        {
+            if timestamp {
+                crate::sign::timestamp::note_resend(cx);
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    safe_cex_engine::log::code::REQUEST_FAILED,
+                    "BingX rejected a request signature; re-signing it once",
+                );
+            }
             let _ = cx.finish_http_context(request.leg.context());
             request.page.resent = true;
             self.send_page(cx, request.page);

@@ -27,7 +27,9 @@ use safe_cex_engine::socket_lifecycle::{
     Invalidation, LifecycleEvent, MAX_FRAME_BYTES, RetireReason, SocketCapabilities, SocketError,
     TrafficPolicy,
 };
-use safe_cex_engine::{Command, Cx, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num};
+use safe_cex_engine::{
+    Command, Cx, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue, num,
+};
 use sign::{Credentials, Query};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -611,9 +613,9 @@ impl BinanceFutures {
                 if self.is_spot() {
                     topics.extend(self.kline_topics());
                 } else {
-                    if !self.options.public_data_only {
-                        topics.push("!bookTicker".to_owned());
-                    }
+                    // Bid and ask are public: a guest account without this
+                    // stream would keep the startup REST quote forever.
+                    topics.push("!bookTicker".to_owned());
                     if self.shared_public_socket() {
                         topics.push("!ticker@arr".to_owned());
                         topics.push("!markPrice@arr@1s".to_owned());
@@ -653,15 +655,31 @@ impl BinanceFutures {
     fn depth_topics(&self) -> Vec<String> {
         self.books
             .keys()
-            .map(|symbol| format!("{}@depth", symbol.to_lowercase()))
+            .map(|symbol| depth_topic(symbol))
             .collect()
     }
 
     fn kline_topics(&self) -> Vec<String> {
         self.candles
             .keys()
-            .map(|(symbol, interval)| format!("{}@kline_{interval}", symbol.to_lowercase()))
+            .map(|(symbol, interval)| kline_topic(symbol, *interval))
             .collect()
+    }
+
+    /// The feed and interest key `topic` streams on; Options has no streams.
+    fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        if self.is_options() {
+            return None;
+        }
+        let (channel, key) = match topic {
+            SubscriptionTopic::OrderBook { symbol } => (Channel::Public, depth_topic(symbol)),
+            SubscriptionTopic::Candles { symbol, interval } => (
+                self.candle_channel(),
+                self.supports(*interval)
+                    .then(|| kline_topic(symbol, *interval))?,
+            ),
+        };
+        Some((self.connection_ref(channel).feed?, key))
     }
 
     fn on_markets(
@@ -1296,6 +1314,14 @@ fn market_from_wire(m: &SymbolInfo<'_>, variant: Variant) -> Market {
     }
 }
 
+fn depth_topic(symbol: &str) -> String {
+    format!("{}@depth", symbol.to_lowercase())
+}
+
+fn kline_topic(symbol: &str, interval: Interval) -> String {
+    format!("{}@kline_{interval}", symbol.to_lowercase())
+}
+
 fn kline_candle(open_time_ms: f64, o: &str, h: &str, l: &str, c: &str, v: &str) -> Candle {
     Candle {
         timestamp: open_time_ms / 1000.0,
@@ -1587,6 +1613,14 @@ impl Venue for BinanceFutures {
             _ => {}
         }
         Ok(())
+    }
+
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
     }
 
     /// `{"method","params","id"}` frames: Spot's within its native control

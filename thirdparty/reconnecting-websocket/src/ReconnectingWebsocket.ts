@@ -42,7 +42,17 @@ export type Options = {
    * short-lived authentication headers can be regenerated safely.
    */
   headers?: Record<string, string> | HeadersProvider;
+  /** A close this answers true for reconnects with no backoff wait; later failures back off as usual. */
+  reconnectsAtOnce?: (event: { code: number; reason: string }) => boolean;
+  /** Called on every change of `loopState.phase`, so a supervisor can check each transition. */
+  onLoopPhase?: (phase: LoopPhase) => void;
 };
+
+/**
+ * Where the connect loop is. While it should reconnect it is always in one of the
+ * first three; `stopped` means nothing will open a socket again until `reconnect()`.
+ */
+export type LoopPhase = 'connected' | 'connecting' | 'retry-scheduled' | 'stopped';
 
 const DEFAULT = {
   maxReconnectionDelay: 10000,
@@ -80,9 +90,12 @@ export class ReconnectingWebSocket {
   private _connectTimeout: any;
   private _shouldReconnect = true;
   private _connectLock = false;
+  /** Bumped by every connect; a URL provider settling for an older one is ignored. */
+  private _attempt = 0;
   private _binaryType: BinaryType = 'blob';
   private _closeCalled = false;
   private _messageQueue: Message[] = [];
+  private _loopState: { phase: LoopPhase; since: number } = { phase: 'stopped', since: Date.now() };
 
   private readonly _url: UrlProvider;
   private readonly _protocols?: string | string[];
@@ -138,6 +151,11 @@ export class ReconnectingWebSocket {
   /**
    * Returns the number or connection retries
    */
+  /** The connect loop's phase and when it entered it. */
+  get loopState(): { phase: LoopPhase; since: number } {
+    return { ...this._loopState };
+  }
+
   get retryCount(): number {
     return Math.max(this._retryCount, 0);
   }
@@ -225,6 +243,7 @@ export class ReconnectingWebSocket {
     this._closeCalled = true;
     this._shouldReconnect = false;
     this._clearTimeouts();
+    this._enterPhase('stopped');
     if (!this._ws) {
       this._debug('close enqueued: no ws instance');
       return;
@@ -240,6 +259,7 @@ export class ReconnectingWebSocket {
     this._closeCalled = true;
     this._shouldReconnect = false;
     this._clearTimeouts();
+    this._enterPhase('stopped');
     if (!this._ws) return;
     this._removeListeners();
     const ws = this._ws as any;
@@ -350,10 +370,16 @@ export class ReconnectingWebSocket {
     return delay;
   }
 
-  private _wait(): Promise<void> {
+  private _wait(delay: number): Promise<void> {
     return new Promise((resolve) => {
-      setTimeout(resolve, this._getNextDelay());
+      setTimeout(resolve, delay);
     });
+  }
+
+  private _enterPhase(phase: LoopPhase) {
+    if (this._loopState.phase === phase) return;
+    this._loopState = { phase, since: Date.now() };
+    this._options.onLoopPhase?.(phase);
   }
 
   private _getNextUrl(urlProvider: UrlProvider): Promise<string> {
@@ -388,6 +414,7 @@ export class ReconnectingWebSocket {
     if (this._retryCount >= maxRetries) {
       this._debug('max retries reached', this._retryCount, '>=', maxRetries);
       this._connectLock = false;
+      this._enterPhase('stopped');
       // Dispatch close event so listeners know we gave up
       const event = new Events.CloseEvent(4000, 'Max retries exhausted', this);
       if (this.onclose) {
@@ -398,6 +425,9 @@ export class ReconnectingWebSocket {
     }
 
     this._retryCount++;
+    // A reconnect may start while an older attempt still awaits its URL provider:
+    // that one must not open a second socket or unlock this one when it settles.
+    const attempt = ++this._attempt;
 
     this._debug('connect', this._retryCount);
     this._removeListeners();
@@ -405,12 +435,19 @@ export class ReconnectingWebSocket {
       this._connectLock = false;
       throw Error('No valid WebSocket class provided');
     }
-    this._wait()
-      .then(() => this._getNextUrl(this._url))
+    const delay = this._getNextDelay();
+    this._enterPhase(delay > 0 ? 'retry-scheduled' : 'connecting');
+    this._wait(delay)
+      .then(() => {
+        if (attempt === this._attempt && this._shouldReconnect) this._enterPhase('connecting');
+        return this._getNextUrl(this._url);
+      })
       .then((url) => {
+        if (attempt !== this._attempt) return;
         // close could be called before creating the ws
         if (this._closeCalled) {
           this._connectLock = false;
+          this._enterPhase('stopped');
           return;
         }
         this._debug('connect', { url, protocols: this._protocols });
@@ -469,7 +506,18 @@ export class ReconnectingWebSocket {
         this._connectTimeout = setTimeout(() => this._handleTimeout(), connectionTimeout);
       })
       .catch(() => {
+        if (attempt !== this._attempt) return;
         this._connectLock = false;
+        // A URL provider that failed (no token yet, a refused key) retries through the
+        // normal bounded reconnect delay; stopping here left the socket with no loop.
+        if (!this._closeCalled && this._shouldReconnect) {
+          const event = new Events.ErrorEvent(Error('WebSocket URL provider failed'), this);
+          if (this.onerror) {
+            this.onerror(event);
+          }
+          this._listeners.error.forEach((listener) => this._callEventListener(event, listener));
+          this._connect();
+        }
       });
   }
 
@@ -516,6 +564,7 @@ export class ReconnectingWebSocket {
 
     clearTimeout(this._connectTimeout);
     this._uptimeTimeout = setTimeout(() => this._acceptOpen(), minUptime);
+    this._enterPhase('connected');
 
     // Only set binaryType in browser - ws package doesn't support 'blob'
     const isNode = typeof process !== 'undefined' && process.versions?.node;
@@ -561,6 +610,7 @@ export class ReconnectingWebSocket {
     this._clearTimeouts();
 
     if (this._shouldReconnect) {
+      if (this._options.reconnectsAtOnce?.(event)) this._retryCount = -1;
       this._connect();
     }
 

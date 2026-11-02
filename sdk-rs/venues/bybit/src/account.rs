@@ -116,7 +116,7 @@ pub enum Request {
         coin: &'static str,
         cursor: String,
         rows: Vec<Mapped>,
-        unsupported: Vec<String>,
+        unsupported: Vec<(String, String)>,
         invalid: bool,
         rejected: RowAdmission<String>,
     },
@@ -196,7 +196,7 @@ struct OrdersJoin {
     issued_at: f64,
     pending: usize,
     rows: Vec<Mapped>,
-    unsupported: Vec<String>,
+    unsupported: Vec<(String, String)>,
     failed: bool,
     rejected: RowAdmission<String>,
     cursors: HashSet<String>,
@@ -625,6 +625,19 @@ fn priced_tpsl_kind(order: &Order, store: &Store) -> Option<OrderType> {
     } else {
         OrderType::TakeProfit
     })
+}
+
+/// The wire fields `map_order` reads to type an order, for the unsupported-order log.
+fn unsupported_detail(o: &OrderRow<'_>) -> String {
+    format!(
+        "orderType {:?}, stopOrderType {:?}, createType {:?}, tpslMode {:?}, side {:?}, triggerPrice {:?}",
+        present(&o.order_type),
+        present(&o.stop_order_type),
+        present(&o.create_type),
+        present(&o.tpsl_mode),
+        o.side.as_deref(),
+        present(&o.trigger_price),
+    )
 }
 
 pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
@@ -2008,6 +2021,10 @@ impl BybitLinear {
             self.account.handshake = Some("auth");
             self.account.handshake_timer = Some(cx.set_timer(10_000.0));
         }
+        // Hyro never reads the clock, so its handshake bookkeeping above never waits.
+        if self.auth_waits_for_clock(socket) {
+            return;
+        }
         if let Some(credentials) = &self.credentials {
             let request_id = self
                 .variant
@@ -2303,6 +2320,10 @@ impl BybitLinear {
                     },
                     format!("[WS]{op}:{message}"),
                 );
+                // Bybit's clock, read before the re-auth, corrects a slow host.
+                if op == "auth" {
+                    self.read_auth_clock(cx);
+                }
                 // An unauthenticated socket answers pings but carries no topics.
                 if op == "auth"
                     && let Some(feed) = self.private.feed
@@ -2600,7 +2621,7 @@ impl BybitLinear {
                 // other order; finish_orders keeps its last known state and says so.
                 if well_formed && mapped.is_none() && !self.variant.is_hyro() {
                     rejected.reject_in(Some(row.order_id.to_string()), &row.symbol);
-                    unsupported.push(row.order_id.to_string());
+                    unsupported.push((row.order_id.to_string(), unsupported_detail(&row)));
                 } else if !well_formed
                     || mapped.as_ref().is_none_or(|mapped| {
                         mapped.orders.iter().any(|order| !valid_order(order))
@@ -3103,7 +3124,7 @@ impl BybitLinear {
                 merged.push(order.clone());
             }
         }
-        for id in &join.unsupported {
+        for (id, detail) in &join.unsupported {
             let known = cx.store.order(id).filter(|o| self.owns_symbol(&o.symbol));
             if let Some(order) = known
                 && !merged.iter().any(|o| o.id == *id)
@@ -3116,10 +3137,10 @@ impl BybitLinear {
                 Level::Error,
                 if known.is_some() {
                     format!(
-                        "Bybit order {id} has an unsupported type; its last known state is kept"
+                        "Bybit order {id} has an unsupported type ({detail}); its last known state is kept"
                     )
                 } else {
-                    format!("Bybit order {id} has an unsupported type and is not shown")
+                    format!("Bybit order {id} has an unsupported type ({detail}) and is not shown")
                 },
             );
         }

@@ -1144,6 +1144,7 @@ impl Hyperliquid {
             self.finish_trade(cx, Err(error.venue_error()));
             return;
         }
+        let full_position = request.order_reply == OrderReply::FullPosition;
         match request.effect {
             Effect::ScheduleCancel => unreachable!(),
             Effect::Place(records) => {
@@ -1158,6 +1159,15 @@ impl Hyperliquid {
                         Status::Error { .. } => continue,
                         Status::Resting { resting } => (Some(resting.oid.to_string()), true),
                         Status::Filled { filled } => (Some(filled.oid.to_string()), false),
+                        // Ruled: a rested full-position trigger has no oid, and [] reads as nothing
+                        // placed; its cloid is the pending id, and the order read names it.
+                        Status::Text(s) if s == "waitingForTrigger" && full_position => {
+                            self.schedule_orders(cx);
+                            let cloid = records
+                                .get(index)
+                                .and_then(|r| r.order.client_order_id.clone());
+                            (cloid, false)
+                        }
                         Status::Text(s) if s == "waitingForTrigger" || s == "waitingForFill" => {
                             (None, false)
                         }

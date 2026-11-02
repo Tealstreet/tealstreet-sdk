@@ -107,6 +107,8 @@ pub struct ChaserRequest {
     pub max_attempts: u32,
     pub reduce_only: bool,
     pub delay: f64,
+    /// The TWAP this slice belongs to.
+    pub twap_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -1288,7 +1288,8 @@ impl Venue for BreakoutProp {
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
-            Command::SetTickerSymbols { .. } => {}
+            // The engine repairs subscriptions itself; it never forwards this.
+            Command::SetTickerSymbols { .. } | Command::RepairSubscription(_) => {}
             Command::Venue { command, .. } => {
                 safe_cex_engine::unsupported_venue_action(cx, command)
             }

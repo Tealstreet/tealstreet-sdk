@@ -201,6 +201,13 @@ impl Venue for ApexOmni {
     ) -> safe_cex_engine::socket_lifecycle::Control {
         self.classify_control(store, feed, authenticated, text)
     }
+    fn subscription_interest(
+        &self,
+        _: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
+    }
     fn encode_socket_interests(
         &self,
         _: &safe_cex_engine::Store,

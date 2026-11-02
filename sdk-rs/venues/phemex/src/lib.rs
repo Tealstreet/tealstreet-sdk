@@ -111,12 +111,38 @@ pub struct PhemexPerpetuals {
     /// The last product read skipped a malformed row, so an unknown symbol may be listed.
     catalogue_partial: bool,
     paused_until: f64,
+    /// When an unreadable public message was last logged; at most one per minute.
+    public_parse_logged_at: Option<f64>,
     account: account::State,
     trading: trading::State,
     history: history::State,
     income: income::State,
 }
+const PUBLIC_PARSE_LOG_MS: f64 = 60_000.0;
+
 impl PhemexPerpetuals {
+    /// A public message that would not parse, logged at most once a minute.
+    fn public_unreadable(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        error: &serde_json::Error,
+        text: &str,
+    ) {
+        if self
+            .public_parse_logged_at
+            .is_some_and(|at| cx.now - at < PUBLIC_PARSE_LOG_MS)
+        {
+            return;
+        }
+        self.public_parse_logged_at = Some(cx.now);
+        let head: String = text.chars().take(200).collect();
+        cx.notice(
+            Level::Warn,
+            code::STREAM_MALFORMED,
+            format!("Phemex public message unreadable ({error}): {head}"),
+        );
+    }
+
     pub fn new(options: Options) -> Self {
         let credentials = options
             .credentials
@@ -140,6 +166,7 @@ impl PhemexPerpetuals {
             discovery: Default::default(),
             catalogue_partial: false,
             paused_until: 0.,
+            public_parse_logged_at: None,
             account: account::State::new(),
             trading: trading::State::default(),
             history: history::State::default(),
@@ -462,6 +489,8 @@ impl Venue for PhemexPerpetuals {
             account: safe_cex_engine::AccountLookup::Query,
             order_history_needs_symbol: true,
             fresh_positions: true,
+            nuke_account_cancel: true,
+            symbol_cancel_misses_unseen: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -520,6 +549,13 @@ impl Venue for PhemexPerpetuals {
         } else {
             self.public_socket_event(cx, event)
         }
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn encode_socket_interests(
         &self,
@@ -668,15 +704,25 @@ impl Venue for PhemexPerpetuals {
             #[derive(serde::Deserialize)]
             struct K {
                 kline_p: Vec<CandleRow>,
+                #[serde(rename = "type", default)]
+                kind: String,
             }
-            if let Ok(k) = serde_json::from_str::<K>(text) {
-                for r in k.kline_p.into_iter().rev() {
-                    for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
-                        s == &e.symbol.to_ascii_uppercase()
-                            && resolution(*i).is_some_and(|n| n as f64 == r.1.0)
-                    }) {
-                        cx.candle(s, *i, r.candle());
-                    }
+            let mut k = match serde_json::from_str::<K>(text) {
+                Ok(k) => k,
+                Err(error) => return self.public_unreadable(cx, &error, text),
+            };
+            k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
+            // A subscribe answers with history as a snapshot: only its newest row is live.
+            if k.kind == "snapshot" {
+                let newest = k.kline_p.pop();
+                k.kline_p = newest.into_iter().collect();
+            }
+            for r in k.kline_p {
+                for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
+                    s == &e.symbol.to_ascii_uppercase()
+                        && resolution(*i).is_some_and(|n| n as f64 == r.1.0)
+                }) {
+                    cx.candle(s, *i, r.candle());
                 }
             }
         }
@@ -1095,6 +1141,14 @@ impl Venue for PhemexPerpetuals {
     ) {
         match action {
             safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            action @ safe_cex_engine::VenueAction::CancelAccountOrders => {
+                if self
+                    .trade_command(cx, Command::Venue { command, action })
+                    .is_some()
+                {
+                    safe_cex_engine::unsupported_venue_action(cx, command);
+                }
+            }
             _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }

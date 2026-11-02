@@ -139,7 +139,9 @@ impl SignStep for Http {
         Ok(())
     }
 
+    // BingX refuses a timestamp past its 5000 ms recvWindow (also the maximum): re-sign a held
+    // request well before, so the network still has its share of the window.
     fn freshness_ms(&self) -> f64 {
-        5_000.
+        2_000.
     }
 }

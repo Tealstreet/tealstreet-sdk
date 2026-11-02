@@ -1269,6 +1269,8 @@ mod tests {
         caught_fatal: bool,
         /// Login-gated feed whose "refused" frame is a route refusal.
         route_auth: bool,
+        /// The interest key `subscription_interest` names; `None` keeps the default.
+        repair_key: Option<&'static str>,
     }
     fn policy() -> FeedPolicy {
         FeedPolicy {
@@ -1360,6 +1362,13 @@ mod tests {
                 })?;
             }
             Ok(())
+        }
+        fn subscription_interest(
+            &self,
+            _: &Store,
+            _: &crate::SubscriptionTopic,
+        ) -> Option<(FeedId, String)> {
+            Some((self.feed?, self.repair_key?.into()))
         }
         fn on_signing_receipt(&mut self, _: SigningTarget<'_, ()>, _: crate::signing::SignReceipt) {
             self.receipts += 1;
@@ -2241,6 +2250,108 @@ mod tests {
             e.io.core.socket_driver.state.desired(feed).unwrap().len(),
             1
         );
+    }
+    fn sent(e: &mut Engine<Probe>) -> Vec<String> {
+        e.drain_actions()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+    fn repair_warnings(actions: &[Action]) -> Vec<&LogEvent> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(
+                    event @ LogEvent {
+                        code: log_code::SUBSCRIPTION_REJECTED,
+                        level: Level::Warn,
+                        ..
+                    },
+                )) => Some(event),
+                _ => None,
+            })
+            .collect()
+    }
+    fn repair_command() -> Event<'static> {
+        Event::Command(Command::RepairSubscription(
+            crate::SubscriptionTopic::OrderBook {
+                symbol: "BTCUSDT".into(),
+            },
+        ))
+    }
+    /// Opens the probe feed with one desired `book` interest.
+    fn subscribed_probe(repair_key: Option<&'static str>) -> (Engine<Probe>, FeedId) {
+        let (mut e, socket) = engine();
+        e.venue.repair_key = repair_key;
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        let feed = e.venue.feed.unwrap();
+        Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        }
+        .set_socket_interests(
+            feed,
+            vec![Interest {
+                key: "book".into(),
+                wire_args: "native-book".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(sent(&mut e), vec!["true:native-book"]);
+        (e, feed)
+    }
+    #[test]
+    fn repair_subscription_command_resubscribes_the_named_interest() {
+        let (mut e, feed) = subscribed_probe(Some("book"));
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(repair_warnings(&actions).is_empty());
+        let frames: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(frames, ["false:native-book", "true:native-book"]);
+        assert_eq!(
+            e.io.core.socket_driver.state.desired(feed).unwrap().len(),
+            1
+        );
+    }
+    #[test]
+    fn repair_subscription_without_a_venue_interest_warns_and_sends_nothing() {
+        let (mut e, _) = subscribed_probe(None);
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+        let warnings = repair_warnings(&actions);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].message,
+            "Probe cannot repair the order book BTCUSDT subscription: \
+             the venue cannot name its stream for this topic"
+        );
+        assert!(
+            warnings[0]
+                .fields
+                .contains(&("topic", "order book BTCUSDT".into()))
+        );
+        assert!(warnings[0].fields.contains(&("venue", "Probe".into())));
+    }
+    #[test]
+    fn repair_subscription_for_an_undesired_key_warns_and_sends_nothing() {
+        let (mut e, _) = subscribed_probe(Some("other"));
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+        let warnings = repair_warnings(&actions);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.ends_with("other is not subscribed"));
     }
     #[test]
     fn auth_progress_invalid_deadlines_leave_watch_and_auth_bound_unchanged() {

@@ -3,6 +3,9 @@ mod support;
 use safe_cex_engine::{Command, Event, Outcome};
 use support::{Harness, Options};
 
+/// Startup discovery's bound (the engine's DISCOVERY_TIMEOUT_MS).
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+
 fn ready() -> Harness {
     let mut h = Harness::started(Options {
         key: Some("api-key".into()),
@@ -545,7 +548,7 @@ fn background_catalogue_reply_at_its_deadline_cannot_publish_markets() {
         ..Options::default()
     });
     let request = h.take("exchangeInfo");
-    h.now += 20_000.;
+    h.now += DISCOVERY_DEADLINE_MS;
     h.reply(request.id, 200, "", support::EXCHANGE_INFO);
     assert!(!h.engine.store().loaded().markets);
     assert!(h.engine.store().markets().is_empty());

@@ -120,7 +120,9 @@ enum Call {
         require_ack: bool,
     },
     /// Reaches orders the store has not seen; their rows follow from the stream.
-    CancelSymbol,
+    CancelSymbol {
+        symbol: String,
+    },
     ReconcileReplacement {
         parent: String,
         id: String,
@@ -173,6 +175,10 @@ struct Job {
     restore: Vec<OrderStatus>,
     recover: Option<Vec<PlaceOrderOpts>>,
     created: Vec<String>,
+    /// The leg re-placed after its two-leg TP/SL was cancelled: id, symbol, side and kind.
+    kept: Option<(String, String, OrderSide, OrderType)>,
+    /// The kept leg's placement went out, so a failure leaves the position without it.
+    kept_sent: bool,
 }
 struct Prepare {
     orders: Vec<PlaceOrderOpts>,
@@ -551,7 +557,9 @@ impl BitunixFutures {
                         job.steps.push_back(Step {
                             path: CANCEL_ALL,
                             body: text(&payload),
-                            call: Call::CancelSymbol,
+                            call: Call::CancelSymbol {
+                                symbol: symbol.clone(),
+                            },
                             delay: 0.0,
                         });
                     }
@@ -807,7 +815,10 @@ impl BitunixFutures {
                         .account
                         .native
                         .get(&row.id)
-                        .is_some_and(|n| !n.attached && n.position_id == position_id)
+                        // Only the position's own full leg pairs; a partial stop keeps its size.
+                        .is_some_and(|n| {
+                            !n.attached && n.full_position && n.position_id == position_id
+                        })
                     {
                         if row.kind == OrderType::StopLoss {
                             p.sl_price = Some(num::format(row.price));
@@ -855,12 +866,13 @@ impl BitunixFutures {
             p.sl_stop_type = Some(stop(o.sl_trigger_type));
             p.sl_order_type = Some("MARKET".into());
         }
-        let sizes = split_quantities(
-            amount,
-            m.precision.amount,
-            m.limits.amount.min,
-            m.limits.amount.max,
-        )?;
+        // A MARKET order (a Nuke close included) answers to maxMarketOrderVolume.
+        let maximum = self
+            .market_maxima
+            .get(&o.symbol)
+            .filter(|_| o.kind == OrderType::Market)
+            .map_or(m.limits.amount.max, |max| *max);
+        let sizes = split_quantities(amount, m.precision.amount, m.limits.amount.min, maximum)?;
         if o.client_order_id.is_some() && sizes.len() != 1 {
             return Err("Bitunix clientOrderId cannot be split".into());
         }
@@ -1035,6 +1047,7 @@ impl BitunixFutures {
         let mut seen = HashSet::new();
         let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
         let mut replacements = vec![];
+        let mut kept_steps = vec![];
         for id in ids {
             let o = cx.store.order(id).ok_or_else(|| {
                 format!("Bitunix order {id} not found; cancellation requires a reconciled order")
@@ -1097,11 +1110,31 @@ impl BitunixFutures {
                     path: CANCEL_TPSL,
                     body: text(&p),
                     call: Call::Cancel {
-                        ids: affected,
+                        ids: affected.clone(),
                         require_ack: false,
                     },
                     delay: 0.0,
                 });
+                // One order carries both legs, and no write drops just one: the
+                // cancel takes both, so the leg the caller kept goes back at its size.
+                for kept in cx.store.orders().iter().filter(|r| {
+                    affected.contains(&r.id)
+                        && !selected.contains(r.id.as_str())
+                        && r.status == OrderStatus::Open
+                        && matches!(r.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                }) {
+                    let (path, p) = self.kept_leg(cx, kept)?;
+                    job.kept = Some((kept.id.clone(), kept.symbol.clone(), kept.side, kept.kind));
+                    kept_steps.push(Step {
+                        path,
+                        body: text(&p),
+                        call: Call::Place {
+                            clients: Vec::new(),
+                            batch: false,
+                        },
+                        delay: 0.0,
+                    });
+                }
             } else {
                 if let Some((_, rows)) = regular.iter_mut().find(|(s, _)| s == &o.symbol) {
                     rows.push(n.raw_id.clone());
@@ -1147,6 +1180,7 @@ impl BitunixFutures {
                 delay: 0.0,
             });
         }
+        job.steps.extend(kept_steps);
         for (parent, p) in replacements {
             job.steps.push_back(Step {
                 path: "/api/v1/futures/trade/get_order_detail",
@@ -1161,6 +1195,49 @@ impl BitunixFutures {
             });
         }
         Ok(job)
+    }
+    /// The surviving leg of a two-leg TP/SL as its own placement, without the other leg.
+    fn kept_leg(
+        &self,
+        cx: &Cx<'_, Pending>,
+        kept: &Order,
+    ) -> Result<(&'static str, Payload), String> {
+        let o = PlaceOrderOpts {
+            symbol: kept.symbol.clone(),
+            kind: kept.kind,
+            side: kept.side,
+            amount: kept.amount.max(0.0),
+            price: Some(kept.price),
+            trigger_price: None,
+            reduce_only: Some(true),
+            trigger_type: kept.trigger_type,
+            sl_trigger_type: kept.trigger_type,
+            tp_trigger_type: kept.trigger_type,
+            max_slippage_pct: None,
+            stop_loss: None,
+            take_profit: None,
+            time_in_force: None,
+            client_order_id: None,
+            close: None,
+            stp_mode: None,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
+        };
+        let (path, mut p) = self
+            .payloads(cx, &o)?
+            .into_iter()
+            .next()
+            .ok_or("Bitunix kept TP/SL leg has no placement")?;
+        // A full leg pairs with the store's other full leg, which is the one being cancelled.
+        if kept.kind == OrderType::StopLoss {
+            (p.tp_price, p.tp_stop_type, p.tp_qty) = (None, None, None);
+            (p.tp_order_type, p.tp_order_price) = (None, None);
+        } else {
+            (p.sl_price, p.sl_stop_type, p.sl_qty) = (None, None, None);
+            (p.sl_order_type, p.sl_order_price) = (None, None);
+        }
+        Ok((path, p))
     }
     fn replacement(
         &self,
@@ -1450,6 +1527,20 @@ impl BitunixFutures {
         let Some(mut step) = live.job.steps.pop_front() else {
             return self.finish(cx, command);
         };
+        if let Some((id, ..)) = &live.job.kept
+            && matches!(step.call, Call::Place { .. })
+        {
+            // A leg that filled while its sibling was cancelled has nothing left to protect.
+            if cx
+                .store
+                .order(id)
+                .is_some_and(|o| o.status == OrderStatus::Closed)
+            {
+                live.job.kept = None;
+                return self.advance(cx, command);
+            }
+            live.job.kept_sent = true;
+        }
         // Native's gap between batch chunks: the Plan timer issues the call.
         if step.delay > 0.0
             && let Some(plan) = live.plan.clone()
@@ -1658,7 +1749,27 @@ impl BitunixFutures {
         self.reread_held(cx);
     }
     /// Fails the job under its owner; the journal projects the outcome.
-    fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, error: VenueError) {
+    /// Names the lost leg once its re-place went out and failed.
+    fn kept_gone(&mut self, command: u32, error: &mut VenueError) {
+        let Some(job) = self
+            .trading
+            .live
+            .get_mut(&command)
+            .map(|live| &mut live.job)
+        else {
+            return;
+        };
+        if !job.kept_sent {
+            return;
+        }
+        if let Some((_, symbol, side, kind)) = job.kept.take() {
+            let unknown = error.outcome == Some(Outcome::Unknown);
+            let gone = safe_cex_engine::error::stop_gone_text(&symbol, side, kind, unknown);
+            error.message = format!("{gone}: {}", error.message);
+        }
+    }
+    fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, mut error: VenueError) {
+        self.kept_gone(command, &mut error);
         let Some(live) = self.take_live(command) else {
             return;
         };
@@ -1772,8 +1883,9 @@ impl BitunixFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: VenueError,
+        mut error: VenueError,
     ) {
+        self.kept_gone(request.command, &mut error);
         // Never released: a settings scope ends with the job.
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.settings_released = false;
@@ -1835,9 +1947,18 @@ impl BitunixFutures {
                 batch: true,
             } => self.batch_answer(cx, &request, data, clients.len()),
             Call::Cancel { ids, require_ack } => {
-                self.cancel_answer(cx, &request, data, ids, *require_ack)
+                self.cancel_answer(cx, &request, data, ids, *require_ack, false)
             }
-            Call::CancelSymbol => Ok(()),
+            Call::CancelSymbol { symbol } => {
+                let ids: Vec<_> = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| o.symbol == *symbol)
+                    .map(|o| o.id.clone())
+                    .collect();
+                self.cancel_answer(cx, &request, data, &ids, false, true)
+            }
             Call::Amend {
                 id, parent, leg, ..
             } => self.amend_answer(cx, &request, data, id, parent, *leg),
@@ -1884,10 +2005,7 @@ impl BitunixFutures {
         if accepted.is_ok()
             && matches!(
                 request.step.call,
-                Call::CancelSymbol
-                    | Call::Leverage { .. }
-                    | Call::Margin { .. }
-                    | Call::Mode { .. }
+                Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
             )
             && cx
                 .http_write_fact(
@@ -1945,12 +2063,13 @@ impl BitunixFutures {
             code: NativeCode::Int(code),
             message: "",
         });
+        let mut error = error;
+        self.kept_gone(command, &mut error);
         let mut refused = false;
         // Live: a batch answered 20003 with its orders resting. Only 10007's signature refusal,
         // which the venue resends past, proves a batch sent nothing.
         let batch_unproven = matches!(request.step.call, Call::Place { batch: true, .. })
             && code.is_some_and(|code| code != 10007);
-        let mut error = error;
         if batch_unproven {
             error = error.outcome(Outcome::Unknown);
         }
@@ -2299,6 +2418,7 @@ impl BitunixFutures {
         data: &str,
         ids: &[String],
         require_ack: bool,
+        sweep: bool,
     ) -> Result<(), Option<VenueError>> {
         #[derive(Deserialize, Default)]
         #[serde(rename_all = "camelCase")]
@@ -2344,7 +2464,7 @@ impl BitunixFutures {
             Ok(rows) => (rows, true),
             Err(_) => (Vec::new(), false),
         };
-        let succeeded: HashSet<String> = successes
+        let echoed: Vec<String> = successes
             .iter()
             .filter_map(|raw| match ack_identity(raw.get(), false) {
                 Ok((Some(id), false)) if serde_json::from_str::<Item<'_>>(raw.get()).is_ok() => {
@@ -2353,6 +2473,7 @@ impl BitunixFutures {
                 _ => None,
             })
             .collect();
+        let succeeded: HashSet<&String> = echoed.iter().collect();
         let failures: Vec<_> = rejected
             .iter()
             .filter_map(|raw| serde_json::from_str::<Item<'_>>(raw.get()).ok())
@@ -2362,8 +2483,9 @@ impl BitunixFutures {
             || successes.len() != succeeded.len()
             || failures.len() != rejected.len();
         // Native: a clean code-0 answer cancels every target unless an ACK is
-        // required; otherwise only the echoed IDs are proven.
-        let all = !require_ack && !malformed && rejected.is_empty();
+        // required; otherwise only the echoed IDs are proven. A sweep's targets are its rows.
+        let clean = !require_ack && !malformed && rejected.is_empty();
+        let all = clean && !sweep;
         let mut canceled = Vec::new();
         for id in ids {
             if all || succeeded.contains(&raw_id(id)) {
@@ -2375,10 +2497,14 @@ impl BitunixFutures {
                 });
             }
         }
-        if all {
+        if clean {
             return Self::record(cx, request, Ok(canceled));
         }
-        let raws: Vec<_> = canceled.iter().map(raw_id).collect();
+        let raws: Vec<_> = if sweep {
+            echoed
+        } else {
+            canceled.iter().map(raw_id).collect()
+        };
         let mut items: Vec<_> = raws.iter().map(|id| BatchItem::Accepted(id)).collect();
         items.extend(failures.iter().map(|f| {
             BatchItem::Native(Native {
@@ -2389,13 +2515,15 @@ impl BitunixFutures {
         if malformed {
             items.push(BatchItem::Accepted(""));
         }
+        // A sweep has no caller list to count against: its rows are the answer.
+        let expected = if sweep { items.len() } else { ids.len() };
         let message = failures
             .iter()
             .map(|f| {
                 if f.error_msg.is_empty() {
                     format!("Bitunix cancel failed for {}", f.order_id)
                 } else {
-                    f.error_msg.to_string()
+                    format!("Bitunix cancel failed for {}: {}", f.order_id, f.error_msg)
                 }
             })
             .collect::<Vec<_>>();
@@ -2410,7 +2538,7 @@ impl BitunixFutures {
         match cx.http_write_batch(
             &request.context,
             &codes::BITUNIX,
-            ids.len(),
+            expected,
             &items,
             message,
             None,

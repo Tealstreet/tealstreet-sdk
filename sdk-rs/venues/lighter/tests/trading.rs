@@ -1455,3 +1455,34 @@ fn a_refused_batch_in_a_200_keeps_its_unknown_handling() {
     let (_, outcome) = completion(&mut e);
     assert_eq!(outcome, Some(Outcome::Unknown));
 }
+
+#[test]
+fn a_maker_only_key_refusal_says_what_the_key_allows() {
+    // The user's sendTx text; the numeric code was not captured, so both shapes are covered.
+    for body in [
+        r#"{"code":21800,"message":"maker-only api key can only send 0ms delay transactions"}"#,
+        r#"{"message":"maker-only api key can only send 0ms delay transactions"}"#,
+    ] {
+        let (mut e, _) = ready_unattributed();
+        e.handle(
+            NOW,
+            Event::Command(Command::SetLeverage {
+                command: 8,
+                symbol: "ETH".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let nonce = http(&mut e, "nextNonce");
+        reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+        let write = http(&mut e, "sendTx");
+        reply(&mut e, &write, 400, body);
+        assert_eq!(
+            failure(&mut e),
+            "This Lighter API key is maker-only, which allows only post-only orders and cancels; \
+             change leverage or place market and stop orders from a key that is not maker-only: \
+             maker-only api key can only send 0ms delay transactions",
+            "{body}"
+        );
+    }
+}

@@ -113,6 +113,13 @@ impl Kraken {
             format!("Kraken socket admission failed: {error:?}"),
         );
     }
+    /// The public feed and key `topic` streams on; candles are REST-polled.
+    pub(super) fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let SubscriptionTopic::OrderBook { symbol } = topic else {
+            return None;
+        };
+        Some((self.public.feed?, book_interest(symbol).key.to_string()))
+    }
     fn public_interests(&self, store: &safe_cex_engine::Store) -> Vec<Interest> {
         let selected: Vec<_> = store
             .markets()
@@ -132,7 +139,7 @@ impl Kraken {
         let mut books: Vec<_> = self.books.keys().collect();
         books.sort();
         for symbol in books {
-            interests.push(futures_interest("book", &[symbol.as_str()]));
+            interests.push(book_interest(symbol));
         }
         interests
     }
@@ -145,10 +152,8 @@ impl Kraken {
     }
     pub(super) fn repair_book(&self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         if let Some(feed) = self.public.feed
-            && let Err(error) = cx.repair_socket_interests(
-                feed,
-                vec![futures_interest("book", &[symbol]).key.to_string()],
-            )
+            && let Err(error) =
+                cx.repair_socket_interests(feed, vec![book_interest(symbol).key.to_string()])
         {
             self.socket_error(cx, false, error);
         }
@@ -260,6 +265,9 @@ struct FuturesFrame<'a> {
     event: &'a str,
     feed: &'a str,
     product_ids: &'a [String],
+}
+fn book_interest(symbol: &str) -> Interest {
+    futures_interest("book", &[symbol])
 }
 fn futures_interest(feed: &str, products: &[&str]) -> Interest {
     Interest::from_wire_args(

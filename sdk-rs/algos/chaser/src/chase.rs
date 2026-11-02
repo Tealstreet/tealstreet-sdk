@@ -46,6 +46,9 @@ pub struct ChaserOptions {
     pub terminate: Option<Terminate>,
     #[serde(default)]
     pub client_id: Option<String>,
+    /// Set only by a TWAP starting its slice, never from a page's `chaser:start`.
+    #[serde(skip_deserializing)]
+    pub twap_id: Option<String>,
 }
 
 impl ChaserOptions {
@@ -86,6 +89,8 @@ pub struct ActiveChaser {
     pub current_order_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub twap_id: Option<String>,
 }
 
 /// The `chaser:complete` event. `filled` is in placement units, clamped to
@@ -537,6 +542,7 @@ impl Chase {
             stop_reason: state.stop_reason.clone(),
             current_order_ids: state.current.clone(),
             origin: self.options.origin.clone(),
+            twap_id: self.options.twap_id.clone(),
         }
     }
 }

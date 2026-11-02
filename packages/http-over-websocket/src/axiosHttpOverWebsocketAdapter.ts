@@ -18,6 +18,8 @@ const MAX_LOG_DEPTH = 4;
 const REDACTED = '[REDACTED]';
 const TRUNCATED = '[TRUNCATED]';
 export const TRADE_TUNNEL_RPC_VERSION = 4;
+// How long an rpc.auth may go unanswered on an open connection before the token is resent.
+const AUTH_REPLY_TIMEOUT_MS = 5_000;
 const TRADE_TUNNEL_ACCEPT_ENCODING = ['gzip'] as const;
 const TRADE_TUNNEL_GZIP_BASE64_ENCODING = 'gzip+base64';
 const SENSITIVE_LOG_KEY_PATTERN =
@@ -543,7 +545,18 @@ const createAxiosHttpOverWebsocketAdapter = (
               if (i % 10 === 0) {
                 console.log(`[HOW] Waiting for valid token... (attempt ${i + 1}/${MAX_TOKEN_RETRIES})`);
               }
-              await sleepWithinDeadline(500);
+              try {
+                await sleepWithinDeadline(500);
+              } catch (error) {
+                // A deadline spent waiting on our own token is our authorization, not the network.
+                if (!(error instanceof TradeTunnelTimeoutError)) throw error;
+                throw Object.assign(
+                  new Error(
+                    `Tealstreet proxy authorization missing: no valid proxy token before the request deadline (${config.url})`,
+                  ),
+                  { name: 'ProxyTokenUnavailableError', config },
+                );
+              }
             }
           }
           // Return whatever we have after max retries
@@ -616,18 +629,28 @@ const createAxiosHttpOverWebsocketAdapter = (
 
         while (howWebSocket.authState !== HOWWebSocketAuthState.Good) {
           await sleepWithinDeadline(25);
-          if (howWebSocket.authState === HOWWebSocketAuthState.Bad) {
-            await sleepWithinDeadline(500);
+          const isBad = howWebSocket.authState === HOWWebSocketAuthState.Bad;
+          // isTokenSent alone would gate every later request off resending for the
+          // connection's life when the tunnel drops or never answers that rpc.auth.
+          const isUnanswered =
+            howWebSocket.authState === HOWWebSocketAuthState.Unknown &&
+            howWebSocket.isOpen &&
+            howWebSocket.isTimeSynced &&
+            (!howWebSocket.isTokenSent || Date.now() - howWebSocket.tokenSentAt >= AUTH_REPLY_TIMEOUT_MS);
+          if (isBad || isUnanswered) {
+            if (isBad) {
+              await sleepWithinDeadline(500);
 
-            // If token is NOT expired but auth still fails, it means user auth is broken
-            // (not just an expired token issue), so increment retries to eventually fail out
-            if (token && !isTokenExpired(token)) {
-              badAuthRetries++;
-            }
+              // If token is NOT expired but auth still fails, it means user auth is broken
+              // (not just an expired token issue), so increment retries to eventually fail out
+              if (token && !isTokenExpired(token)) {
+                badAuthRetries++;
+              }
 
-            // if user auth is the problem, fail out after 10 attempts completely
-            if (badAuthRetries > 10) {
-              throw new Error('Cannot refresh auth token, please reload the terminal');
+              // if user auth is the problem, fail out after 10 attempts completely
+              if (badAuthRetries > 10) {
+                throw new Error('Cannot refresh auth token, please reload the terminal');
+              }
             }
 
             try {

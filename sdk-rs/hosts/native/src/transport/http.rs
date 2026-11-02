@@ -1,10 +1,9 @@
 //! Preparation and final handoff for the existing native HTTP executor.
-use super::{NetworkTransport, open_socket};
-use crate::routing::{
-    HttpRoute, HttpRouteMode, Socket, authenticate_how, http_packet, insert_header, receive_http,
-};
+use super::NetworkTransport;
+use crate::how_pool::HowConnection;
+use crate::routing::{HttpRoute, HttpRouteMode, http_packet, insert_header};
 use crate::{Events, HostEvent};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use safe_cex_engine::request_context::RoutingIntent;
 use safe_cex_engine::{HttpRequest, Method, RequestId, RequestRoute};
 use std::fmt;
@@ -13,7 +12,6 @@ use std::pin::Pin;
 use std::time::Duration;
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
-use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HttpPrepareError {
@@ -59,7 +57,7 @@ struct Prepared {
     deadline: Instant,
     route: Option<HttpRoute>,
     proxy_header: Option<(String, String)>,
-    socket: Option<Socket>,
+    tunnel: Option<HowConnection>,
 }
 impl fmt::Debug for Prepared {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -71,7 +69,7 @@ impl fmt::Debug for Prepared {
 
 enum Packet {
     Direct(reqwest::Client, Box<reqwest::Request>),
-    How(Box<Socket>, String),
+    How(HowConnection, String),
 }
 struct Bound {
     request: RequestId,
@@ -79,6 +77,26 @@ struct Bound {
     packet: Packet,
     /// Sent through the Tealstreet REST proxy, whose own 401 is not the venue's.
     proxied: bool,
+    /// Venue host and the way it went, for a transport failure's log line; never a URL.
+    route: String,
+}
+
+/// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`.
+fn route_label(origin: &str, packet: &Packet) -> String {
+    let host = |url: &str| {
+        reqwest::Url::parse(url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .unwrap_or_else(|| "unparsable url".to_owned())
+    };
+    let venue = host(origin);
+    match packet {
+        Packet::How(..) => format!("{venue} via HTTP tunnel"),
+        Packet::Direct(_, request) => match request.url().host_str() {
+            Some(sent) if sent != venue => format!("{venue} via {sent}"),
+            _ => format!("{venue} direct"),
+        },
+    }
 }
 impl fmt::Debug for Bound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -130,7 +148,7 @@ pub(super) fn prepare(
                 None => None,
             };
             let mut proxy_header = None;
-            let mut socket = None;
+            let mut tunnel = None;
             if let Some(route) = &route {
                 if route.authorize {
                     let state = routing.as_ref().expect("route has a routing state");
@@ -151,39 +169,23 @@ pub(super) fn prepare(
                 }
                 if route.mode == HttpRouteMode::How {
                     let state = routing.as_ref().expect("route has a routing state");
-                    let tunnel = route
+                    let url = route
                         .tunnel_url
                         .as_deref()
                         .ok_or(HttpPrepareError::Invalid("HOW route missing tunnelUrl"))?;
-                    let mut tunnel = reqwest::Url::parse(tunnel)
-                        .map_err(|_| HttpPrepareError::Invalid("Invalid HTTP tunnel URL"))?;
-                    let retained: Vec<_> = tunnel
-                        .query_pairs()
-                        .filter(|(name, _)| name != "v" && name != "t")
-                        .map(|(name, value)| (name.into_owned(), value.into_owned()))
-                        .collect();
-                    tunnel.set_query(None);
-                    tunnel
-                        .query_pairs_mut()
-                        .extend_pairs(retained)
-                        .append_pair("v", "2")
-                        .append_pair("t", &format!("{:.0}", crate::now_ms()));
                     let headers = state
                         .plan
                         .ws_headers
                         .iter()
                         .map(|(name, value)| (name.clone(), value.clone()))
                         .collect();
-                    let mut connected =
-                        open_socket(tunnel.as_str(), headers).await.map_err(|_| {
-                            HttpPrepareError::Transport("HTTP tunnel connection failed".into())
-                        })?;
-                    // The helper already redacts provider failures. Preserve
-                    // that caller-visible cause, without parsing error text.
-                    authenticate_how(&mut connected, &state.tokens)
+                    // The account's open socket for this route, opened (or reopened) on demand.
+                    let connection = state.how.connection(url, headers, state.tokens.clone());
+                    connection
+                        .ready()
                         .await
                         .map_err(HttpPrepareError::Transport)?;
-                    socket = Some(connected);
+                    tunnel = Some(connection);
                 }
             }
             Ok(Box::new(Prepared {
@@ -196,7 +198,7 @@ pub(super) fn prepare(
                 deadline,
                 route,
                 proxy_header,
-                socket,
+                tunnel,
             }) as Box<dyn PreparedHttp>)
         };
         tokio::time::timeout_at(deadline, operation)
@@ -261,11 +263,11 @@ impl PreparedHttp for Prepared {
             insert_header(&mut headers, name, value);
         }
         let proxied =
-            self.socket.is_none() && self.route.as_ref().is_some_and(|route| route.authorize);
-        let packet = if let Some(socket) = self.socket.take() {
+            self.tunnel.is_none() && self.route.as_ref().is_some_and(|route| route.authorize);
+        let packet = if let Some(tunnel) = self.tunnel.take() {
             let packet = http_packet(&packet, &headers)
                 .map_err(|_| HttpPrepareError::Invalid("Invalid HTTP tunnel packet"))?;
-            Packet::How(Box::new(socket), packet)
+            Packet::How(tunnel, packet)
         } else {
             let method = match packet.method {
                 Method::Get => reqwest::Method::GET,
@@ -293,11 +295,13 @@ impl PreparedHttp for Prepared {
                 ),
             )
         };
+        let route = route_label(&self.origin, &packet);
         Ok(Box::new(Bound {
             request: self.request,
             deadline: self.deadline,
             packet,
             proxied,
+            route,
         }))
     }
 }
@@ -313,7 +317,9 @@ impl BoundHttp for Bound {
             deadline,
             packet,
             proxied,
+            route,
         } = *self;
+        let started = Instant::now();
         // These are the last controllable transport API calls. Route/token/HOW
         // preparation and packet validation have all finished before this point.
         let response: Pin<Box<dyn Future<Output = Result<(), String>> + Send>> = match packet {
@@ -321,19 +327,9 @@ impl BoundHttp for Bound {
                 let response = http.execute(*packet);
                 Box::pin(direct_response(response, request, events.clone(), proxied))
             }
-            Packet::How(mut socket, packet) => {
-                let sent = socket.start_send_unpin(Message::Text(packet.into()));
+            Packet::How(tunnel, packet) => {
                 let response_events = events.clone();
-                Box::pin(async move {
-                    sent.map_err(|_| "HTTP tunnel handoff failed".to_owned())?;
-                    socket
-                        .flush()
-                        .await
-                        .map_err(|_| "HTTP tunnel handoff failed".to_owned())?;
-                    let result = receive_http(&mut socket, request, &response_events).await;
-                    let _ = socket.as_mut().close(None).await;
-                    result
-                })
+                Box::pin(async move { tunnel.request(request, packet, response_events).await })
             }
         };
         tokio::spawn(async move {
@@ -347,6 +343,7 @@ impl BoundHttp for Bound {
                 Ok(Err(error)) => error,
                 Err(_) => "transport request timed out".into(),
             };
+            super::log_request_failure(&route, &error, started.elapsed());
             let _ = events.send(HostEvent::HttpFailed(request, error));
         })
         .abort_handle()
@@ -432,6 +429,32 @@ async fn direct_response(
 mod tests {
     use super::*;
     use crate::{ProxyTokenProvider, RoutingPlan, Transport};
+
+    #[test]
+    fn a_failed_request_is_named_by_venue_host_and_route_never_its_url() {
+        let client = NetworkTransport::new().http.clone();
+        let direct = client
+            .get("https://api.bitget.com/api/v2/mix/market/contracts?productType=x")
+            .build();
+        assert_eq!(
+            route_label(
+                "https://api.bitget.com",
+                &Packet::Direct(client.clone(), Box::new(direct.unwrap()))
+            ),
+            "api.bitget.com direct"
+        );
+        let proxied = client
+            .get("https://proxy-jp.example/https://api.bitget.com/api/v2/mix/market/contracts?token=t")
+            .build()
+            .unwrap();
+        assert_eq!(
+            route_label(
+                "https://api.bitget.com",
+                &Packet::Direct(client, Box::new(proxied))
+            ),
+            "api.bitget.com via proxy-jp.example"
+        );
+    }
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::{mpsc, oneshot};

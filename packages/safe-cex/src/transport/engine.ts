@@ -413,7 +413,7 @@ const PROXY_AUTHORIZATION_MISSING = 'Tealstreet proxy authorization missing';
 const DIRECT_PUBLIC_READS: ReadonlySet<ExchangeName> = new Set(['hyperliquid', 'hyperliquidspot']);
 
 const relayFailed = (exchange: ExchangeName, error: Error) =>
-  `[${exchange}] The connection to the Tealstreet relay failed (${error.message}); this account's requests through it are not sent until it reconnects`;
+  `[${exchange}] The connection to the Tealstreet relay failed (${error.message}); this account's requests through it fail and keep retrying until it reconnects`;
 
 const httpTransport = (
   exchange: ExchangeName,

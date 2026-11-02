@@ -2495,6 +2495,33 @@ mod tests {
                 public_catalogue_validation: venue == "breakoutprop",
                 isolated_book_subscriptions: venue == "asterdex",
                 inverse_closed_positions: venue == "bybitinverse",
+                nuke_account_cancel: any(
+                    &[
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "krakenspot",
+                        "phemex",
+                    ],
+                    venue,
+                ),
+                symbol_cancel_misses_unseen: any(
+                    &[
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "blofin",
+                        "hyperliquid",
+                        "hyperliquidspot",
+                        "hyrotrader",
+                        "krakenspot",
+                        "lighter",
+                        "lighter-robinhood",
+                        "paradex",
+                        "phemex",
+                    ],
+                    venue,
+                ) || any(&OKX, venue),
             };
             let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, ""), None) else {
                 panic!("{venue} engine constructs");

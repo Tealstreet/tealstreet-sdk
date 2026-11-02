@@ -539,6 +539,58 @@ fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
 }
 
 #[test]
+fn documented_empty_leverage_reply_applies_the_leverage() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    use safe_cex_venue_backpack::Options;
+    let mut e = Driver::new(Options {
+        read_identity: None,
+        read_credentials_status: None,
+        read_credentials: None,
+        public_data_only: false,
+        key: Some("public-test-key".into()),
+        secret: Some(STANDARD.encode([7u8; 32])),
+        recv_window: None,
+        identity: None,
+    });
+    e.start(1000.0);
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
+    );
+    let pending = requests(&mut e);
+    let info = pending
+        .iter()
+        .find(|r| r.url.ends_with("/account"))
+        .unwrap()
+        .clone();
+    for r in pending
+        .iter()
+        .filter(|r| r.url.contains("/tickers") || r.url.contains("/markPrices"))
+    {
+        reply(&mut e, r, 200, "[]");
+    }
+    assert!(info.url.ends_with("/account"));
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetLeverage {
+            command: 1,
+            symbol: SYMBOL.into(),
+            leverage: 20.0,
+            side: None,
+        }),
+    );
+    let patch = requests(&mut e).pop().unwrap();
+    // Docs: PATCH /api/v1/account answers 200 "Success." with no content.
+    reply(&mut e, &patch, 200, "");
+    reply(&mut e, &info, 200, r#"{"leverageLimit":"10"}"#);
+    assert_eq!(e.store().setting(SYMBOL).unwrap().leverage, 20.0);
+}
+
+#[test]
 fn amend_trigger_limit_preserves_execution_price_and_trigger_source() {
     let (mut e, socket) = ready();
     e.handle(1000.0, Event::WsOpened { socket });

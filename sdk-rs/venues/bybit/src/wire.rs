@@ -81,6 +81,13 @@ pub struct Status<'a> {
     pub ret_msg: Opt<'a>,
 }
 
+/// The envelope's own Bybit server stamp, Unix milliseconds.
+#[derive(Deserialize)]
+pub struct ServerStamp {
+    #[serde(default)]
+    pub time: Option<f64>,
+}
+
 /// A streamed list's envelope, its list emptied: status and the page cursor.
 #[derive(Deserialize)]
 pub struct PageEnvelope<'a> {

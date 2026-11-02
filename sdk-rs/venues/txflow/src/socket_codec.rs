@@ -58,6 +58,43 @@ impl TxFlow {
         )
     }
 
+    /// A candle streams on the api feed.
+    fn candle_interest(asset: u32, interval: Interval) -> Interest {
+        let coin = asset.to_string();
+        Self::socket_interest(
+            true,
+            "candle",
+            Some(&coin),
+            Some(interval.as_str()),
+            None,
+            None,
+        )
+    }
+
+    /// A book streams on the node feed.
+    fn book_interest(asset: u32) -> Interest {
+        let coin = asset.to_string();
+        Self::socket_interest(false, "l2Book", Some(&coin), None, None, None)
+    }
+
+    /// The feed and key `desired_socket_interests` streams `topic` under.
+    pub(super) fn topic_interest(
+        &self,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        let (feed, interest) = match topic {
+            safe_cex_engine::SubscriptionTopic::OrderBook { symbol } => (
+                self.node.feed?,
+                Self::book_interest(*self.assets.get(symbol)?),
+            ),
+            safe_cex_engine::SubscriptionTopic::Candles { symbol, interval } => (
+                self.api.feed?,
+                Self::candle_interest(*self.assets.get(symbol)?, *interval),
+            ),
+        };
+        Some((feed, interest.key.to_string()))
+    }
+
     fn desired_socket_interests(
         &self,
         store: &safe_cex_engine::Store,
@@ -83,14 +120,7 @@ impl TxFlow {
                 }
                 for (symbol, interval) in self.candles.keys() {
                     if let Some(asset) = self.assets.get(symbol) {
-                        values.push(Self::socket_interest(
-                            true,
-                            "candle",
-                            Some(&asset.to_string()),
-                            Some(interval.as_str()),
-                            None,
-                            None,
-                        ));
+                        values.push(Self::candle_interest(*asset, *interval));
                     }
                 }
             } else {
@@ -104,14 +134,7 @@ impl TxFlow {
                 ));
                 for symbol in self.books.keys() {
                     if let Some(asset) = self.assets.get(symbol) {
-                        values.push(Self::socket_interest(
-                            false,
-                            "l2Book",
-                            Some(&asset.to_string()),
-                            None,
-                            None,
-                            None,
-                        ));
+                        values.push(Self::book_interest(*asset));
                     }
                 }
             }

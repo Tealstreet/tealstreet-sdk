@@ -4,7 +4,7 @@ use crate::accounts::{Registry, now_ms};
 use crate::auth::Verifier;
 use crate::config::Config;
 use crate::out::{OUTBOUND_CAPACITY, Out};
-use crate::session::{Identity, Session};
+use crate::session::{Close, Identity, Session};
 use crate::state::{Log, Metrics};
 use axum::Router;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
@@ -12,7 +12,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
@@ -57,9 +57,21 @@ pub async fn drain(app: &App) {
     }
 }
 
+/// Break-glass: stop every chase and TWAP, telling each page what stopped, then
+/// move every socket. False if some account had not ended by the deadline.
+pub async fn drain_now(app: &App) -> bool {
+    let settled = app.registry.break_glass(DRAIN_DEADLINE).await;
+    if !settled {
+        Log::warn("break-glass drain passed its deadline; orders may rest");
+    }
+    settled
+}
+
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/health", get(health).options(preflight))
+        .route("/admin/drain", post(admin_drain))
+        .route("/admin/undrain", post(admin_undrain))
         .route("/capabilities", get(capabilities).options(preflight))
         .route(
             "/account/capabilities",
@@ -90,8 +102,13 @@ async fn preflight() -> Response {
 
 async fn health(State(app): State<Arc<App>>) -> Response {
     let (connections, inits, disposes) = app.metrics.snapshot();
+    let draining = app.registry.drain_state() != crate::accounts::Drain::Off;
+    let (chases, twaps) = app.registry.running_algos();
     let body = json!({
-        "ok": true,
+        // A draining box takes no new users: its load balancer pool fails over.
+        "ok": !draining,
+        "draining": draining,
+        "algos": {"chases": chases, "twaps": twaps},
         "runtime": "rust",
         "uptime": app.started.elapsed().as_secs(),
         "release": app.config.release,
@@ -103,7 +120,90 @@ async fn health(State(app): State<Arc<App>>) -> Response {
         "inits": inits,
         "disposes": disposes,
     });
-    cors(axum::Json(body).into_response())
+    let status = if draining {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
+    };
+    cors((status, axum::Json(body)).into_response())
+}
+
+/// Headers an edge or proxy adds. cloudflared dials this port from loopback, so a
+/// loopback peer alone does not prove the operator is on the box.
+const FORWARDED_HEADERS: [&str; 6] = [
+    "cf-connecting-ip",
+    "cf-ray",
+    "cdn-loop",
+    "x-forwarded-for",
+    "x-real-ip",
+    "forwarded",
+];
+
+/// Admin routes answer only a peer on this box (loopback, or the Docker bridge the
+/// published port arrives through) whose request no proxy forwarded.
+pub fn admin_peer(headers: &HeaderMap, peer: SocketAddr) -> bool {
+    let on_box = match peer.ip().to_canonical() {
+        std::net::IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+        std::net::IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local(),
+    };
+    on_box
+        && !FORWARDED_HEADERS
+            .iter()
+            .any(|name| headers.contains_key(*name))
+}
+
+#[derive(Deserialize)]
+struct DrainQuery {
+    now: Option<String>,
+}
+
+fn drain_status(app: &App) -> serde_json::Value {
+    let (chases, twaps) = app.registry.running_algos();
+    let drain = match app.registry.drain_state() {
+        crate::accounts::Drain::Off => "off",
+        crate::accounts::Drain::Waiting => "waiting",
+        crate::accounts::Drain::Now => "now",
+    };
+    json!({"drain": drain, "algos": {"chases": chases, "twaps": twaps}})
+}
+
+/// `POST /admin/drain` starts a drain; `?now=1` is break-glass.
+async fn admin_drain(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(query): Query<DrainQuery>,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return (StatusCode::FORBIDDEN, "admin routes are local only").into_response();
+    }
+    if query.now.as_deref() == Some("1") {
+        Log::info("admin: break-glass drain");
+        let settled = drain_now(&app).await;
+        let mut body = drain_status(&app);
+        body["settled"] = settled.into();
+        return axum::Json(body).into_response();
+    }
+    Log::info("admin: drain");
+    app.registry.start_drain();
+    axum::Json(drain_status(&app)).into_response()
+}
+
+/// `POST /admin/undrain` ends a drain that did not end in a restart.
+async fn admin_undrain(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return (StatusCode::FORBIDDEN, "admin routes are local only").into_response();
+    }
+    if *app.closing.borrow() {
+        return (StatusCode::CONFLICT, "the process is stopping").into_response();
+    }
+    Log::info("admin: undrain");
+    app.registry.undrain();
+    axum::Json(drain_status(&app)).into_response()
 }
 
 pub fn capabilities_json() -> serde_json::Value {
@@ -278,6 +378,24 @@ async fn send(
     )
 }
 
+/// What the page was already sent goes first (a break-glass stop notice), then the move.
+async fn move_away(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    outgoing: &mut tokio::sync::mpsc::Receiver<String>,
+    moved: Close,
+) {
+    while let Ok(text) = outgoing.try_recv() {
+        if !send(sink, Message::Text(text.into())).await {
+            return;
+        }
+    }
+    let frame = CloseFrame {
+        code: moved.code(),
+        reason: moved.reason().into(),
+    };
+    send(sink, Message::Close(Some(frame))).await;
+}
+
 fn idle_dropped(socket: u64, user: Option<&str>) -> String {
     format!(
         "idle socket dropped: socket {socket} user {}",
@@ -294,11 +412,17 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
         .as_ref()
         .map(|(_, expires_at_ms)| *expires_at_ms);
     let user = identity.user.clone();
+    if let Some(user) = &user {
+        app.registry.user_connected(user);
+    }
     let mut session = Session::new(app.registry.clone(), app.metrics.clone(), identity, out);
     let mut loaded = session.take_loaded();
+    let mut dropped = session.take_dropped();
     session.open().await;
     let taken_over = session.taken_over();
     let mut closing = app.closing.subscribe();
+    let mut drain = app.registry.watch_drain();
+    let mut algos_ended = app.registry.watch_algos_ended();
     let close_at = expires.map(|expires_at_ms| {
         let remaining = Duration::from_millis(expires_at_ms.saturating_sub(now_ms()));
         tokio::time::Instant::now() + remaining + TOKEN_GRACE
@@ -335,12 +459,21 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
                 send(&mut sink, close(1008, "Tealstreet proxy token expired")).await;
                 break;
             }
+            Ok(()) = drain.changed() => if let Some(moved) = session.drain_close() {
+                move_away(&mut sink, &mut outgoing, moved).await;
+                break;
+            },
+            Ok(()) = algos_ended.changed() => if let Some(moved) = session.drain_close() {
+                move_away(&mut sink, &mut outgoing, moved).await;
+                break;
+            },
             // A resume of this session arrived on a new socket: this one is dead.
             _ = taken_over.notified() => {
                 Log::info("session taken over by a resume");
                 break;
             }
             Some((name, client)) = loaded.recv() => session.account_loaded(&name, client).await,
+            Some((name, client)) = dropped.recv() => session.client_dropped(&name, client).await,
             text = outgoing.recv() => match text {
                 Some(text) => if !send(&mut sink, Message::Text(text.into())).await { break },
                 None => break,
@@ -351,8 +484,12 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
                 session.heard();
                 match message {
                     Message::Text(text) => {
-                        if let Err(violation) = session.handle(text.as_str()).await {
-                            send(&mut sink, close(1008, violation.0)).await;
+                        if let Err(refusal) = session.handle(text.as_str()).await {
+                            if refusal == Close::Moved {
+                                move_away(&mut sink, &mut outgoing, refusal).await;
+                            } else {
+                                send(&mut sink, close(refusal.code(), refusal.reason())).await;
+                            }
                             break;
                         }
                     }
@@ -376,6 +513,106 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admin_routes_answer_only_an_unforwarded_loopback_peer() {
+        let none = HeaderMap::new();
+        let local: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let mapped: SocketAddr = "[::ffff:127.0.0.1]:5000".parse().unwrap();
+        assert!(admin_peer(&none, local));
+        assert!(admin_peer(&none, mapped));
+        assert!(admin_peer(&none, "[::1]:5000".parse().unwrap()));
+        // The box's Docker bridge: the port is published on the host's loopback only.
+        assert!(admin_peer(&none, "172.18.0.1:5000".parse().unwrap()));
+        for remote in ["100.64.1.2:5000", "172.64.1.2:443", "[2606:4700::1]:443"] {
+            assert!(!admin_peer(&none, remote.parse().unwrap()), "{remote}");
+        }
+        // cloudflared dials from loopback; the edge's headers give it away.
+        for header in FORWARDED_HEADERS {
+            let mut forwarded = HeaderMap::new();
+            forwarded.insert(header, HeaderValue::from_static("1.2.3.4"));
+            assert!(!admin_peer(&forwarded, local), "{header}");
+        }
+    }
+
+    #[tokio::test]
+    async fn health_counts_running_chases_and_twaps_and_reports_draining() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account =
+                    crate::accounts::tests::held_account_counted(&registry, link, String::new());
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let op = |op: &str, data: &str| {
+                    let input = crate::algos::AlgoInput::Op {
+                        op: op.into(),
+                        data: data.into(),
+                        origin: "test".into(),
+                    };
+                    account.algos.as_ref().unwrap().send(input).unwrap();
+                };
+                op(
+                    "chaser:start",
+                    r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#,
+                );
+                let market = r#"{"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true}"#;
+                op(
+                    "twap:start",
+                    &format!(
+                        r#"{{"accountName":"acct","activeMarket":{market},"size":0.1,"duration":600,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"}}"#
+                    ),
+                );
+                tokio::time::sleep(Duration::from_millis(600)).await;
+                let config = Config {
+                    port: 0,
+                    region: None,
+                    release: None,
+                    engine_threads: 1,
+                    max_connections: 16,
+                    max_public_per_ip: 2,
+                    idle_timeout: Duration::from_secs(30),
+                    resume_grace: Duration::from_secs(60),
+                    account_flush: Duration::from_millis(60),
+                };
+                let app = Arc::new(App {
+                    registry: registry.clone(),
+                    metrics: Arc::default(),
+                    verifier: Arc::new(Verifier::new(crate::auth::PROXY_PUBLIC_KEY).unwrap()),
+                    config,
+                    started: Instant::now(),
+                    public_per_ip: Mutex::default(),
+                    closing: tokio::sync::watch::channel(false).0,
+                });
+                let read = async |app: &Arc<App>| {
+                    let response = health(State(app.clone())).await;
+                    let status = response.status().as_u16();
+                    let body = axum::body::to_bytes(response.into_body(), 1 << 16)
+                        .await
+                        .unwrap();
+                    (
+                        status,
+                        serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                    )
+                };
+                let (status, body) = read(&app).await;
+                assert_eq!(status, 200, "{body}");
+                assert_eq!(body["ok"], true);
+                assert_eq!(body["draining"], false);
+                assert_eq!(body["algos"], json!({"chases": 1, "twaps": 1}));
+                registry.start_drain();
+                let (status, body) = read(&app).await;
+                assert_eq!(status, 503, "a draining box takes no new users: {body}");
+                assert_eq!(body["ok"], false);
+                assert_eq!(body["draining"], true);
+                assert_eq!(
+                    body["algos"],
+                    json!({"chases": 1, "twaps": 1}),
+                    "the drain never stops them"
+                );
+            })
+            .await;
+    }
 
     #[test]
     fn an_idle_drop_names_its_socket_and_user() {

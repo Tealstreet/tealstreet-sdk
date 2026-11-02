@@ -20,7 +20,8 @@ use safe_cex_engine::request_context::{Context, Credential, Operation, Policy, R
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
-    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue,
+    num,
 };
 use serde::{Serialize, de::IgnoredAny};
 use std::collections::HashMap;
@@ -139,7 +140,15 @@ pub struct BitgetFutures {
     live_tickers: safe_cex_engine::startup::LiveTickers,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), usize>,
+    /// Topics Bitget answered with event:error, by (channel, instId): retries made, pending timer.
+    refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
+    /// When an unreadable public message was last logged; at most one per minute.
+    public_parse_logged_at: Option<f64>,
 }
+
+/// A refused subscription is sent again after 1 s, 2 s and 4 s, then left refused.
+const SUBSCRIBE_RETRIES: u32 = 3;
+const PUBLIC_PARSE_LOG_MS: f64 = 60_000.0;
 
 fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
     let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body).ok();
@@ -205,6 +214,8 @@ impl BitgetFutures {
             live_tickers: Default::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
+            refused_topics: HashMap::new(),
+            public_parse_logged_at: None,
         }
     }
 
@@ -359,6 +370,36 @@ impl BitgetFutures {
         }
     }
 
+    /// Re-sends one live book or candle channel on the public socket; counts,
+    /// refused-topic retries and reconnect resubscription are left untouched.
+    fn repair(&self, cx: &mut Cx<'_, Pending>, topic: &SubscriptionTopic) -> Result<(), String> {
+        let live = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => self
+                .candles
+                .contains_key(&(symbol.clone(), *interval))
+                .then(|| candle_topic(symbol.clone(), *interval))
+                .flatten(),
+            SubscriptionTopic::OrderBook { symbol } => self
+                .books
+                .contains_key(symbol)
+                .then(|| book_topic(symbol.clone())),
+        };
+        let Some(native) = live else {
+            return Err(format!("{topic} is not subscribed"));
+        };
+        let connection = &self.sockets[0];
+        let Some(socket) = connection.socket.filter(|_| connection.open) else {
+            return Err(format!(
+                "the public socket carrying {} {} is not open",
+                native.0, native.1
+            ));
+        };
+        let topics = [native];
+        self.send_topics(cx, socket, "unsubscribe", &topics);
+        self.send_topics(cx, socket, "subscribe", &topics);
+        Ok(())
+    }
+
     fn send_topics(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -416,14 +457,26 @@ impl BitgetFutures {
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         let message = match serde_json::from_str::<PublicMessage<'_>>(text) {
             Ok(message) => message,
-            Err(_) => {
+            Err(error) => {
+                if self
+                    .public_parse_logged_at
+                    .is_none_or(|at| cx.now - at >= PUBLIC_PARSE_LOG_MS)
+                {
+                    self.public_parse_logged_at = Some(cx.now);
+                    let head: String = text.chars().take(200).collect();
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        format!("Bitget public message unreadable ({error}): {head}"),
+                    );
+                }
                 if let Ok(header) = serde_json::from_str::<PublicHeader<'_>>(text)
                     && header.arg.channel == "books"
                 {
                     let symbol = header.arg.inst_id.as_ref();
                     if let Some(state) = self.books.get_mut(symbol) {
                         state.reset();
-                        let topics = [("books".into(), symbol.to_owned())];
+                        let topics = [book_topic(symbol.to_owned())];
                         self.subscribe(cx, "unsubscribe", &topics);
                         self.subscribe(cx, "subscribe", &topics);
                     }
@@ -432,12 +485,48 @@ impl BitgetFutures {
             }
         };
         if message.event == "error" {
+            let topic = (
+                message.arg.channel.to_string(),
+                message.arg.inst_id.to_string(),
+            );
+            let retry = (!topic.0.is_empty() && !topic.1.is_empty())
+                .then(|| {
+                    self.refused_topics
+                        .entry(topic.clone())
+                        .or_insert((0, None))
+                })
+                .filter(|(made, timer)| *made < SUBSCRIBE_RETRIES && timer.is_none());
+            let detail = match retry {
+                Some((made, timer)) => {
+                    *timer = Some(cx.set_timer(1_000.0 * f64::from(1u32 << *made)));
+                    *made += 1;
+                    format!(
+                        "{} {}: retry {made} of {SUBSCRIBE_RETRIES}",
+                        topic.0, topic.1
+                    )
+                }
+                None if !topic.0.is_empty() => format!("{} {}: not retried", topic.0, topic.1),
+                None => String::new(),
+            };
             cx.notice(
                 Level::Error,
                 code::SUBSCRIPTION_REJECTED,
-                format!("Bitget WS: {}", message.msg),
+                if detail.is_empty() {
+                    format!("Bitget WS: {}", message.msg)
+                } else {
+                    format!("Bitget WS: {} ({detail})", message.msg)
+                },
             );
             return;
+        }
+        if !self.refused_topics.is_empty()
+            && let Some((_, timer)) = self.refused_topics.remove(&(
+                message.arg.channel.to_string(),
+                message.arg.inst_id.to_string(),
+            ))
+            && let Some(timer) = timer
+        {
+            cx.clear_timer(timer);
         }
         match message.data {
             PublicData::Tickers(rows) => {
@@ -482,7 +571,7 @@ impl BitgetFutures {
                         Err(error) => {
                             state.reset();
                             cx.notice(Level::Warn, code::STREAM_MALFORMED, error);
-                            let topics = [("books".into(), symbol.to_owned())];
+                            let topics = [book_topic(symbol.to_owned())];
                             self.subscribe(cx, "unsubscribe", &topics);
                             self.subscribe(cx, "subscribe", &topics);
                             break;
@@ -619,6 +708,16 @@ fn interval(value: Interval) -> Option<&'static str> {
     })
 }
 
+/// The (channel, instId) every book subscribe, unsubscribe and repair names.
+fn book_topic(symbol: String) -> (String, String) {
+    ("books".to_owned(), symbol)
+}
+
+/// The (channel, instId) every candle subscribe, unsubscribe and repair names.
+fn candle_topic(symbol: String, value: Interval) -> Option<(String, String)> {
+    Some((format!("candle{}", interval(value)?), symbol))
+}
+
 fn candle(row: &CandleRow) -> Candle {
     Candle {
         timestamp: row[0].get() / 1000.0,
@@ -744,6 +843,13 @@ impl Venue for BitgetFutures {
     }
 
     type Pending = Pending;
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate().and_then(|_| {
@@ -790,12 +896,12 @@ impl Venue for BitgetFutures {
         if index == 0 {
             for (symbol, state) in &mut self.books {
                 state.reset();
-                topics.push(("books".to_owned(), symbol.clone()));
+                topics.push(book_topic(symbol.clone()));
             }
             topics.extend(
                 self.candles
                     .keys()
-                    .filter_map(|(s, i)| Some((format!("candle{}", interval(*i)?), s.clone()))),
+                    .filter_map(|(s, i)| candle_topic(s.clone(), *i)),
             );
         }
         self.send_topics(cx, socket, "subscribe", &topics);
@@ -1206,6 +1312,18 @@ impl Venue for BitgetFutures {
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_write(cx);
+        if let Some(topic) = self
+            .refused_topics
+            .iter_mut()
+            .find(|(_, (_, pending))| *pending == Some(timer))
+            .map(|(topic, (_, pending))| {
+                *pending = None;
+                topic.clone()
+            })
+        {
+            self.subscribe(cx, "subscribe", &[topic]);
+            return;
+        }
         if let Some(read) = self.discovery.on_timer(timer) {
             self.discovery_read(cx, read == DiscoveryRead::Tickers);
             return;
@@ -1253,7 +1371,7 @@ impl Venue for BitgetFutures {
                 let state = self.books.entry(symbol.clone()).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
-                    self.subscribe(cx, "subscribe", &[("books".to_owned(), symbol)]);
+                    self.subscribe(cx, "subscribe", &[book_topic(symbol)]);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1261,7 +1379,7 @@ impl Venue for BitgetFutures {
                     state.subscribers -= 1;
                     if state.subscribers == 0 {
                         self.books.remove(&symbol);
-                        self.subscribe(cx, "unsubscribe", &[("books".to_owned(), symbol)]);
+                        self.subscribe(cx, "unsubscribe", &[book_topic(symbol)]);
                     }
                 }
             }
@@ -1269,7 +1387,7 @@ impl Venue for BitgetFutures {
                 symbol,
                 interval: value,
             } => {
-                let Some(native) = interval(value) else {
+                let Some(topic) = candle_topic(symbol.clone(), value) else {
                     cx.notice(
                         Level::Error,
                         code::COMMAND_UNSUPPORTED,
@@ -1277,10 +1395,10 @@ impl Venue for BitgetFutures {
                     );
                     return;
                 };
-                let count = self.candles.entry((symbol.clone(), value)).or_default();
+                let count = self.candles.entry((symbol, value)).or_default();
                 *count += 1;
                 if *count == 1 {
-                    self.subscribe(cx, "subscribe", &[(format!("candle{native}"), symbol)]);
+                    self.subscribe(cx, "subscribe", &[topic]);
                 }
             }
             Command::UnsubscribeCandles {
@@ -1292,12 +1410,8 @@ impl Venue for BitgetFutures {
                     *count -= 1;
                     if *count == 0 {
                         self.candles.remove(&key);
-                        if let Some(native) = interval(key.1) {
-                            self.subscribe(
-                                cx,
-                                "unsubscribe",
-                                &[(format!("candle{native}"), key.0)],
-                            );
+                        if let Some(topic) = candle_topic(key.0, key.1) {
+                            self.subscribe(cx, "unsubscribe", &[topic]);
                         }
                     }
                 }

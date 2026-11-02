@@ -83,12 +83,39 @@ pub struct Session {
     /// A held client's account has loaded: `(account name, client id)`.
     loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     loaded_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
+    /// A client the engine removed (its queue full, or a frame too large): `(account, client)`.
+    dropped: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
+    dropped_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(String, u64)>>,
+    /// When each account was last re-snapshotted after such a removal.
+    rejoined_at: HashMap<String, std::time::Instant>,
     /// Told when a resume of this session's id takes it over.
     taken_over: Arc<tokio::sync::Notify>,
     /// The settings refusal last sent per account, so the client's backoff
     /// retries show it once; cleared when that account's init succeeds.
     refused: HashMap<String, String>,
+    /// Chart and book subscriptions that arrived before their account joined,
+    /// applied at join: the page sends them whenever its chart asks.
+    early: HashMap<String, Vec<Topic>>,
+    /// Moved off a draining box: its accounts are released, never parked here.
+    moved: bool,
 }
+
+/// A chart or book subscription, by its page op.
+#[derive(Clone, Debug)]
+struct Topic {
+    op: String,
+    symbol: String,
+    interval: Option<String>,
+    /// A chart's forced reset: the upstream stream may be dead, so it is repaired too.
+    reset: bool,
+}
+
+/// Per account; a page re-sends its live topics on every init, so this only
+/// needs to outlast one join.
+const EARLY_TOPICS: usize = 64;
+
+/// A page that cannot keep up is re-snapshotted at most this often.
+const REJOIN_AFTER_DROP_MIN: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// How long a resume waits for the session it takes over to park, as long as
 /// that socket loop can be stuck in one send.
@@ -101,6 +128,8 @@ const NUKE_WAITING: &str = "Nuke is waiting for this account's positions and ord
 
 pub const SNAPSHOT_HOLD_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 const SNAPSHOT_HOLD_CHECK: std::time::Duration = std::time::Duration::from_millis(250);
+/// How long a hold's load check may wait on the engine; a miss is retried next hold tick.
+const HOLD_LOAD_CHECK: std::time::Duration = std::time::Duration::from_millis(20);
 
 const PUBLIC_OPS: [&str; 5] = [
     "sendSnapshot",
@@ -110,8 +139,33 @@ const PUBLIC_OPS: [&str; 5] = [
     "unsubscribeOHLCV",
 ];
 
-/// Why the socket must close with 1008.
-pub struct PolicyViolation(pub &'static str);
+/// The close a drained box sends: this box is going away, reconnect elsewhere.
+pub const MOVED_CODE: u16 = 4100;
+pub const MOVED_REASON: &str = "draining: reconnect";
+
+/// Why the socket must close now.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Close {
+    /// 1008, with the reason.
+    Policy(&'static str),
+    /// The box is draining: [`MOVED_CODE`].
+    Moved,
+}
+
+impl Close {
+    pub fn code(&self) -> u16 {
+        match self {
+            Self::Policy(_) => 1008,
+            Self::Moved => MOVED_CODE,
+        }
+    }
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Self::Policy(reason) => reason,
+            Self::Moved => MOVED_REASON,
+        }
+    }
+}
 
 impl Session {
     pub fn new(
@@ -122,6 +176,7 @@ impl Session {
     ) -> Self {
         let socket = registry.next_id();
         let (loaded, loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (dropped, dropped_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             registry,
             metrics,
@@ -132,8 +187,41 @@ impl Session {
             joined: HashMap::new(),
             loaded,
             loaded_rx: Some(loaded_rx),
+            dropped,
+            dropped_rx: Some(dropped_rx),
+            rejoined_at: HashMap::new(),
             taken_over: Arc::new(tokio::sync::Notify::new()),
             refused: HashMap::new(),
+            early: HashMap::new(),
+            moved: false,
+        }
+    }
+
+    /// Whether a drain moves this socket now: break-glass moves every socket,
+    /// a waiting drain only one whose accounts run no chase or TWAP.
+    pub fn drain_close(&mut self) -> Option<Close> {
+        let moves = match self.registry.drain_state() {
+            crate::accounts::Drain::Off => false,
+            crate::accounts::Drain::Now => true,
+            crate::accounts::Drain::Waiting => !self
+                .joined
+                .values()
+                .any(|joined| joined.account.running.any()),
+        };
+        self.moved |= moves;
+        moves.then_some(Close::Moved)
+    }
+
+    /// A draining box admits inits only from users already live on it.
+    fn moved_by_drain(&self) -> bool {
+        match self.registry.drain_state() {
+            crate::accounts::Drain::Off => false,
+            crate::accounts::Drain::Now => true,
+            crate::accounts::Drain::Waiting => !self
+                .identity
+                .user
+                .as_deref()
+                .is_some_and(|user| self.registry.live_here(user)),
         }
     }
 
@@ -160,6 +248,43 @@ impl Session {
     /// each goes to [`Session::account_loaded`].
     pub fn take_loaded(&mut self) -> tokio::sync::mpsc::UnboundedReceiver<(String, u64)> {
         self.loaded_rx.take().expect("taken once")
+    }
+
+    /// The socket loop's receiver of clients the engine removed; each goes to
+    /// [`Session::client_dropped`].
+    pub fn take_dropped(&mut self) -> tokio::sync::mpsc::UnboundedReceiver<(String, u64)> {
+        self.dropped_rx.take().expect("taken once")
+    }
+
+    /// The engine removed this client without the session asking: its queue was
+    /// full or a frame too large. Without this the page got nothing and saw no gap.
+    pub async fn client_dropped(&mut self, name: &str, client: u64) {
+        if self
+            .joined
+            .get(name)
+            .is_none_or(|joined| joined.client.id != client)
+        {
+            return;
+        }
+        let recent = self
+            .rejoined_at
+            .get(name)
+            .is_some_and(|at| at.elapsed() < REJOIN_AFTER_DROP_MIN);
+        if recent {
+            Log::warn(&format!(
+                "engine dropped client {client} of {name} on socket {} again within {}s; left to the page's resnapshot",
+                self.socket,
+                REJOIN_AFTER_DROP_MIN.as_secs()
+            ));
+            return;
+        }
+        Log::warn(&format!(
+            "engine dropped client {client} of {name} on socket {}: its queue was full or a frame too large; re-snapshotting",
+            self.socket
+        ));
+        self.rejoined_at
+            .insert(name.to_owned(), std::time::Instant::now());
+        self.resnapshot(name).await;
     }
 
     /// A held client's account loaded: its client gets a full snapshot now.
@@ -228,7 +353,7 @@ impl Session {
         self.send(envelope::session(&self.resume_id, resumed));
     }
 
-    pub async fn handle(&mut self, text: &str) -> Result<(), PolicyViolation> {
+    pub async fn handle(&mut self, text: &str) -> Result<(), Close> {
         let Ok(message) = serde_json::from_str::<Inbound>(text) else {
             Log::warn("invalid envelope");
             return Ok(());
@@ -241,7 +366,7 @@ impl Session {
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
                         && PUBLIC_OPS.contains(&msg.op.as_str()))
                 {
-                    return Err(PolicyViolation(
+                    return Err(Close::Policy(
                         "Unauthenticated exchange-server message rejected",
                     ));
                 }
@@ -249,7 +374,7 @@ impl Session {
             }
             Inbound::SignRes(response) => {
                 if !authenticated {
-                    return Err(PolicyViolation(
+                    return Err(Close::Policy(
                         "Unauthenticated exchange-server sessions cannot sign",
                     ));
                 }
@@ -302,7 +427,7 @@ impl Session {
             Inbound::Perf(_) => {}
             Inbound::Verbose(_) => {
                 if !authenticated {
-                    return Err(PolicyViolation(
+                    return Err(Close::Policy(
                         "Unauthenticated exchange-server sessions cannot enable diagnostics",
                     ));
                 }
@@ -311,12 +436,20 @@ impl Session {
         Ok(())
     }
 
-    async fn init(&mut self, init: InitPayload) -> Result<(), PolicyViolation> {
+    async fn init(&mut self, init: InitPayload) -> Result<(), Close> {
         let authenticated = self.identity.user.is_some();
         let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
         if !authenticated && let Some(reason) = unauthenticated_init_refusal(&init) {
             self.send(envelope::error(Some(&init.account_name), reason));
-            return Err(PolicyViolation(reason));
+            return Err(Close::Policy(reason));
+        }
+        if self.moved_by_drain() {
+            Log::info(&format!(
+                "init {} on socket {} moved: this box is draining",
+                init.account_name, self.socket
+            ));
+            self.moved = true;
+            return Err(Close::Moved);
         }
         Log::info(&format!(
             "init {} ({}) socket {} session {}",
@@ -349,11 +482,20 @@ impl Session {
             if first_refusal(&mut self.refused, &init.account_name, &refusal) {
                 self.send(envelope::init_refused(&init.account_name, &refusal));
             }
+            self.drop_early(&init.account_name, "init refused for other settings");
             return Ok(());
         }
         self.refused.remove(&init.account_name);
         if let Some(joined) = self.joined.remove(&init.account_name) {
-            self.leave(joined);
+            // New settings rebuild it. Unless another live socket keeps it, its algos stop
+            // here and this page hears their finals; leaving first would tell no one.
+            if joined.account.live_holders_besides(self.socket).is_empty() {
+                self.registry
+                    .stop_for_new_settings(&joined.account, self.outbox());
+                Self::leave_engine(joined);
+            } else {
+                self.leave(joined);
+            }
         }
         let token = self.identity.token.clone();
         let account = self
@@ -382,22 +524,17 @@ impl Session {
                         "algo stop notice {} to socket {}: {} ({} chase ends)",
                         init.account_name,
                         self.socket,
-                        kept.text,
+                        kept.summary(),
                         kept.ends.len()
                     ));
-                    if !kept.text.is_empty() {
-                        self.send(envelope::algo_error(
-                            &init.account_name,
-                            Value::String(kept.text),
-                        ));
-                    }
-                    for end in kept.ends {
-                        self.send(end);
+                    for frame in kept.frames(&init.account_name) {
+                        self.send(frame);
                     }
                 }
             }
             Err(error) => {
                 Log::warn(&format!("init {} refused: {error}", init.account_name));
+                self.drop_early(&init.account_name, "init refused");
                 self.send(envelope::error(Some(&init.account_name), &error));
             }
         }
@@ -412,7 +549,7 @@ impl Session {
                     let _ = algos.send(crate::algos::AlgoInput::Joined);
                 }
                 self.joined.insert(
-                    name,
+                    name.clone(),
                     Joined {
                         account,
                         client,
@@ -421,8 +558,10 @@ impl Session {
                         subscriptions: HashMap::new(),
                     },
                 );
+                self.apply_early(&name);
             }
             Err(error) => {
+                self.drop_early(&name, "account did not join");
                 self.send(envelope::error(Some(&name), error));
                 self.registry.release(&account, self.socket);
             }
@@ -440,6 +579,8 @@ impl Session {
         });
         let pump = tokio::spawn(pump(
             link,
+            id,
+            self.dropped.clone(),
             account.handle.clone(),
             account.name.clone(),
             self.out.clone(),
@@ -527,6 +668,22 @@ impl Session {
             return;
         };
         self.forget_disposed();
+        let topic = Self::topic_of(&msg);
+        if !self.joined.contains_key(&name)
+            && let Some(topic) = topic.clone()
+        {
+            self.queue_early(&name, topic);
+            return;
+        }
+        // It only acks, and the page waits on it: answer it joined or not.
+        if msg.op == "updatePositions" && !self.joined.contains_key(&name) {
+            self.send(envelope::msg(
+                &name,
+                "updatePositions:done",
+                json!({"requestId": msg.data.get("requestId"), "success": true}),
+            ));
+            return;
+        }
         if !self.joined.contains_key(&name) {
             Log::warn(&format!("no joined account for op {}", msg.op));
             if msg.op == "callMethod" {
@@ -565,30 +722,7 @@ impl Session {
             ("sendSnapshot", _, _) => {
                 self.resnapshot(&name).await;
             }
-            ("subscribeOrderBook", Some(symbol), _) => self.subscribe(
-                &name,
-                json!({"op": "subscribeOrderBook", "symbol": symbol}),
-                json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
-                true,
-            ),
-            ("unsubscribeOrderBook", Some(symbol), _) => self.subscribe(
-                &name,
-                json!({"op": "subscribeOrderBook", "symbol": symbol}),
-                json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
-                false,
-            ),
-            ("subscribeOHLCV", Some(symbol), Some(interval)) => self.subscribe(
-                &name,
-                json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
-                json!({"op": "unsubscribeCandles", "symbol": symbol, "interval": interval}),
-                true,
-            ),
-            ("unsubscribeOHLCV", Some(symbol), Some(interval)) => self.subscribe(
-                &name,
-                json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
-                json!({"op": "unsubscribeCandles", "symbol": symbol, "interval": interval}),
-                false,
-            ),
+            _ if topic.is_some() => self.apply_topic(&name, topic.as_ref().unwrap()),
             ("callMethod", _, _) => self.call(&name, msg.data).await,
             ("updatePositions", _, _) => self.send(envelope::msg(
                 &name,
@@ -620,6 +754,102 @@ impl Session {
 
     /// Counts a book/candle (un)subscribe; only the first subscribe and the last
     /// unsubscribe reach the engine, whose per-client demand is a set.
+    fn topic_of(msg: &AccountMsg) -> Option<Topic> {
+        let field = |key: &str| msg.data.get(key).and_then(Value::as_str).map(str::to_owned);
+        let symbol = field("symbol")?;
+        let interval = field("interval");
+        match msg.op.as_str() {
+            "subscribeOrderBook" | "unsubscribeOrderBook" => {}
+            "subscribeOHLCV" | "unsubscribeOHLCV" if interval.is_some() => {}
+            _ => return None,
+        }
+        Some(Topic {
+            reset: msg.op.starts_with("subscribe")
+                && msg.data.get("reset").and_then(Value::as_bool) == Some(true),
+            op: msg.op.clone(),
+            symbol,
+            interval,
+        })
+    }
+
+    fn topic_line(&self, verb: &str, name: &str, topic: &Topic) -> String {
+        format!(
+            "{verb}: {} account {name} symbol {} interval {} socket {}",
+            topic.op,
+            topic.symbol,
+            topic.interval.as_deref().unwrap_or("-"),
+            self.socket
+        )
+    }
+
+    fn queue_early(&mut self, name: &str, topic: Topic) {
+        Log::info(&self.topic_line("subscription queued until join", name, &topic));
+        let queue = self.early.entry(name.to_owned()).or_default();
+        queue.push(topic);
+        if queue.len() > EARLY_TOPICS {
+            let oldest = queue.remove(0);
+            Log::warn(&self.topic_line("subscription dropped: early queue full", name, &oldest));
+        }
+    }
+
+    fn apply_early(&mut self, name: &str) {
+        for topic in self.early.remove(name).unwrap_or_default() {
+            Log::info(&self.topic_line("subscription applied at join", name, &topic));
+            self.apply_topic(name, &topic);
+        }
+    }
+
+    fn drop_early(&mut self, name: &str, reason: &str) {
+        for topic in self.early.remove(name).unwrap_or_default() {
+            Log::warn(&self.topic_line(&format!("subscription dropped: {reason}"), name, &topic));
+        }
+    }
+
+    fn apply_topic(&mut self, name: &str, topic: &Topic) {
+        let symbol = &topic.symbol;
+        let add = topic.op.starts_with("subscribe");
+        let (subscribe, unsubscribe, repair) = match topic.interval.as_deref() {
+            Some(interval) if topic.op.ends_with("OHLCV") => (
+                json!({"op": "subscribeCandles", "symbol": symbol, "interval": interval}),
+                json!({"op": "unsubscribeCandles", "symbol": symbol, "interval": interval}),
+                json!({"kind": "candles", "symbol": symbol, "interval": interval}),
+            ),
+            _ => (
+                json!({"op": "subscribeOrderBook", "symbol": symbol}),
+                json!({"op": "unsubscribeOrderBook", "symbol": symbol}),
+                json!({"kind": "orderBook", "symbol": symbol}),
+            ),
+        };
+        let key = subscribe.to_string();
+        self.subscribe(name, subscribe, unsubscribe, add);
+        if topic.reset {
+            self.repair(name, topic, &key, repair);
+        }
+    }
+
+    /// Re-sends the venue's subscribe for a topic this socket holds, rate limited per
+    /// account and topic: refcounts above the venue absorb a chart's own resubscribe.
+    fn repair(&mut self, name: &str, topic: &Topic, key: &str, repair: Value) {
+        let joined = &self.joined[name];
+        if !joined.subscriptions.contains_key(key) {
+            return;
+        }
+        let account = &joined.account;
+        if !self
+            .registry
+            .allow_repair(&account.user, &account.name, key, std::time::Instant::now())
+        {
+            Log::info(&self.topic_line(
+                "subscription repair skipped: repaired recently",
+                name,
+                topic,
+            ));
+            return;
+        }
+        Log::info(&self.topic_line("subscription repair requested", name, topic));
+        self.input(name, json!({"op": "repairSubscription", "topic": repair}));
+    }
+
     fn subscribe(&mut self, name: &str, subscribe: Value, unsubscribe: Value, add: bool) {
         let key = subscribe.to_string();
         let held = self.joined[name]
@@ -1019,6 +1249,7 @@ impl Session {
                 joined.account.handle.leave(client.id);
             }
             if self.identity.resumable
+                && !self.moved
                 && self.identity.user.is_some()
                 && !joined.account.is_public()
             {
@@ -1190,14 +1421,16 @@ struct Hold {
     loaded: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
 }
 
+/// Bounded: a starting engine is busy, and a pump waiting on it lets its client queue fill.
 async fn account_loaded(handle: &AccountHandle) -> bool {
-    handle
-        .read(|store| {
-            let loaded = store.loaded();
-            loaded.orders && loaded.positions
-        })
-        .await
-        .unwrap_or(false)
+    let read = handle.read(|store| {
+        let loaded = store.loaded();
+        loaded.orders && loaded.positions
+    });
+    matches!(
+        tokio::time::timeout(HOLD_LOAD_CHECK, read).await,
+        Ok(Some(true))
+    )
 }
 
 /// Asks the session for a full snapshot once the account loads or the hold
@@ -1214,8 +1447,11 @@ async fn release_hold(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn pump(
     mut link: ClientLink,
+    client: u64,
+    dropped: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     handle: AccountHandle,
     name: String,
     out: Out,
@@ -1259,7 +1495,13 @@ async fn pump(
         let item = tokio::select! {
             item = link.outgoing.recv() => match item {
                 Some(item) => item,
-                None => break,
+                None => {
+                    // The engine closed this client's link; a drain or leave aborts the pump first.
+                    if !draining.load(Ordering::Relaxed) {
+                        let _ = dropped.send((name.clone(), client));
+                    }
+                    break;
+                }
             },
             _ = hold_tick.tick(), if held.is_some() && hold.is_some() => {
                 release_hold(&handle, &name, &mut hold, held.expect("holding")).await;
@@ -1286,8 +1528,9 @@ async fn pump(
                         held = Some(std::time::Instant::now());
                     }
                 }
-                if let Some(since) = held {
-                    release_hold(&handle, &name, &mut hold, since).await;
+                // Withheld until the release re-snapshot, which carries the whole account;
+                // the hold tick checks the load, never this frame.
+                if held.is_some() {
                     continue;
                 }
                 seq += 1;
@@ -1325,6 +1568,18 @@ async fn pump(
         );
         settle(&out, &name, pending, Err(detail));
     }
+}
+
+/// The engine's notices that startup is still waiting or retrying a read, for the journal
+/// too: while held, the page sees nothing, and a start that never finished was silent.
+fn startup_waiting_line(name: &str, notice: &Value) -> Option<String> {
+    use safe_cex_engine::log::code::{STARTUP_DEGRADED, STARTUP_INCOMPLETE};
+    (notice["code"] == STARTUP_INCOMPLETE || notice["code"] == STARTUP_DEGRADED).then(|| {
+        format!(
+            "{name} {}",
+            notice["message"].as_str().unwrap_or("startup incomplete")
+        )
+    })
 }
 
 fn notice_to_msg(
@@ -1389,6 +1644,9 @@ fn notice_to_msg(
             let _ = out.send(envelope::msg(name, "error", json!([notice["error"]])));
         }
         ("event" | "accountAuth", _) => {
+            if let Some(line) = startup_waiting_line(name, notice) {
+                Log::warn(&line);
+            }
             let _ = out.send(envelope::msg(name, "engine-event", notice.clone()));
             if notice["code"] == "order.rejected" && notice["level"] == "error" {
                 let _ = out.send(envelope::msg(name, "error", json!([notice["message"]])));
@@ -1456,6 +1714,198 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
 mod tests {
     use super::*;
 
+    const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
+    const WEB_TWAP: &str = r#"{"accountName":"acct","activeMarket":{"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true},"size":0.1,"duration":600,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"}"#;
+
+    fn acct_init() -> InitPayload {
+        InitPayload {
+            account_name: "acct".into(),
+            exchange_name: "bybit".into(),
+            key: "k".into(),
+            ..InitPayload::default()
+        }
+    }
+
+    fn algo_op(account: &Account, op: &str, data: &str) {
+        account
+            .algos
+            .as_ref()
+            .unwrap()
+            .send(crate::algos::AlgoInput::Op {
+                op: op.into(),
+                data: data.into(),
+                origin: "test".into(),
+            })
+            .unwrap();
+    }
+
+    fn user_session(
+        registry: Arc<Registry>,
+        user: &str,
+    ) -> (Session, tokio::sync::mpsc::Receiver<String>) {
+        let (out, sent, _) = Out::channel(256);
+        let identity = Identity {
+            user: Some(user.into()),
+            token: Some(("t".into(), u64::MAX)),
+            resume_from: None,
+            resumable: true,
+        };
+        let session = Session::new(registry, Arc::new(Metrics::default()), identity, out);
+        (session, sent)
+    }
+
+    /// User u's account under `registry`, with a chase running and a socket of u joined to it.
+    async fn chasing_session(
+        registry: &Arc<Registry>,
+    ) -> (Arc<Account>, Session, tokio::sync::mpsc::Receiver<String>) {
+        let init = acct_init();
+        let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+        let account =
+            crate::accounts::tests::held_account_counted(registry, link, init.fingerprint());
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let (mut session, sent) = user_session(registry.clone(), "u");
+        assert!(session.init(init).await.is_ok());
+        algo_op(&account, "chaser:start", WEB_CHASE);
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        assert_eq!(registry.running_algos(), (1, 0), "the chase runs");
+        (account, session, sent)
+    }
+
+    /// A key or routing edit rebuilds the account: the old one's algos stop on purpose,
+    /// with their finals to this page, never left repricing for a page told they stopped.
+    #[tokio::test(start_paused = true)]
+    async fn a_rebuild_for_new_settings_stops_the_old_accounts_algos_and_tells_the_page() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (account, mut session, mut sent) = chasing_session(&registry).await;
+                let mut chase = Value::Null;
+                while let Ok(frame) = sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&frame).unwrap();
+                    if frame["d"]["op"] == "store"
+                        && let Some(row) = frame["d"]["data"]["activeChasers"].get(0)
+                    {
+                        chase = row["id"].clone();
+                    }
+                }
+                assert!(chase.is_string(), "{chase}");
+                // The helper's stand-in socket: the page's own is the only holder.
+                registry.release(&account, 7);
+                let edited = InitPayload {
+                    key: "k2".into(),
+                    ..acct_init()
+                };
+                let _ = session.init(edited).await;
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                assert_eq!(registry.running_algos(), (0, 0), "the old chase stopped");
+                let mut told = Vec::new();
+                while let Ok(frame) = sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&frame).unwrap();
+                    if frame["d"]["op"] == "error" && frame["d"]["data"][1]["algo"]["id"] == chase {
+                        told.push(frame["d"]["data"][0].clone());
+                    }
+                }
+                assert_eq!(
+                    told.len(),
+                    1,
+                    "the page is told the chase stopped: {told:?}"
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_drain_moves_an_idle_socket_at_once() {
+        let registry = crate::accounts::tests::registry();
+        let (mut idle, _sent) = user_session(registry.clone(), "u");
+        assert_eq!(idle.drain_close(), None, "nothing moves before a drain");
+        registry.start_drain();
+        assert_eq!(idle.drain_close(), Some(Close::Moved));
+        assert_eq!(Close::Moved.code(), 4100);
+        assert_eq!(Close::Moved.reason(), "draining: reconnect");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_drained_socket_running_a_chase_stays_until_the_chase_ends_then_moves() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (account, mut session, _sent) = chasing_session(&registry).await;
+                let mut ended = registry.watch_algos_ended();
+                registry.start_drain();
+                assert_eq!(session.drain_close(), None, "kept while its chase runs");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                assert_eq!(
+                    session.drain_close(),
+                    None,
+                    "the drain never stops the chase"
+                );
+                assert_eq!(registry.running_algos(), (1, 0));
+                algo_op(&account, "chaser:terminateAll", "{}");
+                tokio::time::timeout(std::time::Duration::from_secs(60), ended.changed())
+                    .await
+                    .expect("told as the chase ends")
+                    .unwrap();
+                assert_eq!(registry.running_algos(), (0, 0));
+                assert_eq!(session.drain_close(), Some(Close::Moved));
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_drain_refuses_users_new_here_and_admits_a_live_users_second_socket() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (_account, _first, _sent) = chasing_session(&registry).await;
+                registry.start_drain();
+                let (mut stranger, _) = user_session(registry.clone(), "v");
+                assert_eq!(stranger.init(acct_init()).await, Err(Close::Moved));
+                assert!(!stranger.joined.contains_key("acct"));
+                let (mut second_tab, _) = user_session(registry.clone(), "u");
+                assert_eq!(second_tab.init(acct_init()).await, Ok(()));
+                assert!(second_tab.joined.contains_key("acct"));
+                assert_eq!(second_tab.drain_close(), None, "its account runs a chase");
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn break_glass_tells_the_page_what_stopped_before_it_moves_every_socket() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (_account, mut session, mut sent) = chasing_session(&registry).await;
+                while sent.try_recv().is_ok() {}
+                let mut drain = registry.watch_drain();
+                // What the page had been sent when every socket was told to move.
+                let before_move = tokio::task::spawn_local(async move {
+                    while *drain.borrow_and_update() != crate::accounts::Drain::Now {
+                        drain.changed().await.unwrap();
+                    }
+                    let mut frames = Vec::new();
+                    while let Ok(frame) = sent.try_recv() {
+                        frames.push(frame);
+                    }
+                    frames
+                });
+                assert!(
+                    registry
+                        .break_glass(std::time::Duration::from_secs(25))
+                        .await
+                );
+                let frames = before_move.await.unwrap();
+                assert!(
+                    frames.iter().any(|frame| frame.contains(r#""op":"error""#)
+                        && frame.contains("Chase on BTCUSDT stopped")),
+                    "the chase's own final notice first: {frames:?}"
+                );
+                assert_eq!(registry.running_algos(), (0, 0));
+                assert_eq!(session.drain_close(), Some(Close::Moved));
+            })
+            .await;
+    }
+
     #[test]
     fn metadata_refreshes_wait_in_their_own_pool() {
         let reads = Arc::new(tokio::sync::Semaphore::new(0));
@@ -1472,6 +1922,184 @@ mod tests {
                 .try_acquire_owned()
                 .is_err()
         );
+    }
+
+    fn chart_subscribe(op: &str) -> AccountMsg {
+        AccountMsg {
+            op: op.into(),
+            data: json!({"symbol": "BTCUSDT", "interval": "1"}),
+            account_name: Some("acct".into()),
+        }
+    }
+
+    fn early_session(registry: Arc<Registry>) -> Session {
+        let (out, _sent, _) = Out::channel(64);
+        let identity = Identity {
+            user: Some("u".into()),
+            token: Some(("t".into(), u64::MAX)),
+            resume_from: None,
+            resumable: false,
+        };
+        Session::new(registry, Arc::new(Metrics::default()), identity, out)
+    }
+
+    /// A chart's subscribe that reached the server before its account joined was
+    /// dropped (no joined account for op subscribeOHLCV), and the chart froze.
+    #[tokio::test]
+    async fn a_chart_subscribe_before_join_is_applied_at_join() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let joined_then = |early: bool| async move {
+                    let registry = crate::accounts::tests::registry();
+                    let init = InitPayload {
+                        account_name: "acct".into(),
+                        exchange_name: "bybit".into(),
+                        key: "k".into(),
+                        ..InitPayload::default()
+                    };
+                    let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                    let account = crate::accounts::tests::held_account_running_algos(
+                        link,
+                        init.fingerprint(),
+                    );
+                    crate::accounts::tests::register(&registry, &account);
+                    settle().await;
+                    let (mut session, _sent) = sign_silent_session(registry);
+                    if early {
+                        session.msg(chart_subscribe("subscribeOHLCV")).await;
+                        assert!(!session.joined.contains_key("acct"));
+                        assert_eq!(session.early["acct"].len(), 1);
+                    }
+                    assert!(session.init(init).await.is_ok());
+                    settle().await;
+                    if !early {
+                        session.msg(chart_subscribe("subscribeOHLCV")).await;
+                    }
+                    assert!(!session.early.contains_key("acct"));
+                    let mut held: Vec<_> = session.joined["acct"]
+                        .subscriptions
+                        .clone()
+                        .into_iter()
+                        .collect();
+                    held.sort();
+                    held
+                };
+                // Before join it was dropped; now it lands exactly as one sent after join.
+                assert_eq!(joined_then(true).await, joined_then(false).await);
+            })
+            .await;
+    }
+
+    /// A page whose client queue filled was removed by the engine with no log and
+    /// no frames; the session now says so and gives it a fresh client and snapshot.
+    #[tokio::test]
+    async fn a_client_the_engine_drops_is_logged_and_re_snapshotted() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account =
+                    crate::accounts::tests::held_account_running_algos(link, init.fingerprint());
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                let (mut session, _sent) = sign_silent_session(registry);
+                let mut dropped = session.take_dropped();
+                assert!(session.init(init).await.is_ok());
+                settle().await;
+                let first = session.joined["acct"].client.id;
+                // As a full queue does: the engine side removes the peer, the session did not ask.
+                account.handle.leave(first);
+                let (name, client) =
+                    tokio::time::timeout(std::time::Duration::from_secs(3), dropped.recv())
+                        .await
+                        .expect("the drop is reported")
+                        .unwrap();
+                assert_eq!((name.as_str(), client), ("acct", first));
+                session.client_dropped(&name, client).await;
+                assert_ne!(session.joined["acct"].client.id, first);
+                // A second drop within the window is logged, not re-snapshotted again.
+                let second = session.joined["acct"].client.id;
+                session.client_dropped("acct", second).await;
+                assert_eq!(session.joined["acct"].client.id, second);
+            })
+            .await;
+    }
+
+    /// A chart's forced reset after its own unsubscribe repairs the stream it holds again,
+    /// once per window per account and topic.
+    #[tokio::test]
+    async fn a_reset_subscribe_repairs_its_held_topic_once_per_window() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let settle = || tokio::time::sleep(std::time::Duration::from_millis(200));
+                let registry = crate::accounts::tests::registry();
+                let init = InitPayload {
+                    account_name: "acct".into(),
+                    exchange_name: "bybit".into(),
+                    key: "k".into(),
+                    ..InitPayload::default()
+                };
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let account =
+                    crate::accounts::tests::held_account_running_algos(link, init.fingerprint());
+                crate::accounts::tests::register(&registry, &account);
+                settle().await;
+                let (mut session, _sent) = sign_silent_session(registry.clone());
+                assert!(session.init(init).await.is_ok());
+                settle().await;
+                let candle = |op: &str, reset: bool| AccountMsg {
+                    op: op.into(),
+                    data: json!({"symbol": "BTCUSDT", "interval": "1m", "reset": reset}),
+                    account_name: Some("acct".into()),
+                };
+                let key = json!({"op": "subscribeCandles", "symbol": "BTCUSDT", "interval": "1m"})
+                    .to_string();
+                // A probe records a repair when it allows one: ask once, after the reset.
+                let recorded = |key: &str| {
+                    !registry.allow_repair(
+                        &account.user,
+                        &account.name,
+                        key,
+                        std::time::Instant::now(),
+                    )
+                };
+
+                session.msg(candle("subscribeOHLCV", false)).await;
+                session.msg(candle("unsubscribeOHLCV", true)).await;
+                assert!(session.joined["acct"].subscriptions.is_empty());
+
+                session.msg(candle("subscribeOHLCV", true)).await;
+                assert!(recorded(&key), "the reset of a held topic was repaired");
+                let later = std::time::Instant::now() + crate::accounts::REPAIR_EVERY;
+                assert!(registry.allow_repair(&account.user, &account.name, &key, later));
+                assert!(
+                    registry.allow_repair(&account.user, "other", &key, std::time::Instant::now()),
+                    "another account's same topic has its own window"
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn an_early_subscribe_whose_account_never_joins_is_dropped_not_kept() {
+        let mut session = early_session(crate::accounts::tests::registry());
+        session.msg(chart_subscribe("subscribeOHLCV")).await;
+        session.msg(chart_subscribe("unsubscribeOHLCV")).await;
+        assert_eq!(session.early["acct"].len(), 2);
+        session.drop_early("acct", "init refused");
+        assert!(!session.early.contains_key("acct"));
+        for _ in 0..(EARLY_TOPICS + 5) {
+            session.msg(chart_subscribe("subscribeOHLCV")).await;
+        }
+        assert_eq!(session.early["acct"].len(), EARLY_TOPICS);
     }
 
     /// On the wire: an algo error raised during a drop, then the resume. The op is
@@ -2104,7 +2732,7 @@ mod tests {
                 crate::accounts::tests::register(&registry, &account);
                 let end = r#"{"t":"msg","d":{"op":"chaser:complete","data":{"id":"c1","filled":0.001,"replayed":true}}}"#;
                 (registry.keep_notice(&account, "r1"))(crate::algos::Kept {
-                    text: String::new(),
+                    notices: Vec::new(),
                     ends: vec![end.to_owned()],
                 });
                 let (out, mut sent, _) = Out::channel(64);
@@ -2131,6 +2759,104 @@ mod tests {
                     !frames.iter().any(|frame| frame.contains(r#""op":"error""#)),
                     "{frames:?}"
                 );
+            })
+            .await;
+    }
+
+    /// Grace expiry stops a chase and a TWAP with no browser to tell; the owner's
+    /// next init is told once per algo, each notice naming its kind and the id
+    /// its store row had, so the page can dedupe it against its own backstop.
+    #[tokio::test(start_paused = true)]
+    async fn the_next_init_is_told_each_stopped_algo_by_kind_and_id() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (account, session, mut sent) = chasing_session(&registry).await;
+                algo_op(&account, "twap:start", WEB_TWAP);
+                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                assert_eq!(registry.running_algos(), (1, 1));
+                let (mut chase, mut twap) = (Value::Null, Value::Null);
+                while let Ok(frame) = sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&frame).unwrap();
+                    let rows = &frame["d"]["data"];
+                    if frame["d"]["op"] == "store" {
+                        if let Some(row) = rows["activeChasers"].get(0) {
+                            chase = row["id"].clone();
+                        }
+                        if let Some(row) = rows["activeTWAPs"].get(0) {
+                            twap = row["id"].clone();
+                        }
+                    }
+                }
+                assert!(chase.is_string() && twap.is_string(), "{chase} {twap}");
+                // The helper's stand-in socket: the page's own is the only holder.
+                registry.release(&account, 7);
+                let owner = session.resume_id.clone();
+                session.close();
+                tokio::time::sleep(std::time::Duration::from_secs(80)).await;
+                assert_eq!(
+                    registry.running_algos(),
+                    (0, 0),
+                    "grace expiry stopped them"
+                );
+                // The rebuilt account the next init finds.
+                let init = acct_init();
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let (rebuilt, _algos) =
+                    crate::accounts::tests::held_account_with(Some(link), init.fingerprint());
+                crate::accounts::tests::register(&registry, &rebuilt);
+                let (out, mut sent, _) = Out::channel(256);
+                let identity = Identity {
+                    user: Some("u".into()),
+                    token: Some(("t".into(), u64::MAX)),
+                    resume_from: Some(owner),
+                    resumable: true,
+                };
+                let mut next = Session::new(
+                    registry.clone(),
+                    Arc::new(Metrics::default()),
+                    identity,
+                    out,
+                );
+                next.open().await;
+                let wire = format!(
+                    r#"{{"t":"init","d":{}}}"#,
+                    serde_json::to_string(&init).unwrap()
+                );
+                assert!(next.handle(&wire).await.is_ok());
+                let mut notices = Vec::new();
+                while let Ok(frame) = sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&frame).unwrap();
+                    if frame["d"]["op"] == "error" {
+                        notices.push(frame["d"]["data"].clone());
+                    }
+                }
+                for (kind, id, text) in [
+                    (
+                        "chase",
+                        &chase,
+                        "Chase on BTCUSDT stopped: no browser for 60s.",
+                    ),
+                    (
+                        "twap",
+                        &twap,
+                        "TWAP on BTCUSDT stopped: no browser for 60s.",
+                    ),
+                ] {
+                    let algo = serde_json::json!({"kind": kind, "id": id});
+                    let told: Vec<&Value> = notices
+                        .iter()
+                        .filter(|data| data[1]["algo"] == algo)
+                        .collect();
+                    assert_eq!(told.len(), 1, "{algo} told once: {notices:?}");
+                    assert!(
+                        told[0][0]
+                            .as_str()
+                            .is_some_and(|told| told.starts_with(text)),
+                        "{told:?}"
+                    );
+                    assert_eq!(told[0][1]["forceToast"], true);
+                }
             })
             .await;
     }
@@ -2180,6 +2906,24 @@ mod tests {
     }
 
     #[test]
+    fn a_startup_still_waiting_is_logged_with_what_it_waits_for() {
+        let waiting = json!({"type": "event", "level": "error", "code": "startup.incomplete",
+            "message": "Startup incomplete: still waiting for markets, tickers"});
+        assert_eq!(
+            startup_waiting_line("bbbbb", &waiting).as_deref(),
+            Some("bbbbb Startup incomplete: still waiting for markets, tickers")
+        );
+        let retrying = json!({"type": "event", "level": "warn", "code": "startup.degraded",
+            "message": "Public startup delayed; still retrying: transport request timed out"});
+        assert_eq!(
+            startup_waiting_line("bbbbb", &retrying).as_deref(),
+            Some("bbbbb Public startup delayed; still retrying: transport request timed out")
+        );
+        let other = json!({"type": "event", "code": "order.rejected", "message": "x"});
+        assert_eq!(startup_waiting_line("bbbbb", &other), None);
+    }
+
+    #[test]
     fn a_settings_refusal_is_sent_once_until_its_fields_change_or_it_resolves() {
         let mut refused = HashMap::new();
         let spot = "bear5 is open elsewhere with different settings (enableSpotMarkets)";
@@ -2199,6 +2943,80 @@ mod tests {
         // A successful init clears it (Session::init), so a later refusal shows again.
         refused.remove("bear5");
         assert!(first_refusal(&mut refused, "bear5", both));
+    }
+
+    /// Every Hosted init logged engine dropped client once: while startup was held the
+    /// pump awaited an engine read per frame, the engine was busy starting, and the
+    /// 32-frame queue filled. Held frames must drain without waiting on the engine.
+    #[tokio::test]
+    async fn held_startup_frames_drain_without_waiting_on_the_engine() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let handle = crate::accounts::tests::idle_handle_on_own_thread();
+                // The engine busy starting up: a turn that takes a while.
+                let busy = handle.clone();
+                tokio::task::spawn_local(async move {
+                    let _ = busy
+                        .read(|_| std::thread::sleep(std::time::Duration::from_millis(1_500)))
+                        .await;
+                });
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                let (frames, outgoing) = tokio::sync::mpsc::channel(32);
+                let (_cancel, canceled) = tokio::sync::watch::channel(false);
+                let (out, _sent, _) = Out::channel(64);
+                let (loaded, _loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+                let (dropped, _dropped_rx) = tokio::sync::mpsc::unbounded_channel();
+                tokio::task::spawn_local(pump(
+                    safe_cex_native::ClientLink { outgoing, canceled },
+                    1,
+                    dropped,
+                    handle,
+                    "acct".into(),
+                    out,
+                    Arc::default(),
+                    Arc::default(),
+                    Some(Hold { client: 1, loaded }),
+                ));
+                let mut accepted = 0;
+                for _ in 0..100 {
+                    if frames
+                        .try_send(safe_cex_native::Outgoing::Frame(Arc::from(&b"frame"[..])))
+                        .is_ok()
+                    {
+                        accepted += 1;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(3)).await;
+                }
+                assert_eq!(accepted, 100, "the held pump stalled on the busy engine");
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn update_positions_before_join_is_still_answered() {
+        let (out, mut sent, _) = Out::channel(64);
+        let identity = Identity {
+            user: Some("u".into()),
+            token: Some(("t".into(), u64::MAX)),
+            resume_from: None,
+            resumable: false,
+        };
+        let mut session = Session::new(
+            crate::accounts::tests::registry(),
+            Arc::new(Metrics::default()),
+            identity,
+            out,
+        );
+        session
+            .msg(AccountMsg {
+                op: "updatePositions".into(),
+                data: json!({"requestId": 9}),
+                account_name: Some("acct".into()),
+            })
+            .await;
+        let reply = sent.try_recv().expect("a reply");
+        assert!(reply.contains("updatePositions:done"), "{reply}");
+        assert!(reply.contains(r#""requestId":9"#), "{reply}");
     }
 
     /// The COSIGNED data-source path end to end: a source account on the native
@@ -2402,8 +3220,11 @@ mod tests {
         ) {
             let (out, sent, _) = Out::channel(256);
             let (loaded, _loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (dropped, _dropped_rx) = tokio::sync::mpsc::unbounded_channel();
             let task = tokio::task::spawn_local(pump(
                 link,
+                client,
+                dropped,
                 handle.clone(),
                 "acct".into(),
                 out,
@@ -2649,8 +3470,11 @@ mod tests {
                     let link = handle.join(1, true).await.unwrap();
                     let (out, mut sent, _) = Out::channel(64);
                     let (loaded, mut loaded_rx) = tokio::sync::mpsc::unbounded_channel();
+                    let (dropped, _dropped_rx) = tokio::sync::mpsc::unbounded_channel();
                     let pump = tokio::task::spawn_local(pump(
                         link,
+                        1,
+                        dropped,
                         handle.clone(),
                         "acct".into(),
                         out,

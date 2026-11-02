@@ -1682,6 +1682,7 @@ impl<P> Cx<'_, P> {
         parent: Option<&Context>,
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
+        let policy = discovery_bound(scope, policy, self.store.loaded());
         self.core().make_http_context(scope, policy, parent, egress)
     }
 
@@ -2228,6 +2229,31 @@ impl<P> Cx<'_, P> {
         #[cfg(feature = "repair-mutations")]
         self.io.repair_leg_finished(context, self.now);
         Ok(())
+    }
+}
+
+/// Startup discovery's bound. The catalogue and first tickers can be most of a
+/// megabyte through a slow browser relay, and the open is inside the bound too.
+pub const DISCOVERY_TIMEOUT_MS: u32 = 60_000;
+
+/// The standard read bound venues give their reads.
+const READ_TIMEOUT_MS: u32 = 20_000;
+
+/// A public background read on the standard bound, issued before markets and tickers
+/// have loaded, is startup discovery: it gets DISCOVERY_TIMEOUT_MS. A bound a venue
+/// chose for itself, and every other request, is kept.
+fn discovery_bound(scope: Scope, policy: Policy, loaded: crate::model::Loaded) -> Policy {
+    let discovery = scope == Scope::Background
+        && policy.operation == Operation::Read
+        && policy.credential.is_none()
+        && !(loaded.markets && loaded.tickers);
+    if discovery && policy.timeout_ms == READ_TIMEOUT_MS {
+        Policy {
+            timeout_ms: DISCOVERY_TIMEOUT_MS,
+            ..policy
+        }
+    } else {
+        policy
     }
 }
 

@@ -437,6 +437,8 @@ export type CallableMethodsInWorker =
   | 'fetchHistoricalOrders'
   | 'fetchClosedPnl';
 
+export type OHLCVWebworkerOptions = Pick<OHLCVOptions, 'symbol' | 'interval'> & { reset?: boolean };
+
 export interface Exchange {
   // udf endpoints for TV, if supported
   initTime: number;
@@ -534,7 +536,10 @@ export interface Exchange {
   listenOHLCV: (o: OHLCVOptions, c: (c: Candle) => void) => () => void;
   listenOHLCVs: (o: OHLCVSOptions, c: (c: Candle & { symbol: string; interval: Timeframe }) => void) => void;
   listenOrderBook: (s: string, c: (o: OrderBook) => void) => () => void;
-  listenOHLCVWebworker: (o: Pick<OHLCVOptions, 'symbol' | 'interval'>, c: (c: Candle) => void) => () => void;
+  /** `reset`: a forced resubscribe; the venue re-sends its subscribe for a stream gone dead. */
+  listenOHLCVWebworker: (o: OHLCVWebworkerOptions, c: (c: Candle) => void) => () => void;
+  /** Re-sends the venue's native subscribe for a live candle stream, where the venue can. */
+  repairOHLCV?: (o: Pick<OHLCVOptions, 'symbol' | 'interval'>) => void;
   listenOrderBookWebworker: (s: string, c: (o: OrderBook) => void) => () => void;
   updatePositionsInWebworker: (symbols?: string[]) => Promise<void>;
   callMethodInWorker: <M extends CallableMethodsInWorker>(
@@ -1653,9 +1658,14 @@ export class BaseExchange implements Exchange {
     this.store.reset();
   }
 
-  listenOHLCVWebworker(o: Pick<OHLCVOptions, 'symbol' | 'interval'>, c: (c: Candle) => void) {
+  listenOHLCVWebworker(o: OHLCVWebworkerOptions, c: (c: Candle) => void) {
     const subId = nanoid();
-    this.emitter.emit('subscribeOHLCV', { symbol: o.symbol, interval: o.interval, subId });
+    this.emitter.emit('subscribeOHLCV', {
+      symbol: o.symbol,
+      interval: o.interval,
+      subId,
+      ...(o.reset && { reset: true }),
+    });
     const handler = (event: any) => {
       if (event.symbol === o.symbol && event.interval === o.interval) {
         c(event.candle);

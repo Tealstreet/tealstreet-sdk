@@ -327,6 +327,7 @@ const isFreshPositionsRead = (body: unknown): body is FreshPositionsRead => {
     )
   );
 };
+const NUKE_ORDERS_MAY_REMAIN = 'Orders, including triggers and TP/SL, may remain on this venue: check open orders';
 const NUKE_UNSEEN_ORDERS =
   'Orders placed in the last few seconds may not be cancelled on this venue: check open orders';
 /** The one rule for when a nuke warns that unseen orders may rest. */
@@ -2428,7 +2429,9 @@ export class RustEngineExchange extends BaseExchange {
     const failures: unknown[] = [];
     await this.cancelAllOrders(await this.nukeCancelSymbols(placedSymbols)).catch((error) => failures.push(error));
     if ((await this.capabilitiesFor('nuke')).nukeAccountCancel)
-      await this.command({ op: 'cancelAccountOrders' }).catch((error) => failures.push(error));
+      await this.command({ op: 'cancelAccountOrders' }).catch((error) =>
+        failures.push(withWarning(error, NUKE_ORDERS_MAY_REMAIN)),
+      );
     if (failures.length === 1) throw failures[0];
     if (failures.length) throw new Error(failures.map(errorMessage).join('; '));
   };
@@ -3302,6 +3305,15 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.publicDemandReady || this.isDisposed) return;
     this.sharedPublicFeed?.send({ op: 'candle', symbol, interval, subscribe });
     this.subscriptionCommand({ op: subscribe ? 'subscribeCandles' : 'unsubscribeCandles', symbol, interval });
+  };
+
+  /** The engine re-sends the venue's subscribe for this live stream; a venue that cannot logs why. */
+  repairOHLCV = (opts: Pick<OHLCVOptions, 'symbol' | 'interval'>) => {
+    if (!this.publicDemandReady || !this.candleListeners.has(`${opts.symbol}:${opts.interval}`)) return;
+    this.subscriptionCommand({
+      op: 'repairSubscription',
+      topic: { kind: 'candles', symbol: opts.symbol, interval: opts.interval },
+    });
   };
 
   listenOHLCVForFeed = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {

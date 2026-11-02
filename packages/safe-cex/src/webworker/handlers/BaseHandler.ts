@@ -19,6 +19,9 @@ export const rustAlgoExchange = (exchange: unknown): RustAlgoExchange | undefine
 const PENDING_TIMEOUT_MS = 30_000;
 const PENDING_POLL_MS = 500;
 const PENDING_TIMEOUT_REPORT_COOLDOWN_MS = 5 * 60_000;
+// Subscriptions wait for markets however long they take; a repeat replaces its
+// earlier copy and the oldest go past this many, so the queue stays bounded.
+const MAX_PENDING_SUBSCRIPTIONS = 200;
 
 export abstract class BaseHandler {
   protected _accountName: string;
@@ -35,6 +38,8 @@ export abstract class BaseHandler {
   private _firstPendingAt: number | null = null;
   private _lastPendingTimeoutReportAt: number | null = null;
   private _suppressedPendingTimeoutReports = 0;
+  private _pendingReported = false;
+  private _droppedPending = 0;
 
   constructor(
     accountName: string,
@@ -89,11 +94,17 @@ export abstract class BaseHandler {
     }
 
     this._firstPendingAt ??= Date.now();
+    const key = pendingKey(payload);
+    this._pendingUntilMarkets = this._pendingUntilMarkets.filter((pending) => pendingKey(pending) !== key);
     this._pendingUntilMarkets.push(payload);
+    if (this._pendingUntilMarkets.length > MAX_PENDING_SUBSCRIPTIONS) {
+      this._droppedPending += this._pendingUntilMarkets.length - MAX_PENDING_SUBSCRIPTIONS;
+      this._pendingUntilMarkets = this._pendingUntilMarkets.slice(-MAX_PENDING_SUBSCRIPTIONS);
+    }
 
     this._schedulePendingMarketsCheck();
 
-    // Timeout: drop pending and notify client if markets never load
+    // Report slow markets once per cooldown; the subscriptions stay queued.
     if (!this._pendingTimeout) {
       this._pendingTimeout = setTimeout(() => {
         if (this._pendingUntilMarkets.length > 0) {
@@ -103,7 +114,7 @@ export abstract class BaseHandler {
             now - this._lastPendingTimeoutReportAt >= PENDING_TIMEOUT_REPORT_COOLDOWN_MS;
 
           if (shouldReport) {
-            const msg = `Markets still not loaded after ${PENDING_TIMEOUT_MS / 1000}s, dropping ${this._pendingUntilMarkets.length} pending subscriptions`;
+            const msg = `Markets still not loaded after ${PENDING_TIMEOUT_MS / 1000}s, keeping ${this._pendingUntilMarkets.length} pending subscriptions until they load`;
             console.error(`[${this.constructor.name}] ${msg}`);
             const error = new Error(msg);
             error.name = 'MarketsNotLoadedError';
@@ -134,12 +145,20 @@ export abstract class BaseHandler {
           } else {
             this._suppressedPendingTimeoutReports += 1;
           }
-          this._pendingUntilMarkets = [];
+          this._pendingReported = true;
         }
-        this._clearPendingTimers();
+        this._pendingTimeout = null;
       }, PENDING_TIMEOUT_MS);
     }
     return true;
+  }
+
+  /** An unsubscribe for a subscription still waiting on markets: it must never apply. */
+  protected cancelPending(subId: unknown): void {
+    this._pendingUntilMarkets = this._pendingUntilMarkets.filter(
+      (pending) => (pending.data as { subId?: unknown } | undefined)?.subId !== subId,
+    );
+    if (this._pendingUntilMarkets.length === 0) this._clearPendingTimers();
   }
 
   private _schedulePendingMarketsCheck(): void {
@@ -156,6 +175,13 @@ export abstract class BaseHandler {
   }
 
   private _flushPending(): void {
+    const waitedMs = this._firstPendingAt === null ? 0 : Date.now() - this._firstPendingAt;
+    if (this._pendingReported) {
+      const dropped = this._droppedPending ? `, ${this._droppedPending} oldest dropped past the bound` : '';
+      console.info(
+        `[${this.constructor.name}] Markets loaded: applied ${this._pendingUntilMarkets.length} pending subscriptions after ${Math.floor(waitedMs / 1000)}s${dropped}`,
+      );
+    }
     this._clearPendingTimers();
     this._resetPendingTimeoutReportEpisode();
     const toReplay = [...this._pendingUntilMarkets];
@@ -173,6 +199,8 @@ export abstract class BaseHandler {
       this._pendingCheckTimer = null;
     }
     this._firstPendingAt = null;
+    this._pendingReported = false;
+    this._droppedPending = 0;
   }
 
   private _getPendingTelemetry(): Record<string, unknown> {
@@ -186,6 +214,7 @@ export abstract class BaseHandler {
       marketCount: this._exchange.store.markets.length,
       loadedMarkets: this._exchange.store.loaded?.markets === true,
       pendingCount: this._pendingUntilMarkets.length,
+      droppedPastBound: this._droppedPending,
       pendingAgeMs: this._firstPendingAt === null ? 0 : Date.now() - this._firstPendingAt,
       pendingOpCounts,
       exchangeOptions: {
@@ -218,3 +247,5 @@ export abstract class BaseHandler {
     this._suppressedPendingTimeoutReports = 0;
   }
 }
+
+const pendingKey = (payload: StoreWorkerPayload): string => `${payload.op}:${JSON.stringify(payload.data)}`;

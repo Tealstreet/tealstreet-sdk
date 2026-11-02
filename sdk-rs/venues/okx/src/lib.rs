@@ -685,8 +685,7 @@ impl Okx {
             if gap {
                 let id = message.arg.inst_id;
                 if let Some(feed) = self.connections[PUBLIC].feed {
-                    let key =
-                        serde_json::to_string(&Topic::instrument("books", id)).expect("topic");
+                    let key = socket_codec::interest_key(&socket_codec::book_topic(id));
                     if let Err(error) = cx.repair_socket_interests(feed, vec![key]) {
                         cx.notice(
                             Level::Error,
@@ -874,6 +873,14 @@ impl Venue for Okx {
             self.socket_account_ready(cx, reopened);
         }
         Ok(())
+    }
+
+    fn subscription_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(store, topic)
     }
 
     fn encode_socket_interests(
@@ -1362,6 +1369,20 @@ impl Venue for Okx {
         if let Err(error) = result {
             if let Some(context) = &discovery {
                 let _ = cx.finish_http_context(context);
+            }
+            // EEA's keyed catalogue is signed: a refused key is refused, not a retry.
+            if matches!(pending, Pending::Markets { .. })
+                && self.options.eea
+                && self.credentials.is_some()
+                && let Some((code, msg)) = serde_json::from_str::<wire::Envelope<'_>>(response.body)
+                    .ok()
+                    .map(|e| (e.code.to_owned(), e.msg.to_owned()))
+                && code != "50113"
+                && let Some(kind) = account::rest_key_rejection(&code)
+            {
+                let refused = account::rejection("API key", &code, &msg, kind);
+                self.reject_startup(cx, refused, kind == safe_cex_engine::ErrorKind::AuthInvalid);
+                return;
             }
             if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
                 self.public_failed(

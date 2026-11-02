@@ -10,7 +10,8 @@ use safe_cex_engine::{Action, Engine, Event, HttpRequest, RequestId, TimerId};
 use safe_cex_venue_okx::Okx;
 use std::collections::HashSet;
 
-const DEADLINE_MS: f64 = 20_000.0;
+// Startup discovery reads carry the engine's 60 s discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.0;
 const PUBLIC_MARKETS: &str = "/api/v5/public/instruments?instType=SWAP";
 const PRIVATE_MARKETS: &str = "/api/v5/account/instruments?instType=SWAP";
 
@@ -20,6 +21,7 @@ struct Cycle {
     requests: Vec<HttpRequest>,
     managed: HashSet<RequestId>,
     timers: Vec<(TimerId, f64)>,
+    notices: Vec<String>,
 }
 
 impl Cycle {
@@ -31,6 +33,7 @@ impl Cycle {
             requests: Vec::new(),
             managed: HashSet::new(),
             timers: Vec::new(),
+            notices: Vec::new(),
         };
         cycle.engine.start(0.0);
         cycle.collect();
@@ -76,6 +79,7 @@ impl Cycle {
                 Action::Http(request) => self.requests.push(request),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(notice) => self.notices.push(format!("{notice:?}")),
                 _ => {}
             }
             for action in self
@@ -203,7 +207,7 @@ fn public_tickers_read_releases_through_background_context() {
 fn an_unanswered_instruments_read_ends_at_the_shared_deadline_and_retries() {
     let mut cycle = Cycle::started(Options::default());
     let first = cycle.take(PUBLIC_MARKETS).expect("public instruments read");
-    cycle.advance(DEADLINE_MS + 30_000.0);
+    cycle.advance(DISCOVERY_DEADLINE_MS + 30_000.0);
     assert!(
         cycle
             .requests
@@ -227,6 +231,37 @@ fn eea_private_instruments_read_is_managed_and_signed() {
         cycle.managed.contains(&read.id),
         "EEA instruments released outside managed Context custody"
     );
+}
+
+/// A wave okxeu user sat on "still waiting for markets": the keyed catalogue read is
+/// signed, and a refused key was retried as if a public read had failed.
+#[test]
+fn eea_catalogue_refused_for_the_key_ends_startup_as_a_key_refusal() {
+    let mut cycle = Cycle::started(credentialed(true));
+    cycle.answer(
+        PRIVATE_MARKETS,
+        r#"{"code":"50110","msg":"Your IP 1.2.3.4 is not included in your API key's IP whitelist.","data":[]}"#,
+        1.0,
+    );
+    assert!(
+        cycle.notices.iter().any(|n| n.contains("StartupFailed")),
+        "{:?}",
+        cycle.notices
+    );
+    cycle.advance(120_000.0);
+    assert_eq!(cycle.count(PRIVATE_MARKETS), 0, "{:?}", cycle.urls());
+}
+
+#[test]
+fn eea_catalogue_server_error_is_still_retried() {
+    let mut cycle = Cycle::started(credentialed(true));
+    cycle.answer(
+        PRIVATE_MARKETS,
+        r#"{"code":"50001","msg":"Service temporarily unavailable","data":[]}"#,
+        1.0,
+    );
+    cycle.advance(120_000.0);
+    assert!(cycle.count(PRIVATE_MARKETS) >= 1, "{:?}", cycle.urls());
 }
 
 // ---- Compatibility controls ----

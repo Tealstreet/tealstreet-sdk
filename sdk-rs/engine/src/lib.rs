@@ -73,7 +73,8 @@ pub use engine::{
     DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpRelease, HttpRequest,
     MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PollTimerBounds, Query,
     ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SigningTarget, SocketChannel,
-    SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction, unsupported_venue_action,
+    SocketContext, SocketId, SocketSpec, SubscriptionTopic, TimerId, Venue, VenueAction,
+    unsupported_venue_action,
 };
 pub use error::{
     BuilderAuthorization, BuilderAuthorizationReason, ErrorKind, Outcome, Partial, VenueError,

@@ -1858,3 +1858,37 @@ mod owned_nonpageable {
         assert_eq!(e.store().orders(), &[cached]);
     }
 }
+#[test]
+fn spot_native_tier_with_a_wide_top_gap_keeps_its_tier() {
+    let (mut e, s) = ready(false);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    e.drain_plain().for_each(drop);
+    // Coarse tier: every price a multiple of 10 ticks.
+    support::message(
+        &mut e,
+        s,
+        2100.0,
+        r#"{"channel":"l2Book","data":{"coin":"PURR/USDC","time":2100,"levels":[[{"px":"0.2","sz":"20"},{"px":"0.1999","sz":"30"},{"px":"0.1998","sz":"30"}],[{"px":"0.21","sz":"40"},{"px":"0.2101","sz":"50"},{"px":"0.2102","sz":"50"}]]}}"#,
+    );
+    // Native tier with a 5-tick top gap; the gap alone would read as the coarse tier.
+    support::message(
+        &mut e,
+        s,
+        2200.0,
+        r#"{"channel":"l2Book","data":{"coin":"PURR/USDC","time":2200,"levels":[[{"px":"0.2","sz":"2"},{"px":"0.19995","sz":"3"},{"px":"0.19993","sz":"3"}],[{"px":"0.21","sz":"4"},{"px":"0.21005","sz":"5"},{"px":"0.21007","sz":"5"}]]}}"#,
+    );
+    let book = e
+        .venue()
+        .books()
+        .find(|(s, _)| *s == "PURR/USDC")
+        .unwrap()
+        .1;
+    // Both tiers kept: three native levels plus the two deeper coarse levels.
+    assert_eq!(book.bids().len(), 5);
+    assert_eq!(book.asks().len(), 5);
+}

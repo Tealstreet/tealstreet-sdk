@@ -131,3 +131,34 @@ describe('proxyTokenClient', () => {
     });
   });
 });
+
+describe('proxyTokenClient hung fetch', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('aborts a /api/proxykey fetch after 10 s and frees the single flight for the next caller', async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          signals.push(init.signal!);
+          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { refreshProxyToken } = await import('./proxyTokenClient');
+    const first = refreshProxyToken();
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(signals[0].aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(first).resolves.toBe('');
+    expect(signals[0].aborted).toBe(true);
+    // The single flight was released: the next caller fetches again instead of joining the hung one.
+    void refreshProxyToken();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});

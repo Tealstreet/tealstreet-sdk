@@ -1161,7 +1161,8 @@ impl Backpack {
                     }
                 }
                 Step::Leverage(leverage) => {
-                    if request.managed.is_some() {
+                    // Documented: PATCH /api/v1/account answers 200 with no content.
+                    if request.managed.is_some() && !response.body.trim().is_empty() {
                         validate_ack(response.body)?;
                     }
                     accept_trade(cx, &request, vec![])?;

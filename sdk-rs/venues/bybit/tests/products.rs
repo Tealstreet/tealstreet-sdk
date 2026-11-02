@@ -1092,7 +1092,7 @@ fn owned_history_category_failure_keeps_sorted_globally_limited_prior_rows() {
 #[test]
 fn unsupported_order_memory_is_separate_and_persistent_across_product_swaps() {
     let mut h = ready(true);
-    let expected = "Bybit order shared-unsupported has an unsupported type and is not shown";
+    let expected = r#"Bybit order shared-unsupported has an unsupported type (orderType Some("FutureType"), stopOrderType None, createType None, tpslMode None, side None, triggerPrice None) and is not shown"#;
     for round in 0..3 {
         if round > 0 {
             h.advance(15_000.0);
@@ -1349,7 +1349,8 @@ fn option_seeds_are_managed_background_reads() {
         .collect();
     assert!(!seeds.is_empty(), "option seeds requested");
     for seed in seeds {
-        assert_eq!(seed.timeout_ms, Some(20_000), "{} is managed", seed.url);
+        // The startup ticker snapshot, on the engine's 60 s discovery bound.
+        assert_eq!(seed.timeout_ms, Some(60_000), "{} is managed", seed.url);
     }
 }
 

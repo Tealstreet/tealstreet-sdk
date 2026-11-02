@@ -162,6 +162,27 @@ pub fn algo_error(account_name: &str, message: Value) -> String {
     )
 }
 
+/// An algo error, and for an algo's stop notice the algo it names
+/// (`{"kind": "chase"|"twap", "id"}`), so the page can dedupe it exactly.
+pub fn algo_notice(
+    account_name: &str,
+    message: &str,
+    algo: Option<&crate::algos::AlgoRef>,
+) -> String {
+    let mut options = json!({"forceToast": true});
+    if let Some(algo) = algo {
+        options["algo"] = json!({"kind": algo.kind, "id": algo.id});
+    }
+    envelope(
+        "msg",
+        json!({
+            "op": "error",
+            "accountName": account_name,
+            "data": [message, options],
+        }),
+    )
+}
+
 /// An init the server will not build: shown to the user at once (`forceToast`),
 /// and marked `initRefused` so the client can stop waiting for that account to load.
 pub fn init_refused(account_name: &str, message: &str) -> String {

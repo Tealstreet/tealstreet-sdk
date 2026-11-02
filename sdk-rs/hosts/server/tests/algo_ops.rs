@@ -175,6 +175,7 @@ impl Algos {
             None,
             PlacedSymbols::default(),
             Arc::new(AtomicBool::new(true)),
+            Default::default(),
             inbox_rx,
         ));
         // The feed's join snapshot loads the market before any op.
@@ -693,9 +694,10 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
         .run_until(async {
             let mut algos = Algos::start().await;
             algos.op("chaser:start", web_chase(None));
-            algos
+            let store = algos
                 .next("store", |data| !active_chasers(data).is_empty())
                 .await;
+            let id = active_chasers(&store["data"])[0]["id"].clone();
             let (kept, notice) = tokio::sync::oneshot::channel();
             let kept = Mutex::new(Some(kept));
             algos
@@ -709,13 +711,19 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
                     })),
                 })
                 .unwrap();
+            let kept = tokio::time::timeout(Duration::from_secs(5), notice)
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(
-                tokio::time::timeout(Duration::from_secs(5), notice)
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                "Chase on BTCUSDT stopped: no browser for 60s. Its order may still be open: check it."
-                    .into()
+                kept.notices,
+                [algos::Notice {
+                    text: "Chase on BTCUSDT stopped: no browser for 60s. Its order may still be open: check it.".into(),
+                    algo: Some(algos::AlgoRef {
+                        kind: "chase",
+                        id: id.as_str().unwrap().to_owned(),
+                    }),
+                }]
             );
             while let Ok(text) = algos.out.try_recv() {
                 let message: Value = serde_json::from_str(&text).unwrap();
@@ -724,6 +732,119 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
                     "nothing is sent to an absent socket"
                 );
             }
+        })
+        .await;
+}
+
+/// The page dedupes stop notices by algo: each stopped chase and TWAP is its own
+/// notice, its text unchanged, naming its kind and the id its store row had.
+#[tokio::test]
+async fn each_stopped_chase_and_twap_is_its_own_notice_naming_its_algo() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("chaser:start", web_chase(None));
+            algos.op("chaser:start", web_chase(None));
+            algos.op("twap:start", web_twap());
+            let store = algos
+                .next("store", |data| {
+                    active_chasers(data).len() == 2 && active_twaps(data).len() == 1
+                })
+                .await;
+            let chase = "Chase on BTCUSDT stopped: the server is restarting.";
+            let mut expected: Vec<(Value, &str)> = active_chasers(&store["data"])
+                .iter()
+                .map(|row| (json!({"kind": "chase", "id": row["id"]}), chase))
+                .collect();
+            let twap = &active_twaps(&store["data"])[0];
+            expected.push((
+                json!({"kind": "twap", "id": twap["id"]}),
+                "TWAP on BTCUSDT stopped: the server is restarting.",
+            ));
+            algos
+                .inbox
+                .send(AlgoInput::Dispose {
+                    reason: "the server is restarting".into(),
+                    stopped: None,
+                })
+                .unwrap();
+            let mut notices = Vec::new();
+            let _ = tokio::time::timeout(Duration::from_secs(5), async {
+                while let Some(text) = algos.out.recv().await {
+                    let message: Value = serde_json::from_str(&text).unwrap();
+                    let d = &message["d"];
+                    if d["op"] == "error"
+                        && d["data"][0]
+                            .as_str()
+                            .is_some_and(|text| text.contains(" stopped: "))
+                    {
+                        notices.push(d["data"].clone());
+                    }
+                }
+            })
+            .await;
+            assert_eq!(notices.len(), expected.len(), "one per algo: {notices:?}");
+            for (algo, text) in expected {
+                let told: Vec<&Value> = notices
+                    .iter()
+                    .filter(|data| data[1]["algo"] == algo)
+                    .collect();
+                assert_eq!(told.len(), 1, "{algo} told once: {notices:?}");
+                assert_eq!(told[0][0], text);
+                assert_eq!(told[0][1]["forceToast"], true);
+            }
+        })
+        .await;
+}
+
+/// One notice per user action: a TWAP's slice chase names its TWAP on its row, and
+/// a stop tells the TWAP, not the slice too.
+#[tokio::test]
+async fn a_twap_slice_chase_names_its_twap_and_its_stop_is_told_by_the_twap() {
+    LocalSet::new()
+        .run_until(async {
+            let mut algos = Algos::start().await;
+            algos.op("chaser:start", web_chase(None));
+            let mut twap = web_twap();
+            twap["useChaserOrders"] = true.into();
+            algos.op("twap:start", twap);
+            let store = algos
+                .next("store", |data| {
+                    active_chasers(data).len() == 2 && active_twaps(data).len() == 1
+                })
+                .await;
+            let twap_id = active_twaps(&store["data"])[0]["id"].clone();
+            let chasers = active_chasers(&store["data"]);
+            let (slices, own): (Vec<&Value>, Vec<&Value>) =
+                chasers.iter().partition(|row| row.get("twapId").is_some());
+            assert_eq!(slices.len(), 1, "{chasers:?}");
+            assert_eq!(slices[0]["twapId"], twap_id);
+            assert_eq!(own.len(), 1, "{chasers:?}");
+            algos
+                .inbox
+                .send(AlgoInput::Dispose {
+                    reason: "the server is restarting".into(),
+                    stopped: None,
+                })
+                .unwrap();
+            let mut told = Vec::new();
+            let _ = tokio::time::timeout(Duration::from_secs(5), async {
+                while let Some(text) = algos.out.recv().await {
+                    let message: Value = serde_json::from_str(&text).unwrap();
+                    let d = &message["d"];
+                    if d["op"] == "error" && !d["data"][1]["algo"].is_null() {
+                        told.push(d["data"][1]["algo"].clone());
+                    }
+                }
+            })
+            .await;
+            assert_eq!(
+                told,
+                vec![
+                    json!({"kind": "chase", "id": own[0]["id"]}),
+                    json!({"kind": "twap", "id": twap_id}),
+                ]
+            );
         })
         .await;
 }

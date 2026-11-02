@@ -22,6 +22,45 @@ struct Send<T> {
     subscription: T,
 }
 
+/// The native subscribe frame, and so the interest key, for one public topic.
+fn public_topic(
+    kind: &str,
+    coin: Option<&str>,
+    interval: Option<&str>,
+    dex: Option<&str>,
+) -> String {
+    serde_json::to_string(&Send {
+        method: "subscribe",
+        subscription: PublicTopic {
+            r#type: kind,
+            coin,
+            interval,
+            dex,
+        },
+    })
+    .expect("native public topic")
+}
+
+/// Spot depth names its significant figures, `null` for full precision.
+fn spot_depth_topic(coin: &str, n_sig_figs: Option<u8>) -> String {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Depth<'a> {
+        r#type: &'static str,
+        coin: &'a str,
+        n_sig_figs: Option<u8>,
+    }
+    serde_json::to_string(&Send {
+        method: "subscribe",
+        subscription: Depth {
+            r#type: "l2Book",
+            coin,
+            n_sig_figs,
+        },
+    })
+    .expect("native spot depth topic")
+}
+
 #[derive(serde::Deserialize)]
 struct EncodedTopic<'a> {
     #[serde(borrow)]
@@ -37,6 +76,32 @@ struct DepthOrder<'a> {
 }
 
 impl Hyperliquid {
+    /// The feed and key `topic` streams on: a candle's own topic, or a book's
+    /// full-precision `l2Book` (perps' `bbo` and spot's rounded depths are siblings).
+    pub(super) fn topic_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        let key = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => public_topic(
+                "candle",
+                Some(store.market(symbol)?.id.as_str()),
+                Some(interval.as_str()),
+                None,
+            ),
+            SubscriptionTopic::OrderBook { symbol } => {
+                let coin = store.market(symbol)?.id.as_str();
+                if self.spot {
+                    spot_depth_topic(coin, None)
+                } else {
+                    public_topic("l2Book", Some(coin), None, None)
+                }
+            }
+        };
+        Some((self.connection.feed?, key))
+    }
+
     pub(super) fn socket_refused(cx: &mut Cx<'_, Pending>, error: SocketError) {
         cx.notice(
             safe_cex_engine::Level::Error,
@@ -55,18 +120,9 @@ impl Hyperliquid {
             return interests;
         }
         let add = |values: &mut Vec<Interest>, kind, coin, interval, dex| {
-            values.push(Interest::from_wire_args(
-                serde_json::to_string(&Send {
-                    method: "subscribe",
-                    subscription: PublicTopic {
-                        r#type: kind,
-                        coin,
-                        interval,
-                        dex,
-                    },
-                })
-                .expect("native public topic"),
-            ));
+            values.push(Interest::from_wire_args(public_topic(
+                kind, coin, interval, dex,
+            )));
         };
         add(&mut interests, "allMids", None, None, None);
         if !self.spot {
@@ -82,25 +138,10 @@ impl Hyperliquid {
                 continue;
             };
             if self.spot {
-                #[derive(Serialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Depth<'a> {
-                    r#type: &'static str,
-                    coin: &'a str,
-                    n_sig_figs: Option<u8>,
-                }
                 for n_sig_figs in [None, Some(2), Some(3), Some(4), Some(5)] {
-                    interests.push(Interest::from_wire_args(
-                        serde_json::to_string(&Send {
-                            method: "subscribe",
-                            subscription: Depth {
-                                r#type: "l2Book",
-                                coin: &market.id,
-                                n_sig_figs,
-                            },
-                        })
-                        .expect("native spot depth topic"),
-                    ));
+                    interests.push(Interest::from_wire_args(spot_depth_topic(
+                        &market.id, n_sig_figs,
+                    )));
                 }
             } else {
                 for kind in ["l2Book", "bbo"] {

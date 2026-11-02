@@ -10,6 +10,8 @@ use safe_cex_engine::{Command, Cx, Response, SocketId, Venue};
 use safe_cex_venue_lighter::{Lighter, Pending};
 use support::Options;
 use support::{NOW, reply_at};
+// Startup catalog reads before markets and tickers load get the engine's discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
 const META: &str = r#"{"code":200,"order_book_details":[{"market_id":1,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2,"symbol":"BTC","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot"}]}"#;
 fn engine(robinhood: bool, testnet: bool) -> Engine<Lighter> {
     support::engine(Options {
@@ -138,10 +140,12 @@ fn empty<V: Venue<Pending = Pending>>(e: &mut Engine<V>, now: f64) {
 fn deadline(a: &[Action]) -> TimerId {
     a.iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20000. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + DISCOVERY_DEADLINE_MS => {
+                Some(*timer)
+            }
             _ => None,
         })
-        .expect("original twenty-second attempt deadline")
+        .expect("original discovery attempt deadline")
 }
 #[test]
 fn native_catalog_wire_and_codec_in_all_deployments() {
@@ -303,16 +307,16 @@ fn bound_catalog_expires_before_claim_and_late_claim_is_inert() {
     let timer = deadline(&a);
     let (p, _) = prep(&a, false);
     let (permit, r) = bind(&mut e, NOW + 1., p);
-    e.handle(NOW + 20000., Event::TimerFired { timer });
+    e.handle(NOW + DISCOVERY_DEADLINE_MS, Event::TimerFired { timer });
     let a: Vec<_> = e.drain_actions().collect();
     let (fallback, _) = prep(&a, true);
-    assert!(e.claim_http(NOW + 20000., permit).is_err());
-    reply_at(&mut e, NOW + 20001., &r, 200, META);
-    empty(&mut e, NOW + 20001.);
+    assert!(e.claim_http(NOW + DISCOVERY_DEADLINE_MS, permit).is_err());
+    reply_at(&mut e, NOW + DISCOVERY_DEADLINE_MS + 1., &r, 200, META);
+    empty(&mut e, NOW + DISCOVERY_DEADLINE_MS + 1.);
     let a: Vec<_> = e.drain_actions().collect();
     assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
-    let next = release(&mut e, NOW + 20002., fallback);
-    reply_at(&mut e, NOW + 20003., &next, 200, META);
+    let next = release(&mut e, NOW + DISCOVERY_DEADLINE_MS + 2., fallback);
+    reply_at(&mut e, NOW + DISCOVERY_DEADLINE_MS + 3., &next, 200, META);
     snapshot(&e);
 }
 #[test]
@@ -322,20 +326,26 @@ fn released_timeout_and_late_response_cannot_replace_fresh_fallback() {
     let timer = deadline(&a);
     let (p, _) = prep(&a, false);
     let old = release(&mut e, NOW + 1., p);
-    e.handle(NOW + 20000., Event::TimerFired { timer });
+    e.handle(NOW + DISCOVERY_DEADLINE_MS, Event::TimerFired { timer });
     let (p, _) = prep(&e.drain_actions().collect::<Vec<_>>(), true);
-    reply_at(&mut e, NOW + 20001., &old, 200, META);
-    empty(&mut e, NOW + 20001.);
+    reply_at(&mut e, NOW + DISCOVERY_DEADLINE_MS + 1., &old, 200, META);
+    empty(&mut e, NOW + DISCOVERY_DEADLINE_MS + 1.);
     e.drain_actions().for_each(drop);
-    let fresh = release(&mut e, NOW + 20002., p);
-    reply_at(&mut e, NOW + 20003., &fresh, 200, META);
+    let fresh = release(&mut e, NOW + DISCOVERY_DEADLINE_MS + 2., p);
+    reply_at(&mut e, NOW + DISCOVERY_DEADLINE_MS + 3., &fresh, 200, META);
     snapshot(&e);
     assert!(
         e.drain_actions()
             .any(|a| matches!(a, Action::WsConnect { .. })),
         "fresh catalog completed native startup"
     );
-    reply_at(&mut e, NOW + 20004., &old, 500, r#"{"code":500}"#);
+    reply_at(
+        &mut e,
+        NOW + DISCOVERY_DEADLINE_MS + 4.,
+        &old,
+        500,
+        r#"{"code":500}"#,
+    );
     assert!(e.drain_actions().next().is_none());
     snapshot(&e);
 }

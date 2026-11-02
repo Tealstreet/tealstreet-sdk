@@ -1,14 +1,12 @@
 //! Loopback tests of the routes, auth and unauthenticated policy; no venue I/O.
+mod support;
+
 use futures_util::{SinkExt, StreamExt};
-use safe_cex_exchange_server::accounts::Registry;
 use safe_cex_exchange_server::auth::{PROXY_PUBLIC_KEY, Verifier};
-use safe_cex_exchange_server::config::Config;
-use safe_cex_exchange_server::http::{App, drain, router};
-use safe_cex_exchange_server::state::Metrics;
-use safe_cex_exchange_server::threads::EngineThreads;
-use std::net::SocketAddr;
+use safe_cex_exchange_server::http::{App, drain};
 use std::sync::Arc;
 use std::time::Duration;
+use support::{get, next_close, post};
 use tokio_tungstenite::tungstenite::Message;
 
 async fn server() -> String {
@@ -16,43 +14,11 @@ async fn server() -> String {
 }
 
 async fn server_app() -> (String, Arc<App>) {
-    let config = Config {
-        port: 0,
-        region: Some("tyo".into()),
-        release: Some("test".into()),
-        engine_threads: 1,
-        max_connections: 16,
-        max_public_per_ip: 2,
-        idle_timeout: Duration::from_secs(30),
-        resume_grace: Duration::from_secs(60),
-        account_flush: Duration::from_millis(60),
-    };
-    let app = App {
-        registry: Arc::new(Registry::new(
-            EngineThreads::start(1).unwrap(),
-            config.account_flush,
-            config.resume_grace,
-        )),
-        metrics: Arc::new(Metrics::default()),
-        verifier: Arc::new(Verifier::new(PROXY_PUBLIC_KEY).unwrap()),
-        config,
-        started: std::time::Instant::now(),
-        public_per_ip: Default::default(),
-        closing: tokio::sync::watch::channel(false).0,
-    };
-    let app = Arc::new(app);
-    let served = app.clone();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            router(served).into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await
-        .unwrap();
-    });
-    (address.to_string(), app)
+    let app = support::app(
+        support::config(Duration::from_secs(60)),
+        Verifier::new(PROXY_PUBLIC_KEY).unwrap(),
+    );
+    (support::serve(app.clone()).await, app)
 }
 
 #[tokio::test]
@@ -72,16 +38,64 @@ async fn a_drain_closes_sockets_1001() {
     assert_eq!(u16::from(closed.unwrap().code), 1001);
 }
 
-async fn get(address: &str, path: &str) -> (u16, String) {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
-    let request = format!("GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-    stream.write_all(request.as_bytes()).await.unwrap();
-    let mut response = String::new();
-    stream.read_to_string(&mut response).await.unwrap();
-    let status = response[9..12].parse().unwrap();
-    let body = response.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
-    (status, body)
+const PUBLIC_INIT: &str =
+    r#"{"t":"init","d":{"accountName":"__pub_bybit","exchangeName":"bybit","publicOnly":true}}"#;
+
+#[tokio::test]
+async fn a_drain_moves_an_idle_socket_and_refuses_new_users_with_4100() {
+    let (address, _app) = server_app().await;
+    let url = format!("ws://{address}/account");
+    let (mut idle, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (status, body) = post(&address, "/admin/drain", "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        next_close(&mut idle).await,
+        (4100, "draining: reconnect".to_owned())
+    );
+    let (mut newcomer, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    newcomer.send(Message::text(PUBLIC_INIT)).await.unwrap();
+    assert_eq!(
+        next_close(&mut newcomer).await,
+        (4100, "draining: reconnect".to_owned())
+    );
+    let (status, body) = get(&address, "/health").await;
+    assert_eq!(status, 503, "{body}");
+    assert!(
+        body.contains(r#""draining":true"#) && body.contains(r#""algos":{"chases":0,"twaps":0}"#),
+        "{body}"
+    );
+    let (status, _) = post(&address, "/admin/undrain", "").await;
+    assert_eq!(status, 200);
+    let (status, body) = get(&address, "/health").await;
+    assert_eq!(status, 200);
+    assert!(body.contains(r#""draining":false"#), "{body}");
+}
+
+#[tokio::test]
+async fn break_glass_moves_every_socket_with_4100() {
+    let (address, _app) = server_app().await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}/account"))
+        .await
+        .unwrap();
+    let (status, body) = post(&address, "/admin/drain?now=1", "").await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains(r#""settled":true"#), "{body}");
+    assert_eq!(
+        next_close(&mut socket).await,
+        (4100, "draining: reconnect".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn admin_routes_refuse_a_request_the_edge_forwarded() {
+    let (address, _app) = server_app().await;
+    for path in ["/admin/drain", "/admin/drain?now=1", "/admin/undrain"] {
+        let (status, _) = post(&address, path, "cf-connecting-ip: 1.2.3.4\r\n").await;
+        assert_eq!(status, 403, "{path}");
+    }
+    let (status, body) = get(&address, "/health").await;
+    assert_eq!(status, 200);
+    assert!(body.contains(r#""draining":false"#), "{body}");
 }
 
 #[tokio::test]

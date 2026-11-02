@@ -123,6 +123,8 @@ pub struct Cryptocom {
     malformed_markets: HashSet<String>,
     reread_stalls: u8,
     subscriptions: BTreeMap<String, u32>,
+    /// Candlestick subscriptions past their first answer, which carries history.
+    candles_live: HashSet<String>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
     message_id: u64,
@@ -258,6 +260,7 @@ impl Cryptocom {
             malformed_markets: HashSet::new(),
             reread_stalls: 0,
             subscriptions: BTreeMap::new(),
+            candles_live: HashSet::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
             message_id: 0,
@@ -321,6 +324,7 @@ impl Cryptocom {
             *count -= 1;
             if *count == 0 {
                 self.subscriptions.remove(&channel);
+                self.candles_live.remove(&channel);
                 self.subscribe(cx, &[channel], "unsubscribe");
             }
         }
@@ -453,9 +457,17 @@ impl Cryptocom {
                 if !self.subscriptions.contains_key(message.subscription) {
                     return Ok(());
                 }
-                json::each::<CandleRow>(message.data.get(), |row| {
-                    cx.candle(symbol, timeframe, row.candle())
-                })?;
+                let mut candles = Vec::new();
+                json::each::<CandleRow>(message.data.get(), |row| candles.push(row.candle()))?;
+                candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                // A subscription's first answer carries history: only its newest row is live.
+                if self.candles_live.insert(message.subscription.to_owned()) {
+                    let newest = candles.pop();
+                    candles = newest.into_iter().collect();
+                }
+                for candle in candles {
+                    cx.candle(symbol, timeframe, candle);
+                }
             }
             _ => {}
         }
@@ -537,6 +549,13 @@ impl Venue for Cryptocom {
     }
 
     type Pending = Pending;
+    fn status_exempt_refusal(
+        &self,
+        pending: &Pending,
+        response: safe_cex_engine::Response<'_>,
+    ) -> bool {
+        matches!(pending, Pending::Trade(request) if request.refused_by_body(response.body))
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(Err(error)) = self.options.secondary_validation {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
@@ -583,7 +602,19 @@ impl Venue for Cryptocom {
                 );
             } else if channel == 1 && envelope.method == "public/auth" {
                 let code = serde_json::from_str::<AuthenticationReply>(text)?.code;
-                if code != 0 {
+                // Only these name the key; busy, internal and nonce answers retry on reconnect.
+                if code != 0 && !matches!(code, 40101 | 40103 | 40104) {
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_UNAVAILABLE,
+                        format!(
+                            "Crypto.com private login not accepted, reconnecting: {} {}",
+                            envelope.code, envelope.message
+                        ),
+                    );
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1011);
+                } else if code != 0 {
                     cx.notice(
                         Level::Error,
                         code::AUTH_REJECTED,
@@ -645,6 +676,8 @@ impl Venue for Cryptocom {
                 for state in self.books.values_mut() {
                     state.synced = false;
                 }
+                // Resubscribed on reconnect, each answers with history again.
+                self.candles_live.clear();
             }
         }
     }

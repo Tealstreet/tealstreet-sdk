@@ -85,6 +85,13 @@ pub struct ActiveChaser {
         skip_serializing_if = "Option::is_none"
     )]
     pub origin: Option<TaskOrigin>,
+    #[serde(
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[serde(rename = "twapId")]
+    pub twap_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -692,6 +699,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         origin: Option<TaskOrigin>,
+        #[serde(
+            default,
+            deserialize_with = "crate::deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        #[serde(rename = "twapId")]
+        twap_id: Option<String>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::ActiveChaser {

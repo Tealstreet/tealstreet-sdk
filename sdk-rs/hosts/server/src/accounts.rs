@@ -78,6 +78,8 @@ pub struct Account {
     pub reads: Arc<tokio::sync::Semaphore>,
     /// Metadata refreshes waiting for load, one per selected symbol.
     pub metadata_refreshes: Arc<tokio::sync::Semaphore>,
+    /// Chases and TWAPs its algo host is running; none for public accounts.
+    pub running: Arc<crate::algos::Running>,
 }
 
 /// Concurrent waiting store reads per account; more are refused, not queued.
@@ -196,7 +198,7 @@ impl Account {
     }
 
     /// Live (not parked) sockets holding this account, other than `holder`.
-    fn live_holders_besides(&self, holder: u64) -> Vec<u64> {
+    pub(crate) fn live_holders_besides(&self, holder: u64) -> Vec<u64> {
         self.holders
             .lock()
             .unwrap()
@@ -312,12 +314,54 @@ pub struct Registry {
     engine_config: ServerConfig,
     pub resume_grace: Duration,
     /// The process is going away: no new account starts.
-    draining: AtomicBool,
+    stopping: AtomicBool,
+    /// The operator's drain before a restart (see DESIGN "Drain and roll").
+    drain: tokio::sync::watch::Sender<Drain>,
+    /// Bumped as any account's chases or TWAPs end.
+    algos_ended: Arc<tokio::sync::watch::Sender<u64>>,
     /// 5-10 account starts per second per egress IP, with jitter (DESIGN sizing).
     pacer: crate::pacing::Pacer,
     /// Why algos stopped while no browser was there to see it, one per
     /// (user, account), for that account's next init.
     notices: Notices,
+    /// When each user last opened a socket, and was last logged as not returning.
+    presence: Arc<Mutex<HashMap<String, Presence>>>,
+    /// The last forced-reset repair of each (user, account, topic) in this process.
+    repairs: Mutex<HashMap<(String, String, String), std::time::Instant>>,
+}
+
+/// A chart's forced reset repairs its upstream stream at most this often per account and topic.
+pub const REPAIR_EVERY: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Copy)]
+struct Presence {
+    socket_at: std::time::Instant,
+    told_at: Option<std::time::Instant>,
+}
+
+/// How long after its session is disposed for no browser a user may stay away unlogged.
+const RETURN_WAIT: Duration = Duration::from_secs(5 * 60);
+/// A user absent again within this is not logged again.
+const RETURN_LOG_EVERY: Duration = Duration::from_secs(60 * 60);
+
+/// An opaque, stable tag for a user in logs: never the raw id. The same form as the
+/// routing Worker's tag (the first six bytes of SHA-256, hex), so the journals line up.
+pub fn user_tag(user: &str) -> String {
+    safe_cex_crypto::sha256(user.as_bytes())[..6]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The operator's drain of this box before a restart.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Drain {
+    #[default]
+    Off,
+    /// Sockets move as their accounts' chases and TWAPs end; users new here are moved.
+    Waiting,
+    /// Break-glass: algos were stopped and told; every socket moves.
+    Now,
 }
 
 /// A still-open resumable session, as a resume of its id reaches it.
@@ -489,6 +533,24 @@ fn routing_plan(init: &InitPayload, public_only: bool) -> Result<RoutingPlan, St
 /// differing fields stay readable). Two inits that would build the same engine
 /// share it, whatever else differs between the clients that sent them: a field
 /// another venue reads, a default sent explicitly, flags resolving alike.
+/// Hands a disposed account's stop notices and chase ends to one socket. A later,
+/// fuller `Kept` repeats what came before it, so only what is new is sent.
+fn tell_through(account: &Account, outbox: Outbox) -> crate::algos::StopNotice {
+    let name = account.name.clone();
+    let told = Mutex::new((0, 0));
+    Box::new(move |kept: crate::algos::Kept| {
+        let mut told = told.lock().unwrap();
+        let new = crate::algos::Kept {
+            notices: kept.notices.get(told.0..).unwrap_or_default().to_vec(),
+            ends: kept.ends.get(told.1..).unwrap_or_default().to_vec(),
+        };
+        *told = (kept.notices.len(), kept.ends.len());
+        for frame in new.frames(&name) {
+            outbox(frame);
+        }
+    })
+}
+
 pub fn build_fingerprint(init: &InitPayload) -> String {
     let public_only = init.public_only == Some(true) || init.account_name.starts_with("__pub_");
     let mut fields = match engine_options(init, public_only) {
@@ -575,10 +637,33 @@ impl Registry {
                 ..ServerConfig::default()
             },
             resume_grace,
-            draining: AtomicBool::new(false),
+            stopping: AtomicBool::new(false),
+            drain: tokio::sync::watch::channel(Drain::Off).0,
+            algos_ended: Arc::new(tokio::sync::watch::channel(0).0),
             pacer: crate::pacing::Pacer::new(7, Duration::from_millis(60)),
             notices: Arc::default(),
+            presence: Arc::default(),
+            repairs: Mutex::default(),
         }
+    }
+
+    /// Whether a forced reset may repair `topic` on `account` now, and records it if so.
+    /// Each user's engine has its own venue socket, so the limit is per account, not per topic.
+    pub fn allow_repair(
+        &self,
+        user: &str,
+        account: &str,
+        topic: &str,
+        now: std::time::Instant,
+    ) -> bool {
+        let mut repairs = self.repairs.lock().unwrap();
+        repairs.retain(|_, at| now.duration_since(*at) < REPAIR_EVERY);
+        let key = (user.to_owned(), account.to_owned(), topic.to_owned());
+        if repairs.contains_key(&key) {
+            return false;
+        }
+        repairs.insert(key, now);
+        true
     }
 
     /// Server-allocated, process-unique IDs for sockets, park holders and clients.
@@ -644,7 +729,7 @@ impl Registry {
         token: Option<(String, u64)>,
         outbox: Outbox,
     ) -> Result<Arc<Account>, String> {
-        if self.draining.load(Ordering::Relaxed) {
+        if self.stopping.load(Ordering::Relaxed) {
             return Err("The server is restarting; reconnecting".into());
         }
         let key = (user.to_owned(), init.account_name.clone());
@@ -678,7 +763,15 @@ impl Registry {
             token: token.clone(),
         };
         let (account, remote) = self
-            .build(user, init, public_only, fingerprint, token, holder, outbox)
+            .build(
+                user,
+                init,
+                public_only,
+                fingerprint,
+                token,
+                holder,
+                outbox.clone(),
+            )
             .await?;
         let account = Arc::new(account);
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
@@ -696,7 +789,11 @@ impl Registry {
         if let Some(replaced) = replaced {
             // A concurrent init of the same name won the race; the later build stands.
             // Its holders go too, so the losing socket stops calling a stopped account.
-            self.dispose_for(&replaced, "account replaced by a newer init", None);
+            self.dispose_for(
+                &replaced,
+                "account replaced by a newer init",
+                Some(tell_through(&replaced, outbox)),
+            );
         }
         Ok(account)
     }
@@ -738,6 +835,8 @@ impl Registry {
         let algo_placed = placed_symbols.clone();
         let held = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let algo_held = held.clone();
+        let running = Arc::new(crate::algos::Running::new(self.algos_ended.clone()));
+        let algo_running = running.clone();
         let (algos, algo_inbox) = if public_only {
             (None, None)
         } else {
@@ -773,6 +872,7 @@ impl Registry {
                                 algo_signer,
                                 algo_placed,
                                 algo_held,
+                                algo_running,
                                 inbox,
                             ));
                         }
@@ -802,6 +902,7 @@ impl Registry {
             frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
             reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
             metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
+            running,
         };
         Ok((account, remote))
     }
@@ -829,6 +930,47 @@ impl Registry {
         if empty {
             self.dispose_for(account, "account disposed", None);
         }
+    }
+
+    /// A socket of `user` opened: they are back.
+    pub fn user_connected(&self, user: &str) {
+        let now = std::time::Instant::now();
+        let mut presence = self.presence.lock().unwrap();
+        presence
+            .entry(user.to_owned())
+            .and_modify(|seen| seen.socket_at = now)
+            .or_insert(Presence {
+                socket_at: now,
+                told_at: None,
+            });
+    }
+
+    /// The line for a user whose session was disposed for no browser at `disposed_at`
+    /// and who has opened no socket since, at most once per user per RETURN_LOG_EVERY.
+    fn did_not_return(
+        &self,
+        user: &str,
+        disposed_at: std::time::Instant,
+        now: std::time::Instant,
+    ) -> Option<String> {
+        let mut presence = self.presence.lock().unwrap();
+        let seen = presence.entry(user.to_owned()).or_insert(Presence {
+            socket_at: disposed_at,
+            told_at: None,
+        });
+        if seen.socket_at > disposed_at
+            || seen
+                .told_at
+                .is_some_and(|told| now.duration_since(told) < RETURN_LOG_EVERY)
+        {
+            return None;
+        }
+        seen.told_at = Some(now);
+        Some(format!(
+            "hosted user did not return: {} after {} min",
+            user_tag(user),
+            now.duration_since(disposed_at).as_secs() / 60
+        ))
     }
 
     /// The stop notice for a session that resumed `from`, if it is still owed one.
@@ -920,15 +1062,10 @@ impl Registry {
             ));
         }
         let stopped: crate::algos::StopNotice = Box::new(move |kept| {
+            let frames = kept.frames(&name);
             for outbox in &live {
-                if !kept.text.is_empty() {
-                    outbox(crate::envelope::algo_error(
-                        &name,
-                        Value::String(kept.text.clone()),
-                    ));
-                }
-                for end in &kept.ends {
-                    outbox(end.clone());
+                for frame in &frames {
+                    outbox(frame.clone());
                 }
             }
         });
@@ -943,6 +1080,16 @@ impl Registry {
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
     pub fn dispose(&self, account: &Arc<Account>) {
         self.dispose_for(account, "account disposed", None);
+    }
+
+    /// New settings rebuild `account`: its algos stop now, their finals told through
+    /// `outbox`, rather than left running for a page told they stopped.
+    pub fn stop_for_new_settings(&self, account: &Arc<Account>, outbox: Outbox) {
+        self.dispose_for(
+            account,
+            "its key or connection settings changed",
+            Some(tell_through(account, outbox)),
+        );
     }
 
     fn dispose_for(
@@ -980,7 +1127,7 @@ impl Registry {
     /// within `deadline`. Holders stay, so browsers still sign those cancels and
     /// are told. False if some account had not ended by then.
     pub async fn drain(&self, deadline: Duration) -> bool {
-        self.draining.store(true, Ordering::Relaxed);
+        self.stopping.store(true, Ordering::Relaxed);
         let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
         for account in &accounts {
             Self::stop(account, "the server is restarting", None);
@@ -993,6 +1140,78 @@ impl Registry {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         true
+    }
+
+    /// The operator drains the box: sockets move as their algos end, and only
+    /// users already live here may init. Running algos are never stopped for it.
+    pub fn start_drain(&self) {
+        self.drain.send_if_modified(|drain| {
+            let starts = *drain == Drain::Off;
+            if starts {
+                *drain = Drain::Waiting;
+            }
+            starts
+        });
+    }
+
+    /// Break-glass: stop every chase and TWAP through the SIGTERM path, which tells
+    /// each live page what stopped, and only then move every socket. False if some
+    /// account had not ended within `deadline`.
+    pub async fn break_glass(&self, deadline: Duration) -> bool {
+        self.start_drain();
+        let until = tokio::time::Instant::now() + deadline;
+        let mut settled = self.drain(deadline).await;
+        // A host zeroes its counts only after telling its pages what stopped.
+        while settled && self.running_algos() != (0, 0) {
+            if tokio::time::Instant::now() >= until {
+                settled = false;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        self.drain.send_replace(Drain::Now);
+        settled
+    }
+
+    /// Ends a drain that did not end in a restart.
+    pub fn undrain(&self) {
+        self.stopping.store(false, Ordering::Relaxed);
+        self.drain.send_replace(Drain::Off);
+    }
+
+    pub fn drain_state(&self) -> Drain {
+        *self.drain.borrow()
+    }
+
+    /// Changes as a drain starts, goes break-glass or ends.
+    pub fn watch_drain(&self) -> tokio::sync::watch::Receiver<Drain> {
+        self.drain.subscribe()
+    }
+
+    /// Changes as any account's chases or TWAPs end.
+    pub fn watch_algos_ended(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.algos_ended.subscribe()
+    }
+
+    /// `(chases, twaps)` running on this box, parked accounts included.
+    pub fn running_algos(&self) -> (usize, usize) {
+        self.accounts
+            .lock()
+            .unwrap()
+            .values()
+            .map(|account| account.running.counts())
+            .fold((0, 0), |(chases, twaps), (more_chases, more_twaps)| {
+                (chases + more_chases, twaps + more_twaps)
+            })
+    }
+
+    /// Whether `user` holds any private account here, live or parked.
+    pub fn live_here(&self, user: &str) -> bool {
+        self.accounts
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|(holder, _)| holder == user)
     }
 
     /// Moves a closing socket's private accounts under `resume_id` for the grace
@@ -1032,6 +1251,17 @@ impl Registry {
             let expired = registry.parked.lock().unwrap().remove(&resume_id);
             if let Some(expired) = expired {
                 let reason = format!("no browser for {}s", grace.as_secs());
+                let disposed_at = std::time::Instant::now();
+                let user = expired.user.clone();
+                let watcher = registry.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(RETURN_WAIT).await;
+                    if let Some(line) =
+                        watcher.did_not_return(&user, disposed_at, std::time::Instant::now())
+                    {
+                        Log::warn(&line);
+                    }
+                });
                 for (account, park_holder) in expired.accounts {
                     // No browser to tell: the next init of the account is told.
                     let last = {
@@ -1165,86 +1395,20 @@ pub fn resume_id() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+/// Test accounts on a test venue, for this crate's tests and the two-box harness
+/// (`tests/boxes.rs`); built only for tests or the `test-support` feature.
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing {
     use super::*;
 
-    /// A venue that does nothing: the registry tests need only its handle.
-    struct Idle;
-    impl safe_cex_engine::Venue for Idle {
-        type Pending = ();
-        fn start(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>) {}
-        fn on_open(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::SocketId) {}
-        fn on_message(
-            &mut self,
-            _: &mut safe_cex_engine::Cx<'_, ()>,
-            _: safe_cex_engine::SocketId,
-            _: &str,
-        ) {
-        }
-        fn on_close(
-            &mut self,
-            _: &mut safe_cex_engine::Cx<'_, ()>,
-            _: safe_cex_engine::SocketId,
-            _: u16,
-        ) {
-        }
-        fn on_response(
-            &mut self,
-            _: &mut safe_cex_engine::Cx<'_, ()>,
-            _: (),
-            _: safe_cex_engine::Response<'_>,
-        ) {
-        }
-        fn on_request_failed(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: (), _: &str) {}
-        fn on_timer(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::TimerId) {}
-        fn on_command(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::Command) {
-        }
-        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
-            None
-        }
-        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
-            Box::new(std::iter::empty())
-        }
-    }
-
-    #[derive(Clone)]
-    struct NoIo;
-    impl safe_cex_native::Transport for NoIo {
-        fn connect(
-            &self,
-            _: safe_cex_engine::SocketId,
-            _: String,
-            _: safe_cex_native::Events,
-        ) -> mpsc::UnboundedSender<String> {
-            mpsc::unbounded_channel().0
-        }
-        fn request(&self, _: safe_cex_engine::HttpRequest, _: safe_cex_native::Events) {}
-    }
-
-    /// A private account held by socket 7, and the inbox its algo host would read.
-    fn held_account() -> (
-        Arc<Account>,
-        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
-    ) {
-        held_account_with(None, String::new())
-    }
-
-    /// `held_account` with a signer link and the fingerprint it was built from.
-    pub(crate) fn held_account_with(
-        link: Option<Arc<SignerLink>>,
-        fingerprint: String,
-    ) -> (
-        Arc<Account>,
-        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
-    ) {
-        held_account_on(Idle, link, fingerprint)
-    }
-
-    fn held_account_on<V: safe_cex_engine::Venue + 'static>(
+    /// A private account of `user` named `name` on `venue`, held by no socket yet,
+    /// and the inbox its algo host would read.
+    pub fn account_on<V: safe_cex_engine::Venue + 'static>(
         venue: V,
+        (user, name, venue_name): (&str, &str, &str),
         link: Option<Arc<SignerLink>>,
         fingerprint: String,
+        running: Arc<crate::algos::Running>,
     ) -> (
         Arc<Account>,
         mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
@@ -1257,9 +1421,9 @@ pub(crate) mod tests {
         .unwrap();
         let (algos, inbox) = mpsc::unbounded_channel();
         let account = Arc::new(Account {
-            user: "u".into(),
-            name: "acct".into(),
-            venue: "bitget".into(),
+            user: user.into(),
+            name: name.into(),
+            venue: venue_name.into(),
             handle,
             link,
             token: ProxyToken::new(),
@@ -1272,44 +1436,130 @@ pub(crate) mod tests {
             frame_reads: Arc::new(tokio::sync::Semaphore::new(MAX_FRAME_READS)),
             reads: Arc::new(tokio::sync::Semaphore::new(MAX_READS)),
             metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
+            running,
         });
-        account.hold(
-            7,
-            Live {
-                outbox: Arc::new(|_| true),
-                token: None,
-            },
-        );
         (account, inbox)
     }
 
-    /// `held_account_with` plus its real algo host, emitting as `build` wires it.
-    pub(crate) fn held_account_running_algos(
-        link: Arc<SignerLink>,
-        fingerprint: String,
-    ) -> Arc<Account> {
-        let (account, inbox) = held_account_with(Some(link.clone()), fingerprint);
-        run_algos(account, link, inbox)
-    }
-
-    /// A private account whose startup is held until `HeldLoad` releases it, as a
-    /// silent signer holds it, with one long open on BTCUSDT.
-    pub(crate) fn held_load_account(
-        link: Arc<SignerLink>,
-        load_after_ms: Option<f64>,
-    ) -> (Arc<Account>, Arc<std::sync::atomic::AtomicUsize>) {
-        let placed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    /// `user`'s loaded BTCUSDT account under `registry`, as `build` would leave it
+    /// for `init`: no socket holds it until one sends that init, its algo host runs
+    /// and is counted, and every command is answered at once. Call in a `LocalSet`.
+    pub fn trading_account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> {
+        let link = SignerLink::new(0, Arc::new(|_| false));
+        let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
         let venue = HeldLoad {
-            placed: placed.clone(),
-            load_after_ms,
+            placed: Arc::default(),
+            load_after_ms: Some(0.),
+            ticker: true,
         };
-        let (account, inbox) = held_account_on(venue, Some(link.clone()), String::new());
-        (run_algos(account, link, inbox), placed)
+        let names = (
+            user,
+            init.account_name.as_str(),
+            init.exchange_name.as_str(),
+        );
+        let (account, inbox) = account_on(
+            venue,
+            names,
+            Some(link.clone()),
+            init.fingerprint(),
+            running,
+        );
+        let account = run_algos(account, link, inbox);
+        register(registry, &account);
+        account
     }
 
-    struct HeldLoad {
-        placed: Arc<std::sync::atomic::AtomicUsize>,
-        load_after_ms: Option<f64>,
+    /// Sends the web's algo `op` to `account`'s algo host.
+    pub fn algo_op(account: &Account, op: &str, data: &str) {
+        let input = crate::algos::AlgoInput::Op {
+            op: op.into(),
+            data: data.into(),
+            origin: "test".into(),
+        };
+        let sent = account.algos.as_ref().map(|algos| algos.send(input));
+        assert!(
+            matches!(sent, Some(Ok(()))),
+            "{} runs no algo host",
+            account.name
+        );
+    }
+
+    /// Who holds one account on this box, and whether it can sign.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct Held {
+        pub live: Vec<u64>,
+        pub parked: bool,
+        /// The live socket signing goes through.
+        pub signing: Option<u64>,
+        /// Its signer link would send a sign-req now (no suspended or ended session).
+        pub can_sign: bool,
+        pub chases: usize,
+        pub twaps: usize,
+    }
+
+    /// Every account `registry` holds.
+    pub fn accounts(registry: &Registry) -> Vec<Arc<Account>> {
+        registry
+            .accounts
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Every account `registry` holds, by (user, account), live or parked.
+    pub fn holdings(registry: &Registry) -> std::collections::BTreeMap<(String, String), Held> {
+        let accounts = registry.accounts.lock().unwrap();
+        accounts
+            .iter()
+            .map(|(key, account)| {
+                let holders = account.holders.lock().unwrap();
+                let mut live: Vec<u64> = holders
+                    .by_id
+                    .iter()
+                    .filter(|(_, holder)| holder.is_some())
+                    .map(|(id, _)| *id)
+                    .collect();
+                live.sort_unstable();
+                let (chases, twaps) = account.running.counts();
+                let held = Held {
+                    live,
+                    parked: holders.by_id.values().any(Option::is_none),
+                    signing: holders.signing,
+                    can_sign: account
+                        .link
+                        .as_ref()
+                        .is_some_and(|link| link.is_available()),
+                    chases,
+                    twaps,
+                };
+                (key.clone(), held)
+            })
+            .collect()
+    }
+
+    #[derive(Clone)]
+    pub struct NoIo;
+    impl safe_cex_native::Transport for NoIo {
+        fn connect(
+            &self,
+            _: safe_cex_engine::SocketId,
+            _: String,
+            _: safe_cex_native::Events,
+        ) -> mpsc::UnboundedSender<String> {
+            mpsc::unbounded_channel().0
+        }
+        fn request(&self, _: safe_cex_engine::HttpRequest, _: safe_cex_native::Events) {}
+    }
+
+    /// A BTCUSDT venue that loads after `load_after_ms`, if ever.
+    pub struct HeldLoad {
+        /// Placements seen while `ticker` is off; they never settle.
+        pub placed: Arc<std::sync::atomic::AtomicUsize>,
+        pub load_after_ms: Option<f64>,
+        /// A BTCUSDT ticker, and every command answered: chases run as on a trading venue.
+        pub ticker: bool,
     }
     impl safe_cex_engine::Venue for HeldLoad {
         type Pending = ();
@@ -1346,6 +1596,20 @@ pub(crate) mod tests {
             cx: &mut safe_cex_engine::Cx<'_, ()>,
             command: safe_cex_engine::Command,
         ) {
+            if self.ticker {
+                if let Some(id) = command.completion_id() {
+                    let result = match &command {
+                        safe_cex_engine::Command::PlaceOrders { orders, .. } => {
+                            let ids: Vec<String> =
+                                (0..orders.len()).map(|i| format!("o-{i}")).collect();
+                            serde_json::to_string(&ids).unwrap()
+                        }
+                        _ => "null".into(),
+                    };
+                    cx.done(id, result);
+                }
+                return;
+            }
             match command {
                 safe_cex_engine::Command::PlaceOrders { .. } => {
                     self.placed.fetch_add(1, Ordering::SeqCst);
@@ -1389,6 +1653,24 @@ pub(crate) mod tests {
                 taker_fee: None,
                 maker_fee: None,
             }]);
+            if self.ticker {
+                cx.store.set_tickers(vec![safe_cex_engine::model::Ticker {
+                    id: "BTCUSDT".into(),
+                    symbol: "BTCUSDT".into(),
+                    bid: 77_000.,
+                    ask: 77_000.1,
+                    last: 77_000.,
+                    mark: 77_000.,
+                    index: 77_000.,
+                    mid_price: None,
+                    percentage: 0.,
+                    open_interest: 0.,
+                    funding_rate: 0.,
+                    funding_time: 0.,
+                    volume: 0.,
+                    quote_volume: 0.,
+                }]);
+            }
             cx.store.set_orders(Vec::new());
             cx.store.set_positions(vec![Position {
                 id: "BTCUSDT-long".into(),
@@ -1415,7 +1697,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn run_algos(
+    /// Runs `account`'s algo host on this `LocalSet`, wired as `build` wires it.
+    pub fn run_algos(
         account: Arc<Account>,
         link: Arc<SignerLink>,
         inbox: mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
@@ -1436,8 +1719,171 @@ pub(crate) mod tests {
             Some(link),
             account.placed.clone(),
             account.held.clone(),
+            account.running.clone(),
             inbox,
         ));
+        account
+    }
+
+    /// `account` as the registry's account for its (user, name).
+    pub fn register(registry: &Registry, account: &Arc<Account>) {
+        registry.accounts.lock().unwrap().insert(
+            (account.user.clone(), account.name.clone()),
+            account.clone(),
+        );
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    pub(crate) use super::testing::register;
+    use super::testing::{HeldLoad, NoIo, account_on, run_algos};
+    use super::*;
+
+    /// A venue that does nothing: the registry tests need only its handle.
+    struct Idle;
+    impl safe_cex_engine::Venue for Idle {
+        type Pending = ();
+        fn start(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>) {}
+        fn on_open(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::SocketId) {}
+        fn on_message(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: &str,
+        ) {
+        }
+        fn on_close(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: safe_cex_engine::SocketId,
+            _: u16,
+        ) {
+        }
+        fn on_response(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, ()>,
+            _: (),
+            _: safe_cex_engine::Response<'_>,
+        ) {
+        }
+        fn on_request_failed(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::TimerId) {}
+        fn on_command(&mut self, _: &mut safe_cex_engine::Cx<'_, ()>, _: safe_cex_engine::Command) {
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    /// A private account held by socket 7, and the inbox its algo host would read.
+    fn held_account() -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        held_account_with(None, String::new())
+    }
+
+    /// `held_account` with a signer link and the fingerprint it was built from.
+    pub(crate) fn held_account_with(
+        link: Option<Arc<SignerLink>>,
+        fingerprint: String,
+    ) -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        held_account_on(Idle, link, fingerprint, Arc::default())
+    }
+
+    fn held_account_on<V: safe_cex_engine::Venue + 'static>(
+        venue: V,
+        link: Option<Arc<SignerLink>>,
+        fingerprint: String,
+        running: Arc<crate::algos::Running>,
+    ) -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        let (account, inbox) =
+            account_on(venue, ("u", "acct", "bitget"), link, fingerprint, running);
+        account.hold(
+            7,
+            Live {
+                outbox: Arc::new(|_| true),
+                token: None,
+            },
+        );
+        (account, inbox)
+    }
+
+    /// `held_account_with` plus its real algo host, emitting as `build` wires it.
+    pub(crate) fn held_account_running_algos(
+        link: Arc<SignerLink>,
+        fingerprint: String,
+    ) -> Arc<Account> {
+        let (account, inbox) = held_account_with(Some(link.clone()), fingerprint);
+        run_algos(account, link, inbox)
+    }
+
+    /// A private account whose startup is held until `HeldLoad` releases it, as a
+    /// silent signer holds it, with one long open on BTCUSDT.
+    pub(crate) fn held_load_account(
+        link: Arc<SignerLink>,
+        load_after_ms: Option<f64>,
+    ) -> (Arc<Account>, Arc<std::sync::atomic::AtomicUsize>) {
+        let placed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let venue = HeldLoad {
+            placed: placed.clone(),
+            load_after_ms,
+            ticker: false,
+        };
+        let (account, inbox) =
+            held_account_on(venue, Some(link.clone()), String::new(), Arc::default());
+        (run_algos(account, link, inbox), placed)
+    }
+
+    /// An unloaded account's actor on its own thread, so a test can keep the engine
+    /// busy without blocking the test's own tasks.
+    pub(crate) fn idle_handle_on_own_thread() -> safe_cex_native::AccountHandle {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            tokio::task::LocalSet::new().block_on(&runtime, async move {
+                let engine = safe_cex_engine::test_support::seeded_engine(Idle);
+                let (handle, task) = safe_cex_native::spawn_account(
+                    safe_cex_native::Host::new(engine, NoIo),
+                    ServerConfig::default(),
+                )
+                .unwrap();
+                tx.send(handle).unwrap();
+                let _ = task.await;
+            });
+        });
+        rx.recv().unwrap()
+    }
+
+    /// A loaded BTCUSDT account under `registry` running its algo host and
+    /// counting its algos there, as `build` wires it. Placements never settle.
+    pub(crate) fn held_account_counted(
+        registry: &Registry,
+        link: Arc<SignerLink>,
+        fingerprint: String,
+    ) -> Arc<Account> {
+        let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
+        let venue = HeldLoad {
+            placed: Arc::default(),
+            load_after_ms: Some(0.),
+            ticker: true,
+        };
+        let (account, inbox) = held_account_on(venue, Some(link.clone()), fingerprint, running);
+        let account = run_algos(account, link, inbox);
+        register(registry, &account);
         account
     }
 
@@ -1455,14 +1901,6 @@ pub(crate) mod tests {
     /// The socket `account` signs through.
     pub(crate) fn signing(account: &Account) -> Option<u64> {
         account.holders.lock().unwrap().signing
-    }
-
-    /// `account` as the registry's account for its (user, name).
-    pub(crate) fn register(registry: &Registry, account: &Arc<Account>) {
-        registry.accounts.lock().unwrap().insert(
-            (account.user.clone(), account.name.clone()),
-            account.clone(),
-        );
     }
 
     #[tokio::test]
@@ -1536,6 +1974,37 @@ pub(crate) mod tests {
             .await;
     }
 
+    /// The page starts a chase on what its frames show; the algo host's store may
+    /// not have caught up with that frame yet, and the chase must not fail on it.
+    #[tokio::test(start_paused = true)]
+    async fn a_chase_started_before_the_algo_host_read_the_loaded_market_runs() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for _ in 0..16 {
+                    let link = SignerLink::new(7, Arc::new(|_| true));
+                    let running = Arc::new(crate::algos::Running::default());
+                    let venue = HeldLoad {
+                        placed: Arc::default(),
+                        load_after_ms: Some(0.),
+                        ticker: true,
+                    };
+                    let (account, inbox) =
+                        held_account_on(venue, Some(link.clone()), String::new(), running.clone());
+                    // The engine loads; the op is queued before the algo host has read a frame.
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    super::testing::algo_op(
+                        &account,
+                        "chaser:start",
+                        r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#,
+                    );
+                    let _account = run_algos(account, link, inbox);
+                    tokio::time::sleep(Duration::from_millis(600)).await;
+                    assert_eq!(running.counts(), (1, 0), "the chase runs");
+                }
+            })
+            .await;
+    }
+
     pub(crate) fn registry() -> Arc<Registry> {
         Arc::new(Registry::new(
             EngineThreads::start(1).unwrap(),
@@ -1559,7 +2028,7 @@ pub(crate) mod tests {
                 assert_eq!(
                     registry
                         .take_notice("u", "acct", None)
-                        .map(|kept| kept.text)
+                        .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "a second device, or a reopened tab, is told"
@@ -1572,7 +2041,7 @@ pub(crate) mod tests {
                 assert_eq!(
                     registry
                         .take_notice("u", "acct", Some("owner"))
-                        .map(|kept| kept.text)
+                        .map(|kept| kept.summary())
                         .as_deref(),
                     Some("stopped"),
                     "the device that owned the chase still is"
@@ -1587,7 +2056,7 @@ pub(crate) mod tests {
                 assert_eq!(
                     registry
                         .take_notice("u", "acct", Some("owner"))
-                        .map(|kept| kept.text)
+                        .map(|kept| kept.summary())
                         .as_deref(),
                     Some("second"),
                     "one per account"
@@ -1601,6 +2070,45 @@ pub(crate) mod tests {
                 );
             })
             .await;
+    }
+
+    #[test]
+    fn a_user_who_does_not_return_is_logged_by_tag_once_an_hour() {
+        let registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        let user = "auth0|5f1d00c0ffee";
+        let disposed = std::time::Instant::now();
+        let five = disposed + Duration::from_secs(5 * 60);
+        let line = registry.did_not_return(user, disposed, five).unwrap();
+        assert_eq!(
+            line,
+            format!("hosted user did not return: {} after 5 min", user_tag(user))
+        );
+        assert!(
+            !line.contains("auth0") && user_tag(user).len() == 12,
+            "{line}"
+        );
+        assert_eq!(
+            registry.did_not_return(user, disposed, five + Duration::from_secs(60)),
+            None
+        );
+        let later = five + Duration::from_secs(60 * 60);
+        assert!(
+            registry.did_not_return(user, disposed, later).is_some(),
+            "again after an hour"
+        );
+        // One who came back is not logged.
+        let back = "auth0|returning";
+        let gone = std::time::Instant::now();
+        std::thread::sleep(Duration::from_millis(2));
+        registry.user_connected(back);
+        assert_eq!(
+            registry.did_not_return(back, gone, gone + Duration::from_secs(300)),
+            None
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -2315,7 +2823,11 @@ pub(crate) mod tests {
                 ..InitPayload::default()
             };
             let options = engine_options(&init, false);
-            assert_eq!(options["lighterWsRoute"].as_bool(), expected, "{venue} {route:?}");
+            assert_eq!(
+                options["lighterWsRoute"].as_bool(),
+                expected,
+                "{venue} {route:?}"
+            );
         }
     }
 
