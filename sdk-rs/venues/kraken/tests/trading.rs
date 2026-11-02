@@ -1164,9 +1164,46 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
             symbol: "PF_XBTUSD".into(),
         },
     );
+    let cancel = http(&mut e, "cancelallorders");
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"result":"success","cancelStatus":{"status":"noOrdersToCancel"}}"#,
+    );
     assert!(
         e.drain_plain()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 82, .. })))
+    );
+}
+
+#[test]
+fn symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
+    let (mut e, _) = ready();
+    command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 83,
+            symbol: "PF_XBTUSD".into(),
+        },
+    );
+    let cancel = http(&mut e, "cancelallorders");
+    assert!(
+        cancel
+            .body
+            .as_deref()
+            .unwrap_or_default()
+            .contains("symbol=PF_XBTUSD")
+    );
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"result":"success","cancelStatus":{"status":"cancelled","cancelledOrders":[]}}"#,
+    );
+    assert!(
+        e.drain_plain()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 83, .. })))
     );
 }
 

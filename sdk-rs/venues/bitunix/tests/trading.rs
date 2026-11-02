@@ -903,11 +903,15 @@ fn a_stale_tpsl_does_not_abort_cancel_all() {
     let mut sent = requests(&mut e);
     let mut failed = false;
     let mut stale_answered = false;
+    let mut swept = false;
     while let Some(r) = sent.pop() {
         let body = if r.url.contains("tpsl/cancel_order") {
             stale_answered = true;
             r#"{"code":20007,"msg":"Order not found. It may have been filled or canceled"}"#
                 .to_owned()
+        } else if r.url.contains("cancel_all_orders") {
+            swept = true;
+            r#"{"code":0,"data":null}"#.to_owned()
         } else {
             // Every remaining regular order is acknowledged by its ID.
             let sent: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
@@ -932,7 +936,35 @@ fn a_stale_tpsl_does_not_abort_cancel_all() {
         }));
     }
     assert!(stale_answered);
+    assert!(swept, "the by-symbol cancel follows the row cancels");
     assert!(!failed);
+}
+
+#[test]
+fn symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
+    for answer in [r#"{"code":0}"#, r#"{"code":0,"data":{"successList":[]}}"#] {
+        let (mut e, _) = startup();
+        e.store_mut().set_orders(Vec::new());
+        e.handle(
+            1.0,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 8,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let sent = requests(&mut e);
+        let sweep = sent
+            .iter()
+            .find(|r| r.url.contains("cancel_all_orders"))
+            .expect("swept");
+        assert_eq!(sweep.body.as_deref(), Some(r#"{"symbol":"BTCUSDT"}"#));
+        reply(&mut e, sweep.id, answer);
+        assert!(
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 8, .. })))
+        );
+    }
 }
 
 // Live: this body came back while two of the batch's orders rested on the venue.

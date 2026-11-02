@@ -7,6 +7,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_phemex::PhemexPerpetuals;
 use support::{Options, PreparedEngine};
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const NOW: f64 = 1_700_000_000_000.;
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"},{"symbol":"ETHUSDC","type":"PerpetualV2","settleCurrency":"USDC","baseCurrency":"ETH","quoteCurrency":"USDC","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"}]}}"#;
@@ -119,7 +120,10 @@ impl H {
         self.done.iter().find(|(c, _)| *c == id).map(|(_, r)| r)
     }
     fn succeeded(&self, id: u32) -> bool {
-        self.result(id).is_some_and(|r| r.as_deref() == Ok("[]"))
+        self.result(id).is_some_and(|r| {
+            r.as_deref()
+                .is_ok_and(|b| b.starts_with(r#"{"skipped":[],"open":["#))
+        })
     }
     fn failure(&self, id: u32) -> &VenueError {
         match self.result(id) {

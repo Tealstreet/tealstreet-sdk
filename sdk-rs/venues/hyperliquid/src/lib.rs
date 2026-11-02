@@ -1070,8 +1070,12 @@ impl Venue for Hyperliquid {
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        // Every cancel names an order id; there is no immediate cancel-all.
         if self.spot {
-            safe_cex_engine::Capabilities::NO_HISTORY
+            safe_cex_engine::Capabilities {
+                symbol_cancel_misses_unseen: true,
+                ..safe_cex_engine::Capabilities::NO_HISTORY
+            }
         } else {
             safe_cex_engine::Capabilities {
                 position_history: safe_cex_engine::PositionHistory::FillsSymbol,
@@ -1079,6 +1083,7 @@ impl Venue for Hyperliquid {
                 client_order_lookup: true,
                 schedule_cancel: true,
                 fresh_positions: true,
+                symbol_cancel_misses_unseen: true,
                 ..safe_cex_engine::Capabilities::BASE
             }
         }

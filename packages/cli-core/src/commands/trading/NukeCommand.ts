@@ -1,4 +1,4 @@
-import { describeStoppedAlgos } from '@tealstreet/safe-cex/src/nukeResult';
+import { describeStoppedAlgos, nukeWarning } from '@tealstreet/safe-cex/src/nukeResult';
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 
@@ -26,6 +26,8 @@ export class NukeCommand extends TradingBaseCommand {
     const reportStopped = (result: unknown) => {
       const stopped = describeStoppedAlgos(result);
       if (stopped) this.printWarning(ctx, stopped);
+      const warning = nukeWarning(result);
+      if (warning) this.printWarning(ctx, warning);
     };
 
     // Awaited: a one-shot exec exits when this returns, and ok must mean it finished.

@@ -4,6 +4,7 @@ mod support;
 use safe_cex_engine::{Command, ErrorKind, Event, Outcome, VenueAction};
 use safe_cex_venue_binance::Variant;
 use support::Harness;
+const FLAT_ANSWER: &str = r#"{"skipped":[],"open":[]}"#;
 
 const USDM_RISK: &str = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0.010","entryPrice":"95000.0","markPrice":"96000.0","unRealizedProfit":"10.00","liquidationPrice":"80000.5","notional":"960.0","updateTime":1720736417660}]"#;
 const COIN_RISK: &str = r#"[{"symbol":"BTCUSD_PERP","positionSide":"BOTH","positionAmt":"5","entryPrice":"9500.0","markPrice":"10000.0","unRealizedProfit":"0.01","leverage":"20","liquidationPrice":"8000","marginType":"cross","isolatedMargin":"0","notionalValue":"0.05","updateTime":1720736417660}]"#;
@@ -160,7 +161,7 @@ fn a_read_issued_after_the_command_commits_then_it_succeeds() {
         assert!(h.has_request(path), "{name}: a read is issued");
         assert_eq!(h.result(40), None, "{name}");
         answer(&mut h, path, "[]");
-        assert_eq!(h.result(40), Some(&Ok("[]".to_owned())), "{name}");
+        assert_eq!(h.result(40), Some(&Ok(FLAT_ANSWER.to_owned())), "{name}");
         assert_eq!(open(&h), 0.0, "{name}: the store is flat");
     }
 }
@@ -183,16 +184,16 @@ fn a_read_in_flight_is_followed_by_a_new_one() {
         if let Some(config) = stale_config {
             h.reply(config.id, 200, "", CONFIG);
         }
-        assert_eq!(
-            h.result(39),
-            Some(&Ok("[]".to_owned())),
-            "{name}: its own read answers it"
+        assert!(
+            matches!(h.result(39), Some(Ok(body)) if body.starts_with(r#"{"skipped":[],"open":[{"symbol":"#)),
+            "{name}: its own read answers it: {:?}",
+            h.result(39)
         );
         assert_eq!(h.result(41), None, "{name}: the older read cannot answer");
         assert_eq!(open(&h), before);
         assert!(h.has_request(path), "{name}: a new read follows");
         answer(&mut h, path, "[]");
-        assert_eq!(h.result(41), Some(&Ok("[]".to_owned())), "{name}");
+        assert_eq!(h.result(41), Some(&Ok(FLAT_ANSWER.to_owned())), "{name}");
         assert_eq!(open(&h), 0.0);
     }
 }
@@ -259,7 +260,7 @@ fn a_read_a_newer_stream_event_discarded_is_not_a_commit() {
         "a new read follows well inside the repair throttle"
     );
     answer(&mut h, USDM, "[]");
-    assert_eq!(h.result(45), Some(&Ok("[]".to_owned())));
+    assert_eq!(h.result(45), Some(&Ok(FLAT_ANSWER.to_owned())));
     assert_eq!(open(&h), 0.0);
 }
 
@@ -305,13 +306,16 @@ fn an_owned_row_outside_the_coinm_catalogue_is_named_and_a_flat_one_is_not() {
     let mut h = coinm();
     read(&mut h, 70);
     answer(&mut h, COIN, &unlisted);
-    assert_eq!(h.result(70), Some(&Ok(r#"["ETHUSD_250926"]"#.to_owned())));
+    assert_eq!(
+        h.result(70),
+        Some(&Ok(r#"{"skipped":["ETHUSD_250926"],"open":[]}"#.to_owned()))
+    );
 
     let flat = unlisted.replace("\"positionAmt\":\"5\"", "\"positionAmt\":\"0\"");
     let mut h = coinm();
     read(&mut h, 71);
     answer(&mut h, COIN, &flat);
-    assert_eq!(h.result(71), Some(&Ok("[]".to_owned())));
+    assert_eq!(h.result(71), Some(&Ok(FLAT_ANSWER.to_owned())));
 }
 
 #[test]
@@ -320,7 +324,14 @@ fn usdm_and_pm_commit_a_row_on_an_unknown_market_rather_than_dropping_it() {
         let mut h = start();
         read(&mut h, 72);
         answer(&mut h, path, &USDM_RISK.replace("BTCUSDT", "DOGEUSDT"));
-        assert_eq!(h.result(72), Some(&Ok("[]".to_owned())), "{name}");
+        assert_eq!(
+            h.result(72),
+            Some(&Ok(
+                r#"{"skipped":[],"open":[{"symbol":"DOGEUSDT","side":"long","contracts":0.01}]}"#
+                    .to_owned()
+            )),
+            "{name}"
+        );
         assert!(open(&h) > 0.0, "{name}: the row is shown, not skipped");
     }
 }

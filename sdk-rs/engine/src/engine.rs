@@ -575,6 +575,9 @@ pub enum VenueAction {
     /// Succeeds only once a positions read issued after this command has
     /// committed to the store; `Capabilities::fresh_positions` advertises it.
     ReadPositions,
+    /// A nuke's cancel of every open order on the account, for a venue whose symbol
+    /// cancel misses unseen orders; `Capabilities::nuke_account_cancel` advertises it.
+    CancelAccountOrders,
     /// Lighter: the cached account tier as a JSON string, or `null`.
     FetchAccountTier,
     /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
@@ -752,7 +755,11 @@ impl Command {
             Self::PlaceOrders { .. } => Intent::Place,
             Self::CancelOrders { .. }
             | Self::CancelOrdersWithSymbols { .. }
-            | Self::CancelSymbolOrders { .. } => Intent::Cancel,
+            | Self::CancelSymbolOrders { .. }
+            | Self::Venue {
+                action: VenueAction::CancelAccountOrders,
+                ..
+            } => Intent::Cancel,
             Self::AmendOrder { .. } | Self::AmendOrderWithSymbol { .. } => Intent::Amend,
             Self::SetLeverage { .. }
             | Self::SetMarginType { .. }
@@ -5245,8 +5252,12 @@ impl<V: Venue> Engine<V> {
             }
             Event::Command(Command::Venue { command, action }) => {
                 cx.io.begin_command_entry(Some(command));
-                cx.io.core.request_contexts.dispatch =
-                    Some((command, crate::classify::Intent::Place));
+                let intent = Command::Venue {
+                    command,
+                    action: action.clone(),
+                }
+                .write_intent();
+                cx.io.core.request_contexts.dispatch = Some((command, intent));
                 self.venue.on_venue_action(&mut cx, command, action);
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();

@@ -435,7 +435,7 @@ fn stop_all_stops_twaps_and_chases_and_reports_once_cancels_settle() {
         .unwrap_or_else(|| panic!("no algos:stopped in {stopped:?}"));
     assert_eq!(
         report["data"],
-        serde_json::json!({ "stoppedChasers": [chase_id], "stoppedTwaps": [twap_id], "settled": true })
+        serde_json::json!({ "stoppedChasers": [chase_id], "stoppedTwaps": [twap_id], "settled": true, "placedSymbols": ["BTCUSDT"] })
     );
     assert!(stopped.contains(&serde_json::json!({ "op": "twap:stateUpdate", "data": {} })));
     let store = stopped

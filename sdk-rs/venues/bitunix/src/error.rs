@@ -94,6 +94,8 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
     }
     error
 }
+pub(crate) const NO_DATA: &str = "Bitunix response has no data";
+
 pub(crate) fn response_data<'a>(
     response: &Response<'a>,
     write: bool,
@@ -159,7 +161,7 @@ pub(crate) fn response_data<'a>(
     envelope
         .data
         .map(|data| data.get())
-        .ok_or_else(|| malformed("Bitunix response has no data", write))
+        .ok_or_else(|| malformed(NO_DATA, write))
 }
 
 #[cfg(test)]

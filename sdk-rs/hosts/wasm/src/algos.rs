@@ -250,8 +250,7 @@ impl Algos {
                     use safe_cex_exec::native::CancelAllScope;
                     match sweep.capabilities.cancel_all {
                         CancelAll::Native => CancelAllScope::Native,
-                        CancelAll::EachOpenSymbol => CancelAllScope::Symbols(Vec::new()),
-                        CancelAll::EachPlacedSymbol => {
+                        CancelAll::EachOpenSymbol | CancelAll::EachPlacedSymbol => {
                             CancelAllScope::Symbols(sweep.placed.borrow().iter().cloned().collect())
                         }
                     }
@@ -398,6 +397,7 @@ impl Algos {
                     "stoppedChasers": stopped_chasers,
                     "stoppedTwaps": stopped_twaps,
                     "settled": settled,
+                    "placedSymbols": port.placed.borrow().iter().collect::<Vec<_>>(),
                 })
                 .to_string(),
             );

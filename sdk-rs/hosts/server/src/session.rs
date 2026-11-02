@@ -703,8 +703,8 @@ impl Session {
                 })
                 .await
                 .unwrap_or_default();
-            // As `cancelEachPlacedSymbol`: frames can lag a placement's ACK.
-            if account.handle.capabilities().cancel_all == CancelAll::EachPlacedSymbol {
+            // Frames can lag a placement's ACK, on every per-symbol cancel mode.
+            if account.handle.capabilities().cancel_all != CancelAll::Native {
                 symbols.extend(account.placed.symbols());
             }
             symbols

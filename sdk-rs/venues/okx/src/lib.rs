@@ -961,6 +961,7 @@ impl Venue for Okx {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             closed_positions: true,
             fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }

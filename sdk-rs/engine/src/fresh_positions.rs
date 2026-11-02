@@ -2,14 +2,30 @@
 //! numbers its reads; a waiter holds, per read key (a product), the first read
 //! number that may answer it, so an in-flight read can never settle it.
 use crate::engine::Cx;
+use crate::model::PositionSide;
 use crate::request_context::{CommandEntryError, Context, Operation, Owner};
 use crate::{ErrorKind, Outcome, VenueError};
+use serde::Serialize;
 
 struct Waiter {
     root: Context,
     legs: Vec<(u8, u32)>,
     /// Symbols of owned rows the reads that satisfied its legs could not represent.
     skipped: Vec<String>,
+}
+
+/// A success answer: what the read could not keep, and what it left open.
+#[derive(Serialize)]
+struct FreshAnswer<'a> {
+    skipped: &'a [String],
+    open: Vec<OpenRow<'a>>,
+}
+
+#[derive(Serialize)]
+struct OpenRow<'a> {
+    symbol: &'a str,
+    side: PositionSide,
+    contracts: f64,
 }
 
 #[derive(Default)]
@@ -68,7 +84,8 @@ impl FreshPositions {
     }
 
     /// Read `generation` committed to the store. `skipped` names rows it dropped
-    /// because their market is outside the catalogue; the answer lists them.
+    /// because their market is outside the catalogue. The answer lists them and the
+    /// store's nonzero rows at the commit of the waiter's final leg.
     pub fn committed<P>(
         &mut self,
         cx: &mut Cx<'_, P>,
@@ -91,10 +108,24 @@ impl FreshPositions {
             if !waiter.legs.is_empty() {
                 return true;
             }
-            let body = serde_json::to_string(&waiter.skipped);
+            let open = cx
+                .store
+                .positions()
+                .iter()
+                .filter(|position| position.contracts != 0.0)
+                .map(|position| OpenRow {
+                    symbol: &position.symbol,
+                    side: position.side,
+                    contracts: position.contracts,
+                })
+                .collect();
+            let body = serde_json::to_string(&FreshAnswer {
+                skipped: &waiter.skipped,
+                open,
+            });
             let _ = cx.settle_caller_read_root(
                 &waiter.root,
-                body.map_err(|_| VenueError::new("positions read: unserializable skipped rows")),
+                body.map_err(|_| VenueError::new("positions read: unserializable answer")),
             );
             false
         });

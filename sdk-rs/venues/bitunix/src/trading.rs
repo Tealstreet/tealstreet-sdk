@@ -22,6 +22,7 @@ const BATCH: &str = "/api/v1/futures/trade/batch_order";
 const TPSL: &str = "/api/v1/futures/tpsl/place_order";
 const FULL_TPSL: &str = "/api/v1/futures/tpsl/position/place_order";
 const CANCEL: &str = "/api/v1/futures/trade/cancel_orders";
+const CANCEL_ALL: &str = "/api/v1/futures/trade/cancel_all_orders";
 const CANCEL_TPSL: &str = "/api/v1/futures/tpsl/cancel_order";
 const AMEND: &str = "/api/v1/futures/trade/modify_order";
 const AMEND_TPSL: &str = "/api/v1/futures/tpsl/modify_order";
@@ -118,6 +119,8 @@ enum Call {
         ids: Vec<String>,
         require_ack: bool,
     },
+    /// Reaches orders the store has not seen; their rows follow from the stream.
+    CancelSymbol,
     ReconcileReplacement {
         parent: String,
         id: String,
@@ -539,7 +542,21 @@ impl BitunixFutures {
                     .filter(|o| o.symbol == symbol && o.status == OrderStatus::Open)
                     .map(|o| o.id.clone())
                     .collect();
-                self.plan_cancel(cx, &ids)
+                self.plan_cancel(cx, &ids).map(|mut job| {
+                    if !symbol.is_empty() {
+                        let payload = Payload {
+                            symbol: Some(symbol.clone()),
+                            ..Default::default()
+                        };
+                        job.steps.push_back(Step {
+                            path: CANCEL_ALL,
+                            body: text(&payload),
+                            call: Call::CancelSymbol,
+                            delay: 0.0,
+                        });
+                    }
+                    job
+                })
             }
             Command::AmendOrder {
                 id, price, amount, ..
@@ -1802,6 +1819,10 @@ impl BitunixFutures {
             {
                 "null"
             }
+            // Its documented answer carries only the code, which already read 0 here.
+            Err(error) if request.step.path == CANCEL_ALL && error.message == error::NO_DATA => {
+                "null"
+            }
             Err(error) => return self.write_refused(cx, request, &response, error),
         };
         let accepted = match &request.step.call {
@@ -1816,6 +1837,7 @@ impl BitunixFutures {
             Call::Cancel { ids, require_ack } => {
                 self.cancel_answer(cx, &request, data, ids, *require_ack)
             }
+            Call::CancelSymbol => Ok(()),
             Call::Amend {
                 id, parent, leg, ..
             } => self.amend_answer(cx, &request, data, id, parent, *leg),
@@ -1862,7 +1884,10 @@ impl BitunixFutures {
         if accepted.is_ok()
             && matches!(
                 request.step.call,
-                Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
+                Call::CancelSymbol
+                    | Call::Leverage { .. }
+                    | Call::Margin { .. }
+                    | Call::Mode { .. }
             )
             && cx
                 .http_write_fact(

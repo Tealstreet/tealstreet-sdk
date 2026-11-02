@@ -36,36 +36,30 @@ impl Adapter {
         let stopped = json!({"stoppedChasers": stopped_chasers, "stoppedTwaps": stopped_twaps});
         // A browser writer runs the legs itself; the host only stops its algos.
         if mode == "algos" {
+            let placed = match self.cancel_all.as_ref().map(|scopes| scopes()) {
+                Some(CancelAllScope::Symbols(placed)) => placed,
+                _ => Vec::new(),
+            };
+            let mut stopped = stopped;
+            stopped["placedSymbols"] = json!(placed);
             return Ok(stopped);
         }
+        // Before any close: a market close otherwise fills against a resting order.
+        // Every traded symbol is cancelled, whether or not the store shows its order.
         if !matches!(mode, "positions" | "pos") {
-            let store = self.snapshot();
-            let mut symbols = Vec::new();
-            for order in rows(&store, "orders") {
-                if let Some(symbol) = order["symbol"].as_str().filter(|s| !s.is_empty())
-                    && !symbols.iter().any(|s| s == symbol)
-                {
-                    symbols.push(symbol.to_string());
-                }
-            }
-            for symbol in symbols {
+            for (target, command) in self.traded_symbol_cancels() {
                 if self.cx.scope.is_disposed() {
                     return Err(
                         json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
                     );
                 }
-                match self
-                    .nuke_command("cancelSymbolOrders", json!([symbol]))
-                    .await
-                {
+                match self.run_command(command).await {
                     Ok(_) => {
                         completed += 1;
                         cancelled += 1;
-                        cancelled_symbols.push(symbol.clone());
+                        cancelled_symbols.push(target);
                     }
-                    Err(error) => {
-                        failures.push(named(error, "cancel", &symbol));
-                    }
+                    Err(error) => failures.push(named(error, "cancel", &target)),
                 }
             }
         }
@@ -75,6 +69,7 @@ impl Adapter {
             let mut positions = open_positions(&self.snapshot());
             for attempt in 0..=NUKE_CLOSE_RETRIES {
                 let mut failed = Vec::new();
+                let close_attempted = !positions.is_empty();
                 for position in positions {
                     if self.cx.scope.is_disposed() {
                         return Err(
@@ -110,11 +105,15 @@ impl Adapter {
                 }
                 // A venue with the read closes again only on one issued after this round.
                 if fresh_read {
-                    for _ in 0..NUKE_FLAT_SETTLE_MS / NUKE_CLOSE_RETRY_MS {
-                        if open_positions(&self.snapshot()).is_empty() {
-                            break;
+                    if close_attempted {
+                        safe_cex_algos::executor::sleep_ms(NUKE_READ_SETTLE_MS).await;
+                        let remaining = NUKE_FLAT_SETTLE_MS - NUKE_READ_SETTLE_MS;
+                        for _ in 0..remaining / NUKE_CLOSE_RETRY_MS {
+                            if open_positions(&self.snapshot()).is_empty() {
+                                break;
+                            }
+                            safe_cex_algos::executor::sleep_ms(NUKE_CLOSE_RETRY_MS).await;
                         }
-                        safe_cex_algos::executor::sleep_ms(NUKE_CLOSE_RETRY_MS).await;
                     }
                     if self.cx.scope.is_disposed() {
                         return Err(
@@ -122,22 +121,16 @@ impl Adapter {
                         );
                     }
                     let read = self.read_fresh_positions().await;
-                    let open = open_positions(&self.snapshot());
-                    close_failures = failed
-                        .into_iter()
-                        .filter(|(position, _)| {
-                            open.iter().any(|row| {
-                                row["symbol"] == position["symbol"]
-                                    && row["side"] == position["side"]
-                            })
-                        })
-                        .map(|(_, failure)| failure)
-                        .collect();
-                    match read {
-                        Ok(rows) => skipped = rows,
+                    let store_open = open_positions(&self.snapshot());
+                    let open = match read {
+                        Ok(answer) => {
+                            skipped = answer.skipped;
+                            answer.open
+                        }
                         Err(error) => {
+                            close_failures = still_open_failures(failed, &store_open);
                             let cause = error["message"].as_str().unwrap_or("read failed");
-                            let named = describe_open(&open);
+                            let named = describe_open(&store_open);
                             let left = if named.is_empty() {
                                 String::new()
                             } else {
@@ -148,17 +141,32 @@ impl Adapter {
                             );
                             break;
                         }
-                    }
+                    };
+                    close_failures = failed
+                        .into_iter()
+                        .filter(|(position, _)| {
+                            open.iter().any(|row| {
+                                position["symbol"] == row.symbol.as_str()
+                                    && position["side"] == row.side.as_str()
+                            })
+                        })
+                        .map(|(_, failure)| failure)
+                        .collect();
                     if open.is_empty() {
                         break;
                     }
                     if attempt == NUKE_CLOSE_RETRIES {
                         if close_failures.is_empty() {
-                            failures.push(json!({"message":format!("Nuke did not leave the account flat: {} still open", describe_open(&open))}));
+                            let left = open
+                                .iter()
+                                .map(|row| format!("{} {} {}", row.symbol, row.side, row.contracts))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            failures.push(json!({"message":format!("Nuke did not leave the account flat: {left} still open")}));
                         }
                         break;
                     }
-                    positions = open;
+                    positions = store_open;
                     continue;
                 }
                 if failed.is_empty() {
@@ -209,8 +217,18 @@ impl Adapter {
             }
         }
         let stopped_count = stopped_chasers.len() + stopped_twaps.len();
+        let warning = (!matches!(mode, "positions" | "pos"))
+            .then(|| unseen_orders_warning(&self.cx.port.capabilities()))
+            .flatten();
+        let warned = |text: String| match warning {
+            Some(warning) => format!("{text}. {warning}"),
+            None => text,
+        };
         if failures.is_empty() {
-            let mut result = json!({"summary":format!("Nuke completed: {stopped_count} algo(s) stopped, {closed} position close(s) accepted, {cancelled} symbol cancel(s) and {swept} cancel-all sweep(s) accepted")});
+            let mut result = json!({"summary":warned(format!("Nuke completed: {stopped_count} algo(s) stopped, {closed} position close(s) accepted, {cancelled} symbol cancel(s) and {swept} cancel-all sweep(s) accepted"))});
+            if let Some(warning) = warning {
+                result["warning"] = json!(warning);
+            }
             result["stoppedChasers"] = stopped["stoppedChasers"].clone();
             result["stoppedTwaps"] = stopped["stoppedTwaps"].clone();
             Ok(result)
@@ -233,7 +251,7 @@ impl Adapter {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            error["message"] = json!(format!(
+            error["message"] = json!(warned(format!(
                 "Nuke completed {completed} operation(s), {} failed: {}. Open orders: {}",
                 failures.len(),
                 failures
@@ -242,7 +260,7 @@ impl Adapter {
                     .collect::<Vec<_>>()
                     .join("; "),
                 if open.is_empty() { "none" } else { &open }
-            ));
+            )));
             error["partialOrderIds"] = json!(ids);
             error["failedOperationCount"] = json!(failures.len());
             error["failedLegs"] = json!(failures);
@@ -260,12 +278,26 @@ impl Adapter {
             Err(error)
         }
     }
-    /// The final cancel-all: one venue-wide cancel, or each symbol with an open
-    /// order now plus the host's attempted-placement symbols, less those this nuke
-    /// has already cancelled.
+    /// The traded symbols, each with its cancel: open orders, open positions and
+    /// the host's attempted placements; on a venue-wide cancel, that cancel alone.
+    fn traded_symbol_cancels(&self) -> Vec<(String, safe_cex_engine::engine::Command)> {
+        let store = self.snapshot();
+        let positions = open_positions(&store);
+        let held = positions.iter().filter_map(|p| p["symbol"].as_str());
+        self.cancels_for(held.map(str::to_owned).collect(), &[])
+    }
+    /// The final cancel-all, catching what appeared during the nuke: the same scope
+    /// less the symbols this nuke has already cancelled.
     fn sweep_commands(
         &self,
         cancelled: &[String],
+    ) -> Vec<(String, safe_cex_engine::engine::Command)> {
+        self.cancels_for(Vec::new(), cancelled)
+    }
+    fn cancels_for(
+        &self,
+        also: Vec<String>,
+        done: &[String],
     ) -> Vec<(String, safe_cex_engine::engine::Command)> {
         let scope = self
             .cancel_all
@@ -280,14 +312,15 @@ impl Adapter {
                     .filter_map(|order| order["symbol"].as_str().filter(|s| !s.is_empty()))
                     .map(str::to_owned)
                     .chain(placed)
+                    .chain(also)
                     .collect();
                 symbols.sort();
                 symbols.dedup();
-                symbols.retain(|symbol| !cancelled.contains(symbol));
+                symbols.retain(|symbol| !done.contains(symbol));
                 symbols
             }
         };
-        symbols
+        let mut cancels: Vec<_> = symbols
             .into_iter()
             .filter_map(|symbol| {
                 let command = json!({"op":"cancelSymbolOrders","command":self.cx.port.next_command_id(),"symbol":symbol});
@@ -295,7 +328,16 @@ impl Adapter {
                 let target = if symbol.is_empty() { "all symbols".into() } else { symbol };
                 Some((target, command))
             })
-            .collect()
+            .collect();
+        // Nuke means everything: the account-wide cancel reaches what a symbol cancel misses.
+        if self.cx.port.capabilities().nuke_account_cancel {
+            let command =
+                json!({"op":"cancelAccountOrders","command":self.cx.port.next_command_id()});
+            if let Ok(command) = decode_command(&command.to_string()) {
+                cancels.push(("the account".into(), command));
+            }
+        }
+        cancels
     }
     async fn nuke_command(&self, method: &str, args: Value) -> Result<Value, Value> {
         let capabilities = self.cx.port.capabilities();
@@ -303,14 +345,13 @@ impl Adapter {
             .map_err(|message| json!({"message":message,"outcome":"notSent"}))?;
         self.run_command(command).await
     }
-    /// The symbols of open rows a read issued now could not keep.
-    async fn read_fresh_positions(&self) -> Result<Vec<String>, Value> {
+    /// A read issued now. Malformed or old answers are errors: never confirmed flat.
+    async fn read_fresh_positions(&self) -> Result<FreshRead, Value> {
         let command = json!({"op":"readPositions","command":self.cx.port.next_command_id()});
         let command = decode_command(&command.to_string())
             .map_err(|error| json!({"message":error.to_string()}))?;
         let answer = self.run_command(command).await?;
-        serde_json::from_value(answer)
-            .map_err(|_| json!({"message":"Invalid positions read result"}))
+        parse_fresh_read(&answer).ok_or_else(|| json!({"message":"Invalid positions read result"}))
     }
     async fn run_command(&self, command: safe_cex_engine::engine::Command) -> Result<Value, Value> {
         self.cx
@@ -326,7 +367,61 @@ const NUKE_STOP_REASON: &str = "Stopped by nuke";
 const NUKE_CLOSE_RETRIES: u32 = 3;
 const NUKE_CLOSE_RETRY_MS: u64 = 100;
 const NUKE_FLAT_SETTLE_MS: u64 = 2_000;
+/// The least wait after a close round before the read that can prove flat.
+const NUKE_READ_SETTLE_MS: u64 = 500;
 const NUKE_NOT_CONFIRMED: &str = "Nuke could not confirm the account is flat";
+const NUKE_UNSEEN_ORDERS: &str =
+    "Orders placed in the last few seconds may not be cancelled on this venue: check open orders";
+
+/// The one rule for when a nuke warns that unseen orders may rest.
+fn unseen_orders_warning(capabilities: &safe_cex_engine::Capabilities) -> Option<&'static str> {
+    (capabilities.symbol_cancel_misses_unseen && !capabilities.nuke_account_cancel)
+        .then_some(NUKE_UNSEEN_ORDERS)
+}
+
+struct FreshRead {
+    skipped: Vec<String>,
+    open: Vec<OpenRow>,
+}
+
+struct OpenRow {
+    symbol: String,
+    side: String,
+    contracts: f64,
+}
+
+/// The `readPositions` answer; `None` for anything but its exact object shape.
+fn parse_fresh_read(answer: &Value) -> Option<FreshRead> {
+    let skipped = answer["skipped"]
+        .as_array()?
+        .iter()
+        .map(|symbol| symbol.as_str().map(str::to_owned))
+        .collect::<Option<_>>()?;
+    let open = answer["open"]
+        .as_array()?
+        .iter()
+        .map(|row| {
+            Some(OpenRow {
+                symbol: row["symbol"].as_str()?.to_owned(),
+                side: row["side"].as_str()?.to_owned(),
+                contracts: row["contracts"].as_f64()?,
+            })
+        })
+        .collect::<Option<_>>()?;
+    Some(FreshRead { skipped, open })
+}
+
+/// Failures of closes whose position still shows open in `open`.
+fn still_open_failures(failed: Vec<(Value, Value)>, open: &[Value]) -> Vec<Value> {
+    failed
+        .into_iter()
+        .filter(|(position, _)| {
+            open.iter()
+                .any(|row| row["symbol"] == position["symbol"] && row["side"] == position["side"])
+        })
+        .map(|(_, failure)| failure)
+        .collect()
+}
 
 fn open_positions(store: &Value) -> Vec<Value> {
     rows(store, "positions")

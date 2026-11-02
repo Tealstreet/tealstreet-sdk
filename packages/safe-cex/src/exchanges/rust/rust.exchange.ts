@@ -302,9 +302,48 @@ const NUKE_CLOSE_RETRIES = 3;
 const NUKE_CLOSE_RETRY_MS = 100;
 const NUKE_FLAT_ROUNDS = 3;
 const NUKE_FLAT_SETTLE_MS = 2_000;
+/** The least wait after a close round before the read that can prove flat. */
+const NUKE_READ_SETTLE_MS = 500;
 const NUKE_NOT_CONFIRMED = 'Nuke could not confirm the account is flat';
-const describeOpen = (positions: Position[]) =>
+const describeOpen = (positions: Pick<Position, 'symbol' | 'side' | 'contracts'>[]) =>
   positions.map((p) => `${p.symbol} ${p.side} ${p.contracts}`).join(', ');
+type FreshPositionsRead = {
+  skipped: string[];
+  open: Pick<Position, 'symbol' | 'side' | 'contracts'>[];
+};
+/** Only this exact shape can prove anything; an old array or a partial row proves nothing. */
+const isFreshPositionsRead = (body: unknown): body is FreshPositionsRead => {
+  const read = body as Partial<FreshPositionsRead> | null;
+  return (
+    Array.isArray(read?.skipped) &&
+    read.skipped.every((symbol) => typeof symbol === 'string') &&
+    Array.isArray(read.open) &&
+    read.open.every(
+      (row) =>
+        typeof row?.symbol === 'string' &&
+        typeof row.side === 'string' &&
+        typeof row.contracts === 'number' &&
+        Number.isFinite(row.contracts),
+    )
+  );
+};
+const NUKE_UNSEEN_ORDERS =
+  'Orders placed in the last few seconds may not be cancelled on this venue: check open orders';
+/** The one rule for when a nuke warns that unseen orders may rest. */
+const unseenOrdersWarning = (capabilities: EngineCapabilities): string | undefined =>
+  capabilities.symbolCancelMissesUnseen && !capabilities.nukeAccountCancel ? NUKE_UNSEEN_ORDERS : undefined;
+/** The failure, its message ending with the warning; a frozen error is wrapped, not changed. */
+const withWarning = (error: unknown, warning: string | undefined): unknown => {
+  if (!warning) return error;
+  const message = `${errorMessage(error)}. ${warning}`;
+  if (error instanceof Error && !Object.isFrozen(error)) {
+    error.message = message;
+    return error;
+  }
+  return Object.assign(new Error(message), error instanceof Error ? { ...error } : {}, { cause: error });
+};
+/** A stop's own result, plus the placements the stopping engine attempted. */
+type AlgoStopWithPlacements = NukeResult & { placedSymbols?: string[] };
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode'] as const;
 /**
@@ -1142,8 +1181,12 @@ export class RustEngineExchange extends BaseExchange {
 
   /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere: the
    * worker's run in its Rust algos; an in-process CLI's run in the TS algos. */
-  stopAccountAlgos = (): Promise<NukeResult> =>
-    this.runsRustAlgos ? this.stopRustAlgos() : stopLocalAccountAlgos(this);
+  stopAccountAlgos = async (): Promise<AlgoStopWithPlacements> => {
+    const stopped: AlgoStopWithPlacements = this.runsRustAlgos
+      ? await this.stopRustAlgos()
+      : await stopLocalAccountAlgos(this);
+    return { ...stopped, placedSymbols: [...(stopped.placedSymbols ?? []), ...this.attemptedPlacementSymbols] };
+  };
 
   /** Whether this account's engine runs algos, once its engine host exists to say. */
   private algoRoute: 'rust' | 'unsupported' | undefined;
@@ -1238,7 +1281,7 @@ export class RustEngineExchange extends BaseExchange {
 
   /** As `stopAccountAlgos.ts`, in the engine: TWAPs first, then every chase, waiting
    * (bounded) for their cancels. */
-  private stopRustAlgos = async (): Promise<NukeResult> => {
+  private stopRustAlgos = async (): Promise<AlgoStopWithPlacements> => {
     const host = this.host!;
     let backstop: ReturnType<typeof setTimeout> | undefined;
     const unanswered = new Promise<AlgoStopAllResult>((resolve) => {
@@ -1255,7 +1298,11 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (!result.settled)
       this.log('Stopped chases did not confirm their cancels before the nuke; orders may rest', LogSeverity.Warning);
-    return { stoppedChasers: result.stoppedChasers, stoppedTwaps: result.stoppedTwaps };
+    return {
+      stoppedChasers: result.stoppedChasers,
+      stoppedTwaps: result.stoppedTwaps,
+      placedSymbols: result.placedSymbols ?? [],
+    };
   };
 
   // Startup is single-use, including failures; a retry needs a new account instance.
@@ -2307,9 +2354,7 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (capabilities.stpControls) for (const order of orders) this.validateAsterStp(order.stpMode);
-    if (this.capabilityRecord?.cancelAll === 'eachPlacedSymbol') {
-      for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
-    }
+    for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
     return this.writeCommand<string[]>(timing, { op: 'placeOrders', orders });
   };
 
@@ -2362,19 +2407,36 @@ export class RustEngineExchange extends BaseExchange {
     this.assertEngineAlive();
     if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
     this.isNuking = true;
+    let warning: string | undefined;
     try {
-      const stopped = await this.stopAlgosForNuke();
-      await this.cancelAllOrders();
-      return stopped;
+      const { placedSymbols, ...stopped } = await this.stopAlgosForNuke();
+      warning = unseenOrdersWarning(await this.capabilitiesFor('nuke'));
+      await this.cancelNukeOrders(placedSymbols);
+      return warning ? { ...stopped, warning } : stopped;
+    } catch (error) {
+      throw withWarning(error, warning);
     } finally {
       this.isNuking = false;
     }
   };
 
+  /**
+   * Every traded symbol's cancel, then, where the venue has one, its account-wide cancel:
+   * nuke means everything. Each runs whatever the other did; failures are named together.
+   */
+  private cancelNukeOrders = async (placedSymbols?: string[]): Promise<void> => {
+    const failures: unknown[] = [];
+    await this.cancelAllOrders(await this.nukeCancelSymbols(placedSymbols)).catch((error) => failures.push(error));
+    if ((await this.capabilitiesFor('nuke')).nukeAccountCancel)
+      await this.command({ op: 'cancelAccountOrders' }).catch((error) => failures.push(error));
+    if (failures.length === 1) throw failures[0];
+    if (failures.length) throw new Error(failures.map(errorMessage).join('; '));
+  };
+
   /** Running chasers and TWAPs would place again behind the nuke: stop them first. */
-  private stopAlgosForNuke = async (): Promise<NukeResult> => {
+  private stopAlgosForNuke = async (): Promise<AlgoStopWithPlacements> => {
     const stopped = this.isWorkerMirror
-      ? ((await this.callWorker('stopAccountAlgos')) as NukeResult)
+      ? ((await this.callWorker('stopAccountAlgos')) as AlgoStopWithPlacements)
       : await this.stopAccountAlgos();
     const count = stopped.stoppedChasers.length + stopped.stoppedTwaps.length;
     if (count)
@@ -2385,6 +2447,14 @@ export class RustEngineExchange extends BaseExchange {
     return stopped;
   };
 
+  /** Beyond what cancel-all itself covers: open positions, and the stopping engine's placements. */
+  private nukeCancelSymbols = async (placedSymbols: string[] = []): Promise<string[]> => [
+    ...placedSymbols,
+    ...(await this.fetchPositions().catch(() => this.store.positions))
+      .filter((position) => position.contracts !== 0)
+      .map((position) => position.symbol),
+  ];
+
   private runNativeNuke = async (cancelOrders: boolean): Promise<NukeResult> => {
     this.assertEngineAlive();
     if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
@@ -2392,7 +2462,7 @@ export class RustEngineExchange extends BaseExchange {
     let failed = false;
     let failure: unknown;
     try {
-      const stopped = await this.stopAlgosForNuke();
+      const { placedSymbols, ...stopped } = await this.stopAlgosForNuke();
       const leg = async (run: () => Promise<void>) => {
         try {
           await run();
@@ -2406,13 +2476,14 @@ export class RustEngineExchange extends BaseExchange {
         }
       };
       // Orders first: a market close otherwise fills against the user's own resting bid.
-      if (cancelOrders) await leg(() => this.cancelAllOrders());
+      if (cancelOrders) await leg(() => this.cancelNukeOrders(placedSymbols));
       await leg(() => this.closeUntilFlat());
+      const warning = cancelOrders ? unseenOrdersWarning(await this.capabilitiesFor('nuke')) : undefined;
       if (failed) {
         this.logNukeRemainder();
-        throw failure;
+        throw withWarning(failure, warning);
       }
-      return stopped;
+      return warning ? { ...stopped, warning } : stopped;
     } finally {
       this.isNuking = false;
     }
@@ -2429,43 +2500,61 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   /**
-   * A positions read issued after this call; resolves with the symbols of open rows it
-   * could not keep. On the engine's owner it flushes, so frames precede the answer.
+   * A positions read issued after this call; resolves with the rows it could not keep and
+   * what it left open. On the engine's owner it flushes, so frames precede the answer.
    */
-  readPositions = async (): Promise<string[]> => {
-    const skipped = await this.command<string[]>({ op: 'readPositions' }, { report: false });
+  readPositions = async (): Promise<FreshPositionsRead> => {
+    const read = await this.command<FreshPositionsRead>({ op: 'readPositions' }, { report: false });
     this.host?.flush();
-    return skipped;
+    return read;
   };
 
   /**
    * A close can succeed and leave a position (a fill against a resting order), so flat is
-   * read, not assumed. A venue with `freshPositions` sends a further close only on a read
-   * issued after the last one; if that read fails, or times out, none is sent.
+   * read, not assumed: a venue with `freshPositions` is flat only on a read issued at least
+   * `NUKE_READ_SETTLE_MS` after the last close. If that read fails, no further close is sent.
    */
   private closeUntilFlat = async (): Promise<void> => {
     const capabilities = await this.capabilitiesFor('nuke');
-    let skipped: string[] = [];
     for (let round = 0; round < NUKE_FLAT_ROUNDS; round += 1) {
-      await this.closeAllPositions();
-      const settleBy = Date.now() + NUKE_FLAT_SETTLE_MS;
-      while (Date.now() < settleBy && !this.isDisposed && (await this.positionsStillOpen()).length) {
-        await new Promise((resolve) => setTimeout(resolve, NUKE_CLOSE_RETRY_MS));
-      }
+      const closed = await this.closeAllPositions();
+      if (closed || !capabilities.freshPositions) await this.settleAfterClose(capabilities.freshPositions);
       if (this.isDisposed) return;
-      if (capabilities.freshPositions) skipped = await this.freshNukeRead();
-      if (!(await this.positionsStillOpen()).length) break;
-      if (round === NUKE_FLAT_ROUNDS - 1) {
-        const left = await this.positionsStillOpen();
-        throw new Error(`Nuke did not leave the account flat: ${describeOpen(left)} still open`);
+      if (capabilities.freshPositions) {
+        const { skipped, open } = await this.freshNukeRead();
+        if (!open.length) {
+          if (skipped.length) throw new Error(`${NUKE_NOT_CONFIRMED}: ${skipped.join(', ')} on no listed market`);
+          return;
+        }
+        if (round === NUKE_FLAT_ROUNDS - 1)
+          throw new Error(`Nuke did not leave the account flat: ${describeOpen(open)} still open`);
+        continue;
       }
+      const left = await this.positionsStillOpen();
+      if (!left.length) return;
+      if (round === NUKE_FLAT_ROUNDS - 1)
+        throw new Error(`Nuke did not leave the account flat: ${describeOpen(left)} still open`);
     }
-    if (skipped.length) throw new Error(`${NUKE_NOT_CONFIRMED}: ${skipped.join(', ')} on no listed market`);
   };
 
-  private freshNukeRead = async (): Promise<string[]> => {
+  /** Up to the flat settle while the store shows open; before a proving read, at least the read settle. */
+  private settleAfterClose = async (provingRead: boolean): Promise<void> => {
+    const closedAt = Date.now();
+    if (provingRead) await new Promise((resolve) => setTimeout(resolve, NUKE_READ_SETTLE_MS));
+    while (
+      Date.now() < closedAt + NUKE_FLAT_SETTLE_MS &&
+      !this.isDisposed &&
+      (await this.positionsStillOpen()).length
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, NUKE_CLOSE_RETRY_MS));
+    }
+  };
+
+  private freshNukeRead = async (): Promise<FreshPositionsRead> => {
     try {
-      return await this.readPositions();
+      const read: unknown = await this.readPositions();
+      if (!isFreshPositionsRead(read)) throw new Error('unexpected positions read result');
+      return read;
     } catch (error) {
       const left = await this.positionsStillOpen().catch(() => []);
       const named = left.length ? `${describeOpen(left)} may still be open: ` : '';
@@ -2477,8 +2566,10 @@ export class RustEngineExchange extends BaseExchange {
    * Closes one position at a time so a failure names its symbol, as legacy, and
    * retries only a failed close whose position still shows open: a close that
    * succeeded behind a lagging store is never sent again. Every close is reduce-only.
+   * Resolves whether any close was attempted.
    */
-  private closeAllPositions = async (): Promise<void> => {
+  private closeAllPositions = async (): Promise<boolean> => {
+    let attempted = false;
     const unusable: { symbol: string; error: unknown }[] = [];
     let failures = new Map<string, { symbol: string; error: unknown }>();
     for (let attempt = 0; attempt <= NUKE_CLOSE_RETRIES; attempt += 1) {
@@ -2496,7 +2587,10 @@ export class RustEngineExchange extends BaseExchange {
           continue;
         }
         try {
-          if (order) await this.placeOrders([order]);
+          if (order) {
+            attempted = true;
+            await this.placeOrders([order]);
+          }
         } catch (error) {
           failures.set(key, { symbol: position.symbol, error });
         }
@@ -2510,7 +2604,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     for (const key of failures.keys()) if (!open.has(key)) failures.delete(key);
     const failed = [...failures.values(), ...unusable];
-    if (!failed.length) return;
+    if (!failed.length) return attempted;
     const unknown = failed.find(({ error }) => (error as { outcome?: unknown })?.outcome === 'unknown');
     const details = (unknown ?? failed[0]).error;
     throw Object.assign(
@@ -2576,26 +2670,23 @@ export class RustEngineExchange extends BaseExchange {
       ? this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId })
       : this.findOrderFromOpenOrders(symbol, clientOrderId);
 
-  cancelAllOrders = async () => {
+  /**
+   * `alsoSymbols` reach a nuke's traded symbols the store cannot show. A venue-wide cancel
+   * covers them; otherwise each is cancelled with the native orders and attempted placements.
+   */
+  cancelAllOrders = async (alsoSymbols: string[] = []) => {
     this.refuseWriteBeforeEngine();
     const ready = this.writeCapabilitiesFor('cancelAllOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
-    const mode = capabilities.cancelAll;
-    if (mode === 'native') await this.command({ op: 'cancelSymbolOrders', symbol: '' });
-    else if (mode === 'eachPlacedSymbol') await this.cancelEachPlacedSymbol();
-    else await this.cancelEachNativeOrderSymbol();
-  };
-
-  // Native current orders, not a JS store that can lag the engine's flush.
-  private cancelEachNativeOrderSymbol = async () => {
-    await this.cancelEachSymbol(new Set((await this.fetchOrders()).map((order) => order.symbol)));
-  };
-
-  private cancelEachPlacedSymbol = async () => {
-    // Frames can lag placement ACKs. Keep attempted scopes for this account's
-    // lifetime, including uncertain/rejected outcomes and races with later places.
+    if (capabilities.cancelAll === 'native') {
+      await this.command({ op: 'cancelSymbolOrders', symbol: '' });
+      return;
+    }
+    // Native current orders, not a JS store that can lag the engine's flush; frames can
+    // lag placement ACKs, so attempted scopes stay for the account's lifetime.
+    const orders = capabilities.cancelAll === 'eachOpenSymbol' ? await this.fetchOrders() : this.store.orders;
     await this.cancelEachSymbol(
-      new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]),
+      new Set([...orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols, ...alsoSymbols]),
     );
   };
 

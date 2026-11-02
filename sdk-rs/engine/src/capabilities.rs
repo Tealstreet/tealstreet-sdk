@@ -61,6 +61,11 @@ pub struct Capabilities {
     pub order_history_needs_symbol: bool,
     /// The `ReadPositions` venue action: a positions read issued after the command.
     pub fresh_positions: bool,
+    /// The `CancelAccountOrders` venue action, which only a nuke sends.
+    pub nuke_account_cancel: bool,
+    /// A symbol cancel acts on the store's rows, so it can miss an order the store
+    /// has not seen yet (one placed seconds ago, its frame still in flight).
+    pub symbol_cancel_misses_unseen: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -192,6 +197,8 @@ impl Capabilities {
         schedule_cancel: false,
         order_history_needs_symbol: false,
         fresh_positions: false,
+        nuke_account_cancel: false,
+        symbol_cancel_misses_unseen: false,
     };
 
     /// No history axis: fills, orders and income are all unavailable.
@@ -241,6 +248,8 @@ impl Capabilities {
             self.schedule_cancel,
             self.order_history_needs_symbol,
             self.fresh_positions,
+            self.nuke_account_cancel,
+            self.symbol_cancel_misses_unseen,
         ]
         .iter()
         .enumerate()
@@ -313,6 +322,8 @@ mod tests {
             schedule_cancel: true,
             order_history_needs_symbol: true,
             fresh_positions: true,
+            nuke_account_cancel: true,
+            symbol_cancel_misses_unseen: true,
             ..Capabilities::NO_HISTORY
         };
         let mut w = FrameWriter::new(vec![], 0.0);
@@ -323,7 +334,7 @@ mod tests {
         assert_eq!(payload.len(), 8);
         assert_eq!(
             u32::from_le_bytes(payload[..4].try_into().unwrap()),
-            (0x1ff << 16) | (7 << 25)
+            (0x1ff << 16) | (0x1f << 25)
         );
         assert_eq!(
             u32::from_le_bytes(payload[4..].try_into().unwrap()),

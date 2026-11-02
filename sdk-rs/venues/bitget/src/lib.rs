@@ -259,7 +259,7 @@ impl BitgetFutures {
         }
     }
 
-    fn coin(&self) -> &'static str {
+    pub(crate) fn coin(&self) -> &'static str {
         match (self.options.product, self.options.testnet) {
             (Product::Usdt, false) => "USDT",
             (Product::Usdt, true) => "SUSDT",
@@ -269,7 +269,7 @@ impl BitgetFutures {
         }
     }
 
-    fn inverse(&self) -> bool {
+    pub(crate) fn inverse(&self) -> bool {
         self.options.product == Product::Inverse
     }
 
@@ -643,6 +643,8 @@ impl Venue for BitgetFutures {
             account: safe_cex_engine::AccountLookup::Query,
             leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
             fresh_positions: true,
+            nuke_account_cancel: true,
+            symbol_cancel_misses_unseen: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -660,6 +662,9 @@ impl Venue for BitgetFutures {
     ) {
         match action {
             safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            action @ safe_cex_engine::VenueAction::CancelAccountOrders => {
+                self.trade_command(cx, safe_cex_engine::Command::Venue { command, action })
+            }
             _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }

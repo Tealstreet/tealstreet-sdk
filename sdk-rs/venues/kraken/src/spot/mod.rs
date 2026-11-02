@@ -422,7 +422,11 @@ impl Venue for KrakenSpot {
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        safe_cex_engine::Capabilities::NO_HISTORY
+        safe_cex_engine::Capabilities {
+            nuke_account_cancel: true,
+            symbol_cancel_misses_unseen: true,
+            ..safe_cex_engine::Capabilities::NO_HISTORY
+        }
     }
     fn socket_control(
         &self,
@@ -793,6 +797,19 @@ impl Venue for KrakenSpot {
         if self.poll == Some(timer) {
             self.poll = None;
             self.poll = Some(cx.set_timer(5_000.));
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::CancelAccountOrders => {
+                self.cancel_account_orders(cx, command)
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
