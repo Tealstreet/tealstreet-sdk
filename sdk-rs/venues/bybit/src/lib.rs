@@ -2786,6 +2786,9 @@ impl Venue for BybitLinear {
                 state.modes.insert((category, symbol.clone()), *hedged);
             }
             state.bound.extend(account.position_bound.iter().cloned());
+            state
+                .trailing_profit
+                .extend(account.trailing_profit.iter().cloned());
         }
         Some(state.encode())
     }
@@ -2830,6 +2833,7 @@ impl Venue for BybitLinear {
                 released.push(key);
             }
             account.position_bound = state.bound.iter().cloned().collect();
+            account.trailing_profit = state.trailing_profit.iter().cloned().collect();
         }
         for key in released {
             cx.release_setting(&key);

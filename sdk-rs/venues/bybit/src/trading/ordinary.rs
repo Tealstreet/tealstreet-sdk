@@ -181,6 +181,9 @@ fn fields(body: &str) -> Fields {
     })
 }
 
+const TRAILING_PROFIT_UNEDITABLE: &str =
+    "A Bybit trailing take-profit cannot be edited here; cancel and recreate it on Bybit";
+
 impl BybitLinear {
     pub(crate) fn ordinary_command(&self, command: &Command) -> bool {
         trade_command_id(command).is_some()
@@ -257,6 +260,13 @@ impl BybitLinear {
         // that only returns already-recovered identities sends nothing.
         if !self.private_ready() && !matches!(command, Command::PlaceOrders { .. }) {
             return Some(Gate::Fail(not_sent(HYRO_RECONNECTING)));
+        }
+        // Bybit has no edit for a trailing take-profit; a trading-stop
+        // amend would replace it with an ordinary full take-profit.
+        if let Command::AmendOrder { id, .. } = command
+            && self.account.trailing_profit.contains(id)
+        {
+            return Some(Gate::Fail(not_sent(TRAILING_PROFIT_UNEDITABLE)));
         }
         let symbol = match command {
             Command::CancelSymbolOrders { symbol, .. }
