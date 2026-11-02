@@ -3730,3 +3730,24 @@ fn a_nuke_cancels_account_wide_because_a_symbol_cancel_misses_unseen_orders() {
     assert!(capabilities.nuke_account_cancel);
     assert!(capabilities.symbol_cancel_misses_unseen);
 }
+
+/// A read already in flight when the cancel lands shows the old order: the wait asks
+/// again at 3 s and 6 s rather than waiting out the 10 s on one stale read.
+#[test]
+fn a_replacement_waiting_on_its_cancel_rereads_the_account() {
+    let (mut e, _socket) = authenticated("OneWay");
+    e.store_mut().upsert_order(order("old"));
+    let r = amend_old(&mut e);
+    let a = respond(
+        &mut e,
+        &r,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Init","execStatus":"Init","bizError":0,"cumQtyRq":"0"}}),
+    );
+    for at in [1001. + 3_000., 1001. + 6_000.] {
+        assert!(
+            a.iter()
+                .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == at)),
+            "no reread at {at}"
+        );
+    }
+}

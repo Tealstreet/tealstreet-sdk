@@ -120,6 +120,8 @@ struct Reconcile {
 /// Reads with rows this engine cannot map before giving up on a symbol.
 const INCOMPLETE_READS: u32 = 3;
 const RESTING_ROWS_READ_MS: f64 = 60_000.;
+/// When a replacement waiting on its cancel reads the account again.
+const REPLACE_WAIT_REFRESH_MS: [f64; 2] = [3_000., 6_000.];
 /// The list's page size is unverified; a list this long may be cut, so absence proves nothing.
 const RESTING_LIST_MAX_ROWS: usize = 20;
 #[derive(Deserialize)]
@@ -212,6 +214,9 @@ pub struct State {
     reconcile: HashMap<String, Reconcile>,
     reconcile_timer: Option<TimerId>,
     resting_timer: Option<TimerId>,
+    /// Re-reads while a replacement waits on its cancel: a read already in flight
+    /// when the cancel landed shows the old order, and nothing else asks again.
+    replace_refresh: Vec<TimerId>,
     /// Limit rows open at the last periodic tick: only these are old enough to check.
     resting_seen: HashSet<String>,
     /// `{currency}:{symbol}` (or `{currency}:` for an unreadable row) of skips already logged.
@@ -527,6 +532,13 @@ impl PhemexPerpetuals {
     pub(crate) fn account_write(&mut self, _cx: &mut Cx<'_, Pending>) {
         self.account.write_revision += 1;
         self.account.order_revision += 1;
+    }
+    /// Refresh now and again at 3 s and 6 s, inside a replacement's cancel wait.
+    pub(crate) fn replace_wait_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account_refresh(cx);
+        for delay in REPLACE_WAIT_REFRESH_MS {
+            self.account.replace_refresh.push(cx.set_timer(delay));
+        }
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         // Frame-fed: the data source's frames carry every account change; nothing is read here.
@@ -2276,6 +2288,16 @@ impl PhemexPerpetuals {
         });
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if let Some(at) = self
+            .account
+            .replace_refresh
+            .iter()
+            .position(|t| *t == timer)
+        {
+            self.account.replace_refresh.swap_remove(at);
+            self.account_refresh(cx);
+            return true;
+        }
         if self.account.reconcile_timer == Some(timer) {
             self.account.reconcile_timer = None;
             self.orders_reconcile(cx);
