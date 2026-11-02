@@ -23,6 +23,7 @@ class FakeExchange {
   start = startMock;
   on = onMock;
   disablePublicWebsockets = vi.fn();
+  dispose = vi.fn();
 
   // Mirrors the real signature: the worker hands its own store to the exchange,
   // and `_setupExchangeEventListeners` subscribes to `exchange.store`. Creating
@@ -198,5 +199,24 @@ describe('ExchangeWorker on public data only', () => {
     }
     expect(account.process).not.toHaveBeenCalled();
     expect(market.process).toHaveBeenCalled();
+  });
+});
+
+describe('ExchangeWorker when the engine deactivates', () => {
+  it('hands the page the refusal, so it can run on public data', async () => {
+    const handlers: Record<string, (...args: any[]) => void> = {};
+    onMock.mockImplementation((event: string, handler: (...args: any[]) => void) => {
+      handlers[event] = handler;
+    });
+    loaderMock.mockResolvedValue(FakeExchange);
+    startMock.mockImplementation(() => new Promise(() => undefined));
+    const { messages, worker } = createWorker();
+    void worker.start();
+    await vi.waitFor(() => expect(handlers.deactivate).toBeDefined());
+    handlers.deactivate('Api credential is invalid');
+    expect(messages.find((m) => m.op === 'deactivate-status')).toMatchObject({
+      data: true,
+      refusal: 'Api credential is invalid',
+    });
   });
 });

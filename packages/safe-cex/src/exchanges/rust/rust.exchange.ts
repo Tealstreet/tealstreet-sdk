@@ -1464,7 +1464,7 @@ export class RustEngineExchange extends BaseExchange {
             this.noteAuthFailure();
             this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
             for (const wake of this.startupWaiters) wake();
-            this.emitter.emit('deactivate');
+            this.emitter.emit('deactivate', this.startupFailure.message);
           },
           onStartupFailed: (detail) => {
             // Keeps kind/venueCode so start() and validateAccount can branch on them.

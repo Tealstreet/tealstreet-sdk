@@ -1378,7 +1378,7 @@ export class ExchangeWorker {
       if (isCurrent()) this._ctx.postMessage({ op: 'ws-reconnected' });
     });
 
-    this._exchange!.on('deactivate', () => {
+    this._exchange!.on('deactivate', (refusal?: string) => {
       if (!isCurrent()) return;
       this.log('info', `Exchange emitted deactivate event: ${this._exchangeName}`);
       // Dispose through the worker so any in-flight start() gets cancelled.
@@ -1386,7 +1386,7 @@ export class ExchangeWorker {
       this._exchange = null;
       this._clearRuntimePipeline();
       // Notify main thread of deactivation
-      this._ctx.postMessage({ op: 'deactivate-status', data: true });
+      this._ctx.postMessage({ op: 'deactivate-status', data: true, refusal: refusal ?? 'The exchange refused this key.' });
     });
   }
 }
