@@ -1,3 +1,11 @@
+vi.mock('../../exchanges/bybit/bybit.types', async (importOriginal) => {
+  const { configuredHyrotraderEndpoints } = await import('../fixtures/configuredHyrotraderEndpoints');
+  return {
+    ...(await importOriginal<typeof import('../../exchanges/bybit/bybit.types')>()),
+    ...configuredHyrotraderEndpoints,
+  };
+});
+
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());

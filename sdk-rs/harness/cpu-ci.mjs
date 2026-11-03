@@ -19,8 +19,7 @@ import { loadGateLedger } from './verify-gates.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { selectBitgetPair } from './bitget-paired-ci.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
-import { assessBitgetPairedSteady, pairedSteadyAssessment, bitgetAnchorAuthority,
-  combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
+import { pairedSteadyAssessment, readBitgetSteadyCertificate } from './bitget-paired-steady.mjs';
 
 import { CPU_REMEASURE_SUITES, requireCpuRemeasureSuite } from './cpu-rollout.mjs';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -232,24 +231,21 @@ async function loadBitgetPaired(context) {
     const directory = resolve(context.env.RUNNER_TEMP, 'authenticated-bitget-paired');
     artifactEntriesToDirectory(bundle.entries, directory);
     const authority = await selectBitgetPair({ reader: context.reader, runId: context.runId, root: context.root });
-    const measured = {};
-    for (const [name, selected] of Object.entries({ tip: authority, anchor: bitgetAnchorAuthority(authority) })) {
-      const evidence = readBitgetPairedEvidence(resolve(directory, name, 'records'));
-      for (const [index, cohort] of evidence.cohorts.entries()) {
-        const key = sha256(`bitget-paired:${name}:${index + 1}`);
-        insist(cohort.before.measurementKey === key, 'paired cohort measurement key differs');
-        authenticateMeasurementWindow({ key, job: bundle.job, logBytes: bundle.logBytes,
-          execution: { runId: authority.runId, jobId: authority.jobId, runnerId: authority.runnerId,
-            attempt: 1, measuredCheckoutSha: context.checkoutSha,
-            startedAt: cohort.before.startedAt, completedAt: cohort.finishedAt } });
-        restorePairedRawOutputs(context.root, cohort.evidence);
-        revalidateRecordedEvidence(cohort.evidence, { root: context.root });
-      }
-      const result = assessBitgetPairedSteady({ authority: selected, evidence, manifest: manifest() });
-      insist(result.valid, result.errors.join('\n'));
-      measured[name] = result.certificate;
-    }
-    const certificate = combineBitgetPairedCertificates(measured.tip, measured.anchor);
+    const certificate = await readBitgetSteadyCertificate({ authority, manifest: manifest(),
+      readEvidence: async (name, selected) => {
+        const evidence = readBitgetPairedEvidence(resolve(directory, name, 'records'));
+        for (const [index, cohort] of evidence.cohorts.entries()) {
+          const key = sha256(`bitget-paired:${name}:${index + 1}`);
+          insist(cohort.before.measurementKey === key, 'paired cohort measurement key differs');
+          authenticateMeasurementWindow({ key, job: bundle.job, logBytes: bundle.logBytes,
+            execution: { runId: selected.runId, jobId: selected.jobId, runnerId: selected.runnerId,
+              attempt: 1, measuredCheckoutSha: context.checkoutSha,
+              startedAt: cohort.before.startedAt, completedAt: cohort.finishedAt } });
+          restorePairedRawOutputs(context.root, cohort.evidence);
+          revalidateRecordedEvidence(cohort.evidence, { root: context.root });
+        }
+        return evidence;
+      } });
     insist(certificate.steadyAccepted, 'tip or cumulative anchor steady regression');
     return { certificate, bundle };
   })();
@@ -643,7 +639,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (!['plan', 'certify'].includes(values.command)) requireCpuRemeasureSuite(values.suite);
   if (values.command === 'status') {
     if (process.env.CPU_CERT_RESULT !== 'success') {
-      console.error(`shared CPU certification did not complete (result=${process.env.CPU_CERT_RESULT || 'missing'}); non-blocking`);
+      console.error(`shared CPU certification did not complete (result=${process.env.CPU_CERT_RESULT || 'missing'}); certification not accepted`);
       process.exit(1);
     }
     const checkout = spawnSync('git', ['rev-parse', '--verify', 'HEAD'], { encoding: 'utf8' });
