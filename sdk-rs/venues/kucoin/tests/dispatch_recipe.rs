@@ -160,6 +160,10 @@ impl Venue for Issue {
 }
 
 fn setup(broker: bool) -> (LocalSigner, Identity, Identity) {
+    setup_passphrase(broker, "passphrase!@#")
+}
+
+fn setup_passphrase(broker: bool, passphrase: &str) -> (LocalSigner, Identity, Identity) {
     let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
         "primary": {"passphrase":"requiredForPrivate", "extra": {
             "key":"kucoinBroker", "encoding":"utf8", "trim":true}},
@@ -168,7 +172,7 @@ fn setup(broker: bool) -> (LocalSigner, Identity, Identity) {
     }))
     .unwrap();
     let mut input = serde_json::json!({
-        "primary": {"key":"replay-key", "secret":"replay-secret", "passphrase":"passphrase!@#"},
+        "primary": {"key":"replay-key", "secret":"replay-secret", "passphrase":passphrase},
         "secondary": {"key":"read-key", "secret":"read-secret"}
     });
     if broker {
@@ -241,6 +245,18 @@ fn both_origins_and_slots_match_the_existing_ordered_native_headers() {
         for secondary in [false, true] {
             for broker in [false, true] {
                 for (method, path, body) in [
+                    (
+                        Method::Get,
+                        "/api/v1/orders?status=active&currentPage=1&pageSize=100",
+                        None,
+                    ),
+                    (
+                        Method::Get,
+                        "/api/v1/stopOrders?status=active&currentPage=1&pageSize=100",
+                        None,
+                    ),
+                    (Method::Get, "/api/v1/account-overview?currency=USDT", None),
+                    (Method::Get, "/api/v2/position/getPositionMode", None),
                     (
                         Method::Get,
                         "/api/v1/orders?symbol=XBTUSDTM&clientOid=hello!@#",
@@ -334,6 +350,67 @@ fn independent_request_and_passphrase_vectors_are_unchanged() {
         ),
     ] {
         assert!(http.headers.contains(&(name, expected.into())));
+    }
+}
+
+#[test]
+fn saved_passphrase_bytes_match_native_without_trimming_or_normalizing() {
+    for secondary in [false, true] {
+        let (mut engine, observed) = issue(
+            "https://api-futures.kucoin.com",
+            Method::Get,
+            "/api/v1/account-overview?currency=USDT",
+            None,
+            false,
+            secondary,
+            Delivery::Immediate(0),
+        );
+        engine.start(NOW);
+        let _ = prepared_actions(&mut engine, NOW);
+        let work = observed.seen.lock().unwrap()[0].clone();
+        for passphrase in [
+            " \t\u{2003} ".into(),
+            "päss密碼🔑\0".into(),
+            "x".repeat(65_536),
+        ] {
+            let (provider, _, _) = setup_passphrase(false, &passphrase);
+            let result = provider.sign_now(&work).unwrap();
+            let expected = native_sign::headers(
+                &native_sign::Credentials {
+                    key: if secondary { "read-key" } else { "replay-key" }.into(),
+                    secret: if secondary {
+                        "read-secret"
+                    } else {
+                        "replay-secret"
+                    }
+                    .into(),
+                    passphrase,
+                    broker: None,
+                },
+                Method::Get,
+                "/api/v1/account-overview?currency=USDT",
+                "",
+                NOW,
+            );
+            assert_eq!(
+                safe_cex_crypto::encode(&result.values[2], safe_cex_crypto::Encoding::Base64),
+                expected
+                    .iter()
+                    .find(|(name, _)| *name == "KC-API-PASSPHRASE")
+                    .unwrap()
+                    .1,
+            );
+        }
+    }
+    for passphrase in [None, Some(String::new()), Some("x".repeat(1024 * 1024 + 1))] {
+        let policy = serde_json::from_value(serde_json::json!({
+            "primary": {"passphrase":"requiredForPrivate"}
+        }))
+        .unwrap();
+        let input = serde_json::json!({"primary": {
+            "key":"replay-key", "secret":"replay-secret", "passphrase":passphrase
+        }});
+        assert!(LocalSigner::from_json_with_policy(input.to_string(), policy).is_err());
     }
 }
 
