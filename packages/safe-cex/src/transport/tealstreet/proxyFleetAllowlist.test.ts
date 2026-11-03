@@ -19,7 +19,8 @@ describe('proxy fleet allowlist', () => {
 
   it('matches a venue url by prefix only', () => {
     expect(proxyFleetForwards('https://api.bybit.com/v5/order/create')).toBe(true);
-    expect(proxyFleetForwards('https://api.kraken.com/0/private/Balance')).toBe(false);
+    expect(proxyFleetForwards('https://api.kraken.com/0/private/Balance')).toBe(true);
+    expect(proxyFleetForwards('https://api.gemini.com/v1/balances')).toBe(false);
     expect(proxyFleetForwards('https://api.crypto.com/v2/private/get-order')).toBe(false);
   });
 });
