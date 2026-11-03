@@ -31,6 +31,7 @@ const betaVenues = Object.freeze({
   kraken: { family: 'kraken' },
   krakenspot: { family: 'kraken' },
   lighter: { family: 'lighter' },
+  mexc: { family: 'mexc' },
   okx: { family: 'okx' },
   okxdemo: { family: 'okx' },
   okxeu: { family: 'okx' },

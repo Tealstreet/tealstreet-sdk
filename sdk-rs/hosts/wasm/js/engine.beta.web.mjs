@@ -18,6 +18,7 @@ function importFamily(family) {
     case 'hyperliquid': return import('../pkg/web/hyperliquid/safe_cex_wasm.js');
     case 'kraken': return import('../pkg/web/kraken/safe_cex_wasm.js');
     case 'lighter': return import('../pkg/web/lighter/safe_cex_wasm.js');
+    case 'mexc': return import('../pkg/web/mexc/safe_cex_wasm.js');
     case 'okx': return import('../pkg/web/okx/safe_cex_wasm.js');
     case 'paradex': return import('../pkg/web/paradex/safe_cex_wasm.js');
     case 'phemex': return import('../pkg/web/phemex/safe_cex_wasm.js');

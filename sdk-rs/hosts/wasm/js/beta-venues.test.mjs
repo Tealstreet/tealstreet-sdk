@@ -12,16 +12,16 @@ import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
-  'woo', 'mexc', 'grvt', 'backpack', 'coinbase', 'coinbasespot', 'orderly', 'kodiakfi', 'mode', 'salsadex',
+  'woo', 'grvt', 'backpack', 'coinbase', 'coinbasespot', 'orderly', 'kodiakfi', 'mode', 'salsadex',
   'tealstreet-dex', 'what', 'woofi', 'kucoin', 'kucoinspot', 'polymarket', 'breakoutprop', 'txflow', 'weex',
   'bitrue', 'lighter-robinhood',
 ];
 
-test('the beta set is exactly the 30 IN venues in 15 families', () => {
-  assert.equal(betaVenueNames.length, 30);
+test('the beta set is exactly the 31 IN venues in 16 families', () => {
+  assert.equal(betaVenueNames.length, 31);
   assert.deepEqual(betaVenueFamilies, [
     'apexomni', 'asterdex', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'cryptocom',
-    'hyperliquid', 'kraken', 'lighter', 'okx', 'paradex', 'phemex',
+    'hyperliquid', 'kraken', 'lighter', 'mexc', 'okx', 'paradex', 'phemex',
   ]);
 });
 
