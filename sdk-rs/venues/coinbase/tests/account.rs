@@ -11,7 +11,7 @@ const SPOT: &str = r#"{"products":[{"product_id":"BTC-USD","product_type":"SPOT"
 const INTX: &str = r#"{"products":[{"product_id":"BTC-PERP-INTX","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USDC","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"PERPETUAL","contract_root_unit":"BTC","contract_size":"1"}}]}"#;
 const CFM: &str = r#"{"products":[{"product_id":"BTC-CDE","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"1","price_increment":"0.01","base_min_size":"1","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"EXPIRING","contract_root_unit":"BTC","contract_size":"0.01","perpetual_details":{"funding_time":"2025-12-15T12:00:00Z","open_interest":"30"}}}]}"#;
 const CFM_BALANCE: &str = r#"{"balance_summary":{"total_usd_balance":{"value":"10"},"available_margin":{"value":"8"},"unrealized_pnl":{"value":"1.5"}}}"#;
-const BREAKDOWN: &str = r#"{"breakdown":{"spot_positions":[{"asset":"BTC","total_balance_crypto":1.5,"available_to_trade_crypto":1,"total_balance_fiat":150}]}}"#;
+const BREAKDOWN: &str = r#"{"breakdown":{"spot_positions":[{"account_type":"ACCOUNT_TYPE_WALLET","asset":"BTC","total_balance_crypto":1.5,"available_to_trade_crypto":1,"total_balance_fiat":150}]}}"#;
 const INTX_BALANCE: &str =
     r#"{"summary":{"total_balance":{"value":"1000"},"buying_power":{"value":"800"}}}"#;
 const INTX_POSITIONS: &str = r#"{"positions":[{"symbol":"BTC-PERP-INTX","position_side":"POSITION_SIDE_LONG","net_size":"2","entry_vwap":{"value":"100"},"mark_price":{"value":"110"},"liquidation_price":{"value":"50"},"leverage":"10"}]}"#;
@@ -246,6 +246,334 @@ fn spot_selection_does_not_probe_cfm_and_preserves_held_currency() {
         (1.5, 1.0, 0.5)
     );
     assert!(s.e.store().positions().is_empty());
+}
+
+#[test]
+fn spot_cash_excludes_prediction_derivatives_and_unknown_account_types() {
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = Some(r#"{"breakdown":{
+        "portfolio":{"uuid":"portfolio-one","type":"DEFAULT"},
+        "portfolio_balances":{"total_cash_equivalent_balance":{"value":"1000000","currency":"USD"}},
+        "futures_positions":null,"perp_positions":null,
+        "spot_positions":[
+            {"asset":"USD","account_uuid":"fiat-one","account_type":"ACCOUNT_TYPE_FIAT","is_cash":true,
+             "total_balance_crypto":100,"available_to_trade_crypto":90,"total_balance_fiat":100,"available_to_trade_fiat":90},
+            {"asset":"USD","account_uuid":"prediction-one","account_type":"ACCOUNT_TYPE_PREDICTION_MARKETS_CFM","is_cash":true,
+             "total_balance_crypto":5000,"available_to_trade_crypto":5000,"total_balance_fiat":5000,"available_to_trade_fiat":5000},
+            {"asset":"USD","account_uuid":"derivatives-one","account_type":"ACCOUNT_TYPE_DERIVATIVES_CASH","is_cash":true,
+             "total_balance_crypto":6000,"available_to_trade_crypto":6000,"total_balance_fiat":6000,"available_to_trade_fiat":6000},
+            {"asset":"USDC","account_uuid":"wallet-one","account_type":"ACCOUNT_TYPE_WALLET","is_cash":true,
+             "total_balance_crypto":2600,"available_to_trade_crypto":2400,"total_balance_fiat":2600,"available_to_trade_fiat":2400},
+            {"asset":null,"account_type":"ACCOUNT_TYPE_FUTURE_UNKNOWN","total_balance_crypto":null,"available_to_trade_crypto":"not-an-amount"},
+            {"asset":"BTC","total_balance_crypto":8000,"available_to_trade_crypto":8000}
+        ]}}"#.into());
+    let mut s = s.ready();
+    let balance = s.e.store().balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used),
+        (2700., 2490., 210.)
+    );
+    let coins = s.e.store().currency_balances().unwrap();
+    assert_eq!(coins.len(), 2);
+    for (asset, total, free) in [("USD", 100., 90.), ("USDC", 2600., 2400.)] {
+        let coin = coins.iter().find(|c| c.currency == asset).unwrap();
+        assert_eq!(
+            (coin.balance.total, coin.balance.free, coin.balance.used),
+            (total, free, total - free)
+        );
+    }
+    let prefix = "Coinbase excluded spot account type ";
+    let notes = s
+        .logs
+        .iter()
+        .filter(|log| log.starts_with(prefix))
+        .cloned()
+        .collect::<Vec<_>>();
+    for kind in [
+        "ACCOUNT_TYPE_PREDICTION_MARKETS_CFM",
+        "ACCOUNT_TYPE_DERIVATIVES_CASH",
+        "ACCOUNT_TYPE_FUTURE_UNKNOWN",
+        "MISSING",
+    ] {
+        assert!(notes.contains(&format!("{prefix}{kind}")));
+    }
+    assert_eq!(notes.len(), 4);
+    let reads = s.urls.len();
+    s.poll_until(|s| s.urls.len() > reads + 6);
+    assert_eq!(
+        s.logs.iter().filter(|log| log.starts_with(prefix)).count(),
+        4
+    );
+}
+
+#[test]
+fn spot_wallet_aggregation_keeps_the_physical_row_limit() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let old = s.e.store().balance().clone();
+    let old_coins = s.e.store().currency_balances().unwrap().to_vec();
+    let row = serde_json::json!({"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC",
+        "total_balance_crypto":1,"available_to_trade_crypto":0.5});
+    s.breakdown = Some(
+        serde_json::json!({"breakdown":{"spot_positions":vec![row.clone();1001]}}).to_string(),
+    );
+    s.poll_until(|s| s.logs.iter().any(|log| log.contains("balance row limit")));
+    assert_eq!(s.e.store().balance(), &old);
+    assert_eq!(s.e.store().currency_balances().unwrap(), old_coins);
+    s.breakdown =
+        Some(serde_json::json!({"breakdown":{"spot_positions":vec![row;1000]}}).to_string());
+    s.poll_until(|s| s.e.store().balance().total == 1000.);
+    assert_eq!(s.e.store().balance().free, 500.);
+    let coins = s.e.store().currency_balances().unwrap();
+    assert_eq!(coins.len(), 1);
+    assert_eq!(
+        (coins[0].balance.total, coins[0].balance.free),
+        (1000., 500.)
+    );
+}
+
+#[test]
+fn us_default_portfolio_aggregates_wallet_rows_without_derivatives_sections() {
+    for derivatives in [
+        "",
+        r#", "futures_positions":null,"perp_positions":null,"margin":null"#,
+    ] {
+        let mut s = Session::new("DEFAULT", true);
+        s.breakdown = Some(format!(
+            r#"{{"breakdown":{{
+            "portfolio":{{"uuid":"portfolio-one","type":"DEFAULT"}},
+            "portfolio_balances":{{
+                "total_cash_equivalent_balance":{{"value":"2600","currency":"USD"}},
+                "total_futures_balance":null,"perp_unrealized_pnl":null
+            }},
+            "spot_positions":[
+                {{"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","account_uuid":"wallet-one","total_balance_crypto":2000,
+                  "available_to_trade_crypto":1800,"total_balance_fiat":2000,"available_to_trade_fiat":1800}},
+                {{"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","account_uuid":"wallet-two","total_balance_crypto":600,
+                  "available_to_trade_crypto":600,"total_balance_fiat":600,"available_to_trade_fiat":600}}
+            ]{derivatives}
+        }}}}"#
+        ));
+        let s = s.ready();
+        let loaded = s.e.store().loaded();
+        assert!(
+            loaded.markets && loaded.tickers && loaded.balance && loaded.orders && loaded.positions
+        );
+        let balance = s.e.store().balance();
+        assert_eq!(
+            (balance.total, balance.free, balance.used),
+            (2600., 2400., 200.)
+        );
+        let coins = s.e.store().currency_balances().unwrap();
+        assert_eq!(coins.len(), 1);
+        assert_eq!(coins[0].currency, "USDC");
+        assert_eq!(
+            (
+                coins[0].balance.total,
+                coins[0].balance.free,
+                coins[0].balance.used
+            ),
+            (2600., 2400., 200.)
+        );
+        assert!(
+            !s.urls
+                .iter()
+                .any(|url| url.contains("/intx/") || url.contains("/cfm/"))
+        );
+    }
+}
+
+#[test]
+fn malformed_spot_amounts_name_the_field_without_echoing_its_value() {
+    for field in [
+        "total_balance_crypto",
+        "available_to_trade_crypto",
+        "total_balance_fiat",
+        "available_to_trade_fiat",
+    ] {
+        let mut s = Session::new("DEFAULT", true);
+        let mut row = serde_json::json!({"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","total_balance_crypto":2600,
+            "available_to_trade_crypto":2400,"total_balance_fiat":2600,"available_to_trade_fiat":2400});
+        row[field] = serde_json::json!("invalid-private-sentinel");
+        s.breakdown = Some(serde_json::json!({"breakdown":{"spot_positions":[row]}}).to_string());
+        s.poll_until(|s| {
+            s.logs
+                .iter()
+                .any(|log| log.contains(&format!("spot_positions.{field}")))
+        });
+        assert!(!s.e.store().loaded().balance);
+        assert!(
+            s.logs
+                .iter()
+                .all(|log| !log.contains("invalid-private-sentinel"))
+        );
+    }
+}
+
+#[test]
+fn spot_cash_root_ignores_portfolio_summary_and_crypto_equity() {
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = Some(
+        r#"{"breakdown":{
+        "portfolio_balances":{
+            "total_balance":{"value":"7600","currency":"USD"},
+            "total_cash_equivalent_balance":{"value":"999999","currency":"USD"}
+        },
+        "spot_positions":[
+            {"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400,
+             "total_balance_fiat":2600,"available_to_trade_fiat":2400},
+            {"account_type":"ACCOUNT_TYPE_WALLET","asset":"BTC","total_balance_crypto":0.05,"available_to_trade_crypto":0.04,
+             "total_balance_fiat":5000,"available_to_trade_fiat":4000}
+        ]}}"#
+            .into(),
+    );
+    let s = s.ready();
+    let balance = s.e.store().balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used),
+        (2600., 2400., 200.)
+    );
+    let usdc =
+        s.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|coin| coin.currency == "USDC")
+            .unwrap();
+    assert_eq!(
+        (usdc.balance.total, usdc.balance.free, usdc.balance.used),
+        (2600., 2400., 200.)
+    );
+    let btc =
+        s.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|coin| coin.currency == "BTC")
+            .unwrap();
+    assert_eq!((btc.balance.total, btc.balance.free), (0.05, 0.04));
+    assert!(s.e.store().loaded().balance);
+}
+
+#[test]
+fn spot_cash_rows_supply_the_root_when_the_portfolio_summary_is_absent() {
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = Some(
+        r#"{"breakdown":{"spot_positions":[
+        {"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","total_balance_crypto":2500,"available_to_trade_crypto":2300,
+         "total_balance_fiat":2499,"available_to_trade_fiat":2299},
+        {"account_type":"ACCOUNT_TYPE_WALLET","asset":"USD","total_balance_crypto":101,"available_to_trade_crypto":91},
+        {"account_type":"ACCOUNT_TYPE_WALLET","asset":"BTC","total_balance_crypto":1,"available_to_trade_crypto":1,
+         "total_balance_fiat":60000,"available_to_trade_fiat":60000}
+    ]}}"#
+            .into(),
+    );
+    let s = s.ready();
+    let balance = s.e.store().balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used),
+        (2600., 2390., 210.)
+    );
+    let usdc =
+        s.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|coin| coin.currency == "USDC")
+            .unwrap();
+    assert_eq!((usdc.balance.total, usdc.balance.free), (2500., 2300.));
+}
+
+#[test]
+fn invalid_spot_cash_row_keeps_the_last_balance_and_currency_snapshot() {
+    for (total, free) in [(-1., 0.), (100., 200.)] {
+        let mut s = Session::new("DEFAULT", true);
+        s.breakdown = Some(r#"{"breakdown":{"spot_positions":[
+            {"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400}
+        ]}}"#.into());
+        let mut s = s.ready();
+        let old = s.e.store().balance().clone();
+        let coins = s.e.store().currency_balances().unwrap().to_vec();
+        s.breakdown = Some(format!(
+            r#"{{"breakdown":{{"spot_positions":[
+            {{"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","total_balance_crypto":{total},"available_to_trade_crypto":{free}}}
+        ]}}}}"#
+        ));
+        s.poll_until(|s| {
+            s.logs
+                .iter()
+                .any(|l| l.contains("Coinbase invalid spot cash balance"))
+        });
+        assert_eq!(s.e.store().balance(), &old);
+        assert_eq!(s.e.store().currency_balances().unwrap(), coins);
+    }
+}
+
+#[test]
+fn a_clean_empty_spot_balance_clears_cash_while_cfm_keeps_its_margin_balance() {
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = Some(
+        r#"{"breakdown":{"spot_positions":[
+        {"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400}
+    ]}}"#
+            .into(),
+    );
+    let mut s = s.ready();
+    assert_eq!(s.e.store().balance().total, 2600.);
+    s.breakdown = Some(r#"{"breakdown":{"spot_positions":[]}}"#.into());
+    s.poll_until(|s| s.e.store().balance().total == 0.);
+    assert!(s.e.store().currency_balances().unwrap().is_empty());
+
+    let mut s = Session::new("DEFAULT", false);
+    s.breakdown = Some(
+        r#"{"breakdown":{"spot_positions":[
+        {"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400}
+    ]}}"#
+            .into(),
+    );
+    let s = s.ready();
+    assert_eq!(
+        (s.e.store().balance().total, s.e.store().balance().free),
+        (10., 8.)
+    );
+    assert_eq!(
+        s.e.store().currency_balances().unwrap()[0].balance.total,
+        2600.
+    );
+}
+
+#[test]
+fn spot_ticker_polls_do_not_replace_markets_or_reset_private_readiness() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.collect();
+    s.e.take_frame(s.now);
+    let market = s.e.store().markets()[0].clone();
+    let initial_products = s.urls.iter().filter(|u| u.contains("/products?")).count();
+    for _ in 0..60 {
+        let requests = s.collect();
+        if requests.is_empty() {
+            s.fire();
+        } else {
+            for request in requests {
+                s.answer(request);
+            }
+        }
+        let loaded = s.e.store().loaded();
+        assert!(
+            loaded.markets && loaded.tickers && loaded.balance && loaded.orders && loaded.positions
+        );
+        assert_eq!(&s.e.store().markets()[0], &market);
+        if let Some(frame) = s.e.take_frame(s.now) {
+            assert!(
+                safe_cex_engine::wire::sections(frame).all(|(kind, _)| kind != 2),
+                "ticker refresh must not publish a replacement markets section"
+            );
+        }
+    }
+    assert!(s.urls.iter().filter(|u| u.contains("/products?")).count() >= initial_products + 3);
+    assert_eq!(
+        s.urls.iter().filter(|u| u.ends_with("/portfolios")).count(),
+        1
+    );
 }
 #[test]
 fn cfm_contracts_are_normalized_and_settings_are_cross_oneway() {
@@ -1587,7 +1915,7 @@ fn order_row_without_an_id_keeps_stored_orders_while_valid_peers_commit() {
 fn one_invalid_spot_holding_keeps_its_stored_copy_while_valid_peers_commit() {
     let holding = |asset: &str, total: &str, free: &str| {
         format!(
-            r#"{{"asset":"{asset}","total_balance_crypto":{total},"available_to_trade_crypto":{free}}}"#
+            r#"{{"account_type":"ACCOUNT_TYPE_WALLET","asset":"{asset}","total_balance_crypto":{total},"available_to_trade_crypto":{free}}}"#
         )
     };
     let breakdown = |rows: &[String]| {
@@ -1765,7 +2093,7 @@ fn a_skipped_order_is_an_error_only_when_no_stored_copy_is_kept() {
 fn a_skipped_spot_holding_is_an_error_only_when_no_stored_copy_is_kept() {
     let holding = |asset: &str, total: &str, free: &str| {
         format!(
-            r#"{{"asset":"{asset}","total_balance_crypto":{total},"available_to_trade_crypto":{free}}}"#
+            r#"{{"account_type":"ACCOUNT_TYPE_WALLET","asset":"{asset}","total_balance_crypto":{total},"available_to_trade_crypto":{free}}}"#
         )
     };
     let breakdown = |rows: &[String]| {

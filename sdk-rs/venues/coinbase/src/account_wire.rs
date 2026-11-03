@@ -41,20 +41,110 @@ pub struct CfmSummary {
     pub unrealized_pnl: Option<Money>,
 }
 #[derive(Deserialize)]
-pub struct Breakdown {
-    pub breakdown: BreakdownBody,
+pub struct Breakdown<'a> {
+    #[serde(borrow)]
+    pub breakdown: BreakdownBody<'a>,
 }
 #[derive(Deserialize)]
-pub struct BreakdownBody {
-    pub spot_positions: Vec<SpotBalance>,
+pub struct BreakdownBody<'a> {
+    #[serde(borrow)]
+    pub spot_positions: Vec<&'a RawValue>,
+}
+pub fn cash_balance(rows: &[SpotBalance]) -> Result<safe_cex_engine::model::Balance, String> {
+    let (mut total, mut free) = (0., 0.);
+    for row in rows
+        .iter()
+        .filter(|row| matches!(row.asset.as_str(), "USD" | "USDC"))
+    {
+        let row_total = row
+            .total_balance_fiat
+            .map_or(row.total_balance_crypto.0, |n| n.0);
+        let available = row
+            .available_to_trade_fiat
+            .map_or(row.available_to_trade_crypto.0, |n| n.0);
+        if row_total < 0.
+            || available < 0.
+            || available > row_total
+            || row.total_balance_crypto.0 < 0.
+            || row.available_to_trade_crypto.0 < 0.
+            || row.available_to_trade_crypto.0 > row.total_balance_crypto.0
+        {
+            return Err("Coinbase invalid spot cash balance: field `spot_positions`".into());
+        }
+        total += row_total;
+        free += available;
+    }
+    if !total.is_finite() || !free.is_finite() || total < 0. || free < 0. || free > total {
+        return Err("Coinbase invalid spot cash balance: field `spot_positions`".into());
+    }
+    Ok(safe_cex_engine::model::Balance {
+        total,
+        free,
+        used: total - free,
+        upnl: 0.,
+    })
+}
+#[derive(Deserialize)]
+pub struct SpotAccount {
+    #[serde(default)]
+    pub account_type: String,
 }
 #[derive(Deserialize)]
 pub struct SpotBalance {
     pub asset: String,
+    #[serde(deserialize_with = "spot_total_crypto")]
     pub total_balance_crypto: Decimal,
+    #[serde(deserialize_with = "spot_available_crypto")]
     pub available_to_trade_crypto: Decimal,
-    #[serde(default, rename = "total_balance_fiat")]
-    pub _total_balance_fiat: Option<Decimal>,
+    #[serde(default, deserialize_with = "spot_total_fiat")]
+    pub total_balance_fiat: Option<Decimal>,
+    #[serde(default, deserialize_with = "spot_available_fiat")]
+    pub available_to_trade_fiat: Option<Decimal>,
+}
+impl SpotAccount {
+    pub fn is_spot_wallet(&self) -> bool {
+        matches!(
+            self.account_type.as_str(),
+            "ACCOUNT_TYPE_FIAT" | "ACCOUNT_TYPE_WALLET"
+        )
+    }
+    pub fn excluded_type(&self) -> &str {
+        let kind = self.account_type.as_str();
+        if kind.is_empty() {
+            "MISSING"
+        } else if kind.len() <= 80
+            && kind.starts_with("ACCOUNT_TYPE_")
+            && kind.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
+        {
+            kind
+        } else {
+            "UNKNOWN"
+        }
+    }
+}
+fn spot_total_crypto<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Decimal, D::Error> {
+    <Decimal>::deserialize(d).map_err(|_| {
+        serde::de::Error::custom("Coinbase invalid field `spot_positions.total_balance_crypto`")
+    })
+}
+fn spot_available_crypto<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Decimal, D::Error> {
+    <Decimal>::deserialize(d).map_err(|_| {
+        serde::de::Error::custom(
+            "Coinbase invalid field `spot_positions.available_to_trade_crypto`",
+        )
+    })
+}
+fn spot_total_fiat<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Decimal>, D::Error> {
+    <Option<Decimal>>::deserialize(d).map_err(|_| {
+        serde::de::Error::custom("Coinbase invalid field `spot_positions.total_balance_fiat`")
+    })
+}
+fn spot_available_fiat<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Decimal>, D::Error> {
+    <Option<Decimal>>::deserialize(d).map_err(|_| {
+        serde::de::Error::custom("Coinbase invalid field `spot_positions.available_to_trade_fiat`")
+    })
 }
 #[derive(Deserialize)]
 pub struct IntxPosition<'a> {

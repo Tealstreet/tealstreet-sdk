@@ -146,8 +146,8 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
     breakdown: {
       portfolio,
       spot_positions: [
-        { asset: 'BTC', total_balance_crypto: 1.5, available_to_trade_crypto: 1, total_balance_fiat: 165 },
-        { asset: 'USD', total_balance_crypto: 1000, available_to_trade_crypto: 900, total_balance_fiat: 1000 },
+        { account_type: 'ACCOUNT_TYPE_WALLET', asset: 'BTC', total_balance_crypto: 1.5, available_to_trade_crypto: 1, total_balance_fiat: 165 },
+        { account_type: 'ACCOUNT_TYPE_FIAT', asset: 'USD', total_balance_crypto: 1000, available_to_trade_crypto: 900, total_balance_fiat: 1000 },
       ],
       portfolio_balances: { total_balance: { value: '1165', currency: 'USD' } },
     },
