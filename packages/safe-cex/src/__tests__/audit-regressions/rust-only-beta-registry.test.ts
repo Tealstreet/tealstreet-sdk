@@ -58,6 +58,10 @@ const expected = [
   'asterdex',
   'mexc',
   'woo',
+  'kucoin',
+  'kucoinspot',
+  'coinbase',
+  'coinbasespot',
 ];
 const out = Object.keys(exchangeMetadata).filter((name) => !expected.includes(name)) as ExchangeName[];
 const unsupported = { kind: 'unsupported', outcome: 'notSent' };
@@ -69,15 +73,15 @@ describe('Rust-only beta construction', () => {
   it('has exactly the declared IN names', () => {
     expect([...BETA_VENUES]).toEqual(expected);
     expect(getRegisteredExchangeNames()).toEqual(expected);
-    expect(new Set(BETA_VENUES).size).toBe(32);
-    expect(out).toEqual(expect.arrayContaining(['coinbase', 'grvt', 'lighter-robinhood']));
+    expect(new Set(BETA_VENUES).size).toBe(36);
+    expect(out).toEqual(expect.arrayContaining(['grvt', 'lighter-robinhood', 'polymarket']));
   });
   it('constructs Rust for every IN name without an engine opt-in', async () => {
     for (const name of BETA_VENUES) {
       expect(await exchangeRegistry[name]()).toBe(state.Rust);
       expect(await createExchange(name, { key: '', secret: '', publicDataOnly: true })).toBeInstanceOf(state.Rust);
     }
-    expect(state.calls).toHaveLength(32);
+    expect(state.calls).toHaveLength(36);
     expect(state.calls.every(({ options }) => (options as { engine: string }).engine === 'rust')).toBe(true);
   });
   it('refuses OUT web/native loaders before loading a runtime', async () => {
@@ -124,7 +128,7 @@ describe('Rust-only beta construction', () => {
     const worker = new ExchangeWorker(
       { postMessage: (message: unknown) => messages.push(message) } as unknown as Worker,
       'saved-out-account',
-      'coinbase',
+      'polymarket',
       { key: '', secret: '' },
       {} as never,
       {} as never,
@@ -133,7 +137,7 @@ describe('Rust-only beta construction', () => {
     await expect(worker.start()).resolves.toBe(false);
     expect(virtualClock.start).not.toHaveBeenCalled();
     expect(state.calls).toEqual([]);
-    expect(JSON.stringify(messages)).toContain('coinbase is unsupported in this build');
+    expect(JSON.stringify(messages)).toContain('polymarket is unsupported in this build');
     worker.dispose();
   });
   it('refuses unsupported delegated modes without fallback', async () => {
