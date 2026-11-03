@@ -24,6 +24,19 @@ const EXCLUDED = new Set([
   'sdk-rs/hosts/native',
 ]);
 
+// Harness files that decide whether to publish, or measure, but never shape what is built: a
+// change to one must not force a cut. beta-wasm-inputs.test.mjs proves that no build, loader or
+// release-test script imports any of them.
+export const HARNESS_NOT_BUILT = Object.freeze([
+  /^sdk-rs\/harness\/[^/]+\.test\.mjs$/,
+  /^sdk-rs\/harness\/beta-wasm-release-guard\.mjs$/,
+  /^sdk-rs\/harness\/ci-result\.mjs$/,
+  /^sdk-rs\/harness\/cpu-[^/]+\.mjs$/,
+  /^sdk-rs\/harness\/bitget-paired-[^/]+\.mjs$/,
+  /^sdk-rs\/harness\/family-measure\.mjs$/,
+]);
+const notBuilt = (rel) => HARNESS_NOT_BUILT.some((pattern) => pattern.test(rel));
+
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 const walk = (root, dir, files) => {
@@ -33,7 +46,7 @@ const walk = (root, dir, files) => {
     if (EXCLUDED.has(entry.name) || EXCLUDED.has(rel)) continue;
     if (entry.isSymbolicLink()) throw new Error(`symlink in beta wasm inputs: ${rel}`);
     if (entry.isDirectory()) walk(root, path, files);
-    else if (entry.isFile()) files.push([rel, sha256(readFileSync(path))]);
+    else if (entry.isFile() && !notBuilt(rel)) files.push([rel, sha256(readFileSync(path))]);
   }
 };
 
@@ -54,6 +67,13 @@ export const betaWasmInputs = (root, toolchain) => {
     files,
   });
   return { fingerprint: sha256(record), files: files.length, toolchain };
+};
+
+/** The repo-relative path of every file the fingerprint covers, sorted. */
+export const betaWasmInputPaths = (root) => {
+  const files = [];
+  walk(root, join(root, 'sdk-rs'), files);
+  return files.map(([rel]) => rel).sort();
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

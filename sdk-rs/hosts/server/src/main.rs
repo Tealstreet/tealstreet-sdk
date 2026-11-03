@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
+    // A malformed proxy or tunnel override refuses here, not on the first account.
+    let bases = safe_cex_native::resolve::route_bases()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -29,6 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             closing: tokio::sync::watch::channel(false).0,
         });
         let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
+        Log::info(&format!("route bases: {bases}"));
         Log::info(&format!("listening on {}", config.port));
         let draining = app.clone();
         axum::serve(

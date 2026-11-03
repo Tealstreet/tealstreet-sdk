@@ -1,17 +1,18 @@
 ---
 title: V2 Shutdown and IP Whitelist Migration
-description: Guide for moving V2 users to V3 and helping V3 users update exchange IP whitelists before the AWS shutdown.
+description: Guide for moving V2 users to V3 and keeping exchange IP whitelists valid for Rust and legacy app egress.
 sidebar_position: 2
 hide_title: false
 draft: false
 hide_table_of_contents: false
 ---
 
-:::caution Action required before November 2, 2026 at 00:00 UTC
-Tealstreet is moving from the old AWS infrastructure to a new Vultr fleet in
-Tokyo. If your exchange API keys use Tealstreet IP whitelisting, update them to
-include the new IP addresses before the AWS shutdown on November 2, 2026 at
-00:00 UTC.
+import ProxyFleetIps from '@site/src/components/ProxyFleetIps';
+
+:::caution Keep both app lanes allowed
+The Rust app uses the Vultr Tokyo fleet. The legacy app still uses the AWS
+addresses for whitelabel users and rollback. Allow the union shown below so the
+same API key can work on either lane.
 :::
 
 <!-- :::note Temporary migration page
@@ -20,13 +21,13 @@ Retire it 30-60 days after the migration is complete, once support confirms the
 old Tealstreet IPs are no longer needed.
 ::: -->
 
-Tealstreet is moving legacy infrastructure from AWS to a new Vultr Tokyo fleet.
+The Rust app uses the Vultr Tokyo fleet; the legacy app retains AWS egress.
 Most users only need to know which path applies to them:
 
 - If you still use the old V2 terminal, move to V3 and add your exchange
   accounts there.
 - If you already use V3 with Tealstreet IP whitelisting enabled, update the IP
-  whitelist on each exchange API key during the overlap window.
+  whitelist on each exchange API key using the current list below.
 - If you use V3 on multiple devices, turn on
   [Cloud Sync for API Keys](/docs/connect/cloud-sync) before the cutover so the
   same Tealstreet API key list is available everywhere you sign in.
@@ -58,17 +59,16 @@ should not require an exchange-side whitelist edit.
 | Item | Status |
 | --- | --- |
 | New Tealstreet IP list available | Available now |
-| Migration window | Now until November 2, 2026 at 00:00 UTC |
+| Migration window | Ended November 2, 2026 at 00:00 UTC |
 | Final V2 shutdown | November 2, 2026 at 00:00 UTC |
-| Old AWS IPs retired | November 2, 2026 at 00:00 UTC |
+| Legacy AWS egress | Still used for rollback and whitelabel |
 
-During the overlap window, keep both the old and new Tealstreet IPs on your
-exchange API key when the exchange allows it. Do not remove the old IPs until
-Tealstreet announces that the cutover is complete.
+Add the current fleet IPs and the selected venue/region's legacy AWS addresses.
+Keep any additional venue-specific addresses shown in the API key form.
 
 ## V2 user - move to V3
 
-V2 is being retired on November 2, 2026 at 00:00 UTC. To keep trading on
+V2 was retired on November 2, 2026 at 00:00 UTC. To keep trading on
 Tealstreet, create or use a V3 account and add your exchange API keys there.
 
 ### Before you start
@@ -130,10 +130,9 @@ Tealstreet routing.
 
 ### What changes
 
-Tealstreet is replacing the old AWS IP addresses used by the Tealstreet Network
-with a simplified Vultr Tokyo fleet. For a short overlap window, both sets
-should work. After the AWS shutdown on November 2, 2026 at 00:00 UTC, keys that
-still allow only the old AWS IPs may stop connecting through Tealstreet.
+The Rust app egresses through the Vultr Tokyo fleet, while the legacy app uses
+the AWS private proxy pool. A key may need to work on both when a user is moved
+back to the legacy app. Keep both groups allowed until the legacy app is retired.
 
 Cloud sync can help make your Tealstreet API key list available on every device
 while you work through this migration. It does not edit the exchange API key or
@@ -146,47 +145,15 @@ Add the full new Tealstreet IP list anywhere your exchange asks for the
 Tealstreet Network, TS Network, or Tealstreet IP whitelist.
 
 Going forward, Tealstreet Network routing uses one region instead of split
-Japan and Singapore routing. Add the single Tokyo list below; there are no
-separate Singapore, proxy, or exchange-specific IP blocks to add.
+Japan and Singapore routing for Rust. The legacy app still has separate AWS
+regions. Choose your venue and legacy region below, and allow both groups.
+Retain any additional passthrough IPs shown in your venue-specific API key form.
 
 #### New Tealstreet IPs, Vultr Tokyo fleet
 
-- `167.179.112.217`
-- `45.63.121.235`
-- `45.77.135.138`
-- `108.61.162.122`
-- `149.28.30.214`
-- `108.160.129.108`
-- `45.77.27.69`
-- `45.76.52.241`
-- `108.61.247.61`
+<ProxyFleetIps />
 
-#### Old Tealstreet IPs, AWS fleet
-
-These are the old AWS IPs that Tealstreet is retiring. Your exchange may show
-some or all of these Japan and Singapore IPs on existing API keys.
-
-##### Old Japan region IPs
-
-- `18.178.14.27`
-- `35.75.147.201`
-- `35.78.132.227`
-- `54.238.24.246`
-- `54.65.38.58`
-
-##### Old Singapore region IPs
-
-- `13.215.143.179`
-- `54.169.98.78`
-- `18.139.171.87`
-- `52.76.105.51`
-- `13.251.151.220`
-- `54.179.219.84`
-- `18.139.81.245`
-
-When Tealstreet shows both old and new blocks in the API key form, copy the new
-Tealstreet IP list for your exchange. Keep the old list in place until the
-November 2, 2026 at 00:00 UTC shutdown when the exchange allows both lists.
+Use the web API key form's copy button to copy the union. Where a verified venue limit is too small for the union, the form copies the fleet only and labels the legacy addresses optional; that key will not work on the legacy app unless its AWS addresses can also be allowed.
 
 ### Update each exchange key
 
@@ -198,8 +165,7 @@ Repeat these steps for each Tealstreet-connected exchange account:
 4. Find the API key used by Tealstreet.
 5. Edit the IP whitelist or allowed IP addresses.
 6. Add the new Tealstreet IPs.
-7. Keep the old Tealstreet IPs during the overlap window, if the exchange allows
-   enough entries.
+7. Retain any additional passthrough addresses shown in your venue-specific API key form.
 8. Save the exchange-side API key changes and complete any 2FA or email checks.
 9. Return to Tealstreet and reconnect or validate the account.
 
