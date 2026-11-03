@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assertCertified, assertFreshTag, assertNotHeld, createAndVerifyTag, publishedFingerprint } from './beta-wasm-release-guard.mjs';
+import { assertCertified, assertFreshTag, assertNotHeld, createAndVerifyTag, publishedFingerprint, supersededBy } from './beta-wasm-release-guard.mjs';
 
 const REPO = 'Tealstreet/tealstreet-sdk';
 const TAG = 'rust-beta-wasm-aaaaaaaaaaa';
@@ -138,4 +138,38 @@ test('a release whose pin already carries the fingerprint is found, so the same 
   assert.equal(await publishedFingerprint({ api, repo: REPO, fingerprint: 'none', fetchImpl }), undefined);
   const error = fakeApi({ [`GET /repos/${REPO}/releases?per_page=30`]: { status: 403, json: null } });
   await assert.rejects(publishedFingerprint({ api: error.api, repo: REPO, fingerprint: 'new', fetchImpl }), /HTTP 403/);
+});
+
+// rust-beta-wasm-f5ea907ebd5: its master run finished at 09:46, after 18d192329cd was released.
+test('a release built from a descendant supersedes an older run; equal, older or diverged ones do not', async () => {
+  const releases = [
+    { tag_name: 'rust-beta-wasm-ccccccccccc', draft: true },
+    { tag_name: 'rust-beta-wasm-bbbbbbbbbbb' },
+    { tag_name: 'rust-beta-wasm-ddddddddddd' },
+    { tag_name: 'not-a-beta-release' },
+  ];
+  const compareTo = (tag) => `GET /repos/${REPO}/compare/${SHA}...${tag}?per_page=1`;
+  const scripted = (statuses) =>
+    fakeApi({
+      [`GET /repos/${REPO}/releases?per_page=30`]: { status: 200, json: releases },
+      [compareTo('rust-beta-wasm-bbbbbbbbbbb')]: { status: 200, json: { status: statuses[0] } },
+      [compareTo('rust-beta-wasm-ddddddddddd')]: { status: 200, json: { status: statuses[1] } },
+    });
+  const superseded = scripted(['behind', 'ahead']);
+  assert.equal(await supersededBy({ api: superseded.api, repo: REPO, sha: SHA }), 'rust-beta-wasm-ddddddddddd');
+  assert.ok(!superseded.calls.some((call) => call.includes('ccccccccccc')), 'drafts are not releases');
+  for (const statuses of [['identical', 'behind'], ['diverged', 'behind']]) {
+    const { api } = scripted(statuses);
+    assert.equal(await supersededBy({ api, repo: REPO, sha: SHA }), undefined, statuses.join());
+  }
+});
+
+test('a failed release listing or comparison fails instead of reading as not superseded', async () => {
+  const listing = fakeApi({ [`GET /repos/${REPO}/releases?per_page=30`]: { status: 502, json: null } });
+  await assert.rejects(supersededBy({ api: listing.api, repo: REPO, sha: SHA }), /HTTP 502/);
+  const comparison = fakeApi({
+    [`GET /repos/${REPO}/releases?per_page=30`]: { status: 200, json: [{ tag_name: 'rust-beta-wasm-bbbbbbbbbbb' }] },
+  });
+  await assert.rejects(supersededBy({ api: comparison.api, repo: REPO, sha: SHA }), /HTTP 404/);
+  await assert.rejects(supersededBy({ api: comparison.api, repo: REPO, sha: 'main' }), /full commit SHA/);
 });
