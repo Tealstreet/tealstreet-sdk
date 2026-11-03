@@ -46,6 +46,15 @@ pub enum Request {
         invalid: bool,
     },
 }
+struct CandleRange {
+    symbol: String,
+    granularity: &'static str,
+    seconds: f64,
+    cursor: f64,
+    end: f64,
+    page_end: f64,
+    rows: BTreeMap<u64, Candle>,
+}
 #[derive(Default)]
 pub(crate) struct Depth {
     pub book: Book,
@@ -77,6 +86,7 @@ pub(crate) struct Public {
     candles: HashMap<(String, Interval), (u32, Option<Candle>)>,
     products: HashMap<String, (f64, f64)>,
     daily: HashMap<String, Daily>,
+    candle_ranges: HashMap<CommandId, Box<CandleRange>>,
     daily_generation: u64,
     generation: u64,
     seeding: bool,
@@ -1116,16 +1126,30 @@ impl Coinbase {
             }
             Request::Candles {
                 command,
-                mut rows,
+                rows,
                 invalid,
             } => {
+                let Some(mut walk) = self.public.candle_ranges.remove(&command) else {
+                    return;
+                };
                 if invalid {
                     cx.fail(command, "Malformed Coinbase candles");
                 } else {
-                    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
-                        Ok(data) => cx.done(command, data),
-                        Err(error) => cx.fail(command, error),
+                    for row in rows {
+                        if row.timestamp >= walk.cursor && row.timestamp < walk.page_end {
+                            walk.rows.insert(row.timestamp as u64, row);
+                        }
+                    }
+                    walk.cursor = walk.page_end;
+                    if walk.cursor < walk.end {
+                        self.public.candle_ranges.insert(command, walk);
+                        self.candle_page(cx, command);
+                    } else {
+                        let rows = walk.rows.into_values().collect::<Vec<_>>();
+                        match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
+                            Ok(data) => cx.done(command, data),
+                            Err(error) => cx.fail(command, error),
+                        };
                     };
                 }
             }
@@ -1145,6 +1169,7 @@ impl Coinbase {
         let mut failures = vec![];
         match pending {
             Request::Candles { command, .. } => {
+                self.public.candle_ranges.remove(&command);
                 failures.push((command, safe_cex_engine::VenueError::new(error)));
             }
             Request::Daily {
@@ -1630,40 +1655,83 @@ impl Coinbase {
                     cx.fail(command, "Unknown Coinbase market");
                     return None;
                 }
-                let end = to_ms.unwrap_or(cx.now) / 1000.;
+                let end = (to_ms.unwrap_or(cx.now).min(cx.now) / 1000.)
+                    .round()
+                    .max(0.);
                 let start = from_ms
-                    .map(|n| n / 1000.)
-                    .unwrap_or(end - seconds * f64::from(limit.unwrap_or(300).clamp(1, 300)));
-                if !start.is_finite() || !end.is_finite() || start < 0. || end <= start {
+                    .map(|n| (n / 1000.).round())
+                    .unwrap_or(end - seconds * f64::from(limit.unwrap_or(300).max(1)))
+                    .max(0.);
+                if !start.is_finite() || !end.is_finite() {
                     cx.fail(command, "Invalid Coinbase candle range");
                     return None;
                 }
-                let path = format!(
-                    "/api/v3/brokerage/market/products/{}/candles?granularity={granularity}&start={:.0}&end={:.0}&limit={}",
-                    ws_symbol(&symbol),
-                    start,
-                    end,
-                    limit.unwrap_or(300).clamp(1, 300)
-                );
-                if let Err(error) = self.request(
-                    cx,
-                    Method::Get,
-                    path,
-                    None,
-                    Some(ArrayAt::Field("candles")),
-                    Pending::Public(Request::Candles {
-                        command,
-                        rows: vec![],
-                        invalid: false,
-                    }),
-                ) {
-                    cx.fail(command, error);
+                if end <= start {
+                    crate::local_context::complete(
+                        cx,
+                        safe_cex_engine::request_context::Operation::Read,
+                        Ok("[]".into()),
+                    );
+                    return None;
                 }
+                self.public.candle_ranges.insert(
+                    command,
+                    Box::new(CandleRange {
+                        symbol: ws_symbol(&symbol),
+                        granularity,
+                        seconds,
+                        cursor: start,
+                        end,
+                        page_end: start,
+                        rows: BTreeMap::new(),
+                    }),
+                );
+                self.candle_page(cx, command);
             }
             Command::SetTickerSymbols { .. } => {}
             other => return Some(other),
         }
         None
+    }
+}
+
+impl Coinbase {
+    fn candle_page(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        let Some(walk) = self.public.candle_ranges.get_mut(&command) else {
+            return;
+        };
+        walk.page_end = (walk.cursor + walk.seconds * 300.).min(walk.end);
+        let limit = ((walk.page_end - walk.cursor) / walk.seconds)
+            .ceil()
+            .clamp(1., 300.) as u32;
+        // Treat each page as half-open, even if Coinbase includes its end second.
+        let path = format!(
+            "/api/v3/brokerage/market/products/{}/candles?granularity={}&start={:.0}&end={:.0}&limit={limit}",
+            walk.symbol,
+            walk.granularity,
+            walk.cursor,
+            (walk.page_end - 1.).max(walk.cursor + 1.)
+        );
+        let result = if walk.page_end <= walk.cursor {
+            Err("Coinbase candle range cannot advance".into())
+        } else {
+            self.request(
+                cx,
+                Method::Get,
+                path,
+                None,
+                Some(ArrayAt::Field("candles")),
+                Pending::Public(Request::Candles {
+                    command,
+                    rows: vec![],
+                    invalid: false,
+                }),
+            )
+        };
+        if let Err(error) = result {
+            self.public.candle_ranges.remove(&command);
+            cx.fail(command, error);
+        }
     }
 }
 // Live candles are built from the ticker, so every interval is served.

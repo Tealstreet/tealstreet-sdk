@@ -94,6 +94,43 @@ describe('retained Coinbase Rust family oracle', () => {
   let mirrored: BaseExchange | undefined;
   afterEach(() => { exchange?.dispose(); exchange = undefined; mirrored?.dispose(); mirrored = undefined; });
 
+  it('loads 1000 ARB-USDC minute bars through four bounded public candle requests', async () => {
+    const tape = transport();
+    const originalRequest = tape.native.request;
+    const pages: Array<{ start: number; end: number }> = [];
+    const start = Math.floor((Date.now() / 1000 - 72000) / 60) * 60;
+    tape.native.request = async (request) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith('/candles')) {
+        expect(request.method).toBe('GET');
+        expect(url.pathname).toBe('/api/v3/brokerage/market/products/ARB-USD/candles');
+        expect(request.headers).toEqual({});
+        expect(url.searchParams.get('granularity')).toBe('ONE_MINUTE');
+        const begin = Number(url.searchParams.get('start'));
+        const end = Number(url.searchParams.get('end'));
+        expect(end - begin + 1).toBeLessThanOrEqual(300 * 60);
+        expect(Number(url.searchParams.get('limit'))).toBeLessThanOrEqual(300);
+        pages.push({ start: begin, end });
+        const candles = Array.from({ length: (end - begin + 1) / 60 }, (_, i) => ({
+          start: String(begin + i * 60), open: '1', high: '3', low: '0.5', close: '2', volume: '4',
+        })).reverse();
+        return { status: 200, body: new TextEncoder().encode(JSON.stringify({ candles })) };
+      }
+      if (url.pathname.endsWith('/products')) return { status: 200,
+        body: new TextEncoder().encode(JSON.stringify({ products: [{ ...product, product_id: 'ARB-USDC', base_currency_id: 'ARB', quote_currency_id: 'USDC' }] })) };
+      return originalRequest(request);
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    exchange = new RustEngineExchange('coinbasespot', { key: '', secret: '', publicDataOnly: true, tealstreetTunnel: false }, new DefaultStore());
+    await exchange.start();
+    const bars = await exchange.fetchOHLCV({ symbol: 'ARB-USDC', interval: '1m',
+      from: start * 1000, to: (start + 1000 * 60) * 1000, limit: 1000 });
+    expect(pages).toHaveLength(4);
+    expect(pages.map((page) => (page.end - page.start + 1) / 60)).toEqual([300, 300, 300, 100]);
+    expect(bars.map((bar) => bar.timestamp)).toEqual(Array.from({ length: 1000 }, (_, i) => start + i * 60));
+  }, 20000);
+
   it('loads a US retail DEFAULT-only spot portfolio and publishes its USD cash root through EngineHost', async () => {
     const tape = transport();
     const originalRequest = tape.native.request;
