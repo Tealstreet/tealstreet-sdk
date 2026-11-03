@@ -25,7 +25,7 @@ export function readBitgetPairedEvidence(directory) {
   };
   const json = name => parseCohortJson(read(name));
   const jsonText = name => { const bytes = read(name); parseCohortJson(bytes); return bytes.toString('utf8'); };
-  const plan = json('plan.json'), comparison = json('comparison.json');
+  const plan = json('plan.json');
   insist(!['T', 'tolerance', 'threshold', 'R0', 'r0', 'baselineOverride', 'anchorOverride', 'A0'].some(key => Object.hasOwn(plan, key)),
     'PR-supplied acceptance authority in measurement plan');
   insist(plan.protocolSha256 === BITGET_PAIRED_PROTOCOL_SHA256 && plan.freezeSha256 === BITGET_PAIRED_FREEZE_SHA256,
@@ -38,6 +38,17 @@ export function readBitgetPairedEvidence(directory) {
     return [arm, { source: plan.refs[arm], metadataBytes, metadata: parseCohortJson(metadataBytes),
       files: Object.fromEntries(names.map(name => [name, sha(read(`${packagePath}/${name}`))])) }];
   }));
+  const common = { schema: 1, freezeSha256: plan.freezeSha256, protocolSha256: plan.protocolSha256,
+    runId: String(plan.runId), attempt: plan.runAttempt, jobId: String(plan.jobId), runnerId: String(plan.runnerId),
+    refs: plan.refs, candidateTree: plan.candidateTree, order: plan.order, archives,
+    measurementSource: plan.measurementSource, measurementTree: plan.measurementTree, measurementFiles: plan.measurementFiles,
+    cpuModel: plan.runner.cpuModel, imageOS: plan.runner.imageOS, imageVersion: plan.runner.imageVersion,
+    nodeSha256: plan.nodeSha256 };
+  if (plan.disposition === 'unchanged-bytes') return { ...common, disposition: plan.disposition,
+    tapeSha256: plan.tapeSha256,
+    case: { venue: plan.venue, tape: plan.tape, books: plan.books, private: false }, cohorts: [] };
+  insist(plan.disposition === undefined, 'unknown paired disposition');
+  const comparison = json('comparison.json');
   insist(comparison.cohorts?.length === 8, 'missing complete cohort receipt');
   const cohorts = BITGET_COHORT_ORDER.map((arm, index) => {
     const prefix = `${String(index + 1).padStart(2, '0')}-${arm}`;
@@ -57,10 +68,5 @@ export function readBitgetPairedEvidence(directory) {
     return { before: json(`${prefix}/before.json`), finishedAt: receipt.finishedAt,
       evidence: { report, reportBytes, raw } };
   });
-  return { schema: 1, freezeSha256: plan.freezeSha256, protocolSha256: plan.protocolSha256,
-    runId: String(plan.runId), attempt: plan.runAttempt, jobId: String(plan.jobId), runnerId: String(plan.runnerId),
-    refs: plan.refs, candidateTree: plan.candidateTree, order: plan.order, archives, cohorts,
-    measurementSource: plan.measurementSource, measurementTree: plan.measurementTree, measurementFiles: plan.measurementFiles,
-    cpuModel: plan.runner.cpuModel, imageOS: plan.runner.imageOS, imageVersion: plan.runner.imageVersion,
-    nodeSha256: plan.nodeSha256 };
+  return { ...common, cohorts };
 }

@@ -211,7 +211,9 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
   // Also reject extra markers for this key with a substituted payload clock.
   check(lines.filter((line) => line.text.startsWith(`CPU_CASE_BEGIN ${key} `) || line.text.startsWith(`CPU_CASE_END ${key} `)).length === 2, 'substituted/duplicate case marker payload');
   const begin = markers[0][0], finish = markers[1][0];
-  check(begin.index < finish.index && begin.at !== null && finish.at !== null && start <= begin.at && begin.at <= end && end <= finish.at, 'public case marker ordering/time differs');
+  // Actions may buffer BEGIN until after execution ends; receipt clocks bound
+  // delivery, while the exact payload timestamps above order the execution.
+  check(begin.index < finish.index && begin.at !== null && finish.at !== null && start <= begin.at && begin.at <= finish.at && end <= finish.at, 'public case marker ordering/time differs');
   const candidates = (job.steps ?? []).filter((step) => /public/i.test(step.name ?? '') && step.status === 'completed' && step.conclusion === 'success').filter((step) => {
     const window = successfulStep(job, step.name);
     return [start, end, begin.at, finish.at].every((at) => at >= window.start && at < window.end);
