@@ -11,8 +11,11 @@ use serde::Deserialize;
 use std::{
     cell::{Cell, RefCell},
     cmp::Ordering,
+    collections::HashMap,
+    future::Future,
     rc::Rc,
 };
+use tokio::sync::oneshot;
 
 const MAX_LIMIT: f64 = 5000.;
 const MAX_MARKET_LIMIT: f64 = 10_000.;
@@ -26,6 +29,13 @@ fn error(status: u16, message: impl Into<String>, code: &str) -> Reply {
             .field("code", Json::str(code))
             .build(),
     )
+}
+
+/// A venue rate limit: 429 with `Retry-After`, so the page waits instead of retrying.
+fn rate_limited(reason: String, wait_ms: f64) -> Reply {
+    let mut reply = error(429, reason, "rate-limited");
+    reply.retry_after_secs = Some((wait_ms / 1000.).ceil().max(1.) as u64);
+    reply
 }
 
 fn bad_request(message: impl Into<String>) -> Reply {
@@ -103,6 +113,7 @@ fn parse_timestamp(value: Option<&str>, name: &str) -> Result<f64, String> {
     Ok(timestamp)
 }
 
+#[derive(Clone)]
 pub struct CandleRequest {
     pub exchange: String,
     pub symbol: String,
@@ -564,11 +575,79 @@ async fn fetch_once(
     }
 }
 
+/// Candle requests in flight by their exact parameters.
+#[derive(Default)]
+pub struct InFlight(RefCell<HashMap<String, Vec<oneshot::Sender<Reply>>>>);
+
+/// Drops the entry if its request never answered, so its waiters ask for themselves.
+struct Leading<'a> {
+    in_flight: &'a InFlight,
+    key: String,
+}
+
+impl Drop for Leading<'_> {
+    fn drop(&mut self) {
+        self.in_flight.0.borrow_mut().remove(&self.key);
+    }
+}
+
+impl InFlight {
+    /// The first request for `key` runs `fetch`; identical ones arriving meanwhile get its reply.
+    async fn share<F: Future<Output = Reply>>(&self, key: String, fetch: impl Fn() -> F) -> Reply {
+        let waiting = {
+            let mut in_flight = self.0.borrow_mut();
+            match in_flight.get_mut(&key) {
+                Some(waiters) => {
+                    let (answer, answered) = oneshot::channel();
+                    waiters.push(answer);
+                    Some(answered)
+                }
+                None => {
+                    in_flight.insert(key.clone(), Vec::new());
+                    None
+                }
+            }
+        };
+        if let Some(answered) = waiting {
+            return match answered.await {
+                Ok(reply) => reply,
+                Err(_) => fetch().await,
+            };
+        }
+        let leading = Leading {
+            in_flight: self,
+            key,
+        };
+        let reply = fetch().await;
+        let waiters = self.0.borrow_mut().remove(&leading.key);
+        for waiter in waiters.into_iter().flatten() {
+            let _ = waiter.send(reply.clone());
+        }
+        reply
+    }
+}
+
+/// Identical requests in flight share the first one's answer: one venue read, not one per page.
 pub async fn candles(app: &App, query: &Query) -> Reply {
     let request = match parse_candle_request(query) {
         Ok(request) => request,
         Err(message) => return bad_request(message),
     };
+    let key = format!(
+        "{}|{}|{}|{}|{}|{}",
+        request.exchange,
+        request.symbol,
+        request.interval,
+        request.from_ms,
+        request.to_ms,
+        request.limit
+    );
+    app.candles_in_flight
+        .share(key, || fetch_candles(app, request.clone()))
+        .await
+}
+
+async fn fetch_candles(app: &App, request: CandleRequest) -> Reply {
     let exchange = request.exchange.clone();
     let service_error = |reason: &str| {
         alert(
@@ -598,6 +677,17 @@ pub async fn candles(app: &App, query: &Query) -> Reply {
     let resident = match app.pool.hold(&request.exchange).await {
         Ok(resident) => resident,
         Err(reason) => return service_error(&reason),
+    };
+    // A rate-limited venue is not asked again until its wait ends.
+    if let Some(wait_ms) = resident.rate_limited_for(pool::now_ms()) {
+        let reason = resident
+            .last_rate_limit()
+            .unwrap_or_else(|| format!("{exchange} is rate limiting candle reads"));
+        return rate_limited(reason, wait_ms);
+    }
+    let upstream_error = |reason: String| match resident.rate_limited_for(pool::now_ms()) {
+        Some(wait_ms) => rate_limited(reason, wait_ms),
+        None => upstream_error(reason),
     };
     let engine = resident.engine();
     // Only a request that reached the venue may be judged by its error latch.
@@ -802,6 +892,70 @@ mod tests {
                 r#"{"timestamp":3,"open":1,"high":null,"low":null,"close":null,"volume":null}"#,
             ]
         );
+    }
+
+    #[test]
+    fn a_venue_rate_limit_answers_429_with_its_wait_in_whole_seconds() {
+        let reply = rate_limited("Bybit klines: Too many visits".into(), 12_300.);
+        assert_eq!(reply.status, 429);
+        assert_eq!(reply.retry_after_secs, Some(13));
+        assert!(reply.body.contains("Too many visits"), "{}", reply.body);
+        assert_eq!(rate_limited("x".into(), 10.).retry_after_secs, Some(1));
+    }
+
+    fn ok(body: &str) -> Reply {
+        Reply::json(200, Json::str(body))
+    }
+
+    #[tokio::test]
+    async fn identical_requests_in_flight_share_one_fetch() {
+        let in_flight = InFlight::default();
+        let fetches = Cell::new(0);
+        let fetch = || async {
+            fetches.set(fetches.get() + 1);
+            tokio::task::yield_now().await;
+            ok("candles")
+        };
+        let (a, b, c) = tokio::join!(
+            in_flight.share("BTC".into(), fetch),
+            in_flight.share("BTC".into(), fetch),
+            in_flight.share("ETH".into(), fetch),
+        );
+        assert_eq!(fetches.get(), 2, "BTC once, ETH once");
+        assert_eq!(
+            (a.body.as_str(), b.body.as_str()),
+            (c.body.as_str(), c.body.as_str())
+        );
+        assert!(
+            in_flight.0.borrow().is_empty(),
+            "settled entries are released"
+        );
+        in_flight.share("BTC".into(), fetch).await;
+        assert_eq!(fetches.get(), 3, "a later request fetches again");
+    }
+
+    #[tokio::test]
+    async fn a_waiter_whose_leading_request_was_dropped_fetches_for_itself() {
+        let in_flight = InFlight::default();
+        let fetches = Cell::new(0);
+        let fetch = || async {
+            fetches.set(fetches.get() + 1);
+            tokio::task::yield_now().await;
+            ok("candles")
+        };
+        let mut leading = Box::pin(in_flight.share("BTC".into(), fetch));
+        // Start the leading request, then abandon it mid-fetch.
+        assert!(poll_once(leading.as_mut()).await);
+        drop(leading);
+        let reply = in_flight.share("BTC".into(), fetch).await;
+        assert_eq!(reply.status, 200);
+        assert_eq!(fetches.get(), 2);
+    }
+
+    /// Polls `future` once; true when it is still pending.
+    async fn poll_once<F: Future>(mut future: std::pin::Pin<&mut F>) -> bool {
+        std::future::poll_fn(|cx| std::task::Poll::Ready(future.as_mut().poll(cx).is_pending()))
+            .await
     }
 
     #[test]
