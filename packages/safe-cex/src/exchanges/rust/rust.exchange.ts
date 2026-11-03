@@ -122,6 +122,7 @@ import { mapAsterDEXSignerSetup } from './asterdexSignerSetup';
 import { assertBetaAccount, BETA_VENUES, isBetaVenue } from './betaVenues';
 import {
   deriveBridgeConstruction,
+  deriveEndpointSetupPolicy,
   derivePublicMode,
   deriveRemoteSigningPolicy,
   deriveSignerSetupMapping,
@@ -1344,6 +1345,18 @@ export class RustEngineExchange extends BaseExchange {
   private createHost = async () => {
     const options = this.engineOptions;
     if (this.setupError) throw this.setupError;
+    if (deriveEndpointSetupPolicy(this.name) === 'hyrotrader') {
+      const simulator = options.extra?.hyrotraderMode === 'demo' || !HYROTRADER_PROD_URL.livenet;
+      const network = options.testnet ? 'testnet' : 'livenet';
+      const rest = simulator ? HYROTRADER_SIMULATOR_URL : HYROTRADER_PROD_URL;
+      const sockets = simulator ? HYROTRADER_SIMULATOR_WS_URL : HYROTRADER_PROD_WS_URL;
+      if (!rest[network] || !sockets.public.linear[network] || !sockets.private[network]) {
+        const message = `HyroTrader ${simulator ? 'simulator' : 'production'} URLs are not configured in this build.`;
+        const error = new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+        this.reportCommandError(error);
+        throw error;
+      }
+    }
     if (this.warnIgnoredCoinbaseReadOptions) {
       this.warnIgnoredCoinbaseReadOptions = false;
       this.log(

@@ -27,6 +27,20 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "backpack": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "binance": {
     "startup": true,
     "trading": true,
@@ -237,7 +251,49 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "coinbase": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": false,
+    "incomeRange": false,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "coinbasespot": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": false,
+    "incomeRange": false,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "cryptocom": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "grvt": {
     "startup": true,
     "trading": true,
     "openOrders": true,
@@ -293,6 +349,20 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "kodiakfi": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "kraken": {
     "startup": true,
     "trading": true,
@@ -321,6 +391,34 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "kucoin": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "kucoinspot": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": false,
+    "incomeHistory": false,
+    "incomeRange": false,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "lighter": {
     "startup": true,
     "trading": true,
@@ -336,6 +434,20 @@
     "accountGreeks": false
   },
   "mexc": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "mode": {
     "startup": true,
     "trading": true,
     "openOrders": true,
@@ -433,7 +545,35 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "what": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "woo": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "woofi": {
     "startup": true,
     "trading": true,
     "openOrders": true,
