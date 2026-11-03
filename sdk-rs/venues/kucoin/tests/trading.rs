@@ -2,7 +2,9 @@
 //! Switch Position Mode; safe-cex native-lot and client-ID contracts.
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
-use safe_cex_venue_kucoin::{Kucoin, Options};
+mod support;
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 
 struct Harness {
     engine: Engine<Kucoin>,
@@ -26,16 +28,16 @@ impl Harness {
         Self::with_source(17)
     }
     fn with_source(seed: u64) -> Self {
-        let mut engine = Engine::new(
-            Kucoin::new(Options {
+        let mut engine = support::credentials::with_seed(
+            Options {
                 key: Some("documented-test-key".into()),
                 secret: Some("documented-test-secret".into()),
                 passphrase: Some("documented-test-passphrase".into()),
                 ..Default::default()
-            }),
-            Some(safe_cex_engine::test_support::seeded_entropy(seed)),
-        )
-        .unwrap();
+            },
+            Kucoin::new,
+            seed,
+        );
         engine.store_mut().set_markets(vec![Market {
             id: "XBTUSDTM".into(),
             symbol: "BTCUSDT".into(),
@@ -77,7 +79,9 @@ impl Harness {
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
         let mut receipts = Vec::new();
-        for action in self.engine.drain_actions() {
+        for action in
+            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now).into_iter()
+        {
             if let Action::Notice(Notice::CommandProgress {
                 receipts: actual, ..
             }) = &action
@@ -234,6 +238,31 @@ fn order() -> PlaceOrderOpts {
 }
 fn place(h: &mut Harness, orders: Vec<PlaceOrderOpts>) {
     h.command(Command::PlaceOrders { command: 1, orders });
+}
+
+#[test]
+fn provider_refusal_is_not_sent_and_releases_the_native_write_job() {
+    let mut h = Harness::new();
+    let provider = h.engine.signer().unwrap();
+    h.engine
+        .set_signer(Some(std::sync::Arc::new(
+            support::credentials::RefuseWrites(provider.clone()),
+        )))
+        .unwrap();
+    place(&mut h, vec![order()]);
+    h.metadata(true, "CROSS");
+    h.pace();
+    assert!(!h.has("/api/v1/orders"));
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    h.engine.set_signer(Some(provider)).unwrap();
+    h.command(Command::PlaceOrders {
+        command: 2,
+        orders: vec![order()],
+    });
+    assert_eq!(h.take("/api/v1/orders").method, Method::Post);
 }
 
 #[test]

@@ -41,6 +41,19 @@ test('shared broker-role setup caps retain CI headroom and reject the next byte'
   }
 });
 
+test('KuCoin custody caps retain the approved CI headroom and exact boundary', () => {
+  for (const [venue, measured, cap] of [
+    ['kucoin', 1_630_161, 1_640_448],
+    ['kucoinspot', 2_211_621, 2_222_080],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('CI budgets each standalone venue build under its own venue name', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   const step = workflow.indexOf('name: Check family isolation, every alias and the shipped size');

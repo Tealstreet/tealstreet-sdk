@@ -37,6 +37,9 @@ compile_error!(
     "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
+#[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+mod kucoin_setup;
+
 #[cfg(feature = "kraken")]
 pub use safe_cex_venue_kraken::sign::dispatch::Selected as kraken_selected;
 #[cfg(feature = "kraken")]
@@ -870,7 +873,11 @@ fn prepare_local_signer_with_policy(
     VenueError,
 > {
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, Secret};
-    let primary =
+    #[cfg_attr(
+        not(any(feature = "kucoin", feature = "kucoinspot")),
+        allow(unused_mut)
+    )]
+    let mut primary =
         if options.key.is_some() || options.secret.is_some() || options.passphrase.is_some() {
             Some(LocalIdentity {
                 key: Secret::new(options.key.take().unwrap_or_default()),
@@ -881,6 +888,14 @@ fn prepare_local_signer_with_policy(
         } else {
             None
         };
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+    if policy
+        .primary
+        .and_then(|rule| rule.extra)
+        .is_some_and(|extra| extra.key == safe_cex_engine::signing::ExtraKey::KucoinBroker)
+    {
+        kucoin_setup::take_broker(options, primary.as_mut());
+    }
     use construction::ReadCredentialsPolicy;
     // A public-only PublicRead provider holds no primary, so only Read roles select.
     let primary = primary.filter(|_| !public_read_excludes_primary(read_policy, public_data_only));
@@ -2010,41 +2025,21 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "kucoinspot")]
-        "kucoinspot" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                KucoinSpot::new(KucoinOptions {
-                    read_credentials: options.read_credentials.take(),
-                    broker: options.extra.take().and_then(|e| e.kucoin_broker),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
-                }),
-                entropy,
-            )?,
-        ),
+        "kucoinspot" => {
+            let (venue, identities) = kucoin_setup::venue_options(&mut options, signer.is_some())?;
+            let mut engine = Engine::new(KucoinSpot::new(venue), entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "kucoin")]
-        "kucoin" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Kucoin::new(KucoinOptions {
-                    read_credentials: options.read_credentials.take(),
-                    broker: options.extra.take().and_then(|e| e.kucoin_broker),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
-                }),
-                entropy,
-            )?,
-        ),
+        "kucoin" => {
+            let (venue, identities) = kucoin_setup::venue_options(&mut options, signer.is_some())?;
+            let mut engine = Engine::new(Kucoin::new(venue), entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bingx")]
         "bingx" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -2331,7 +2326,7 @@ pub struct PublicFeedOptions {
 #[serde(rename_all = "camelCase")]
 pub struct KucoinExtra {
     #[serde(default)]
-    pub kucoin_broker: Option<safe_cex_venue_kucoin::sign::BrokerOptions>,
+    pub kucoin_broker: Option<kucoin_setup::BrokerInput>,
 }
 
 #[cfg(any(
