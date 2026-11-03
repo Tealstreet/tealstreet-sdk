@@ -1074,9 +1074,10 @@ fn owned_history_category_failure_keeps_sorted_globally_limited_prior_rows() {
                 if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
             {
                 assert_eq!(
-                    event.fields,
+                    event.fields[..1],
                     [("command", safe_cex_engine::Value::Num(811.0))]
                 );
+                assert_eq!(event.fields[1].0, "reason");
                 Some(index)
             }
             _ => None,

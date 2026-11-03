@@ -1033,9 +1033,8 @@ mod owned_income {
         let notices = markers(output);
         assert_eq!(notices.len(), 1, "exactly one owned marker: {output:?}");
         assert_eq!(notices[0].level, Level::Warn);
-        assert_eq!(notices[0].fields.len(), 1);
         assert!(
-            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id))] if *id == f64::from(owner))
+            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id)), ("reason", Value::Str(_))] if *id == f64::from(owner))
         );
         let index = output
             .iter()

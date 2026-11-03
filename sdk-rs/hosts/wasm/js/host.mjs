@@ -1402,7 +1402,8 @@ export class EngineHost {
         const command = fields?.command;
         const pending = Number.isInteger(command) && command >= 0 && command <= 0xffff_ffff
           ? this.commands.get(command) : undefined;
-        if (code === 'history.incomplete' && pending) pending.incomplete = true;
+        // The engine's closed reason code, never the message (which may quote the venue).
+        if (code === 'history.incomplete' && pending) pending.incomplete = typeof fields?.reason === 'string' ? fields.reason : true;
         const event = { level, code, message, fields };
         let callbackFailure;
         try { pending?.onEvent?.(event); }
@@ -1478,7 +1479,10 @@ export class EngineHost {
           try { result = action.result === undefined ? undefined : JSON.parse(action.result); }
           catch (cause) { this.settleCommand(action.command, new CommandProtocolError(cause, pending.identity), true); break; }
           // Optional and non-enumerable: rows stay a plain array for existing callers.
-          if (pending.incomplete && Array.isArray(result)) Object.defineProperty(result, 'incomplete', { value: true, writable: true, configurable: true });
+          if (pending.incomplete && Array.isArray(result)) {
+            Object.defineProperty(result, 'incomplete', { value: true, writable: true, configurable: true });
+            if (typeof pending.incomplete === 'string') Object.defineProperty(result, 'incompleteReason', { value: pending.incomplete, writable: true, configurable: true });
+          }
           this.settleCommand(action.command, result);
         }
         // Settlement wins before any consumer runs: a broken toast/log handler

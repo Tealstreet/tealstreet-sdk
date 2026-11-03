@@ -477,6 +477,25 @@ test('a history.incomplete event naming the command marks its rows incomplete', 
 });
 
 
+test("an incomplete event's closed reason code rides the rows, never its message", async () => {
+  const r = rig();
+  const reasoned = r.host.command({ op: 'fetchFills' });
+  const bare = r.host.command({ op: 'fetchFills' });
+  r.host.run(JSON.stringify([
+    { op: 'event', level: 'warn', code: 'history.incomplete', message: 'venue said: ip 1.2.3.4', fields: { command: 1, reason: 'cursorStalled' } },
+    { op: 'event', level: 'warn', code: 'history.incomplete', message: 'older engine', fields: { command: 2 } },
+    { op: 'done', command: 1, result: '[{"id":"a"}]' },
+    { op: 'done', command: 2, result: '[{"id":"b"}]' },
+  ]));
+  const rows = await reasoned;
+  assert.equal(rows.incomplete, true);
+  assert.equal(rows.incompleteReason, 'cursorStalled');
+  assert.deepEqual(Object.keys(rows), ['0'], 'the reason is not enumerable either');
+  const older = await bare;
+  assert.equal(older.incomplete, true);
+  assert.equal(older.incompleteReason, undefined);
+});
+
 const coverageEvent = (command) => ({
   op: 'event', level: 'warn', code: 'history.incomplete', message: 'partial history', fields: { command },
 });

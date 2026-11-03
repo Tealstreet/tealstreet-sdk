@@ -177,7 +177,8 @@ impl<V: Venue> H<V> {
             let done_at = self.actions.iter().position(|a| matches!(a, Action::Notice(Notice::CommandDone {command,..}) if *command == id)).expect("marker needs successful completion");
             assert!(mark_at < done_at, "marker must precede completion");
             assert_eq!(marker.level, Level::Warn);
-            assert_eq!(marker.fields, vec![("command", Value::Num(f64::from(id)))]);
+            assert_eq!(marker.fields[..1], [("command", Value::Num(f64::from(id)))]);
+            assert_eq!(marker.fields[1].0, "reason");
         }
     }
 }
