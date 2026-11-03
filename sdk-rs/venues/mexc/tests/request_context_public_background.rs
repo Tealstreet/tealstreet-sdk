@@ -7,8 +7,8 @@ use safe_cex_engine::{
 use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::{MARKETS, TICKERS, TestEngine, jittered};
 
-// Startup discovery reads carry the engine's 60 s discovery deadline; later reads keep 20 s.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline; later reads keep 20 s.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const READ_DEADLINE_MS: f64 = 20_000.;
 const DEPTH: &str = r#"{"success":true,"code":0,"data":{"version":10,"bids":[[60000,10,1]],"asks":[[60001,40,1]]}}"#;
 

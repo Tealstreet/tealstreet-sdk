@@ -3,8 +3,8 @@ use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, Notice, Respons
 use safe_cex_venue_polymarket::{Options, Polymarket};
 
 // A Background Read issued before markets and tickers load carries the engine's
-// 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 
 fn engine_with_market() -> Engine<Polymarket> {
     use safe_cex_engine::model::{Limits, Market, MinMax, Precision};

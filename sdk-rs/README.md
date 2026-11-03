@@ -28,6 +28,15 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## Startup discovery deadlines
+
+Before both markets and tickers load, credential-free Background Reads using the
+standard 20 s policy receive a 90 s total deadline: 60 s for discovery plus a
+30 s transport-readiness allowance. The host caps readiness within that original
+deadline; it never resets the clock after readiness. Credentialed reads, caller
+commands, writes, explicit venue timeouts and reads after discovery keep their
+existing bounds.
+
 ## Host entropy
 
 Core construction is explicit: `Engine::new(venue, Some(entropy))` returns a

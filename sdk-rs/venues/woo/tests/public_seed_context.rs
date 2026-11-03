@@ -12,8 +12,8 @@ use support::{MARKETS, TICKERS};
 type Driver = Engine<Woo>;
 const FUNDING: &str = r#"{"success":true,"rows":[{"symbol":"PERP_BTC_USDT","est_funding_rate":0.002,"next_funding_time":1700057600000}]}"#;
 const EMPTY: &str = r#"{"success":true,"rows":[]}"#;
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const READ_DEADLINE_MS: f64 = 20_000.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

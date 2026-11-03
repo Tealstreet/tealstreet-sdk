@@ -3,8 +3,8 @@ mod support;
 use safe_cex_engine::{Command, Event, Outcome};
 use support::{Harness, Options};
 
-/// Startup discovery's bound (the engine's DISCOVERY_TIMEOUT_MS).
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+/// Startup discovery's bound (the engine's discovery timeout plus readiness allowance).
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 
 fn ready() -> Harness {
     let mut h = Harness::started(Options {
