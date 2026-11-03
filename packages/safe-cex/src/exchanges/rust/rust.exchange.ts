@@ -2270,7 +2270,10 @@ export class RustEngineExchange extends BaseExchange {
     } catch (error) {
       // The web's placement failure names the order; a second raw report would only repeat it.
       const callerReports = command.op === 'placeOrders' && this.options.callerReportsPlacementFailures;
-      if (report && !callerReports) this.reportCommandError(error);
+      // A history the venue cannot give (MEXC income other than funding) is no failure to show.
+      const unsupportedHistory =
+        PRIVATE_HISTORY_OPS.has(command.op) && error instanceof ExchangeError && error.kind === 'unsupported';
+      if (report && !callerReports && !unsupportedHistory) this.reportCommandError(error);
       throw error;
     }
   };

@@ -399,3 +399,21 @@ it('reports a typed GRVT builder rejection once while preserving actionable appr
   expect(r.errors).toHaveBeenCalledTimes(1);
   expect(serializeCommandError(error)).toMatchObject({ ...builderAuthorization, errorReported: true });
 });
+
+it('keeps an unsupported history read quiet but still rejects it, typed', async () => {
+  const r = await fixture('bybit', { key: 'fixture-key', secret: 'fixture-secret', publicDataOnly: false });
+  r.onCommand(({ command }) => [
+    {
+      op: 'done',
+      command,
+      error: 'MEXC income supports only kind FUNDING_FEE',
+      detail: { message: 'MEXC income supports only kind FUNDING_FEE', kind: 'unsupported', outcome: 'notSent' },
+    },
+  ]);
+  const error = await r.exchange.fetchIncomeHistory({ incomeType: 'COMMISSION' }).catch((error: unknown) => error);
+  expect(error).toMatchObject({ kind: 'unsupported', message: 'MEXC income supports only kind FUNDING_FEE' });
+  expect(r.errors).not.toHaveBeenCalled();
+  r.onCommand(({ command }) => [{ op: 'done', command, error: 'income read failed' }]);
+  await r.exchange.fetchIncomeHistory({ incomeType: 'FUNDING_FEE' }).catch(() => undefined);
+  expect(r.errors).toHaveBeenCalledTimes(1);
+});
