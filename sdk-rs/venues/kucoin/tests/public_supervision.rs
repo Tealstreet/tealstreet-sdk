@@ -3,7 +3,9 @@ use safe_cex_engine::{
     Action, Engine, Event, HttpRequest, PublicFeedPolicy, Response, SocketChannel, SocketId,
     TimerId, Venue,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options};
+mod support;
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 
 const FUTURES_MARKETS: &str = r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001,"expireDate":null,"isInverse":false}]}"#;
 const FUTURES_TICKERS: &str = r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100","bestBidPrice":"99","bestAskPrice":"101","size":12}]}"#;
@@ -22,8 +24,7 @@ struct Sim<V: Venue> {
 }
 
 impl<V: Venue> Sim<V> {
-    fn start(venue: V, policy: PublicFeedPolicy) -> Self {
-        let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+    fn start(mut e: Engine<V>, policy: PublicFeedPolicy) -> Self {
         e.set_public_feed_policy(policy).unwrap();
         let mut sim = Self {
             e,
@@ -106,7 +107,7 @@ impl<V: Venue> Sim<V> {
 }
 
 fn futures(policy: PublicFeedPolicy, options: Options) -> Sim<Kucoin> {
-    let mut sim = Sim::start(Kucoin::new(options), policy);
+    let mut sim = Sim::start(support::credentials::engine(options, Kucoin::new), policy);
     sim.reply("/contracts/active", FUTURES_MARKETS);
     sim.reply("/allTickers", FUTURES_TICKERS);
     sim
@@ -169,7 +170,10 @@ mod spot {
     const SPOT_TICKERS: &str = r#"{"code":"200000","data":{"time":1700000000000,"ticker":[{"symbol":"BTC-USDT","last":"100","buy":"99","sell":"101"}]}}"#;
 
     fn spot(policy: PublicFeedPolicy, options: Options) -> Sim<KucoinSpot> {
-        let mut sim = Sim::start(KucoinSpot::new(options), policy);
+        let mut sim = Sim::start(
+            support::credentials::engine(options, KucoinSpot::new),
+            policy,
+        );
         sim.reply("/api/v2/symbols", SPOT_MARKETS);
         sim.reply("/allTickers", SPOT_TICKERS);
         sim

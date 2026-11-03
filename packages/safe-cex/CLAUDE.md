@@ -69,6 +69,9 @@ argument is private provider setup, separate from engine-options JSON. Cached
 construction metadata preserves `canSign`/public mode; transport receives only
 read-identity presence; managed routing uses explicit credential intent before
 credentials are materialised, while legacy requests retain header-based routing.
+KuCoin Futures/Spot also install their passphrase and optional configured broker
+key only in this capsule. One receipt binds Present plus the request, passphrase,
+and optional broker MACs; Hosted admission remains disabled for both names.
 Lighter's trusted native/JSON mapping uses a typed API-index principal when a
 private Schnorr signing ref exists and the original key is not Nonblank.
 Original SetupFacts stay unchanged; the principal is never presentable. Validated
