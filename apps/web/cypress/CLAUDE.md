@@ -19,6 +19,22 @@ End-to-end tests for the Tealstreet trading platform — exercises real exchange
 - **Local fast iteration and CI both use exchange-server mode, but not the same endpoint.** The Mac mini loop intentionally keeps `apps/web/.env.local` pointed at `NEXT_PUBLIC_EXCHANGE_SERVER_URL=ws://localhost:23456` and runs `yarn workspace @tealstreet/exchange-server dev` locally. GitHub e2e sets `CYPRESS_useExchangeServer=true` and relies on the deployed app's hosted default, `wss://connect.tealstreet.io/account`; do not change the mini env to hosted just to mirror CI unless explicitly validating the hosted path.
 - **Failures**: Cypress writes screenshots and videos to `cypress/screenshots/` and `cypress/videos/` (gitignored)
 
+## Hosted test account identity
+
+Hosted accounts are shared by authenticated user and account name, not exchange.
+The parallel matrix shares one test login, so `config/accountNames.js` assigns
+stable names per exchange and credential variant (`test-bybit`,
+`test-okx-badkey`, and the UI form variants). Do not restore the global `test`,
+`e2e-good-key` or `e2e-bad-key` names: another job's different venue/key then
+hits the server's multi-client refusal before private data can load.
+
+Keep names stable across runs and attempts to reuse hosted accounts/journals.
+The signer-only bad-key probe and the form's fully corrupted credentials use
+different names; the form's saved-account lookup, activation and cleanup use
+those same names. Server protection, keys, routing and financial assertions stay
+unchanged. Hermetic identity regressions run through the existing mirror CI
+Node-test step: `node --test .github/tests/e2e-account-names.test.cjs`.
+
 ## Order-form invariant: price before size
 
 **Always call `setBuyPrice`/`setSellPrice` before `setOrderSize` on any
