@@ -137,7 +137,7 @@ test('status names incomplete shared certification before reading absent or malf
       encoding: 'utf8', env: { ...process.env, CPU_CERT_RESULT: result, CPU_CERT_RESULTS: output },
     });
     assert.equal(child.status, 1);
-    assert.equal(child.stderr.trim(), `shared CPU certification did not complete (result=${result || 'missing'}); non-blocking`);
+    assert.equal(child.stderr.trim(), `shared CPU certification did not complete (result=${result || 'missing'}); certification not accepted`);
     assert.doesNotMatch(child.stdout, /accepted/);
   }
 });
