@@ -76,6 +76,9 @@ export const downSizeReduceOrder = (
   }
 
   const rounded = roundToNearestMultiple(reducedSize, market?.precision?.amount || DEFAULT_AMOUNT_PRECISION);
+  // Orders ahead that cover the position leave float residue (0.05 - 0.02 - 0.03 = 3.5e-18), which
+  // rounds to 0. A zero amount is never an order: keep the order as placed, as when nothing is left.
+  if (!(rounded > 0)) return order;
   return {
     ...order,
     amount: baseToNative(rounded),
