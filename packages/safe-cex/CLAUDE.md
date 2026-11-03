@@ -528,6 +528,15 @@ Use it instead of class identity or text. Unknown/pending/network/malformed
 checks stay ordinary failures. The command error allowlist retains only validated
 approval fields; the old class export stays available without prototype repair.
 
+## Reported closed-PnL read failures
+
+Rust `fetchClosedPnl` propagates the engine's typed read error, including through
+worker/hosted transport. A failed read is never a successful empty history;
+refreshing consumers retain their last good result and surface the failure.
+Actual empty reads and public-only sessions still return empty arrays. Journal
+and ingestion use the separate strict `fetchHistoricalPositions` path, so this
+change confers no ingestion completion or new history capability.
+
 ## Rust incomplete history
 
 A successful partial Rust history read returns the available rows with a
