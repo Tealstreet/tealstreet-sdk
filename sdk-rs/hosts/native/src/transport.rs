@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{
     Message,
     client::IntoClientRequest,
+    handshake::client::Request,
     http::{HeaderName, HeaderValue},
 };
 
@@ -154,6 +155,10 @@ impl Default for NetworkTransport {
     }
 }
 
+/// How long one resolved address may take to accept TCP before the next is tried.
+/// The OS default (about two minutes on Linux) would stall failover behind a dead host.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
+
 pub(crate) async fn open_socket(
     url: &str,
     headers: Vec<(String, String)>,
@@ -167,10 +172,78 @@ pub(crate) async fn open_socket(
             HeaderValue::from_str(&value).map_err(|error| error.to_string())?,
         );
     }
-    tokio_tungstenite::connect_async(request)
+    let (host, port) = socket_authority(&request)?;
+    let addresses: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+        .await
+        .map_err(|error| tokio_tungstenite::tungstenite::Error::Io(error).to_string())?
+        .collect();
+    open_socket_at(request, &addresses, CONNECT_TIMEOUT).await
+}
+
+/// The host and port `connect_async` would dial: the URL's, or the scheme's default.
+fn socket_authority(request: &Request) -> Result<(String, u16), String> {
+    let uri = request.uri();
+    let host = uri
+        .host()
+        .map(|host| {
+            host.trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_owned()
+        })
+        .ok_or("URL error: No host name in the URL")?;
+    let port = uri
+        .port_u16()
+        .or(match uri.scheme_str() {
+            Some("wss") => Some(443),
+            Some("ws") => Some(80),
+            _ => None,
+        })
+        .ok_or("URL error: URL scheme not supported")?;
+    Ok((host, port))
+}
+
+/// Connects to the first address that answers, then runs TLS and the upgrade over it;
+/// SNI and `Host` still name the URL's host, so stock-root verification holds.
+async fn open_socket_at(
+    request: Request,
+    addresses: &[std::net::SocketAddr],
+    timeout: Duration,
+) -> Result<crate::routing::Socket, String> {
+    let (stream, index) = connect_first(addresses, timeout).await?;
+    if index > 0 {
+        eprintln!(
+            "venue socket for {} connected to {} (address {} of {})",
+            request.uri().host().unwrap_or_default(),
+            addresses[index],
+            index + 1,
+            addresses.len()
+        );
+    }
+    tokio_tungstenite::client_async_tls_with_config(request, stream, None, None)
         .await
         .map(|(socket, _)| socket)
         .map_err(|error| error.to_string())
+}
+
+/// Each address in turn, each bounded by `timeout`; the error is the last address's.
+async fn connect_first(
+    addresses: &[std::net::SocketAddr],
+    timeout: Duration,
+) -> Result<(tokio::net::TcpStream, usize), String> {
+    let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no address resolved");
+    for (index, address) in addresses.iter().enumerate() {
+        match tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address)).await {
+            Ok(Ok(stream)) => return Ok((stream, index)),
+            Ok(Err(error)) => last = error,
+            Err(_) => {
+                last = std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("connect to {address} timed out after {timeout:?}"),
+                )
+            }
+        }
+    }
+    Err(tokio_tungstenite::tungstenite::Error::Io(last).to_string())
 }
 
 /// How often one host's failed opens are logged; the line counts those in between.
@@ -617,6 +690,85 @@ mod security_tests {
             .err()
             .unwrap();
         assert!(error.contains("429"), "{error}");
+    }
+
+    /// A WebSocket listener on loopback that completes one upgrade.
+    async fn upgrade_once() -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let _ = socket.next().await;
+        });
+        address
+    }
+
+    /// A non-routable address: its SYN goes unanswered, so only the timeout ends the try.
+    const BLACKHOLE: &str = "10.255.255.1:443";
+
+    #[tokio::test]
+    async fn a_silent_first_address_fails_over_to_the_second_within_the_timeout() {
+        let live = upgrade_once().await;
+        let request = format!("ws://tunnel-vpc.tealstreet.io:{}/tunnel", live.port())
+            .into_client_request()
+            .unwrap();
+        let started = std::time::Instant::now();
+        let mut socket = open_socket_at(
+            request,
+            &[BLACKHOLE.parse().unwrap(), live],
+            Duration::from_millis(300),
+        )
+        .await
+        .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        tokio::time::timeout(Duration::from_secs(1), socket.send(Message::text("ping")))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_first_answering_address_wins_and_a_silent_one_reports_its_timeout() {
+        let live = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let live = live.local_addr().map(|a| (live, a)).unwrap();
+        let (_, index) = connect_first(
+            &[live.1, BLACKHOLE.parse().unwrap()],
+            Duration::from_millis(300),
+        )
+        .await
+        .unwrap();
+        assert_eq!(index, 0);
+        let error = connect_first(&[BLACKHOLE.parse().unwrap()], Duration::from_millis(200))
+            .await
+            .err()
+            .unwrap();
+        assert!(
+            error.starts_with("IO error: ")
+                && (error.contains("timed out") || error.contains("unreachable")),
+            "{error}"
+        );
+        assert_eq!(
+            connect_first(&[], Duration::from_millis(1))
+                .await
+                .err()
+                .unwrap(),
+            "IO error: no address resolved"
+        );
+    }
+
+    #[test]
+    fn the_dialled_authority_defaults_the_port_by_scheme() {
+        let authority = |url: &str| socket_authority(&url.into_client_request().unwrap());
+        assert_eq!(
+            authority("wss://tunnel-vpc.tealstreet.io/tunnel").unwrap(),
+            ("tunnel-vpc.tealstreet.io".into(), 443)
+        );
+        assert_eq!(authority("ws://[::1]:9/x").unwrap(), ("::1".into(), 9));
     }
 
     #[test]

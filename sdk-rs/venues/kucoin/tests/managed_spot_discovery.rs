@@ -3,8 +3,8 @@ use safe_cex_engine::request_context::{Error, HttpAction, Preparation, RoutingIn
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, VenueError};
 use safe_cex_venue_kucoin::{Options, spot::KucoinSpot};
 
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const MARKETS: &str = r#"{"code":"200000","data":[{"symbol":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.001","priceIncrement":"0.1","baseMinSize":"0.001","baseMaxSize":"100"}]}"#;
 const TICKERS: &str = r#"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100","buy":"99","sell":"101"}]}}"#;
 

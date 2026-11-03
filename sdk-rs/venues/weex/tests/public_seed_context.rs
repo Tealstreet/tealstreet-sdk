@@ -17,8 +17,8 @@ use support::setup::Options;
 
 const NOW: f64 = 1_000.;
 const LIMIT: f64 = 20_000.;
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
 const DAILY: &str = r#"[{"symbol":"BTCUSDT","lastPrice":"100","priceChangePercent":"2","volume":"3","quoteVolume":"300"}]"#;
 const BOOK: &str = r#"[{"symbol":"BTCUSDT","bidPrice":"99","askPrice":"101"}]"#;

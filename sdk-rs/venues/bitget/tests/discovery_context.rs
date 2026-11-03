@@ -11,7 +11,7 @@ use safe_cex_venue_bitget::{BitgetFutures, Product};
 use std::collections::HashSet;
 
 /// Startup discovery's deadline: a catalogue can be most of a megabyte through a slow relay.
-const DEADLINE_MS: f64 = 60_000.0;
+const DEADLINE_MS: f64 = 90_000.0;
 const MARKETS: &str = "https://api.bitget.com/api/v2/mix/market/contracts?productType=usdt-futures";
 const TICKER_URL: &str =
     "https://api.bitget.com/api/v2/mix/market/tickers?productType=usdt-futures";
@@ -206,11 +206,13 @@ fn startup_discovery_reads_carry_the_longer_discovery_deadline() {
         .iter()
         .find(|r| r.url == MARKETS)
         .expect("contracts read");
-    assert_eq!(contracts.timeout_ms, Some(60_000));
+    assert_eq!(contracts.timeout_ms, Some(DEADLINE_MS as u32));
     cycle.answer(MARKETS, CONTRACTS, 1.0);
     let tickers = cycle.take(TICKER_URL).expect("tickers read");
     assert!(
-        tickers.timeout_ms.is_some_and(|ms| ms > 59_000),
+        tickers
+            .timeout_ms
+            .is_some_and(|ms| ms > DEADLINE_MS as u32 - 1_000),
         "{:?}",
         tickers.timeout_ms
     );

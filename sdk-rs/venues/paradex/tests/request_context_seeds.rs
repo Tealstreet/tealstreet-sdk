@@ -9,8 +9,8 @@ use safe_cex_engine::{
 use safe_cex_venue_paradex::{Options, Paradex};
 
 const NOW: f64 = 1000.;
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 fn start(testnet: bool) -> (Engine<Paradex>, Vec<Action>) {
     let mut e = safe_cex_engine::test_support::seeded_engine(Paradex::new(Options {
         public_data_only: true,

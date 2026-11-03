@@ -5,8 +5,8 @@ use safe_cex_engine::{
 use safe_cex_venue_orderly::{Options, Orderly};
 use support::{Clock, Driver, POSITIONS, options};
 
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const PING: &str = r#"{"event":"ping"}"#;
 const PONG: &str = r#"{"event":"pong"}"#;
 const AUTH: &str = r#"{"event":"auth","success":true}"#;

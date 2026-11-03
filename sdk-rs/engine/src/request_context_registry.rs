@@ -2235,13 +2235,16 @@ impl<P> Cx<'_, P> {
 /// Startup discovery's bound. The catalogue and first tickers can be most of a
 /// megabyte through a slow browser relay, and the open is inside the bound too.
 pub const DISCOVERY_TIMEOUT_MS: u32 = 60_000;
+/// Discovery's extra transport-readiness allowance; the host caps readiness
+/// separately without resetting the original request deadline.
+pub const DISCOVERY_READINESS_MS: u32 = 30_000;
 
 /// The standard read bound venues give their reads.
 const READ_TIMEOUT_MS: u32 = 20_000;
 
 /// A public background read on the standard bound, issued before markets and tickers
-/// have loaded, is startup discovery: it gets DISCOVERY_TIMEOUT_MS. A bound a venue
-/// chose for itself, and every other request, is kept.
+/// have loaded, is startup discovery: it gets DISCOVERY_TIMEOUT_MS plus
+/// DISCOVERY_READINESS_MS. Explicit venue bounds and other requests are kept.
 fn discovery_bound(scope: Scope, policy: Policy, loaded: crate::model::Loaded) -> Policy {
     let discovery = scope == Scope::Background
         && policy.operation == Operation::Read
@@ -2249,7 +2252,7 @@ fn discovery_bound(scope: Scope, policy: Policy, loaded: crate::model::Loaded) -
         && !(loaded.markets && loaded.tickers);
     if discovery && policy.timeout_ms == READ_TIMEOUT_MS {
         Policy {
-            timeout_ms: DISCOVERY_TIMEOUT_MS,
+            timeout_ms: DISCOVERY_TIMEOUT_MS + DISCOVERY_READINESS_MS,
             ..policy
         }
     } else {
@@ -2453,6 +2456,67 @@ mod tests {
     use super::*;
     use crate::request_context::{Operation, RetryPolicy};
     use crate::{Notice, Store};
+
+    #[test]
+    fn only_standard_public_background_discovery_gets_the_readiness_allowance() {
+        let read = Policy {
+            timeout_ms: 20_000,
+            ..policy()
+        };
+        for (markets, tickers) in [(false, false), (true, false), (false, true)] {
+            let loaded = crate::model::Loaded {
+                markets,
+                tickers,
+                ..Default::default()
+            };
+            assert_eq!(
+                discovery_bound(Scope::Background, read.clone(), loaded).timeout_ms,
+                90_000,
+                "60 s read plus 30 s readiness, before both datasets load"
+            );
+        }
+        let loaded = crate::model::Loaded {
+            markets: true,
+            tickers: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            discovery_bound(Scope::Background, read.clone(), loaded).timeout_ms,
+            20_000
+        );
+        assert_eq!(
+            discovery_bound(Scope::Command(7), read.clone(), Default::default()).timeout_ms,
+            20_000
+        );
+        let private = Policy {
+            credential: Some(crate::request_context::Credential {
+                slot: crate::CredentialSlot::Primary,
+                reference: crate::signing::KeyRef("primary.credential".into()),
+            }),
+            ..read.clone()
+        };
+        let mutation = Policy {
+            operation: Operation::Mutation,
+            ..read.clone()
+        };
+        for other in [private, mutation] {
+            assert_eq!(
+                discovery_bound(Scope::Background, other, Default::default()).timeout_ms,
+                20_000
+            );
+        }
+        for timeout_ms in [1_000, 60_000, 100_000] {
+            let custom = Policy {
+                timeout_ms,
+                ..read.clone()
+            };
+            assert_eq!(
+                discovery_bound(Scope::Background, custom, Default::default()).timeout_ms,
+                timeout_ms,
+                "explicit venue bounds are preserved"
+            );
+        }
+    }
 
     #[test]
     fn native_unproven_public_capture_refuses_invalid_authority_before_callback() {

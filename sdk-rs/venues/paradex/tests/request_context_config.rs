@@ -9,8 +9,8 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_paradex::{Options, Paradex};
 const NOW: f64 = 1_700_000_000_000.;
-// Startup discovery reads carry the engine's 60 s discovery deadline.
-const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const CONFIG: &str = r#"{"starknet_chain_id":"PRIVATE_SN_PARACLEAR_MAINNET"}"#;
 fn start(testnet: bool) -> (Engine<Paradex>, Vec<Action>) {
     let mut e = support::engine(
