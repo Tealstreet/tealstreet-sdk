@@ -13,7 +13,10 @@ use safe_cex_engine::{
     Action, Command, CredentialSlot, Cx, DispatchContext, Engine, Event, Method, Response,
     SignStep, SocketId, TimerId, Venue,
 };
-use safe_cex_venue_kucoin::sign::{self, dispatch};
+use safe_cex_venue_kucoin::sign::dispatch;
+#[allow(dead_code)]
+#[path = "support/native_sign.rs"]
+mod native_sign;
 use std::sync::{Arc, Mutex};
 
 const NOW: f64 = 1_700_000_000_123.;
@@ -269,7 +272,7 @@ fn both_origins_and_slots_match_the_existing_ordered_native_headers() {
                         })
                         .collect();
                     assert_eq!(https.len(), 1, "{actions:?}");
-                    let credentials = sign::Credentials {
+                    let credentials = native_sign::Credentials {
                         key: if secondary { "read-key" } else { "replay-key" }.into(),
                         secret: if secondary {
                             "read-secret"
@@ -278,7 +281,7 @@ fn both_origins_and_slots_match_the_existing_ordered_native_headers() {
                         }
                         .into(),
                         passphrase: "passphrase!@#".into(),
-                        broker: broker.then(|| sign::BrokerOptions {
+                        broker: broker.then(|| native_sign::BrokerOptions {
                             partner: " partner-test ".into(),
                             broker_key: " broker-test-key ".into(),
                             broker_name: " Broker Name ".into(),
@@ -287,7 +290,7 @@ fn both_origins_and_slots_match_the_existing_ordered_native_headers() {
                     };
                     assert_eq!(
                         https[0].headers,
-                        sign::headers(&credentials, method, path, body.unwrap_or(""), NOW)
+                        native_sign::headers(&credentials, method, path, body.unwrap_or(""), NOW)
                     );
                     let seen = provider.seen.lock().unwrap();
                     assert_eq!(seen.len(), 1);
