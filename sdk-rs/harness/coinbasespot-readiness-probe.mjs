@@ -11,7 +11,8 @@
 // The runner injects COINBASE_KEY, COINBASE_SECRET and optional COINBASE_PASSPHRASE
 // into the environment; never pass them as arguments or print them. A downloaded
 // Coinbase key JSON may include its private key, with COINBASE_SECRET empty.
-// Output: flags/root/currencies/counts every 5s for 60s, plus request method/path
+// Output: flags/root/currencies/counts and frame/status counts every 5s for 60s,
+// plus closed engine parse/validation kind/path/field summaries and request method/path
 // refusals or transport failures and completed HTTP status/path. No queries,
 // headers, response bodies, signing material or raw errors are printed.
 // This release matches the live lanes before the cash-root fix (#2970).
@@ -27,11 +28,13 @@ export async function runProbe() {
     loaded: Object.fromEntries(Object.keys(LOADED_FLAG).map((name) => [name.toLowerCase(), false])),
     balance: { total: 0, free: 0, used: 0, upnl: 0 },
     currencies: {}, orderCount: 0, positionCount: 0,
+    frameCount: 0, statusFrameCount: 0,
   };
   const started = Date.now();
   const print = () => process.stdout.write(`${JSON.stringify({ elapsedSeconds: Math.floor((Date.now() - started) / 1000), ...state })}\n`);
   let host;
   let interval;
+  let flush;
   try {
     const key = process.env.COINBASE_KEY;
     const secret = process.env.COINBASE_SECRET ?? '';
@@ -42,25 +45,35 @@ export async function runProbe() {
     const engine = new WasmEngine('coinbasespot', JSON.stringify({
       key, secret, passphrase: process.env.COINBASE_PASSPHRASE ?? '', spotOnly: true, publicDataOnly: false,
     }));
-    host = new EngineHost(engine, transport, {
+    host = createProbeHost(engine, transport, {
       onFrame(buffer) {
-        const frame = new Frame(buffer);
-        const status = frame.status();
-        if (status) state.loaded = Object.fromEntries(Object.entries(LOADED_FLAG).map(([name, flag]) => [name.toLowerCase(), Boolean(status.loaded & flag)]));
-        const balance = frame.balance();
-        if (balance) {
-          state.balance = Object.fromEntries(['total', 'free', 'used', 'upnl'].map((name) => [name, balance[name]]));
-          state.currencies = balance.currencies ?? {};
+        state.frameCount++;
+        try {
+          const frame = new Frame(buffer);
+          const status = frame.status();
+          if (status) {
+            state.statusFrameCount++;
+            state.loaded = Object.fromEntries(Object.entries(LOADED_FLAG).map(([name, flag]) => [name.toLowerCase(), Boolean(status.loaded & flag)]));
+          }
+          const balance = frame.balance();
+          if (balance) {
+            state.balance = Object.fromEntries(['total', 'free', 'used', 'upnl'].map((name) => [name, balance[name]]));
+            state.currencies = balance.currencies ?? {};
+          }
+          const orders = frame.orders();
+          if (orders) state.orderCount = orders.count;
+          const positions = frame.positions();
+          if (positions) state.positionCount = positions.count;
+        } catch {
+          console.log(JSON.stringify({ kind: 'frame_decode', path: 'unknown', field: 'unknown' }));
         }
-        const orders = frame.orders();
-        if (orders) state.orderCount = orders.count;
-        const positions = frame.positions();
-        if (positions) state.positionCount = positions.count;
       },
-      // Never print engine notices, response bodies, socket frames, headers or errors.
+      // HTTP engine diagnostics are observed at their actual request ID below.
       onLog() {}, onEvent() {},
+      onStartupFailed() { console.log(JSON.stringify({ kind: 'startup_failed', path: 'unknown', field: 'unknown' })); },
     });
     host.start();
+    flush = startProbeFlushing(host);
     print();
     interval = setInterval(print, 5000);
     await new Promise((resolve) => setTimeout(resolve, 60000));
@@ -70,8 +83,54 @@ export async function runProbe() {
     process.exitCode = 1;
   } finally {
     clearInterval(interval);
+    clearInterval(flush);
     host?.dispose();
   }
+}
+
+export function startProbeFlushing(host) {
+  return setInterval(() => host.flush(), 250);
+}
+
+const fields = new Set(['products', 'product_type', 'product_id', 'status', 'base_currency_id',
+  'quote_currency_id', 'base_increment', 'price_increment', 'base_min_size', 'base_max_size',
+  'future_product_details', 'portfolios', 'uuid', 'type', 'breakdown', 'spot_positions', 'asset',
+  'total_balance_crypto', 'available_to_trade_crypto', 'orders', 'order_id', 'order_configuration',
+  'has_next', 'cursor', 'pagination', 'side', 'order_type', 'filled_size']);
+
+export function parseFailureSummary(message, path) {
+  const missing = /missing field `([^`]+)`/.exec(message);
+  const kind = missing ? 'missing_field' : message.includes('invalid type') ? 'invalid_type'
+    : message.includes('invalid value') ? 'invalid_value'
+      : /EOF while parsing|expected (?:value|ident|colon|comma)|trailing characters/.test(message) ? 'json_syntax' : 'validation';
+  const field = missing && fields.has(missing[1]) ? missing[1]
+    : /products pagination/.test(message) ? 'pagination' : /products cursor/.test(message) ? 'cursor'
+      : /products|catalogue/.test(message) ? 'products' : 'unknown';
+  return { kind, path, field };
+}
+
+export function createProbeHost(engine, transport, handlers, log = (row) => console.log(JSON.stringify(row))) {
+  const paths = new Map();
+  // Inspect only actions returned while this exact HTTP response is reduced.
+  for (const method of ['httpStart', 'httpChunk', 'httpEnd']) {
+    const original = engine[method].bind(engine);
+    engine[method] = (id, ...args) => {
+      const actions = original(id, ...args);
+      for (const action of JSON.parse(actions || '[]')) {
+        if (action.op === 'event' && action.code === 'request.failed')
+          log(parseFailureSummary(action.message, paths.get(id) ?? 'unknown'));
+      }
+      return actions;
+    };
+  }
+  const host = new EngineHost(engine, transport, handlers);
+  const request = host.request.bind(host);
+  host.request = async (action) => {
+    paths.set(action.request, new URL(action.url).pathname);
+    try { return await request(action); }
+    finally { paths.delete(action.request); }
+  };
+  return host;
 }
 
 export function readOnlyTransport(native, { proxyPrefix, log = (line) => process.stdout.write(`${line}\n`) } = {}) {

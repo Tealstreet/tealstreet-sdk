@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readOnlyTransport } from './coinbasespot-readiness-probe.mjs';
+import { createProbeHost, loadProbeEngine, parseFailureSummary, readOnlyTransport, startProbeFlushing } from './coinbasespot-readiness-probe.mjs';
+import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 test('all brokerage GET reads reach the transport while writes and foreign targets refuse', async () => {
   const calls = [];
@@ -74,4 +75,93 @@ test('only Coinbase heartbeat/user subscriptions reach the socket', () => {
     assert.throws(() => connection.send(JSON.stringify({ type: 'subscribe', channel: 'orders' })), /Read-only probe refused/);
   }
   assert.equal(sends.length, 4);
+});
+
+test('engine failure summaries expose only closed kinds and field names', () => {
+  assert.deepEqual(parseFailureSummary('missing field `base_increment` at line 1 column 50', '/api/v3/brokerage/products'),
+    { kind: 'missing_field', path: '/api/v3/brokerage/products', field: 'base_increment' });
+  for (const message of ['missing field `private-value`', 'invalid type: string "private-value", expected f64',
+    'invalid value: private-value', 'EOF while parsing a value', 'Malformed Coinbase products private-value']) {
+    const summary = parseFailureSummary(message, '/api/v3/brokerage/products');
+    assert.ok(!JSON.stringify(summary).includes('private-value'));
+    assert.ok(['missing_field', 'invalid_type', 'invalid_value', 'json_syntax', 'validation'].includes(summary.kind));
+  }
+});
+
+test('published WASM processes fixture 200s but exports readiness only when the probe flushes', {
+  skip: !process.env.COINBASE_PROBE_TEST_WASM_DIR, timeout: 15_000,
+}, async () => {
+  const { WasmEngine } = await loadProbeEngine(process.env.COINBASE_PROBE_TEST_WASM_DIR);
+  const requests = [];
+  const diagnostics = [];
+  const response = (data) => ({ status: 200, body: new TextEncoder().encode(JSON.stringify(data)) });
+  const transport = {
+    now: Date.now, setTimeout, clearTimeout,
+    connect(_url, handlers) { setTimeout(handlers.onOpen, 0); return { send() {}, close() {} }; },
+    async request(request) {
+      const path = new URL(request.url).pathname;
+      requests.push(path);
+      if (path.endsWith('/portfolios')) return response({ portfolios: [{ uuid: 'default-one', type: 'DEFAULT' }] });
+      if (path.endsWith('/portfolios/default-one')) return response({ breakdown: { spot_positions: [
+        { asset: 'USDC', total_balance_crypto: 2600, available_to_trade_crypto: 2400 },
+      ] } });
+      if (path.endsWith('/products')) return response({ products: [{ product_id: 'BTC-USD', product_type: 'SPOT',
+        base_currency_id: 'BTC', quote_currency_id: 'USD', status: 'TRADING', base_increment: '0.001',
+        price_increment: '0.01', base_min_size: '0.001', base_max_size: '100', price: '100' }] });
+      if (path.endsWith('/orders/historical/batch')) return response({ orders: [], has_next: false });
+      throw new Error('Unexpected fixture path');
+    },
+  };
+  const engine = new WasmEngine('coinbasespot', JSON.stringify({
+    key: 'organizations/fixture/apiKeys/fixture', secret: Buffer.alloc(32, 7).toString('base64'), spotOnly: true,
+  }));
+  let frames = 0;
+  let statuses = 0;
+  let loaded = 0;
+  let balance;
+  const host = createProbeHost(engine, readOnlyTransport(transport, { log() {} }), {
+    onFrame(buffer) {
+      frames++;
+      const frame = new Frame(buffer);
+      const status = frame.status();
+      if (status) { statuses++; loaded = status.loaded; }
+      balance = frame.balance() ?? balance;
+    }, onEvent() {}, onLog() {},
+  }, (row) => diagnostics.push(row));
+  const until = async (predicate) => {
+    const deadline = Date.now() + 10_000;
+    while (!predicate()) {
+      assert.ok(Date.now() < deadline, 'fixture engine failed to reach expected state');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  };
+  let flush;
+  try {
+    host.start();
+    await until(() => requests.filter((path) => path.endsWith('/orders/historical/batch')).length >= 5);
+    assert.equal(frames, 0, 'EngineHost must not be assumed to auto-flush');
+    flush = startProbeFlushing(host);
+    await until(() => loaded === 31);
+    assert.ok(frames > 0 && statuses > 0);
+    assert.equal(balance.currencies.USDC.total, 2600);
+    assert.equal(balance.currencies.USDC.free, 2400);
+    assert.equal(balance.total, 0, 'live release predates the cash-root fix');
+    assert.deepEqual(diagnostics, []);
+  } finally {
+    clearInterval(flush);
+    host.dispose();
+  }
+
+  const failures = [];
+  const invalidEngine = new WasmEngine('coinbasespot', JSON.stringify({
+    key: 'organizations/fixture/apiKeys/fixture', secret: Buffer.alloc(32, 7).toString('base64'), spotOnly: true,
+  }));
+  const invalidHost = createProbeHost(invalidEngine, { ...transport, request: async () => response({ unexpected: 'private-value' }) },
+    { onEvent() {}, onLog() {} }, (row) => failures.push(row));
+  try {
+    invalidHost.start();
+    await until(() => failures.length > 0);
+    assert.deepEqual(failures[0], { kind: 'missing_field', path: '/api/v3/brokerage/portfolios', field: 'portfolios' });
+    assert.ok(!JSON.stringify(failures).includes('private-value'));
+  } finally { invalidHost.dispose(); }
 });
