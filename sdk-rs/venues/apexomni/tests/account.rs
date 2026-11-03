@@ -1,6 +1,8 @@
 mod support;
 use safe_cex_engine::model::{MarginType, OrderStatus, OrderType, PositionSide};
-use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, SocketChannel, SocketId};
+use safe_cex_engine::{
+    Action, Command, ErrorKind, Event, HttpRequest, Notice, SocketChannel, SocketId,
+};
 use safe_cex_venue_apexomni::Options;
 use support::*;
 
@@ -1226,16 +1228,38 @@ fn a_refused_key_ends_the_start_and_deactivates() {
 }
 
 // No ApeX whitelist answer is documented, so every shape a gateway or the venue could use:
-// the IP-bound user's start ran to its timeout looking like a slow connection.
+// the IP-bound user's start ran to its timeout looking like a slow connection. ApeX's own
+// 403 (its JSON envelope) is a refused key; a bare or HTML 403 is an edge block on the path,
+// which ends the start as a failure and keeps the status and the body's start in its text.
 #[test]
 fn an_answered_key_refusal_ends_the_start() {
-    for (status, body) in [
-        (403, "Forbidden"),
-        (401, "Unauthorized"),
-        (403, r#"{"code":403,"msg":"IP not allowed"}"#),
+    let html = format!(
+        "<html><head><title>403 Forbidden</title></head><body>{}</body></html>",
+        "x".repeat(200)
+    );
+    for (status, body, kind, text) in [
+        (
+            403,
+            "Forbidden",
+            ErrorKind::Rejected,
+            "ApeX Omni request blocked [403]: Forbidden",
+        ),
+        (
+            403,
+            html.as_str(),
+            ErrorKind::Rejected,
+            "ApeX Omni request blocked [403]: <html><head><title>403 Forbidden</title>",
+        ),
+        (401, "Unauthorized", ErrorKind::AuthInvalid, "[401]"),
+        (
+            403,
+            r#"{"code":403,"msg":"IP not allowed"}"#,
+            ErrorKind::AuthPermission,
+            "IP not allowed",
+        ),
     ] {
         let (mut e, _, http) = seeded();
-        let mut failures = 0;
+        let mut failures = Vec::new();
         for r in http {
             e.handle(
                 20.0,
@@ -1249,15 +1273,23 @@ fn an_answered_key_refusal_ends_the_start() {
                 },
             );
             for action in e.prepared(20.0) {
-                if matches!(
-                    action,
-                    Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
-                ) {
-                    failures += 1;
+                if let Action::Notice(safe_cex_engine::Notice::StartupFailed { error }) = action {
+                    failures.push(error);
                 }
             }
         }
-        assert_eq!(failures, 1, "{status} {body}");
+        assert_eq!(failures.len(), 1, "{status} {body}");
+        assert_eq!(failures[0].kind, Some(kind), "{status} {body}");
+        assert!(
+            failures[0].message.contains(text),
+            "{}",
+            failures[0].message
+        );
+        assert!(
+            failures[0].message.chars().count() < 200,
+            "{}",
+            failures[0].message
+        );
     }
 }
 
