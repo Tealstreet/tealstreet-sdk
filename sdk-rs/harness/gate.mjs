@@ -311,9 +311,12 @@ for (let run = 0; run < correctnessRuns; run++) {
     // ticker subscribes; a Lighter unit test proves every market still gets one.
     // Kraken has no ping frame, so the Rust futures private socket keeps alive on the heartbeat feed.
     // Paradex caps a socket at 200 subscriptions, so Rust takes trades only for charted markets.
+    // Binance futures: Rust streams !bookTicker for public-data-only accounts too (#2899); TS
+    // skipped it there, leaving a guest the startup REST bid and ask.
     const paced = (key) => field === 'subscriptions' && ((values.venue.startsWith('lighter') && key.includes('"channel":"ticker/')) ||
       (values.venue === 'kraken' && key.includes('"feed":"heartbeat"')) ||
-      (values.venue === 'paradex' && key.includes('"channel":"trades.')));
+      (values.venue === 'paradex' && key.includes('"channel":"trades.')) ||
+      (values.venue.startsWith('binance') && key.includes('"!bookTicker"')));
     const left = ts[field]?.filter((key) => !paced(key) && (field !== 'requests' || !implementationPlans.ts.has(key)));
     const right = rust[field]?.filter((key) => !paced(key) && (field !== 'requests' || !implementationPlans.rust.has(key)));
     if (!Array.isArray(left) || !Array.isArray(right) || JSON.stringify(left) !== JSON.stringify(right))
