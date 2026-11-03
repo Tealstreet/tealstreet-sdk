@@ -12,16 +12,16 @@ import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
-  'grvt', 'backpack', 'coinbase', 'coinbasespot', 'orderly', 'kodiakfi', 'mode', 'salsadex',
-  'tealstreet-dex', 'what', 'woofi', 'kucoin', 'kucoinspot', 'polymarket', 'breakoutprop', 'txflow', 'weex',
+  'grvt', 'backpack', 'orderly', 'kodiakfi', 'mode', 'salsadex',
+  'tealstreet-dex', 'what', 'woofi', 'polymarket', 'breakoutprop', 'txflow', 'weex',
   'bitrue', 'lighter-robinhood',
 ];
 
-test('the beta set is exactly the 32 IN venues in 17 families', () => {
-  assert.equal(betaVenueNames.length, 32);
+test('the beta set is exactly the 36 IN venues in 20 families', () => {
+  assert.equal(betaVenueNames.length, 36);
   assert.deepEqual(betaVenueFamilies, [
-    'apexomni', 'asterdex', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'cryptocom',
-    'hyperliquid', 'kraken', 'lighter', 'mexc', 'okx', 'paradex', 'phemex', 'woo',
+    'apexomni', 'asterdex', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'coinbase', 'cryptocom',
+    'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'paradex', 'phemex', 'woo',
   ]);
 });
 

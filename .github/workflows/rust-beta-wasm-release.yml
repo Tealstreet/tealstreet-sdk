@@ -115,12 +115,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ steps.source.outputs.tag }}' '${{ steps.source.outputs.sdk_sha }}'
-      - name: Read the 17 families from beta-venues.mjs
+      - name: Read the 20 families from beta-venues.mjs
         id: roster
         run: |
           families=$(node sdk-rs/hosts/wasm/js/generate-beta-loader.mjs --families)
           count=$(wc -w <<<"$families")
-          [ "$count" -eq 17 ] || { echo "expected 17 beta families, got $count: $families"; exit 1; }
+          [ "$count" -eq 20 ] || { echo "expected 20 beta families, got $count: $families"; exit 1; }
           echo "families=$(jq -cn --arg f "$families" '$f | split(" ")')" >> "$GITHUB_OUTPUT"
 
   build:
