@@ -5,10 +5,15 @@
 //   --pattern beta-wasm-coinbase-safe_cex_wasm.js \
 //   --pattern beta-wasm-coinbase-safe_cex_wasm_bg.wasm --dir /tmp/coinbasespot-readiness-wasm
 // COINBASE_WASM_DIR=/tmp/coinbasespot-readiness-wasm node sdk-rs/harness/coinbasespot-readiness-probe.mjs
+// Optional HTTP routing (WebSockets remain direct):
+// COINBASE_PROXY_PREFIX=https://proxies.tyo.tealstreet.io/api/exchange_proxy/ \
+//   COINBASE_WASM_DIR=/tmp/coinbasespot-readiness-wasm node sdk-rs/harness/coinbasespot-readiness-probe.mjs
 // The runner injects COINBASE_KEY, COINBASE_SECRET and optional COINBASE_PASSPHRASE
 // into the environment; never pass them as arguments or print them. A downloaded
 // Coinbase key JSON may include its private key, with COINBASE_SECRET empty.
-// Output is ONLY flags, root/currency balances and counts, every 5s for 60s.
+// Output: flags/root/currencies/counts every 5s for 60s, plus request method/path
+// refusals or transport failures and completed HTTP status/path. No queries,
+// headers, response bodies, signing material or raw errors are printed.
 // This release matches the live lanes before the cash-root fix (#2970).
 import { EngineHost } from '../hosts/wasm/js/host.mjs';
 import { Frame, LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
@@ -33,7 +38,7 @@ export async function runProbe() {
     if (!key) throw new Error();
     const { WasmEngine } = await loadProbeEngine(process.env.COINBASE_WASM_DIR);
     const native = gateTransport();
-    const transport = readOnlyTransport(native);
+    const transport = readOnlyTransport(native, { proxyPrefix: process.env.COINBASE_PROXY_PREFIX });
     const engine = new WasmEngine('coinbasespot', JSON.stringify({
       key, secret, passphrase: process.env.COINBASE_PASSPHRASE ?? '', spotOnly: true, publicDataOnly: false,
     }));
@@ -69,15 +74,34 @@ export async function runProbe() {
   }
 }
 
-export function readOnlyTransport(native) {
+export function readOnlyTransport(native, { proxyPrefix, log = (line) => process.stdout.write(`${line}\n`) } = {}) {
+  if (proxyPrefix) {
+    const proxy = new URL(proxyPrefix);
+    if (proxy.protocol !== 'https:' || proxy.username || proxy.password || proxy.search || proxy.hash)
+      throw new Error('Read-only probe requires an HTTPS proxy prefix without credentials or query');
+    proxyPrefix = `${proxy.href.replace(/\/+$/, '')}/`;
+  }
   return {
     ...native,
-    request(request) {
-      const url = new URL(request.url);
-      const read = /^\/api\/v3\/brokerage\/(?:portfolios(?:\/[A-Za-z0-9_-]+)?|products|key_permissions|orders\/historical\/(?:batch|[A-Za-z0-9_-]+))$/.test(url.pathname);
-      if (request.method !== 'GET' || request.body || url.origin !== 'https://api.coinbase.com' || !read)
-        return Promise.reject(new Error('Read-only probe refused an outbound request'));
-      return native.request(request);
+    async request(request) {
+      let url;
+      try { url = new URL(request.url); } catch { /* Never log an unparseable URL. */ }
+      const method = /^[A-Z]{1,12}$/.test(request.method) ? request.method : 'UNKNOWN';
+      const path = url?.pathname ?? '[invalid-path]';
+      const read = url?.pathname.startsWith('/api/v3/brokerage/');
+      if (request.method !== 'GET' || request.body != null || url?.origin !== 'https://api.coinbase.com'
+          || url.username || url.password || url.hash || !read) {
+        log(`REFUSED ${method} ${path}`);
+        throw new Error('Read-only probe refused an outbound request');
+      }
+      try {
+        const response = await native.request(proxyPrefix ? { ...request, url: `${proxyPrefix}${url.href}` } : request);
+        log(`COMPLETED ${response.status} ${path}`);
+        return response;
+      } catch {
+        log(`FAILED ${method} ${path}`);
+        throw new Error('Read-only probe transport failed');
+      }
     },
     connect(url, handlers) {
       if (!['wss://advanced-trade-ws.coinbase.com', 'wss://advanced-trade-ws-user.coinbase.com'].includes(url))
