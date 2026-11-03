@@ -353,6 +353,28 @@ impl MexcFutures {
             );
             opts.reduce_only = Some(true);
         }
+        // A reduce-only order can only close the leg on its far side (a buy closes a short);
+        // MEXC's close sides would otherwise rest against nothing, so it is refused here.
+        if !stop && opts.reduce_only == Some(true) {
+            let target = if opts.side == OrderSide::Sell {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            };
+            if !cx
+                .store
+                .positions()
+                .iter()
+                .any(|p| p.symbol == opts.symbol && p.side == target && p.contracts > 0.0)
+            {
+                return Err(format!(
+                    "MEXC reduce-only {} needs an open {} position on {} to reduce",
+                    if opts.side == OrderSide::Sell { "sell" } else { "buy" },
+                    if target == PositionSide::Long { "long" } else { "short" },
+                    opts.symbol
+                ));
+            }
+        }
         if !opts.amount.is_finite() || opts.amount < 0.0 || (!stop && opts.amount == 0.0) {
             return Err("MEXC order requires a positive native amount".into());
         }
