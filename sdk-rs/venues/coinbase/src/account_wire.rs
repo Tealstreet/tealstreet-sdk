@@ -107,11 +107,36 @@ impl BreakdownBody {
 #[derive(Deserialize)]
 pub struct SpotBalance {
     pub asset: String,
+    #[serde(deserialize_with = "spot_total_crypto")]
     pub total_balance_crypto: Decimal,
+    #[serde(deserialize_with = "spot_available_crypto")]
     pub available_to_trade_crypto: Decimal,
+    #[serde(default, deserialize_with = "spot_total_fiat")]
     pub total_balance_fiat: Option<Decimal>,
+    #[serde(default, deserialize_with = "spot_available_fiat")]
     pub available_to_trade_fiat: Option<Decimal>,
 }
+macro_rules! spot_amount {
+    ($name:ident, $ty:ty, $field:literal) => {
+        fn $name<'de, D: serde::Deserializer<'de>>(d: D) -> Result<$ty, D::Error> {
+            <$ty>::deserialize(d).map_err(|_| {
+                serde::de::Error::custom(concat!(
+                    "Coinbase invalid field `spot_positions.",
+                    $field,
+                    "`"
+                ))
+            })
+        }
+    };
+}
+spot_amount!(spot_total_crypto, Decimal, "total_balance_crypto");
+spot_amount!(spot_available_crypto, Decimal, "available_to_trade_crypto");
+spot_amount!(spot_total_fiat, Option<Decimal>, "total_balance_fiat");
+spot_amount!(
+    spot_available_fiat,
+    Option<Decimal>,
+    "available_to_trade_fiat"
+);
 #[derive(Deserialize)]
 pub struct IntxPosition<'a> {
     #[serde(borrow)]

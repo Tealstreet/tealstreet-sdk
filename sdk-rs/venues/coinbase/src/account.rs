@@ -1780,13 +1780,16 @@ impl Coinbase {
                     let r: wire::Breakdown =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
                     if r.breakdown.spot_positions.len() > 1000 {
-                        return Err("Coinbase spot balance limit".into());
+                        return Err(
+                            "Coinbase invalid field `spot_positions`: balance row limit".into()
+                        );
                     }
                     let cash = (self.account.kind == Some(ProductKind::Spot))
                         .then(|| r.breakdown.cash_balance())
                         .transpose()?;
                     let mut coins = SnapshotBuilder::default();
-                    let mut seen = HashSet::new();
+                    let mut sums = HashMap::<String, Balance>::new();
+                    let mut rejected = HashSet::new();
                     let held = |cx: &Cx<'_, Pending>, asset: Option<&str>| {
                         cx.store
                             .currency_balances()
@@ -1805,9 +1808,6 @@ impl Coinbase {
                             coins.reject(None);
                             continue;
                         }
-                        if !seen.insert(b.asset.clone()) {
-                            return Err("Coinbase duplicate spot holding".into());
-                        }
                         if b.total_balance_crypto.0 < 0.0
                             || b.available_to_trade_crypto.0 < 0.0
                             || b.available_to_trade_crypto.0 > b.total_balance_crypto.0
@@ -1818,18 +1818,22 @@ impl Coinbase {
                                 skip_level(held(cx, Some(&b.asset))),
                                 format!("Coinbase skipped invalid spot holding {}", b.asset),
                             );
+                            rejected.insert(b.asset.clone());
                             coins.reject(Some(b.asset));
                             continue;
                         }
-                        coins.push(CurrencyBalance {
-                            currency: b.asset,
-                            balance: Balance {
-                                total: b.total_balance_crypto.0,
-                                free: b.available_to_trade_crypto.0,
-                                used: b.total_balance_crypto.0 - b.available_to_trade_crypto.0,
-                                upnl: 0.0,
-                            },
-                        });
+                        let sum = sums.entry(b.asset).or_default();
+                        sum.total += b.total_balance_crypto.0;
+                        sum.free += b.available_to_trade_crypto.0;
+                        sum.used = sum.total - sum.free;
+                        if !sum.total.is_finite() || !sum.free.is_finite() {
+                            return Err("Coinbase invalid field `spot_positions.total_balance_crypto`: aggregate overflow".into());
+                        }
+                    }
+                    for (currency, balance) in sums {
+                        if !rejected.contains(&currency) {
+                            coins.push(CurrencyBalance { currency, balance });
+                        }
                     }
                     self.account.skip_logged.rearm_namespace(
                         "holding:",

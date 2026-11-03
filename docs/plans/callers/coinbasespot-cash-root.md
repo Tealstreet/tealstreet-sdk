@@ -10,11 +10,19 @@ back to native cash quantities. Non-cash crypto and futures equity do not enter
 this root. Negative, inconsistent or non-USD summaries retain the last snapshot.
 
 Currency slices retain their actual crypto total, free and used quantities.
+Multiple wallet/vault rows for the same asset are summed, with used recomputed
+as total minus free. This fixes the live DEFAULT-portfolio readiness failure:
+the old Rust path rejected duplicate assets and never loaded balance. Legacy
+TS overwrote earlier rows; summation deliberately corrects that behavior too.
+The 1,000 physical-row limit stays in place. Invalid rows retain the previous
+asset slice rather than publishing a partial sum, and non-finite sums refuse
+the snapshot. Malformed amount errors name their field without echoing values.
 No synthetic USD currency replaces an actual USD holding, and no USD/USDC
 order-sizing alias is introduced. CFM and INTX roots retain their own sources.
 An empty complete Spot snapshot clears the root and currencies.
 
-The fixture models a US retail account with one DEFAULT portfolio and no INTX
+The fixture models a US retail account with one DEFAULT portfolio, duplicate
+USDC wallet/vault rows, null or absent derivatives sections and no INTX
 or CFM account. Real engine startup sets empty positions locally, completes all
 five working-order status reads, and reports markets/tickers/balance/orders/
 positions loaded. The same startup and 2,600-USDC balance pass through the actual
@@ -44,8 +52,9 @@ Compared with NX `origin/legacy-master` at
   an authenticated user with active accounts sees the spinner only while
   **no** exchange is marked loaded. Both controllers require the supported
   balance/orders/positions flags plus markets, and optional tickers. This is
-  not an all-accounts gate. A DEFAULT-only account does not reproduce the
-  reported stuck spinner; caller diagnostics remain a separate investigation.
+  not an all-accounts gate. The live probe confirmed markets, tickers, orders
+  and positions loaded but balance stayed false because duplicate assets were
+  rejected. The duplicate-wallet fixture reproduces that readiness failure.
 - Products polling is a ticker refresh, not a markets reload. After seeding,
   successful responses update tickers without replacing markets or resetting
   readiness (pinned over repeated production timer turns). The public socket

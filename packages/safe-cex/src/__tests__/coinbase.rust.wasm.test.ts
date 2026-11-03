@@ -106,11 +106,14 @@ describe('retained Coinbase Rust family oracle', () => {
             total_cash_equivalent_balance: { value: '2600', currency: 'USD' },
           },
           spot_positions: [
-            { asset: 'USDC', total_balance_crypto: 2600, available_to_trade_crypto: 2400,
-              total_balance_fiat: 2600, available_to_trade_fiat: 2400 },
+            { asset: 'USDC', account_uuid: 'wallet-one', total_balance_crypto: 2000, available_to_trade_crypto: 1800,
+              total_balance_fiat: 2000, available_to_trade_fiat: 1800 },
+            { asset: 'USDC', account_uuid: 'vault-one', total_balance_crypto: 600, available_to_trade_crypto: 600,
+              total_balance_fiat: 600, available_to_trade_fiat: 600 },
             { asset: 'BTC', total_balance_crypto: 0.05, available_to_trade_crypto: 0.04,
               total_balance_fiat: 5000, available_to_trade_fiat: 4000 },
           ],
+          futures_positions: null, perp_positions: null, margin: null,
         } })) };
       }
       if (/\/(cfm|intx)\//.test(request.url) || new URL(request.url).hostname === 'api.international.coinbase.com') {
