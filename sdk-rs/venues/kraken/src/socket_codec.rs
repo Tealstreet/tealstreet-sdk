@@ -37,6 +37,7 @@ pub(super) fn policy(private: bool, futures: bool) -> FeedPolicy {
         },
         subscription_interval_ms: 0.,
         close_floors: &[],
+        data_silence: None,
     }
 }
 

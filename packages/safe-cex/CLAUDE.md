@@ -490,6 +490,10 @@ beside `error` (the typed failure wins over the error log venues emit just
 before it), so callers can branch on `authInvalid`/`authPermission` instead of
 matching text. A bare deactivation carries no `kind`.
 
+HyroTrader validates its configured mode/network URLs before loading WASM and
+reports a missing configuration through the normal error event as
+`invalidInput/notSent`. No venue or simulator address is inferred.
+
 Rust command waits default to 120 seconds. `extra.rustCommandTimeoutMs` sets a
 positive integer deadline up to 2147482647 ms; long paginated queries may need
 a larger value. The Rust worker RPC allows one additional second for delivery;
