@@ -318,6 +318,29 @@ impl MexcFutures {
             );
         }
         let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        // A position-panel close may send no amount: it closes the whole position it reduces,
+        // in native contracts, as a full-position stop does below.
+        if !stop
+            && opts.amount == 0.0
+            && (opts.close == Some(true) || opts.reduce_only == Some(true))
+        {
+            let target = if opts.side == OrderSide::Sell {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            };
+            let p = cx
+                .store
+                .positions()
+                .iter()
+                .find(|p| p.symbol == opts.symbol && p.side == target && p.contracts > 0.0)
+                .ok_or_else(|| "MEXC close requires an open position".to_owned())?;
+            opts.amount = num::adjust(
+                p.contracts / m.contract_size.unwrap_or(1.0),
+                self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0),
+            );
+            opts.reduce_only = Some(true);
+        }
         if !opts.amount.is_finite() || opts.amount < 0.0 || (!stop && opts.amount == 0.0) {
             return Err("MEXC order requires a positive native amount".into());
         }

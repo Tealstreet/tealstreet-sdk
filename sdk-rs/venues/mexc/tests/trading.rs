@@ -1696,3 +1696,59 @@ fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
         "{refused:?}"
     );
 }
+
+fn with_long_position() -> TestEngine {
+    let (mut e, socket, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.position","data":{"positionId":"native","symbol":"BTC_USDT","positionType":1,"positionMode":1,"holdVol":60,"holdAvgPrice":60000,"leverage":7,"openType":1}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e
+}
+
+fn market_close(e: &mut TestEngine, side: &str, close: Option<bool>, reduce: Option<bool>) {
+    let mut opts: PlaceOrderOpts = serde_json::from_str(&format!(
+        r#"{{"symbol":"BTCUSDT","type":"market","side":"{side}","amount":0}}"#
+    ))
+    .unwrap();
+    opts.close = close;
+    opts.reduce_only = reduce;
+    e.handle(
+        400.0,
+        Event::Command(Command::PlaceOrders {
+            command: 9,
+            orders: vec![opts],
+        }),
+    );
+}
+
+/// A position-panel market close sends no amount: it closes the whole position it reduces.
+#[test]
+fn a_market_close_without_an_amount_closes_the_whole_position() {
+    for (close, reduce) in [(Some(true), None), (None, Some(true))] {
+        let mut e = with_long_position();
+        market_close(&mut e, "sell", close, reduce);
+        let sent = requests(&mut e);
+        assert_eq!(sent.len(), 1, "{close:?} {reduce:?}");
+        let body = sent[0].body.clone().unwrap();
+        assert!(body.contains("\"vol\":60"), "{body}");
+        assert!(body.contains("\"side\":4"), "{body}");
+        assert!(body.contains("\"reduceOnly\":true"), "{body}");
+    }
+    // Nothing to close on the short side: refused before any send.
+    let mut e = with_long_position();
+    market_close(&mut e, "buy", Some(true), None);
+    let actions = prepared(&mut e, 400.0);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("MEXC close requires an open position")),
+        "{actions:?}"
+    );
+}
