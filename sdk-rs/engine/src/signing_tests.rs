@@ -2048,6 +2048,7 @@ fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
             key: ExtraKey::L1Wallet,
             field: ExtraFieldPolicy::RequiredForPrivate,
             encoding: None,
+            trim: false,
         }),
         ..Default::default()
     });
