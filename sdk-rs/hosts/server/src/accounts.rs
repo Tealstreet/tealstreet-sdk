@@ -829,7 +829,8 @@ impl Registry {
         // Public-only reads on a proxied venue need the proxy too.
         proxy_token.set(token);
         let tokens = proxy_token.provider();
-        let config = self.engine_config.clone();
+        let mut config = self.engine_config.clone();
+        config.log_label = Some(format!("{} {} {venue}", user_tag(user), init.account_name));
         let algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>> = Arc::default();
         let placed_symbols = PlacedSymbols::default();
         let algo_placed = placed_symbols.clone();
