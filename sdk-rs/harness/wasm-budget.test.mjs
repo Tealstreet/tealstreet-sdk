@@ -25,6 +25,22 @@ test('the approved combined ceiling accepts 16 MiB exactly and rejects the next 
   }
 });
 
+test('shared broker-role setup caps retain CI headroom and reject the next byte', () => {
+  for (const [venue, measured, cap] of [
+    ['blofin', 1_923_215, 1_934_336],
+    ['bybit', 2_148_560, 2_159_616],
+    ['okx', 1_910_027, 1_921_024],
+    ['kraken', 2_097_992, 2_108_416],
+    ['krakenspot', 2_097_992, 2_108_416],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('CI budgets each standalone venue build under its own venue name', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   const step = workflow.indexOf('name: Check family isolation, every alias and the shipped size');
