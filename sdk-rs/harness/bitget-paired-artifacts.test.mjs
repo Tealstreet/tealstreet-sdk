@@ -68,3 +68,19 @@ test('duplicate raw files, symlink escape, truncated inventories and protocol ed
     assert.throws(() => readBitgetPairedEvidence(x.root));
   });
 });
+
+test('unchanged built bytes need no tip measurements or anchor artifact', t => {
+  const x = fixture(t), plan = x.json('plan.json');
+  plan.disposition = 'unchanged-bytes';
+  plan.tapeSha256 = sha('tape');
+  x.write('plan.json', plan);
+  rmSync(resolve(x.root, 'comparison.json'));
+  for (const [index, arm] of BITGET_COHORT_ORDER.entries())
+    rmSync(resolve(x.root, `${String(index + 1).padStart(2, '0')}-${arm}`), { recursive: true });
+  const result = readBitgetPairedEvidence(x.root);
+  assert.equal(result.disposition, 'unchanged-bytes');
+  assert.deepEqual(result.cohorts, []);
+  assert.equal(result.tapeSha256, sha('tape'));
+  for (const name of ['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js'])
+    assert.equal(result.archives.baseline.files[name], result.archives.candidate.files[name]);
+});

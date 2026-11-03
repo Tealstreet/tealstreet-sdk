@@ -12,12 +12,12 @@ import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
-  'polymarket', 'breakoutprop', 'txflow', 'weex',
+  'salsadex', 'tealstreet-dex', 'polymarket', 'breakoutprop', 'txflow', 'weex',
   'bitrue',
 ];
 
-test('the beta set is exactly the 46 IN venues in 23 families', () => {
-  assert.equal(betaVenueNames.length, 46);
+test('the beta set is exactly the 44 IN venues in 23 families', () => {
+  assert.equal(betaVenueNames.length, 44);
   assert.deepEqual(betaVenueFamilies, [
     'apexomni', 'asterdex', 'backpack', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'coinbase',
     'cryptocom', 'grvt', 'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'orderly',

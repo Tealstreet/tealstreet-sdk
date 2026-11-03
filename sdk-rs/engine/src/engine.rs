@@ -596,6 +596,12 @@ pub enum VenueAction {
 
 /// The shared rejection for a venue action the venue does not implement.
 const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
+/// A repair on a feed that has carried no data this long reconnects it instead.
+#[cfg(feature = "managed-sockets")]
+const REPAIR_SILENCE_MS: f64 = 30_000.0;
+/// The same topic repaired again within this window reconnects its feed.
+#[cfg(feature = "managed-sockets")]
+const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;
 #[cfg(feature = "order-locks")]
 const UNCERTAIN_PLACEMENT: &str =
     "Placement outcome is uncertain; reconcile before placing or amending";
@@ -1803,6 +1809,9 @@ struct IoCore {
     socket_driver: crate::socket_driver::Driver,
     #[cfg(feature = "managed-sockets")]
     socket_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
+    /// Interest keys repaired recently, and when: a second repair soon after reconnects.
+    #[cfg(feature = "managed-sockets")]
+    repaired: Vec<(String, f64)>,
     #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
     /// `V::socket_capabilities()`, copied once by `Engine::new` for admission in
@@ -1979,6 +1988,8 @@ impl Default for IoCore {
             socket_driver: Default::default(),
             #[cfg(feature = "managed-sockets")]
             socket_message: None,
+            #[cfg(feature = "managed-sockets")]
+            repaired: Vec::new(),
             #[cfg(feature = "managed-sockets")]
             managed_sockets: false,
             #[cfg(feature = "managed-sockets")]
@@ -5510,9 +5521,50 @@ impl<V: Venue> Engine<V> {
                 store: &mut self.store,
                 io: &mut self.io,
             };
+            cx.io
+                .core
+                .repaired
+                .retain(|(_, at)| now - *at < REPEAT_REPAIR_WINDOW_MS);
             for (feed, keys) in by_feed {
-                cx.repair_socket_interests(feed, keys)
-                    .map_err(|error| format!("repair refused: {error:?}"))?;
+                let silent = cx.io.core.socket_driver.data_silent_for(feed, now);
+                // A topic repaired again so soon did not come back: its socket, not its
+                // subscription, is at fault (the venue stopped one stream on a live socket).
+                let repeat = keys
+                    .iter()
+                    .any(|key| cx.io.core.repaired.iter().any(|(held, _)| held == key));
+                // Resubscribing on a socket that has carried no data cannot revive it.
+                let reconnect = repeat || silent.is_some_and(|silent| silent >= REPAIR_SILENCE_MS);
+                let last_data_ms =
+                    silent.or_else(|| cx.io.core.socket_driver.received_age(feed, now));
+                if reconnect {
+                    cx.reconnect_silent_feed(feed);
+                } else {
+                    cx.repair_socket_interests(feed, keys.clone())
+                        .map_err(|error| format!("repair refused: {error:?}"))?;
+                }
+                for key in &keys {
+                    cx.io.core.repaired.retain(|(held, _)| held != key);
+                    cx.io.core.repaired.push((key.clone(), now));
+                }
+                let outcome = if reconnect {
+                    "reconnected"
+                } else {
+                    "resubscribed"
+                };
+                cx.event(
+                    Level::Info,
+                    log_code::SUBSCRIPTION_REPAIRED,
+                    format!(
+                        "{topic} repair {outcome}{}",
+                        last_data_ms
+                            .map(|ms| format!(" (feed last received {:.0} s ago)", ms / 1_000.))
+                            .unwrap_or_default()
+                    ),
+                    vec![
+                        ("topic", topic.to_string().into()),
+                        ("outcome", outcome.into()),
+                    ],
+                );
             }
             return Ok(());
         }
