@@ -21,6 +21,19 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 /// How often one notice code of one account reaches stderr while clients are attached.
 const MIRROR_EVERY: Duration = Duration::from_secs(60);
+const START_FAILED_CODE: &str = "hosted.start_failed";
+
+/// `safe-cex warn hosted.start_failed [user account venue]: kind=… venue_code=… signing_mode=… message="…"`:
+/// fields an alert can match on. The message is the venue's refusal, cut to 200 characters.
+fn start_failure_line(label: &str, signing_mode: Option<&str>, error: &VenueError) -> String {
+    let message: String = error.message.chars().take(200).collect();
+    format!(
+        "safe-cex warn {START_FAILED_CODE} [{label}]: kind={} venue_code={} signing_mode={} message={message:?}",
+        error.kind.map_or("unknown", |kind| kind.as_str()),
+        error.venue_code.as_deref().unwrap_or("none"),
+        signing_mode.unwrap_or("unknown"),
+    )
+}
 
 /// Limits apply independently to every account except `max_connections`.
 #[derive(Clone, Debug)]
@@ -39,6 +52,9 @@ pub struct ServerConfig {
     /// Names the account in log lines this actor writes (a user tag, account and
     /// venue, never credentials); None for listener and test accounts.
     pub log_label: Option<String>,
+    /// Who signs this account (`hosted_cosign`, or `public` with no key), named on
+    /// its start-failure line; None outside the Hosted server.
+    pub signing_mode: Option<&'static str>,
 }
 
 impl Default for ServerConfig {
@@ -56,6 +72,7 @@ impl Default for ServerConfig {
             max_frame_bytes: 16 * 1024 * 1024,
             io_timeout: Duration::from_secs(5),
             log_label: None,
+            signing_mode: None,
         }
     }
 }
@@ -857,6 +874,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     |peer| peer.account_auth,
                 ),
                 Notice::StartupFailed { error } => {
+                    self.note_start_failure(&error);
                     let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     if text.len() > self.config.max_frame_bytes {
                         // Late peers replay this notice, so keep a deliverable failure.
@@ -965,6 +983,27 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 }
             }
         }
+    }
+
+    /// A Hosted account's start failure, one line per account per MIRROR_EVERY. The
+    /// server has no Sentry client, so the journal is where these are alerted on.
+    fn note_start_failure(&mut self, error: &VenueError) {
+        let Some(label) = self.config.log_label.as_deref() else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        if self
+            .mirrored
+            .get(START_FAILED_CODE)
+            .is_some_and(|(at, _)| now.duration_since(*at) < MIRROR_EVERY)
+        {
+            return;
+        }
+        self.mirrored.insert(START_FAILED_CODE.to_owned(), (now, 0));
+        eprintln!(
+            "{}",
+            start_failure_line(label, self.config.signing_mode, error)
+        );
     }
 
     /// Log notices never disconnect peers: an oversized one is cut to fit, and
@@ -1795,6 +1834,25 @@ fn valid_symbol(symbol: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{Events, HostEvent};
+
+    #[test]
+    fn a_hosted_start_failure_line_names_its_kind_code_and_signing_mode() {
+        let error = VenueError::new("OKX 50105: Passphrase error".to_owned())
+            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+            .venue_code("50105".to_owned());
+        assert_eq!(
+            start_failure_line("u:ab12 Main okx", Some("hosted_cosign"), &error),
+            "safe-cex warn hosted.start_failed [u:ab12 Main okx]: kind=authInvalid venue_code=50105 \
+             signing_mode=hosted_cosign message=\"OKX 50105: Passphrase error\""
+        );
+        let bare = VenueError::new("x".repeat(300));
+        let line = start_failure_line("-", None, &bare);
+        assert!(
+            line.contains("kind=unknown venue_code=none signing_mode=unknown"),
+            "{line}"
+        );
+        assert!(line.len() < 300, "the message is cut: {line}");
+    }
     use safe_cex_engine::book::Book;
     use safe_cex_engine::{Cx, HttpRequest, Response, SocketId, TimerId};
     use std::cell::RefCell;
