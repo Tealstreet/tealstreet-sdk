@@ -21,7 +21,7 @@ import { selectBitgetPair } from './bitget-paired-ci.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
 import { pairedSteadyAssessment, readBitgetSteadyCertificate } from './bitget-paired-steady.mjs';
 
-import { collectFamilyIdentity, familyComparisonAuthority, readFamilyIdentity, readFamilyIdentityDirectory, familyCpuAssessment } from './cpu-family-identity.mjs';
+import { collectFamilyIdentity, familyComparisonAuthority, readFamilyIdentity, readFamilyIdentityDirectory, familyCpuAssessment, familyCpuMiss } from './cpu-family-identity.mjs';
 
 import { CPU_REMEASURE_SUITES, requireCpuRemeasureSuite } from './cpu-rollout.mjs';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -39,10 +39,14 @@ const manifest = () => json(new URL('./known-gate-failures.json', import.meta.ur
 export function classifyInitialCase(evidence, declarations, paired, family) {
   const assessment = pairedSteadyAssessment(assessGateReport(evidence.report, declarations), evidence.report, paired, evidence.execution?.measuredCheckoutSha);
   if (!assessment.errors.length) return { decision: 'first', assessment };
+  if (family && familyCpuMiss(evidence, assessment)) {
+    const identityAssessment = familyCpuAssessment(assessment, evidence.report, family, evidence.execution?.measuredCheckoutSha);
+    insist(!identityAssessment.errors.length, identityAssessment.errors.join('\n'));
+    return { decision: 'first', assessment: identityAssessment, unchanged: true };
+  }
   const eligible = assessEligibility(evidence, paired);
   insist(eligible.eligible, [...assessment.errors, ...eligible.errors].join('\n'));
-  const identityAssessment = familyCpuAssessment(assessment, evidence.report, family, evidence.execution?.measuredCheckoutSha);
-  return { decision: identityAssessment.errors.length ? 'second' : 'first', assessment: identityAssessment };
+  return { decision: 'second', assessment };
 }
 
 export function artifactEntriesToDirectory(entries, directory) {
@@ -294,18 +298,25 @@ async function prepareMeasurement(context, suite, destination, mode) {
 async function collectMeasurement(context, suite) {
   requireCpuRemeasureSuite(suite);
   const entries = loadGateLedger({ root: context.root, includeRaw: true });
-  const result = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect' });
-  insist(result.errors.length === 0, result.errors.join('\n'));
+  let result = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect' });
   const state = json(resolve(context.root, 'sdk-rs/harness/out/cpu-collection/state.json'));
   insist(!state.active && state.records.length === publicCases(suite).length, 'missing completed public measurements');
   let unchanged = false;
-  if (state.mode === 'family' && result.pending.length) {
+  const probes = entries.map(entry => ({ entry, assessment: assessGateReport(entry.report, manifest()) }))
+    .filter(({ entry, assessment }) => familyCpuMiss(entry, assessment));
+  if (state.mode === 'family' && probes.length) {
+    const cpuErrors = new Set(probes.flatMap(({ assessment }) => assessment.errors));
+    const residual = result.errors.filter(error => !cpuErrors.has(error));
+    insist(!residual.length, residual.join('\n'));
     const authority = await collectFamilyIdentity(context, suite);
     const runtimeManifest = json(resolve(context.root, 'sdk-rs/harness/out/cpu-collection/cohort/manifest.json'));
-    unchanged = Boolean(readFamilyIdentityDirectory({ directory: resolve(context.root, 'sdk-rs/harness/out/cpu-family'),
-      authority, state, runtimeManifest }));
+    const family = readFamilyIdentityDirectory({ directory: resolve(context.root, 'sdk-rs/harness/out/cpu-family'),
+      authority, state, runtimeManifest });
+    unchanged = Boolean(family);
+    result = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect', family });
     if (unchanged) console.log(`${suite}: unchanged bytes, not measured`);
   }
+  insist(!result.errors.length, result.errors.join('\n'));
   if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `has_eligible=${result.pending.length > 0 && !unchanged}\n`, { flag: 'a' });
   console.log(`${unchanged ? 0 : result.pending.length} CPU cases remain unresolved; this collection is not final certification`);
   return result;
@@ -519,14 +530,16 @@ async function gatherSuite(context, suite) {
   const strict = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
   restoreOriginalOutputs(context, strict.entries);
-  const assessed = verifyGateSuite({ suite, entries: suiteEntries(strict.entries), manifest: manifest(), mode: 'collect' });
-  insist(assessed.errors.length === 0, assessed.errors.join('\n'));
+  const entries = suiteEntries(strict.entries);
+  const needsComparison = entries.some(entry => familyCpuMiss(entry, assessGateReport(entry.report, manifest())));
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
   insist(tiny.job.id === strict.job.id, 'first uploads have different physical producers');
   const bundle = jsonMember(tiny.entries, 'cohort.json'), state = jsonMember(strict.entries, 'cpu-collection/state.json');
   const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
-  const family = await familyIdentityForSuite(context, suite, strict, state, tiny, assessed.pending.length > 0);
+  const family = await familyIdentityForSuite(context, suite, strict, state, tiny, needsComparison);
+  const assessed = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect', family });
+  insist(!assessed.errors.length, assessed.errors.join('\n'));
   insist(bundle.suite === suite && Array.isArray(bundle.claims) && bundle.claims.length === publicCases(suite).length, 'incomplete first claims');
   const { readSourceTree } = await import('./cpu-collection.mjs');
   insist(readSourceTree(context.root).inputsSha256 === state.inputsSha256 && state.sourceHead === context.checkoutSha, 'first measured inputs differ from current source');
@@ -602,9 +615,10 @@ async function certifySuite(context, suite, destination) {
     restoreOriginalOutputs(context, strict.entries);
     revalidateRecordedEvidence(first, { root: context.root });
     if (value.decision === 'first') {
-      insist(classifyInitialCase(first, manifest(), paired, family).decision === 'first',
+      const initial = classifyInitialCase(first, manifest(), paired, family);
+      insist(initial.decision === 'first',
         'first result fails strict policy and authenticated byte/steady supplement');
-      cases.push({ key: value.key, case: value.case, decision: { accepted: true, rule: first.report.status === 'PASS' ? 'strict-first-pass' : family ? 'unchanged bytes, not measured' : 'strict-declared-diagnostic', receipt: null } });
+      cases.push({ key: value.key, case: value.case, decision: { accepted: true, rule: first.report.status === 'PASS' ? 'strict-first-pass' : initial.unchanged ? 'unchanged bytes, not measured' : 'strict-declared-diagnostic', receipt: null } });
     } else {
       const evidence = jsonMember(second.entries, `cpu-second/cases/${value.key}.json`);
       insist(evidence.key === first.key && same(evidence.claim, first.claim), 'second case/first claim differs');

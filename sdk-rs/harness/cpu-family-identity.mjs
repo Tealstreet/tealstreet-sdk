@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { selectCpuComparison } from './bitget-paired-ci.mjs';
 import { parseCohortJson } from './cpu-cohort.mjs';
+import { validatePublicEvidence } from './cpu-remeasure.mjs';
 import { requireCpuRemeasureSuite } from './cpu-rollout.mjs';
 import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { CPU_FIELDS, performanceObjectives, performanceFailures } from './performance-policy.mjs';
@@ -101,4 +102,14 @@ export function familyCpuAssessment(assessment, report, certificate, source) {
     cpu.some(value => failure.startsWith(`performance ${value.label}:`)));
   return { ...assessment, errors: assessment.errors.filter(error =>
     !failures.some(failure => error === `${report.venue}: unexpected ${failure}`)) };
+}
+
+/** A build probe only; this cannot certify or waive a CPU result. */
+export function familyCpuMiss(evidence, assessment) {
+  if (!assessment.errors.length || validatePublicEvidence(evidence).length) return false;
+  const report = evidence.report;
+  const cpu = performanceObjectives(report.samples.ts, report.samples.rust).filter(value => CPU_FIELDS.includes(value.field));
+  const failures = performanceFailures(report.samples.ts, report.samples.rust).filter(failure =>
+    cpu.some(value => failure.startsWith(`performance ${value.label}:`)));
+  return assessment.errors.every(error => failures.some(failure => error === `${report.venue}: unexpected ${failure}`));
 }

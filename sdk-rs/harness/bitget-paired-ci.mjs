@@ -58,7 +58,9 @@ export async function selectCpuComparison({ reader, runId, root, jobName, gitRea
     insist(checkout.sha === checkoutSha && checkout.tree?.sha === checkoutTree &&
       apiParents?.length === 2 && localParents.length === 2 && isDeepStrictEqual(apiParents, localParents) &&
       apiParents.every(parent => /^[a-f0-9]{40}$/.test(parent)) && apiParents[1] === run.head_sha,
-    'checkout API/local tree and exact two-parent PR composition must agree');
+    'checkout API/local tree and exact two-parent PR composition must agree: ' +
+      JSON.stringify({ checkoutSha, checkoutTree, apiSha: checkout.sha, apiTree: checkout.tree?.sha,
+        localParents, apiParents, expectedHead: run.head_sha }));
     const baseline = apiParents[0], landingRef = await reader.getRustLanding();
     insist(landingRef.ref === 'refs/heads/master' &&
       landingRef.url === 'https://api.github.com/repos/Tealstreet/tealstreet-sdk/git/refs/heads/master' &&

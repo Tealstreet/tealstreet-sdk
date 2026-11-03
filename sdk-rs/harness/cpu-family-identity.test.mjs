@@ -4,6 +4,8 @@ import test from 'node:test';
 import { familyComparisonAuthority, readFamilyIdentity } from './cpu-family-identity.mjs';
 import { classifyInitialCase } from './cpu-ci.mjs';
 import { decideRemeasurement } from './cpu-remeasure.mjs';
+import { expectedGateCases } from './ci-gate-suites.mjs';
+import { verifyGateSuite } from './verify-gates.mjs';
 import { performanceFailures, performanceOrder } from './performance-policy.mjs';
 
 const A = 'a'.repeat(40), B = 'b'.repeat(40), TREE = 'c'.repeat(40);
@@ -37,13 +39,15 @@ const metric = (mode, cpu, retained) => ({ baselineKind: 'idle-loaded', measured
   runtimeCpuMs: cpu - 1, runtimeProcessCpuMs: cpu - 1, runtimeWallMs: cpu - 1, wallMs: cpu,
   heapBeforeBytes: 100, heapUsedBytes: 100 + retained, heapRetainedBytes: retained, buffersBefore: 0,
   buffersAfter: 0, bufferRetainedBytes: 0, wasmBeforeBytes: 0, wasmBytes: 0, wasmRetainedBytes: 0, retainedBytes: retained });
-function evidence(metadata, second = false) {
-  const raw = [];
+function evidence(metadata, second = false, steady) {
+  const raw = [], publicCase = expectedGateCases(metadata.venue)[0];
+  const symbols = publicCase.books.split(',');
   const add = (impl, mode, run) => {
     const output = { impl, frames: 10, commands: [], transportReceipt: { frames: 10 }, protocolErrors: [],
-      markets: [{ symbol: 'BTC' }], tickers: [{ symbol: 'BTC', last: 1 }], books: { BTC: { bids: [[1, 1]] } },
+      markets: [{ symbol: symbols[0] }], tickers: [{ symbol: symbols[0], last: 1 }],
+      books: Object.fromEntries(symbols.map(symbol => [symbol, { bids: [[1, 1]] }])),
       metrics: { ...metric(mode, (impl === 'ts' ? 200 : 170) * (metadata.venue === 'okx' ? 10 : 1), impl === 'ts' ? 100 : 80),
-        steadyCpuMs: metadata.venue === 'okx'
+        steadyCpuMs: steady ? steady[impl] : metadata.venue === 'okx'
           ? second ? (impl === 'ts' ? 325.7 : 289.496) : (impl === 'ts' ? 336.515 : 312.985)
           : second ? (impl === 'ts' ? 18.836 : 20.195) : (impl === 'ts' ? 18.745 : 19.896) } };
     const bytes = JSON.stringify(output); raw.push({ impl, mode, run, bytes, sha256: sha(bytes) });
@@ -52,7 +56,7 @@ function evidence(metadata, second = false) {
   for (let run = 0; run < 9; run++) for (const impl of performanceOrder(run)) add(impl, 'performance', run);
   const samples = Object.fromEntries(['ts', 'rust'].map(impl => [impl, raw.filter(slot => slot.impl === impl && slot.mode === 'performance').map(slot => JSON.parse(slot.bytes).metrics)]));
   const failures = performanceFailures(samples.ts, samples.rust).sort();
-  const report = { schema: 1, venue: metadata.venue, tape: `${metadata.venue}-public.jsonl.gz`, tapeSha256: sha('tape'), books: 'BTC', private: false,
+  const report = { ...publicCase, schema: 1, tapeSha256: sha('tape'), private: false,
     runs: 9, correctnessRuns: 1, requiredImprovement: .1, status: failures.length ? 'FAIL' : 'PASS', failures, samples, fixers: [], ciWasm: metadata,
     artifacts: raw.map(({ impl, mode, run }) => ({ impl, mode, run, path: `out/${impl}-${mode}-${run}` })) };
   return { report, raw, execution: { runId: '10', attempt: 1, jobId: second ? '21' : '20', runnerId: second ? '31' : '30',
@@ -89,6 +93,44 @@ test('master 41618845764 OKX inverse miss skips remeasurement only with authenti
   assert.deepEqual(result.errors, ['steadyCpuMs: two-run mean exceeds existing bound']);
   assert.equal(classifyInitialCase(first, declarations).decision, 'second');
   assert.equal(classifyInitialCase(first, declarations, undefined, readFamilyIdentity(data)).decision, 'first');
+});
+
+test('txflow first measurement 17.924/20.579 bypasses CPU eligibility only on identical sealed bytes', async () => {
+  const data = await fixture(), first = evidence(data.metadata, false, { ts: 17.924, rust: 20.579 });
+  const before = JSON.stringify(first);
+  assert.throws(() => classifyInitialCase(first, declarations), /strictly below 1.05/);
+  const certificate = readFamilyIdentity(data);
+  assert.equal(classifyInitialCase(first, declarations, undefined, certificate).decision, 'first');
+  assert.equal(JSON.stringify(first), before);
+  for (const name of ['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js']) {
+    const changed = await fixture();
+    changed.entries.set(`cpu-family/baseline/${name}`, Buffer.from('changed bytes'));
+    changeMetadata(changed, 'baseline', metadata => { metadata.hashes[name] = sha('changed bytes'); });
+    assert.throws(() => classifyInitialCase(first, declarations, undefined, readFamilyIdentity(changed)), /strictly below 1.05/);
+  }
+});
+
+test('first replay collection accepts a sealed CPU-only miss with complete public and private coverage', async () => {
+  const data = await fixture(), first = evidence(data.metadata, false, { ts: 17.924, rust: 20.579 });
+  const privateReport = { ...first.report, ...expectedGateCases('txflow')[1], tapeSha256: sha('private tape'), private: true,
+    status: 'PASS', failures: [], runs: 0, samples: Object.fromEntries(['ts', 'rust'].map(impl =>
+      [impl, [{ ...first.report.samples[impl][0], measuredMode: 'correctness' }]])) };
+  const entries = [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }];
+  const options = { suite: 'txflow', entries, manifest: declarations, mode: 'collect' };
+  assert.ok(verifyGateSuite(options).errors.length, 'old first collection rejects the large CPU miss');
+  const family = readFamilyIdentity(data), accepted = verifyGateSuite({ ...options, family });
+  assert.deepEqual(accepted.errors, []);
+  assert.deepEqual(accepted.pending, []);
+  assert.equal(accepted.rows[0].label, 'UNCHANGED BYTES, NOT MEASURED');
+  assert.ok(verifyGateSuite({ ...options, mode: 'strict', family }).errors.length);
+  for (const mutate of [
+    rows => { rows.pop(); }, rows => { rows[0].raw.pop(); }, rows => { rows[0].exitCode = 0; },
+    rows => { rows[1].report.status = 'FAIL'; rows[1].report.failures = ['private snapshot mismatch']; rows[1].exitCode = 1; },
+    rows => { for (const sample of rows[0].report.samples.rust) sample.retainedBytes = 10000; },
+  ]) {
+    const invalid = structuredClone(entries); mutate(invalid);
+    assert.ok(verifyGateSuite({ ...options, entries: invalid, family }).errors.length);
+  }
 });
 
 test('changed WASM or glue keeps the existing second runner and numeric bound', async () => {
