@@ -86,6 +86,28 @@ fn failure_text(code: i64, venue_text: &str) -> String {
     format!("ApeX Omni request failed [{code}]: {reason}")
 }
 
+/// A 403 without ApeX's JSON envelope came from an edge on the path (a CDN or WAF page),
+/// not from ApeX judging the key: it ends a start as a failure, never a refused key.
+const EDGE_BLOCKED: &str = "ApeX Omni request blocked [403]: ";
+
+fn edge_blocked(body: &str) -> safe_cex_engine::VenueError {
+    let excerpt: String = body.trim().chars().take(120).collect();
+    let excerpt = if excerpt.is_empty() {
+        "empty body".into()
+    } else {
+        excerpt
+    };
+    safe_cex_engine::VenueError::new(format!("{EDGE_BLOCKED}{excerpt}"))
+        .kind(safe_cex_engine::ErrorKind::Rejected)
+        .outcome(safe_cex_engine::Outcome::Rejected)
+}
+
+pub(crate) fn is_edge_blocked(error: &safe_cex_engine::VenueError) -> bool {
+    error.kind == Some(safe_cex_engine::ErrorKind::Rejected)
+        && error.venue_code.is_none()
+        && error.message.starts_with(EDGE_BLOCKED)
+}
+
 enum ApiResponse {
     Success,
     SignatureRefusal(safe_cex_engine::VenueError),
@@ -105,6 +127,9 @@ fn api_response(response: Response<'_>) -> ApiResponse {
         .and_then(Code::number);
     if (200..300).contains(&response.status) && code.is_none_or(|code| code == 0) {
         return ApiResponse::Success;
+    }
+    if envelope.is_none() && response.status == 403 {
+        return ApiResponse::Failed(edge_blocked(response.body));
     }
     let signature = envelope.as_ref().is_some_and(|e| {
         code.is_some_and(|code| code != 0)

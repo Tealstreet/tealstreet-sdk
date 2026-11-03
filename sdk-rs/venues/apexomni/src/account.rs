@@ -183,6 +183,8 @@ pub struct Account {
     pub(crate) initialized: bool,
     pub(crate) recent_executions: Vec<Execution>,
     started: bool,
+    /// An edge-blocked private read already ended this start.
+    start_blocked: bool,
     pub(super) socket: Option<SocketId>,
     pub(super) opened_at: f64,
     pub(super) ping_at: f64,
@@ -1154,6 +1156,13 @@ impl ApexOmni {
         let refused_at_start = cx.startup_read_refused(&error);
         if refused_at_start && error.venue_code.as_deref() == Some("10002") {
             cx.deactivate();
+        }
+        let loaded = cx.store.loaded();
+        if crate::is_edge_blocked(&error)
+            && !(loaded.balance && loaded.orders && loaded.positions)
+            && !std::mem::replace(&mut self.account.start_blocked, true)
+        {
+            cx.startup_failed(error.clone());
         }
         let generation = match request {
             Request::Identity => {
