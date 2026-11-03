@@ -22,6 +22,7 @@ function importFamily(family) {
     case 'okx': return import('../pkg/web/okx/safe_cex_wasm.js');
     case 'paradex': return import('../pkg/web/paradex/safe_cex_wasm.js');
     case 'phemex': return import('../pkg/web/phemex/safe_cex_wasm.js');
+    case 'woo': return import('../pkg/web/woo/safe_cex_wasm.js');
   }
 }
 
