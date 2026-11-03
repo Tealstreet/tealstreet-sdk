@@ -18,5 +18,20 @@ change. The failed-certification wrapper remains exit 1 and now says so plainly.
 
 This changes only harness validation and diagnostics; no venue, dependency,
 Cargo.lock, WASM budget, artifact policy or numeric measurement gate changes.
-Separate measured CPU ratio failures remain failures; this fix does not waive
-them or turn diagnostic reruns into original-attempt certification evidence.
+Measured CPU ratio failures remain failures for changed Bitget bytes; diagnostic
+reruns never become original-attempt certification evidence.
+
+
+Under ddi's byte-identity ruling, independently built base and candidate Bitget
+WASM and JS glue with matching SHA256 seals pass as "unchanged bytes, not
+measured". Both tip and cumulative-anchor CPU witnesses are skipped. The
+collector retains both packages and their source/run metadata; the planner
+rechecks their actual hashes under the same original-attempt producer authority
+and binds the candidate seals to the family runtime. No Q or readiness estimate
+is invented. Changed bytes retain both measured witnesses, the pooled statistic
+and the frozen 1.023110 bound. Correctness, process CPU and memory gates remain.
+
+Original #2960 run 41604963351 measured tip Q=1.034397850 on identical WASM and
+glue, a negative control above the bound. Original #2951 run 41600029141 had
+anchor block Q values 1.016719664 and 1.002793106, yet pooled Q=1.024389402.
+The estimator follow-up is recorded for ddi; this change does not alter it.
