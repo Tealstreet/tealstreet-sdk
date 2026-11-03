@@ -94,6 +94,44 @@ describe('retained Coinbase Rust family oracle', () => {
   let mirrored: BaseExchange | undefined;
   afterEach(() => { exchange?.dispose(); exchange = undefined; mirrored?.dispose(); mirrored = undefined; });
 
+  it('loads a US retail DEFAULT-only spot portfolio and publishes its USD cash root through EngineHost', async () => {
+    const tape = transport();
+    const originalRequest = tape.native.request;
+    tape.native.request = async (request) => {
+      if (new URL(request.url).pathname.endsWith('/portfolios/selected-spot-portfolio')) {
+        tape.requests.push(request);
+        return { status: 200, body: new TextEncoder().encode(JSON.stringify({ breakdown: {
+          portfolio_balances: {
+            total_balance: { value: '7600', currency: 'USD' },
+            total_cash_equivalent_balance: { value: '2600', currency: 'USD' },
+          },
+          spot_positions: [
+            { asset: 'USDC', total_balance_crypto: 2600, available_to_trade_crypto: 2400,
+              total_balance_fiat: 2600, available_to_trade_fiat: 2400 },
+            { asset: 'BTC', total_balance_crypto: 0.05, available_to_trade_crypto: 0.04,
+              total_balance_fiat: 5000, available_to_trade_fiat: 4000 },
+          ],
+        } })) };
+      }
+      if (/\/(cfm|intx)\//.test(request.url) || new URL(request.url).hostname === 'api.international.coinbase.com') {
+        throw new Error('US retail spot startup must not need a derivatives portfolio');
+      }
+      return originalRequest(request);
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    const store = new DefaultStore();
+    exchange = await createExchange('coinbasespot', { key: downloaded, secret: '', tealstreetTunnel: false }, store) as RustEngineExchange;
+    await exchange.start();
+    expect(await exchange.getAccount()).toEqual({ userId: 'selected-spot-portfolio' });
+    expect(store.loaded).toMatchObject({ markets: true, tickers: true, balance: true, orders: true, positions: true });
+    expect(tape.requests.every((request) => !/\/(cfm|intx)\//.test(request.url))).toBe(true);
+    expect(store.positions).toEqual([]);
+    expect(store.orders).toEqual([]);
+    expect(store.balance).toMatchObject({ total: 2600, free: 2400, used: 200, upnl: 0,
+      currencies: { USDC: { total: 2600, free: 2400, used: 200 }, BTC: { total: 0.05, free: 0.04 } } });
+  }, 20000);
+
   it('delivers queued native IDs after a deadline and retains them in the existing log path if a listener throws', async () => {
     const tape = transport();
     const request = tape.native.request;

@@ -47,14 +47,70 @@ pub struct Breakdown {
 #[derive(Deserialize)]
 pub struct BreakdownBody {
     pub spot_positions: Vec<SpotBalance>,
+    pub portfolio_balances: Option<PortfolioBalances>,
+}
+#[derive(Deserialize)]
+pub struct PortfolioBalances {
+    pub total_cash_equivalent_balance: Option<CashEquivalent>,
+}
+#[derive(Deserialize)]
+pub struct CashEquivalent {
+    pub value: Decimal,
+    pub currency: String,
+}
+impl BreakdownBody {
+    pub fn cash_balance(&self) -> Result<safe_cex_engine::model::Balance, String> {
+        let (mut row_total, mut free) = (0., 0.);
+        for row in self
+            .spot_positions
+            .iter()
+            .filter(|row| matches!(row.asset.as_str(), "USD" | "USDC"))
+        {
+            let total = row
+                .total_balance_fiat
+                .map_or(row.total_balance_crypto.0, |n| n.0);
+            let available = row
+                .available_to_trade_fiat
+                .map_or(row.available_to_trade_crypto.0, |n| n.0);
+            if total < 0.
+                || available < 0.
+                || available > total
+                || row.total_balance_crypto.0 < 0.
+                || row.available_to_trade_crypto.0 < 0.
+                || row.available_to_trade_crypto.0 > row.total_balance_crypto.0
+            {
+                return Err("Coinbase invalid spot cash balance".into());
+            }
+            row_total += total;
+            free += available;
+        }
+        let total = match self
+            .portfolio_balances
+            .as_ref()
+            .and_then(|p| p.total_cash_equivalent_balance.as_ref())
+        {
+            Some(cash) if cash.currency == "USD" => cash.value.0,
+            Some(_) => return Err("Coinbase spot cash balance is not USD".into()),
+            None => row_total,
+        };
+        if !total.is_finite() || !free.is_finite() || total < 0. || free < 0. || free > total {
+            return Err("Coinbase invalid spot cash balance".into());
+        }
+        Ok(safe_cex_engine::model::Balance {
+            total,
+            free,
+            used: total - free,
+            upnl: 0.,
+        })
+    }
 }
 #[derive(Deserialize)]
 pub struct SpotBalance {
     pub asset: String,
     pub total_balance_crypto: Decimal,
     pub available_to_trade_crypto: Decimal,
-    #[serde(default, rename = "total_balance_fiat")]
-    pub _total_balance_fiat: Option<Decimal>,
+    pub total_balance_fiat: Option<Decimal>,
+    pub available_to_trade_fiat: Option<Decimal>,
 }
 #[derive(Deserialize)]
 pub struct IntxPosition<'a> {

@@ -1782,6 +1782,9 @@ impl Coinbase {
                     if r.breakdown.spot_positions.len() > 1000 {
                         return Err("Coinbase spot balance limit".into());
                     }
+                    let cash = (self.account.kind == Some(ProductKind::Spot))
+                        .then(|| r.breakdown.cash_balance())
+                        .transpose()?;
                     let mut coins = SnapshotBuilder::default();
                     let mut seen = HashSet::new();
                     let held = |cx: &Cx<'_, Pending>, asset: Option<&str>| {
@@ -1836,8 +1839,8 @@ impl Coinbase {
                     let current = cx.store.currency_balances().unwrap_or_default().to_vec();
                     cx.store
                         .set_currency_balances(coins.commit(current, |c| c.currency.clone()));
-                    if self.account.kind == Some(ProductKind::Spot) {
-                        cx.store.set_balance(Balance::default());
+                    if let Some(cash) = cash {
+                        cx.store.set_balance(cash);
                     }
                 }
                 Request::Positions {

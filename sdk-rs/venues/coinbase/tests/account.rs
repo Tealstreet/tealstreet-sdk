@@ -247,6 +247,182 @@ fn spot_selection_does_not_probe_cfm_and_preserves_held_currency() {
     );
     assert!(s.e.store().positions().is_empty());
 }
+
+#[test]
+fn spot_cash_equivalent_root_preserves_available_usdc_and_excludes_crypto_equity() {
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = Some(
+        r#"{"breakdown":{
+        "portfolio_balances":{
+            "total_balance":{"value":"7600","currency":"USD"},
+            "total_cash_equivalent_balance":{"value":"2600","currency":"USD"}
+        },
+        "spot_positions":[
+            {"asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400,
+             "total_balance_fiat":2600,"available_to_trade_fiat":2400},
+            {"asset":"BTC","total_balance_crypto":0.05,"available_to_trade_crypto":0.04,
+             "total_balance_fiat":5000,"available_to_trade_fiat":4000}
+        ]}}"#
+            .into(),
+    );
+    let s = s.ready();
+    let balance = s.e.store().balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used),
+        (2600., 2400., 200.)
+    );
+    let usdc =
+        s.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|coin| coin.currency == "USDC")
+            .unwrap();
+    assert_eq!(
+        (usdc.balance.total, usdc.balance.free, usdc.balance.used),
+        (2600., 2400., 200.)
+    );
+    let btc =
+        s.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|coin| coin.currency == "BTC")
+            .unwrap();
+    assert_eq!((btc.balance.total, btc.balance.free), (0.05, 0.04));
+    assert!(s.e.store().loaded().balance);
+}
+
+#[test]
+fn spot_cash_rows_supply_the_root_when_the_portfolio_summary_is_absent() {
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = Some(
+        r#"{"breakdown":{"spot_positions":[
+        {"asset":"USDC","total_balance_crypto":2500,"available_to_trade_crypto":2300,
+         "total_balance_fiat":2499,"available_to_trade_fiat":2299},
+        {"asset":"USD","total_balance_crypto":101,"available_to_trade_crypto":91},
+        {"asset":"BTC","total_balance_crypto":1,"available_to_trade_crypto":1,
+         "total_balance_fiat":60000,"available_to_trade_fiat":60000}
+    ]}}"#
+            .into(),
+    );
+    let s = s.ready();
+    let balance = s.e.store().balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used),
+        (2600., 2390., 210.)
+    );
+    let usdc =
+        s.e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|coin| coin.currency == "USDC")
+            .unwrap();
+    assert_eq!((usdc.balance.total, usdc.balance.free), (2500., 2300.));
+}
+
+#[test]
+fn invalid_spot_cash_summary_keeps_the_last_balance_and_currency_snapshot() {
+    for summary in [
+        r#"{"value":"2600","currency":"EUR"}"#,
+        r#"{"value":"-1","currency":"USD"}"#,
+        r#"{"value":"100","currency":"USD"}"#,
+    ] {
+        let mut s = Session::new("DEFAULT", true);
+        s.breakdown = Some(
+            r#"{"breakdown":{"spot_positions":[
+            {"asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400}
+        ]}}"#
+                .into(),
+        );
+        let mut s = s.ready();
+        let old = s.e.store().balance().clone();
+        let coins = s.e.store().currency_balances().unwrap().to_vec();
+        s.breakdown = Some(format!(
+            r#"{{"breakdown":{{
+            "portfolio_balances":{{"total_cash_equivalent_balance":{summary}}},
+            "spot_positions":[{{"asset":"USDC","total_balance_crypto":2700,"available_to_trade_crypto":2500}}]
+        }}}}"#
+        ));
+        s.poll_until(|s| {
+            s.logs.iter().any(|l| {
+                l.contains("Coinbase spot cash balance is not USD")
+                    || l.contains("Coinbase invalid spot cash balance")
+            })
+        });
+        assert_eq!(s.e.store().balance(), &old);
+        assert_eq!(s.e.store().currency_balances().unwrap(), coins);
+    }
+}
+
+#[test]
+fn a_clean_empty_spot_balance_clears_cash_while_cfm_keeps_its_margin_balance() {
+    let mut s = Session::new("DEFAULT", true);
+    s.breakdown = Some(
+        r#"{"breakdown":{"spot_positions":[
+        {"asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400}
+    ]}}"#
+            .into(),
+    );
+    let mut s = s.ready();
+    assert_eq!(s.e.store().balance().total, 2600.);
+    s.breakdown = Some(r#"{"breakdown":{"spot_positions":[]}}"#.into());
+    s.poll_until(|s| s.e.store().balance().total == 0.);
+    assert!(s.e.store().currency_balances().unwrap().is_empty());
+
+    let mut s = Session::new("DEFAULT", false);
+    s.breakdown = Some(
+        r#"{"breakdown":{"spot_positions":[
+        {"asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400}
+    ]}}"#
+            .into(),
+    );
+    let s = s.ready();
+    assert_eq!(
+        (s.e.store().balance().total, s.e.store().balance().free),
+        (10., 8.)
+    );
+    assert_eq!(
+        s.e.store().currency_balances().unwrap()[0].balance.total,
+        2600.
+    );
+}
+
+#[test]
+fn spot_ticker_polls_do_not_replace_markets_or_reset_private_readiness() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.collect();
+    s.e.take_frame(s.now);
+    let market = s.e.store().markets()[0].clone();
+    let initial_products = s.urls.iter().filter(|u| u.contains("/products?")).count();
+    for _ in 0..60 {
+        let requests = s.collect();
+        if requests.is_empty() {
+            s.fire();
+        } else {
+            for request in requests {
+                s.answer(request);
+            }
+        }
+        let loaded = s.e.store().loaded();
+        assert!(
+            loaded.markets && loaded.tickers && loaded.balance && loaded.orders && loaded.positions
+        );
+        assert_eq!(&s.e.store().markets()[0], &market);
+        if let Some(frame) = s.e.take_frame(s.now) {
+            assert!(
+                safe_cex_engine::wire::sections(frame).all(|(kind, _)| kind != 2),
+                "ticker refresh must not publish a replacement markets section"
+            );
+        }
+    }
+    assert!(s.urls.iter().filter(|u| u.contains("/products?")).count() >= initial_products + 3);
+    assert_eq!(
+        s.urls.iter().filter(|u| u.ends_with("/portfolios")).count(),
+        1
+    );
+}
 #[test]
 fn cfm_contracts_are_normalized_and_settings_are_cross_oneway() {
     let s = Session::new("DEFAULT", false).ready();
