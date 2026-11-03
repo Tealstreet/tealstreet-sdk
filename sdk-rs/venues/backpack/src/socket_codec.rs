@@ -63,6 +63,7 @@ fn policy(role: SocketChannel) -> FeedPolicy {
         controls: ControlPolicy::Native,
         subscription_interval_ms: 0.0,
         close_floors: &[],
+        data_silence: None,
     }
 }
 

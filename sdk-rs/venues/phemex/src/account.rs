@@ -653,6 +653,7 @@ impl PhemexPerpetuals {
                     invalidation: Invalidation::Required,
                     subscription_interval_ms: 0.,
                     close_floors: &[],
+                    data_silence: None,
                 })?;
                 self.account.feed = Some(feed);
                 feed

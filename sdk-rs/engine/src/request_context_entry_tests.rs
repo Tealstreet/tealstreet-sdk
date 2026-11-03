@@ -800,6 +800,7 @@ mod managed_socket_activity {
             invalidation: Invalidation::None,
             subscription_interval_ms: 0.,
             close_floors: &[],
+            data_silence: None,
         }
     }
     fn feed(cx: &Cx<'_, ()>) -> FeedId {
