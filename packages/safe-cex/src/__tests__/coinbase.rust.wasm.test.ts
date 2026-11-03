@@ -94,6 +94,27 @@ describe('retained Coinbase Rust family oracle', () => {
   let mirrored: BaseExchange | undefined;
   afterEach(() => { exchange?.dispose(); exchange = undefined; mirrored?.dispose(); mirrored = undefined; });
 
+  it.each(names)('%s normalizes pasted BOM credentials through EngineHost without changing the JWT identity', async (name) => {
+    const tape = transport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    const encoded = seed.toString('base64');
+    const credentials = JSON.stringify({
+      name: `\uFEFF ${keyName}\uFEFF`,
+      privateKey: `\uFEFFed25519:${encoded.slice(0, 16)}\uFEFF${encoded.slice(16)}\uFEFF`,
+    });
+    exchange = await createExchange(name, {
+      key: `\uFEFF ${credentials}\uFEFF`, secret: '', tealstreetTunnel: false,
+    }) as RustEngineExchange;
+    await exchange.start();
+    expect(await exchange.getAccount()).toEqual({ userId: 'selected-spot-portfolio' });
+    const portfolioRead = tape.requests.find((r) => new URL(r.url).pathname.endsWith('/portfolios'));
+    expect(portfolioRead).toBeDefined();
+    expect(jwtClaims(portfolioRead!.headers.Authorization.slice('Bearer '.length)).uri)
+      .toBe('GET api.coinbase.com/api/v3/brokerage/portfolios');
+    expect(tape.requests.every((r) => r.method === 'GET')).toBe(true);
+  });
+
   it('loads a US retail DEFAULT-only spot portfolio and publishes its USD cash root through EngineHost', async () => {
     const tape = transport();
     const originalRequest = tape.native.request;
