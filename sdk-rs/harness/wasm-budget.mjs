@@ -93,6 +93,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // ruling: each raised to CI size plus 10 KiB, rounded up to the KiB.
 // #2945 managed-socket data silence: CI run 41599669844 measured bingx 1,970,123 B; ddi2il ruling,
 // CI size plus 10 KiB, rounded up to the KiB.
+// #2958 shared broker-role setup: CI 41617609699 measured BloFin 1,923,215, Bybit 2,148,560,
+// OKX 1,910,027 and Kraken 2,097,992 B; ddi2il approved CI + 10 KiB rounded up, including the Kraken sibling.
 // #2961 KuCoin provider custody: CI 41611993463 measured 1,630,161 / 2,211,621 B.
 // ddi2il approved each CI size plus 10 KiB, rounded up to the KiB, after shared-provider attribution.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
@@ -105,22 +107,22 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitgetusdc: 2_276_352,
   bitrue: 1_798_144,
   bitunix: 1_824_768,
-  blofin: 1_923_072,
+  blofin: 1_934_336,
   breakoutprop: 1_494_016,
-  bybit: 2_148_352,
+  bybit: 2_159_616,
   coinbase: 1_800_192,
   cryptocom: 1_701_888,
   grvt: 1_767_424,
   hyperliquid: 2_064_384,
   hyperliquidspot: 2_065_408,
-  kraken: 2_096_128,
-  krakenspot: 2_098_176,
+  kraken: 2_108_416,
+  krakenspot: 2_108_416,
   kucoin: 1_640_448,
   kucoinspot: 2_222_080,
   lighter: 1_965_056,
   'lighter-robinhood': 1_967_104,
   mexc: 1_714_176,
-  okx: 1_909_760,
+  okx: 1_921_024,
   orderly: 1_708_032,
   paradex: 2_196_480,
   phemex: 2_023_424,
