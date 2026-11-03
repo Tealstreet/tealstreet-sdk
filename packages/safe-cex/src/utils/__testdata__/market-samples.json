@@ -2006,7 +2006,7 @@
   ],
   "mexc": [
     {
-      "symbol": "BTC_USDT",
+      "symbol": "BTCUSDT",
       "base": "BTC",
       "quote": "USDT",
       "id": "BTC_USDT",
@@ -2014,14 +2014,14 @@
       "binance": "BTCUSDT"
     },
     {
-      "symbol": "ETH_USDT",
+      "symbol": "ETHUSDT",
       "base": "ETH",
       "quote": "USDT",
       "id": "ETH_USDT",
       "binance": "ETHUSDT"
     },
     {
-      "symbol": "1000PEPE_USDT",
+      "symbol": "1000PEPEUSDT",
       "base": "1000PEPE",
       "quote": "USDT",
       "id": "1000PEPE_USDT",

@@ -354,11 +354,10 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
       return `${base}_${quote}_PERP`;
     }
 
-    // -- MEXC futures: BTCUSDT → BTC_USDT ----------------------------------
-    case 'mexc': {
-      const { base, quote } = parseBinanceSymbol(symbol);
-      return `${base}_${quote}`;
-    }
+    // -- MEXC futures: the store keys markets by the compact symbol (BTCUSDT); BTC_USDT is only the
+    // venue id, so converting to it named a market that never exists (Unknown MEXC market).
+    case 'mexc':
+      return symbol;
 
     // -- Crypto.com: BTCUSD → BTCUSD-PERP ----------------------------------
     case 'cryptocom':

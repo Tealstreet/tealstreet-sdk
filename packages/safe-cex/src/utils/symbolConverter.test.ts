@@ -249,3 +249,11 @@ describe('OKX demo symbol parity', () => {
     expect(fromBinance('BTCUSDT', 'okxeudemo')).toBe(fromBinance('BTCUSDT', 'okxeu'));
   });
 });
+
+describe('MEXC keeps the compact store symbol', () => {
+  it('converts other venues to the symbol MEXC markets are keyed by, never the BTC_USDT venue id', () => {
+    expect(convertSymbol('ARBUSDT', 'bybit', 'mexc')).toBe('ARBUSDT');
+    expect(fromBinance('BTCUSDT', 'mexc')).toBe('BTCUSDT');
+    expect(convertSymbol('ARBUSDT', 'mexc', 'bybit')).toBe('ARBUSDT');
+  });
+});
