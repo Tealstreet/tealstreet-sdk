@@ -167,6 +167,8 @@ pub mod code {
     pub const STREAM_MALFORMED: &str = "stream.malformed";
     /// The venue refused a subscription, or one would exceed its limits.
     pub const SUBSCRIPTION_REJECTED: &str = "subscription.rejected";
+    /// A repair ran: its topic, whether it resubscribed or reconnected, and the feed's last data.
+    pub const SUBSCRIPTION_REPAIRED: &str = "subscription.repaired";
     /// A REST read failed; the venue retries on its own schedule.
     pub const REQUEST_FAILED: &str = "request.failed";
     /// Reads are paused after the venue limited them.

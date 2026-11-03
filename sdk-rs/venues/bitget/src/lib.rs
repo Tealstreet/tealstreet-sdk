@@ -1105,10 +1105,11 @@ impl Venue for BitgetFutures {
                 // A product with no contracts cannot appear by retrying.
                 if empty && !tickers && self.inverse() {
                     let _ = cx.finish_http_context(&context);
-                    cx.startup_failed(
+                    let error =
                         safe_cex_engine::VenueError::new("Bitget lists no inverse contracts")
-                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
-                    );
+                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable);
+                    cx.notice_error(Level::Error, code::for_startup_error(&error), &error);
+                    cx.startup_failed(error);
                     return;
                 }
                 if empty {

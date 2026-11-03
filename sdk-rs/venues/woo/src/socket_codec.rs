@@ -133,6 +133,7 @@ impl Woo {
                 },
                 subscription_interval_ms: 0.,
                 close_floors: &[],
+                data_silence: None,
             })?;
             if private {
                 self.account.connection.feed = Some(feed);

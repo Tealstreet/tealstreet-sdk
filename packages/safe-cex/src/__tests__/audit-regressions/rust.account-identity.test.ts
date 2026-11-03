@@ -1,3 +1,11 @@
+vi.mock('../../exchanges/bybit/bybit.types', async (importOriginal) => {
+  const { configuredHyrotraderEndpoints } = await import('../fixtures/configuredHyrotraderEndpoints');
+  return {
+    ...(await importOriginal<typeof import('../../exchanges/bybit/bybit.types')>()),
+    ...configuredHyrotraderEndpoints,
+  };
+});
+
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
@@ -219,10 +227,8 @@ it.each(unsupportedAliases)(
   '%s rejects unsupported identity from its capability record without commands or startup',
   async (name) => {
     const r = fixture(name);
-    // HyroTrader's URLs come from build-time env, so here its host refuses to build.
-    await expect(r.exchange.getAccount()).rejects.toThrow(
-      name === 'hyrotrader' ? /Not implemented|URLs are not configured/ : /Not implemented/,
-    );
+    await expect(r.exchange.getAccount()).rejects.toThrow(/Not implemented/);
+    expect(r.construct).toHaveBeenCalledOnce();
     expect(r.native.start).not.toHaveBeenCalled();
     expect(r.queries()).toEqual([]);
     // Identity reads leave failure visibility to their caller.

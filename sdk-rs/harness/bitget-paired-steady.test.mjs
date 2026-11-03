@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_TOLERANCE, BITGET_PAIRED_PROTOCOL_SHA256,
   assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
-  BITGET_CUMULATIVE_ANCHOR, BITGET_MEASUREMENT_FILES, combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
+  BITGET_CUMULATIVE_ANCHOR, BITGET_MEASUREMENT_FILES, combineBitgetPairedCertificates,
+  assessBitgetUnchangedBytes, readBitgetSteadyCertificate, hasPairedBitgetSteady } from './bitget-paired-steady.mjs';
 import { performanceFailures, performanceOrder } from './performance-policy.mjs';
 import { assessEligibility, decideRemeasurement } from './cpu-remeasure.mjs';
 import { classifyInitialCase, pairedCertificateForRuntime } from './cpu-ci.mjs';
@@ -221,14 +222,15 @@ test('other CPU objectives still require their original two-run mean after stead
   assert.equal(decideRemeasurement(first, make(185, true), certificate).accepted, false);
 });
 
-test('a family certificate cannot authorize a different module or a combined build', () => {
-  const certificate = certificateFor(fixture());
+test('measured and unchanged family certificates cannot authorize a different module or combined build', () => {
+  for (const certificate of [certificateFor(fixture()), assessBitgetUnchangedBytes(unchangedFixture()).certificate]) {
   const entries = new Map([['manifest.json', Buffer.from(JSON.stringify({ entries: Object.entries(certificate.moduleHashes)
     .map(([name, sha256]) => ({ path: `sdk-rs/hosts/wasm/pkg/node/${name}`, type: 'file', sha256 })) }))]]);
   assert.equal(pairedCertificateForRuntime({ certificate }, { mode: 'family' }, entries), certificate);
   assert.equal(pairedCertificateForRuntime({ certificate }, { mode: 'combined' }, entries), undefined);
   entries.set('manifest.json', Buffer.from(JSON.stringify({ entries: [] })));
   assert.throws(() => pairedCertificateForRuntime({ certificate }, { mode: 'family' }, entries));
+  }
 });
 
 test('both independent comparisons are mandatory and cumulative creep blocks a passing tip', () => {
@@ -274,4 +276,97 @@ test('identical pinned anchor and candidate passes without advancing the anchor'
   assert.equal(data.evidence.archives.candidate.files['safe_cex_wasm_bg.wasm'], sha(BITGET_CUMULATIVE_ANCHOR));
   assert.equal(result.certificate.authority.baseline, result.certificate.authority.candidate);
   assert.equal(certificateFor(data).steadyAccepted, true);
+});
+
+
+function unchangedFixture() {
+  const data = fixture(1.0343978501725235);
+  const original = data.evidence.cohorts[1].evidence;
+  const evidence = data.evidence;
+  const baseline = evidence.archives.baseline;
+  baseline.files['safe_cex_wasm_bg.wasm'] = evidence.archives.candidate.files['safe_cex_wasm_bg.wasm'];
+  baseline.metadata.hashes['safe_cex_wasm_bg.wasm'] = baseline.files['safe_cex_wasm_bg.wasm'];
+  baseline.metadataBytes = JSON.stringify(baseline.metadata) + '\n';
+  baseline.files['build.json'] = sha(baseline.metadataBytes);
+  evidence.disposition = 'unchanged-bytes';
+  evidence.cohorts = [];
+  evidence.case = { venue: 'bitget', tape: original.report.tape, books: original.report.books, private: false };
+  evidence.tapeSha256 = original.report.tapeSha256;
+  return { ...data, original };
+}
+
+test('identical sealed WASM and glue yield an unmeasured disposition without either CPU witness', async () => {
+  const data = unchangedFixture(), reads = [];
+  const certificate = await readBitgetSteadyCertificate({ authority: data.authority, manifest,
+    readEvidence: async (name, selected) => {
+      reads.push(name); assert.equal(name, 'tip'); assert.equal(selected, data.authority);
+      return data.evidence;
+    } });
+  assert.deepEqual(reads, ['tip']);
+  assert.equal(certificate.disposition, 'unchanged bytes, not measured');
+  assert.equal(certificate.measured, false);
+  assert.equal(certificate.steadyAccepted, true);
+  assert.equal(certificate.noOverallSuiteCertification, true);
+  assert.equal(certificate.q, undefined);
+  assert.equal(certificate.anchor, undefined);
+  assert.equal(certificate.readinessByCpuModel, undefined);
+  assert.equal(classifyInitialCase(data.original, manifest, certificate).decision, 'first');
+  assert.equal(hasPairedBitgetSteady({ ...certificate }, data.original.report, B), false);
+  assert.equal(hasPairedBitgetSteady(certificate, data.original.report, A), true);
+  const foreign = structuredClone(data.original.report); foreign.ciWasm.sourceHead = A;
+  assert.equal(hasPairedBitgetSteady(certificate, foreign, B), false);
+  assert.throws(() => { certificate.moduleHashes['safe_cex_wasm.js'] = sha('changed'); });
+});
+
+test('unchanged byte proof fails closed on mismatched packages, seals, source, case or producer', () => {
+  const reseal = archive => {
+    archive.metadataBytes = JSON.stringify(archive.metadata) + '\n';
+    archive.files['build.json'] = sha(archive.metadataBytes);
+  };
+  for (const mutate of [
+    x => { x.authority = { ...x.authority }; },
+    x => { x.evidence.attempt = 2; }, x => { x.evidence.runId = '11'; },
+    x => { x.evidence.jobId = '31'; }, x => { x.evidence.runnerId = '41'; },
+    x => { x.evidence.refs.baseline = B; }, x => { x.evidence.measurementTree = A; },
+    x => { x.evidence.measurementFiles = { ...x.evidence.measurementFiles, 'sdk-rs/harness/gate.mjs': A }; },
+    x => { x.evidence.cohorts = [{}]; }, x => { x.evidence.case.venue = 'bitgetusdc'; },
+    x => { x.evidence.tapeSha256 = ''; },
+    x => { delete x.evidence.archives.baseline.files['safe_cex_wasm.js']; },
+    x => { x.evidence.archives.baseline.metadata.sourceHead = B; reseal(x.evidence.archives.baseline); },
+    ...['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js'].map(name => x => {
+      const archive = x.evidence.archives.baseline;
+      archive.files[name] = sha('different bytes'); archive.metadata.hashes[name] = archive.files[name]; reseal(archive);
+    }),
+    x => { x.evidence.archives.candidate.metadataBytes += ' '; },
+  ]) {
+    const data = unchangedFixture(); mutate(data);
+    assert.equal(assessBitgetUnchangedBytes(data).valid, false);
+  }
+});
+
+test('unchanged disposition cannot waive correctness, memory or process CPU failures', () => {
+  const data = unchangedFixture(), result = assessBitgetUnchangedBytes(data);
+  assert.equal(result.valid, true);
+  for (const mutate of [
+    x => { x.report.failures.push('snapshot mismatch'); x.report.status = 'FAIL'; },
+    x => { for (const sample of x.report.samples.rust) sample.retainedBytes = 10000; },
+    x => { for (const sample of x.report.samples.rust) sample.processCpuMs = 10000; },
+  ]) {
+    const invalid = structuredClone(data.original); mutate(invalid);
+    assert.throws(() => classifyInitialCase(invalid, manifest, result.certificate));
+  }
+});
+
+test('changed bytes still require both measured witnesses and the unchanged frozen bound', async () => {
+  for (const q of [1.023, 1.024, 1.0343978501725235]) {
+    const data = fixture(q), reads = [];
+    const certificate = await readBitgetSteadyCertificate({ authority: data.authority, manifest,
+      readEvidence: async name => { reads.push(name); return name === 'tip' ? data.evidence : anchorFixture(data).evidence; } });
+    assert.deepEqual(reads, ['tip', 'anchor']);
+    assert.equal(certificate.tolerance, 1.023110);
+    assert.equal(certificate.steadyAccepted, q <= 1.023110);
+    assert.equal(certificate.measured, undefined);
+    assert.equal(certificate.tip.originalReports.length, 8);
+    assert.equal(certificate.anchor.originalReports.length, 8);
+  }
 });

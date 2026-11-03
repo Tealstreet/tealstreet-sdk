@@ -400,6 +400,23 @@ impl<P> Cx<'_, P> {
             Some((required, pending)),
         )
     }
+    /// Retires a feed that answers pings but carries no data, and reconnects it
+    /// on the ordinary backoff; the next silence window doubles.
+    pub(crate) fn reconnect_silent_feed(&mut self, feed: FeedId) {
+        let effects = self.with_socket_driver(|driver, cx| {
+            driver.note_silent_reconnect(feed);
+            driver
+                .retire(
+                    cx,
+                    feed,
+                    crate::socket_lifecycle::RetireReason::Timeout(crate::socket::Timeout::Silent),
+                    true,
+                )
+                .into_iter()
+                .collect::<Vec<_>>()
+        });
+        self.socket_effects(effects);
+    }
     /// Force native unsubscribe/subscribe for unchanged current interests.
     pub fn repair_socket_interests(
         &mut self,
@@ -718,6 +735,10 @@ impl<V: Venue> Engine<V> {
             }
             let event = match self.socket_replace(proposal.feed, proposal.update) {
                 Ok(revision) => {
+                    // The watch follows the committed interests: only a continuous stream counts.
+                    self.socket_mutate(now, |driver, cx| {
+                        driver.refresh_data_watch(cx, proposal.feed)
+                    });
                     if V::socket_capabilities().handoff {
                         if let Some(mut work) = proposal.continuation {
                             work.revision = revision;
@@ -1289,6 +1310,7 @@ mod tests {
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
             close_floors: &[],
+            data_silence: None,
         }
     }
     impl Venue for Probe {
@@ -2852,3 +2874,7 @@ mod close_floor_tests;
 #[cfg(all(test, feature = "socket-native-timing"))]
 #[path = "socket_native_timing_tests.rs"]
 mod native_timing_tests;
+
+#[cfg(test)]
+#[path = "socket_data_silence_tests.rs"]
+mod data_silence_tests;
