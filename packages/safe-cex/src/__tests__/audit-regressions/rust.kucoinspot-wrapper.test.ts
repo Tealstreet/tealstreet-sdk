@@ -67,7 +67,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
 
   it('registers a spot account and loads once for account queries before startup', async () => {
     const { exchange, construct } = setup();
-    expect(isRustVenue('kucoinspot')).toBe(false);
+    expect(isRustVenue('kucoinspot')).toBe(true);
     expect(exchange.isSpot).toBe(true);
     await expect(exchange.getAccount()).resolves.toEqual({ userId: 'user', subId: null, affiliateId: null });
     await exchange.start();
