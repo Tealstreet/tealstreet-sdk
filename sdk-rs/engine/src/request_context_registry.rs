@@ -2235,12 +2235,16 @@ impl<P> Cx<'_, P> {
 /// Startup discovery's bound. The catalogue and first tickers can be most of a
 /// megabyte through a slow browser relay, and the open is inside the bound too.
 pub const DISCOVERY_TIMEOUT_MS: u32 = 60_000;
+/// Added to a discovery read's deadline for its transport to become ready (the HOW
+/// socket opening on a slow link), which the host caps on its own: the 60 s is the read's.
+pub const DISCOVERY_READINESS_MS: u32 = 30_000;
 
 /// The standard read bound venues give their reads.
 const READ_TIMEOUT_MS: u32 = 20_000;
 
 /// A public background read on the standard bound, issued before markets and tickers
-/// have loaded, is startup discovery: it gets DISCOVERY_TIMEOUT_MS. A bound a venue
+/// have loaded, is startup discovery: it gets DISCOVERY_TIMEOUT_MS plus
+/// DISCOVERY_READINESS_MS. A bound a venue
 /// chose for itself, and every other request, is kept.
 fn discovery_bound(scope: Scope, policy: Policy, loaded: crate::model::Loaded) -> Policy {
     let discovery = scope == Scope::Background
@@ -2249,7 +2253,7 @@ fn discovery_bound(scope: Scope, policy: Policy, loaded: crate::model::Loaded) -
         && !(loaded.markets && loaded.tickers);
     if discovery && policy.timeout_ms == READ_TIMEOUT_MS {
         Policy {
-            timeout_ms: DISCOVERY_TIMEOUT_MS,
+            timeout_ms: DISCOVERY_TIMEOUT_MS + DISCOVERY_READINESS_MS,
             ..policy
         }
     } else {
