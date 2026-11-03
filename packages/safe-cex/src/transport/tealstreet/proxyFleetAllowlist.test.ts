@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -8,7 +8,8 @@ import { PROXY_FLEET_REST_PREFIXES, proxyFleetForwards } from './proxyFleetAllow
 const FLEET_CONFIG = resolve(__dirname, '../../../../../terraform/private-exchange-proxy/haproxy-sg-running.cfg');
 
 describe('proxy fleet allowlist', () => {
-  it('equals the https prefixes the fleet HAProxy forwards', () => {
+  // The fleet config lives in tealstreet-next; the SDK mirror carries only this list.
+  it.skipIf(!existsSync(FLEET_CONFIG))('equals the https prefixes the fleet HAProxy forwards', () => {
     const config = readFileSync(FLEET_CONFIG, 'utf8');
     const prefixes = [...config.matchAll(/path_beg -i \/api\/exchange_proxy\/(https:\/\/\S+)/g)].map(
       ([, prefix]) => prefix,
