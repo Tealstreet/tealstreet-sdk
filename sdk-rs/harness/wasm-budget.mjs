@@ -111,7 +111,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kucoinspot: 2_074_624,
   lighter: 1_965_056,
   'lighter-robinhood': 1_948_672,
-  mexc: 1_697_792,
+  mexc: 1_714_176,
   okx: 1_909_760,
   orderly: 1_692_672,
   paradex: 2_196_480,
