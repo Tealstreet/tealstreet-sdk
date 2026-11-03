@@ -55,6 +55,7 @@ fn policy(private: bool) -> FeedPolicy {
         },
         subscription_interval_ms: 0.0,
         close_floors: &[],
+        data_silence: None,
     }
 }
 

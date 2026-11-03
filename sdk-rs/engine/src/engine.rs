@@ -596,6 +596,9 @@ pub enum VenueAction {
 
 /// The shared rejection for a venue action the venue does not implement.
 const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
+/// A repair on a feed that has carried no data this long reconnects it instead.
+#[cfg(feature = "managed-sockets")]
+const REPAIR_SILENCE_MS: f64 = 30_000.0;
 #[cfg(feature = "order-locks")]
 const UNCERTAIN_PLACEMENT: &str =
     "Placement outcome is uncertain; reconcile before placing or amending";
@@ -5511,6 +5514,17 @@ impl<V: Venue> Engine<V> {
                 io: &mut self.io,
             };
             for (feed, keys) in by_feed {
+                // Resubscribing on a socket that has carried no data cannot revive it.
+                if cx
+                    .io
+                    .core
+                    .socket_driver
+                    .data_silent_for(feed, now)
+                    .is_some_and(|silent| silent >= REPAIR_SILENCE_MS)
+                {
+                    cx.reconnect_silent_feed(feed);
+                    continue;
+                }
                 cx.repair_socket_interests(feed, keys)
                     .map_err(|error| format!("repair refused: {error:?}"))?;
             }

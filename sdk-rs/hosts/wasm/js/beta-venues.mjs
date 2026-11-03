@@ -47,8 +47,6 @@ const betaVenues = Object.freeze({
   orderly: { family: 'orderly' },
   paradex: { family: 'paradex' },
   phemex: { family: 'phemex' },
-  salsadex: { family: 'orderly' },
-  'tealstreet-dex': { family: 'orderly' },
   what: { family: 'orderly' },
   woo: { family: 'woo' },
   woofi: { family: 'orderly' },

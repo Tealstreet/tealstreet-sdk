@@ -27,11 +27,16 @@ impl Default for Config {
     }
 }
 
+/// The longest a silence window grows to between reconnects: ten minutes.
+const MAX_SILENCE_WINDOW_MS: f64 = 600_000.0;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Timeout {
     Connect,
     Auth,
     Idle,
+    /// Open and answering pings, but no data on a feed that streams continuously.
+    Silent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +71,11 @@ pub struct Supervisor {
     since: f64,
     received: f64,
     idle_enabled: bool,
+    /// The data-silence window while the feed carries a continuous stream; None when not watched.
+    data_after_ms: Option<f64>,
+    data_received: f64,
+    /// Consecutive reconnects for silence without data since: each doubles the window.
+    silent_streak: u32,
     next_ping: Option<f64>,
     watch: Option<TimerId>,
     watch_at: Option<f64>,
@@ -106,6 +116,9 @@ impl Supervisor {
             since: 0.0,
             received: 0.0,
             idle_enabled: true,
+            data_after_ms: None,
+            data_received: 0.0,
+            silent_streak: 0,
             next_ping: None,
             watch: None,
             watch_at: None,
@@ -128,6 +141,7 @@ impl Supervisor {
             self.stable_since = cx.now;
         }
         self.received = cx.now;
+        self.data_received = cx.now;
         self.arm(cx);
     }
 
@@ -146,6 +160,7 @@ impl Supervisor {
             self.stable_since = cx.now;
         }
         self.received = cx.now;
+        self.data_received = cx.now;
         self.next_ping = self.config.ping_interval_ms.map(|ms| cx.now + ms);
         self.rearm(cx);
     }
@@ -159,6 +174,7 @@ impl Supervisor {
             self.phase = Phase::Ready;
             self.since = cx.now;
             self.received = cx.now;
+            self.data_received = cx.now;
             self.rearm(cx);
         }
     }
@@ -204,6 +220,47 @@ impl Supervisor {
                 self.failures = 0;
             }
         }
+    }
+
+    /// A data frame (not a pong or control) on the current connection.
+    pub(crate) fn data(&mut self, now: f64) {
+        if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
+            self.data_received = now;
+            self.silent_streak = 0;
+        }
+    }
+
+    /// The silence window now: the declared one, doubled per consecutive silent
+    /// reconnect, so a feed that stays quiet is not redialled every minute.
+    fn data_window(&self) -> Option<f64> {
+        self.data_after_ms.map(|ms| {
+            (ms * f64::from(1u32 << self.silent_streak.min(4))).min(MAX_SILENCE_WINDOW_MS)
+        })
+    }
+
+    /// A reconnect for silence the timer did not raise (a repair that escalated).
+    pub(crate) fn note_silent_reconnect(&mut self) {
+        self.silent_streak = self.silent_streak.saturating_add(1);
+    }
+
+    /// Watch for data silence, `after_ms` without a data frame, or stop watching.
+    /// Arming starts the window afresh, so a newly added stream gets its full window.
+    pub(crate) fn set_data_watch<P>(&mut self, cx: &mut Cx<'_, P>, after_ms: Option<f64>) {
+        if self.data_after_ms == after_ms {
+            return;
+        }
+        assert!(after_ms.is_none_or(|ms| ms.is_finite() && ms > 0.0));
+        self.data_after_ms = after_ms;
+        self.data_received = cx.now;
+        if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
+            self.rearm(cx);
+        }
+    }
+
+    /// How long a watched, ready feed has gone without data; None when not watched.
+    pub(crate) fn data_silent_for(&self, now: f64) -> Option<f64> {
+        (self.phase == Phase::Ready && self.data_after_ms.is_some())
+            .then_some(now - self.data_received)
     }
 
     #[cfg(feature = "managed-sockets")]
@@ -270,6 +327,13 @@ impl Supervisor {
                 if self.idle_enabled && now >= self.received + self.config.idle_timeout_ms =>
             {
                 Some(Timeout::Idle)
+            }
+            Phase::Ready
+                if self
+                    .data_window()
+                    .is_some_and(|ms| now >= self.data_received + ms) =>
+            {
+                Some(Timeout::Silent)
             }
             _ => None,
         }
@@ -409,6 +473,9 @@ impl Supervisor {
             // Retire first; late activity cannot rescue an expired connection.
             self.phase = Phase::Stopped;
             self.next_ping = None;
+            if timeout == Timeout::Silent {
+                self.note_silent_reconnect();
+            }
             return Tick::TimedOut(timeout);
         }
         let ping = self.next_ping.is_some_and(|at| cx.now >= at);
@@ -450,7 +517,13 @@ impl Supervisor {
                     (auth, idle) => auth.or(idle),
                 }
             }
-            Phase::Ready => idle,
+            Phase::Ready => {
+                let silent = self.data_window().map(|ms| self.data_received + ms);
+                match (idle, silent) {
+                    (Some(i), Some(d)) => Some(i.min(d)),
+                    (idle, silent) => idle.or(silent),
+                }
+            }
             Phase::Stopped | Phase::Waiting => return None,
         };
         #[cfg(feature = "managed-sockets")]

@@ -579,6 +579,34 @@ impl Driver {
         self.finish_control(cx, epoch, control, startup_ready, work)
     }
 
+    /// Watch `feed` for data silence while its committed interests include a
+    /// continuous stream; stop watching when they no longer do.
+    pub(crate) fn refresh_data_watch<P>(&mut self, cx: &mut Cx<'_, P>, feed: FeedId) {
+        let Some(silence) = self
+            .state
+            .policy(feed)
+            .ok()
+            .and_then(|policy| policy.data_silence)
+        else {
+            return;
+        };
+        let watched = self.state.desires_any(feed, |key| silence.streams(key));
+        self.runtime_mut(feed)
+            .supervisor
+            .set_data_watch(cx, watched.then_some(silence.after_ms));
+    }
+
+    pub(crate) fn note_silent_reconnect(&mut self, feed: FeedId) {
+        self.runtime_mut(feed).supervisor.note_silent_reconnect();
+    }
+
+    /// How long `feed` has gone without data while watched; None when not watched or not ready.
+    pub(crate) fn data_silent_for(&self, feed: FeedId, now: f64) -> Option<f64> {
+        self.runtimes
+            .get(feed.index())
+            .and_then(|runtime| runtime.supervisor.data_silent_for(now))
+    }
+
     /// Ordinary current traffic stays in place. Scheduling/activation and auth
     /// still require the original context before receive/auth transitions.
     pub(crate) fn observe_control(
@@ -601,6 +629,13 @@ impl Driver {
             .policy(epoch.feed())
             .expect("current feed")
             .traffic;
+        if matches!(control, Control::Other) {
+            self.runtime_mut(epoch.feed()).supervisor.data(now);
+        }
+        #[cfg(feature = "socket-native-timing")]
+        if matches!(control, Control::Traffic) {
+            self.runtime_mut(epoch.feed()).supervisor.data(now);
+        }
         let refresh = self
             .state
             .traffic(epoch, true, matches!(control, Control::Pong));
@@ -1115,6 +1150,7 @@ mod tests {
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
             close_floors: &[],
+            data_silence: None,
         }
     }
     fn bitunix() -> FeedPolicy {

@@ -126,6 +126,24 @@ pub struct FeedPolicy {
     /// Minimum reconnect delay, in ms, after the venue closes with each code.
     /// The retry waits for the longer of this and the ordinary backoff.
     pub close_floors: &'static [(u16, f64)],
+    /// Reconnect a socket that answers pings but carries no data. None: never.
+    pub data_silence: Option<DataSilence>,
+}
+
+/// A feed is watched for data silence only while one of its interests streams
+/// continuously (tickers, an order book): quiet topics alone never count.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DataSilence {
+    /// No data frame for this long on a watched feed means its subscriptions died.
+    pub after_ms: f64,
+    /// Interest-key prefixes of the topics that stream continuously.
+    pub streams: &'static [&'static str],
+}
+impl DataSilence {
+    /// Whether this interest key is a continuous stream.
+    pub(crate) fn streams(&self, key: &str) -> bool {
+        self.streams.iter().any(|prefix| key.starts_with(prefix))
+    }
 }
 impl FeedPolicy {
     /// Longest floor a feed may declare: ten minutes.
@@ -169,6 +187,9 @@ impl FeedPolicy {
             || self.controls == ControlPolicy::None
                 && (self.auth != AuthMode::None || self.traffic != TrafficPolicy::AnyText)
             || !self.valid_close_floors()
+            || self
+                .data_silence
+                .is_some_and(|silence| !positive(silence.after_ms) || silence.streams.is_empty())
         {
             return Err(SocketError::InvalidPolicy);
         }
@@ -625,6 +646,16 @@ impl Lifecycle {
         self.feeds
             .get(feed.0)
             .is_some_and(|f| !f.stopped && f.interests.desired.contains_key(key))
+    }
+    /// Whether a live feed wants any key matching `matches`.
+    pub(crate) fn desires_any(&self, feed: FeedId, matches: impl Fn(&str) -> bool) -> bool {
+        self.feeds.get(feed.0).is_some_and(|f| {
+            !f.stopped
+                && f.interests
+                    .desired
+                    .values()
+                    .any(|interest| matches(&interest.key))
+        })
     }
     pub(crate) fn current(&self, epoch: Epoch) -> bool {
         self.epoch(epoch.feed) == Some(epoch)
@@ -1447,6 +1478,7 @@ mod tests {
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
             close_floors: &[],
+            data_silence: None,
         }
     }
     fn started(auth: AuthMode) -> (Lifecycle, FeedId, Epoch) {

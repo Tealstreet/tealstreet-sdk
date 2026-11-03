@@ -469,6 +469,7 @@ impl BinanceFutures {
             invalidation: Invalidation::Required,
             subscription_interval_ms: if paced { SPOT_SUBSCRIBE_PACE_MS } else { 0.0 },
             close_floors: &[],
+            data_silence: None,
         }
     }
 

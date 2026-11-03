@@ -779,6 +779,7 @@ impl Venue for RetirementPressure {
                 invalidation: Invalidation::Required,
                 subscription_interval_ms: 0.,
                 close_floors: &[],
+                data_silence: None,
             })
             .expect("genuine foreign feed registration"),
         );
