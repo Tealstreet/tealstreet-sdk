@@ -1,4 +1,6 @@
 //! Classic Futures API key version 2 signs the raw path and the passphrase.
+pub mod dispatch;
+
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::Method;
 use serde::Deserialize;
