@@ -1,7 +1,9 @@
 #![cfg(feature = "spot")]
+mod support;
 use safe_cex_engine::request_context::{Error, HttpAction, Preparation, RoutingIntent};
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, VenueError};
-use safe_cex_venue_kucoin::{Options, spot::KucoinSpot};
+use safe_cex_venue_kucoin::spot::KucoinSpot;
+use support::credentials::Options;
 
 // Startup discovery reads carry the engine's 60 s discovery deadline.
 const DISCOVERY_DEADLINE_MS: f64 = 60_000.;
@@ -9,19 +11,22 @@ const MARKETS: &str = r#"{"code":"200000","data":[{"symbol":"BTC-USDT","baseCurr
 const TICKERS: &str = r#"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100","buy":"99","sell":"101"}]}}"#;
 
 fn engine(keyed: bool) -> Engine<KucoinSpot> {
-    safe_cex_engine::test_support::seeded_engine(KucoinSpot::new(if keyed {
-        Options {
-            key: Some("fixture-key".into()),
-            secret: Some("fixture-secret".into()),
-            passphrase: Some("fixture-passphrase".into()),
-            ..Options::default()
-        }
-    } else {
-        Options {
-            public_data_only: true,
-            ..Options::default()
-        }
-    }))
+    support::credentials::engine(
+        if keyed {
+            Options {
+                key: Some("fixture-key".into()),
+                secret: Some("fixture-secret".into()),
+                passphrase: Some("fixture-passphrase".into()),
+                ..Options::default()
+            }
+        } else {
+            Options {
+                public_data_only: true,
+                ..Options::default()
+            }
+        },
+        KucoinSpot::new,
+    )
 }
 fn reply(e: &mut Engine<KucoinSpot>, now: f64, request: safe_cex_engine::RequestId, body: &str) {
     e.handle(

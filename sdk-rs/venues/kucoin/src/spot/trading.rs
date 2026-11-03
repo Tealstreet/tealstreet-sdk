@@ -1,6 +1,6 @@
 use super::*;
 use crate::wire::not_sent;
-use safe_cex_engine::num::{adjust, format};
+use safe_cex_engine::num::{self, adjust};
 use safe_cex_engine::{ErrorKind, Outcome, VenueError};
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,7 +107,7 @@ impl KucoinSpot {
             safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
         })?;
         let price = if o.kind == OrderType::Limit {
-            Some(format(adjust(
+            Some(num::format(adjust(
                 o.price.ok_or("KuCoin Spot limit order needs a price")?,
                 m.precision.price,
             )))
@@ -128,7 +128,7 @@ impl KucoinSpot {
                 "buy"
             },
             price,
-            size: format(amount),
+            size: num::format(amount),
             time_in_force: (o.kind == OrderType::Limit).then_some(match o.time_in_force {
                 Some(TimeInForce::ImmediateOrCancel) => "IOC",
                 Some(TimeInForce::FillOrKill) => "FOK",
@@ -370,8 +370,8 @@ impl KucoinSpot {
                     let body = serde_json::to_string(&Alter {
                         symbol: &market.id,
                         order_id: &id,
-                        new_price: price.map(|n| format(adjust(n, market.precision.price))),
-                        new_size: amount.map(|n| format(adjust(n, market.precision.amount))),
+                        new_price: price.map(|n| num::format(adjust(n, market.precision.price))),
+                        new_size: amount.map(|n| num::format(adjust(n, market.precision.amount))),
                     })
                     .unwrap();
                     Ok((
