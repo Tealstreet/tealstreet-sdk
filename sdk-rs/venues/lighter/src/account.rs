@@ -527,10 +527,9 @@ impl OrderRowError {
         Self::Invalid(error.to_string())
     }
 }
-/// A stream row's own client order index (top level or nested `order`).
-/// What legacy would report for a cancelled row: its reason, or the status
-/// when that names a rejection. `None` for the user's own cancel.
-fn rejection_message(raw: &RawValue, order: &Order) -> Option<String> {
+/// Native stream rejection with a readable post-only explanation.
+/// No notice for the user's own cancellation.
+fn rejection_error(raw: &RawValue, order: &Order) -> Option<VenueError> {
     #[derive(Deserialize)]
     struct Nested<'a> {
         #[serde(default, borrow)]
@@ -546,18 +545,28 @@ fn rejection_message(raw: &RawValue, order: &Order) -> Option<String> {
     let nested = serde_json::from_str::<Nested<'_>>(raw.get()).ok()?;
     let row = serde_json::from_str::<Row<'_>>(nested.order.unwrap_or(raw).get()).ok()?;
     let reason = row.cancel_reason.trim();
-    if !reason.is_empty() {
-        return (!matches!(
-            reason.to_ascii_uppercase().as_str(),
-            "USER_CANCELLED" | "USER_CANCELED"
-        ))
-        .then(|| reason.to_owned());
+    if matches!(
+        reason.to_ascii_uppercase().as_str(),
+        "USER_CANCELLED" | "USER_CANCELED"
+    ) {
+        return None;
     }
-    order
-        .extra
-        .as_ref()
-        .and_then(|extra| extra.reject_reason)
-        .map(|_| row.status.into_owned())
+    let reject_reason = order.extra.as_ref().and_then(|extra| extra.reject_reason);
+    let native_message = if !reason.is_empty() {
+        reason
+    } else if reject_reason.is_some() {
+        row.status.as_ref()
+    } else {
+        return None;
+    };
+    // Translate only the native post-only rejection, retaining its typed diagnostics.
+    Some(if reject_reason == Some(RejectReason::PostOnly) {
+        VenueError::new("Post-only order would execute immediately as taker; not placed.")
+            .kind(ErrorKind::Rejected)
+            .venue_message(native_message)
+    } else {
+        VenueError::new(native_message)
+    })
 }
 
 fn client_order_index(raw: &RawValue) -> Option<String> {
@@ -2625,9 +2634,9 @@ impl Lighter {
                     if order.status == OrderStatus::Canceled
                         && cx.now - order.last_update <= 5_000.0
                         && cx.now - self.account.connection.connected_at > 5_000.0
-                        && let Some(message) = rejection_message(row, &order)
+                        && let Some(error) = rejection_error(row, &order)
                     {
-                        cx.notice(Level::Error, code::ORDER_REJECTED, message);
+                        cx.notice_error(Level::Error, code::ORDER_REJECTED, &error);
                     }
                     if matches!(order.status, OrderStatus::Canceled | OrderStatus::Closed) {
                         self.account.suppressed.insert(order.id.clone());
