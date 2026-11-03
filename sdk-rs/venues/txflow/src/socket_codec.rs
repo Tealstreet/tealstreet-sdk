@@ -176,6 +176,7 @@ impl TxFlow {
                 invalidation: Invalidation::Required,
                 subscription_interval_ms: 150.,
                 close_floors: &[],
+                data_silence: None,
             })?;
             conn.feed = Some(feed);
             feed

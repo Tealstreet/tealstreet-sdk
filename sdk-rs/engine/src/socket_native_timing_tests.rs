@@ -37,6 +37,7 @@ impl Default for Probe {
                 invalidation: Invalidation::None,
                 subscription_interval_ms: 0.,
                 close_floors: &[],
+                data_silence: None,
             },
             timing: Some(NativeTiming::default()),
             snapshot: false,

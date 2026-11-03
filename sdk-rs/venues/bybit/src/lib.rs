@@ -42,9 +42,9 @@ use safe_cex_engine::model::{
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::socket::{Config, Timeout};
 use safe_cex_engine::socket_lifecycle::{
-    AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy, Interest,
-    Invalidation, LifecycleEvent, MAX_INTERESTS, RetireReason, SocketCapabilities, SocketError,
-    TrafficPolicy,
+    AuthMode, AuthRecovery, Control, ControlPolicy, DataSilence, EncodedBatch, FeedId, FeedPolicy,
+    Interest, Invalidation, LifecycleEvent, MAX_INTERESTS, RetireReason, SocketCapabilities,
+    SocketError, TrafficPolicy,
 };
 use safe_cex_engine::time;
 use safe_cex_engine::{
@@ -80,6 +80,8 @@ const SOCKET: Config = Config {
 /// A book that skipped an update is unsubscribed, then subscribed again for a
 /// fresh snapshot this long after.
 const RESUBSCRIBE_DELAY_MS: f64 = 100.0;
+/// A public feed carrying tickers or books with no data this long has lost its subscriptions.
+const PUBLIC_SILENCE_MS: f64 = 60_000.0;
 /// Bybit closes a public socket that subscribes too fast: ten topics per
 /// message, one message per pace interval.
 const TOPICS_PER_SUBSCRIBE: usize = 10;
@@ -1134,6 +1136,11 @@ impl BybitLinear {
                     invalidation: Invalidation::Required,
                     subscription_interval_ms: SUBSCRIBE_PACE_MS,
                     close_floors: &[],
+                    // Tickers and books stream all session; a socket with only those gone quiet is dead.
+                    data_silence: matches!(channel, Channel::Public).then_some(DataSilence {
+                        after_ms: PUBLIC_SILENCE_MS,
+                        streams: &["tickers.", "orderbook."],
+                    }),
                 });
                 match registered {
                     Ok(feed) => {
@@ -1181,6 +1188,9 @@ impl BybitLinear {
             }
             (RetireReason::Timeout(Timeout::Idle), _) => {
                 "Bybit socket closed (idle timeout); reconnecting".into()
+            }
+            (RetireReason::Timeout(Timeout::Silent), _) => {
+                "Bybit public stream carried no data; reconnecting".into()
             }
             (RetireReason::Timeout(_), _) => "Bybit socket timed out; reconnecting".into(),
             (RetireReason::Authentication, _) => {
