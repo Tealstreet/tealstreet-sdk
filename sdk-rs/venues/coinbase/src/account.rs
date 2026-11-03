@@ -1777,15 +1777,34 @@ impl Coinbase {
                 }
                 Request::SpotBalance => {
                     self.account.inflight[1] = false;
-                    let r: wire::Breakdown =
+                    let r: wire::Breakdown<'_> =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
                     if r.breakdown.spot_positions.len() > 1000 {
                         return Err(
                             "Coinbase invalid field `spot_positions`: balance row limit".into()
                         );
                     }
+                    let mut spot_rows = Vec::new();
+                    for raw in r.breakdown.spot_positions {
+                        let account: wire::SpotAccount =
+                            serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
+                        if !account.is_spot_wallet() {
+                            let kind = account.excluded_type();
+                            self.account.skip_logged.report(
+                                cx,
+                                format!("holding-type:{kind}"),
+                                Level::Info,
+                                format!("Coinbase excluded spot account type {kind}"),
+                            );
+                            continue;
+                        }
+                        spot_rows.push(
+                            serde_json::from_str::<wire::SpotBalance>(raw.get())
+                                .map_err(|e| e.to_string())?,
+                        );
+                    }
                     let cash = (self.account.kind == Some(ProductKind::Spot))
-                        .then(|| r.breakdown.cash_balance())
+                        .then(|| wire::cash_balance(&spot_rows))
                         .transpose()?;
                     let mut coins = SnapshotBuilder::default();
                     let mut sums = HashMap::<String, Balance>::new();
@@ -1797,7 +1816,7 @@ impl Coinbase {
                             .iter()
                             .any(|c| asset.is_none_or(|a| c.currency == a))
                     };
-                    for b in r.breakdown.spot_positions {
+                    for b in spot_rows {
                         if b.asset.is_empty() {
                             self.account.skip_logged.report(
                                 cx,

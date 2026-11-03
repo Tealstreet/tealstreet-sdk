@@ -41,68 +41,53 @@ pub struct CfmSummary {
     pub unrealized_pnl: Option<Money>,
 }
 #[derive(Deserialize)]
-pub struct Breakdown {
-    pub breakdown: BreakdownBody,
+pub struct Breakdown<'a> {
+    #[serde(borrow)]
+    pub breakdown: BreakdownBody<'a>,
 }
 #[derive(Deserialize)]
-pub struct BreakdownBody {
-    pub spot_positions: Vec<SpotBalance>,
-    pub portfolio_balances: Option<PortfolioBalances>,
+pub struct BreakdownBody<'a> {
+    #[serde(borrow)]
+    pub spot_positions: Vec<&'a RawValue>,
 }
-#[derive(Deserialize)]
-pub struct PortfolioBalances {
-    pub total_cash_equivalent_balance: Option<CashEquivalent>,
-}
-#[derive(Deserialize)]
-pub struct CashEquivalent {
-    pub value: Decimal,
-    pub currency: String,
-}
-impl BreakdownBody {
-    pub fn cash_balance(&self) -> Result<safe_cex_engine::model::Balance, String> {
-        let (mut row_total, mut free) = (0., 0.);
-        for row in self
-            .spot_positions
-            .iter()
-            .filter(|row| matches!(row.asset.as_str(), "USD" | "USDC"))
+pub fn cash_balance(rows: &[SpotBalance]) -> Result<safe_cex_engine::model::Balance, String> {
+    let (mut total, mut free) = (0., 0.);
+    for row in rows
+        .iter()
+        .filter(|row| matches!(row.asset.as_str(), "USD" | "USDC"))
+    {
+        let row_total = row
+            .total_balance_fiat
+            .map_or(row.total_balance_crypto.0, |n| n.0);
+        let available = row
+            .available_to_trade_fiat
+            .map_or(row.available_to_trade_crypto.0, |n| n.0);
+        if row_total < 0.
+            || available < 0.
+            || available > row_total
+            || row.total_balance_crypto.0 < 0.
+            || row.available_to_trade_crypto.0 < 0.
+            || row.available_to_trade_crypto.0 > row.total_balance_crypto.0
         {
-            let total = row
-                .total_balance_fiat
-                .map_or(row.total_balance_crypto.0, |n| n.0);
-            let available = row
-                .available_to_trade_fiat
-                .map_or(row.available_to_trade_crypto.0, |n| n.0);
-            if total < 0.
-                || available < 0.
-                || available > total
-                || row.total_balance_crypto.0 < 0.
-                || row.available_to_trade_crypto.0 < 0.
-                || row.available_to_trade_crypto.0 > row.total_balance_crypto.0
-            {
-                return Err("Coinbase invalid spot cash balance".into());
-            }
-            row_total += total;
-            free += available;
+            return Err("Coinbase invalid spot cash balance: field `spot_positions`".into());
         }
-        let total = match self
-            .portfolio_balances
-            .as_ref()
-            .and_then(|p| p.total_cash_equivalent_balance.as_ref())
-        {
-            Some(cash) if cash.currency == "USD" => cash.value.0,
-            Some(_) => return Err("Coinbase spot cash balance is not USD".into()),
-            None => row_total,
-        };
-        if !total.is_finite() || !free.is_finite() || total < 0. || free < 0. || free > total {
-            return Err("Coinbase invalid spot cash balance".into());
-        }
-        Ok(safe_cex_engine::model::Balance {
-            total,
-            free,
-            used: total - free,
-            upnl: 0.,
-        })
+        total += row_total;
+        free += available;
     }
+    if !total.is_finite() || !free.is_finite() || total < 0. || free < 0. || free > total {
+        return Err("Coinbase invalid spot cash balance: field `spot_positions`".into());
+    }
+    Ok(safe_cex_engine::model::Balance {
+        total,
+        free,
+        used: total - free,
+        upnl: 0.,
+    })
+}
+#[derive(Deserialize)]
+pub struct SpotAccount {
+    #[serde(default)]
+    pub account_type: String,
 }
 #[derive(Deserialize)]
 pub struct SpotBalance {
@@ -116,27 +101,51 @@ pub struct SpotBalance {
     #[serde(default, deserialize_with = "spot_available_fiat")]
     pub available_to_trade_fiat: Option<Decimal>,
 }
-macro_rules! spot_amount {
-    ($name:ident, $ty:ty, $field:literal) => {
-        fn $name<'de, D: serde::Deserializer<'de>>(d: D) -> Result<$ty, D::Error> {
-            <$ty>::deserialize(d).map_err(|_| {
-                serde::de::Error::custom(concat!(
-                    "Coinbase invalid field `spot_positions.",
-                    $field,
-                    "`"
-                ))
-            })
+impl SpotAccount {
+    pub fn is_spot_wallet(&self) -> bool {
+        matches!(
+            self.account_type.as_str(),
+            "ACCOUNT_TYPE_FIAT" | "ACCOUNT_TYPE_WALLET"
+        )
+    }
+    pub fn excluded_type(&self) -> &str {
+        let kind = self.account_type.as_str();
+        if kind.is_empty() {
+            "MISSING"
+        } else if kind.len() <= 80
+            && kind.starts_with("ACCOUNT_TYPE_")
+            && kind.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
+        {
+            kind
+        } else {
+            "UNKNOWN"
         }
-    };
+    }
 }
-spot_amount!(spot_total_crypto, Decimal, "total_balance_crypto");
-spot_amount!(spot_available_crypto, Decimal, "available_to_trade_crypto");
-spot_amount!(spot_total_fiat, Option<Decimal>, "total_balance_fiat");
-spot_amount!(
-    spot_available_fiat,
-    Option<Decimal>,
-    "available_to_trade_fiat"
-);
+fn spot_total_crypto<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Decimal, D::Error> {
+    <Decimal>::deserialize(d).map_err(|_| {
+        serde::de::Error::custom("Coinbase invalid field `spot_positions.total_balance_crypto`")
+    })
+}
+fn spot_available_crypto<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Decimal, D::Error> {
+    <Decimal>::deserialize(d).map_err(|_| {
+        serde::de::Error::custom(
+            "Coinbase invalid field `spot_positions.available_to_trade_crypto`",
+        )
+    })
+}
+fn spot_total_fiat<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Decimal>, D::Error> {
+    <Option<Decimal>>::deserialize(d).map_err(|_| {
+        serde::de::Error::custom("Coinbase invalid field `spot_positions.total_balance_fiat`")
+    })
+}
+fn spot_available_fiat<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Decimal>, D::Error> {
+    <Option<Decimal>>::deserialize(d).map_err(|_| {
+        serde::de::Error::custom("Coinbase invalid field `spot_positions.available_to_trade_fiat`")
+    })
+}
 #[derive(Deserialize)]
 pub struct IntxPosition<'a> {
     #[serde(borrow)]

@@ -1,33 +1,38 @@
 # Coinbase Spot cash balance and US retail readiness
 
-Coinbase Spot now publishes a USD root balance for the NX margin panel. The
-total comes from `breakdown.portfolio_balances.total_cash_equivalent_balance`
-when its currency is USD. Free is the sum of USD/USDC
-`available_to_trade_fiat`, falling back to each row's available crypto amount
-when that optional field is absent. Used is total minus free; upnl is zero.
-Without a cash-equivalent summary, total is the USD/USDC row fiat sum, falling
-back to native cash quantities. Non-cash crypto and futures equity do not enter
-this root. Negative, inconsistent or non-USD summaries retain the last snapshot.
+Coinbase Spot publishes a USD root balance for the NX margin panel using only
+spot wallet rows. The portfolio breakdown's `account_type` allowlist is
+`ACCOUNT_TYPE_FIAT` and `ACCOUNT_TYPE_WALLET` (the endpoint's crypto-wallet name).
+Prediction-markets, derivatives, vault, staking, missing and unknown types are
+excluded before decoding their amounts. Each excluded type emits a bounded,
+once-per-account-type note containing only its type; malformed labels become
+UNKNOWN. The note uses the existing row-report suppression, not a new cache.
 
-Currency slices retain their actual crypto total, free and used quantities.
-Multiple wallet/vault rows for the same asset are summed, with used recomputed
-as total minus free. This fixes the live DEFAULT-portfolio readiness failure:
-the old Rust path rejected duplicate assets and never loaded balance. Legacy
-TS overwrote earlier rows; summation deliberately corrects that behavior too.
-The 1,000 physical-row limit stays in place. Invalid rows retain the previous
-asset slice rather than publishing a partial sum, and non-finite sums refuse
-the snapshot. Malformed amount errors name their field without echoing values.
-No synthetic USD currency replaces an actual USD holding, and no USD/USDC
-order-sizing alias is introduced. CFM and INTX roots retain their own sources.
-An empty complete Spot snapshot clears the root and currencies.
+Root total is the sum of the filtered USD/USDC rows' `total_balance_fiat`, with
+native cash quantities as the fallback when absent. Free similarly sums
+`available_to_trade_fiat` with a native-quantity fallback. Used is total minus
+free; upnl is zero. `portfolio_balances.total_cash_equivalent_balance` is ignored:
+it may include prediction or derivatives cash. Non-cash crypto equity is excluded.
+CFM and INTX roots retain their own sources.
 
-The fixture models a US retail account with one DEFAULT portfolio, duplicate
-USDC wallet/vault rows, null or absent derivatives sections and no INTX
-or CFM account. Real engine startup sets empty positions locally, completes all
-five working-order status reads, and reports markets/tickers/balance/orders/
-positions loaded. The same startup and 2,600-USDC balance pass through the actual
-JS EngineHost, WASM frame decoder and SDK store. No live account evidence is
-claimed by those fixture tests.
+Currency slices keep actual crypto total and free quantities. Multiple retained
+spot wallets for one asset sum their quantities, with used recomputed as total
+minus free. This deliberately corrects legacy TS's last-row-wins behavior.
+Invalid rows preserve the old asset slice rather than publishing a partial sum;
+invalid cash rows or non-finite aggregates refuse the snapshot. The physical
+1,000-row limit applies before filtering or aggregation. Malformed amount errors
+name their field without echoing values. An empty complete spot snapshot clears
+the root and currencies. No synthetic USD currency replaces a real USD holding.
+
+The live read-only probe established why balance never loaded: a DEFAULT
+portfolio returned three USD rows of FIAT, PREDICTION_MARKETS_CFM and
+DERIVATIVES_CASH types. The old Rust duplicate-asset rejection aborted every
+poll while markets, tickers, orders and positions loaded normally. The new
+production fixture includes those three USD rows and one 2,600-USDC wallet;
+only FIAT USD 100 plus WALLET USDC 2,600 count, yielding root 2,700/free 2,490.
+The actual JS EngineHost/WASM/SDK fixture asserts all loaded flags and these
+balances with null derivatives sections and no INTX/CFM dependency. A separate
+fixture proves remaining genuine duplicate spot wallets sum correctly.
 
 ## Legacy comparison
 
@@ -42,7 +47,8 @@ Compared with NX `origin/legacy-master` at
   and free from `available_to_trade_crypto`; Rust uses `total_balance_crypto`
   for total and available crypto for free. Neither used the portfolio cash
   summary before this fix. This change fixes that shared limitation rather than
-  claiming that legacy had a nonzero aggregate root.
+  claiming that legacy had a nonzero aggregate root. Non-spot account types
+  are now deliberately excluded.
 - NX Margin's Spot summary sums `balance.coins[].notional`, otherwise uses the
   root. Its quote rows use the exact quote currency slice, then quote coin,
   otherwise zero. The separate Spot holdings table values `balance.currencies`
@@ -61,8 +67,9 @@ Compared with NX `origin/legacy-master` at
   subscribes heartbeats and requested book/candle/trade channels, not tickers.
   This PR does not change the REST poll cadence.
 
-Coinbase's documented breakdown separates cash-equivalent portfolio totals and
-native/fiat amounts per holding:
+Coinbase's documented breakdown separates account types and native/fiat amounts
+per holding; its embedded account_type enum names the crypto wallet
+ACCOUNT_TYPE_WALLET:
 https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/portfolios/get-portfolio-breakdown
 
 No new caller setup or ordering prerequisite. Hosted signing, credential
