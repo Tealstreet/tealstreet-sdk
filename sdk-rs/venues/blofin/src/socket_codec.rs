@@ -45,6 +45,7 @@ fn policy(private: bool) -> FeedPolicy {
         },
         subscription_interval_ms: 0.,
         close_floors: &[],
+        data_silence: None,
     }
 }
 /// A book's streams; the first carries the book itself.

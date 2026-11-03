@@ -23,6 +23,7 @@ export const BITGET_PAIRED_PROTOCOL_SHA256 = createHash('sha256').update(JSON.st
 const authorities = new WeakSet();
 const certificates = new WeakSet();
 const combinedCertificates = new WeakSet();
+const unchangedCertificates = new WeakSet();
 const same = isDeepStrictEqual;
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const oid = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
@@ -190,8 +191,57 @@ export function assessBitgetPairedSteady({ authority, evidence, manifest }) {
   catch (error) { return { valid: false, errors: [error.message], certificate: null }; }
 }
 
+/** A distinct unmeasured disposition; archive seals come from independent bytes. */
+export function assessBitgetUnchangedBytes({ authority, evidence }) {
+  try {
+    insist(authorities.has(authority) && authority.witness === 'tip', 'unchanged bytes require issued tip authority');
+    insist(evidence?.schema === 1 && evidence.disposition === 'unchanged-bytes' &&
+      evidence.attempt === 1 && evidence.runId === authority.runId && evidence.jobId === authority.jobId &&
+      evidence.runnerId === authority.runnerId, 'unchanged bytes belong to another original producer');
+    insist(evidence.freezeSha256 === BITGET_PAIRED_FREEZE_SHA256 && evidence.protocolSha256 === BITGET_PAIRED_PROTOCOL_SHA256 &&
+      same(evidence.order, BITGET_COHORT_ORDER) && same(evidence.cohorts, []), 'unchanged bytes cannot claim measured observations');
+    insist(evidence.refs?.baseline === authority.baseline && evidence.refs?.candidate === authority.candidate &&
+      evidence.candidateTree === authority.candidateTree && evidence.measurementSource === authority.candidate &&
+      evidence.measurementTree === authority.candidateTree && same(evidence.measurementFiles, authority.measurementFiles),
+    'unchanged bytes differ from authenticated source/composition');
+    insist(exactCase(evidence.case) && hash(evidence.tapeSha256), 'unchanged bytes require canonical Bitget public input');
+    for (const arm of ['baseline', 'candidate']) checkArchive(evidence.archives?.[arm], authority[arm], authority);
+    for (const name of ['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js']) {
+      const baseline = evidence.archives.baseline, candidate = evidence.archives.candidate;
+      insist(hash(baseline.files[name]) && baseline.metadata.hashes[name] === baseline.files[name] &&
+        candidate.metadata.hashes[name] === candidate.files[name] && baseline.files[name] === candidate.files[name],
+      `unchanged bytes require identical sealed ${name}`);
+    }
+    const certificate = freezeTree({ schema: 1, rule: 'bitget-public-steady-unchanged-bytes',
+      disposition: 'unchanged bytes, not measured', measured: false, steadyAccepted: true, authority,
+      tapeSha256: evidence.tapeSha256, moduleHashes: { ...evidence.archives.candidate.metadata.hashes },
+      noOverallSuiteCertification: true });
+    unchangedCertificates.add(certificate);
+    return { valid: true, errors: [], certificate };
+  } catch (error) { return { valid: false, errors: [error.message], certificate: null }; }
+}
+
+/** Unchanged builds stop at the tip packages; changed builds retain both witnesses. */
+export async function readBitgetSteadyCertificate({ authority, readEvidence, manifest }) {
+  insist(authorities.has(authority) && authority.witness === 'tip', 'issued tip authority required');
+  const tipEvidence = await readEvidence('tip', authority);
+  insist(tipEvidence.disposition === undefined || tipEvidence.disposition === 'unchanged-bytes', 'unknown paired disposition');
+  if (tipEvidence.disposition === 'unchanged-bytes') {
+    const result = assessBitgetUnchangedBytes({ authority, evidence: tipEvidence });
+    insist(result.valid, result.errors.join('\n'));
+    return result.certificate;
+  }
+  const tip = assessBitgetPairedSteady({ authority, evidence: tipEvidence, manifest });
+  insist(tip.valid, tip.errors.join('\n'));
+  const anchorAuthority = bitgetAnchorAuthority(authority);
+  const anchor = assessBitgetPairedSteady({ authority: anchorAuthority,
+    evidence: await readEvidence('anchor', anchorAuthority), manifest });
+  insist(anchor.valid, anchor.errors.join('\n'));
+  return combineBitgetPairedCertificates(tip.certificate, anchor.certificate);
+}
+
 export function hasPairedBitgetSteady(certificate, report, source) {
-  return combinedCertificates.has(certificate) && certificate.steadyAccepted === true && exactCase(report) &&
+  return (combinedCertificates.has(certificate) || unchangedCertificates.has(certificate)) && certificate.steadyAccepted === true && exactCase(report) &&
     report.tapeSha256 === certificate.tapeSha256 && (report.ciWasm?.sourceHead ?? source) === certificate.authority.candidate;
 }
 
