@@ -249,6 +249,50 @@ fn spot_selection_does_not_probe_cfm_and_preserves_held_currency() {
 }
 
 #[test]
+fn us_default_portfolio_aggregates_wallet_rows_without_derivatives_sections() {
+    for derivatives in ["", r#", "futures_positions":null,"perp_positions":null,"margin":null"#] {
+        let mut s = Session::new("DEFAULT", true);
+        s.breakdown = Some(format!(r#"{{"breakdown":{{
+            "portfolio":{{"uuid":"portfolio-one","type":"DEFAULT"}},
+            "portfolio_balances":{{
+                "total_cash_equivalent_balance":{{"value":"2600","currency":"USD"}},
+                "total_futures_balance":null,"perp_unrealized_pnl":null
+            }},
+            "spot_positions":[
+                {{"asset":"USDC","account_uuid":"wallet-one","total_balance_crypto":2000,
+                  "available_to_trade_crypto":1800,"total_balance_fiat":2000,"available_to_trade_fiat":1800}},
+                {{"asset":"USDC","account_uuid":"wallet-two","total_balance_crypto":600,
+                  "available_to_trade_crypto":600,"total_balance_fiat":600,"available_to_trade_fiat":600}}
+            ]{derivatives}
+        }}}}"#));
+        let s = s.ready();
+        let loaded = s.e.store().loaded();
+        assert!(loaded.markets && loaded.tickers && loaded.balance && loaded.orders && loaded.positions);
+        let balance = s.e.store().balance();
+        assert_eq!((balance.total, balance.free, balance.used), (2600., 2400., 200.));
+        let coins = s.e.store().currency_balances().unwrap();
+        assert_eq!(coins.len(), 1);
+        assert_eq!(coins[0].currency, "USDC");
+        assert_eq!((coins[0].balance.total, coins[0].balance.free, coins[0].balance.used), (2600., 2400., 200.));
+        assert!(!s.urls.iter().any(|url| url.contains("/intx/") || url.contains("/cfm/")));
+    }
+}
+
+#[test]
+fn malformed_spot_amounts_name_the_field_without_echoing_its_value() {
+    for field in ["total_balance_crypto", "available_to_trade_crypto", "total_balance_fiat", "available_to_trade_fiat"] {
+        let mut s = Session::new("DEFAULT", true);
+        let mut row = serde_json::json!({"asset":"USDC","total_balance_crypto":2600,
+            "available_to_trade_crypto":2400,"total_balance_fiat":2600,"available_to_trade_fiat":2400});
+        row[field] = serde_json::json!("invalid-private-sentinel");
+        s.breakdown = Some(serde_json::json!({"breakdown":{"spot_positions":[row]}}).to_string());
+        s.poll_until(|s| s.logs.iter().any(|log| log.contains(&format!("spot_positions.{field}"))));
+        assert!(!s.e.store().loaded().balance);
+        assert!(s.logs.iter().all(|log| !log.contains("invalid-private-sentinel")));
+    }
+}
+
+#[test]
 fn spot_cash_equivalent_root_preserves_available_usdc_and_excludes_crypto_equity() {
     let mut s = Session::new("DEFAULT", true);
     s.breakdown = Some(
