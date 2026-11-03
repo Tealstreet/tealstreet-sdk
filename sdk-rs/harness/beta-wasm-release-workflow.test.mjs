@@ -70,3 +70,14 @@ test('nothing builds or publishes without the roster job, and only the release j
   assert.match(job('release'), /beta-wasm-release-guard\.mjs create/);
   assert.match(job('release'), /gh release create "\$TAG" --repo "\$GITHUB_REPOSITORY" --verify-tag/);
 });
+
+test('an automatic run superseded by a newer release publishes nothing; a manual cut is not checked', () => {
+  const roster = job('roster');
+  const certified = roster.indexOf('beta-wasm-release-guard.mjs certified');
+  const superseded = roster.indexOf('beta-wasm-release-guard.mjs superseded "$GITHUB_REPOSITORY" "$SDK_SHA"');
+  const published = roster.indexOf('beta-wasm-release-guard.mjs published');
+  assert.ok(certified < superseded && superseded < published, 'certify, then superseded, then dedupe');
+  const check = roster.slice(roster.lastIndexOf('\n', superseded - 120), published);
+  assert.match(check, /if \[ "\$\{\{ github\.event_name \}\}" = workflow_run \]; then/);
+  assert.match(check, /echo "superseded by \$superseded"\n\s+echo "publish=false" >> "\$GITHUB_OUTPUT"\n\s+exit 0/);
+});
