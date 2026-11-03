@@ -234,7 +234,8 @@ pub struct AccountState {
     /// Symbols of this census's rejected rows that could be an uncertain write:
     /// no stored copy proves them older. Empty text: the row names no market.
     census_unproven: Vec<String>,
-    account_level: u8,
+    /// OKX acctLv (1 spot, 2 spot and futures, 3 multi-currency, 4 portfolio); 0 until read.
+    pub account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
     order_versions: HashMap<String, (u64, f64, bool)>,

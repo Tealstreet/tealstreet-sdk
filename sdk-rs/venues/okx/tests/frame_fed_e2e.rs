@@ -524,3 +524,52 @@ fn a_flat_symbols_leverage_is_confirmed_by_the_sources_refresh_read() {
         "released: a later source change applies before the hold would expire"
     );
 }
+
+fn credentials() -> FixtureOptions {
+    FixtureOptions {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..FixtureOptions::default()
+    }
+}
+
+/// The page refuses hedge mode for a spot-mode (acctLv 1) source without sending it,
+/// and still switches a margin-mode (acctLv 2) source.
+#[test]
+fn the_page_refuses_hedge_mode_for_a_spot_mode_account_it_learned_from_frames() {
+    for (level, refused) in [("1", true), ("2", false)] {
+        let mut source = support::trading_engine_at_level(credentials(), |_| {}, level);
+        let mut page = frame_fed();
+        page.apply_frame(2.0, source.snapshot_frame(2.0), true)
+            .unwrap();
+        let actions = send(
+            &mut page,
+            Command::SetPositionMode {
+                command: 9,
+                hedged: true,
+                symbol: None,
+            },
+            3.0,
+        );
+        let sent = requests(&actions).len();
+        let failure = actions.iter().find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 9, error }) => {
+                Some(error.message.clone())
+            }
+            _ => None,
+        });
+        if refused {
+            assert_eq!(sent, 0, "acctLv {level}: {actions:?}");
+            assert!(
+                failure
+                    .as_deref()
+                    .is_some_and(|m| m.contains("needs a margin account mode")),
+                "acctLv {level}: {failure:?}"
+            );
+        } else {
+            assert_eq!(sent, 1, "acctLv {level}: {actions:?}");
+            assert!(failure.is_none(), "acctLv {level}: {failure:?}");
+        }
+    }
+}

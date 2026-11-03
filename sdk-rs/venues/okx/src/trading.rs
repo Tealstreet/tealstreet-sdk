@@ -256,6 +256,9 @@ impl Requested {
     }
 }
 
+const SIMPLE_MODE_HEDGE: &str =
+    "OKX hedge mode needs a margin account mode; switch it in OKX Settings (Trading mode)";
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Ack<'a> {
@@ -365,7 +368,11 @@ impl Okx {
                 struct Mode {
                     pos_mode: &'static str,
                 }
-                let result = if cx.store.positions().iter().any(|p| p.contracts > 0.0) {
+                // OKX keeps a spot-mode (acctLv 1) account one-way: the write would
+                // not take, and the next config read would put one-way back.
+                let result = if hedged && self.account.account_level == 1 {
+                    Err(SIMPLE_MODE_HEDGE.into())
+                } else if cx.store.positions().iter().any(|p| p.contracts > 0.0) {
                     Err("Please close all positions before switching position mode".into())
                 } else {
                     step(

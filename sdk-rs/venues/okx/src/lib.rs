@@ -933,6 +933,19 @@ impl Venue for Okx {
         self.account_after_uncertain_write(cx);
     }
 
+    /// VENUE_STATE v1: `[1, acctLv]`, 0 while unread. The page needs the level to
+    /// refuse a hedge switch a spot-mode account cannot take.
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(vec![1, self.account.account_level])
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        match state {
+            [1, 0, ..] => {}
+            [1, level, ..] => self.account.account_level = *level,
+            _ => cx.venue_state_unreadable("Unreadable OKX venue state from the data source"),
+        }
+    }
+
     // Frame-fed: the data source reads the config before its orders and
     // positions, so once both have arrived the hedged flag is the account's.
     fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
