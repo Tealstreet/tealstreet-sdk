@@ -165,6 +165,8 @@ pub struct Bingx {
     seed_reported: Vec<bool>,
     sequence: std::cell::Cell<u64>,
     retries: safe_cex_engine::startup::Backoff<List>,
+    /// Set from a banning response for the failure it causes: how long every list waits.
+    ban_wait_ms: Option<f64>,
     reread_stalls: u8,
     // A failed or empty funding read commits tickers without it and retries.
     tickers_committed: bool,
@@ -219,6 +221,7 @@ impl Bingx {
             seed_reported: Vec::new(),
             sequence: std::cell::Cell::new(0),
             retries: Default::default(),
+            ban_wait_ms: None,
             reread_stalls: 0,
             tickers_committed: false,
             live_priced: Vec::new(),
@@ -255,11 +258,29 @@ impl Bingx {
         remap(cx.store, previous, &mut self.live_priced);
     }
 
+    fn note_ban(&mut self, cx: &mut Cx<'_, Pending>, response: &Response<'_>) {
+        self.ban_wait_ms = ban_wait_ms(response, cx.now);
+        if let Some(wait_ms) = self.ban_wait_ms {
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!(
+                    "BingX rate-limited this IP; public reads wait {} s",
+                    (wait_ms / 1000.0).round()
+                ),
+            );
+        }
+    }
+
     fn retry_list(&mut self, cx: &mut Cx<'_, Pending>, kind: List) {
         if matches!(kind, List::Premium) {
             self.seed_reported.fill(false);
         }
-        self.retries.failed(cx, kind);
+        match self.ban_wait_ms.take() {
+            // The ban is per IP: `ban_until` holds every list's retry behind it.
+            Some(wait_ms) => self.retries.failed_after(cx, kind, wait_ms),
+            None => self.retries.failed(cx, kind),
+        }
     }
 
     fn candle_response_context(
@@ -633,6 +654,50 @@ fn refuse_candle_query(cx: &mut Cx<'_, Pending>, error: impl Into<safe_cex_engin
 
 fn interval_ms(interval: Interval) -> Option<f64> {
     stream_interval(interval).map(|_| interval.ms())
+}
+
+/// BingX's per-IP ban ("in the disabled period") outlasts any retry inside it.
+const IP_BANNED: i64 = 100410;
+/// The wait when a ban names no unblock time.
+const BAN_FLOOR_MS: f64 = 5.0 * 60_000.0;
+const BAN_LONGEST_MS: f64 = 24.0 * 3_600_000.0;
+
+/// A 100410 envelope or HTTP 429: how long to wait, from the unblock time the
+/// response names (an epoch in the message, or Retry-After), else BAN_FLOOR_MS.
+pub(crate) fn ban_wait_ms(response: &Response<'_>, now: f64) -> Option<f64> {
+    #[derive(Deserialize)]
+    struct Envelope {
+        code: i64,
+        #[serde(default)]
+        msg: String,
+    }
+    let envelope = serde_json::from_str::<Envelope>(response.body).ok();
+    let banned = response.status == 429 || envelope.as_ref().is_some_and(|e| e.code == IP_BANNED);
+    if !banned {
+        return None;
+    }
+    // The message only: the envelope's own `timestamp` is the server clock, not the unblock.
+    let named = response
+        .header("retry-after")
+        .and_then(|seconds| seconds.trim().parse::<f64>().ok())
+        .map(|seconds| seconds * 1000.0)
+        .or_else(|| unblock_at(&envelope?.msg).map(|at| at - now));
+    Some(
+        named
+            .filter(|wait| *wait > 0.0 && *wait <= BAN_LONGEST_MS)
+            .unwrap_or(BAN_FLOOR_MS),
+    )
+}
+
+/// The first epoch (13-digit milliseconds or 10-digit seconds) in a ban message.
+fn unblock_at(message: &str) -> Option<f64> {
+    message
+        .split(|c: char| !c.is_ascii_digit())
+        .find_map(|digits| match digits.len() {
+            13 => digits.parse::<f64>().ok(),
+            10 => digits.parse::<f64>().ok().map(|seconds| seconds * 1000.0),
+            _ => None,
+        })
 }
 
 pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
@@ -1018,7 +1083,9 @@ impl Venue for Bingx {
             pending => pending,
         };
         if let Err(error) = success(response) {
+            self.note_ban(cx, &response);
             self.on_request_failed(cx, pending, &error);
+            self.ban_wait_ms = None;
             return;
         }
         match pending {
@@ -1184,6 +1251,7 @@ impl Venue for Bingx {
                     cx.startup_read_refused(&error);
                 }
                 self.account.read_error = account::read_refusal(&response);
+                self.note_ban(cx, &response);
                 self.on_request_failed(
                     cx,
                     pending,
@@ -1192,6 +1260,7 @@ impl Venue for Bingx {
                         response.body
                     ),
                 );
+                self.ban_wait_ms = None;
             }
         }
     }
