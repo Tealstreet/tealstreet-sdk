@@ -164,6 +164,32 @@ export function readOnlyTransport(native, { proxyPrefix, log = (line) => process
       try {
         const response = await native.request(proxyPrefix ? { ...request, url: `${proxyPrefix}${url.href}` } : request);
         log(`COMPLETED ${response.status} ${path}`);
+        if (response.status === 200 && /^\/api\/v3\/brokerage\/portfolios\/[^/]+$/.test(path)) {
+          const report = (bytes) => {
+            for (const shape of duplicatePortfolioShapes(bytes))
+              log(JSON.stringify({ kind: 'duplicate_asset_shape', path, ...shape }));
+          };
+          if (response.body instanceof Uint8Array) report(response.body);
+          else if (response.body?.[Symbol.asyncIterator]) {
+            const original = response.body;
+            return { ...response, body: (async function* () {
+              const chunks = [];
+              let size = 0;
+              for await (const chunk of original) {
+                size += chunk.byteLength;
+                if (size <= 2_097_152) chunks.push(chunk);
+                else chunks.length = 0;
+                yield chunk;
+              }
+              if (size <= 2_097_152) {
+                const bytes = new Uint8Array(size);
+                let offset = 0;
+                for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+                report(bytes);
+              }
+            })() };
+          }
+        }
         return response;
       } catch {
         log(`FAILED ${method} ${path}`);
@@ -185,6 +211,34 @@ export function readOnlyTransport(native, { proxyPrefix, log = (line) => process
       };
     },
   };
+}
+
+export function duplicatePortfolioShapes(bytes) {
+  try {
+    const rows = JSON.parse(new TextDecoder().decode(bytes))?.breakdown?.spot_positions;
+    if (!Array.isArray(rows) || rows.length > 1000) return [];
+    const groups = new Map();
+    for (const row of rows) {
+      if (!row || typeof row !== 'object' || !/^[A-Z][A-Z0-9]{0,23}$/.test(row.asset)) continue;
+      const group = groups.get(row.asset) ?? [];
+      group.push(row);
+      groups.set(row.asset, group);
+    }
+    return [...groups].filter(([, group]) => group.length > 1).map(([asset, group]) => ({
+      asset, row_count: group.length,
+      rows: group.map((row) => ({
+        account_type: /^ACCOUNT_TYPE_[A-Z_]{1,48}$/.test(row.account_type) ? row.account_type : 'other_or_absent',
+        is_cash: typeof row.is_cash === 'boolean' ? row.is_cash : null,
+        has_account_uuid: typeof row.account_uuid === 'string' && row.account_uuid.length > 0,
+        account_uuid_differs_from_first: row.account_uuid !== group[0].account_uuid,
+        asset_img_present: Object.hasOwn(row, 'asset_img_url') || Object.hasOwn(row, 'asset_img'),
+        allocation_present: Object.hasOwn(row, 'allocation'),
+        cost_basis_present: Object.hasOwn(row, 'cost_basis'),
+        differing_fields: ['account_type', 'is_cash', 'asset_img_url'].filter((key) => row[key] !== group[0][key]),
+        keys: Object.keys(row).filter((key) => /^[a-z][a-z0-9_]{0,63}$/.test(key)).sort(),
+      })),
+    }));
+  } catch { return []; }
 }
 
 export async function loadProbeEngine(directory) {

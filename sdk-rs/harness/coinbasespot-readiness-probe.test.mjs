@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createProbeHost, loadProbeEngine, parseFailureSummary, readOnlyTransport, startProbeFlushing } from './coinbasespot-readiness-probe.mjs';
+import { createProbeHost, duplicatePortfolioShapes, loadProbeEngine, parseFailureSummary, readOnlyTransport, startProbeFlushing } from './coinbasespot-readiness-probe.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 test('all brokerage GET reads reach the transport while writes and foreign targets refuse', async () => {
@@ -94,6 +94,48 @@ test('engine failure summaries expose only closed kinds and field names', () => 
     assert.ok(!JSON.stringify(summary).includes('private-value'));
     assert.ok(['missing_field', 'invalid_type', 'invalid_value', 'json_syntax', 'validation'].includes(summary.kind));
   }
+});
+
+test('duplicate portfolio diagnostics expose schema and account differences without amounts or identifiers', async () => {
+  const data = { breakdown: { spot_positions: [
+    { asset: 'USDC', account_uuid: 'private-wallet-uuid', account_type: 'ACCOUNT_TYPE_RETAIL', is_cash: true,
+      total_balance_crypto: 1234.56, available_to_trade_crypto: 1200.01, allocation: 98.76,
+      asset_img_url: 'https://private-image.example', cost_basis: { value: 'private-cost' } },
+    { asset: 'USDC', account_uuid: 'private-vault-uuid', account_type: 'ACCOUNT_TYPE_VAULT', is_cash: false,
+      total_balance_crypto: 1234.56, available_to_trade_crypto: 1200.01 },
+    { asset: 'BTC', account_uuid: 'private-third-uuid', total_balance_crypto: 12.34 },
+  ] } };
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  const [shape] = duplicatePortfolioShapes(bytes);
+  assert.equal(shape.asset, 'USDC');
+  assert.equal(shape.row_count, 2);
+  assert.equal(shape.rows[0].account_type, 'ACCOUNT_TYPE_RETAIL');
+  assert.equal(shape.rows[0].is_cash, true);
+  assert.equal(shape.rows[0].account_uuid_differs_from_first, false);
+  assert.equal(shape.rows[1].account_uuid_differs_from_first, true);
+  assert.deepEqual(shape.rows[1].differing_fields, ['account_type', 'is_cash', 'asset_img_url']);
+  assert.ok(shape.rows[0].has_account_uuid && shape.rows[0].asset_img_present
+    && shape.rows[0].allocation_present && shape.rows[0].cost_basis_present);
+  assert.ok(shape.rows[0].keys.includes('total_balance_crypto'));
+  for (const streaming of [false, true]) {
+    const logs = [];
+    const response = { status: 200, body: streaming ? (async function* () {
+      yield bytes.subarray(0, 20); yield bytes.subarray(20);
+    })() : bytes };
+    const transport = readOnlyTransport({ request: async () => response }, { log: (line) => logs.push(line) });
+    const received = await transport.request({ method: 'GET', url: 'https://api.coinbase.com/api/v3/brokerage/portfolios/portfolio-one' });
+    if (streaming) {
+      const chunks = [];
+      for await (const chunk of received.body) chunks.push(...chunk);
+      assert.deepEqual(new Uint8Array(chunks), bytes);
+    } else assert.equal(received, response);
+    const diagnostic = JSON.parse(logs[1]);
+    assert.equal(diagnostic.kind, 'duplicate_asset_shape');
+    assert.deepEqual(diagnostic.rows, shape.rows);
+    for (const forbidden of ['private-', '1234.56', '1200.01', '98.76', '12.34'])
+      assert.ok(!JSON.stringify(logs).includes(forbidden));
+  }
+  assert.deepEqual(duplicatePortfolioShapes(new TextEncoder().encode('invalid-private-body')), []);
 });
 
 test('published WASM processes fixture 200s but exports readiness only when the probe flushes', {
