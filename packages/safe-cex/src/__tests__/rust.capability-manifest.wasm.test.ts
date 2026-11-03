@@ -55,8 +55,6 @@ const CREDENTIAL_SHAPES: Partial<Record<ExchangeName, Partial<ExchangeOptions>>>
   backpack: { secret: Buffer.alloc(32, 0x22).toString('base64') },
   kodiakfi: ORDERLY_KEYS,
   mode: ORDERLY_KEYS,
-  salsadex: ORDERLY_KEYS,
-  'tealstreet-dex': ORDERLY_KEYS,
   what: ORDERLY_KEYS,
   woofi: ORDERLY_KEYS,
 };

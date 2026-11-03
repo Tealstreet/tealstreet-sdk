@@ -545,34 +545,6 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
-  "salsadex": {
-    "startup": true,
-    "trading": true,
-    "openOrders": true,
-    "positions": true,
-    "fillHistory": true,
-    "orderHistory": true,
-    "incomeHistory": true,
-    "incomeRange": true,
-    "closedPnl": false,
-    "optionChain": false,
-    "optionExpiries": false,
-    "accountGreeks": false
-  },
-  "tealstreet-dex": {
-    "startup": true,
-    "trading": true,
-    "openOrders": true,
-    "positions": true,
-    "fillHistory": true,
-    "orderHistory": true,
-    "incomeHistory": true,
-    "incomeRange": true,
-    "closedPnl": false,
-    "optionChain": false,
-    "optionExpiries": false,
-    "accountGreeks": false
-  },
   "what": {
     "startup": true,
     "trading": true,

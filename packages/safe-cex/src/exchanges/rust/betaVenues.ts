@@ -44,8 +44,6 @@ export const BETA_VENUES = Object.freeze([
   'grvt',
   'kodiakfi',
   'mode',
-  'salsadex',
-  'tealstreet-dex',
   'what',
   'woofi',
   'backpack',
