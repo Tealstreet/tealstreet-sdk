@@ -27,6 +27,20 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "backpack": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "binance": {
     "startup": true,
     "trading": true,
@@ -279,6 +293,20 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "grvt": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "hyperliquid": {
     "startup": true,
     "trading": true,
@@ -317,6 +345,20 @@
     "incomeHistory": false,
     "incomeRange": false,
     "closedPnl": true,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "kodiakfi": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
     "optionChain": false,
     "optionExpiries": false,
     "accountGreeks": false
@@ -392,6 +434,20 @@
     "accountGreeks": false
   },
   "mexc": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "mode": {
     "startup": true,
     "trading": true,
     "openOrders": true,
@@ -489,7 +545,63 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "salsadex": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "tealstreet-dex": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "what": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "woo": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
+  "woofi": {
     "startup": true,
     "trading": true,
     "openOrders": true,

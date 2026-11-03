@@ -41,6 +41,14 @@ export const BETA_VENUES = Object.freeze([
   'kucoinspot',
   'coinbase',
   'coinbasespot',
+  'grvt',
+  'kodiakfi',
+  'mode',
+  'salsadex',
+  'tealstreet-dex',
+  'what',
+  'woofi',
+  'backpack',
 ] as const satisfies readonly ExchangeName[]);
 
 export const isBetaVenue = (name: string): name is (typeof BETA_VENUES)[number] =>

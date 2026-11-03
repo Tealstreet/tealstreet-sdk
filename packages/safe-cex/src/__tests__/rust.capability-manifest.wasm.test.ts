@@ -39,6 +39,11 @@ const ACCOUNT_OPTIONS: ExchangeOptions = {
 };
 
 const COINBASE_KEY = 'organizations/capability-manifest/apiKeys/capability-manifest';
+// Orderly keys are base58 32-byte values (here 32 bytes of 0x22).
+const ORDERLY_KEYS = {
+  key: '3JF3sEqM796hk5WFqA6EtmEwJQ9quALszsfJyvXNQKy3',
+  secret: '3JF3sEqM796hk5WFqA6EtmEwJQ9quALszsfJyvXNQKy3',
+};
 
 /** Venues whose secret has its own encoding; the values are well-formed and never sent. */
 const CREDENTIAL_SHAPES: Partial<Record<ExchangeName, Partial<ExchangeOptions>>> = {
@@ -47,6 +52,13 @@ const CREDENTIAL_SHAPES: Partial<Record<ExchangeName, Partial<ExchangeOptions>>>
   lighter: { secret: `0x${'22'.repeat(40)}` },
   coinbase: { key: COINBASE_KEY, secret: Buffer.alloc(32, 0x22).toString('base64') },
   coinbasespot: { key: COINBASE_KEY, secret: Buffer.alloc(32, 0x22).toString('base64') },
+  backpack: { secret: Buffer.alloc(32, 0x22).toString('base64') },
+  kodiakfi: ORDERLY_KEYS,
+  mode: ORDERLY_KEYS,
+  salsadex: ORDERLY_KEYS,
+  'tealstreet-dex': ORDERLY_KEYS,
+  what: ORDERLY_KEYS,
+  woofi: ORDERLY_KEYS,
 };
 
 const running: BaseExchange[] = [];

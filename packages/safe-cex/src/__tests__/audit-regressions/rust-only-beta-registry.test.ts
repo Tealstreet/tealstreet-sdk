@@ -62,6 +62,14 @@ const expected = [
   'kucoinspot',
   'coinbase',
   'coinbasespot',
+  'grvt',
+  'kodiakfi',
+  'mode',
+  'salsadex',
+  'tealstreet-dex',
+  'what',
+  'woofi',
+  'backpack',
 ];
 const out = Object.keys(exchangeMetadata).filter((name) => !expected.includes(name)) as ExchangeName[];
 const unsupported = { kind: 'unsupported', outcome: 'notSent' };
@@ -73,15 +81,15 @@ describe('Rust-only beta construction', () => {
   it('has exactly the declared IN names', () => {
     expect([...BETA_VENUES]).toEqual(expected);
     expect(getRegisteredExchangeNames()).toEqual(expected);
-    expect(new Set(BETA_VENUES).size).toBe(36);
-    expect(out).toEqual(expect.arrayContaining(['grvt', 'lighter-robinhood', 'polymarket']));
+    expect(new Set(BETA_VENUES).size).toBe(44);
+    expect(out).toEqual(expect.arrayContaining(['bitrue', 'lighter-robinhood', 'polymarket']));
   });
   it('constructs Rust for every IN name without an engine opt-in', async () => {
     for (const name of BETA_VENUES) {
       expect(await exchangeRegistry[name]()).toBe(state.Rust);
       expect(await createExchange(name, { key: '', secret: '', publicDataOnly: true })).toBeInstanceOf(state.Rust);
     }
-    expect(state.calls).toHaveLength(36);
+    expect(state.calls).toHaveLength(44);
     expect(state.calls.every(({ options }) => (options as { engine: string }).engine === 'rust')).toBe(true);
   });
   it('refuses OUT web/native loaders before loading a runtime', async () => {
