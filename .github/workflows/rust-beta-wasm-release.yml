@@ -94,11 +94,22 @@ jobs:
             node sdk-rs/harness/beta-wasm-release-guard.mjs certified "$GITHUB_REPOSITORY" '${{ steps.source.outputs.sdk_sha }}'
           fi
       # Unchanged sdk-rs/ inputs already have a release; publishing again only adds volume.
+      # An automatic run whose source a newer release already descends from is superseded:
+      # a slow master run must not publish older source after it. Manual cuts are deliberate.
       - name: Publish only new sdk-rs inputs
         id: inputs
         env:
           GH_TOKEN: ${{ github.token }}
+          SDK_SHA: ${{ steps.source.outputs.sdk_sha }}
         run: |
+          if [ "${{ github.event_name }}" = workflow_run ]; then
+            superseded=$(node sdk-rs/harness/beta-wasm-release-guard.mjs superseded "$GITHUB_REPOSITORY" "$SDK_SHA")
+            if [ -n "$superseded" ]; then
+              echo "superseded by $superseded"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
           fingerprint=$(node --input-type=module -e "
             const { betaWasmInputs } = await import('./sdk-rs/harness/beta-wasm-inputs.mjs');
             console.log(betaWasmInputs('.', { wasmBindgen: process.env.WASM_BINDGEN_VERSION, wasmOpt: 'required', profile: 'release', target: 'wasm32-unknown-unknown' }).fingerprint);")

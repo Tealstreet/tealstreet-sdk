@@ -17,11 +17,14 @@ use std::{future::Future, pin::Pin, rc::Rc};
 use tokio::sync::{mpsc, oneshot};
 
 /// One HTTP answer, built on the local thread that owns the engines.
+#[derive(Clone)]
 pub struct Reply {
     pub status: u16,
     pub body: String,
     /// Seconds of public caching; `None` sends `no-store`.
     pub cache_ttl: Option<u64>,
+    /// A venue's rate limit: seconds before asking again, sent as `Retry-After`.
+    pub retry_after_secs: Option<u64>,
 }
 
 impl Reply {
@@ -30,6 +33,7 @@ impl Reply {
             status,
             body: body.render(),
             cache_ttl: None,
+            retry_after_secs: None,
         }
     }
 }
@@ -39,6 +43,8 @@ pub struct App {
     pub cache: Rc<cache::CandleCache>,
     pub redis: health::RedisHealth,
     pub started: std::time::Instant,
+    /// Identical candle requests in flight, each waiting on the first's answer.
+    pub candles_in_flight: handlers::InFlight,
 }
 
 type LocalJob = Box<dyn FnOnce(Rc<App>) -> Pin<Box<dyn Future<Output = Reply>>> + Send>;
@@ -108,6 +114,7 @@ async fn serve() -> Result<(), String> {
         cache,
         redis: health::RedisHealth::from_env(),
         started: std::time::Instant::now(),
+        candles_in_flight: handlers::InFlight::default(),
     });
     let (jobs, mut inbox) = mpsc::unbounded_channel::<Job>();
     let worker = app.clone();

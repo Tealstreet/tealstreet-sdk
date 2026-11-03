@@ -9,7 +9,7 @@ hide_table_of_contents: false
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import ThemedImage from '@theme/ThemedImage';
-import ApiWhitelist from '/img/connect/bitget/v3/apiwhitelist.png';
+import ProxyFleetIps from '@site/src/components/ProxyFleetIps';
 import ApiTeal from '/img/connect/bitget/v3/api-teal.png';
 import ApiMore from '/img/connect/bitget/apimore.png';
 import ApiMore3 from '/img/connect/bitget/apimore3.png';
@@ -122,9 +122,7 @@ This permission is necessary for the position history and journaling functionali
 - Copy and paste the IP addresses as listed within the Tealstreet trading terminal once you’ve selected Bitget from the dropdown menu.
   - Click the 'Clipboard' button from inside the terminal like in the below image.
 
-<div class="text--center">
-    <img src={ApiWhitelist} alt="API Whitelist" style={{ width: 500 }} />
-</div>
+<ProxyFleetIps exchange="bitget" />
 
 - Click **'Next'** to finalize the API Creation process.
 

@@ -301,7 +301,7 @@ impl BybitLinear {
         }) {
             return;
         }
-        let pause = discovery_rate_limit_pause_ms(&response, cx.now);
+        let pause = venue_rate_limit_pause_ms(&response, cx.now);
         self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         if venue_error(&response).is_some() {
             // The table's kind and native code; a discovery pause is a rate limit.

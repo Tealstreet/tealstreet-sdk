@@ -180,7 +180,8 @@ export const summarizeSocketHealth = (
   const privateHealthy =
     privateSockets.every((socket) => socket.isRecoveryComplete !== false) &&
     (initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy));
-  const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
+  // Reconnect resets initialization, not the last message's page-clock timestamp.
+  const privateTimestamps = privateSockets.map((s) => s.lastMessageTimestamp || 0);
   const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
 
   return {
