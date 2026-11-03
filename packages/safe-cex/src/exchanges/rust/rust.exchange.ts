@@ -67,6 +67,7 @@ import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
+import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { withRequestsLog } from '../../transport/requestsLog';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
@@ -1416,6 +1417,11 @@ export class RustEngineExchange extends BaseExchange {
         (transportFactory ?? synchronizedEngineTransport)(),
         this.signerSetup,
         (message) => this.emitAndLogError(message),
+        (notice) => {
+          // Sentry and the log only: the account keeps working, degraded, so no toast.
+          const { message, sentryData } = tunnelProxyFallbackReport(this.name, notice);
+          this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
+        },
       ),
       this.name,
       (event, message) => this.emitter.emit(event, message),

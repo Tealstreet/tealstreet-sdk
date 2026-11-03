@@ -70,27 +70,78 @@ export const tunnelDialUrl = (url: string): string => {
   return parsed.toString();
 };
 
-const dialedLane = (dialedUrl: string): boolean => {
+const dialedPort = (dialedUrl: string): TunnelLanePort | undefined => {
   try {
     const parsed = new URL(dialedUrl);
-    return isTunnelSocketUrl(parsed) && parsed.port === TUNNEL_LANE_PORT;
+    if (!isTunnelSocketUrl(parsed)) return undefined;
+    return parsed.port === TUNNEL_LANE_PORT ? '8443' : parsed.port ? undefined : '443';
   } catch {
-    return false;
+    return undefined;
   }
 };
 
+// ---- tunnel reachability ----
+// Once the lane is on 443, two more consecutive failed handshakes there mark the
+// tunnel unreachable for this realm, and the engine sends REST through the HTTP
+// proxy; any tunnel handshake that opens marks it reachable again.
+
+const UNREACHABLE_AFTER_443_FAILURES = 2;
+
+export interface TunnelOutage {
+  /** Counts activations in this realm, so a reporter can tell one outage from the next. */
+  episode: number;
+  portsTried: '8443+443' | '443';
+  /** Failed handshakes in the streak, on either port. */
+  failures: number;
+  /** From the streak's first failed handshake to the activation. */
+  sinceFirstFailureMs: number;
+}
+
+let streakFailures = 0;
+let streakTriedLane = false;
+let streakStartedAt = 0;
+let failuresOn443 = 0;
+let episode = 0;
+let outage: TunnelOutage | undefined;
+
+/** The current outage when this realm's tunnel is unreachable on every port, else undefined. */
+export const tunnelOutage = (): TunnelOutage | undefined => outage;
+
 /** A socket dialed from `tunnelDialUrl` opened its handshake. */
 export const noteTunnelDialOpened = (dialedUrl: string): void => {
-  if (dialedLane(dialedUrl)) laneFailures = 0;
+  if (!dialedPort(dialedUrl)) return;
+  laneFailures = 0;
+  failuresOn443 = 0;
+  streakFailures = 0;
+  streakTriedLane = false;
+  outage = undefined;
 };
 
 /** A socket dialed from `tunnelDialUrl` closed or timed out before its handshake opened. */
 export const noteTunnelDialFailed = (dialedUrl: string): void => {
-  if (!dialedLane(dialedUrl) || lanePort !== TUNNEL_LANE_PORT) return;
-  laneFailures += 1;
-  if (laneFailures < LANE_FAILURES_BEFORE_FALLBACK) return;
-  lanePort = '443';
-  for (const listener of fallbackListeners) listener(laneFailures);
+  const port = dialedPort(dialedUrl);
+  if (!laneEnabled || !port) return;
+  if (streakFailures === 0) streakStartedAt = Date.now();
+  streakFailures += 1;
+  if (port === '8443') {
+    if (lanePort !== TUNNEL_LANE_PORT) return;
+    streakTriedLane = true;
+    laneFailures += 1;
+    if (laneFailures < LANE_FAILURES_BEFORE_FALLBACK) return;
+    lanePort = '443';
+    for (const listener of fallbackListeners) listener(laneFailures);
+    return;
+  }
+  if (lanePort !== '443') return;
+  failuresOn443 += 1;
+  if (failuresOn443 < UNREACHABLE_AFTER_443_FAILURES || outage) return;
+  episode += 1;
+  outage = {
+    episode,
+    portsTried: streakTriedLane ? '8443+443' : '443',
+    failures: streakFailures,
+    sinceFirstFailureMs: Date.now() - streakStartedAt,
+  };
 };
 
 /** Resets the lane (tests only); `enabled` stands in for the browser-realm check. */
@@ -98,6 +149,10 @@ export const resetTunnelLane = (enabled: boolean = isBrowserRealm()): void => {
   laneEnabled = enabled;
   lanePort = '8443';
   laneFailures = 0;
+  failuresOn443 = 0;
+  streakFailures = 0;
+  streakTriedLane = false;
+  outage = undefined;
 };
 
 // ---- rpc.relay urls (pure; no socket construction so safe-cex's routing table

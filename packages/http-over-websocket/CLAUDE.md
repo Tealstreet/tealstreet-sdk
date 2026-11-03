@@ -63,6 +63,12 @@ behavior changes, update or delete that snapshot in the same PR.
   443 for good (`tunnel_port` tag, one `Tunnel lane fell back to 443` report).
   The per-venue paths on that host (/grvt, /lighter, /bybitbra), REST and Node
   hosts stay on 443, so the lane carries only tunnel handshakes.
+- **Unreachable tunnel → HTTP proxy** (`tunnelOutage`): once on 443, two more
+  failed handshakes there mark the realm's tunnel unreachable until any tunnel
+  socket opens. Meanwhile safe-cex's engine transport prepares new REST through
+  `/api/exchange_proxy` (same proxy fleet, so the same IPs), skipping hosts the
+  fleet does not forward (`proxyFleetAllowlist.ts`); requests already prepared
+  keep the tunnel. Each activation reports `Tunnel unreachable; …` to Sentry.
 - `ReconnectingWebSocket` handles connection resilience
 - Token-based authentication with expiry checking
 - Latency tracking for tunnel (client↔proxy) and exchange (proxy↔exchange)

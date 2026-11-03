@@ -15,6 +15,7 @@ import {
   tunnelDialUrl,
   tunnelEgressUrl,
   tunnelLanePort,
+  tunnelOutage,
 } from './tunnelEndpoints';
 
 const portOf = (url: string) => new URL(url).port || '443';
@@ -206,5 +207,39 @@ describe('relay socket on the lane', () => {
     dial().close();
     await vi.advanceTimersByTimeAsync(100);
     expect(tunnelLanePort()).toBe('8443');
+  });
+});
+
+describe('tunnel reachability', () => {
+  it('is unreachable after two failed handshakes on 443 once the lane fell back, until one opens', () => {
+    vi.useFakeTimers();
+    const lane = tunnelDialUrl(TOKYO_HOW_EGRESS);
+    noteTunnelDialFailed(lane);
+    vi.advanceTimersByTime(5_000);
+    noteTunnelDialFailed(lane);
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(tunnelOutage()).toBeUndefined();
+    vi.advanceTimersByTime(7_000);
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(tunnelOutage()).toEqual({
+      episode: expect.any(Number),
+      portsTried: '8443+443',
+      failures: 4,
+      sinceFirstFailureMs: 12_000,
+    });
+    noteTunnelDialOpened(TOKYO_HOW_EGRESS);
+    expect(tunnelOutage()).toBeUndefined();
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(tunnelOutage()).toMatchObject({ portsTried: '443', failures: 2 });
+  });
+
+  it('never marks the tunnel unreachable while the lane is still on 8443, or outside a browser', () => {
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(tunnelOutage()).toBeUndefined();
+    resetTunnelLane(false);
+    for (let attempt = 0; attempt < 4; attempt += 1) noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(tunnelOutage()).toBeUndefined();
   });
 });

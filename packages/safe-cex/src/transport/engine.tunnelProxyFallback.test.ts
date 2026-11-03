@@ -1,0 +1,223 @@
+// REST for a tunnel account while this realm's tunnel is unreachable on 8443 and 443:
+// new requests take the HTTP proxy (same fleet egress), prepared ones keep the tunnel.
+import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { TunnelProxyFallbackNotice } from './engine';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  noteTunnelDialFailed,
+  noteTunnelDialOpened,
+  resetTunnelLane,
+  TOKYO_HOW_EGRESS,
+  tunnelDialUrl,
+} from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import { createEngineTransport } from './engine';
+import { tealstreetTransport } from './tealstreet/tealstreetTransport';
+
+const tunnels = vi.hoisted(() => [] as Array<Array<Record<string, any>>>);
+
+vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
+  HOWWebSocket: class {
+    epoch = 0;
+    isOpen = true;
+    isInitialized = true;
+    isTimeSynced = true;
+    isTokenSent = true;
+    authState = 'Good';
+    listeners = new Map<string, (data: unknown) => void>();
+    sent: Array<Record<string, any>> = [];
+    constructor() {
+      tunnels.push(this.sent);
+    }
+    once(event: string, listener: (data: unknown) => void) {
+      this.listeners.set(event, listener);
+    }
+    off(event: string) {
+      this.listeners.delete(event);
+    }
+    sendPrepared(frame: string) {
+      this.send(JSON.parse(frame));
+    }
+    send(message: Record<string, any>) {
+      this.sent.push(message);
+      queueMicrotask(() => {
+        this.listeners.get(`sub:${message.nonce}`)?.({ status: 200, data_raw: '{"via":"tunnel"}', headers: {} });
+        this.listeners.delete(`sub:${message.nonce}`);
+      });
+    }
+  },
+}));
+vi.mock('../accessToken', () => ({
+  getProxyToken: vi.fn(async () => 'proxy-fixture'),
+  isTokenExpired: () => false,
+  captureProxyTokenProvider: () => null,
+  withProxyTokenProvider: (_provider: unknown, fn: () => unknown) => fn(),
+  bindProxyTokenLookup: () => async () => 'proxy-fixture',
+  ProxyTokenUnavailableError: class extends Error {},
+  refreshProxyToken: vi.fn(async () => undefined),
+}));
+
+const PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/';
+const proxied = { status: 200, headers: '', body: new TextEncoder().encode('{"via":"proxy"}') };
+
+const rawTransport = () => {
+  const dispatched: Array<{ url: string; headers: Record<string, string>; body?: unknown }> = [];
+  const raw: Transport = {
+    now: () => 0,
+    setTimeout,
+    clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    connect: vi.fn(() => ({ send: vi.fn(), close: vi.fn() })),
+    request: vi.fn(async (request) => {
+      dispatched.push(request);
+      return proxied;
+    }),
+    prepareHttp: vi.fn((prepare) => ({
+      bind: (network: any) => ({
+        ready: () => true,
+        dispatch: async () => {
+          dispatched.push({ ...network, url: network.url ?? prepare.url });
+          return proxied;
+        },
+        cancel: () => undefined,
+      }),
+      cancel: () => undefined,
+    })) as never,
+  };
+  return { raw, dispatched };
+};
+
+const tunnelSent = () => tunnels.flat().filter((frame) => frame.type === 'rpc.http');
+const body = async (response: { body: unknown }) => new TextDecoder().decode(response.body as Uint8Array);
+
+/** Two failed 8443 handshakes move the lane to 443; two more there make the tunnel unreachable. */
+const tunnelGoesDown = () => {
+  const lane = tunnelDialUrl(TOKYO_HOW_EGRESS);
+  noteTunnelDialFailed(lane);
+  noteTunnelDialFailed(lane);
+  noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+  noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+};
+
+const bybitTunnel = (raw: Transport, notices: TunnelProxyFallbackNotice[] = []) =>
+  createEngineTransport(
+    'bybit',
+    { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true },
+    raw,
+    undefined,
+    undefined,
+    (notice) => notices.push(notice),
+  );
+
+beforeEach(() => {
+  resetTunnelLane(true);
+  for (const sent of tunnels) sent.length = 0;
+});
+
+afterEach(() => {
+  resetTunnelLane();
+});
+
+describe('REST while the tunnel is unreachable', () => {
+  it('stays on the tunnel while the tunnel is reachable', async () => {
+    const { raw, dispatched } = rawTransport();
+    const notices: TunnelProxyFallbackNotice[] = [];
+    const route = bybitTunnel(raw, notices);
+    const response = await route.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/time', headers: {} });
+    expect(await body(response)).toBe('{"via":"tunnel"}');
+    expect(dispatched).toHaveLength(0);
+    expect(notices).toHaveLength(0);
+    route.dispose!();
+  });
+
+  it('sends new requests through the HTTP proxy, reported once per outage, and returns to the tunnel when it opens', async () => {
+    const { raw, dispatched } = rawTransport();
+    const notices: TunnelProxyFallbackNotice[] = [];
+    const route = bybitTunnel(raw, notices);
+    tunnelGoesDown();
+    const url = 'https://api.bybit.com/v5/position/list?category=linear';
+    await route.request({ method: 'GET', url, headers: { 'X-BAPI-SIGN': 'signed' } });
+    await route.request({ method: 'GET', url, headers: { 'X-BAPI-SIGN': 'signed' } });
+    expect(tunnelSent()).toHaveLength(0);
+    expect(dispatched.map((request) => request.url)).toEqual([`${PROXY}${url}`, `${PROXY}${url}`]);
+    expect(dispatched[0].headers['X-BAPI-SIGN']).toBe('signed');
+    expect(Object.values(dispatched[0].headers)).toContain('Bearer proxy-fixture');
+    expect(notices).toEqual([
+      { outage: expect.objectContaining({ portsTried: '8443+443', failures: 4, episode: expect.any(Number) }) },
+    ]);
+
+    noteTunnelDialOpened(TOKYO_HOW_EGRESS);
+    const response = await route.request({ method: 'GET', url, headers: {} });
+    expect(await body(response)).toBe('{"via":"tunnel"}');
+    expect(dispatched).toHaveLength(2);
+
+    tunnelGoesDown();
+    await route.request({ method: 'GET', url, headers: {} });
+    expect(notices).toHaveLength(2);
+    expect(notices[1].outage.episode).toBeGreaterThan(notices[0].outage.episode);
+    route.dispose!();
+  });
+
+  it('keeps a write prepared before the outage on the tunnel and never resends it through the proxy', async () => {
+    const { raw, dispatched } = rawTransport();
+    const route = bybitTunnel(raw);
+    const original = {
+      request: 7,
+      method: 'POST',
+      url: 'https://api.bybit.com/v5/order/create',
+      headers: {},
+      intent: 'primary' as const,
+    };
+    const prepared = await route.prepareHttp!(original);
+    tunnelGoesDown();
+    const bound = prepared.bind({ ...original, headers: { 'X-BAPI-SIGN': 'exact' }, body: '{"qty":1}' });
+    const response = await bound.dispatch();
+    expect(await body(response)).toBe('{"via":"tunnel"}');
+    expect(tunnelSent()).toHaveLength(1);
+    expect(tunnelSent()[0].arg).toMatchObject({ url: original.url, data: '{"qty":1}' });
+    expect(dispatched).toHaveLength(0);
+    expect(raw.prepareHttp).not.toHaveBeenCalled();
+    route.dispose!();
+  });
+
+  it('prepares a write after the outage through the HTTP proxy', async () => {
+    const { raw, dispatched } = rawTransport();
+    const route = bybitTunnel(raw);
+    tunnelGoesDown();
+    const original = {
+      request: 8,
+      method: 'POST',
+      url: 'https://api.bybit.com/v5/order/create',
+      headers: {},
+      intent: 'primary' as const,
+    };
+    const prepared = await route.prepareHttp!(original);
+    await prepared.bind({ ...original, headers: { 'X-BAPI-SIGN': 'exact' }, body: '{"qty":1}' }).dispatch();
+    expect(tunnelSent()).toHaveLength(0);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0].url).toBe(`${PROXY}${original.url}`);
+    route.dispose!();
+  });
+
+  it('leaves a venue host the proxy fleet refuses on the tunnel, tagged', async () => {
+    const { raw, dispatched } = rawTransport();
+    const notices: TunnelProxyFallbackNotice[] = [];
+    const route = bybitTunnel(raw, notices);
+    tunnelGoesDown();
+    await route.request({ method: 'GET', url: 'https://api.example.com/v5/market/time', headers: {} });
+    expect(tunnelSent()).toHaveLength(1);
+    expect(dispatched).toHaveLength(0);
+    expect(notices).toEqual([{ outage: expect.any(Object), skipped: 'proxy_not_allowlisted' }]);
+    route.dispose!();
+  });
+
+  it('never activates outside a browser realm', async () => {
+    resetTunnelLane(false);
+    const { raw, dispatched } = rawTransport();
+    const route = bybitTunnel(raw);
+    tunnelGoesDown();
+    await route.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/time', headers: {} });
+    expect(dispatched).toHaveLength(0);
+    route.dispose!();
+  });
+});

@@ -1,4 +1,5 @@
 import type { DisposableAxiosAdapter } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
+import type { TunnelOutage } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import type { HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
@@ -7,7 +8,7 @@ import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } fr
 import { AxiosHeaders } from 'axios';
 
 import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
-import { tunnelEgressUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import { tunnelEgressUrl, tunnelOutage } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/host';
 import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
@@ -21,6 +22,7 @@ import {
   TEALSTREET_WS_HEADERS,
   tealstreetTransport,
 } from './tealstreet/tealstreetTransport';
+import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
 import { isWsRelayEnabled } from './tealstreet/wsRelay';
 
 export interface EngineHttpRoute {
@@ -320,6 +322,10 @@ const hasHeader = (headers: Record<string, string>, name: string): boolean =>
 const publicBinanceRequest = (exchange: ExchangeName, request: Request): boolean =>
   ['binance', 'binancepm', 'binanceinverse'].includes(exchange) && !hasHeader(request.headers, 'X-MBX-APIKEY');
 
+const isPublicBinanceRead = (exchange: ExchangeName, request: Request, credentialIntent?: CredentialIntent) =>
+  (credentialIntent === 'public' && ['binance', 'binancepm', 'binanceinverse'].includes(exchange)) ||
+  (credentialIntent === undefined && publicBinanceRequest(exchange, request));
+
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
   exchange === 'paradex'
@@ -339,11 +345,7 @@ const restRoute = (
   serverHeaders = false,
   credentialIntent?: CredentialIntent,
 ): RestTransport => {
-  if (
-    (credentialIntent === 'public' && ['binance', 'binancepm', 'binanceinverse'].includes(exchange)) ||
-    (credentialIntent === undefined && publicBinanceRequest(exchange, request))
-  )
-    return { baseURL: request.url, proxied: false };
+  if (isPublicBinanceRead(exchange, request, credentialIntent)) return { baseURL: request.url, proxied: false };
   // Factories resolve a base URL, never a signed query. Keep request data out
   // of host selection and append its exact bytes after the provider rewrites it.
   const baseURL = request.url.match(/^https?:\/\/[^/?#]+/i)?.[0];
@@ -412,6 +414,13 @@ const PROXY_AUTHORIZATION_MISSING = 'Tealstreet proxy authorization missing';
 // but market data must not wait on it: the TS adapter read it from a public-only instance.
 const DIRECT_PUBLIC_READS: ReadonlySet<ExchangeName> = new Set(['hyperliquid', 'hyperliquidspot']);
 
+/** REST left (or could not leave) an unreachable tunnel for the HTTP proxy; once per account and outage. */
+export interface TunnelProxyFallbackNotice {
+  outage: TunnelOutage;
+  /** Why this venue's REST stayed on the tunnel: no proxy route, or a host the fleet refuses. */
+  skipped?: 'no_proxy_route' | 'proxy_not_allowlisted';
+}
+
 const relayFailed = (exchange: ExchangeName, error: Error) =>
   `[${exchange}] The connection to the Tealstreet relay failed (${error.message}); this account's requests through it fail and keep retrying until it reconnects`;
 
@@ -423,6 +432,7 @@ const httpTransport = (
   routing: ResolvedRouting,
   publicPrefix?: string,
   proxyAuthorization?: ProxyAuthorizationNotice,
+  onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
 ): {
   mode: 'direct' | 'how';
   request: Transport['request'];
@@ -439,6 +449,29 @@ const httpTransport = (
     : undefined;
   let disposed = false;
   const pending = new Set<AbortController>();
+  // While this realm's tunnel is unreachable, REST goes through the HTTP proxy, which
+  // egresses from the same fleet. Decided per request at prepare: a prepared request keeps its path.
+  const proxyOptions = { ...options, tealstreetTunnel: false, tealstreetProxy: true };
+  let proxyRouting: ResolvedRouting | undefined;
+  const reportedOutages = new Set<string>();
+  const tunnelProxyRoute = (request: Request, intent?: CredentialIntent): RestTransport | undefined => {
+    const outage = tunnelOutage();
+    if (!adapter || !outage) return undefined;
+    proxyRouting ??= resolved(exchange, proxyOptions, provider).restRouting;
+    const route = restRoute(provider, exchange, proxyOptions, proxyRouting, request, transport.serverHeaders, intent);
+    const skipped =
+      !route.proxied && !isPublicBinanceRead(exchange, request, intent)
+        ? 'no_proxy_route'
+        : route.proxied && !proxyFleetForwards(request.url)
+          ? 'proxy_not_allowlisted'
+          : undefined;
+    const reportKey = `${outage.episode}:${skipped ?? 'proxy'}`;
+    if (!reportedOutages.has(reportKey)) {
+      reportedOutages.add(reportKey);
+      onTunnelProxyFallback?.({ outage, ...(skipped ? { skipped } : {}) });
+    }
+    return skipped ? undefined : route;
+  };
   // Multi-tenant hosts bind proxy tokens to the account's async context. Engine
   // requests start from timers, sockets and shared public feeds, so keep the
   // provider of the context that created this account's transport.
@@ -461,6 +494,13 @@ const httpTransport = (
   };
   const prepare = async (request: Request, intent?: CredentialIntent): Promise<PreparedHttp> => {
     if (disposed) throw new Error('Engine transport disposed');
+    let proxyRoute: RestTransport | undefined;
+    try {
+      proxyRoute = tunnelProxyRoute(request, intent);
+    } catch {
+      proxyRoute = undefined;
+    }
+    const tunnelAdapter = proxyRoute ? undefined : adapter;
     const controller = new AbortController();
     pending.add(controller);
     const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
@@ -527,7 +567,7 @@ const httpTransport = (
     };
     const wrap = (response: HttpResponse): HttpResponse => {
       // An answer through the relay ends a relay outage's one notice.
-      if (adapter) proxyAuthorization?.accepted();
+      if (tunnelAdapter) proxyAuthorization?.accepted();
       if (response.body instanceof Uint8Array) {
         cleanup();
         return response;
@@ -559,12 +599,12 @@ const httpTransport = (
           : undefined;
       const route =
         publicPrefix === undefined
-          ? restRoute(provider, exchange, options, routing, request, transport.serverHeaders, intent)
+          ? (proxyRoute ?? restRoute(provider, exchange, options, routing, request, transport.serverHeaders, intent))
           : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
       const target = route.baseURL ?? request.url;
       const prefix = target.endsWith(request.url) ? target.slice(0, -request.url.length) : undefined;
       if (intent !== undefined && prefix === undefined) throw new HttpPreparationError('unsupported');
-      const aliases = httpHeaderAliases(exchange, route.proxied, Boolean(adapter));
+      const aliases = httpHeaderAliases(exchange, route.proxied, Boolean(tunnelAdapter));
       const hostHeaders = AxiosHeaders.from(venueHeaders(exchange, options));
       const config = {
         method: request.method,
@@ -622,12 +662,12 @@ const httpTransport = (
         );
         return untilAborted(promise, signal);
       };
-      const how = adapter as Partial<DisposableAxiosAdapter> | undefined;
-      if (adapter) {
+      const how = tunnelAdapter as Partial<DisposableAxiosAdapter> | undefined;
+      if (tunnelAdapter) {
         const prepareTunnel = intent === undefined ? how?.prepareLegacy : how?.prepare;
         if (prepareTunnel)
           prepared = await waitForPrepared(
-            withProxyTokenProvider(proxyTokenProvider, () => prepareTunnel.call(adapter, config)),
+            withProxyTokenProvider(proxyTokenProvider, () => prepareTunnel.call(tunnelAdapter, config)),
           );
         else if (intent !== undefined) throw new HttpPreparationError('unsupported');
       } else if (intent !== undefined) {
@@ -661,7 +701,7 @@ const httpTransport = (
         return inner;
       };
       return {
-        ...(adapter ? {} : { expiresAt: (prepared as PreparedHttp | undefined)?.expiresAt }),
+        ...(tunnelAdapter ? {} : { expiresAt: (prepared as PreparedHttp | undefined)?.expiresAt }),
         cancel,
         bind(packet) {
           beforeRelease(() => {
@@ -702,14 +742,14 @@ const httpTransport = (
           if (intent === undefined) delete network.timeoutMs;
           let send: () => Promise<HttpResponse>;
           let ready: () => boolean;
-          if (adapter) {
+          if (tunnelAdapter) {
             const tunnel = prepared as Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
             const inner = beforeRelease(() => validateBound(tunnel?.bind(finalConfig)));
             ready = inner ? () => inner.ready() : () => true;
             send = () => {
               const response = inner
                 ? inner.dispatch()
-                : withProxyTokenProvider(proxyTokenProvider, () => adapter(finalConfig));
+                : withProxyTokenProvider(proxyTokenProvider, () => tunnelAdapter(finalConfig));
               return untilAborted(response, signal).then((value) => {
                 if (typeof value.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
                 return {
@@ -739,12 +779,12 @@ const httpTransport = (
                 const response = send();
                 return untilAborted(response, signal)
                   .then((value) =>
-                    route.proxied && !adapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
+                    route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
                   )
                   .then(wrap)
                   .catch((error) => {
                     // No answer through the relay, and nobody called it off: the relay is down.
-                    if (adapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
+                    if (tunnelAdapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
                       proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
                     cancel();
                     throw error;
@@ -767,7 +807,7 @@ const httpTransport = (
         );
       }
       // The relay never prepared it, and nobody called it off: the relay is down.
-      if (adapter && !prepared && !disposed && !request.signal?.aborted)
+      if (tunnelAdapter && !prepared && !disposed && !request.signal?.aborted)
         proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
       if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw new HttpPreparationError('timedOut');
       throw error;
@@ -794,6 +834,7 @@ export const createEngineTransport = (
   transport: Transport,
   credentials?: { hasSecondary: boolean },
   onProxyAuthorizationFailure?: (message: string) => void,
+  onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
 ): Transport => {
   assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
@@ -855,7 +896,16 @@ export const createEngineTransport = (
       proxyAuthorizationFailing = false;
     },
   };
-  const http = httpTransport(exchange, options, transport, provider, restRouting, undefined, proxyAuthorization);
+  const http = httpTransport(
+    exchange,
+    options,
+    transport,
+    provider,
+    restRouting,
+    undefined,
+    proxyAuthorization,
+    onTunnelProxyFallback,
+  );
   // Explicit public requests bypass account proxy/tunnel policy. URLs stay in
   // the host; venues choose only the typed route name.
   const directHttp = httpTransport(exchange, options, transport, provider, restRouting, '');
@@ -877,6 +927,7 @@ export const createEngineTransport = (
         resolved(exchange, readOptions, provider).restRouting,
         undefined,
         proxyAuthorization,
+        onTunnelProxyFallback,
       )
     : undefined;
   return {
