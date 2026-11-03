@@ -33,5 +33,10 @@ now supplies bounds containing its unchanged 120/180-second bars. Actual
 JS EngineHost/WASM/SDK coverage exercises the same 1,000-bar chart request.
 
 No key, account, hosted-signing or write behavior changes; no new caller setup.
+The scripted private tape tags its unchanged original candle routes as TS-only
+and adds one Rust-only response for the exact end-minus-one-second request.
+Candle payloads and command stages stay unchanged. Existing per-implementation
+request-plan checks cover both shapes; no oracle or comparison policy changes.
+The new SHA carries the same diagnostic sets and exact cash-root acceptances.
 Coinbase's candle limit and granularity contract:
 https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/products/get-product-candles
