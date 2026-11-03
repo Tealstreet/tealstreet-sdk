@@ -3,7 +3,7 @@
 // that wait out their whole deadline instead of recovering after a reconnect.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createAxiosHttpOverWebsocketAdapter } from './axiosHttpOverWebsocketAdapter';
+import { createAxiosHttpOverWebsocketAdapter, TradeTunnelTimeoutError } from './axiosHttpOverWebsocketAdapter';
 import { configureHOW } from './config';
 
 type ServerMode = {
@@ -15,6 +15,10 @@ type ServerMode = {
   silent?: boolean;
   /** rpc.http frames are accepted but not answered (keeps a request in flight). */
   holdHttp?: boolean;
+  /** The upgrade never completes (a dial lost on a slow link); the client redials. */
+  neverOpen?: boolean;
+  /** rpc.http replies arrive this long after the request (a large body on a slow link). */
+  replyAfterMs?: number;
 };
 
 class FakeTunnelSocket {
@@ -45,7 +49,7 @@ class FakeTunnelSocket {
   constructor(readonly url: string) {
     this.mode = FakeTunnelSocket.nextModes.shift() ?? FakeTunnelSocket.defaultMode;
     FakeTunnelSocket.instances.push(this);
-    setTimeout(() => this.serverAccept(), 10);
+    if (!this.mode.neverOpen) setTimeout(() => this.serverAccept(), 10);
   }
 
   addEventListener(type: string, listener: (event: any) => void) {
@@ -69,12 +73,15 @@ class FakeTunnelSocket {
       if (this.authFramesSeen > (this.mode.ignoreAuthFrames ?? 0))
         this.serverSendLater({ type: 'rpc.auth', status: 'success' });
     }
-    if (frame.type === 'rpc.http' && !this.mode.holdHttp)
-      this.serverSendLater({
+    if (frame.type === 'rpc.http' && !this.mode.holdHttp) {
+      const reply = {
         type: 'rpc.http',
         nonce: frame.nonce,
         data: { status: 200, headers: {}, data_raw: '{"retCode":0}' },
-      });
+      };
+      if (this.mode.replyAfterMs) setTimeout(() => this.serverSend(reply), this.mode.replyAfterMs);
+      else this.serverSendLater(reply);
+    }
   }
 
   close() {
@@ -278,5 +285,47 @@ describe('HOWWebSocket reconnect recovery (real socket stack, fake tunnel)', () 
     await advance(30_000);
     expect(FakeTunnelSocket.instances.length, 'sockets dialed after a silent open').toBeGreaterThan(2);
     await expectOk(track(adapter(instrumentsInfo())), 10_000);
+  });
+
+  // --- Readiness: a slow reconnect must not spend a long read's own time ---
+  it('authorization ready after 25 s lets a 90 s discovery read with a 50 s body complete', async () => {
+    FakeTunnelSocket.defaultMode = { ignoreAuthFrames: Infinity };
+    const read = track(adapter(instrumentsInfo(90_000)));
+    await advance(25_000);
+    // Finish authorization independently of reconnect jitter and token retry cadence.
+    const socket = FakeTunnelSocket.latest();
+    expect(socket.readyState).toBe(FakeTunnelSocket.OPEN);
+    socket.mode = { replyAfterMs: 50_000 };
+    socket.serverSend({ type: 'rpc.auth', status: 'success' });
+    await advance(15_000);
+    expect(read.state(), 'body still in flight').toBe('pending');
+    await advance(45_000);
+    expect(read.state(), String(read.error()?.message)).toBe('resolved');
+  });
+
+  it.each(['legacy', 'managed'] as const)('%s readiness fails at 30 s without sending HTTP', async (mode) => {
+    FakeTunnelSocket.defaultMode = { neverOpen: true };
+    const config = instrumentsInfo(90_000);
+    const read = track<unknown>(mode === 'managed' ? adapter.prepare(config) : adapter(config));
+    await advance(30_500);
+    expect(read.state()).toBe('rejected');
+    expect(read.error()).toMatchObject({ name: 'TradeTunnelReadinessError' });
+    expect(read.error()).toBeInstanceOf(TradeTunnelTimeoutError);
+    expect(String(read.error()?.message)).toContain('was not ready within 30 s');
+    expect(FakeTunnelSocket.instances.flatMap((socket) => socket.sent).filter((f) => f.type === 'rpc.http')).toEqual(
+      [],
+    );
+  });
+
+  it.each(['legacy', 'managed'] as const)('%s keeps a caller deadline shorter than the readiness cap', async (mode) => {
+    FakeTunnelSocket.defaultMode = { neverOpen: true };
+    const config = instrumentsInfo(8_000);
+    const read = track<unknown>(mode === 'managed' ? adapter.prepare(config) : adapter(config));
+    await advance(8_000);
+    expect(read.state()).toBe('rejected');
+    expect(read.error()).toMatchObject({ name: 'TradeTunnelTimeoutError' });
+    expect(FakeTunnelSocket.instances.flatMap((socket) => socket.sent).filter((f) => f.type === 'rpc.http')).toEqual(
+      [],
+    );
   });
 });
