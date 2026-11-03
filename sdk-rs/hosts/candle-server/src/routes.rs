@@ -147,7 +147,17 @@ async fn route(local: Local, method: Method, uri: Uri, headers: HeaderMap) -> Re
         }
         _ => not_found(),
     };
-    respond(&origin, reply.status, Some(reply.body), reply.cache_ttl)
+    let mut response = respond(&origin, reply.status, Some(reply.body), reply.cache_ttl);
+    if let Some(seconds) = reply.retry_after_secs {
+        let headers = response.headers_mut();
+        headers.insert(header::RETRY_AFTER, HeaderValue::from(seconds));
+        // The page reads the wait cross-origin.
+        headers.insert(
+            header::ACCESS_CONTROL_EXPOSE_HEADERS,
+            HeaderValue::from_static("retry-after"),
+        );
+    }
+    response
 }
 
 pub fn not_found() -> Reply {
