@@ -38,6 +38,7 @@ const betaVenues = Object.freeze({
   kucoin: { family: 'kucoin' },
   kucoinspot: { family: 'kucoinspot' },
   lighter: { family: 'lighter' },
+  'lighter-robinhood': { family: 'lighter' },
   mexc: { family: 'mexc' },
   mode: { family: 'orderly' },
   okx: { family: 'okx' },
