@@ -99,6 +99,14 @@ const fields = new Set(['products', 'product_type', 'product_id', 'status', 'bas
   'has_next', 'cursor', 'pagination', 'side', 'order_type', 'filled_size']);
 
 export function parseFailureSummary(message, path) {
+  const validation = [
+    ['Coinbase duplicate spot holding', 'asset', 'duplicate_asset'],
+    ['Coinbase spot balance limit', 'spot_positions', 'row_limit'],
+    ['null number', 'unknown', 'null_number'],
+    ['blank number', 'unknown', 'blank_number'],
+    ['invalid number', 'unknown', 'invalid_number'],
+  ].find(([text]) => message.includes(text));
+  if (validation) return { kind: 'validation', path, field: validation[1], reason: validation[2] };
   const missing = /missing field `([^`]+)`/.exec(message);
   const kind = missing ? 'missing_field' : message.includes('invalid type') ? 'invalid_type'
     : message.includes('invalid value') ? 'invalid_value'

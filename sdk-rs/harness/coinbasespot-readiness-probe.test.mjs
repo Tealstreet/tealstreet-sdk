@@ -78,6 +78,14 @@ test('only Coinbase heartbeat/user subscriptions reach the socket', () => {
 });
 
 test('engine failure summaries expose only closed kinds and field names', () => {
+  for (const [message, field, reason] of [
+    ['Coinbase duplicate spot holding', 'asset', 'duplicate_asset'],
+    ['Coinbase spot balance limit', 'spot_positions', 'row_limit'],
+    ['null number at line 1 column 120', 'unknown', 'null_number'],
+    ['blank number at line 1 column 120', 'unknown', 'blank_number'],
+    ['invalid number at line 1 column 120', 'unknown', 'invalid_number'],
+  ]) assert.deepEqual(parseFailureSummary(`${message} private-value`, '/api/v3/brokerage/portfolios/default-one'),
+    { kind: 'validation', path: '/api/v3/brokerage/portfolios/default-one', field, reason });
   assert.deepEqual(parseFailureSummary('missing field `base_increment` at line 1 column 50', '/api/v3/brokerage/products'),
     { kind: 'missing_field', path: '/api/v3/brokerage/products', field: 'base_increment' });
   for (const message of ['missing field `private-value`', 'invalid type: string "private-value", expected f64',
@@ -151,6 +159,24 @@ test('published WASM processes fixture 200s but exports readiness only when the 
     clearInterval(flush);
     host.dispose();
   }
+
+  const duplicateFailures = [];
+  const duplicateEngine = new WasmEngine('coinbasespot', JSON.stringify({
+    key: 'organizations/fixture/apiKeys/fixture', secret: Buffer.alloc(32, 7).toString('base64'), spotOnly: true,
+  }));
+  const duplicateHost = createProbeHost(duplicateEngine, { ...transport, request: async (request) => {
+    if (new URL(request.url).pathname.endsWith('/portfolios/default-one')) return response({ breakdown: { spot_positions: [
+      { asset: 'USDC', total_balance_crypto: 2000, available_to_trade_crypto: 1800 },
+      { asset: 'USDC', total_balance_crypto: 600, available_to_trade_crypto: 600 },
+    ] } });
+    return transport.request(request);
+  } }, { onEvent() {}, onLog() {} }, (row) => duplicateFailures.push(row));
+  try {
+    duplicateHost.start();
+    await until(() => duplicateFailures.length > 0);
+    assert.deepEqual(duplicateFailures[0], { kind: 'validation',
+      path: '/api/v3/brokerage/portfolios/default-one', field: 'asset', reason: 'duplicate_asset' });
+  } finally { duplicateHost.dispose(); }
 
   const failures = [];
   const invalidEngine = new WasmEngine('coinbasespot', JSON.stringify({
