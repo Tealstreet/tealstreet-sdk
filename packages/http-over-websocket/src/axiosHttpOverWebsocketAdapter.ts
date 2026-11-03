@@ -57,6 +57,17 @@ export class TradeTunnelTimeoutError extends Error {
   }
 }
 
+/** Readiness exhausted its cap; timeout callers retain their existing retry classification. */
+export class TradeTunnelReadinessError extends TradeTunnelTimeoutError {
+  constructor(message: string, context: { config: any; method: string; route: TradeTunnelRouteContext; url: string }) {
+    super(message, context);
+    this.name = 'TradeTunnelReadinessError';
+  }
+}
+
+/** The most of a request's deadline spent waiting for the socket to open and authorize. */
+export const READINESS_CAP_MS = 30_000;
+
 export class TradeTunnelDisposedError extends Error {
   constructor(
     readonly config: unknown,
@@ -433,6 +444,15 @@ const createAxiosHttpOverWebsocketAdapter = (
       };
       const timeoutMs = typeof config.timeout === 'number' && config.timeout > 0 ? config.timeout : 20_000;
       const deadline = Date.now() + timeoutMs;
+      // Socket open, clock sync and authorization are bounded on their own, so a slow
+      // reconnect cannot spend the request's time; a long read (discovery) keeps the rest.
+      const readinessDeadline = Math.min(deadline, Date.now() + READINESS_CAP_MS);
+      let readying = true;
+      const createReadinessError = (route: TradeTunnelRouteContext = baseRouteContext) =>
+        new TradeTunnelReadinessError(
+          `HTTP tunnel was not ready within ${Math.round((readinessDeadline - (deadline - timeoutMs)) / 1000)} s: ${config.url}`,
+          { config, method: websocketRequest.method, route, url: websocketRequest.url },
+        );
       const createTimeoutError = (route: TradeTunnelRouteContext = baseRouteContext) =>
         new TradeTunnelTimeoutError(`WSoverHTTP request timed out: ${config.url}`, {
           config,
@@ -448,9 +468,14 @@ const createAxiosHttpOverWebsocketAdapter = (
       };
       const awaitWithinDeadline = <T>(promise: Promise<T>, route?: TradeTunnelRouteContext): Promise<T> =>
         new Promise<T>((resolve, reject) => {
-          const remaining = remainingTime();
+          const total = remainingTime();
+          const ready = readying ? readinessDeadline - Date.now() : total;
+          // Ending with the readiness cap (not the whole deadline) is a readiness failure.
+          const expire = () =>
+            readying && readinessDeadline < deadline ? createReadinessError(route) : createTimeoutError(route);
+          const remaining = Math.min(total, ready);
           if (remaining <= 0) {
-            reject(createTimeoutError(route));
+            reject(expire());
             return;
           }
 
@@ -461,7 +486,7 @@ const createAxiosHttpOverWebsocketAdapter = (
           };
           const timer = setTimeout(() => {
             removeAbort(onAbort);
-            reject(createTimeoutError(route));
+            reject(expire());
           }, remaining);
           addAbort(onAbort);
           promise.then(
@@ -482,6 +507,7 @@ const createAxiosHttpOverWebsocketAdapter = (
 
       if (shouldSimulateHttpOverWebsocket()) {
         if (!legacy) throw new TradeTunnelPreparationError('HTTP_PREPARATION_UNSUPPORTED');
+        readying = false;
         return {
           cancel() {
             canceled = true;
@@ -675,6 +701,7 @@ const createAxiosHttpOverWebsocketAdapter = (
           }
         }
 
+        readying = false;
         const epoch = howWebSocket.epoch;
         const usable = () =>
           !canceled &&

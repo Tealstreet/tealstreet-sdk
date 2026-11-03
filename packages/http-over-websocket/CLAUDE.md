@@ -130,6 +130,9 @@ yarn test           # Vitest
   without closing a shared connection or cancelling another request's refresh.
   When the deadline expires, the adapter rejects with
   `TradeTunnelTimeoutError` and must not transmit the now-stale request.
+- Socket opening, time sync and authorization share a readiness cap of 30 s,
+  bounded by the original request deadline. Exceeding that cap raises
+  `TradeTunnelReadinessError`, a timeout subclass; readiness never resets the deadline.
 - A `Bad` authentication state is connection-scoped. Concurrent Axios requests
   share one refresh/token-send attempt per `HOWWebSocket` through the adapter's
   weak single-flight map, so one bad-token episode emits one `rpc.auth` frame.
