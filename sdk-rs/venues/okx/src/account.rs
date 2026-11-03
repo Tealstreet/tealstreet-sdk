@@ -222,6 +222,8 @@ pub struct AccountState {
     pub ready: bool,
     configured: bool,
     config_in_flight: bool,
+    /// The first config without a position mode was reported; later reads stay quiet.
+    pos_mode_noted: bool,
     config_read_at: f64,
     pub mode_version: u64,
     pub leverage_versions: HashMap<String, u64>,
@@ -948,17 +950,37 @@ impl Okx {
             }
             Request::Config { mode_version, .. } => {
                 self.account.config_in_flight = false;
+                // A 200 answer that cannot be read will not read better on a retry:
+                // it ends the start visibly instead of backing off forever.
                 let configs = serde_json::from_str::<Vec<Config<'_>>>(data);
-                let Ok(configs) = configs else {
-                    self.config_failed(cx, &VenueError::new("malformed OKX config"));
+                let Some(config) = configs.ok().and_then(|configs| configs.into_iter().next())
+                else {
+                    self.config_unusable(cx, "OKX account config answered with no readable account".into());
                     return;
                 };
-                let Some(config) = configs
-                    .first()
-                    .filter(|c| matches!(c.pos_mode, "net_mode" | "long_short_mode"))
-                else {
-                    self.config_failed(cx, &VenueError::new("missing OKX position mode"));
-                    return;
+                let config = match config.pos_mode {
+                    "net_mode" | "long_short_mode" => config,
+                    // Simple (spot) mode accounts report no position mode: they trade one-way.
+                    "" => {
+                        if !std::mem::replace(&mut self.account.pos_mode_noted, true) {
+                            cx.notice(
+                                Level::Warn,
+                                code::CONFIG_INVALID,
+                                format!(
+                                    "OKX account config reports no position mode (acctLv {}); trading it as one-way",
+                                    config.acct_lv
+                                ),
+                            );
+                        }
+                        Config { pos_mode: "net_mode", ..config }
+                    }
+                    other => {
+                        self.config_unusable(
+                            cx,
+                            format!("OKX account reports an unknown position mode '{other}' (acctLv {})", config.acct_lv),
+                        );
+                        return;
+                    }
                 };
                 self.account.config_read_at = cx.now;
                 self.account.startup.succeeded(cx, &());
@@ -1362,6 +1384,18 @@ impl Okx {
             self.account.retry = Some(cx.set_timer(5_000.0));
         }
         self.read_fresh_positions_again(cx);
+    }
+
+    /// A config answer no retry will fix: before the account is configured the start
+    /// fails visibly (it used to retry forever with private reads never sent).
+    fn config_unusable(&mut self, cx: &mut Cx<'_, Pending>, message: String) {
+        if self.account.configured {
+            self.config_failed(cx, &VenueError::new(message));
+            return;
+        }
+        self.account.config_in_flight = false;
+        cx.notice(Level::Error, code::CONFIG_INVALID, &message);
+        cx.startup_failed(VenueError::new(message).kind(ErrorKind::Unsupported));
     }
 
     /// Clearing the in-flight flag lets the backoff timer re-enter account_start.
