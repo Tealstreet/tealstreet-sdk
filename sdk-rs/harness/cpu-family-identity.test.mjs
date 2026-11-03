@@ -188,7 +188,7 @@ test('family comparison source authority refuses retries and a different physica
   }
 });
 
-test('the production base collector restores the exact candidate packages on success and build failure', async t => {
+test('the production base collector builds a clean separate parent with a dirty candidate and preserves it on failure', async t => {
   const { execFileSync, spawnSync } = await import('node:child_process');
   const fs = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -199,9 +199,16 @@ test('the production base collector restores the exact candidate packages on suc
   const put = (name, contents) => { const path = resolve(root, name); fs.mkdirSync(resolve(path, '..'), { recursive: true }); fs.writeFileSync(path, contents); };
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   git('init', '-q', '-b', 'master'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid');
-  put('.gitignore', 'sdk-rs/hosts/wasm/pkg/\nsdk-rs/harness/out/\n');
+  put('.gitignore', 'sdk-rs/hosts/wasm/pkg/\nsdk-rs/harness/out/\nsdk-rs/target/\n');
   put('sdk-rs/harness/build.sh', `set -eu
 if [ "\u0024{FAIL_FAMILY_BUILD:-}" = true ]; then exit 17; fi
+test ! -e candidate.txt
+test ! -e generated.json
+test ! -e sdk-rs/target/candidate-cache
+test "\u0024CARGO_TARGET_DIR" = "\u0024PWD/sdk-rs/target"
+mkdir -p sdk-rs/hosts/wasm/pkg/node sdk-rs/hosts/wasm/pkg/web
+printf 'baseline glue' > sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm.js
+printf '{}' > sdk-rs/hosts/wasm/pkg/node/package.json
 printf 'baseline wasm' > sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm
 printf 'baseline web' > sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm
 `);
@@ -216,10 +223,13 @@ writeFileSync(out+'/build.json',JSON.stringify({sourceHead:execFileSync('git',['
 `);
   git('add', '.'); git('commit', '-qm', 'base'); const baseline = git('rev-parse', 'HEAD');
   put('candidate.txt', 'candidate'); git('add', '.'); git('commit', '-qm', 'candidate'); const candidate = git('rev-parse', 'HEAD');
-  const tools = fs.mkdtempSync(resolve(tmpdir(), 'cpu-family-tools-'));
-  t.after(() => fs.rmSync(tools, { recursive: true, force: true }));
-  fs.writeFileSync(resolve(tools, 'cargo'), '#!/bin/sh\ntest "$1" = clean\n'); fs.chmodSync(resolve(tools, 'cargo'), 0o755);
   const authority = { candidate, baseline, candidateTree: git('rev-parse', 'HEAD^{tree}'), runId: '10', suite: 'txflow' };
+  put('candidate.txt', 'generated tracked change');
+  put('generated.json', '{"replayGenerated":true}');
+  put('sdk-rs/target/candidate-cache', 'original target cache');
+  const before = git('status', '--porcelain'), diffBefore = git('diff', '--binary', 'HEAD');
+  assert.match(before, /candidate.txt/);
+  assert.match(before, /generated.json/);
   for (const fail of [false, true]) {
     for (const directory of ['node', 'web', 'ci-replay']) {
       put(`sdk-rs/hosts/wasm/pkg/${directory}/safe_cex_wasm_bg.wasm`, 'candidate wasm');
@@ -231,9 +241,18 @@ writeFileSync(out+'/build.json',JSON.stringify({sourceHead:execFileSync('git',['
     t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
     const path = resolve(temporary, 'authority.json'); fs.writeFileSync(path, JSON.stringify(authority));
     const child = spawnSync('python3', [script, '--authority', path, '--temporary', temporary], { cwd: root, encoding: 'utf8',
-      env: { ...process.env, PATH: `${tools}:${process.env.PATH}`, GITHUB_ACTIONS: 'true', GITHUB_RUN_ATTEMPT: '1', GITHUB_RUN_ID: '10', FAIL_FAMILY_BUILD: String(fail) } });
+      env: { ...process.env, GITHUB_ACTIONS: 'true', GITHUB_RUN_ATTEMPT: '1', GITHUB_RUN_ID: '10', FAIL_FAMILY_BUILD: String(fail) } });
     assert.equal(child.status, fail ? 1 : 0, child.stderr);
     assert.equal(git('rev-parse', 'HEAD'), candidate);
+    assert.equal(git('status', '--porcelain'), before);
+    assert.equal(git('diff', '--binary', 'HEAD'), diffBefore);
+    assert.equal(fs.readFileSync(resolve(root, 'generated.json'), 'utf8'), '{"replayGenerated":true}');
+    assert.equal(fs.readFileSync(resolve(root, 'sdk-rs/target/candidate-cache'), 'utf8'), 'original target cache');
+    const base = resolve(temporary, 'base-checkout');
+    assert.equal(fs.existsSync(resolve(base, 'candidate.txt')), false);
+    assert.equal(fs.existsSync(resolve(base, 'generated.json')), false);
+    assert.equal(git('-C', base, 'rev-parse', 'HEAD'), baseline);
+    assert.equal(git('-C', base, 'status', '--porcelain'), '');
     for (const directory of ['node', 'web']) {
       assert.equal(fs.readFileSync(resolve(root, `sdk-rs/hosts/wasm/pkg/${directory}/safe_cex_wasm_bg.wasm`), 'utf8'), 'candidate wasm');
       assert.equal(fs.readFileSync(resolve(root, `sdk-rs/hosts/wasm/pkg/${directory}/safe_cex_wasm.js`), 'utf8'), 'candidate glue');

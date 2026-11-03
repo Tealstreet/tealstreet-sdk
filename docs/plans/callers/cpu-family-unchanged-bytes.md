@@ -24,8 +24,8 @@ cpu-cohort-marker-clock.md's Bitget byte-identity ruling to family remeasurement
 Regressions retain original medians from #2963 run 41617614920 (txflow) and
 master run 41618845764 (OKX inverse). Each previously failed the frozen two-run
 mean; each unchanged family now avoids that measurement only with a valid seal
-proof. Collector controls pin exact candidate restoration after success and a
-failed base build; failures cannot emit a completed proof.
+proof. Collector controls pin the exact candidate state after success and a failed
+base build; failures cannot emit a completed proof.
 
 
 Replay measurement jobs now use a full-history checkout, as the shared source
@@ -41,3 +41,12 @@ the changed-byte eligibility bound. Only a valid byte proof accepts it; changed
 WASM or glue still refuses it. Collection controls preserve private coverage,
 ledger consistency, complete raw evidence and memory failures before any
 unchanged-byte acceptance. Ddi approved this broader application in #2967.
+
+
+The parent build uses a separate temporary Git repository fetched from the
+local object store at the authenticated parent SHA, with its own Cargo target
+directory. Its HEAD, tree and clean status are checked before building. Replay
+generated tracked/untracked files cannot enter that checkout. The candidate's
+HEAD, tracked diff and status are preserved on success and failure; its node/web
+packages and Cargo cache are never cleaned or replaced. Candidate bytes remain
+bound to the original archived runtime and provenance checks as before.
