@@ -2,8 +2,8 @@
 use super::*;
 use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::socket_lifecycle::{
-    AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
-    Interest, Invalidation, LifecycleEvent, SocketError, TrafficPolicy,
+    AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, DataSilence, EncodedBatch,
+    FeedId, FeedPolicy, Interest, Invalidation, LifecycleEvent, SocketError, TrafficPolicy,
 };
 #[derive(serde::Deserialize)]
 struct EventName<'a> {
@@ -173,6 +173,11 @@ impl Okx {
                     0.
                 },
                 close_floors: &[],
+                // Tickers and books stream all session; a socket with only those gone quiet is dead.
+                data_silence: (channel == PUBLIC).then_some(DataSilence {
+                    after_ms: 60_000.,
+                    streams: &[r#"{"channel":"tickers""#, r#"{"channel":"books""#],
+                }),
             };
             let feed = cx.register_socket_feed(policy)?;
             self.connections[channel].feed = Some(feed);

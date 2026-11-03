@@ -193,6 +193,7 @@ impl Hyperliquid {
                 invalidation: Invalidation::Required,
                 subscription_interval_ms: 0.,
                 close_floors: &[],
+                data_silence: None,
             })?;
             self.connection.feed = Some(feed);
             feed

@@ -762,6 +762,7 @@ impl MexcFutures {
         Ok(steps)
     }
     pub fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let mut refusal_kind = None;
         let total_orders = match &command {
             Command::PlaceOrders { orders, .. } => orders.len(),
             Command::AmendOrder { .. } => 1,
@@ -830,8 +831,29 @@ impl MexcFutures {
                         }
                         None => opts.amount,
                     };
-                    replacement_fits(cx, &o.symbol, left)
-                        .map_err(|error| format!("{error}; the order is unchanged"))?;
+                    // Native full-position stops use zero as a sentinel; placement resolves
+                    // and validates the live position quantity before any cancellation.
+                    let full_position_stop =
+                        opts.amount == 0.0 && self.account.stop_ids.contains(&id);
+                    if full_position_stop {
+                        let target = if o.side == OrderSide::Sell {
+                            PositionSide::Long
+                        } else {
+                            PositionSide::Short
+                        };
+                        if !cx
+                            .store
+                            .positions()
+                            .iter()
+                            .any(|p| p.symbol == o.symbol && p.side == target && p.contracts > 0.0)
+                        {
+                            refusal_kind = Some(ErrorKind::VenueUnavailable);
+                            return Err("MEXC position not loaded yet; try again in a moment. The order is unchanged".into());
+                        }
+                    } else {
+                        replacement_fits(cx, &o.symbol, left)
+                            .map_err(|error| format!("{error}; the order is unchanged"))?;
+                    }
                     let mut replacement = self.placement(cx, opts)?;
                     if let Call::Place { amend, .. } = &mut replacement.call {
                         *amend = Some(AmendIntent {
@@ -963,7 +985,11 @@ impl MexcFutures {
                 return;
             };
             let _ = cx.command_error_context(&context, error);
-            let _ = cx.fail_context(&context, not_sent(error.as_str()));
+            let mut error = not_sent(error.as_str());
+            if let Some(kind) = refusal_kind {
+                error = error.kind(kind);
+            }
+            let _ = cx.fail_context(&context, error);
             return;
         }
         if self.credentials.is_none() {
