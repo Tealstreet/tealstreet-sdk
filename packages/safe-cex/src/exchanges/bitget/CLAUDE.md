@@ -24,6 +24,10 @@ native units; only remaining and position display sizes use the TS price-based
 8-decimal conversion. Collateral uses each market's base coin and preserves the
 per-coin balance map through worker frames.
 
+An empty inverse catalogue keeps its terminal `venueUnavailable` startup failure
+and emits the same cause as an error-level `request.failed` event for UI consumers.
+It does not retry discovery or change the selected API product.
+
 UTA bills use v3 `financial-records`, retaining raw signed amount and fee metadata
 without assuming trade rows are gross PnL. Classic trailing modifies through
 `modify-plan-order`; UTA trailing uses `type=trailing_stop` and native distance

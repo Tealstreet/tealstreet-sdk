@@ -10307,3 +10307,16 @@ finish bootstrap before installing their cache; the long streamed-cancel test
 keeps its non-resurrection assertion and additionally forbids expired new rows.
 Bootstrap fixtures also fire the genuine socket-handoff wake before expecting
 portfolio collateral reads; their balance and holdings assertions stay intact.
+### Startup visibility: Bitget inverse and unconfigured HyroTrader
+
+Bitget inverse discovery with no contracts still terminates startup with
+`venueUnavailable`, and now emits the same cause through the standard classified
+error event. Contract/API selection and the terminal policy are unchanged.
+
+HyroTrader URLs remain SDK build-time configuration in `bybit.types.ts`, through
+`NEXT_PUBLIC_HYROTRADER_{PROD,SIMULATOR}_{REST,PUBLIC_WS,PRIVATE_WS}_URL`.
+Socket defaults remain derived from the configured REST origin. A missing URL
+for the selected mode/network, checked through the declared endpoint setup policy,
+now emits an `invalidInput/notSent` error and
+rejects before loading WASM or starting transport. Demo selection and the existing
+production-to-simulator fallback are unchanged; no destination is invented.
