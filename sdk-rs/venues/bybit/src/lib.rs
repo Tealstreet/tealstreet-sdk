@@ -317,6 +317,9 @@ pub struct BybitLinear {
     read_credentials: Option<safe_cex_engine::signing::Identity>,
     /// Set once a startup read proved the key unusable; startup never retries it.
     credentials_rejected: bool,
+    private_startup_timer: Option<TimerId>,
+    private_startup_error: Option<VenueError>,
+    private_startup_failed: bool,
     environment_probe_origin: Option<&'static str>,
     environment_probe_attempted: bool,
     environment_probe: Option<EnvironmentProbe>,
@@ -333,6 +336,8 @@ pub struct BybitLinear {
     startup: Startup,
     /// Discovery retries wait out a rate-limit or IP ban across all products.
     discovery_paused_until: f64,
+    /// Kline reads wait out a refused one's rate limit or IP ban together, sending nothing.
+    candles_paused_until: f64,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
@@ -458,7 +463,7 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     }
 }
 
-fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
+pub(crate) fn venue_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
     use safe_cex_engine::startup::{
         MAX_RATE_LIMIT_PAUSE_MS, from_tealstreet_edge, rate_limit_pause_ms,
     };
@@ -573,6 +578,9 @@ impl BybitLinear {
             credentials,
             read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
+            private_startup_timer: None,
+            private_startup_error: None,
+            private_startup_failed: false,
             environment_probe_origin,
             brazil_site: options.bybit_site_id.as_deref() == Some("BRA_BTL"),
             environment_probe_attempted: false,
@@ -591,6 +599,7 @@ impl BybitLinear {
                 ..Startup::default()
             },
             discovery_paused_until: 0.0,
+            candles_paused_until: 0.0,
             account: account::AccountState::new(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
@@ -2208,7 +2217,7 @@ impl BybitLinear {
                 Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
             )
         {
-            let pause = discovery_rate_limit_pause_ms(response, cx.now);
+            let pause = venue_rate_limit_pause_ms(response, cx.now);
             // One window per streak: a repeat refusal while it runs does not extend it.
             if pause > 0.0 && cx.now >= self.discovery_paused_until {
                 self.discovery_paused_until = cx.now + pause;
@@ -3031,7 +3040,7 @@ impl Venue for BybitLinear {
             return;
         }
         if let Then::Candles(read) = pending.then {
-            Self::candles_response(cx, read, &response);
+            self.candles_response(cx, read, &response);
             return;
         }
         if let Then::Options(request) = pending.then {
@@ -3098,7 +3107,7 @@ impl Venue for BybitLinear {
         // A native kline refusal is typed; a success without its list proves nothing.
         if let Then::Candles(read) = pending.then {
             if venue_error(&response).is_some() {
-                Self::candles_response(cx, read, &response);
+                self.candles_response(cx, read, &response);
             } else {
                 let error =
                     VenueError::new("Bybit klines: response did not contain the expected list")
@@ -3138,6 +3147,12 @@ impl Venue for BybitLinear {
         {
             self.select_category(pending.category);
             self.keep_read_error(&pending.then, &error);
+            if matches!(
+                error.kind,
+                Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+            ) {
+                return self.on_response(cx, pending, response);
+            }
         }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still

@@ -23,6 +23,11 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 const MIRROR_EVERY: Duration = Duration::from_secs(60);
 const START_FAILED_CODE: &str = "hosted.start_failed";
 
+/// Notices the journal gets at any level, unthrottled: each subscription repair's outcome.
+fn always_journaled(code: Option<&str>) -> bool {
+    code == Some(safe_cex_engine::log::code::SUBSCRIPTION_REPAIRED)
+}
+
 /// `safe-cex warn hosted.start_failed [user account venue]: kind=… venue_code=… signing_mode=… message="…"`:
 /// fields an alert can match on. The message is the venue's refusal, cut to 200 characters.
 fn start_failure_line(label: &str, signing_mode: Option<&str>, error: &VenueError) -> String {
@@ -1018,6 +1023,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
         code: Option<&str>,
     ) {
         let label = self.config.log_label.as_deref().unwrap_or("-");
+        // Each repair says whether it resubscribed or reconnected; the server rate-limits
+        // repairs per account and topic already, so every one reaches the journal.
+        if always_journaled(code) {
+            eprintln!(
+                "safe-cex {level} {} [{label}]: {message}",
+                code.unwrap_or("log")
+            );
+        }
         if self.peers.is_empty() {
             if warn {
                 eprintln!(
@@ -1834,6 +1847,13 @@ fn valid_symbol(symbol: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{Events, HostEvent};
+
+    #[test]
+    fn every_subscription_repair_outcome_reaches_the_journal() {
+        assert!(always_journaled(Some("subscription.repaired")));
+        assert!(!always_journaled(Some("subscription.rejected")));
+        assert!(!always_journaled(None));
+    }
 
     #[test]
     fn a_hosted_start_failure_line_names_its_kind_code_and_signing_mode() {

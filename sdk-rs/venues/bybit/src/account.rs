@@ -44,6 +44,8 @@ const ORDERS_RETRY_MS: f64 = 15_000.0;
 const ORDERS_PAGE_LIMIT: u32 = 50;
 /// The window for a whole paged account read; each page keeps its own 20 s.
 const ACCOUNT_READ_WINDOW_MS: u32 = 60_000;
+/// Public traffic cannot keep a failed private bootstrap pending forever.
+const PRIVATE_STARTUP_TIMEOUT_MS: f64 = 60_000.0;
 const POSITIONS_PAGE_LIMIT: u32 = 200;
 const EXECUTION_CACHE_LIMIT: usize = 4096;
 const TERMINAL_ORDER_CACHE_LIMIT: usize = 4096;
@@ -309,6 +311,13 @@ pub struct AccountState {
 }
 
 impl Request {
+    fn is_startup_snapshot_read(&self) -> bool {
+        matches!(
+            self,
+            Self::Orders { .. } | Self::Positions { .. } | Self::Wallet { .. }
+        )
+    }
+
     /// A full private snapshot read, where no rows means no rows.
     pub(crate) fn is_snapshot_read(&self) -> bool {
         matches!(self, Self::Orders { .. } | Self::Positions { .. })
@@ -1594,6 +1603,9 @@ impl BybitLinear {
         if self.variant.is_hyro() {
             return;
         }
+        if self.category == self.primary_category {
+            self.private_startup_timer = Some(cx.set_timer(PRIVATE_STARTUP_TIMEOUT_MS));
+        }
         self.fetch_orders(cx);
         self.fetch_positions(cx);
         self.fetch_wallet(cx);
@@ -1955,6 +1967,31 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.private_startup_timer == Some(timer) {
+            self.private_startup_timer = None;
+            let loaded = cx.store.loaded();
+            let missing: Vec<_> = [
+                ("balance", loaded.balance),
+                ("orders", loaded.orders),
+                ("positions", loaded.positions),
+            ]
+            .into_iter()
+            .filter_map(|(name, ready)| (!ready).then_some(name))
+            .collect();
+            if !missing.is_empty() && !self.private_startup_failed && !self.credentials_rejected {
+                self.private_startup_failed = true;
+                let mut error = self.private_startup_error.take().unwrap_or_else(|| {
+                    VenueError::new("No successful private account snapshot was received")
+                });
+                error.message = format!(
+                    "Bybit private startup timed out waiting for {}. Last failure: {}",
+                    missing.join(", "),
+                    error.message
+                );
+                cx.startup_failed(error.kind(ErrorKind::Timeout));
+            }
+            return;
+        }
         if let Some((id, symbol, placed_at)) = self.account.fill_repairs.remove(&timer) {
             self.request_fill_repair(cx, id, symbol, placed_at);
             return;
@@ -2737,6 +2774,26 @@ impl BybitLinear {
             error.message = message;
             error
         };
+        if self.private_startup_timer.is_some()
+            && !self.private_startup_failed
+            && request.is_startup_snapshot_read()
+            && let Some(error) = &classified
+            && matches!(
+                error.kind,
+                Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+            )
+        {
+            self.private_startup_failed = true;
+            cx.clear_timer(self.private_startup_timer.take().expect("checked above"));
+            if let Some((native, message)) = response.as_ref().ok().and_then(venue_error)
+                && crate::CREDENTIAL_REJECTIONS.contains(&native)
+            {
+                self.reject_credentials(cx, native, &message);
+            } else {
+                // Missing read permissions do not prove the trading key invalid.
+                cx.startup_failed(error.clone());
+            }
+        }
         match request {
             Request::FillRepair {
                 order_id,
@@ -2899,6 +2956,7 @@ impl BybitLinear {
                     }
                     Err(message) => {
                         let error = failed(format!("Bybit orders: {message}"));
+                        self.private_startup_error = Some(error.clone());
                         cx.retried_failure_error("bybit.account:2216", &error);
                         join.failed = true;
                         if self.variant.is_hyro() {
@@ -2960,6 +3018,7 @@ impl BybitLinear {
                     }
                     Err(message) => {
                         let error = failed(format!("Bybit positions: {message}"));
+                        self.private_startup_error = Some(error.clone());
                         cx.retried_failure_error("bybit.account:2269", &error);
                         join.failed = true;
                         let typed = self.account.read_error.take();
@@ -3032,6 +3091,7 @@ impl BybitLinear {
                     }
                     Err(message) => {
                         let error = failed(format!("Bybit balance: {message}"));
+                        self.private_startup_error = Some(error.clone());
                         cx.retried_failure_error("bybit.account:2342", &error);
                         if self.variant.is_hyro() {
                             self.account.read_error = Some(error);
@@ -3040,6 +3100,13 @@ impl BybitLinear {
                     }
                 }
             }
+        }
+        let loaded = cx.store.loaded();
+        if loaded.balance && loaded.orders && loaded.positions {
+            if let Some(timer) = self.private_startup_timer.take() {
+                cx.clear_timer(timer);
+            }
+            self.private_startup_error = None;
         }
     }
 

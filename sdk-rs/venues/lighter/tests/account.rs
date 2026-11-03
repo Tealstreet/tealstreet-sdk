@@ -1447,7 +1447,7 @@ fn a_rejected_order_reports_its_reason_once_from_the_stream() {
             "canceled-post-only",
             "",
             NOW + 10_000.0,
-            Some("canceled-post-only"),
+            Some("Post-only order would execute immediately as taker; not placed."),
         ),
         (
             "62",
@@ -1479,6 +1479,13 @@ fn a_rejected_order_reports_its_reason_once_from_the_stream() {
             None,
         ),
         ("67", "open", "", NOW + 16_000.0, None),
+        (
+            "69",
+            "canceled-post-only",
+            r#","cancel_reason":"USER_CANCELED""#,
+            NOW + 16_500.0,
+            None,
+        ),
     ];
     for (id, status, extra, now, expected) in cases {
         notices(&mut e);
@@ -1672,4 +1679,55 @@ fn a_405_page_on_the_account_lookup_retries() {
         );
     }
     assert!(retried);
+}
+
+#[test]
+fn post_only_crossing_has_a_plain_message_and_retains_rejection_classification() {
+    // Native account_all_orders status: CanceledOrder_PostOnly in Lighter's order schema.
+    for extra in [
+        "",
+        r#","cancel_reason":"canceled-post-only""#,
+        r#","cancelReason":"canceled-post-only""#,
+    ] {
+        let (mut e, socket) = ready();
+        e.drain_actions().for_each(drop);
+        let now = NOW + 10_000.0;
+        let payload = format!(
+            r#"{{"channel":"account_all_orders:718895","timestamp":{},"orders":{{"1":[{{"order_index":"61","market_id":1,"type":"limit","time_in_force":"post-only","status":"canceled-post-only","initial_base_amount":"1","remaining_base_amount":"1","price":"120"{extra}}}]}}}}"#,
+            now as u64
+        );
+        message(&mut e, socket, now, &payload);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let errors: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == "order.rejected" =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{actions:?}");
+        let error = errors[0];
+        assert_eq!(error.level, safe_cex_engine::Level::Error);
+        assert_eq!(
+            error.message,
+            "Post-only order would execute immediately as taker; not placed."
+        );
+        assert!(error.fields.contains(&("kind", "rejected".into())));
+        assert!(
+            error
+                .fields
+                .contains(&("venueMessage", "canceled-post-only".into()))
+        );
+        assert!(e.store().order("61").is_none());
+        assert!(e.store().order("42").is_some());
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        message(&mut e, socket, now, &payload);
+        assert!(!e.drain_actions().any(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "order.rejected")));
+    }
 }

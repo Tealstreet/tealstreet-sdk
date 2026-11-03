@@ -36,6 +36,14 @@ impl BybitLinear {
         let Ok(context) = cx.admit_http_command(read_policy()) else {
             return;
         };
+        if cx.now < self.candles_paused_until {
+            let error = VenueError::new("Bybit klines: rate limited; waiting before the next read")
+                .kind(ErrorKind::RateLimited)
+                .outcome(Outcome::NotSent)
+                .retry_after_ms(self.candles_paused_until - cx.now);
+            let _ = cx.fail_context(&context, error);
+            return;
+        }
         // Invalid options send nothing; the read fails instead of hanging.
         if let Some(error) = self.config_error.clone() {
             let error = VenueError::new(error)
@@ -114,6 +122,7 @@ impl BybitLinear {
     }
 
     pub(crate) fn candles_response(
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         mut read: Read,
         response: &Response<'_>,
@@ -141,7 +150,17 @@ impl BybitLinear {
                 native.as_ref(),
                 format!("Bybit klines: {message}"),
             );
-            let _ = cx.fail_context(&read.context, failure.error);
+            let mut error = failure.error;
+            let pause = crate::venue_rate_limit_pause_ms(response, cx.now);
+            if error.kind == Some(ErrorKind::RateLimited) && pause > 0.0 {
+                self.candles_paused_until = self.candles_paused_until.max(cx.now + pause);
+                let retry_after = error
+                    .retry_after_ms
+                    .unwrap_or(0.0)
+                    .max(self.candles_paused_until - cx.now);
+                error = error.retry_after_ms(retry_after);
+            }
+            let _ = cx.fail_context(&read.context, error);
             return;
         }
         // Bybit lists newest first.
