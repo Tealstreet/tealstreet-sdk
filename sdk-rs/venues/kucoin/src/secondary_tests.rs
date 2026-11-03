@@ -139,7 +139,6 @@ fn public_only_signing_helpers_do_not_reintroduce_secondary_identity() {
         });
     engine.start(1700000000000.0);
     engine.prepare_dispatch(1700000000000.0);
-    engine.prepare_dispatch(1700000000000.0);
     let requests = http_requests(&mut engine);
     assert_eq!(requests.len(), 5);
     for request in requests {
