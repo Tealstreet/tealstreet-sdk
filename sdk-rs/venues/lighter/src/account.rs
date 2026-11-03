@@ -129,6 +129,12 @@ pub struct Account {
     pub records: HashMap<String, Order>,
     lookup_failed: bool,
     lookup_retry: Option<TimerId>,
+    /// The lookup ended without an account index; parked reads cannot be answered.
+    pub(crate) lookup_abandoned: bool,
+    /// Private history reads that arrived while the account index lookup was pending.
+    pub(crate) awaiting_identity: Vec<crate::history::Request>,
+    /// Refuses the parked reads outside the lookup's own delivery, which cannot settle them.
+    pub(crate) identity_refusal: Option<TimerId>,
     /// Client order index to native order index, as rows report them.
     pub(crate) client_orders: HashMap<String, String>,
     /// Placed orders the stream has not yet named: their client index can cancel them.
@@ -731,6 +737,7 @@ impl Lighter {
             return;
         }
         self.account.account_index = Some(account);
+        self.release_awaiting_identity(cx, account);
     }
     pub(crate) fn lookup_candidates(&self) -> VecDeque<Lookup> {
         self.candidates(true)
@@ -838,6 +845,8 @@ impl Lighter {
                 code::CONFIG_INVALID,
                 "Failed to resolve Lighter account index. Provide account index in Application ID.",
             );
+            self.account.lookup_abandoned = true;
+            self.schedule_identity_refusal(cx);
         }
     }
     fn identity_ready(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
@@ -849,9 +858,12 @@ impl Lighter {
                 code::CONFIG_INVALID,
                 "Lighter account lookup returned a different account index",
             );
+            self.account.lookup_abandoned = true;
+            self.schedule_identity_refusal(cx);
             return;
         }
         self.account.account_index = Some(account);
+        self.release_awaiting_identity(cx, account);
         if self.account.identity.is_some() {
             self.connect_private(cx);
         }
@@ -1232,6 +1244,11 @@ impl Lighter {
         );
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.identity_refusal == Some(timer) {
+            self.account.identity_refusal = None;
+            self.refuse_awaiting_identity(cx);
+            return true;
+        }
         if self.account.fresh_positions_timer == Some(timer) {
             self.account.fresh_positions_timer = None;
             self.retry_fresh_positions(cx);
