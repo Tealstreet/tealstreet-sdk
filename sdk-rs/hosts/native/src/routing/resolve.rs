@@ -14,6 +14,10 @@ use std::sync::OnceLock;
 #[serde(rename_all = "camelCase")]
 struct Table {
     hosts: Hosts,
+    /// `PROXY_PRIVATE_URL`: the fleet's load balancer, which admits by network only and
+    /// forwards every header to the venue. Our proxy JWT must never ride a route through it.
+    #[serde(skip)]
+    fleet_base: Option<String>,
     rest_headers: BTreeMap<String, String>,
     ws_headers: BTreeMap<String, String>,
     exchanges: HashMap<String, Exchange>,
@@ -141,6 +145,7 @@ impl BaseOverrides {
             for host in table.hosts.private_proxy.values_mut() {
                 host.clone_from(&private);
             }
+            table.fleet_base = Some(private);
         }
         if let Some(public) = tealstreet_base("PROXY_PUBLIC_URL", "https", self.public_proxy)? {
             table.hosts.public_cors_proxy = public;
@@ -778,8 +783,16 @@ pub fn resolve_routing_plan(
             return Err(RoutingError::UnsupportedRewrite);
         }
         let how = uses_tunnel(name, o) && tealstreet;
+        let prefix = if target == base_url {
+            String::new()
+        } else {
+            target[..target.len() - base_url.len() - 1].to_owned()
+        };
+        // The fleet forwards headers as sent: a Bearer of ours reached OKX as an OAuth token
+        // (53000 on third-party-app keys), and the edge's Coinbase rename does not happen there.
+        let fleet = proxied && table().fleet_base.as_deref() == Some(prefix.as_str());
         let mut header_aliases = BTreeMap::new();
-        if matches!(name, "coinbase" | "coinbasespot") && proxied && !how {
+        if matches!(name, "coinbase" | "coinbasespot") && proxied && !how && !fleet {
             header_aliases.insert("Authorization".into(), "Coinbase-Authorization".into());
         }
         let mut headers = venue_headers(name, o);
@@ -792,12 +805,8 @@ pub fn resolve_routing_plan(
             } else {
                 HttpRouteMode::Direct
             },
-            prefix: if target == base_url {
-                String::new()
-            } else {
-                target[..target.len() - base_url.len() - 1].into()
-            },
-            authorize: proxied,
+            prefix,
+            authorize: proxied && !fleet,
             authorization_header: proxy_authorization_header(name).into(),
             headers,
             header_aliases,
