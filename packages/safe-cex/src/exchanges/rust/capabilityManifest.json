@@ -335,6 +335,20 @@
     "optionExpiries": false,
     "accountGreeks": false
   },
+  "mexc": {
+    "startup": true,
+    "trading": true,
+    "openOrders": true,
+    "positions": true,
+    "fillHistory": true,
+    "orderHistory": true,
+    "incomeHistory": true,
+    "incomeRange": true,
+    "closedPnl": false,
+    "optionChain": false,
+    "optionExpiries": false,
+    "accountGreeks": false
+  },
   "okx": {
     "startup": true,
     "trading": true,

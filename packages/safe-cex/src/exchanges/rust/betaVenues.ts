@@ -35,6 +35,7 @@ export const BETA_VENUES = Object.freeze([
   'blofin',
   'cryptocom',
   'asterdex',
+  'mexc',
 ] as const satisfies readonly ExchangeName[]);
 
 export const isBetaVenue = (name: string): name is (typeof BETA_VENUES)[number] =>
