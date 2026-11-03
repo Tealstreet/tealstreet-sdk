@@ -41,8 +41,9 @@ impl Harness {
         Self::with_markets(MARKET)
     }
     fn with_markets(markets: &str) -> Self {
-        let mut h = Self {
-            engine: support::credentials::engine(
+        Self::with_engine(
+            markets,
+            support::credentials::engine(
                 Options {
                     key: Some("key".into()),
                     secret: Some("secret".into()),
@@ -51,6 +52,11 @@ impl Harness {
                 },
                 Kucoin::new,
             ),
+        )
+    }
+    fn with_engine(markets: &str, engine: Engine<Kucoin>) -> Self {
+        let mut h = Self {
+            engine,
             actions: vec![],
             failures: vec![],
             now: 1610000000000.0,
@@ -1480,4 +1486,150 @@ fn a_refused_key_ends_the_start_with_the_reason() {
         }
     }
     assert_eq!(failed, 1);
+}
+
+fn private_read_notice(h: &Harness, path: &str) -> safe_cex_engine::LogEvent {
+    h.actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if matches!(event.code, "request.failed" | "auth.rejected")
+                    && event.message.starts_with("KuCoin private read failed:")
+                    && event.message.contains(path) =>
+            {
+                Some(event.clone())
+            }
+            _ => None,
+        })
+        .expect("terminal private read diagnostic")
+}
+
+#[test]
+fn private_read_http_refusals_keep_status_code_message_and_source_without_data() {
+    for (path, status, native_code, attempts) in [
+        ("/orders?", 401, "400004", 3),
+        ("/stopOrders?", 401, "400004", 3),
+        ("/account-overview?", 401, "400004", 3),
+        ("/getPositionMode", 401, "400004", 3),
+        ("/account-overview?", 200, "400005", 2),
+    ] {
+        let mut h = Harness::new();
+        let body = format!(
+            r#"{{"code":"{native_code}","msg":"Invalid KC-API-PASSPHRASE","data":{{"secret":"response-data-must-not-escape"}}}}"#
+        );
+        for _ in 0..attempts {
+            let request = h.http(path);
+            assert!(
+                request
+                    .headers
+                    .contains(&("KC-API-KEY-VERSION", "2".into()))
+            );
+            h.respond(&request, status, &body);
+        }
+        let event = private_read_notice(&h, path);
+        assert!(
+            event
+                .message
+                .contains(&format!("source=http signError=false HTTP={status}")),
+            "{}",
+            event.message
+        );
+        assert!(event.message.contains(native_code));
+        assert!(event.message.contains("Invalid KC-API-PASSPHRASE"));
+        assert!(event.fields.contains(&("venueCode", native_code.into())));
+        assert!(
+            event
+                .fields
+                .contains(&("venueMessage", "Invalid KC-API-PASSPHRASE".into()))
+        );
+        assert!(!format!("{event:?}").contains("response-data-must-not-escape"));
+    }
+}
+
+#[test]
+fn malformed_http_and_transport_failure_diagnostics_are_distinct_and_do_not_dump_text() {
+    for transport in [false, true] {
+        let mut h = Harness::new();
+        for _ in 0..3 {
+            let request = h.http("/account-overview?");
+            if transport {
+                h.event(Event::HttpFailed {
+                    request: request.id,
+                    error: "transport-with-sensitive-sentinel",
+                });
+            } else {
+                h.respond(&request, 503, "<html>body-with-sensitive-sentinel</html>");
+            }
+        }
+        let event = private_read_notice(&h, "/account-overview?");
+        assert!(
+            event.message.contains(if transport {
+                "source=transport signError=false HTTP=none"
+            } else {
+                "source=http signError=false HTTP=503"
+            }),
+            "{}",
+            event.message
+        );
+        assert!(event.message.contains("code=none msg=none"));
+        assert!(!format!("{event:?}").contains("sensitive-sentinel"));
+    }
+}
+
+#[test]
+fn local_signing_refusal_reports_a_sign_error_and_sends_no_private_read() {
+    use safe_cex_engine::signing::{
+        Capability, KeyRef, SignError, SignFuture, SignRequest, SignResult, Signer,
+    };
+    struct RefuseRead(safe_cex_crypto::signer::LocalSigner);
+    impl Signer for RefuseRead {
+        fn sign(&self, request: SignRequest) -> SignFuture {
+            self.0.sign(request)
+        }
+        fn can_sign(
+            &self,
+            key: &KeyRef,
+            algorithm: safe_cex_engine::signing::Algorithm,
+        ) -> Capability {
+            self.0.can_sign(key, algorithm)
+        }
+        fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+            Some(if request.context.path.contains("account-overview") {
+                Err(SignError::Refused)
+            } else {
+                self.0.sign_now(request)
+            })
+        }
+    }
+    let (options, provider, identities) = Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("passphrase".into()),
+        ..Default::default()
+    }
+    .prepare();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(options));
+    engine.set_identities(identities).unwrap();
+    engine
+        .set_signer(Some(std::sync::Arc::new(RefuseRead(provider))))
+        .unwrap();
+    let h = Harness::with_engine(MARKET, engine);
+    let event = private_read_notice(&h, "/account-overview?");
+    assert!(
+        event
+            .message
+            .contains("source=signing signError=true HTTP=none"),
+        "{}",
+        event.message
+    );
+    assert!(
+        event
+            .message
+            .contains("Signing provider refused the request")
+    );
+    assert!(event.message.contains("code=none msg=none"));
+    assert!(!h.actions.iter().any(
+        |action| matches!(action, Action::Http(request) if request.url.contains("account-overview"))
+    ));
 }

@@ -1199,6 +1199,7 @@ impl Venue for Kucoin {
         match pending {
             Pending::Trade(request) => self.trading_sign_failed(cx, request, error),
             Pending::Identity(command) => self.identity_failed(cx, command, error),
+            Pending::Account(request) => self.account_failed(cx, request, Some(&error)),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -1212,7 +1213,7 @@ impl Venue for Kucoin {
             return;
         }
         match pending {
-            Pending::Account(request) => self.account_response(cx, request, 0, error),
+            Pending::Account(request) => self.account_failed(cx, request, None),
             Pending::Trade(request) => self.trading_response(cx, request, 0, error),
             Pending::History(request) => self.history_response(cx, request, 0, error),
             Pending::Funding(request) => self.funding_response(cx, request, 0, error),
