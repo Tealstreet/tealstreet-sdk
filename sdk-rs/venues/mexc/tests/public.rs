@@ -716,3 +716,18 @@ fn mini_ticker_unknown_inactive_symbols_are_ignored_without_warning() {
         ))
     )));
 }
+
+/// The public pong measures the socket's round trip, which the connection status shows.
+#[test]
+fn a_public_pong_reports_half_the_ping_round_trip_as_latency() {
+    let (mut e, socket) = started();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        140.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"channel":"pong","data":1700000000000}"#,
+        },
+    );
+    assert_eq!(e.store().latency(), 20.0);
+}

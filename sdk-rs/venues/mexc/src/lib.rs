@@ -85,6 +85,8 @@ impl Pending {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
+    /// When the last public ping left, so its pong measures the socket's latency.
+    ping_at: f64,
 }
 
 struct BookState {
@@ -126,6 +128,16 @@ pub struct MexcFutures {
 impl MexcFutures {
     fn fail_local_read(cx: &mut Cx<'_, Pending>, error: &str) {
         cx.refuse_command(Operation::Read, error);
+    }
+
+    /// A query MEXC cannot answer: typed so callers skip it rather than log a failure.
+    fn fail_unsupported_read(cx: &mut Cx<'_, Pending>, error: &str) {
+        cx.refuse_command(
+            Operation::Read,
+            safe_cex_engine::VenueError::new(error)
+                .kind(safe_cex_engine::ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
     }
 
     pub fn new(options: Options) -> Self {
@@ -774,6 +786,7 @@ impl Venue for MexcFutures {
         }
         self.public.open = true;
         self.public_supervisor.opened(cx);
+        self.public.ping_at = cx.now;
         cx.send(socket, PING);
         // Sparse once-per-second prices cover every listed market. Detailed
         // subscriptions provide funding, index and open-interest quantities.
@@ -803,6 +816,11 @@ impl Venue for MexcFutures {
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
+        if message.channel == "pong" {
+            cx.store
+                .set_latency(((cx.now - self.public.ping_at).max(0.0) / 2.0).round());
+            return;
+        }
         let Some(data) = message.data else {
             return;
         };
@@ -1247,6 +1265,7 @@ impl Venue for MexcFutures {
             socket::Tick::Reconnect => self.connect_public(cx),
             socket::Tick::Ping => {
                 if let Some(socket) = self.public.socket {
+                    self.public.ping_at = cx.now;
                     cx.send(socket, PING);
                 }
             }
