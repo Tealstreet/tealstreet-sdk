@@ -12,16 +12,16 @@ import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
-  'grvt', 'backpack', 'orderly', 'kodiakfi', 'mode', 'salsadex',
-  'tealstreet-dex', 'what', 'woofi', 'polymarket', 'breakoutprop', 'txflow', 'weex',
+  'polymarket', 'breakoutprop', 'txflow', 'weex',
   'bitrue', 'lighter-robinhood',
 ];
 
-test('the beta set is exactly the 36 IN venues in 20 families', () => {
-  assert.equal(betaVenueNames.length, 36);
+test('the beta set is exactly the 45 IN venues in 23 families', () => {
+  assert.equal(betaVenueNames.length, 45);
   assert.deepEqual(betaVenueFamilies, [
-    'apexomni', 'asterdex', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'coinbase', 'cryptocom',
-    'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'paradex', 'phemex', 'woo',
+    'apexomni', 'asterdex', 'backpack', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'coinbase',
+    'cryptocom', 'grvt', 'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'orderly',
+    'paradex', 'phemex', 'woo',
   ]);
 });
 
@@ -44,7 +44,7 @@ test('the beta loader refuses an OUT venue before importing any engine', async (
     imports.push(family);
     return { default: async () => {} };
   }, betaVenueFamily);
-  await assert.rejects(load('grvt'), BetaVenueUnavailableError);
+  await assert.rejects(load('bitrue'), BetaVenueUnavailableError);
   await load('okxeu');
   assert.deepEqual(imports, ['okx']);
 });
