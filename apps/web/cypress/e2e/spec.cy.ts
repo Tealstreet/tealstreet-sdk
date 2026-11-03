@@ -83,6 +83,7 @@ interface ExchangeConfig {
 }
 
 const tradeEn = require('../../src/locales/en/trade.json').trade;
+const { testAccountName } = require('../config/accountNames.js');
 
 const getAccount = () => {
   const accountEnv = Cypress.env('account');
@@ -98,7 +99,7 @@ const getAccount = () => {
   return {
     ...account,
     extra: exchangeConfig.accountExtra ? { ...account.extra, ...exchangeConfig.accountExtra } : account.extra,
-    name: 'test',
+    name: testAccountName(account.exchange),
   };
 };
 
@@ -2878,7 +2879,10 @@ describe(
 
           selectExchangeInAddAccountFlow('paradex');
 
-          getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type('e2e-bad-key');
+          getAddAccountInput('name', { timeout: 10000 })
+            .should('be.visible')
+            .clear()
+            .type(testAccountName(account.exchange, 'badkey'));
           getAddAccountInput('api-key').clear().type(corruptKey(account.apiKey));
           getAddAccountInput('subkey-address').clear().type(account.subkeyAddress);
           getAddAccountInput('paradex-address').clear().type(account.paradexAddress);
@@ -2905,6 +2909,7 @@ describe(
 
         const badAccount = {
           ...account,
+          name: testAccountName(account.exchange, 'badkey'),
           apiKey: corruptKey(account.apiKey),
           apiSecret: corruptKey(account.apiSecret),
         };
@@ -3159,6 +3164,8 @@ describe(
         const account = getAccount();
         const metaData = getAccMetadata();
         const exchange = account.exchange;
+        const goodAccountName = testAccountName(exchange, 'goodkey');
+        const badAccountName = testAccountName(exchange, 'form-badkey');
 
         const isHyperliquid = exchange === 'hyperliquid' || exchange === 'hyperliquidspot';
         if (isHyperliquid) {
@@ -3202,7 +3209,7 @@ describe(
         }
 
         // Step 2 — Fill form fields via stable add-account test ids.
-        getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type('e2e-good-key');
+        getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type(goodAccountName);
         fillPrimaryCredentialFields(account);
 
         // Check "Use Tealstreet IPs" if the exchange requires CORS proxy
@@ -3219,12 +3226,12 @@ describe(
         // stay in-flight for several seconds after Done is clicked.
         cy.window({ log: false, timeout: 30000 }).should((win) => {
           const accounts = JSON.parse(win.localStorage.getItem('accounts') || '[]');
-          const goodAccount = accounts.find((a: any) => a.name === 'e2e-good-key');
+          const goodAccount = accounts.find((a: any) => a.name === goodAccountName);
           expect(goodAccount, 'Good account should be saved to localStorage').to.not.be.undefined;
         });
         cy.window({ log: false }).then((win) => {
           const accounts = JSON.parse(win.localStorage.getItem('accounts') || '[]');
-          const goodAccount = accounts.find((a: any) => a.name === 'e2e-good-key');
+          const goodAccount = accounts.find((a: any) => a.name === goodAccountName);
           expect(goodAccount.exchange, 'Account exchange should match').to.eq(exchange);
           cy.task('log', `[add-api-key] Good account saved: ${goodAccount.name} (${goodAccount.exchange})`);
         });
@@ -3252,7 +3259,7 @@ describe(
         }
 
         // Step 2 — Fill form with corrupted credentials
-        getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type('e2e-bad-key');
+        getAddAccountInput('name', { timeout: 10000 }).should('be.visible').clear().type(badAccountName);
         fillPrimaryCredentialFields(account, { corrupt: true });
         if (metaData.requiresCors) {
           // forced-checked, nothing to do
@@ -3297,10 +3304,10 @@ describe(
         // auth errors when the active account has bad creds".
         cy.window({ log: false }).then((win) => {
           const accounts = JSON.parse(win.localStorage.getItem('accounts') || '[]');
-          if (!accounts.find((a: any) => a.name === 'e2e-bad-key')) {
+          if (!accounts.find((a: any) => a.name === badAccountName)) {
             accounts.push({
               ...account,
-              name: 'e2e-bad-key',
+              name: badAccountName,
               apiKey: corruptKey(account.apiKey),
               apiSecret: corruptKey(account.apiSecret),
               ...(metaData.requiresPassphrase && account.passphrase
@@ -3313,7 +3320,7 @@ describe(
             });
             win.localStorage.setItem('accounts', JSON.stringify(accounts));
           }
-          const badAccount = accounts.find((a: any) => a.name === 'e2e-bad-key');
+          const badAccount = accounts.find((a: any) => a.name === badAccountName);
           expect(badAccount, 'Bad account should be in localStorage').to.not.be.undefined;
           cy.task(
             'log',
@@ -3325,7 +3332,7 @@ describe(
 
         cy.window({ log: false }).then((win) => {
           const settings = JSON.parse(win.localStorage.getItem('lastSettings') || '{}');
-          settings.trade = { ...settings.trade, activeAccount: 'e2e-bad-key' };
+          settings.trade = { ...settings.trade, activeAccount: badAccountName };
           win.localStorage.setItem('lastSettings', JSON.stringify(settings));
         });
 
@@ -3442,7 +3449,7 @@ describe(
 
         cy.window({ log: false }).then((win) => {
           const accounts = JSON.parse(win.localStorage.getItem('accounts') || '[]');
-          const cleaned = accounts.filter((a: any) => a.name !== 'e2e-good-key' && a.name !== 'e2e-bad-key');
+          const cleaned = accounts.filter((a: any) => a.name !== goodAccountName && a.name !== badAccountName);
           win.localStorage.setItem('accounts', JSON.stringify(cleaned));
 
           const settings = JSON.parse(win.localStorage.getItem('lastSettings') || '{}');
