@@ -160,6 +160,7 @@ fn feed_policy(role: SocketChannel, backoff_base_ms: f64) -> FeedPolicy {
         invalidation: Invalidation::Required,
         subscription_interval_ms: 0.0,
         close_floors: &[],
+        data_silence: None,
     }
 }
 
