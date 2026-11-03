@@ -1818,3 +1818,45 @@ fn a_market_close_without_an_amount_closes_the_whole_position() {
         "{actions:?}"
     );
 }
+
+/// A reduce-only order closes the leg on its far side; with no such leg it is refused, not sent.
+#[test]
+fn a_reduce_only_order_with_nothing_to_reduce_is_refused_before_sending() {
+    for (side, sent) in [("sell", true), ("buy", false)] {
+        let mut e = with_long_position();
+        let opts: PlaceOrderOpts = serde_json::from_str(&format!(
+            r#"{{"symbol":"BTCUSDT","type":"limit","side":"{side}","amount":60,"price":60000,"reduceOnly":true}}"#
+        ))
+        .unwrap();
+        e.handle(
+            400.0,
+            Event::Command(Command::PlaceOrders {
+                command: 9,
+                orders: vec![opts],
+            }),
+        );
+        let actions = prepared(&mut e, 400.0);
+        let http: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => r.body.clone(),
+                _ => None,
+            })
+            .collect();
+        if sent {
+            assert_eq!(http.len(), 1);
+            assert!(
+                http[0].contains("\"side\":4") && http[0].contains("\"reduceOnly\":true"),
+                "{http:?}"
+            );
+        } else {
+            assert!(http.is_empty(), "{http:?}");
+            assert!(
+                actions.iter().any(|a| format!("{a:?}").contains(
+                    "MEXC reduce-only buy needs an open short position on BTCUSDT to reduce"
+                )),
+                "{actions:?}"
+            );
+        }
+    }
+}

@@ -369,8 +369,16 @@ impl MexcFutures {
             {
                 return Err(format!(
                     "MEXC reduce-only {} needs an open {} position on {} to reduce",
-                    if opts.side == OrderSide::Sell { "sell" } else { "buy" },
-                    if target == PositionSide::Long { "long" } else { "short" },
+                    if opts.side == OrderSide::Sell {
+                        "sell"
+                    } else {
+                        "buy"
+                    },
+                    if target == PositionSide::Long {
+                        "long"
+                    } else {
+                        "short"
+                    },
                     opts.symbol
                 ));
             }
