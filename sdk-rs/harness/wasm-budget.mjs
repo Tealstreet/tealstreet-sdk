@@ -93,6 +93,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // ruling: each raised to CI size plus 10 KiB, rounded up to the KiB.
 // #2945 managed-socket data silence: CI run 41599669844 measured bingx 1,970,123 B; ddi2il ruling,
 // CI size plus 10 KiB, rounded up to the KiB.
+// #2961 KuCoin provider custody: CI 41611993463 measured 1,630,161 / 2,211,621 B.
+// ddi2il approved each CI size plus 10 KiB, rounded up to the KiB, after shared-provider attribution.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_957_888,
   asterdex: 2_097_152,
@@ -113,8 +115,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   hyperliquidspot: 2_065_408,
   kraken: 2_096_128,
   krakenspot: 2_098_176,
-  kucoin: 1_576_960,
-  kucoinspot: 2_099_200,
+  kucoin: 1_640_448,
+  kucoinspot: 2_222_080,
   lighter: 1_965_056,
   'lighter-robinhood': 1_967_104,
   mexc: 1_714_176,
