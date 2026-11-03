@@ -222,6 +222,7 @@ impl Supervisor {
         }
     }
 
+    #[cfg(feature = "managed-sockets")]
     /// A data frame (not a pong or control) on the current connection.
     pub(crate) fn data(&mut self, now: f64) {
         if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
@@ -243,6 +244,7 @@ impl Supervisor {
         self.silent_streak = self.silent_streak.saturating_add(1);
     }
 
+    #[cfg(feature = "managed-sockets")]
     /// Watch for data silence, `after_ms` without a data frame, or stop watching.
     /// Arming starts the window afresh, so a newly added stream gets its full window.
     pub(crate) fn set_data_watch<P>(&mut self, cx: &mut Cx<'_, P>, after_ms: Option<f64>) {
@@ -257,6 +259,13 @@ impl Supervisor {
         }
     }
 
+    /// How long since the current connection received anything; None when not open.
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn received_age(&self, now: f64) -> Option<f64> {
+        matches!(self.phase, Phase::Authenticating | Phase::Ready).then_some(now - self.received)
+    }
+
+    #[cfg(feature = "managed-sockets")]
     /// How long a watched, ready feed has gone without data; None when not watched.
     pub(crate) fn data_silent_for(&self, now: f64) -> Option<f64> {
         (self.phase == Phase::Ready && self.data_after_ms.is_some())

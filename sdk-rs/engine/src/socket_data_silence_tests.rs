@@ -285,3 +285,45 @@ fn a_repair_on_a_live_feed_resubscribes_in_place() {
     assert_eq!(h.silent_retirements(), 0);
     assert_eq!(h.engine.venue.sent, ["false:tick.BTC", "true:tick.BTC"]);
 }
+
+fn repair(h: &mut Harness) {
+    h.event(Event::Command(Command::RepairSubscription(
+        crate::SubscriptionTopic::OrderBook {
+            symbol: "BTC".into(),
+        },
+    )));
+}
+
+// IRYSUSDT on Hosted: the venue stopped one stream while the socket's others flowed, so the
+// first in-place resubscribe changed nothing. Repeating the repair reconnects the socket.
+#[test]
+fn a_topic_repaired_again_within_ten_minutes_reconnects_its_socket() {
+    let mut h = Harness::subscribed(&["tick.BTC"]);
+    for second in (10..=60).step_by(10) {
+        h.advance(f64::from(second) * 1_000.);
+        h.message("tick.BTC 100");
+    }
+    h.engine.venue.sent.clear();
+    repair(&mut h);
+    assert_eq!(h.engine.venue.sent, ["false:tick.BTC", "true:tick.BTC"]);
+    assert_eq!(h.silent_retirements(), 0);
+    h.advance(90_000.);
+    h.message("tick.BTC 100");
+    repair(&mut h);
+    assert_eq!(h.silent_retirements(), 1, "the repeat repair reconnects");
+}
+
+#[test]
+fn a_topic_repaired_again_after_ten_minutes_resubscribes_in_place() {
+    let mut h = Harness::subscribed(&["tick.BTC"]);
+    h.message("tick.BTC 100");
+    repair(&mut h);
+    for half_minute in 1..=22 {
+        h.advance(f64::from(half_minute) * 30_000.);
+        h.message("tick.BTC 100");
+    }
+    h.engine.venue.sent.clear();
+    repair(&mut h);
+    assert_eq!(h.silent_retirements(), 0);
+    assert_eq!(h.engine.venue.sent, ["false:tick.BTC", "true:tick.BTC"]);
+}

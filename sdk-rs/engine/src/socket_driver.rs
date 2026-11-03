@@ -600,6 +600,13 @@ impl Driver {
         self.runtime_mut(feed).supervisor.note_silent_reconnect();
     }
 
+    /// How long since `feed`'s current connection received anything; None when not open.
+    pub(crate) fn received_age(&self, feed: FeedId, now: f64) -> Option<f64> {
+        self.runtimes
+            .get(feed.index())
+            .and_then(|runtime| runtime.supervisor.received_age(now))
+    }
+
     /// How long `feed` has gone without data while watched; None when not watched or not ready.
     pub(crate) fn data_silent_for(&self, feed: FeedId, now: f64) -> Option<f64> {
         self.runtimes
