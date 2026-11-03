@@ -91,12 +91,14 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // breakoutprop 1,483,576, coinbase 1,789,891, grvt 1,756,323, kucoin 1,566,571, kucoinspot 2,087,973,
 // orderly 1,697,103, polymarket 1,576,543, txflow 1,806,532, weex 1,898,411, woo 2,354,045 B. ddi2il
 // ruling: each raised to CI size plus 10 KiB, rounded up to the KiB.
+// #2945 managed-socket data silence: CI run 41599669844 measured bingx 1,970,123 B; ddi2il ruling,
+// CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_957_888,
   asterdex: 2_097_152,
   backpack: 1_860_608,
   binance: 2_152_448,
-  bingx: 1_968_128,
+  bingx: 1_980_416,
   bitget: 2_275_328,
   bitgetusdc: 2_276_352,
   bitrue: 1_798_144,
