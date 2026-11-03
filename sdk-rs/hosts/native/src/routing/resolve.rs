@@ -14,10 +14,11 @@ use std::sync::OnceLock;
 #[serde(rename_all = "camelCase")]
 struct Table {
     hosts: Hosts,
-    /// `PROXY_PRIVATE_URL`: the fleet's load balancer, which admits by network only and
-    /// forwards every header to the venue. Our proxy JWT must never ride a route through it.
+    /// The host of `PROXY_PRIVATE_URL`: the fleet's load balancer, which admits by network
+    /// only and forwards every header to the venue. Our proxy JWT must never ride a route to
+    /// it, whichever override (private or public) points there.
     #[serde(skip)]
-    fleet_base: Option<String>,
+    fleet_host: Option<String>,
     rest_headers: BTreeMap<String, String>,
     ws_headers: BTreeMap<String, String>,
     exchanges: HashMap<String, Exchange>,
@@ -145,7 +146,7 @@ impl BaseOverrides {
             for host in table.hosts.private_proxy.values_mut() {
                 host.clone_from(&private);
             }
-            table.fleet_base = Some(private);
+            table.fleet_host = Some(url_host(&private).to_owned());
         }
         if let Some(public) = tealstreet_base("PROXY_PUBLIC_URL", "https", self.public_proxy)? {
             table.hosts.public_cors_proxy = public;
@@ -169,6 +170,12 @@ impl BaseOverrides {
         }
         Ok(())
     }
+}
+
+/// The authority of `scheme://host/...`, or the whole text when it has no scheme.
+fn url_host(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    rest.split(['/', '?', '#']).next().unwrap_or(rest)
 }
 
 /// An override value, or `None` when unset or empty. These hosts receive users'
@@ -790,7 +797,7 @@ pub fn resolve_routing_plan(
         };
         // The fleet forwards headers as sent: a Bearer of ours reached OKX as an OAuth token
         // (53000 on third-party-app keys), and the edge's Coinbase rename does not happen there.
-        let fleet = proxied && table().fleet_base.as_deref() == Some(prefix.as_str());
+        let fleet = proxied && table().fleet_host.as_deref() == Some(url_host(&prefix));
         let mut header_aliases = BTreeMap::new();
         if matches!(name, "coinbase" | "coinbasespot") && proxied && !how && !fleet {
             header_aliases.insert("Authorization".into(), "Coinbase-Authorization".into());
