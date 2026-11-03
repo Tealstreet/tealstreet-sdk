@@ -9,6 +9,7 @@ fn name(exchange: &ExchangeName) -> &'static str {
         ExchangeName::Backpack => "backpack",
         ExchangeName::Binance => "binance",
         ExchangeName::Binanceinverse => "binanceinverse",
+        ExchangeName::Binanceoptions => "binanceoptions",
         ExchangeName::Binancespot => "binancespot",
         ExchangeName::Binancepm => "binancepm",
         ExchangeName::Bingx => "bingx",
