@@ -317,6 +317,9 @@ pub struct BybitLinear {
     read_credentials: Option<safe_cex_engine::signing::Identity>,
     /// Set once a startup read proved the key unusable; startup never retries it.
     credentials_rejected: bool,
+    private_startup_timer: Option<TimerId>,
+    private_startup_error: Option<VenueError>,
+    private_startup_failed: bool,
     environment_probe_origin: Option<&'static str>,
     environment_probe_attempted: bool,
     environment_probe: Option<EnvironmentProbe>,
@@ -573,6 +576,9 @@ impl BybitLinear {
             credentials,
             read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
+            private_startup_timer: None,
+            private_startup_error: None,
+            private_startup_failed: false,
             environment_probe_origin,
             brazil_site: options.bybit_site_id.as_deref() == Some("BRA_BTL"),
             environment_probe_attempted: false,
@@ -3138,6 +3144,12 @@ impl Venue for BybitLinear {
         {
             self.select_category(pending.category);
             self.keep_read_error(&pending.then, &error);
+            if matches!(
+                error.kind,
+                Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+            ) {
+                return self.on_response(cx, pending, response);
+            }
         }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still

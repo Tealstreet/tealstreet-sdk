@@ -127,6 +127,18 @@ describe('Rust engine socket health (cutover B5)', () => {
     expect((exchange.privateWebsocket as unknown as RustSocketHandle).isReadonlyFallbackActive()).toBe(false);
   });
 
+  it('keeps the page-clock private message timestamp while its reconnect is uninitialized', async () => {
+    const { exchange, store, live, deliver } = await setup();
+    deliver('private');
+    const last = store.socketHealth!.privateLastMessage;
+    expect(last).toBeGreaterThan(0);
+    live('private').handlers.onClose(1006);
+    exchange.syncSocketHealthToStore();
+    expect(store.socketHealth!.privateInitialized).toBe(false);
+    expect(store.socketHealth!.privateLastMessage).toBe(last);
+    expect(exchange.privateWebsocket!.lastReceived).toBe(last);
+  });
+
   it('a silent private stream turns unhealthy on the periodic sync', async () => {
     const { exchange, store, deliver } = await setup();
     deliver('private');

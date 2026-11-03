@@ -2080,3 +2080,18 @@ Rust release code generation for the Bybit crate uses `opt-level = "z"` for
 family WASM size. CI still requires the public CPU/memory gates and complete raw replay
 outputs, including caller identities; the source parsers, handlers and financial
 calculations retain their existing behavior.
+
+## Bounded Rust private startup
+
+After account metadata and catalogue readiness start the private snapshot phase,
+Rust Bybit allows 60 seconds for balance, orders and positions to load. Fresh
+public frames do not extend this bound. A missing section emits one typed
+Timeout startup failure naming the missing sections and the last read failure;
+empty wallet lists never become a fabricated zero balance. Valid zero-valued
+wallet rows and empty orders/positions remain successful snapshots.
+Definitive required-read authentication/permission refusals surface immediately;
+read-permission failures do not deactivate an otherwise usable trading key.
+HyroTrader retains its separate private readiness policy. Suspended browsers
+cannot run timers: an expired bound is observed when the host resumes execution.
+Demo uses `api-demo.bybit.com` and `stream-demo.bybit.com/v5/private`; its public
+stream remains on the ordinary mainnet endpoint.
