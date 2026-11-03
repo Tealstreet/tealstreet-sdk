@@ -13,11 +13,11 @@ import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
   'salsadex', 'tealstreet-dex', 'polymarket', 'breakoutprop', 'txflow', 'weex',
-  'bitrue', 'lighter-robinhood',
+  'bitrue',
 ];
 
-test('the beta set is exactly the 43 IN venues in 23 families', () => {
-  assert.equal(betaVenueNames.length, 43);
+test('the beta set is exactly the 44 IN venues in 23 families', () => {
+  assert.equal(betaVenueNames.length, 44);
   assert.deepEqual(betaVenueFamilies, [
     'apexomni', 'asterdex', 'backpack', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'coinbase',
     'cryptocom', 'grvt', 'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'orderly',
@@ -46,7 +46,8 @@ test('the beta loader refuses an OUT venue before importing any engine', async (
   }, betaVenueFamily);
   await assert.rejects(load('bitrue'), BetaVenueUnavailableError);
   await load('okxeu');
-  assert.deepEqual(imports, ['okx']);
+  await load('lighter-robinhood');
+  assert.deepEqual(imports, ['okx', 'lighter']);
 });
 
 test('engine.beta.web.mjs is generated from the table and imports only beta families', () => {
