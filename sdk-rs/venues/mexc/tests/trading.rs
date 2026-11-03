@@ -1361,8 +1361,7 @@ fn targeted_open_mexc_leg_uses_its_native_position_id_and_preserves_other_positi
     );
 }
 
-#[test]
-fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown() {
+fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown_with(refusal: &str) {
     let mut e = ready();
     for command in [1, 2] {
         e.handle(
@@ -1398,12 +1397,7 @@ fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown()
     e.handle(650.0, Event::TimerFired { timer });
     let second = requests(&mut e).remove(0);
     assert!(second.url.ends_with("/order/submit"));
-    reply(
-        &mut e,
-        &second,
-        700.0,
-        r#"{"success":false,"code":510,"message":"Requests are too frequent"}"#,
-    );
+    reply(&mut e, &second, 700.0, refusal);
     e.drain_actions().for_each(drop);
     e.handle(
         750.0,
@@ -1425,6 +1419,21 @@ fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown()
         .unwrap();
     e.handle(2200.0, Event::TimerFired { timer });
     assert!(requests(&mut e).remove(0).url.ends_with("/order/submit"));
+}
+
+#[test]
+fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown() {
+    singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown_with(
+        r#"{"success":false,"code":510,"message":"Requests are too frequent"}"#,
+    );
+}
+
+/// Legacy cooled down on the venue's too-frequent text as well as code 510.
+#[test]
+fn a_too_frequent_refusal_without_code_510_also_cools_submits_down() {
+    singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown_with(
+        r#"{"success":false,"code":1002,"message":"Requests are too frequent"}"#,
+    );
 }
 
 #[test]

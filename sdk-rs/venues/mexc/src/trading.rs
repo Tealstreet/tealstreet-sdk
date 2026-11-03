@@ -1416,7 +1416,10 @@ impl MexcFutures {
             return;
         }
         if let Ok(e) = &envelope
-            && e.code == 510.0
+            && (e.code == 510.0
+                || e.message
+                    .to_ascii_lowercase()
+                    .contains("requests are too frequent"))
         {
             self.trading.next_submit = self.trading.next_submit.max(cx.now + 1500.0);
         }
