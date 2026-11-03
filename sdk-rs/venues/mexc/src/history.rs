@@ -215,7 +215,7 @@ impl MexcFutures {
     pub fn start_query(&self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                Self::fail_local_read(cx, "MEXC client-order-ID lookup is unsupported");
+                Self::fail_unsupported_read(cx, "MEXC client-order-ID lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -242,7 +242,7 @@ impl MexcFutures {
                     .as_deref()
                     .is_none_or(|k| !k.eq_ignore_ascii_case("FUNDING_FEE"))
                 {
-                    Self::fail_local_read(cx, "MEXC income supports only kind FUNDING_FEE");
+                    Self::fail_unsupported_read(cx, "MEXC income supports only kind FUNDING_FEE");
                     return;
                 }
                 (Kind::Funding, symbol, None, from_ms, to_ms, limit)
