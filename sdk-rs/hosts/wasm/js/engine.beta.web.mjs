@@ -14,9 +14,12 @@ function importFamily(family) {
     case 'bitunix': return import('../pkg/web/bitunix/safe_cex_wasm.js');
     case 'blofin': return import('../pkg/web/blofin/safe_cex_wasm.js');
     case 'bybit': return import('../pkg/web/bybit/safe_cex_wasm.js');
+    case 'coinbase': return import('../pkg/web/coinbase/safe_cex_wasm.js');
     case 'cryptocom': return import('../pkg/web/cryptocom/safe_cex_wasm.js');
     case 'hyperliquid': return import('../pkg/web/hyperliquid/safe_cex_wasm.js');
     case 'kraken': return import('../pkg/web/kraken/safe_cex_wasm.js');
+    case 'kucoin': return import('../pkg/web/kucoin/safe_cex_wasm.js');
+    case 'kucoinspot': return import('../pkg/web/kucoinspot/safe_cex_wasm.js');
     case 'lighter': return import('../pkg/web/lighter/safe_cex_wasm.js');
     case 'mexc': return import('../pkg/web/mexc/safe_cex_wasm.js');
     case 'okx': return import('../pkg/web/okx/safe_cex_wasm.js');
