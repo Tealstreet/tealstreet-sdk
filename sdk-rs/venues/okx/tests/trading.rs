@@ -2,7 +2,8 @@
 mod support;
 use crate::support::*;
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::{Action, Command, Event, Notice};
+use safe_cex_engine::{Action, Command, Engine, Event, Notice};
+use safe_cex_venue_okx::Okx;
 fn order(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
@@ -2350,4 +2351,72 @@ fn a_gone_cancel_row_asks_for_a_read_because_its_frame_may_never_come() {
         out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
     );
+}
+
+fn set_mode_actions(e: &mut Engine<Okx>, command: u32, hedged: bool) -> Vec<Action> {
+    e.handle(
+        5.0,
+        Event::Command(Command::SetPositionMode {
+            command,
+            hedged,
+            symbol: None,
+        }),
+    );
+    prepared(e, 5.0)
+}
+
+fn mode_writes(actions: &[Action]) -> usize {
+    actions
+        .iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("/api/v5/account/set-position-mode")))
+        .count()
+}
+
+// OKX docs: a spot-mode account trades one-way; set-position-mode cannot hedge it.
+#[test]
+fn hedge_mode_on_a_spot_mode_account_is_refused_before_sending() {
+    let options = FixtureOptions {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..FixtureOptions::default()
+    };
+    let mut e = trading_engine_at_level(options, |_| {}, "1");
+    let actions = set_mode_actions(&mut e, 21, true);
+    assert_eq!(mode_writes(&actions), 0, "{actions:?}");
+    let failure = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 21, error }) => {
+                Some(error.message.clone())
+            }
+            _ => None,
+        })
+        .expect("a visible refusal");
+    assert!(
+        failure.contains("needs a margin account mode; switch it in OKX Settings"),
+        "{failure}"
+    );
+    assert!(!e.store().hedged());
+
+    // One-way is what the account already trades: still allowed.
+    assert_eq!(mode_writes(&set_mode_actions(&mut e, 22, false)), 1);
+}
+
+#[test]
+fn hedge_mode_on_every_margin_account_level_is_sent() {
+    for level in ["2", "3", "4"] {
+        let options = FixtureOptions {
+            key: Some("test-key".into()),
+            secret: Some("test-secret".into()),
+            passphrase: Some("test-passphrase".into()),
+            ..FixtureOptions::default()
+        };
+        let mut e = trading_engine_at_level(options, |_| {}, level);
+        assert_eq!(
+            mode_writes(&set_mode_actions(&mut e, 23, true)),
+            1,
+            "acctLv {level}"
+        );
+    }
 }

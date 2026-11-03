@@ -161,6 +161,54 @@ impl PlacedSymbols {
     }
 }
 
+/// Why an account was disposed, as `disposal=<kind>` on its audit line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Disposal {
+    /// Re-inited on public data: the page saw its key refused, or its start fail.
+    PublicData,
+    /// Re-inited with other key or connection settings.
+    SettingsChanged,
+    /// A concurrent init of the same name won the race.
+    Replaced,
+    /// Remote signing failed repeatedly.
+    SignerFailures,
+    /// No browser came back within the resume grace.
+    NoBrowser,
+    /// The page disposed it: the user removed or deactivated it, or the page dropped it.
+    PageDisposed,
+    /// The page's ping stopped listing it.
+    Orphaned,
+    /// It never joined the socket that built it.
+    JoinFailed,
+    /// Its last socket closed without resuming.
+    SocketClosed,
+}
+
+impl Disposal {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PublicData => "public_data",
+            Self::SettingsChanged => "settings_changed",
+            Self::Replaced => "replaced",
+            Self::SignerFailures => "signer_failures",
+            Self::NoBrowser => "no_browser",
+            Self::PageDisposed => "page_disposed",
+            Self::Orphaned => "orphaned",
+            Self::JoinFailed => "join_failed",
+            Self::SocketClosed => "socket_closed",
+        }
+    }
+
+    /// A rebuild for a new init: onto public data only when a keyed account loses its key.
+    pub fn rebuild(was_public: bool, now_public: bool) -> Self {
+        if now_public && !was_public {
+            Self::PublicData
+        } else {
+            Self::SettingsChanged
+        }
+    }
+}
+
 /// A live socket holding an account: where its signing and proxy token go.
 #[derive(Clone)]
 pub struct Live {
@@ -756,7 +804,10 @@ impl Registry {
                 account.hold(holder, Live { outbox, token });
                 return Ok(account);
             }
-            self.dispose(&account);
+            self.dispose(
+                &account,
+                Disposal::rebuild(account.is_public(), public_only),
+            );
         }
         let live = Live {
             outbox: outbox.clone(),
@@ -791,6 +842,7 @@ impl Registry {
             // Its holders go too, so the losing socket stops calling a stopped account.
             self.dispose_for(
                 &replaced,
+                Disposal::Replaced,
                 "account replaced by a newer init",
                 Some(tell_through(&replaced, outbox)),
             );
@@ -829,7 +881,14 @@ impl Registry {
         // Public-only reads on a proxied venue need the proxy too.
         proxy_token.set(token);
         let tokens = proxy_token.provider();
-        let config = self.engine_config.clone();
+        let mut config = self.engine_config.clone();
+        config.log_label = Some(format!("{} {} {venue}", user_tag(user), init.account_name));
+        // A private account always signs through the browser (asserted above).
+        config.signing_mode = Some(if public_only {
+            "public"
+        } else {
+            "hosted_cosign"
+        });
         let algo_owner: Arc<Mutex<Option<std::sync::Weak<Account>>>> = Arc::default();
         let placed_symbols = PlacedSymbols::default();
         let algo_placed = placed_symbols.clone();
@@ -919,8 +978,8 @@ impl Registry {
         holds.then_some(account)
     }
 
-    /// Lets go of one holder; the last one disposes the account.
-    pub fn release(&self, account: &Arc<Account>, holder: u64) {
+    /// Lets go of one holder; the last one disposes the account, for `disposal`.
+    pub fn release(&self, account: &Arc<Account>, holder: u64, disposal: Disposal) {
         let empty = {
             let mut holders = account.holders.lock().unwrap();
             holders.by_id.remove(&holder);
@@ -928,7 +987,7 @@ impl Registry {
             holders.by_id.is_empty()
         };
         if empty {
-            self.dispose_for(account, "account disposed", None);
+            self.dispose_for(account, disposal, "account disposed", None);
         }
     }
 
@@ -1069,7 +1128,12 @@ impl Registry {
                 }
             }
         });
-        self.dispose_for(account, "remote signing failed repeatedly", Some(stopped));
+        self.dispose_for(
+            account,
+            Disposal::SignerFailures,
+            "remote signing failed repeatedly",
+            Some(stopped),
+        );
     }
 
     /// Whether `holder` still holds `account`; disposing drops every holder.
@@ -1078,15 +1142,21 @@ impl Registry {
     }
 
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
-    pub fn dispose(&self, account: &Arc<Account>) {
-        self.dispose_for(account, "account disposed", None);
+    pub fn dispose(&self, account: &Arc<Account>, disposal: Disposal) {
+        self.dispose_for(account, disposal, "account disposed", None);
     }
 
     /// New settings rebuild `account`: its algos stop now, their finals told through
     /// `outbox`, rather than left running for a page told they stopped.
-    pub fn stop_for_new_settings(&self, account: &Arc<Account>, outbox: Outbox) {
+    pub fn stop_for_new_settings(
+        &self,
+        account: &Arc<Account>,
+        outbox: Outbox,
+        disposal: Disposal,
+    ) {
         self.dispose_for(
             account,
+            disposal,
             "its key or connection settings changed",
             Some(tell_through(account, outbox)),
         );
@@ -1095,6 +1165,7 @@ impl Registry {
     fn dispose_for(
         &self,
         account: &Arc<Account>,
+        disposal: Disposal,
         reason: &str,
         stopped: Option<crate::algos::StopNotice>,
     ) {
@@ -1107,8 +1178,9 @@ impl Registry {
             .copied()
             .collect();
         Log::info(&format!(
-            "dispose {}: {reason} (holders {holders:?})",
-            account.name
+            "dispose {}: {reason} (disposal={}, holders {holders:?})",
+            account.name,
+            disposal.as_str()
         ));
         let mut accounts = self.accounts.lock().unwrap();
         let key = (account.user.clone(), account.name.clone());
@@ -1272,7 +1344,7 @@ impl Registry {
                     };
                     if last {
                         let stopped = registry.keep_notice(&account, &resume_id);
-                        registry.dispose_for(&account, &reason, Some(stopped));
+                        registry.dispose_for(&account, Disposal::NoBrowser, &reason, Some(stopped));
                     }
                 }
             }
@@ -1736,6 +1808,16 @@ pub mod testing {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn a_rebuild_onto_public_data_is_told_apart_from_new_settings() {
+        assert_eq!(Disposal::rebuild(false, true), Disposal::PublicData);
+        assert_eq!(Disposal::rebuild(false, false), Disposal::SettingsChanged);
+        assert_eq!(Disposal::rebuild(true, true), Disposal::SettingsChanged);
+        assert_eq!(Disposal::rebuild(true, false), Disposal::SettingsChanged);
+        assert_eq!(Disposal::PublicData.as_str(), "public_data");
+        assert_eq!(Disposal::SignerFailures.as_str(), "signer_failures");
+    }
+
     pub(crate) use super::testing::register;
     use super::testing::{HeldLoad, NoIo, account_on, run_algos};
     use super::*;
@@ -2937,7 +3019,7 @@ pub(crate) mod tests {
                 assert_eq!(account.token.provider()().await.unwrap(), "first");
                 account.sign_through_socket(2, Arc::new(|_| true), token("second"));
                 assert_eq!(account.token.provider()().await.unwrap(), "second");
-                registry.dispose(&account);
+                registry.dispose(&account, Disposal::SettingsChanged);
             })
             .await;
     }

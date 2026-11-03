@@ -80,7 +80,12 @@ pub(crate) struct Inner {
     bound: Mutex<Option<Vec<u8>>>,
     streak: Mutex<Streak>,
     on_fatal: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// When each signer warning last reached stderr, so a looping account logs once a minute.
+    warned: Mutex<std::collections::HashMap<&'static str, Instant>>,
 }
+
+/// How often one signer warning of one account reaches the server journal.
+const SIGN_WARN_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn refused<T>() -> Result<T, SignError> {
     Err(SignError::Refused)
@@ -270,7 +275,27 @@ impl Inner {
             bound: Mutex::new(None),
             streak: Mutex::new(Streak::default()),
             on_fatal: Mutex::new(None),
+            warned: Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    /// A signer problem the server could not otherwise see: the browser answers or
+    /// stays silent, and nothing else would put it in the journal.
+    fn warn_sign(&self, what: &'static str) {
+        let mut warned = self.warned.lock().unwrap_or_else(|p| p.into_inner());
+        let now = Instant::now();
+        if warned
+            .get(what)
+            .is_some_and(|at| now.duration_since(*at) < SIGN_WARN_EVERY)
+        {
+            return;
+        }
+        warned.insert(what, now);
+        eprintln!(
+            "safe-cex warn signer [{} {}]: {what}",
+            self.account_name.as_deref().unwrap_or("-"),
+            self.venue
+        );
     }
 
     pub(crate) fn set_fatal(&self, callback: Box<dyn FnOnce() + Send>) {
@@ -351,7 +376,10 @@ impl Inner {
             Err(Failure::Suspended | Failure::Aborted) => return Err(SignError::Unavailable),
             // Silence is a slow page, not a failed signer: the socket's worker
             // answers echoes while the page's thread is too busy to sign.
-            Err(Failure::Duplicate | Failure::TimedOut) => return Err(SignError::TimedOut),
+            Err(Failure::Duplicate | Failure::TimedOut) => {
+                self.warn_sign("sign request timed out after 15s");
+                return Err(SignError::TimedOut);
+            }
             Err(Failure::Unavailable | Failure::SendFailed) => {
                 self.record_failure();
                 return Err(SignError::Unavailable);
@@ -359,6 +387,16 @@ impl Inner {
         };
         let error = response.get("error");
         if error.is_some_and(|error| error.as_str() != Some("")) {
+            // The page answers this when it holds no signer for the account.
+            if error.and_then(Value::as_str).is_some_and(|text| {
+                text.starts_with("No signer for") || text.contains("cannot sign")
+            }) {
+                self.warn_sign(
+                    "sign request unroutable: the page holds no signer for this account",
+                );
+            } else {
+                self.warn_sign("sign request refused by the page");
+            }
             self.record_failure();
             return refused();
         }

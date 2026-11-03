@@ -103,6 +103,10 @@ let streakStartedAt = 0;
 let failuresOn443 = 0;
 let episode = 0;
 let outage: TunnelOutage | undefined;
+let lastOpenedAt: number | undefined;
+
+/** When a tunnel handshake last opened in this realm, for telling a Hosted-only outage from a wider one. */
+export const tunnelLastOpenedAt = (): number | undefined => lastOpenedAt;
 
 /** The current outage when this realm's tunnel is unreachable on every port, else undefined. */
 export const tunnelOutage = (): TunnelOutage | undefined => outage;
@@ -110,6 +114,7 @@ export const tunnelOutage = (): TunnelOutage | undefined => outage;
 /** A socket dialed from `tunnelDialUrl` opened its handshake. */
 export const noteTunnelDialOpened = (dialedUrl: string): void => {
   if (!dialedPort(dialedUrl)) return;
+  lastOpenedAt = Date.now();
   laneFailures = 0;
   failuresOn443 = 0;
   streakFailures = 0;
@@ -153,6 +158,7 @@ export const resetTunnelLane = (enabled: boolean = isBrowserRealm()): void => {
   streakFailures = 0;
   streakTriedLane = false;
   outage = undefined;
+  lastOpenedAt = undefined;
 };
 
 // ---- rpc.relay urls (pure; no socket construction so safe-cex's routing table
