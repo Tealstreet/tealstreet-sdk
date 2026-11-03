@@ -393,10 +393,32 @@ fn open_sockets_ping_every_ten_seconds_and_answered_pings_keep_them_alive() {
         assert_eq!(h.pings(socket), 1, "{path}");
         h.advance_answering(opened + 10_000.0, &[socket]);
         assert_eq!(h.pings(socket), 2, "{path}");
-        h.advance_answering(opened + 120_000.0, &[socket]);
+        // Data keeps flowing too: a public feed with only pongs is reconnected for silence.
+        for step in 1..=4 {
+            h.advance_answering(opened + f64::from(step) * 30_000.0, &[socket]);
+            h.message(socket, r#"{"arg":{"channel":"tickers"},"data":[]}"#);
+        }
         assert_eq!(h.pings(socket), 13, "{path}");
         assert!(!h.closed.contains(&socket), "{path}");
     }
+}
+
+#[test]
+fn a_public_socket_answering_pings_but_carrying_no_data_is_reconnected() {
+    let mut h = harness("/public");
+    let socket = h.open("/public");
+    let opened = h.now;
+    h.message(socket, r#"{"arg":{"channel":"tickers"},"data":[]}"#);
+    h.advance_answering(opened + 59_000.0, &[socket]);
+    assert!(
+        !h.closed.contains(&socket),
+        "still inside the silence window"
+    );
+    h.advance_answering(opened + 61_000.0, &[socket]);
+    assert!(
+        h.closed.contains(&socket),
+        "pongs alone do not keep a ticker feed"
+    );
 }
 
 #[test]
