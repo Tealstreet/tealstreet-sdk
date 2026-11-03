@@ -1,6 +1,8 @@
 //! Scripted staging account; markPrice schema:
 //! https://docs.woox.io/#get-all-position-info-new. No network transport is used.
 mod support;
+mod trusted;
+use trusted::Prepared;
 use safe_cex_engine::model::Ticker;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, TimerId};
 use safe_cex_venue_woo::{Options, Woo};
@@ -36,13 +38,11 @@ fn pending() -> (Engine<Woo>, HttpRequest, TimerId, TimerId) {
     pending_with(CATALOGUE)
 }
 fn pending_with(catalogue: &str) -> (Engine<Woo>, HttpRequest, TimerId, TimerId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
+    let mut e = trusted::keyed(Options {
         testnet: true,
-        key: Some("scripted-key".into()),
-        secret: Some("scripted-secret".into()),
         application_id: Some("scripted-app".into()),
         ..Default::default()
-    }));
+    }, "scripted-key", "scripted-secret", None);
     e.start(0.0);
     let catalogue_request = request(&support::prepared_seed_actions(&mut e, 0.), "/public/info");
     reply(&mut e, &catalogue_request, 0.0, catalogue);
@@ -66,7 +66,7 @@ fn pending_with(catalogue: &str) -> (Engine<Woo>, HttpRequest, TimerId, TimerId)
             error: "scripted public outage",
         },
     );
-    let failed = e.drain_actions().collect::<Vec<_>>();
+    let failed = e.prepared().collect::<Vec<_>>();
     assert!(failed.iter().any(|action| matches!(
         action,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
@@ -89,7 +89,7 @@ fn pending_with(catalogue: &str) -> (Engine<Woo>, HttpRequest, TimerId, TimerId)
         })
         .unwrap();
     reply(&mut e, &info, 0.0, INFO);
-    let positions = request(&e.drain_actions().collect::<Vec<_>>(), "/v3/positions");
+    let positions = request(&e.prepared().collect::<Vec<_>>(), "/v3/positions");
     assert!(!e.store().loaded().tickers);
     (e, positions, retry, poll)
 }
@@ -128,7 +128,7 @@ fn unpriced_native_holding_is_an_error_and_never_an_empty_success() {
     let (mut e, positions, _, _) = pending();
     reply(&mut e, &positions, 0.0, UNPRICED);
     assert!(!e.store().loaded().positions);
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("position mark unavailable"))));
+    assert!(e.prepared().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("position mark unavailable"))));
 }
 #[test]
 fn an_unpriced_refresh_preserves_previous_positions_and_account_valuation() {
@@ -136,9 +136,9 @@ fn an_unpriced_refresh_preserves_previous_positions_and_account_valuation() {
     reply(&mut e, &positions, 0.0, NATIVE);
     let before = e.store().positions().to_vec();
     let balance = e.store().balance().clone();
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(2000.0, Event::TimerFired { timer: poll });
-    let positions = request(&e.drain_actions().collect::<Vec<_>>(), "/v3/positions");
+    let positions = request(&e.prepared().collect::<Vec<_>>(), "/v3/positions");
     reply(&mut e, &positions, 2000.0, UNPRICED);
     assert_eq!(e.store().positions(), before);
     assert_eq!(*e.store().balance(), balance);
@@ -147,14 +147,14 @@ fn an_unpriced_refresh_preserves_previous_positions_and_account_valuation() {
 fn ticker_recovery_immediately_reconciles_a_previously_unpriced_position() {
     let (mut e, positions, retry, _) = pending();
     reply(&mut e, &positions, 0.0, UNPRICED);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(1000.0, Event::TimerFired { timer: retry });
     let ticker = request(
         &support::prepared_seed_actions(&mut e, 1000.),
         "/public/futures",
     );
     reply(&mut e, &ticker, 1000.0, TICKERS);
-    let positions = request(&e.drain_actions().collect::<Vec<_>>(), "/v3/positions");
+    let positions = request(&e.prepared().collect::<Vec<_>>(), "/v3/positions");
     reply(&mut e, &positions, 1000.0, UNPRICED);
     assert!(e.store().loaded().positions);
     let p = e.store().position("JTOUSDT").unwrap();
@@ -172,9 +172,9 @@ fn owned_position_outside_partial_catalogue_cannot_clear_a_snapshot() {
         let (mut e, positions, _, poll) = pending_with(&catalogue);
         let request = if previous {
             reply(&mut e, &positions, 0.0, NATIVE);
-            e.drain_actions().for_each(drop);
+            e.prepared().for_each(drop);
             e.handle(2000.0, Event::TimerFired { timer: poll });
-            request(&e.drain_actions().collect::<Vec<_>>(), "/v3/positions")
+            request(&e.prepared().collect::<Vec<_>>(), "/v3/positions")
         } else {
             positions
         };
@@ -189,7 +189,7 @@ fn owned_position_outside_partial_catalogue_cannot_clear_a_snapshot() {
         assert_eq!(e.store().positions(), before);
         assert_eq!(*e.store().balance(), balance);
         assert_eq!(e.store().loaded().positions, previous);
-        assert!(e.drain_actions().any(|action| matches!(action,
+        assert!(e.prepared().any(|action| matches!(action,
             Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("owned position market unavailable"))));
     }
 }
@@ -208,7 +208,7 @@ fn a_refused_key_ends_the_start_with_the_reason() {
             },
         },
     );
-    assert!(e.drain_actions().any(|a| matches!(
+    assert!(e.prepared().any(|a| matches!(
         a,
         Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
     )));

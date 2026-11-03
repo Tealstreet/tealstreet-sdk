@@ -1,23 +1,23 @@
 mod support;
+mod trusted;
+use trusted::Prepared;
 use safe_cex_engine::{Action, Command, Event, Notice, Query, Response};
-use safe_cex_venue_woo::{Options, Woo};
+use safe_cex_venue_woo::Options;
 use serde::Deserialize;
 use support::*;
 
 const NOW: f64 = 1_786_603_865_910.0;
 fn ready() -> TestEngine {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
+    let mut e = trusted::keyed(Options {
         public_data_only: false,
-        key: Some("fixture-key".into()),
-        secret: Some("fixture-secret".into()),
         ..Default::default()
-    }));
+    }, "fixture-key", "fixture-secret", None);
     e.start(0.0);
     let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
     let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(&mut e, &r, 20.0, TICKERS);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e
 }
 fn query(e: &mut TestEngine, q: Query) -> safe_cex_engine::HttpRequest {
@@ -31,7 +31,7 @@ fn query(e: &mut TestEngine, q: Query) -> safe_cex_engine::HttpRequest {
     requests(e).remove(0)
 }
 fn result(e: &mut TestEngine) -> Result<String, String> {
-    e.drain_actions()
+    e.prepared()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone {
                 command: 99,
@@ -368,7 +368,7 @@ fn ledger_pages_obey_ten_requests_per_minute_and_later_failure_keeps_coverage() 
         NOW + 1.0,
         r#"{"success":true,"data":{"rows":[{"id":1,"type":"FUNDING_FEE","token":"USDT","amount":0.1,"timestamp":1786603865910}],"meta":{"total":2,"records_per_page":1,"current_page":1}}}"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.prepared().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     let timer = actions
         .into_iter()
@@ -396,7 +396,7 @@ fn ledger_pages_obey_ten_requests_per_minute_and_later_failure_keeps_coverage() 
         },
     );
     // The first validated ledger row survives; page-two failure carries coverage.
-    owned_history::partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+    owned_history::partial(&e.prepared().collect::<Vec<_>>(), 1);
 }
 #[test]
 fn malformed_history_row_is_skipped_with_a_warning_and_valid_rows_return() {
@@ -411,7 +411,7 @@ fn malformed_history_row_is_skipped_with_a_warning_and_valid_rows_return() {
             fill(1, NOW, "BUY")
         ),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared().collect();
     assert!(actions.iter().any(|a| matches!(a,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains("WOO fills history: skipped 1")
@@ -526,7 +526,7 @@ fn invalid_history_inputs_finish_without_http() {
                 query: q,
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.prepared().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions
@@ -1187,7 +1187,7 @@ mod owned_history {
         }
     }
     fn next(e: &mut TestEngine) -> HttpRequest {
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.prepared().collect();
         if let Some(r) = actions.iter().find_map(|a| match a {
             Action::Http(r) => Some(r.clone()),
             _ => None,
@@ -1332,7 +1332,7 @@ mod owned_history {
                             r = next(&mut e);
                         }
                     }
-                    typed_reject(&e.drain_actions().collect::<Vec<_>>());
+                    typed_reject(&e.prepared().collect::<Vec<_>>());
                     assert!(e.store().orders().is_empty());
                 }
             }
@@ -1355,7 +1355,7 @@ mod owned_history {
                     );
                     let second = next(&mut e);
                     failed(&mut e, &second, failure, axis, streamed);
-                    partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+                    partial(&e.prepared().collect::<Vec<_>>(), 1);
                     assert!(e.store().orders().is_empty());
                 }
             }
@@ -1389,7 +1389,7 @@ mod owned_history {
                     second = next(&mut e);
                 }
             }
-            partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+            partial(&e.prepared().collect::<Vec<_>>(), 1);
         }
     }
 
@@ -1412,7 +1412,7 @@ mod owned_history {
             let second = next(&mut e);
             assert!(second.url.contains("page=2"));
             failed(&mut e, &second, 0, 0, streamed);
-            partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+            partial(&e.prepared().collect::<Vec<_>>(), 1);
         }
     }
 
@@ -1446,7 +1446,7 @@ mod owned_history {
                     &rows(axis, &format!("{valid},{{}}"), 1, 2, 100),
                     streamed,
                 );
-                let output = e.drain_actions().collect::<Vec<_>>();
+                let output = e.prepared().collect::<Vec<_>>();
                 assert!(output.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==code::ROW_SKIPPED)));
                 partial(&output, 1);
             }
@@ -1473,7 +1473,7 @@ mod owned_history {
             send(&mut e, &r, &rows(axis, &excluded, 1, 2, 1), true);
             let second = next(&mut e);
             failed(&mut e, &second, 0, axis, true);
-            typed_reject(&e.drain_actions().collect::<Vec<_>>());
+            typed_reject(&e.prepared().collect::<Vec<_>>());
         }
     }
 
@@ -1496,7 +1496,7 @@ mod owned_history {
                 ),
                 true,
             );
-            let output = e.drain_actions().collect::<Vec<_>>();
+            let output = e.prepared().collect::<Vec<_>>();
             typed_reject(&output);
         }
     }
@@ -1525,7 +1525,7 @@ mod owned_history {
                 r = next(&mut e);
             }
         }
-        let output = e.drain_actions().collect::<Vec<_>>();
+        let output = e.prepared().collect::<Vec<_>>();
         typed_reject(&output);
         assert!(
             !output.iter().any(|a| matches!(a, Action::Http(_))),
@@ -1549,7 +1549,7 @@ mod owned_history {
                     r = next(&mut e);
                 }
             }
-            let output = e.drain_actions().collect::<Vec<_>>();
+            let output = e.prepared().collect::<Vec<_>>();
             assert!(
                 !output.iter().any(|a| matches!(a, Action::Http(_))),
                 "never request1001"
@@ -1596,13 +1596,13 @@ mod owned_history {
         send(&mut e, &first, &rows(1, &order(1), 1, 2, 1), true);
         let second = next(&mut e);
         failed(&mut e, &peer, 0, 1, true);
-        let peer_output: Vec<_> = e.drain_actions().collect();
+        let peer_output: Vec<_> = e.prepared().collect();
         assert!(markers(&peer_output).is_empty());
         assert!(peer_output.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { command: 42, error }) if error.kind == Some(ErrorKind::Internal)
         )));
         failed(&mut e, &second, 0, 1, true);
-        partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+        partial(&e.prepared().collect::<Vec<_>>(), 1);
         assert!(e.store().orders().is_empty());
         assert!(e.store().positions().is_empty());
         assert_eq!(e.store().balance(), &before);
@@ -1618,7 +1618,7 @@ mod owned_history {
             &rows(1, &format!("{},{{}}", order(1)), 1, 5, 3),
             true,
         );
-        let mut output: Vec<_> = e.drain_actions().collect();
+        let mut output: Vec<_> = e.prepared().collect();
         let second = output
             .iter()
             .find_map(|a| match a {
@@ -1636,7 +1636,7 @@ mod owned_history {
             &rows(1, &format!("{},{{}},{{}}", order(2)), 2, 5, 3),
             true,
         );
-        output.extend(e.drain_actions());
+        output.extend(e.prepared());
         partial(&output, 2);
         let gap = markers(&output)[0];
         assert!(gap.message.contains("skipped 1"));
@@ -1656,7 +1656,7 @@ mod owned_history {
             );
             assert!(r.headers.is_empty());
             send(&mut e, &r, &rows(3, "", 1, 0, 100), streamed);
-            let output: Vec<_> = e.drain_actions().collect();
+            let output: Vec<_> = e.prepared().collect();
             assert!(markers(&output).is_empty());
             assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
             assert_eq!(output.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 99, result }) if result == "[]")).count(), 1);
@@ -1666,7 +1666,7 @@ mod owned_history {
     #[test]
     fn consuming_signed_setup_refusal_keeps_legacy_strict_error() {
         let (mut e, _) = started();
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         e.handle(
             NOW,
             Event::Command(Command::Query {
@@ -1674,7 +1674,7 @@ mod owned_history {
                 query: fills(Some(5)),
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = e.prepared().collect();
         assert!(markers(&output).is_empty());
         assert!(!output.iter().any(|a| matches!(
             a,
@@ -1705,7 +1705,7 @@ mod owned_history {
                 r = next(&mut e);
             }
         }
-        let output = e.drain_actions().collect::<Vec<_>>();
+        let output = e.prepared().collect::<Vec<_>>();
         assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(output.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:99,error}) if error.message=="WOO history pagination limit exceeded")));
     }
@@ -1735,7 +1735,7 @@ fn failed_streamed_fill_prefix_cannot_poison_the_same_identity_on_an_alternative
         },
     );
     assert!(
-        !e.drain_actions()
+        !e.prepared()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
     );
     e.handle(

@@ -1,20 +1,20 @@
 //! Native rare identity reads: route/signer, exact IDs, failure ownership and no state commits.
+mod trusted;
+use trusted::Prepared;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
 use safe_cex_venue_woo::{Options, Woo};
 const NOW: f64 = 1000.0;
 fn engine(read: bool, public: bool) -> Engine<Woo> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
-        key: Some("primary-key".into()),
-        secret: Some("primary-secret".into()),
-        read_credentials: read.then(|| safe_cex_engine::ReadCredentials {
-            key: "read-key".into(),
-            secret: "read-secret".into(),
-            passphrase: None,
-        }),
-        public_data_only: public,
-        application_id: Some("configured-ws-id-is-not-account-id".into()),
-        ..Default::default()
-    }));
+    let mut e = trusted::keyed(
+        Options {
+            public_data_only: public,
+            application_id: Some("configured-ws-id-is-not-account-id".into()),
+            ..Default::default()
+        },
+        "primary-key",
+        "primary-secret",
+        read.then_some(("read-key", "read-secret")),
+    );
 
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 123.0,
@@ -22,12 +22,12 @@ fn engine(read: bool, public: bool) -> Engine<Woo> {
         used: 23.0,
         upnl: 7.0,
     });
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e
 }
 fn ask(e: &mut Engine<Woo>) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    e.drain_actions().collect()
+    e.prepared().collect()
 }
 fn request(e: &mut Engine<Woo>) -> HttpRequest {
     let actions = ask(e);
@@ -89,7 +89,7 @@ fn respond(e: &mut Engine<Woo>, r: &HttpRequest, status: u16, body: &str) -> Vec
             },
         },
     );
-    e.drain_actions().collect()
+    e.prepared().collect()
 }
 #[test]
 fn identity_returns_exact_response_ids_without_mutating_live_account() {
@@ -163,7 +163,7 @@ fn identity_missing_false_empty_or_failed_read_rejects_once_and_preserves_state(
                     error: "connection lost",
                 },
             );
-            e.drain_actions().collect()
+            e.prepared().collect()
         } else {
             respond(&mut e, &r, 503, "unavailable")
         };
@@ -183,20 +183,4 @@ fn identity_public_only_fails_before_network_even_with_saved_credentials() {
 fn identity_without_credentials_fails_before_network() {
     let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options::default()));
     result(ask(&mut e), true).unwrap_err();
-}
-
-#[test]
-fn identity_rejects_incomplete_saved_read_credentials_without_primary_fallback() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
-        key: Some("primary-key".into()),
-        secret: Some("primary-secret".into()),
-        read_credentials: Some(safe_cex_engine::ReadCredentials {
-            key: "read-key".into(),
-            secret: String::new(),
-            passphrase: None,
-        }),
-        ..Default::default()
-    }));
-    let error = result(ask(&mut e), true).unwrap_err();
-    assert!(error.contains("Secondary read credentials"));
 }

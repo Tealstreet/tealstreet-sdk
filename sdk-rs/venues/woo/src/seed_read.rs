@@ -338,12 +338,7 @@ impl Woo {
                     before,
                     self.malformed_rows,
                 );
-                let private = !self.options.public_data_only
-                    && self
-                        .options
-                        .key
-                        .as_deref()
-                        .is_some_and(|key| !key.is_empty());
+                let private = self.primary().is_some();
                 if !refresh && !private {
                     cx.store.set_balance(Default::default());
                     cx.store.set_positions(Vec::new());

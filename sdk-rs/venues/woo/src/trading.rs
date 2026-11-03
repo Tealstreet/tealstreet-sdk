@@ -950,10 +950,7 @@ impl Woo {
             }
             _ => return,
         };
-        if self.options.public_data_only
-            || self.options.key.is_none()
-            || self.options.secret.is_none()
-        {
+        if self.primary().is_none() {
             cx.fail(
                 command,
                 not_sent("WOO trading requires credentials").kind(ErrorKind::AuthInvalid),

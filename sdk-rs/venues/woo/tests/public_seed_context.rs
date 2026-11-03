@@ -1,5 +1,6 @@
 //! Local originals for unsigned seed custody; production is unchanged.
 mod support;
+mod trusted;
 
 use safe_cex_engine::log::code;
 use safe_cex_engine::request_context::{Claim, HttpAction, Preparation, Prepared, RoutingIntent};
@@ -1047,12 +1048,10 @@ fn nonfinite_funding_timer_creates_no_work_and_preserves_its_live_peer() {
 #[test]
 fn native_saved_primary_never_signs_public_seed_routes() {
     for public_data_only in [true, false] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
-            key: Some("fixture-key".into()),
-            secret: Some("fixture-secret".into()),
+        let mut e = trusted::keyed(Options {
             public_data_only,
             ..Default::default()
-        }));
+        }, "fixture-key", "fixture-secret", None);
         e.start(0.);
         let markets = packet(&e.drain_actions().collect::<Vec<_>>(), Seed::Markets);
         assert!(markets.request.headers.is_empty() && markets.request.signer_headers.is_empty());

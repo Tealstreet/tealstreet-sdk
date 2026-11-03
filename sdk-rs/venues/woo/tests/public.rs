@@ -1,4 +1,5 @@
 mod support;
+mod trusted;
 use safe_cex_engine::{Action, Command, Event, Notice, SocketChannel, Venue};
 use safe_cex_venue_woo::{Options, Woo};
 use support::*;
@@ -32,13 +33,11 @@ const UPDATE: &str = r#"{"topic":"PERP_BTC_USDT@orderbookupdate","ts":102,"data"
 #[test]
 fn initial_sockets_have_explicit_roles_and_unmodified_venue_urls_on_both_environments() {
     for (testnet, host) in [(false, "wss.woox.io"), (true, "wss.staging.woox.io")] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
+        let mut e = trusted::keyed(Options {
             testnet,
-            key: Some("fixture-key".into()),
-            secret: Some("fixture-secret".into()),
             application_id: Some("socket-role-test".into()),
             ..Default::default()
-        }));
+        }, "fixture-key", "fixture-secret", None);
         e.start(0.0);
         let r = prepared_seed_requests(&mut e, 0.).remove(0);
         response(&mut e, &r, 10.0, MARKETS);

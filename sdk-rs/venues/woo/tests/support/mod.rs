@@ -5,7 +5,8 @@ pub type TestEngine = Engine<Woo>;
 pub const MARKETS: &str = r#"{"success":true,"rows":[{"symbol":"SPOT_BTC_USDT"},{"symbol":"PERP_BTC_USDT","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":100,"base_imr":0.02,"price_range":0.01}]}"#;
 pub const TICKERS: &str = r#"{"success":true,"rows":[{"symbol":"PERP_UNKNOWN_USDT"},{"symbol":"PERP_BTC_USDT","24h_open":50000,"24h_close":60000,"24h_volume":4,"24h_amount":240000,"index_price":59999,"mark_price":60001,"last_funding_rate":0.0001,"next_funding_time":1700028800000,"open_interest":10000}]}"#;
 pub fn requests(e: &mut TestEngine) -> Vec<HttpRequest> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)

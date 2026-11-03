@@ -1,4 +1,5 @@
 mod support;
+mod trusted;
 
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::Interval;
@@ -142,16 +143,18 @@ impl Harness {
     fn connecting_with_topics(count: usize) -> Self {
         let trace = Rc::new(RefCell::new(Trace::default()));
         let encoder_failure = Rc::new(Cell::new(None));
+        let (provider, identities) = trusted::setup("fixture-key", "fixture-secret");
         let mut engine = safe_cex_engine::test_support::seeded_engine(Observed {
             native: Woo::new(Options {
-                key: Some("fixture-key".into()),
-                secret: Some("fixture-secret".into()),
                 application_id: Some("fixture-app".into()),
+                identities: identities.clone(),
                 ..Default::default()
             }),
             trace: trace.clone(),
             encoder_failure: encoder_failure.clone(),
         });
+        engine.set_signer(Some(provider)).unwrap();
+        engine.set_identities(identities).unwrap();
         engine.start(0.);
         let request = support::prepared_seed_actions(&mut engine, 0.)
             .into_iter()
