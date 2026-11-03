@@ -41,8 +41,6 @@ pub enum Pending {
     History(history::Request),
     Account(account::Request),
     Seed(Box<seed_read::Read>),
-    #[cfg(test)]
-    SigningProbe,
     Depth {
         symbol: String,
         generation: u64,
@@ -734,8 +732,6 @@ impl Venue for Woo {
             Pending::Trade(_) => (),
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Seed(read) => self.seed_item(cx, read, item),
-            #[cfg(test)]
-            Pending::SigningProbe => (),
             Pending::Candles { rows, bad, .. } => {
                 if let Some(c) = serde_json::from_str(item).ok().and_then(candle) {
                     rows.push(c);
@@ -785,8 +781,6 @@ impl Venue for Woo {
             Pending::Identity(_) | Pending::History(_) | Pending::Trade(_) => unreachable!(),
             Pending::Account(_) | Pending::Managed(..) => unreachable!(),
             Pending::Seed(_) => unreachable!(),
-            #[cfg(test)]
-            Pending::SigningProbe => (),
             Pending::Candles {
                 command,
                 mut rows,
@@ -889,8 +883,6 @@ impl Venue for Woo {
                 self.account_read_again(cx);
             }
             Pending::Seed(read) => self.seed_failed(cx, *read, error, true),
-            #[cfg(test)]
-            Pending::SigningProbe => (),
             Pending::Depth { symbol, generation } => {
                 if self
                     .depth
@@ -1055,5 +1047,3 @@ fn reread_partial<P>(
     *stalls < 5
 }
 
-#[cfg(test)]
-mod secondary_tests;

@@ -1,16 +1,16 @@
 mod support;
+mod trusted;
+use trusted::Prepared;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response};
-use safe_cex_venue_woo::{Options, Woo};
+use safe_cex_venue_woo::Options;
 use support::*;
 fn engine() -> TestEngine {
     let (seed, _) = started();
-    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
-        key: Some("fixture-key".into()),
-        secret: Some("fixture-secret".into()),
+    let mut e = trusted::keyed(Options {
         application_id: Some("fixture-app".into()),
         ..Default::default()
-    }));
+    }, "fixture-key", "fixture-secret", None);
     e.store_mut().set_markets(seed.store().markets().to_vec());
     e.store_mut().set_tickers(seed.store().tickers().to_vec());
     e
@@ -26,7 +26,7 @@ fn placed(e: &mut TestEngine, orders: Vec<PlaceOrderOpts>) -> Vec<Action> {
         1000.0,
         Event::Command(Command::PlaceOrders { command: 1, orders }),
     );
-    e.drain_actions().collect()
+    e.prepared().collect()
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn req(actions: &[Action], method: Method, path: &str) -> HttpRequest {
 }
 fn reply(e: &mut TestEngine, r: &HttpRequest, now: f64, body: &str) -> Vec<Action> {
     response(e, r, now, body);
-    e.drain_actions().collect()
+    e.prepared().collect()
 }
 fn tick(e: &mut TestEngine, actions: &[Action]) -> Vec<Action> {
     let (timer, at) = actions
@@ -115,7 +115,7 @@ fn tick(e: &mut TestEngine, actions: &[Action]) -> Vec<Action> {
         })
         .unwrap();
     e.handle(at, Event::TimerFired { timer });
-    e.drain_actions().collect()
+    e.prepared().collect()
 }
 fn result(actions: &[Action]) -> Result<String, String> {
     actions
@@ -452,7 +452,7 @@ fn regular_price_only_amend_always_sends_total_quantity() {
             amount: None,
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let r = req(&a, Method::Put, "/v3/order/12");
     assert!(r.body.as_ref().unwrap().contains(r#""quantity":"0.01""#));
     let a = reply(
@@ -479,7 +479,7 @@ fn parent_cancel_deduplicates_siblings_and_symbol_cancel_covers_both_families() 
             ids: vec!["12".into(), "13".into()],
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let r = req(&a, Method::Delete, "/v3/algo/order/10");
     let a = reply(
         &mut e,
@@ -496,7 +496,7 @@ fn parent_cancel_deduplicates_siblings_and_symbol_cancel_covers_both_families() 
             symbol: "BTCUSDT".into(),
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     req(&a, Method::Delete, "/v3/merge/orders/pending/PERP_BTC_USDT");
 }
 #[test]
@@ -509,7 +509,7 @@ fn global_cancel_covers_regular_and_algo_families() {
             symbol: String::new(),
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let r = req(&a, Method::Delete, "/v3/orders/pending");
     let a = reply(&mut e, &r, 1010.0, r#"{"success":true}"#);
     let a = tick(&mut e, &a);
@@ -526,7 +526,7 @@ fn global_cancel_attempts_both_families_after_failures_without_retrying() {
                 symbol: String::new(),
             }),
         );
-        let a: Vec<_> = e.drain_actions().collect();
+        let a: Vec<_> = e.prepared().collect();
         let regular = req(&a, Method::Delete, "/v3/orders/pending");
         match failure {
             "transport" => e.handle(
@@ -552,7 +552,7 @@ fn global_cancel_attempts_both_families_after_failures_without_retrying() {
                 },
             ),
         }
-        let a: Vec<_> = e.drain_actions().collect();
+        let a: Vec<_> = e.prepared().collect();
         assert!(!a.iter().any(|a| matches!(
             a,
             Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
@@ -592,7 +592,7 @@ fn global_cancel_reports_algo_failure_after_regular_success() {
             symbol: String::new(),
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let regular = req(&a, Method::Delete, "/v3/orders/pending");
     let a = reply(&mut e, &regular, 1010.0, r#"{"success":true}"#);
     let a = tick(&mut e, &a);
@@ -617,7 +617,7 @@ fn ambiguous_write_failure_never_retries_and_fifo_advances_to_next_command() {
             orders: vec![opts()],
         }),
     );
-    assert_eq!(e.drain_actions().count(), 0);
+    assert_eq!(e.prepared().count(), 0);
     e.handle(
         1010.0,
         Event::HttpResponse {
@@ -629,7 +629,7 @@ fn ambiguous_write_failure_never_retries_and_fifo_advances_to_next_command() {
             },
         },
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     assert!(result(&a).unwrap_err().contains("ambiguous"));
     let a = tick(&mut e, &a);
     let second = req(&a, Method::Post, "/v1/order");
@@ -647,7 +647,7 @@ fn leverage_commits_only_after_matching_authoritative_readback() {
             side: None,
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let r = req(&a, Method::Post, "/v1/client/futures_leverage");
     let a = reply(&mut e, &r, 1010.0, r#"{"success":true}"#);
     let r = req(&a, Method::Get, "/v1/client/futures_leverage");
@@ -676,7 +676,7 @@ fn mode_readback_retries_reads_only_and_never_invents_confirmation() {
             symbol: None,
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let r = req(&a, Method::Post, "/v1/client/position_mode");
     let mut a = reply(&mut e, &r, 1010.0, r#"{"success":true}"#);
     for attempt in 0..3 {
@@ -712,7 +712,7 @@ fn positional_engine() -> TestEngine {
         })
         .unwrap();
     response(&mut e, &ticker, 20.0, TICKERS);
-    early.extend(e.drain_actions());
+    early.extend(e.prepared());
     let a = early;
     let regular = a
         .iter()
@@ -778,7 +778,7 @@ fn positional_amend_targets_child_under_parent_and_sized_algo_amount_is_native_q
             amount: None,
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let r = req(&a, Method::Put, "/v3/algo/order/100");
     let body = r.body.as_ref().unwrap();
     assert!(body.contains(r#""childOrders":[{"algoOrderId":"101","triggerPrice":"58500"}]"#));
@@ -795,7 +795,7 @@ fn positional_amend_targets_child_under_parent_and_sized_algo_amount_is_native_q
             amount: Some(0.02),
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let r = req(&a, Method::Put, "/v3/algo/order/22");
     assert_eq!(r.body.as_deref(), Some(r#"{"quantity":"0.02"}"#));
 }
@@ -820,7 +820,7 @@ fn native_snowflake_ids_are_preserved_for_results_amend_and_cancel() {
             ids: vec!["9007199254740993".into()],
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let r = req(&a, Method::Delete, "/v1/order");
     assert!(
         r.body
@@ -882,7 +882,7 @@ fn amendments_reject_rounded_zero_prices_and_sized_algo_invalid_lots_without_wri
                 amount,
             }),
         );
-        let a: Vec<_> = e.drain_actions().collect();
+        let a: Vec<_> = e.prepared().collect();
         assert!(result(&a).is_err());
         assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
     }
@@ -903,7 +903,7 @@ fn trailing_amend_refreshes_full_position_quantity_after_cancel_ack() {
             amount: None,
         }),
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     let r = req(&a, Method::Delete, "/v3/algo/order/12");
     e.store_mut().update_positions(|p| p.contracts = 0.03);
     let a = reply(&mut e, &r, 1010.0, r#"{"success":true}"#);
@@ -960,7 +960,7 @@ fn write_failures_are_classified_without_changing_their_text() {
                 },
             },
         );
-        let a: Vec<_> = e.drain_actions().collect();
+        let a: Vec<_> = e.prepared().collect();
         let error = failure(&a);
         assert_eq!(
             (error.kind, error.outcome),
@@ -981,7 +981,7 @@ fn write_failures_are_classified_without_changing_their_text() {
             error: "reset",
         },
     );
-    let a: Vec<_> = e.drain_actions().collect();
+    let a: Vec<_> = e.prepared().collect();
     assert_eq!(
         (failure(&a).kind, failure(&a).outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
@@ -1002,7 +1002,7 @@ fn accepted_leverage_write_reports_unconfirmed_readback_without_resending() {
             side: None,
         }),
     );
-    let a = e.drain_actions().collect::<Vec<_>>();
+    let a = e.prepared().collect::<Vec<_>>();
     let write = req(&a, Method::Post, "/v1/client/futures_leverage");
     let mut a = reply(&mut e, &write, 1010.0, r#"{"success":true}"#);
     for attempt in 0..3 {

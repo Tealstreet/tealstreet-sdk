@@ -1,4 +1,6 @@
 mod support;
+mod trusted;
+use trusted::Prepared;
 
 use safe_cex_engine::{Action, Engine, Event, SocketChannel, SocketId};
 use safe_cex_venue_woo::{Options, Woo};
@@ -8,12 +10,10 @@ const ACCEPTED: &str = r#"{"event":"auth","success":true}"#;
 const TICKER: &str = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":"61000","volume":5,"amount":305000}]}"#;
 
 fn private_open() -> (TestEngine, SocketId) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
-        key: Some("fixture-key".into()),
-        secret: Some("fixture-secret".into()),
+    let mut engine = trusted::keyed(Options {
         application_id: Some("fixture-app".into()),
         ..Default::default()
-    }));
+    }, "fixture-key", "fixture-secret", None);
     engine.start(0.);
     let market = support::prepared_seed_requests(&mut engine, 0.).remove(0);
     response(&mut engine, &market, 10., MARKETS);
@@ -37,7 +37,7 @@ fn private_open() -> (TestEngine, SocketId) {
         })
         .unwrap();
     response(&mut engine, ticker, 20., TICKERS);
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     engine.handle(21., Event::WsOpened { socket });
     (engine, socket)
 }
@@ -76,7 +76,7 @@ fn duplicate_private_open_cannot_repeat_authentication_or_reads() {
     let (mut engine, socket) = private_open();
     assert_eq!(frames(&mut engine, socket).len(), 1);
     engine.handle(22., Event::WsOpened { socket });
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = engine.prepared().collect();
     assert!(
         !actions
             .iter()
@@ -88,7 +88,7 @@ fn duplicate_private_open_cannot_repeat_authentication_or_reads() {
 #[test]
 fn expired_public_data_retires_before_it_can_refresh_or_mutate() {
     let (mut engine, socket) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     let before = engine.store().ticker("BTCUSDT").unwrap().last;
     engine.handle(
         20_030.,
@@ -116,7 +116,7 @@ fn expired_public_data_retires_before_it_can_refresh_or_mutate() {
 #[test]
 fn expired_private_auth_cannot_release_subscriptions() {
     let (mut engine, socket) = private_open();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     engine.handle(
         10_021.,
         Event::WsMessage {
@@ -124,7 +124,7 @@ fn expired_private_auth_cannot_release_subscriptions() {
             text: ACCEPTED,
         },
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = engine.prepared().collect();
     assert!(
         !actions.iter().any(
             |action| matches!(action, Action::WsSend { socket: value, .. } if *value == socket)
@@ -145,7 +145,7 @@ fn expired_private_auth_cannot_release_subscriptions() {
 #[test]
 fn live_public_data_keeps_its_native_mapping() {
     let (mut engine, socket) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     engine.handle(
         31.,
         Event::WsMessage {
@@ -181,7 +181,7 @@ fn live_private_auth_preserves_native_subscription_bytes_and_order() {
 #[test]
 fn current_private_execution_reaches_the_unchanged_native_mapper() {
     let (mut engine, socket) = private_open();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     engine.handle(
         22.,
         Event::WsMessage {
@@ -196,7 +196,7 @@ fn current_private_execution_reaches_the_unchanged_native_mapper() {
 fn reconnect_replays_book_interest_and_keeps_native_seed_buffer_fences() {
     use safe_cex_engine::{Command, Venue};
     let (mut engine, socket) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     engine.handle(
         40.,
         Event::Command(Command::SubscribeOrderBook {
@@ -225,7 +225,7 @@ fn reconnect_replays_book_interest_and_keeps_native_seed_buffer_fences() {
         .unwrap();
     support::snapshot(&mut engine, &old_seed, 42., 100);
     assert!(engine.venue().book("BTCUSDT").is_none());
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     engine.handle(retry_at, Event::TimerFired { timer });
     let next = engine
         .drain_actions()
@@ -293,7 +293,7 @@ fn reconnect_replays_book_interest_and_keeps_native_seed_buffer_fences() {
 fn managed_candle_interests_preserve_reference_counts() {
     use safe_cex_engine::{Command, model::Interval};
     let (mut engine, socket) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     for time in [40., 41.] {
         engine.handle(
             time,
@@ -339,7 +339,7 @@ fn malformed_auth_retires_without_releasing_private_interests() {
         r#"{"event":"auth","success":"true"}"#,
     ] {
         let (mut engine, socket) = private_open();
-        engine.drain_actions().for_each(drop);
+        engine.prepared().for_each(drop);
         engine.handle(
             22.,
             Event::WsMessage {
@@ -347,7 +347,7 @@ fn malformed_auth_retires_without_releasing_private_interests() {
                 text: malformed,
             },
         );
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions: Vec<_> = engine.prepared().collect();
         assert!(!actions.iter().any(
             |action| matches!(action, Action::WsSend { socket: value, .. } if *value == socket)
         ));
@@ -393,7 +393,7 @@ fn assert_book_subscription_before_seed(actions: &[Action], socket: SocketId) {
 fn dynamic_book_subscription_is_released_before_its_http_seed() {
     use safe_cex_engine::Command;
     let (mut engine, socket) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     engine.handle(
         40.,
         Event::Command(Command::SubscribeOrderBook {
@@ -454,9 +454,9 @@ fn reconnect_book(engine: &mut TestEngine, now: f64, actions: &[Action]) -> (Soc
 fn handoff_wake_preserves_intervening_book_delta_and_runs_once() {
     use safe_cex_engine::Venue;
     let (mut engine, socket) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     subscribe_book(&mut engine, 40., "BTCUSDT");
-    let mut actions: Vec<_> = engine.drain_actions().collect();
+    let mut actions: Vec<_> = engine.prepared().collect();
     let wake = seed_wake(&actions, 40.);
     support::ws(
         &mut engine,
@@ -466,7 +466,7 @@ fn handoff_wake_preserves_intervening_book_delta_and_runs_once() {
     );
     assert!(requests(&mut engine).is_empty());
     engine.handle(42., Event::TimerFired { timer: wake });
-    actions.extend(engine.drain_actions());
+    actions.extend(engine.prepared());
     assert_book_subscription_before_seed(&actions, socket);
     let seeds: Vec<_> = actions
         .iter()
@@ -487,9 +487,9 @@ fn handoff_wake_preserves_intervening_book_delta_and_runs_once() {
 #[test]
 fn retired_admitted_seed_survives_reconnect_and_old_wakes_are_inert() {
     let (mut engine, old) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     subscribe_book(&mut engine, 40., "BTCUSDT");
-    let wake = seed_wake(&engine.drain_actions().collect::<Vec<_>>(), 40.);
+    let wake = seed_wake(&engine.prepared().collect::<Vec<_>>(), 40.);
     engine.handle(
         41.,
         Event::WsClosed {
@@ -497,17 +497,17 @@ fn retired_admitted_seed_survives_reconnect_and_old_wakes_are_inert() {
             code: 1006,
         },
     );
-    let retired: Vec<_> = engine.drain_actions().collect();
+    let retired: Vec<_> = engine.prepared().collect();
     engine.handle(42., Event::TimerFired { timer: wake });
     assert!(requests(&mut engine).is_empty());
     let (socket, at) = reconnect_book(&mut engine, 41., &retired);
-    let mut fresh: Vec<_> = engine.drain_actions().collect();
+    let mut fresh: Vec<_> = engine.prepared().collect();
     let next = seed_wake(&fresh, at);
     assert_ne!(next, wake);
     engine.handle(at, Event::TimerFired { timer: wake });
     assert!(requests(&mut engine).is_empty());
     engine.handle(at, Event::TimerFired { timer: next });
-    fresh.extend(engine.drain_actions());
+    fresh.extend(engine.prepared());
     assert_book_subscription_before_seed(&fresh, socket);
     assert_eq!(
         fresh
@@ -523,9 +523,9 @@ fn retired_admitted_seed_survives_reconnect_and_old_wakes_are_inert() {
 fn remove_readd_book_cannot_be_seeded_by_its_old_wake() {
     use safe_cex_engine::Command;
     let (mut engine, _) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     subscribe_book(&mut engine, 40., "BTCUSDT");
-    let old = seed_wake(&engine.drain_actions().collect::<Vec<_>>(), 40.);
+    let old = seed_wake(&engine.prepared().collect::<Vec<_>>(), 40.);
     engine.handle(
         41.,
         Event::Command(Command::UnsubscribeOrderBook {
@@ -534,7 +534,7 @@ fn remove_readd_book_cannot_be_seeded_by_its_old_wake() {
     );
     assert!(requests(&mut engine).is_empty());
     subscribe_book(&mut engine, 42., "BTCUSDT");
-    let fresh = seed_wake(&engine.drain_actions().collect::<Vec<_>>(), 42.);
+    let fresh = seed_wake(&engine.prepared().collect::<Vec<_>>(), 42.);
     assert_ne!(old, fresh);
     engine.handle(42., Event::TimerFired { timer: old });
     assert!(requests(&mut engine).is_empty());
@@ -552,18 +552,18 @@ fn removing_one_required_book_rearms_the_other_due_seed() {
     let mut markets = engine.store().markets().to_vec();
     markets.push(eth);
     engine.store_mut().set_markets(markets);
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     subscribe_book(&mut engine, 40., "BTCUSDT");
-    let a = seed_wake(&engine.drain_actions().collect::<Vec<_>>(), 40.);
+    let a = seed_wake(&engine.prepared().collect::<Vec<_>>(), 40.);
     subscribe_book(&mut engine, 41., "ETHUSDT");
-    let b = seed_wake(&engine.drain_actions().collect::<Vec<_>>(), 41.);
+    let b = seed_wake(&engine.prepared().collect::<Vec<_>>(), 41.);
     engine.handle(
         42.,
         Event::Command(Command::UnsubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let c = seed_wake(&engine.drain_actions().collect::<Vec<_>>(), 42.);
+    let c = seed_wake(&engine.prepared().collect::<Vec<_>>(), 42.);
     engine.handle(43., Event::TimerFired { timer: a });
     engine.handle(43., Event::TimerFired { timer: b });
     assert!(requests(&mut engine).is_empty());
@@ -576,7 +576,7 @@ fn removing_one_required_book_rearms_the_other_due_seed() {
 fn unrelated_interests_do_not_bypass_native_book_retry_delay() {
     use safe_cex_engine::{Command, model::Interval};
     let (mut engine, socket) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     subscribe_book(&mut engine, 40., "BTCUSDT");
     let seed = support::released_requests(&mut engine, 40.).remove(0);
     support::ws(
@@ -585,7 +585,7 @@ fn unrelated_interests_do_not_bypass_native_book_retry_delay() {
         50.,
         r#"{"topic":"PERP_BTC_USDT@orderbookupdate","ts":101,"data":{"bids":[[59000,-1]],"asks":[]}}"#,
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = engine.prepared().collect();
     let retry = actions
         .iter()
         .find_map(|a| match a {
@@ -607,7 +607,7 @@ fn unrelated_interests_do_not_bypass_native_book_retry_delay() {
     support::snapshot(&mut engine, &seed, 52., 100);
     assert!(requests(&mut engine).is_empty());
     engine.handle(1050., Event::TimerFired { timer: retry });
-    let wake = seed_wake(&engine.drain_actions().collect::<Vec<_>>(), 1050.);
+    let wake = seed_wake(&engine.prepared().collect::<Vec<_>>(), 1050.);
     engine.handle(1050., Event::TimerFired { timer: wake });
     assert_eq!(requests(&mut engine).len(), 1);
 }
@@ -620,9 +620,9 @@ fn refused_seed_handoff_recovers_after_real_interest_capacity_is_freed() {
     let mut expanded = original.clone();
     expanded[0].base = "A".repeat(MAX_INTEREST_BYTES);
     engine.store_mut().set_markets(expanded);
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     subscribe_book(&mut engine, 40., "BTCUSDT");
-    let refused: Vec<_> = engine.drain_actions().collect();
+    let refused: Vec<_> = engine.prepared().collect();
     assert!(refused.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("Capacity"))));
     assert!(!refused.iter().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(
@@ -635,10 +635,10 @@ fn refused_seed_handoff_recovers_after_real_interest_capacity_is_freed() {
     engine.store_mut().set_markets(original);
     let (socket, at) = reconnect_book(&mut engine, 40., &refused);
     assert_ne!(socket, old);
-    let mut actions: Vec<_> = engine.drain_actions().collect();
+    let mut actions: Vec<_> = engine.prepared().collect();
     let wake = seed_wake(&actions, at);
     engine.handle(at, Event::TimerFired { timer: wake });
-    actions.extend(engine.drain_actions());
+    actions.extend(engine.prepared());
     assert_book_subscription_before_seed(&actions, socket);
     let seeds: Vec<_> = actions
         .iter()
@@ -656,11 +656,11 @@ fn refused_seed_handoff_recovers_after_real_interest_capacity_is_freed() {
 #[test]
 fn expired_released_seed_wake_cannot_issue_http() {
     let (mut engine, socket) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     subscribe_book(&mut engine, 40., "BTCUSDT");
-    let wake = seed_wake(&engine.drain_actions().collect::<Vec<_>>(), 40.);
+    let wake = seed_wake(&engine.prepared().collect::<Vec<_>>(), 40.);
     engine.handle(20030., Event::TimerFired { timer: wake });
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = engine.prepared().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(
         actions
@@ -681,11 +681,11 @@ fn first_open_and_reconnect_rebase_two_book_demand_before_unsubscribe_wakes() {
         second.base = "ETH".into();
         markets.push(second);
         engine.store_mut().set_markets(markets);
-        engine.drain_actions().for_each(drop);
+        engine.prepared().for_each(drop);
         subscribe_book(&mut engine, 40., "BTCUSDT");
-        engine.drain_actions().for_each(drop);
+        engine.prepared().for_each(drop);
         subscribe_book(&mut engine, 40., "ETHUSDT");
-        let mut actions: Vec<_> = engine.drain_actions().collect();
+        let mut actions: Vec<_> = engine.prepared().collect();
         let mut now = 40.;
         if reconnect {
             engine.handle(
@@ -695,9 +695,9 @@ fn first_open_and_reconnect_rebase_two_book_demand_before_unsubscribe_wakes() {
                     code: 1006,
                 },
             );
-            actions = engine.drain_actions().collect();
+            actions = engine.prepared().collect();
             (public, now) = reconnect_book(&mut engine, 41., &actions);
-            actions = engine.drain_actions().collect();
+            actions = engine.prepared().collect();
         }
         let old: Vec<_> = actions
             .iter()
@@ -713,7 +713,7 @@ fn first_open_and_reconnect_rebase_two_book_demand_before_unsubscribe_wakes() {
                 symbol: "BTCUSDT".into(),
             }),
         );
-        let replaced: Vec<_> = engine.drain_actions().collect();
+        let replaced: Vec<_> = engine.prepared().collect();
         let current: Vec<_> = replaced
             .iter()
             .filter_map(|action| match action {
@@ -730,7 +730,7 @@ fn first_open_and_reconnect_rebase_two_book_demand_before_unsubscribe_wakes() {
         for timer in old {
             engine.handle(now, Event::TimerFired { timer });
             assert!(
-                engine.drain_actions().next().is_none(),
+                engine.prepared().next().is_none(),
                 "every superseded wake is inert"
             );
         }
@@ -739,7 +739,7 @@ fn first_open_and_reconnect_rebase_two_book_demand_before_unsubscribe_wakes() {
         assert_eq!(http.len(), 1);
         assert!(http[0].url.ends_with("/orderbook/PERP_ETH_USDT"));
         subscribe_book(&mut engine, now, "BTCUSDT");
-        let additions: Vec<_> = engine.drain_actions().collect();
+        let additions: Vec<_> = engine.prepared().collect();
         assert!(additions.iter().any(|action| matches!(action, Action::WsSend { socket, text } if *socket == public && text.contains("PERP_BTC_USDT@orderbookupdate"))));
         let timer = seed_wake(&additions, now);
         engine.handle(now, Event::TimerFired { timer });
@@ -765,7 +765,7 @@ fn nonfinite_socket_observations_cannot_publish_or_schedule_work() {
             } else {
                 support::started()
             };
-            engine.drain_actions().for_each(drop);
+            engine.prepared().for_each(drop);
             let before = full_store_frame(&engine);
             engine.handle(
                 now,
@@ -774,7 +774,7 @@ fn nonfinite_socket_observations_cannot_publish_or_schedule_work() {
                     text: if private { ACCEPTED } else { TICKER },
                 },
             );
-            let actions: Vec<_> = engine.drain_actions().collect();
+            let actions: Vec<_> = engine.prepared().collect();
             assert_eq!(full_store_frame(&engine), before);
             assert!(
                 actions.is_empty(),
@@ -791,7 +791,7 @@ fn nonfinite_socket_observations_cannot_publish_or_schedule_work() {
                 assert_eq!(frames(&mut engine, socket).len(), 3);
             } else {
                 assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 61_000.);
-                assert!(engine.drain_actions().next().is_none());
+                assert!(engine.prepared().next().is_none());
             }
         }
     }
@@ -800,9 +800,9 @@ fn nonfinite_socket_observations_cannot_publish_or_schedule_work() {
 #[test]
 fn retired_socket_payload_and_duplicate_close_have_no_effects() {
     let (mut engine, socket) = support::started();
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     engine.handle(40., Event::WsClosed { socket, code: 1006 });
-    let cleanup: Vec<_> = engine.drain_actions().collect();
+    let cleanup: Vec<_> = engine.prepared().collect();
     let before = full_store_frame(&engine);
     assert!(
         cleanup
@@ -822,7 +822,7 @@ fn retired_socket_payload_and_duplicate_close_have_no_effects() {
         Event::WsClosed { socket, code: 1006 },
     ] {
         engine.handle(41., event);
-        assert!(engine.drain_actions().next().is_none());
+        assert!(engine.prepared().next().is_none());
         assert_eq!(full_store_frame(&engine), before);
     }
 }

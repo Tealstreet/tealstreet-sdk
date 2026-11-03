@@ -1,5 +1,7 @@
 //! Scripted discovery regressions; no network or account credentials.
 mod support;
+mod trusted;
+use trusted::Prepared;
 use safe_cex_engine::{Action, Engine, Event, Response};
 use safe_cex_venue_woo::{Options, Woo};
 use support::jittered;
@@ -31,7 +33,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
                 error: "scripted network failure",
             },
         );
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = engine.prepared().collect::<Vec<_>>();
         assert!(
             !actions
                 .iter()
@@ -70,18 +72,16 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     );
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
-    assert!(engine.drain_actions().any(|action| matches!(action,
+    assert!(engine.prepared().any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
-        key: Some("scripted-key".into()),
-        secret: Some("scripted-secret".into()),
+    let mut engine = trusted::keyed(Options {
         application_id: Some("scripted-app".into()),
         ..Default::default()
-    }));
+    }, "scripted-key", "scripted-secret", None);
     engine.start(0.0);
     let catalogue = support::prepared_seed_actions(&mut engine, 0.0)
         .into_iter()
@@ -209,7 +209,7 @@ fn live_ticker_never_creates_a_catalogue_market_missing_from_the_rest_seed() {
         })
         .unwrap();
     engine.handle(0.0, Event::HttpResponse { request: ticker.id, response: Response { status: 200, headers: "", body: r###"{"success":true,"rows":[{"symbol":"PERP_UNKNOWN_USDT"},{"symbol":"PERP_BTC_USDT","24h_open":50000,"24h_close":60000,"24h_volume":4,"24h_amount":240000,"index_price":59999,"mark_price":60001,"last_funding_rate":0.0001,"next_funding_time":1700028800000,"open_interest":10000}]}"### }});
-    actions.extend(engine.drain_actions());
+    actions.extend(engine.prepared());
 
     assert!(engine.store().market("ETHUSDT").is_some());
     assert!(engine.store().ticker("ETHUSDT").is_none());
@@ -221,7 +221,7 @@ fn live_ticker_never_creates_a_catalogue_market_missing_from_the_rest_seed() {
         })
         .unwrap();
     engine.handle(0.0, Event::WsOpened { socket });
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     engine.handle(1.0, Event::WsMessage { socket, text: r###"{"topic":"tickers","data":[{"symbol":"PERP_ETH_USDT","close":201},{"symbol":"PERP_BTC_USDT","close":60001},{"symbol":"PERP_UNKNOWN_USDT","close":999}]}"### });
     // Like TS, live data only updates rows the REST ticker seed listed.
     assert!(engine.store().ticker("ETHUSDT").is_none());

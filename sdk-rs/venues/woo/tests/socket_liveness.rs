@@ -1,4 +1,6 @@
 mod support;
+mod trusted;
+use trusted::Prepared;
 use safe_cex_engine::model::Balance;
 use safe_cex_engine::{Action, Engine, Event, SocketChannel, SocketId, TimerId};
 type LivenessEngine = Engine<safe_cex_venue_woo::Woo>;
@@ -16,19 +18,15 @@ fn seed_tickers(e: &mut LivenessEngine) -> Vec<Action> {
         })
         .unwrap();
     support::response(e, &request, 20.0, support::TICKERS);
-    actions.extend(e.drain_actions());
+    actions.extend(e.prepared());
     actions
 }
 
 fn connecting() -> (LivenessEngine, SocketId, f64, bool) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_woo::Woo::new(
-        safe_cex_venue_woo::Options {
-            key: Some("key".into()),
-            secret: Some("secret".into()),
+    let mut e = trusted::keyed(safe_cex_venue_woo::Options {
             application_id: Some("app".into()),
             ..Default::default()
-        },
-    ));
+        }, "key", "secret", None);
     e.start(0.0);
     let request = support::prepared_seed_requests(&mut e, 0.).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);
@@ -49,7 +47,7 @@ fn connecting() -> (LivenessEngine, SocketId, f64, bool) {
 fn started() -> (LivenessEngine, SocketId, f64, TimerId) {
     let (mut e, socket, opened_at, already_open) = connecting();
     if !already_open {
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         e.handle(opened_at, Event::WsOpened { socket });
     }
     let timer = e
@@ -78,7 +76,7 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
                 text: REJECTED,
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.prepared().collect();
         assert_eq!(
             actions
                 .iter()
@@ -112,7 +110,7 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
         );
         e.handle(now, Event::WsClosed { socket, code: 1006 });
         assert!(
-            e.drain_actions().next().is_none(),
+            e.prepared().next().is_none(),
             "retired socket events must be inert"
         );
         e.handle(at, Event::TimerFired { timer: retry });
@@ -135,7 +133,7 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
                 text: REJECTED,
             },
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(e.prepared().next().is_none());
         socket = replacement;
         now = at;
         e.handle(now, Event::WsOpened { socket });
@@ -153,7 +151,7 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
 fn continuous_pongs_cannot_extend_the_authentication_deadline() {
     let (mut e, socket, now, first_watch) = started();
     e.handle(now + 4999.0, Event::WsMessage { socket, text: PONG });
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(now + 5000.0, Event::TimerFired { timer: first_watch });
     let mut timers: Vec<_> = e
         .drain_actions()
@@ -169,7 +167,7 @@ fn continuous_pongs_cannot_extend_the_authentication_deadline() {
             break timer;
         }
         e.handle(at - 1.0, Event::WsMessage { socket, text: PONG });
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         e.handle(at, Event::TimerFired { timer });
         timers = e
             .drain_actions()
@@ -180,10 +178,10 @@ fn continuous_pongs_cannot_extend_the_authentication_deadline() {
             .collect();
     };
     e.handle(now + 9999.0, Event::WsMessage { socket, text: PONG });
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(now + 10_000.0, Event::TimerFired { timer: watch });
     assert!(
-        e.drain_actions()
+        e.prepared()
             .any(|a| matches!(a, Action::WsClose { socket: s } if s == socket))
     );
 }
@@ -198,7 +196,7 @@ fn accepted_login_cancels_auth_deadline_and_stale_timer_cannot_close_socket() {
             text: ACCEPTED,
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared().collect();
     assert!(
         actions
             .iter()
@@ -219,20 +217,20 @@ fn accepted_login_cancels_auth_deadline_and_stale_timer_cannot_close_socket() {
         },
     );
     assert!(
-        e.drain_actions().next().is_none(),
+        e.prepared().next().is_none(),
         "duplicate login acknowledgements are inert"
     );
     e.handle(now + 10_000.0, Event::TimerFired { timer: old_watch });
-    assert!(e.drain_actions().next().is_none());
+    assert!(e.prepared().next().is_none());
     e.handle(now + 10_001.0, Event::WsMessage { socket, text: PONG });
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(
         now + 10_001.0,
         Event::TimerFired {
             timer: active_watch,
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
     assert!(
         actions
@@ -243,14 +241,10 @@ fn accepted_login_cancels_auth_deadline_and_stale_timer_cannot_close_socket() {
 
 #[test]
 fn private_connection_that_never_opens_is_closed_and_backed_off() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_woo::Woo::new(
-        safe_cex_venue_woo::Options {
-            key: Some("key".into()),
-            secret: Some("secret".into()),
+    let mut e = trusted::keyed(safe_cex_venue_woo::Options {
             application_id: Some("app".into()),
             ..Default::default()
-        },
-    ));
+        }, "key", "secret", None);
     e.start(0.0);
     let request = support::prepared_seed_requests(&mut e, 0.).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);
@@ -277,7 +271,7 @@ fn private_connection_that_never_opens_is_closed_and_backed_off() {
         })
         .unwrap();
     e.handle(now + 10_000.0, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared().collect();
     assert!(
         actions
             .iter()

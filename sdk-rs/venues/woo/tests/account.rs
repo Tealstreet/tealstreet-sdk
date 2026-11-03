@@ -1,9 +1,11 @@
 mod support;
+mod trusted;
+use trusted::Prepared;
 use safe_cex_engine::model::OrderStatus;
 use safe_cex_engine::{
     Action, Command, Event, HttpRequest, Notice, SocketChannel, SocketId, TimerId,
 };
-use safe_cex_venue_woo::{Options, Woo};
+use safe_cex_venue_woo::Options;
 use support::*;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
@@ -39,7 +41,7 @@ fn established_stream() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
         20.5,
         r#"{"event":"auth","success":true}"#,
     );
-    engine.drain_actions().for_each(drop);
+    engine.prepared().for_each(drop);
     (engine, socket, reads, timer)
 }
 
@@ -119,12 +121,10 @@ fn start_with_retry_at(
     TimerId,
     Option<TimerId>,
 ) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
-        key: Some("replay-key".into()),
-        secret: Some("replay-secret".into()),
+    let mut e = trusted::keyed(Options {
         application_id: Some("app".into()),
         ..Default::default()
-    }));
+    }, "replay-key", "replay-secret", None);
     e.start(at);
     let r = prepared_seed_requests(&mut e, at).remove(0);
     response(&mut e, &r, at + 10.0, markets);
@@ -137,7 +137,7 @@ fn start_with_retry_at(
         })
         .unwrap();
     response(&mut e, &ticker, at + 20.0, TICKERS);
-    early.extend(e.drain_actions());
+    early.extend(e.prepared());
     let actions = early;
     let socket = actions
         .iter()
@@ -257,13 +257,13 @@ fn startup_auth_snapshot_settings_and_exact_ids() {
             .any(|(k, v)| *k == "x-api-key" && v == "replay-key")
     }));
     e.handle(25.0, Event::WsOpened { socket });
-    let sent: Vec<_> = e.drain_actions().collect();
+    let sent: Vec<_> = e.prepared().collect();
     assert!(sent.iter().any(
         |a| matches!(a,Action::WsSend{text,..}if text.contains("auth")&&text.contains("timestamp"))
     ));
     ws(&mut e, socket, 26.0, r#"{"event":"auth","success":true}"#);
     assert_eq!(
-        e.drain_actions()
+        e.prepared()
             .filter(|a| matches!(a,Action::WsSend{text,..}if text.contains("subscribe")))
             .count(),
         2
@@ -297,7 +297,7 @@ fn startup_auth_snapshot_settings_and_exact_ids() {
 fn failed_algo_snapshot_preserves_complete_known_orders() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     response(&mut e, &regular, 80.0, &page(""));
@@ -379,7 +379,7 @@ fn flat_leverage_uses_legacy_oneway_cross_and_updates_both_rails() {
     let s = e.store().setting("BTCUSDT").unwrap();
     assert_eq!(s.buy_leverage, Some(12.0));
     assert_eq!(s.sell_leverage, Some(12.0));
-    assert!(e.drain_actions().any(|a| matches!(
+    assert!(e.prepared().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone {
             command: 7,
@@ -400,7 +400,7 @@ fn non_futures_account_never_marks_balance_or_positions_loaded() {
 fn private_watchdog_closes_then_reconnects_with_capped_backoff() {
     let (mut e, socket, _, _) = start();
     e.handle(30.0, Event::WsOpened { socket });
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     ws(&mut e, socket, 31.0, r#"{"event":"auth","success":true}"#);
     let watchdog = e
         .drain_actions()
@@ -410,7 +410,7 @@ fn private_watchdog_closes_then_reconnects_with_capped_backoff() {
         })
         .unwrap();
     e.handle(21_000.0, Event::TimerFired { timer: watchdog });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared().collect();
     assert!(
         actions
             .iter()
@@ -426,7 +426,7 @@ fn private_watchdog_closes_then_reconnects_with_capped_backoff() {
         })
         .unwrap();
     e.handle(22_000.0, Event::TimerFired { timer: reconnect });
-    assert!(e.drain_actions().any(|a| matches!(a,Action::WsConnect{url,channel:Some(SocketChannel::Private),context:None,..}if url == "wss://wss.woox.io/v2/ws/private/stream/app")));
+    assert!(e.prepared().any(|a| matches!(a,Action::WsConnect{url,channel:Some(SocketChannel::Private),context:None,..}if url == "wss://wss.woox.io/v2/ws/private/stream/app")));
 }
 
 #[test]
@@ -454,7 +454,7 @@ fn two_hedge_rails_in_one_snapshot_preserve_distinct_settings() {
 fn malformed_positions_read_preserves_known_positions() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let p = take(&mut reads, "/v3/positions");
     response(
@@ -528,7 +528,7 @@ fn auth_rejection_does_not_subscribe() {
         r#"{"event":"auth","success":false,"message":"bad key"}"#,
     );
     assert!(
-        e.drain_actions()
+        e.prepared()
             .all(|a| !matches!(a, Action::WsSend { .. }))
     );
 }
@@ -536,7 +536,7 @@ fn auth_rejection_does_not_subscribe() {
 fn malformed_known_order_keeps_its_stored_copy_while_the_rest_commits() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     response(
@@ -554,7 +554,7 @@ fn malformed_known_order_keeps_its_stored_copy_while_the_rest_commits() {
 fn account_equity_always_excludes_current_unrealized_pnl() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let info = take(&mut reads, "accountinfo");
     response(&mut e, &info, 80.0, INFO);
@@ -579,7 +579,7 @@ fn single_object_algo_parent_updates_each_child() {
 fn closing_fill_keeps_flat_position_across_multiple_stale_refreshes() {
     let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     ws(
         &mut e,
         socket,
@@ -587,7 +587,7 @@ fn closing_fill_keeps_flat_position_across_multiple_stale_refreshes() {
         r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":77,"status":"FILLED","side":"SELL","type":"MARKET","quantity":0.01,"totalExecutedQuantity":0.01,"executedQuantity":0.01,"executedPrice":60001,"tradeId":102}}"#,
     );
     assert!(e.store().positions().is_empty());
-    let mut actions: Vec<_> = e.drain_actions().collect();
+    let mut actions: Vec<_> = e.prepared().collect();
     for _ in 0..2 {
         let (timer, now) = actions
             .iter()
@@ -603,14 +603,14 @@ fn closing_fill_keeps_flat_position_across_multiple_stale_refreshes() {
         let r = requests(&mut e).remove(0);
         response(&mut e, &r, now + 1.0, POS);
         assert!(e.store().positions().is_empty());
-        actions = e.drain_actions().collect();
+        actions = e.prepared().collect();
     }
 }
 #[test]
 fn old_position_read_cannot_restore_preconfirmation_leverage() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let old = take(&mut reads, "/v3/positions");
     e.handle(
@@ -639,7 +639,7 @@ fn old_position_read_cannot_restore_preconfirmation_leverage() {
 fn old_position_read_cannot_restore_preconfirmation_mode() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let old = take(&mut reads, "/v3/positions");
     e.handle(
@@ -739,7 +739,7 @@ fn malformed_executable_algo_leaf_keeps_its_stored_copy_while_siblings_commit() 
     ] {
         let (mut e, socket, mut reads, _) = start();
         load(&mut e, &mut reads);
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         let mut reads = stream_ready(&mut e, socket, 70.0);
         let r = take(&mut reads, "/v1/orders?");
         response(&mut e, &r, 80.0, &page(""));
@@ -853,7 +853,7 @@ fn invalid_regular_or_algo_page_metadata_preserves_complete_known_orders() {
         for algo in [false, true] {
             let (mut e, socket, mut reads, _) = start();
             load(&mut e, &mut reads);
-            e.drain_actions().for_each(drop);
+            e.prepared().for_each(drop);
             let mut reads = stream_ready(&mut e, socket, 70.0);
             let regular = take(&mut reads, "/v1/orders?");
             let plan = take(&mut reads, "/v3/algo/orders?");
@@ -890,7 +890,7 @@ fn invalid_regular_or_algo_page_metadata_preserves_complete_known_orders() {
 fn invalid_second_page_metadata_cannot_publish_a_successful_prefix() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     let first = page(&ORDER.replace("9007199254740993", "81"))
@@ -917,7 +917,7 @@ fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
             65.0,
             r#"{"topic":"algoexecutionreportv2","data":{"symbol":"PERP_BTC_USDT","algoOrderId":92,"rootAlgoOrderId":92,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0.01,"triggerPrice":58000,"totalExecutedQuantity":0,"reduceOnly":true}}"#,
         );
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         e.handle(66., Event::WsClosed { socket, code: 1006 });
         let (timer, retry_at) = e
             .drain_actions()
@@ -974,7 +974,7 @@ fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
             e.store().order("92").unwrap().parent_id.as_deref(),
             Some("92")
         );
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         e.handle(
             retry_at + 40.,
             Event::Command(Command::AmendOrder {
@@ -1037,7 +1037,7 @@ fn stream_child_fill_without_own_side_or_status_is_not_lost() {
 fn one_unmappable_position_row_neither_freezes_nor_drops_the_rest() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let p = take(&mut reads, "/v3/positions");
     response(
@@ -1051,7 +1051,7 @@ fn one_unmappable_position_row_neither_freezes_nor_drops_the_rest() {
     );
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().positions()[0].contracts, 0.02);
-    assert!(e.drain_actions().any(|a| matches!(a,
+    assert!(e.prepared().any(|a| matches!(a,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains("WOO positions: skipped 1")
     )));
@@ -1060,7 +1060,7 @@ fn one_unmappable_position_row_neither_freezes_nor_drops_the_rest() {
 fn unidentified_position_row_keeps_every_stored_position() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let p = take(&mut reads, "/v3/positions");
     response(
@@ -1077,7 +1077,7 @@ fn unidentified_order_row_keeps_every_stored_order() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     assert!(e.store().order("9007199254740993").is_some());
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     response(&mut e, &regular, 80.0, &page(r#"{"order_id":[1]}"#));
@@ -1090,7 +1090,7 @@ fn unidentified_order_row_keeps_every_stored_order() {
 fn invalid_known_position_row_keeps_its_stored_copy() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let p = take(&mut reads, "/v3/positions");
     response(
@@ -1102,7 +1102,7 @@ fn invalid_known_position_row_keeps_its_stored_copy() {
     );
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().positions()[0].contracts, 0.01);
-    assert!(e.drain_actions().any(|a| matches!(a,
+    assert!(e.prepared().any(|a| matches!(a,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. }))
             if message.contains("BTCUSDT")
     )));
@@ -1121,7 +1121,7 @@ fn hedge_skip_keeps_only_the_unreadable_leg_and_drops_a_closed_sibling() {
         r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_USDT","holding":0.01,"averageOpenPrice":60000,"leverage":10,"marginMode":"CROSS"},{"symbol":"PERP_BTC_USDT","holding":-0.02,"averageOpenPrice":61000,"leverage":15,"marginMode":"CROSS"}]}}"#,
     );
     assert_eq!(e.store().positions().len(), 2);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(2020.0, Event::TimerFired { timer });
     let p = take(&mut requests(&mut e), "/v3/positions");
     response(
@@ -1147,12 +1147,12 @@ fn steady_hedged_fills_cannot_starve_position_snapshots() {
         40.0,
         r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_USDT","holding":0.01,"averageOpenPrice":60000,"leverage":10,"marginMode":"CROSS"},{"symbol":"PERP_BTC_USDT","holding":-0.02,"averageOpenPrice":61000,"leverage":10,"marginMode":"CROSS"}]}}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut now = 2020.0;
     for i in 0..3 {
         e.handle(now, Event::TimerFired { timer });
         let mut read = None;
-        for a in e.drain_actions() {
+        for a in e.prepared() {
             match a {
                 Action::Http(r) if r.url.contains("/v3/positions") => read = Some(r),
                 Action::SetTimer { timer: t, at_ms } if at_ms == now + 2000.0 => timer = t,
@@ -1169,7 +1169,7 @@ fn steady_hedged_fills_cannot_starve_position_snapshots() {
                 t = 400 + i
             ),
         );
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         response(
             &mut e,
             &read.unwrap(),
@@ -1204,10 +1204,10 @@ fn repeated_skips_and_hidden_exposure_warn_once_per_change() {
     let mut skipped = 0;
     let mut hidden = 0;
     for tick in 1..=3 {
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         let at = 2020.0 * f64::from(tick);
         e.handle(at, Event::TimerFired { timer });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.prepared().collect();
         timer = actions
             .iter()
             .find_map(|a| match a {
@@ -1224,7 +1224,7 @@ fn repeated_skips_and_hidden_exposure_warn_once_per_change() {
             .collect();
         let p = take(&mut http, "/v3/positions");
         response(&mut e, &p, at + 5.0, &body);
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.prepared().collect();
         for a in &actions {
             if let Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
@@ -1248,7 +1248,7 @@ fn unknown_working_regular_or_protective_order_retains_the_whole_previous_snapsh
         let (mut e, socket, mut reads, _) = start_with(&catalogue);
         load(&mut e, &mut reads);
         let before = e.store().orders().to_vec();
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         let mut reads = stream_ready(&mut e, socket, 70.0);
         let regular = take(&mut reads, "/v1/orders?");
         let unknown_regular = ORDER.replace("PERP_BTC_USDT", "PERP_MISSING_USDT");
@@ -1278,7 +1278,7 @@ fn unknown_working_regular_or_protective_order_retains_the_whole_previous_snapsh
             assert!(e.store().orders().is_empty());
         } else {
             assert_eq!(e.store().orders(), before);
-            assert!(e.drain_actions().any(|action| matches!(action,
+            assert!(e.prepared().any(|action| matches!(action,
                 Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("working order market unavailable"))));
         }
     }
@@ -1289,7 +1289,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     let (mut e, _, mut reads, _) = start();
     load(&mut e, &mut reads);
     let now = 1000.;
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(
         now,
         Event::PollScaleChanged {
@@ -1313,7 +1313,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                 scale: interval / POLL_MS,
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.prepared().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         let timers: Vec<_> = actions
             .iter()
@@ -1330,7 +1330,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert!(!e.prepared().any(|a| matches!(a, Action::Http(_))));
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
@@ -1353,7 +1353,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: f64::INFINITY,
         },
     );
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     for _ in 0..12 {
         if pending.is_empty() {
             break;
@@ -1379,7 +1379,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
+            pending.extend(e.prepared().filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
             }));
@@ -1528,12 +1528,10 @@ fn unpriced_last_without_cumulative_does_not_double_count_the_correction() {
 // instead of staying invisible until the next poll.
 #[test]
 fn stop_read_before_the_ticker_seed_is_reread_as_soon_as_prices_exist() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options {
-        key: Some("replay-key".into()),
-        secret: Some("replay-secret".into()),
+    let mut e = trusted::keyed(Options {
         application_id: Some("app".into()),
         ..Default::default()
-    }));
+    }, "replay-key", "replay-secret", None);
     e.start(0.0);
     let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
@@ -1628,7 +1626,7 @@ fn partial_catalogue_is_reread_and_releases_the_repaired_market() {
     let catalogue = MARKETS.replace("]}", r#",{"symbol":"PERP_ETH_USDT"}]}"#);
     let (mut e, _, mut reads, poll, retry) = start_with_retry(&catalogue);
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let retry = retry.expect("partial catalogue schedules a re-read");
     e.handle(1010.0, Event::TimerFired { timer: retry });
     let reread = prepared_seed_requests(&mut e, 1010.);
@@ -1641,7 +1639,7 @@ fn partial_catalogue_is_reread_and_releases_the_repaired_market() {
         &MARKETS.replace("]}", &format!(",{ETH_MARKET}]}}")),
     );
     assert!(e.store().market("ETHUSDT").is_some());
-    let after: Vec<_> = e.drain_actions().collect();
+    let after: Vec<_> = e.prepared().collect();
     assert!(
         !after.iter().any(|a| matches!(
             a,
@@ -1665,7 +1663,7 @@ fn isolated_exposure_stays_visible_and_warns_once_per_symbol() {
     let pos = take(&mut reads, "/v3/positions");
     let isolated = POS.replace("CROSS", "ISOLATED");
     response(&mut e, &pos, 40.0, &isolated);
-    let out = e.drain_actions().collect::<Vec<_>>();
+    let out = e.prepared().collect::<Vec<_>>();
     let warnings=out.iter().filter(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::CONFIG_INVALID&&event.message.contains("isolated")&&event.message.contains("BTCUSDT"))).count();
     assert_eq!(warnings, 1);
     assert_eq!(e.store().positions().len(), 1);
@@ -1677,14 +1675,14 @@ fn isolated_exposure_stays_visible_and_warns_once_per_symbol() {
     let mut reads = requests(&mut e);
     let pos = take(&mut reads, "/v3/positions");
     response(&mut e, &pos, 2020.0, &isolated);
-    assert!(!e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::CONFIG_INVALID)));
+    assert!(!e.prepared().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::CONFIG_INVALID)));
     assert_eq!(e.store().positions().len(), 1);
 }
 
 #[test]
 fn fractional_socket_open_uses_integer_auth_stamp_and_matching_signature() {
     let (mut e, socket, _, _, _) = start_with_retry_at(MARKETS, 1_699_999_999_970.0);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(1700000000000.875, Event::WsOpened { socket });
     let auth = e
         .drain_actions()
@@ -1714,10 +1712,10 @@ fn skipped_summary_repeats_on_text_change_and_rearms_on_clean_positions() {
     let b = a.replace("]}}", ",{}]}}");
     let mut summaries = Vec::new();
     for (i, body) in [&a, &a, &b, &a, POS, &a].into_iter().enumerate() {
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         let at = 2020.0 * (i + 1) as f64;
         e.handle(at, Event::TimerFired { timer });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.prepared().collect();
         timer = actions
             .iter()
             .find_map(|a| match a {
@@ -1734,7 +1732,7 @@ fn skipped_summary_repeats_on_text_change_and_rearms_on_clean_positions() {
             .collect();
         let p = take(&mut http, "/v3/positions");
         response(&mut e, &p, at + 5.0, body);
-        summaries.extend(e.drain_actions().filter_map(|a| match a {
+        summaries.extend(e.prepared().filter_map(|a| match a {
             Action::Notice(Notice::Event(event))
                 if event.message.starts_with("WOO positions: skipped") =>
             {
@@ -1765,7 +1763,7 @@ fn grouped_positions_count_unique_ids_and_each_anonymous_row_keep_cached_exposur
     load(&mut e, &mut reads);
     let before = e.store().positions().to_vec();
     assert_eq!(before.len(), 1);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let health = e.health().rows_skipped;
     e.handle(2020.0, Event::TimerFired { timer });
     let mut reads = requests(&mut e);
@@ -1815,7 +1813,7 @@ fn snapshot_token_rejects_both_join_orders_after_explicit_invalidation() {
         let (mut e, socket, mut reads, _) = start();
         load(&mut e, &mut reads);
         let before = e.store().orders().to_vec();
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         let mut reads = stream_ready(&mut e, socket, 70.0);
         let normal = take(&mut reads, "/v1/orders?");
         let algo = take(&mut reads, "/v3/algo/orders?");
@@ -1840,7 +1838,7 @@ fn snapshot_token_accepted_cancel_ack_fences_an_older_join() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     let before = e.store().orders().to_vec();
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let normal = take(&mut reads, "/v1/orders?");
     let algo = take(&mut reads, "/v3/algo/orders?");
@@ -1868,7 +1866,7 @@ fn snapshot_token_capture_and_late_exhaustion_leave_orders_and_polling_owned() {
         let (mut e, socket, mut reads, timer) = start();
         load(&mut e, &mut reads);
         let before = e.store().orders().to_vec();
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         if !late {
             safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
         }
@@ -1883,10 +1881,10 @@ fn snapshot_token_capture_and_late_exhaustion_leave_orders_and_polling_owned() {
             assert!(!reads.iter().any(|r| r.url.contains("/orders?")));
         }
         assert_eq!(e.store().orders(), before);
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         e.handle(2010.0, Event::TimerFired { timer });
         assert!(
-            e.drain_actions()
+            e.prepared()
                 .any(|a| matches!(a, Action::SetTimer { .. }))
         );
     }
@@ -1896,7 +1894,7 @@ fn snapshot_token_capture_and_late_exhaustion_leave_orders_and_polling_owned() {
 fn snapshot_token_ws_peer_stays_current_and_healthy_algo_rows_commit() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let mut reads = stream_ready(&mut e, socket, 70.0);
     let normal = take(&mut reads, "/v1/orders?");
     let algo = take(&mut reads, "/v3/algo/orders?");
@@ -1924,7 +1922,7 @@ fn snapshot_token_invalid_placement_ack_does_not_invalidate_but_valid_id_does() 
     ] {
         let (mut e, _, mut reads, _) = start();
         load(&mut e, &mut reads);
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         let token = e.store_mut().begin_orders_snapshot().unwrap();
         let order = serde_json::from_str(
             r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":59000}"#,
@@ -1961,7 +1959,7 @@ fn snapshot_token_rejected_algo_join_does_not_poison_later_amend_routing() {
         65.0,
         r#"{"topic":"algoexecutionreportv2","data":{"symbol":"PERP_BTC_USDT","algoOrderId":92,"rootAlgoOrderId":92,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0.01,"triggerPrice":58000,"totalExecutedQuantity":0,"reduceOnly":true}}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     let (_, opened_at, mut reads) = reconnect_stream(&mut e, socket, 70.);
     let normal = take(&mut reads, "/v1/orders?");
     let algo = take(&mut reads, "/v3/algo/orders?");
@@ -1973,7 +1971,7 @@ fn snapshot_token_rejected_algo_join_does_not_poison_later_amend_routing() {
         opened_at + 20.,
         &algos(&ALGO.replace("\"algoOrderId\":43", "\"algoOrderId\":92")),
     );
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(
         opened_at + 40.,
         Event::Command(Command::AmendOrder {
@@ -2007,7 +2005,7 @@ fn snapshot_token_discarded_initial_join_cannot_seed_execution_prefix_or_readine
         response(&mut e, &algo, 60.0, &algos(""));
         assert!(!e.store().loaded().orders);
         assert!(e.store().orders().is_empty());
-        e.drain_actions().for_each(drop);
+        e.prepared().for_each(drop);
         let event_at = if fresh_read {
             let (replacement, opened_at, mut reads) = reconnect_stream(&mut e, socket, 70.);
             socket = replacement;
@@ -2049,7 +2047,7 @@ fn snapshot_token_discarded_initial_join_cannot_seed_execution_prefix_or_readine
 fn account_reads_wait_for_the_private_subscriptions_on_the_first_open() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
-    e.drain_actions().for_each(drop);
+    e.prepared().for_each(drop);
     e.handle(70.0, Event::WsOpened { socket });
     assert!(
         requests(&mut e).is_empty(),
