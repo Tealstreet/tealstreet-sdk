@@ -1730,7 +1730,7 @@ fn market_close(e: &mut TestEngine, side: &str, close: Option<bool>, reduce: Opt
 /// A position-panel market close sends no amount: it closes the whole position it reduces.
 #[test]
 fn a_market_close_without_an_amount_closes_the_whole_position() {
-    for (close, reduce) in [(Some(true), None), (None, Some(true))] {
+    for (close, reduce) in [(Some(true), None), (Some(true), Some(true))] {
         let mut e = with_long_position();
         market_close(&mut e, "sell", close, reduce);
         let sent = requests(&mut e);
@@ -1740,6 +1740,17 @@ fn a_market_close_without_an_amount_closes_the_whole_position() {
         assert!(body.contains("\"side\":4"), "{body}");
         assert!(body.contains("\"reduceOnly\":true"), "{body}");
     }
+    // Reduce-only alone is never widened to the whole position: amount 0 stays refused.
+    let mut e = with_long_position();
+    market_close(&mut e, "sell", None, Some(true));
+    let actions = prepared(&mut e, 400.0);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("MEXC order requires a positive native amount")),
+        "{actions:?}"
+    );
     // Nothing to close on the short side: refused before any send.
     let mut e = with_long_position();
     market_close(&mut e, "buy", Some(true), None);

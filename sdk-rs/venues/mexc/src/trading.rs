@@ -318,12 +318,10 @@ impl MexcFutures {
             );
         }
         let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
-        // A position-panel close may send no amount: it closes the whole position it reduces,
-        // in native contracts, as a full-position stop does below.
-        if !stop
-            && opts.amount == 0.0
-            && (opts.close == Some(true) || opts.reduce_only == Some(true))
-        {
+        // Only an explicit close with no amount means the whole position, in native contracts,
+        // as a full-position stop does below. A reduce-only order is never widened: a size the
+        // page sized down to 0 stays refused rather than closing more than the user asked.
+        if !stop && opts.amount == 0.0 && opts.close == Some(true) {
             let target = if opts.side == OrderSide::Sell {
                 PositionSide::Long
             } else {
