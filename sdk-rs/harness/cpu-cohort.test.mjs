@@ -437,3 +437,39 @@ test('GraphQL baseRefOid is logged from the fixed base repository and never cach
   assert.equal(calls.length, 2);
   assert.equal(reader.snapshots().responses.length, 2);
 });
+
+
+test('buffered public markers use payload execution order within physical delivery bounds', () => {
+  // Original run 41598460629, paired job 125791670432: BEGIN arrived after payload END.
+  const source = fixture().claims[0].observations[0];
+  const job = { ...source.job, name: 'Rust / Bitget counterbalanced steady CPU',
+    started_at: '2026-11-03T07:53:40.000Z', completed_at: '2026-11-03T07:55:00.000Z',
+    steps: [
+      { name: 'Run actions/checkout@v7', status: 'completed', conclusion: 'success',
+        started_at: '2026-11-03T07:53:40.000Z', completed_at: '2026-11-03T07:53:45.000Z' },
+      { name: 'Public counterbalanced steady CPU', status: 'completed', conclusion: 'success',
+        started_at: '2026-11-03T07:53:46.000Z', completed_at: '2026-11-03T07:54:59.000Z' },
+    ] };
+  const key = hash('buffered public marker regression');
+  const execution = { runId: String(job.run_id), jobId: String(job.id), runnerId: String(job.runner_id),
+    attempt: 1, measuredCheckoutSha: source.checkout.sha,
+    startedAt: '2026-11-03T07:53:52.087692+00:00', completedAt: '2026-11-03T07:54:28.709793+00:00' };
+  const checkout = `2026-11-03T07:53:41.000Z [command]/usr/bin/git log -1 --format=%H\n2026-11-03T07:53:41.001Z ${source.checkout.sha}\n`;
+  const begin = `2026-11-03T07:54:28.7100007Z CPU_CASE_BEGIN ${key} ${execution.startedAt}\n`;
+  const end = `2026-11-03T07:54:28.7101159Z CPU_CASE_END ${key} ${execution.completedAt}\n`;
+  const input = { execution, key, job, logBytes: Buffer.from(checkout + begin + end) };
+  const receipt = authenticateMeasurementWindow(input);
+  assert.equal(receipt.startedAt, execution.startedAt);
+  assert.equal(receipt.completedAt, execution.completedAt);
+  assert.equal(receipt.beginLoggedAt, '2026-11-03T07:54:28.710Z');
+  assert.equal(receipt.stepName, 'Public counterbalanced steady CPU');
+  for (const raw of [
+    checkout + end + begin,
+    checkout + begin + end + end,
+    checkout + begin.replace('07:54:28.7100007Z', '07:53:51.000Z') + end,
+    checkout + begin + end.replace('07:54:28.7101159Z', '07:54:28.708Z'),
+    checkout + begin.replace('07:54:28.7100007Z', '07:54:28.711Z') + end,
+    checkout + begin + end.replace('07:54:28.7101159Z', '07:55:01.000Z'),
+    checkout + begin.replace(execution.startedAt, execution.completedAt) + end,
+  ]) assert.throws(() => authenticateMeasurementWindow({ ...input, logBytes: Buffer.from(raw) }));
+});

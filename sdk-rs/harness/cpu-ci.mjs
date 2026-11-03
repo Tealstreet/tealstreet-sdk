@@ -643,7 +643,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (!['plan', 'certify'].includes(values.command)) requireCpuRemeasureSuite(values.suite);
   if (values.command === 'status') {
     if (process.env.CPU_CERT_RESULT !== 'success') {
-      console.error(`shared CPU certification did not complete (result=${process.env.CPU_CERT_RESULT || 'missing'}); non-blocking`);
+      console.error(`shared CPU certification did not complete (result=${process.env.CPU_CERT_RESULT || 'missing'}); certification not accepted`);
       process.exit(1);
     }
     const checkout = spawnSync('git', ['rev-parse', '--verify', 'HEAD'], { encoding: 'utf8' });
