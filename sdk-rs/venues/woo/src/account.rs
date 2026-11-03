@@ -710,10 +710,20 @@ impl Woo {
         let c = &mut self.account.connection;
         c.open = true;
         c.ping_at = cx.now;
-        let Some(text) = crate::sign::websocket_auth(&self.options, cx.now) else {
+        // The Primary signs the private stream's auth, even with a read key configured.
+        let Some(primary) = self.primary().cloned() else {
             return true;
         };
-        cx.send(socket, text);
+        let url = if self.options.testnet {
+            "wss://wss.staging.woox.io"
+        } else {
+            "wss://wss.woox.io"
+        };
+        cx.send_signed(
+            socket,
+            String::new(),
+            Box::new(crate::sign::dispatch::WsAuth::new(primary, url)),
+        );
         true
     }
     /// Events before the subscriptions were never delivered, the first open included.

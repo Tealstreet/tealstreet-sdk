@@ -17,30 +17,25 @@ use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
     Venue, num,
 };
+use safe_cex_engine::request_context::{Credential, Operation, Policy, RetryPolicy, Scope};
+use safe_cex_engine::CredentialSlot;
 use std::collections::HashMap;
 use wire::*;
 
 #[derive(Clone, Default)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
+    /// WOO's account id, part of the socket path; not a credential.
     pub application_id: Option<String>,
+    /// Opaque refs from trusted setup; the provider holds the key material.
+    pub identities: safe_cex_engine::signing::Identities,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
-}
 
 pub enum Pending {
+    /// A signed request's context, finished when it settles.
+    Managed(safe_cex_engine::request_context::Context, Box<Pending>),
     Identity(CommandId),
     Trade(trading::Request),
     History(history::Request),
@@ -93,7 +88,7 @@ pub struct Woo {
     trading: trading::Trading,
     history: history::History,
     account: account::Account,
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     rest: &'static str,
     public: Connection,
     depth: HashMap<String, Depth>,
@@ -163,29 +158,58 @@ impl Woo {
                 pending,
             ));
         }
-        let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) else {
+        let Some(primary) = self.primary() else {
             return Err("WOO private requests require credentials".into());
         };
-        if self.options.public_data_only || key.is_empty() || secret.is_empty() {
-            return Err("WOO private requests require credentials".into());
+        // A read key, when configured, serves every read; writes take the primary.
+        let read = (method == Method::Get)
+            .then_some(self.options.identities.secondary.as_ref())
+            .flatten();
+        let (slot, identity) = match read {
+            Some(read) => (CredentialSlot::Secondary, read),
+            None => (CredentialSlot::Primary, primary),
+        };
+        let context = cx
+            .http_context(
+                Scope::Background,
+                Policy {
+                    operation: if method == Method::Get {
+                        Operation::Read
+                    } else {
+                        Operation::Mutation
+                    },
+                    credential: Some(Credential {
+                        slot,
+                        reference: identity.credential.clone(),
+                    }),
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .map_err(|reason| reason.venue_error().message)?;
+        let recipe =
+            sign::dispatch::Http::new(identity.clone(), self.rest, method, path, &params, body);
+        let (url, body) = (recipe.url(), recipe.body());
+        cx.request_signed_managed(
+            context.clone(),
+            None,
+            method,
+            url,
+            body,
+            Box::new(recipe),
+            Pending::Managed(context, Box::new(pending)),
+        )
+        .map_err(|(_, reason)| reason.venue_error().message)
+    }
+    /// The trading identity, unless this account runs on public data.
+    pub(crate) fn primary(&self) -> Option<&safe_cex_engine::signing::Identity> {
+        if self.options.public_data_only {
+            return None;
         }
-        let read = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get);
-        let key = read.map_or(key.as_str(), |r| r.key.as_str());
-        let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
-        let request = sign::request(key, secret, cx.now, method, path, &params, body);
-        let url = if request.path.starts_with("https://") {
-            request.path
-        } else {
-            format!("{}{}", self.rest, request.path)
-        };
-        Ok(cx.request(method, url, request.headers, request.body, pending))
+        self.options.identities.primary.as_ref()
     }
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             account: account::Account::new(),
             trading: trading::Trading::default(),
@@ -571,7 +595,7 @@ impl Venue for Woo {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.options.read_credentials
+        if let Some(read) = &self.options.identities.secondary
             && let Err(error) = read.validate()
         {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
@@ -704,6 +728,7 @@ impl Venue for Woo {
     fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Managed(_, inner) => self.on_item(cx, inner, item),
             Pending::Identity(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Trade(_) => (),
@@ -722,6 +747,11 @@ impl Venue for Woo {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Managed(context, inner) = pending {
+            let _ = cx.finish_http_context(&context);
+            self.on_response(cx, *inner, response);
+            return;
+        }
         if let Pending::Identity(command) = pending {
             self.identity_response(cx, command, response);
             return;
@@ -753,7 +783,7 @@ impl Venue for Woo {
         match pending {
             Pending::SocketBookSeeds(_) | Pending::SocketAccountReady => (),
             Pending::Identity(_) | Pending::History(_) | Pending::Trade(_) => unreachable!(),
-            Pending::Account(_) => unreachable!(),
+            Pending::Account(_) | Pending::Managed(..) => unreachable!(),
             Pending::Seed(_) => unreachable!(),
             #[cfg(test)]
             Pending::SigningProbe => (),
@@ -840,11 +870,16 @@ impl Venue for Woo {
     ) {
         match pending {
             Pending::Seed(read) => self.seed_precommit_failed(cx, *read, reason, error),
+            Pending::Managed(_, inner) => self.on_request_failed(cx, *inner, &error.message),
             other => self.on_sign_error(cx, other, error),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Managed(context, inner) => {
+                let _ = cx.finish_http_context(&context);
+                self.on_request_failed(cx, *inner, error);
+            }
             Pending::SocketBookSeeds(_) | Pending::SocketAccountReady => (),
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::History(request) => self.history_failed(cx, request, error),

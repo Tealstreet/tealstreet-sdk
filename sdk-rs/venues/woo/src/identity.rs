@@ -84,7 +84,7 @@ fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity,
 }
 impl Woo {
     pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if let Some(read) = &self.options.read_credentials
+        if let Some(read) = &self.options.identities.secondary
             && let Err(error) = read.validate()
         {
             finish(cx, command, Err(error.into()));
