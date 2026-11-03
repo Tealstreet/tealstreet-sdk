@@ -158,6 +158,14 @@ insist(archive_names == sorted(p.name for p in (result_root / 'candidate/node').
 plan['archiveMetadata'] = {arm: json.loads((result_root / arm / 'node/build.json').read_text())
                            for arm in refs}
 write_json(result_root / 'plan.json', plan)
+# Only independently built WASM and glue bytes can skip both CPU witnesses.
+if authority['witness'] == 'tip' and all(
+        sha(result_root / 'baseline/node' / name) == sha(result_root / 'candidate/node' / name)
+        for name in ('safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js')):
+    plan['disposition'] = 'unchanged-bytes'
+    write_json(result_root / 'plan.json', plan)
+    print('unchanged bytes, not measured', flush=True)
+    sys.exit(0)
 active_module = Path(args.module_path).resolve()
 insist(active_module == result_root.parent.parent / 'active-module', 'unexpected canonical module path')
 cohorts = []
