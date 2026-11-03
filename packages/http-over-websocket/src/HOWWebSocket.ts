@@ -5,6 +5,7 @@ import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/Re
 
 import { getUniqueLatencyDomains, syncServerTime } from './config';
 import { decodeTradeTunnelMessage } from './tradeTunnelBinaryFrame';
+import { noteTunnelDialFailed, noteTunnelDialOpened, tunnelDialUrl } from './tunnelEndpoints';
 import { HOWWebSocketAuthState, LatencyEntry } from './types';
 
 // Import ws package for Node.js/Bun - needed because Bun's native WebSocket
@@ -88,6 +89,9 @@ export class HOWWebSocket {
   // A getter is resolved at each connect, so the module-level singletons follow
   // `setTunnelEgressUrls` however early they were constructed.
   private url: string | (() => string);
+  // The url the current connect attempt dialed, and whether that attempt opened.
+  private dialedUrl = '';
+  private dialOpened = false;
 
   constructor(
     url: string | (() => string),
@@ -122,7 +126,13 @@ export class HOWWebSocket {
     const wsUrl = new URL(url);
     wsUrl.searchParams.set('v', '2');
     wsUrl.searchParams.set('t', String(Date.now()));
-    ws = new ReconnectingWebSocket(wsUrl.toString(), protocols, options);
+    // Resolved per attempt, so a reconnect after the lane falls back dials 443.
+    const dialUrl = () => {
+      this.dialedUrl = tunnelDialUrl(wsUrl.toString());
+      this.dialOpened = false;
+      return this.dialedUrl;
+    };
+    ws = new ReconnectingWebSocket(dialUrl, protocols, options);
     ws.binaryType = 'arraybuffer';
 
     // Add error handler immediately to prevent uncaught errors
@@ -215,6 +225,8 @@ export class HOWWebSocket {
 
   onOpen = async () => {
     this.epoch++;
+    this.dialOpened = true;
+    noteTunnelDialOpened(this.dialedUrl);
     if (!this.isDisposed) {
       this.isOpen = true;
 
@@ -306,6 +318,8 @@ export class HOWWebSocket {
 
   onClose = async () => {
     this.epoch++;
+    if (!this.dialOpened && this.dialedUrl && !this.isDisposed) noteTunnelDialFailed(this.dialedUrl);
+    this.dialedUrl = '';
     this.isOpen = false;
     this.isTimeSynced = false;
     this.isTokenSent = false;

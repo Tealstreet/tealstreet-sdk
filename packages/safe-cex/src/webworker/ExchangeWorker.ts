@@ -7,6 +7,8 @@ import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePa
 
 import throttle from 'lodash/throttle';
 
+import { onTunnelLaneFallback, tunnelLanePort } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+
 import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
@@ -28,6 +30,10 @@ import { TwapHandler } from './handlers/TwapHandler';
 import { UiStateHandler } from './handlers/UiStateHandler';
 import { UpdatePositionsHandler } from './handlers/UpdatePositionsHandler';
 import { exchangeDependentPostprocessors, independentPostprocessors } from './postProcessors/registry';
+
+// The tunnel lane is per realm, so one live ExchangeWorker reports this realm's fallback.
+const liveExchangeWorkers = new Set<ExchangeWorker>();
+onTunnelLaneFallback((failures) => liveExchangeWorkers.values().next().value?.reportTunnelLaneFallback(failures));
 
 type WorkerSentryControl = {
   reportKey?: string;
@@ -180,6 +186,7 @@ export class ExchangeWorker {
     this._metadata = metadata;
     this._sessionKey = sessionKey;
     this.instanceId = instanceId;
+    liveExchangeWorkers.add(this);
 
     const throttleMs = 250 * (this._options?.tuning?.dataUpdateThrottleMultiplier || 1);
     this._throttledStoreUpdate = throttle((data: StoreData) => this._storeUpdate(data), throttleMs, {
@@ -269,6 +276,7 @@ export class ExchangeWorker {
                 account: this._accountName,
                 // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
                 ...exchangeErrorTags(error),
+                tunnel_port: tunnelLanePort(),
                 ...splitExtra.sentryTags,
                 ...workerSentryControl.tags,
               },
@@ -828,8 +836,15 @@ export class ExchangeWorker {
     return true;
   }
 
+  /** This realm's tunnel sockets left the 8443 lane for 443 after repeated failed handshakes. */
+  reportTunnelLaneFallback(failures: number) {
+    const message = 'Tunnel lane fell back to 443';
+    this.logError(message, new Error(message), { sentryTags: { tunnel_lane_failures: String(failures) } });
+  }
+
   dispose() {
     if (this._disposed) return;
+    liveExchangeWorkers.delete(this);
     this._disposed = true;
     this._stopped = true;
     this._started = false;

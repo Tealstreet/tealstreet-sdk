@@ -55,6 +55,14 @@ behavior changes, update or delete that snapshot in the same PR.
   every consumer reads `tunnelEgressUrl(egress)` at dial time, and the
   module-level `howWebSocketSG`/`howWebSocketJA` singletons take a URL getter
   for that reason. Do not reintroduce a constant read at construction.
+- **Browsers dial the tunnel on 8443** (`tunnelDialUrl`): Chrome runs one
+  WebSocket handshake at a time per IP:port, and the tunnel host shares
+  Cloudflare's anycast IPs with other sockets. The tables keep the 443 url; the
+  HOW and relay sockets rewrite `wss://<tunnel host>/tunnel` only, at dial time,
+  in browser realms only. Two consecutive failed 8443 handshakes move the realm to
+  443 for good (`tunnel_port` tag, one `Tunnel lane fell back to 443` report).
+  The per-venue paths on that host (/grvt, /lighter, /bybitbra), REST and Node
+  hosts stay on 443, so the lane carries only tunnel handshakes.
 - `ReconnectingWebSocket` handles connection resilience
 - Token-based authentication with expiry checking
 - Latency tracking for tunnel (client↔proxy) and exchange (proxy↔exchange)
