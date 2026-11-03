@@ -1424,6 +1424,8 @@ pub enum ExchangeName {
     Binance,
     #[serde(rename = "binanceinverse")]
     Binanceinverse,
+    #[serde(rename = "binanceoptions")]
+    Binanceoptions,
     #[serde(rename = "binancespot")]
     Binancespot,
     #[serde(rename = "binancepm")]
@@ -5000,6 +5002,8 @@ mod strict_codecs {
         Binance,
         #[serde(rename = "binanceinverse")]
         Binanceinverse,
+        #[serde(rename = "binanceoptions")]
+        Binanceoptions,
         #[serde(rename = "binancespot")]
         Binancespot,
         #[serde(rename = "binancepm")]
@@ -7224,6 +7228,11 @@ mod strict_codecs {
                         .unwrap()
                         .to_owned(),
                     serde_json::to_value(ExchangeName::Binanceinverse)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(ExchangeName::Binanceoptions)
                         .unwrap()
                         .as_str()
                         .unwrap()

@@ -65,11 +65,17 @@ while the 128-level serde recursion limit remains a separate CHOSEN budget.
 MANIFEST-SPEC §19 defines the observability discriminator; diagnostic-only text
 must not be assumed when a caller can read the retained unit programmatically.
 
-Gates: `cargo test -p safe-cex-types`, which drives the Node oracles in
-`tests/`, plus strict clippy on the host **and** the wasm target. Generated
-bindings come from root `yarn types:generate`; `tests/generate.test.cjs` is their
-freshness check — regenerating is not a substitute for running it. The oracles
-are the reason a field rename here is cheap and a shape change is not.
+Gates: `cargo test --locked -p safe-cex-types --tests`, which drives the Node
+oracles in `tests/`, plus strict clippy on the host **and** the wasm target.
+Rust CI runs these tests in the isolated candle-cache lane with locked root Yarn
+dependencies and `SAFE_CEX_TYPESCRIPT_PATH` pointing at `node_modules/typescript`.
+Keep this package out of workspace-wide feature unification: its serde_json
+number/map features belong to the restored candle-cache stack, not the engine.
+From `sdk-rs`, generate bindings with
+`cargo run --locked -p safe-cex-types --example generate`, then
+`node safe-cex-types/generate.cjs`. `tests/generate.test.cjs` checks the generation
+rules; run it as well. The oracles are the reason a field rename here is cheap
+and a shape change is not.
 
 `position_record` defines the canonical 24-field linear-perpetual journal type.
 Gross realized PnL, fees and signed funding remain separate; closeCount is the
