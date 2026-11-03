@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createProbeHost, duplicatePortfolioShapes, loadProbeEngine, parseFailureSummary, readOnlyTransport, startProbeFlushing } from './coinbasespot-readiness-probe.mjs';
+import { createProbeHost, diagnosticEvent, duplicatePortfolioShapes, loadProbeEngine, parseFailureSummary, readOnlyTransport, startProbeFlushing } from './coinbasespot-readiness-probe.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 test('all brokerage GET reads reach the transport while writes and foreign targets refuse', async () => {
@@ -78,6 +78,8 @@ test('only Coinbase heartbeat/user subscriptions reach the socket', () => {
 });
 
 test('engine failure summaries expose only closed kinds and field names', () => {
+  assert.deepEqual(parseFailureSummary('Coinbase invalid field `spot_positions.total_balance_crypto`', '/portfolio'),
+    { kind: 'validation', path: '/portfolio', field: 'spot_positions.total_balance_crypto' });
   for (const [message, field, reason] of [
     ['Coinbase duplicate spot holding', 'asset', 'duplicate_asset'],
     ['Coinbase spot balance limit', 'spot_positions', 'row_limit'],
@@ -94,6 +96,17 @@ test('engine failure summaries expose only closed kinds and field names', () => 
     assert.ok(!JSON.stringify(summary).includes('private-value'));
     assert.ok(['missing_field', 'invalid_type', 'invalid_value', 'json_syntax', 'validation'].includes(summary.kind));
   }
+});
+
+test('only closed Coinbase exclusion events expose their type without unrelated log text', () => {
+  for (const account_type of ['ACCOUNT_TYPE_DERIVATIVES_CASH', 'ACCOUNT_TYPE_FUTURE_UNKNOWN', 'MISSING', 'UNKNOWN']) {
+    assert.deepEqual(diagnosticEvent({ op: 'event', code: 'row.skipped', message: `Coinbase excluded spot account type ${account_type}` }, '/portfolio'),
+      { kind: 'excluded_account_type', path: '/portfolio', account_type });
+  }
+  for (const message of ['Coinbase excluded spot account type private-value',
+    'Coinbase excluded spot account type ACCOUNT_TYPE_FIAT amount 1234', 'private-body'])
+    assert.equal(diagnosticEvent({ op: 'event', code: 'row.skipped', message }, '/portfolio'), undefined);
+  assert.equal(diagnosticEvent({ op: 'log', code: 'row.skipped', message: 'private-body' }, '/portfolio'), undefined);
 });
 
 test('duplicate portfolio diagnostics expose schema and account differences without amounts or identifiers', async () => {

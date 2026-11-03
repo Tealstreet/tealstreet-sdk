@@ -96,9 +96,13 @@ const fields = new Set(['products', 'product_type', 'product_id', 'status', 'bas
   'quote_currency_id', 'base_increment', 'price_increment', 'base_min_size', 'base_max_size',
   'future_product_details', 'portfolios', 'uuid', 'type', 'breakdown', 'spot_positions', 'asset',
   'total_balance_crypto', 'available_to_trade_crypto', 'orders', 'order_id', 'order_configuration',
-  'has_next', 'cursor', 'pagination', 'side', 'order_type', 'filled_size']);
+  'has_next', 'cursor', 'pagination', 'side', 'order_type', 'filled_size',
+  'total_balance_fiat', 'available_to_trade_fiat', 'account_type']);
 
 export function parseFailureSummary(message, path) {
+  const named = /Coinbase invalid (?:spot cash balance: )?field `([^`]+)`/.exec(message);
+  if (named && fields.has(named[1].replace(/^spot_positions\./, '')))
+    return { kind: 'validation', path, field: named[1] };
   const validation = [
     ['Coinbase duplicate spot holding', 'asset', 'duplicate_asset'],
     ['Coinbase spot balance limit', 'spot_positions', 'row_limit'],
@@ -117,6 +121,14 @@ export function parseFailureSummary(message, path) {
   return { kind, path, field };
 }
 
+export function diagnosticEvent(action, path) {
+  if (action.op !== 'event') return;
+  if (action.code === 'request.failed') return parseFailureSummary(action.message, path);
+  const excluded = action.code === 'row.skipped'
+    && /^Coinbase excluded spot account type (ACCOUNT_TYPE_[A-Z_]{1,67}|MISSING|UNKNOWN)$/.exec(action.message);
+  if (excluded) return { kind: 'excluded_account_type', path, account_type: excluded[1] };
+}
+
 export function createProbeHost(engine, transport, handlers, log = (row) => console.log(JSON.stringify(row))) {
   const paths = new Map();
   // Inspect only actions returned while this exact HTTP response is reduced.
@@ -125,8 +137,8 @@ export function createProbeHost(engine, transport, handlers, log = (row) => cons
     engine[method] = (id, ...args) => {
       const actions = original(id, ...args);
       for (const action of JSON.parse(actions || '[]')) {
-        if (action.op === 'event' && action.code === 'request.failed')
-          log(parseFailureSummary(action.message, paths.get(id) ?? 'unknown'));
+        const summary = diagnosticEvent(action, paths.get(id) ?? 'unknown');
+        if (summary) log(summary);
       }
       return actions;
     };
