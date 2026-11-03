@@ -562,7 +562,10 @@ changes and every 5 s, never through the TS watchdog. A private socket is health
 for 60 s of silence, the engine venues' own idle limit. Reconnecting closes only
 open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
 `auth.rejected` events raise `authFailureStreak`; a private stream delivering
-again resets it.
+again resets it. Private `privateLastMessage` retains the last received frame's
+page-clock timestamp while the socket is uninitialized or reconnecting; a feed
+that has never received a frame still has no timestamp. Health/initialization
+flags remain independent of this diagnostic age.
 
 ## Client order ID contract
 
