@@ -19,6 +19,9 @@ use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, 
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
+/// How often one notice code of one account reaches stderr while clients are attached.
+const MIRROR_EVERY: Duration = Duration::from_secs(60);
+
 /// Limits apply independently to every account except `max_connections`.
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -33,6 +36,9 @@ pub struct ServerConfig {
     pub max_message_bytes: usize,
     pub max_frame_bytes: usize,
     pub io_timeout: Duration,
+    /// Names the account in log lines this actor writes (a user tag, account and
+    /// venue, never credentials); None for listener and test accounts.
+    pub log_label: Option<String>,
 }
 
 impl Default for ServerConfig {
@@ -49,6 +55,7 @@ impl Default for ServerConfig {
             max_message_bytes: 64 * 1024,
             max_frame_bytes: 16 * 1024 * 1024,
             io_timeout: Duration::from_secs(5),
+            log_label: None,
         }
     }
 }
@@ -595,6 +602,9 @@ struct Account<V: Venue, T: Transport> {
     next_command: u32,
     /// Replayed to clients that join after startup failed, so none waits on it.
     startup_failure: Option<Arc<str>>,
+    /// Warn+ notices mirrored to stderr while clients are attached: per code, the
+    /// last line written and how many were held back since.
+    mirrored: HashMap<String, (std::time::Instant, u32)>,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -615,6 +625,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             pending: HashMap::new(),
             next_command: 0,
             startup_failure: None,
+            mirrored: HashMap::new(),
         }
     }
 
@@ -967,11 +978,34 @@ impl<V: Venue, T: Transport> Account<V, T> {
         message: &str,
         code: Option<&str>,
     ) {
+        let label = self.config.log_label.as_deref().unwrap_or("-");
         if self.peers.is_empty() {
             if warn {
-                eprintln!("safe-cex {level} {}: {message}", code.unwrap_or("log"));
+                eprintln!(
+                    "safe-cex {level} {} [{label}]: {message}",
+                    code.unwrap_or("log")
+                );
             }
             return;
+        }
+        // The browser gets every notice, but the journal needs warnings too: a venue
+        // retrying forever logged nowhere the server could alert on.
+        if warn {
+            let code = code.unwrap_or("log");
+            let now = std::time::Instant::now();
+            match self.mirrored.get_mut(code) {
+                Some((at, held)) if now.duration_since(*at) < MIRROR_EVERY => *held += 1,
+                entry => {
+                    let held = entry.map_or(0, |(_, held)| *held);
+                    let more = if held > 0 {
+                        format!(" (+{held} more since)")
+                    } else {
+                        String::new()
+                    };
+                    eprintln!("safe-cex {level} {code} [{label}]: {message}{more}");
+                    self.mirrored.insert(code.to_owned(), (now, 0));
+                }
+            }
         }
         let limit = self.config.max_frame_bytes;
         let mut text = encode(message);
