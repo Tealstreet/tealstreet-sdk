@@ -209,6 +209,17 @@ fn native_side(side: OrderSide, reduce: bool) -> u8 {
         (OrderSide::Sell, true) => 4,
     }
 }
+/// An amount below one volume step was rounded up to a whole contract before: it now refuses,
+/// naming the minimum in contracts and in base so a base-sized entry is recognisable.
+fn below_minimum(step: f64, m: &safe_cex_engine::model::Market) -> String {
+    let contracts = num::format(step);
+    let base = num::format(step * m.contract_size.unwrap_or(1.0));
+    let unit = if step == 1.0 { "contract" } else { "contracts" };
+    format!(
+        "MEXC order size is below the {contracts} {unit} minimum ({base} {})",
+        m.base
+    )
+}
 fn json<T: Serialize>(value: &T) -> Result<String, String> {
     serde_json::to_string(value).map_err(|e| e.to_string())
 }
@@ -240,7 +251,10 @@ impl MexcFutures {
             .market(&opts.symbol)
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
         let step = self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0);
-        let vol = num::adjust(opts.amount, step).max(step);
+        let vol = num::adjust(opts.amount, step);
+        if vol < step {
+            return Err(below_minimum(step, m));
+        }
         let kind = if opts.kind == OrderType::Market {
             5
         } else {
@@ -454,7 +468,11 @@ impl MexcFutures {
             opts.amount,
             self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0),
         );
-        if vol <= 0.0 || vol * m.contract_size.unwrap_or(1.0) > m.limits.amount.max {
+        let step = self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0);
+        if vol < step {
+            return Err(below_minimum(step, m));
+        }
+        if vol * m.contract_size.unwrap_or(1.0) > m.limits.amount.max {
             return Err("MEXC stop amount exceeds native volume limits".into());
         }
         #[derive(Serialize)]

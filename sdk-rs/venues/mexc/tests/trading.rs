@@ -716,35 +716,81 @@ fn filled_order_is_neither_replaced_nor_changed_to_canceled_by_cancel_ack() {
     );
 }
 
+/// Below one contract is refused, naming the minimum, instead of silently becoming one.
 #[test]
-fn optimistic_quantity_matches_minimum_snapped_submission() {
-    let mut e = ready();
-    let mut opts = order();
-    opts.amount = 0.1;
+fn a_size_below_one_contract_is_refused_not_rounded_up() {
+    for (command, amount) in [(1, 0.1), (2, 0.02)] {
+        let mut e = ready();
+        let mut opts = order();
+        opts.amount = amount;
+        e.handle(
+            200.0,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![opts],
+            }),
+        );
+        let actions = prepared(&mut e, 200.0);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "{amount}"
+        );
+        assert!(
+            actions.iter().any(|a| format!("{a:?}")
+                .contains("MEXC order size is below the 1 contract minimum (0.0001 BTC)")),
+            "{actions:?}"
+        );
+    }
+}
+
+/// Whole contracts pass through, and half a contract or more rounds to the nearest one.
+#[test]
+fn contract_sizes_round_to_the_nearest_whole_contract() {
+    for (amount, vol) in [(200.0, "\"vol\":200.0"), (0.6, "\"vol\":1.0")] {
+        let mut e = ready();
+        let mut opts = order();
+        opts.amount = amount;
+        e.handle(
+            200.0,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts],
+            }),
+        );
+        let r = requests(&mut e).remove(0);
+        assert!(r.body.as_ref().unwrap().contains(vol), "{:?}", r.body);
+        reply(
+            &mut e,
+            &r,
+            300.0,
+            r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+        );
+    }
+}
+
+/// A reduce-only order below one contract gets the same minimum refusal.
+#[test]
+fn a_reduce_only_order_below_one_contract_is_refused() {
+    let mut e = with_long_position();
+    let mut opts: PlaceOrderOpts = serde_json::from_str(
+        r#"{"symbol":"BTCUSDT","type":"market","side":"sell","amount":0.02,"reduceOnly":true}"#,
+    )
+    .unwrap();
+    opts.reduce_only = Some(true);
     e.handle(
-        200.0,
+        400.0,
         Event::Command(Command::PlaceOrders {
-            command: 1,
+            command: 9,
             orders: vec![opts],
         }),
     );
-    let r = requests(&mut e).remove(0);
-    assert!(r.body.as_ref().unwrap().contains("\"vol\":1.0"));
-    reply(
-        &mut e,
-        &r,
-        300.0,
-        r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
-    );
-    assert_eq!(
-        e.store()
-            .order("one")
-            .unwrap()
-            .extra
-            .as_ref()
-            .unwrap()
-            .remaining_native,
-        Some(1.0)
+    let actions = prepared(&mut e, 400.0);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("below the 1 contract minimum")),
+        "{actions:?}"
     );
 }
 
