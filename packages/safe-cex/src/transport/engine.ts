@@ -336,6 +336,19 @@ const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =
         ? !options.publicDataOnly && options.tealstreetTunnel !== false
         : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && Boolean(options.tealstreetTunnel);
 
+// A browser engine on public data only keeps the account's tunnel flag but not the
+// tunnel; the flag must not suppress the proxy, or a venue whose public REST refuses
+// browser origins (requiresCors) is dialed browser-direct. Native hosts have no CORS.
+// GRVT and blofin are exempt: their provider already turns the tunnel flag into the proxy.
+const restOptionsFor = (exchange: ExchangeName, options: ExchangeOptions): ExchangeOptions =>
+  options.publicDataOnly &&
+  options.tealstreetTunnel &&
+  exchange !== 'grvt' &&
+  exchange !== 'blofin' &&
+  !usesTunnel(exchange, options)
+    ? { ...options, tealstreetTunnel: false }
+    : options;
+
 const restRoute = (
   provider: TransportProvider,
   exchange: ExchangeName,
@@ -440,6 +453,8 @@ const httpTransport = (
   dispose(): void;
 } => {
   const tunnel = publicPrefix === undefined && usesTunnel(exchange, options);
+  const restOptions = restOptionsFor(exchange, options);
+  const restRouting = restOptions === options ? routing : resolved(exchange, restOptions, provider).restRouting;
   const adapter = tunnel
     ? provider.restAdapter({
         exchange,
@@ -599,7 +614,8 @@ const httpTransport = (
           : undefined;
       const route =
         publicPrefix === undefined
-          ? (proxyRoute ?? restRoute(provider, exchange, options, routing, request, transport.serverHeaders, intent))
+          ? (proxyRoute ??
+            restRoute(provider, exchange, restOptions, restRouting, request, transport.serverHeaders, intent))
           : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
       const target = route.baseURL ?? request.url;
       const prefix = target.endsWith(request.url) ? target.slice(0, -request.url.length) : undefined;
@@ -785,7 +801,9 @@ const httpTransport = (
                   .catch((error) => {
                     // No answer through the relay, and nobody called it off: the relay is down.
                     if (tunnelAdapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
-                      proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
+                      proxyAuthorization?.failed(
+                        relayFailed(exchange, error instanceof Error ? error : new Error(String(error))),
+                      );
                     cancel();
                     throw error;
                   });
@@ -803,7 +821,9 @@ const httpTransport = (
       if ((error as { name?: unknown })?.name === 'ProxyTokenUnavailableError') {
         const reason = (error as Error).message;
         proxyAuthorization?.failed(
-          reason.includes(PROXY_AUTHORIZATION_MISSING) ? reason : `[${exchange}] ${PROXY_AUTHORIZATION_MISSING}: ${reason}`,
+          reason.includes(PROXY_AUTHORIZATION_MISSING)
+            ? reason
+            : `[${exchange}] ${PROXY_AUTHORIZATION_MISSING}: ${reason}`,
         );
       }
       // The relay never prepared it, and nobody called it off: the relay is down.
@@ -957,11 +977,11 @@ export const createEngineTransport = (
                 ? readHttp
                 : intent === 'public' && DIRECT_PUBLIC_READS.has(exchange)
                   ? directHttp
-                : intent === 'public' &&
-                    readHttp &&
-                    !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
-                  ? readHttp
-                  : http;
+                  : intent === 'public' &&
+                      readHttp &&
+                      !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
+                    ? readHttp
+                    : http;
       if (!selected) throw new HttpPreparationError('unsupported');
       return selected.prepareHttp({ ...packet, route, intent });
     },
