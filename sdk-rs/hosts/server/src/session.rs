@@ -1,7 +1,7 @@
 //! One `/account` socket: the JSON envelope over this user's accounts.
 //! Every account op resolves through (this socket's user, accounts it joined).
 use crate::accounts::now_ms;
-use crate::accounts::{Account, PUBLIC_ACCOUNT, PUBLIC_EXCHANGE, Registry};
+use crate::accounts::{Account, Disposal, PUBLIC_ACCOUNT, PUBLIC_EXCHANGE, Registry};
 use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
 use crate::out::Out;
@@ -395,7 +395,7 @@ impl Session {
                 ));
                 if let Some(joined) = self.joined.remove(&account_name) {
                     self.metrics.note_dispose();
-                    self.leave(joined);
+                    self.leave(joined, Disposal::PageDisposed);
                 }
             }
             Inbound::EchoRes(response) => {
@@ -419,7 +419,7 @@ impl Session {
                         .collect();
                     for name in orphaned {
                         if let Some(joined) = self.joined.remove(&name) {
-                            self.leave(joined);
+                            self.leave(joined, Disposal::Orphaned);
                         }
                     }
                 }
@@ -489,12 +489,13 @@ impl Session {
         if let Some(joined) = self.joined.remove(&init.account_name) {
             // New settings rebuild it. Unless another live socket keeps it, its algos stop
             // here and this page hears their finals; leaving first would tell no one.
+            let disposal = Disposal::rebuild(joined.account.is_public(), public_only);
             if joined.account.live_holders_besides(self.socket).is_empty() {
                 self.registry
-                    .stop_for_new_settings(&joined.account, self.outbox());
+                    .stop_for_new_settings(&joined.account, self.outbox(), disposal);
                 Self::leave_engine(joined);
             } else {
-                self.leave(joined);
+                self.leave(joined, disposal);
             }
         }
         let token = self.identity.token.clone();
@@ -563,7 +564,8 @@ impl Session {
             Err(error) => {
                 self.drop_early(&name, "account did not join");
                 self.send(envelope::error(Some(&name), error));
-                self.registry.release(&account, self.socket);
+                self.registry
+                    .release(&account, self.socket, Disposal::JoinFailed);
             }
         }
     }
@@ -632,10 +634,10 @@ impl Session {
         }
     }
 
-    fn leave(&self, joined: Joined) {
+    fn leave(&self, joined: Joined, disposal: Disposal) {
         let account = joined.account.clone();
         Self::leave_engine(joined);
-        self.registry.release(&account, self.socket);
+        self.registry.release(&account, self.socket, disposal);
     }
 
     fn leave_engine(joined: Joined) {
@@ -1255,7 +1257,8 @@ impl Session {
             {
                 parked.push((joined.account, self.socket));
             } else {
-                self.registry.release(&joined.account, self.socket);
+                self.registry
+                    .release(&joined.account, self.socket, Disposal::SocketClosed);
             }
         }
         if let Some(user) = &self.identity.user {
@@ -1790,7 +1793,7 @@ mod tests {
                 }
                 assert!(chase.is_string(), "{chase}");
                 // The helper's stand-in socket: the page's own is the only holder.
-                registry.release(&account, 7);
+                registry.release(&account, 7, Disposal::PageDisposed);
                 let edited = InitPayload {
                     key: "k2".into(),
                     ..acct_init()
@@ -2252,7 +2255,7 @@ mod tests {
                     "held and listed: {frames:?}"
                 );
 
-                registry.dispose(&account);
+                registry.dispose(&account, Disposal::SettingsChanged);
                 settle().await;
                 session.handle(r#"{"t":"ping"}"#).await.ok();
                 session
@@ -2790,7 +2793,7 @@ mod tests {
                 }
                 assert!(chase.is_string() && twap.is_string(), "{chase} {twap}");
                 // The helper's stand-in socket: the page's own is the only holder.
-                registry.release(&account, 7);
+                registry.release(&account, 7, Disposal::PageDisposed);
                 let owner = session.resume_id.clone();
                 session.close();
                 tokio::time::sleep(std::time::Duration::from_secs(80)).await;
