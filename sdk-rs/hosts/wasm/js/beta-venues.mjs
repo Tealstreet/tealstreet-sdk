@@ -38,6 +38,7 @@ const betaVenues = Object.freeze({
   okxeudemo: { family: 'okx' },
   paradex: { family: 'paradex' },
   phemex: { family: 'phemex' },
+  woo: { family: 'woo' },
 });
 
 export const betaVenueNames = Object.freeze(Object.keys(betaVenues).sort());

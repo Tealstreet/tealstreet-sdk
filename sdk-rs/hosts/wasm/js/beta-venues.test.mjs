@@ -12,16 +12,16 @@ import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
-  'woo', 'grvt', 'backpack', 'coinbase', 'coinbasespot', 'orderly', 'kodiakfi', 'mode', 'salsadex',
+  'grvt', 'backpack', 'coinbase', 'coinbasespot', 'orderly', 'kodiakfi', 'mode', 'salsadex',
   'tealstreet-dex', 'what', 'woofi', 'kucoin', 'kucoinspot', 'polymarket', 'breakoutprop', 'txflow', 'weex',
   'bitrue', 'lighter-robinhood',
 ];
 
-test('the beta set is exactly the 31 IN venues in 16 families', () => {
-  assert.equal(betaVenueNames.length, 31);
+test('the beta set is exactly the 32 IN venues in 17 families', () => {
+  assert.equal(betaVenueNames.length, 32);
   assert.deepEqual(betaVenueFamilies, [
     'apexomni', 'asterdex', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'cryptocom',
-    'hyperliquid', 'kraken', 'lighter', 'mexc', 'okx', 'paradex', 'phemex',
+    'hyperliquid', 'kraken', 'lighter', 'mexc', 'okx', 'paradex', 'phemex', 'woo',
   ]);
 });
 
@@ -44,7 +44,7 @@ test('the beta loader refuses an OUT venue before importing any engine', async (
     imports.push(family);
     return { default: async () => {} };
   }, betaVenueFamily);
-  await assert.rejects(load('woo'), BetaVenueUnavailableError);
+  await assert.rejects(load('grvt'), BetaVenueUnavailableError);
   await load('okxeu');
   assert.deepEqual(imports, ['okx']);
 });
