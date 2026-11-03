@@ -262,7 +262,7 @@ fn general_income_cannot_silently_return_a_funding_only_ledger() {
             actions.iter().any(|a| matches!(a,
                 Action::Notice(Notice::CommandFailed { error, .. })
                 if error.legacy_text() == "MEXC income supports only kind FUNDING_FEE"
-                    && error.kind == Some(safe_cex_engine::ErrorKind::Unsupported)
+                    && (error.kind == Some(safe_cex_engine::ErrorKind::Unsupported)) == kind.is_some()
             )),
             "{actions:?}"
         );

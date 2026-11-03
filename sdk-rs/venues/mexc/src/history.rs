@@ -238,12 +238,22 @@ impl MexcFutures {
                 to_ms,
                 limit,
             } => {
-                if kind
-                    .as_deref()
-                    .is_none_or(|k| !k.eq_ignore_ascii_case("FUNDING_FEE"))
-                {
-                    Self::fail_unsupported_read(cx, "MEXC income supports only kind FUNDING_FEE");
-                    return;
+                // A named kind MEXC has no ledger for is Unsupported, so ingestion skips it.
+                // No kind asks for the whole ledger, which funding alone cannot answer: that
+                // stays a plain refusal, as the advertised income handler exists.
+                match kind.as_deref() {
+                    Some(k) if k.eq_ignore_ascii_case("FUNDING_FEE") => {}
+                    Some(_) => {
+                        Self::fail_unsupported_read(
+                            cx,
+                            "MEXC income supports only kind FUNDING_FEE",
+                        );
+                        return;
+                    }
+                    None => {
+                        Self::fail_local_read(cx, "MEXC income supports only kind FUNDING_FEE");
+                        return;
+                    }
                 }
                 (Kind::Funding, symbol, None, from_ms, to_ms, limit)
             }

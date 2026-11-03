@@ -187,12 +187,7 @@ fn native(actions: &[Action], owner: u32, message: &str) {
         "local error emits no I/O, timer, auth evidence or publication"
     );
     // What MEXC cannot answer is typed Unsupported, so callers skip it instead of logging.
-    let expected = if [
-        "MEXC client-order-ID lookup is unsupported",
-        "MEXC income supports only kind FUNDING_FEE",
-    ]
-    .contains(&message)
-    {
+    let expected = if message == "MEXC client-order-ID lookup is unsupported" {
         VenueError::new(message)
             .kind(ErrorKind::Unsupported)
             .outcome(safe_cex_engine::Outcome::NotSent)
