@@ -17,6 +17,16 @@ describe('proxy fleet allowlist', () => {
     expect([...PROXY_FLEET_REST_PREFIXES].sort()).toEqual([...new Set(prefixes)].sort());
   });
 
+  it.each([
+    'https://clob.polymarket.com/data/orders?next_cursor=MA==',
+    'https://gamma-api.polymarket.com/markets?active=true',
+    'https://data-api.polymarket.com/positions?user=fixture',
+  ])('forwards the Polymarket REST endpoint %s', (url) => {
+    expect(proxyFleetForwards(url)).toBe(true);
+    expect(proxyFleetForwards(url.replace('.polymarket.com/', '.polymarket.com.evil.invalid/'))).toBe(false);
+    expect(proxyFleetForwards(url.replace('.polymarket.com/', '.polymarket.com@evil.invalid/'))).toBe(false);
+  });
+
   it('matches a venue url by prefix only', () => {
     expect(proxyFleetForwards('https://api.bybit.com/v5/order/create')).toBe(true);
     expect(proxyFleetForwards('https://api.kraken.com/0/private/Balance')).toBe(true);

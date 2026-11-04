@@ -3076,6 +3076,62 @@ impl<P> Cx<'_, P> {
             .commit_orders_read(read, scope, in_scope, rows, unproven)
     }
 
+    /// The release of the read this response answers, only inside that response.
+    /// A venue whose census spans independent reads keeps the earliest of its
+    /// legs' marks and commits from it (`commit_orders_read_from`).
+    #[cfg(feature = "order-locks")]
+    pub fn order_read_mark(&self) -> Option<crate::order_read_cover::OrderReadMark> {
+        let (epoch, read) = self.io.core.order_response_read?;
+        (self.io.core.order_response_token == Some(epoch)).then_some(read)
+    }
+
+    /// `commit_orders_read` for rows drawn from several independent reads: the
+    /// cover and the refusals go by the earliest of `earliest` and this
+    /// response's own release, never the last leg's alone (H9).
+    #[cfg(feature = "order-locks")]
+    pub fn commit_orders_read_from(
+        &mut self,
+        earliest: crate::order_read_cover::OrderReadMark,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: Vec<crate::model::Order>,
+        unproven: &[String],
+    ) -> Option<Vec<String>> {
+        let read = self.order_read_mark()?.earliest(earliest);
+        self.store
+            .commit_orders_read(read, scope, in_scope, rows, unproven)
+    }
+
+    /// `orders_read_refusals` for rows drawn from several independent reads.
+    #[cfg(feature = "order-locks")]
+    pub fn orders_read_refusals_from(
+        &self,
+        earliest: crate::order_read_cover::OrderReadMark,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: &[crate::model::Order],
+    ) -> Option<Vec<String>> {
+        let read = self.order_read_mark()?.earliest(earliest);
+        self.store.orders_read_refusals(read, scope, in_scope, rows)
+    }
+
+    /// What `commit_orders_read` with these rows would refuse, without changing
+    /// anything (`None`: the whole read, or no read response to commit). A venue
+    /// updates its own per-order state only for the symbols this admits.
+    #[cfg(feature = "order-locks")]
+    pub fn orders_read_refusals(
+        &self,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: &[crate::model::Order],
+    ) -> Option<Vec<String>> {
+        let (epoch, read) = self.io.core.order_response_read?;
+        if self.io.core.order_response_token != Some(epoch) {
+            return None;
+        }
+        self.store.orders_read_refusals(read, scope, in_scope, rows)
+    }
+
     /// Call only after accepting a complete, fresh authoritative order read.
     /// A read started before an uncertain placement cannot clear its fence.
     pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
@@ -4154,6 +4210,9 @@ pub struct Engine<V: Venue> {
     /// Frame-fed: the data source's clock minus this host's, in ms, as the
     /// host measured it (`None` until it has).
     source_clock_offset: Option<f64>,
+    /// Frame-fed: the source's last snapshot advertised `order_read_covers`,
+    /// so only its read covers lift a fence, never a frame's stamp.
+    source_read_covers: bool,
     /// Data source: the VENUE_STATE bytes last sent, so unchanged state is not resent.
     venue_state_sent: Option<Vec<u8>>,
     shared_books: HashMap<String, Book>,
@@ -4249,6 +4308,7 @@ impl<V: Venue> Engine<V> {
             #[cfg(feature = "order-locks")]
             fence_marks: Vec::new(),
             source_clock_offset: None,
+            source_read_covers: false,
             venue_state_sent: None,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
@@ -4460,6 +4520,10 @@ impl<V: Venue> Engine<V> {
         let expired = self.io.core.setting_holds.expire(now);
         let kept = self.io.core.setting_holds.keep(&self.store);
         let applied = crate::ingest::apply(&mut self.store, &mut self.ingest, &parsed, snapshot)?;
+        // Only a frame carrying CAPABILITIES (a snapshot) says; others keep it.
+        if let Some(read_covers) = applied.read_covers {
+            self.source_read_covers = read_covers;
+        }
         // A snapshot replaces both sections, so it speaks for them even if absent.
         self.io.core.setting_holds.restore(
             &mut self.store,
@@ -4492,23 +4556,37 @@ impl<V: Venue> Engine<V> {
         // write can predate the venue showing it, and acting then would let a
         // retry place twice. On this host's clock when the offset is known;
         // otherwise a grace long enough to absorb the unmeasured skew.
+        // A source with read covers speaks only through them: a frame's stamp
+        // is not when its rows were read (docs/plans/RUST_FRAME_FED_READ_COVER.md §9).
+        let offset = self.source_clock_offset;
+        let host_time = move |sent: f64| match offset {
+            Some(offset) => sent - offset - crate::frame_fed::FENCE_GRACE_MS,
+            None => sent - crate::frame_fed::UNSYNCED_FENCE_GRACE_MS,
+        };
+        let read_covers = self.source_read_covers;
         let cover = applied.orders.then(|| {
-            let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
-            match self.source_clock_offset {
-                Some(offset) => stamp - offset - crate::frame_fed::FENCE_GRACE_MS,
-                None => stamp - crate::frame_fed::UNSYNCED_FENCE_GRACE_MS,
+            if read_covers {
+                applied.orders_read.as_ref()?.account.map(host_time)
+            } else {
+                let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
+                Some(host_time(stamp))
             }
         });
+        let cover = cover.flatten();
         cx.io.core.source_orders_cover = cover;
         self.venue.on_frame_ingested(&mut cx);
         cx.io.core.source_orders_cover = None;
-        if let Some(_cover) = cover {
+        if applied.orders {
             #[cfg(feature = "order-locks")]
-            {
+            if read_covers {
+                if let Some(covers) = &applied.orders_read {
+                    self.lift_on_read_covers(covers, host_time);
+                }
+            } else if let Some(cover) = cover {
                 let lifted = self
                     .fence_marks
                     .iter()
-                    .filter(|(_, at)| *at <= _cover)
+                    .filter(|(_, at)| *at <= cover)
                     .map(|(token, _)| *token)
                     .max();
                 if let Some(token) = lifted {
@@ -4521,6 +4599,38 @@ impl<V: Venue> Engine<V> {
         }
         self.finish_event_scope(now);
         Ok(())
+    }
+
+    /// Lift each uncertain symbol whose own read (or the account's) was sent
+    /// well after its fence was marked; `""` (every symbol) only on the
+    /// account's. Marks no standing fence still needs are dropped.
+    #[cfg(feature = "order-locks")]
+    fn lift_on_read_covers(
+        &mut self,
+        covers: &crate::ingest::ReadCovers,
+        host_time: impl Fn(f64) -> f64,
+    ) {
+        let marks = &self.fence_marks;
+        let lifts: Vec<(String, u64)> = self
+            .io
+            .core
+            .order_locks
+            .uncertain_epochs()
+            .filter_map(|(symbol, epoch)| {
+                let marked = marks.iter().find(|(token, _)| *token >= epoch)?.1;
+                let sent = covers.cover(symbol)?;
+                (host_time(sent) >= marked).then(|| (symbol.to_owned(), epoch))
+            })
+            .collect();
+        let locks = &mut self.io.core.order_locks;
+        for (symbol, epoch) in lifts {
+            // The account cover speaks for every symbol fenced up to `epoch`.
+            locks.reconciled((!symbol.is_empty()).then_some(symbol.as_str()), epoch);
+        }
+        match locks.uncertain_epochs().map(|(_, epoch)| epoch).min() {
+            Some(oldest) => self.fence_marks.retain(|(token, _)| *token >= oldest),
+            None => self.fence_marks.clear(),
+        }
     }
 
     /// Account sections (balance, orders, positions) are expected at startup only
@@ -10714,3 +10824,7 @@ mod http_plan_boundary_tests;
 #[cfg(feature = "http-plans")]
 #[path = "http_plan_expiry.rs"]
 mod http_plan_expiry;
+
+#[cfg(all(test, feature = "order-locks"))]
+#[path = "read_cover_lift_tests.rs"]
+mod read_cover_lift_tests;

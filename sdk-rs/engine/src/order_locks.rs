@@ -626,6 +626,13 @@ impl OrderLocks {
         self.epoch
     }
 
+    /// Each uncertain symbol (`""`: every symbol) with the epoch that sealed it.
+    pub fn uncertain_epochs(&self) -> impl Iterator<Item = (&str, u64)> {
+        self.uncertain
+            .iter()
+            .map(|(symbol, epoch)| (symbol.as_str(), *epoch))
+    }
+
     /// A whole-account read cleared every fence up to `token` but `unproven`
     /// symbols; an empty symbol there means any fence may be its row's.
     pub fn reconciled_except(&mut self, unproven: &[String], token: u64) {
@@ -678,6 +685,22 @@ impl OrderLocks {
 #[cfg(test)]
 mod managed_tests {
     use super::*;
+
+    /// A rejected row naming no market could be any uncertain write: the read's
+    /// coverage says so with "", and no fence clears from that read.
+    #[test]
+    fn a_rejection_without_a_market_clears_no_fence() {
+        let mut locks = OrderLocks::default();
+        locks.fence(Some(&["BTCUSDT".into(), "ETHUSDT".into()]));
+        let mut coverage = crate::coverage::RowAdmission::<String>::default();
+        coverage.reject(None);
+        assert_eq!(coverage.unproven(), [String::new()]);
+        locks.reconciled_except(coverage.unproven(), locks.token());
+        assert!(locks.uncertain("BTCUSDT") && locks.uncertain("ETHUSDT"));
+        // The control: a clean read of the same epoch clears both.
+        locks.reconciled_except(&[], locks.token());
+        assert!(!locks.uncertain("BTCUSDT") && !locks.uncertain("ETHUSDT"));
+    }
 
     #[test]
     fn a_double_underscore_leg_locks_its_parent_order() {

@@ -2268,3 +2268,58 @@ fn a_pre_tp_sl_order_shows_like_a_normal_one() {
     h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"pre_tp_sl","orderId":"123","orderType":"limit","side":"buy","size":"1","price":"60000","filledSize":"0","state":"live"}]}"#);
     assert!(h.e.store().order("123").is_some());
 }
+
+#[test]
+fn refused_startup_read_seeds_only_real_execution_suffixes() {
+    const START: f64 = 1_700_000_000_000.;
+    let mut h = Harness::new_at(START);
+    h.open_private();
+    h.modes();
+    for (qty, avg, time) in [(6, 120, START + 1.), (8, 130, START + 2.)] {
+        let text = startup_execution("123", qty, avg, START - 100., time, "partially_filled");
+        h.handle(
+            time,
+            Event::WsMessage {
+                socket: h.private,
+                text: &text,
+            },
+        );
+        h.collect();
+    }
+    assert!(executions(h.e.take_frame(START + 2.).unwrap()).is_empty());
+    startup_reply_at(
+        &mut h,
+        "orders-pending",
+        &startup_orders(4, 100),
+        START + 3.,
+    );
+    finish_startup_orders(&mut h, START + 4.);
+    assert_eq!(
+        executions(h.e.take_frame(START + 4.).unwrap()),
+        [(160., 0.002), (160., 0.002)]
+    );
+    assert_eq!(h.e.store().order("123").unwrap().filled, 0.008);
+    let frame = h.e.snapshot_frame(START + 4.).to_vec();
+    let cover = safe_cex_engine::wire::sections(&frame)
+        .find(|(k, _)| *k == safe_cex_engine::wire::section::ORDERS_READ)
+        .map(|(_, p)| f64::from_le_bytes(p[8..16].try_into().unwrap()));
+    assert!(
+        cover.is_none_or(|v| v.is_nan()),
+        "refused startup rows prove no cover: {cover:?}"
+    );
+    let text = startup_execution("123", 8, 130, START - 100., START + 2., "partially_filled");
+    h.handle(
+        START + 5.,
+        Event::WsMessage {
+            socket: h.private,
+            text: &text,
+        },
+    );
+    h.collect();
+    assert!(
+        h.e.take_frame(START + 5.)
+            .map(executions)
+            .unwrap_or_default()
+            .is_empty()
+    );
+}
