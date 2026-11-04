@@ -244,3 +244,154 @@ fn a_stream_row_refuses_only_its_own_symbol() {
         "the other symbol commits"
     );
 }
+
+fn versioned(row: &str, id: &str, updated: f64) -> String {
+    row.replace("\"id\":\"123\"", &format!("\"id\":\"{id}\""))
+        .replace(
+            "\"last_updated_at\":1700000000000",
+            &format!("\"last_updated_at\":{updated:.0}"),
+        )
+}
+#[test]
+fn terminal_seen_only_in_census_blocks_older_open_stream() {
+    let (mut h, socket) = loaded();
+    let read = repair(&mut h, socket);
+    let closed =
+        versioned(ORDER, "999", h.now).replace("\"status\":\"OPEN\"", "\"status\":\"CLOSED\"");
+    h.respond(read, 200, &format!(r#"{{"results":[{closed}]}}"#));
+    assert!(
+        h.e.store().order("999").is_none(),
+        "terminal row is not published as open"
+    );
+    let older = versioned(ORDER, "999", h.now - 500.);
+    h.now += 1.;
+    order_update(&mut h, socket, &older);
+    assert!(
+        !h.e.store()
+            .order("999")
+            .is_some_and(|o| o.status == safe_cex_engine::model::OrderStatus::Open),
+        "accepted terminal census evidence must prevent resurrection"
+    );
+}
+#[test]
+fn stream_terminal_working_control_blocks_older_open() {
+    let (mut h, socket) = loaded();
+    h.now += 6000.;
+    let closed =
+        versioned(ORDER, "999", h.now).replace("\"status\":\"OPEN\"", "\"status\":\"CLOSED\"");
+    order_update(&mut h, socket, &closed);
+    let older = versioned(ORDER, "999", h.now - 500.);
+    h.now += 1.;
+    order_update(&mut h, socket, &older);
+    assert!(
+        !h.e.store()
+            .order("999")
+            .is_some_and(|o| o.status == safe_cex_engine::model::OrderStatus::Open)
+    );
+}
+#[test]
+fn same_clock_refusal_keeps_native_amendment_evidence() {
+    let (mut h, socket) = loaded();
+    let read = repair(&mut h, socket);
+    let fresh = versioned(ORDER, "123", h.now)
+        .replace("\"price\":\"99\"", "\"flags\":[],\"price\":\"101\"");
+    order_update(&mut h, socket, &fresh);
+    let kept = h.e.store().order("123").unwrap().clone();
+    let stale =
+        versioned(ORDER, "123", h.now + 1000.).replace("\"price\":\"99\"", "\"price\":\"111\"");
+    h.respond(read, 200, &format!(r#"{{"results":[{stale}]}}"#));
+    assert_eq!(h.e.store().order("123"), Some(&kept));
+    h.command(safe_cex_engine::Command::AmendOrder {
+        command: 901,
+        id: "123".into(),
+        price: None,
+        amount: Some(3.),
+    });
+    assert!(
+        !h.failures
+            .iter()
+            .any(|e| e.outcome == Some(safe_cex_engine::Outcome::NotSent)),
+        "amendment diagnostic: {:?}",
+        h.result(901)
+    );
+    let amend = h.take("/orders/123");
+    let body: serde_json::Value = serde_json::from_str(amend.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["price"], "101");
+    assert_eq!(body["size"], "3");
+}
+#[test]
+fn census_around_write_boundaries_cannot_lift_lost_write_fence() {
+    for before_write in [true, false] {
+        let (mut h, socket) = loaded();
+        let previous = account_cover(&mut h).1;
+        let read = before_write.then(|| repair(&mut h, socket));
+        let order=serde_json::from_str(r#"{"symbol":"BTC-USD-PERP","type":"limit","side":"buy","amount":1,"price":100,"clientOrderId":"probe-902"}"#).unwrap();
+        h.command(safe_cex_engine::Command::PlaceOrders {
+            command: 902,
+            orders: vec![order],
+        });
+        let write = h.take("/orders");
+        assert_eq!(write.method, safe_cex_engine::Method::Post);
+        let read = read.unwrap_or_else(|| repair(&mut h, socket));
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: write.id,
+                error: "lost physical write response",
+            },
+        );
+        h.collect();
+        h.now += 1.;
+        h.respond(read, 200, &format!(r#"{{"results":[{ORDER}]}}"#));
+        assert_eq!(
+            account_cover(&mut h).1,
+            previous,
+            "write boundary invalidates read token ({before_write})"
+        );
+        let order=serde_json::from_str(r#"{"symbol":"BTC-USD-PERP","type":"limit","side":"buy","amount":1,"price":100,"clientOrderId":"probe-903"}"#).unwrap();
+        h.command(safe_cex_engine::Command::PlaceOrders {
+            command: 903,
+            orders: vec![order],
+        });
+        assert!(
+            h.result(903).is_err(),
+            "old census must not lift lost-write fence"
+        );
+        assert!(
+            h.pending
+                .iter()
+                .all(|r| r.method == safe_cex_engine::Method::Get)
+        );
+    }
+}
+#[test]
+fn unidentified_and_unsupported_rows_prove_no_cover() {
+    for bad in [
+        r#"{"market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN"}"#.to_owned(),
+        ORDER.replace("LIMIT", "UNSUPPORTED_TYPE"),
+    ] {
+        let (mut h, socket) = loaded();
+        let previous = account_cover(&mut h).1;
+        let read = repair(&mut h, socket);
+        let kept = h.e.store().order("123").unwrap().clone();
+        h.respond(read, 200, &format!(r#"{{"results":[{bad}]}}"#));
+        assert_eq!(h.e.store().order("123"), Some(&kept));
+        assert_eq!(account_cover(&mut h).1, previous);
+    }
+}
+#[test]
+fn retired_old_census_cannot_replace_fresh_commit() {
+    let (mut h, socket) = loaded();
+    let old = repair(&mut h, socket);
+    let old_copy = old.clone();
+    h.respond(old, 200, &format!(r#"{{"results":[{ORDER}]}}"#));
+    let newer = repair(&mut h, socket);
+    let fresh = versioned(ORDER, "321", h.now);
+    h.respond(newer, 200, &format!(r#"{{"results":[{fresh}]}}"#));
+    let rows = h.e.store().orders().to_vec();
+    let cover = account_cover(&mut h).1;
+    h.now += 1.;
+    h.respond(old_copy, 200, r#"{"results":[]}"#);
+    assert_eq!(h.e.store().orders(), rows);
+    assert_eq!(account_cover(&mut h).1, cover);
+}
