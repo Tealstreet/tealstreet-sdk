@@ -729,7 +729,13 @@
     "woo": {
       "routing": {
         "restPool": "asia",
-        "howEgress": "sg"
+        "howEgress": "sg",
+        "ws": {
+          "private": {
+            "kind": "mainnetProxyConditional",
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwss.woox.io%2Fv2%2Fws%2Fprivate%2Fstream%2F"
+          }
+        }
       },
       "requiresCors": false,
       "enforceWsTunnel": false,
