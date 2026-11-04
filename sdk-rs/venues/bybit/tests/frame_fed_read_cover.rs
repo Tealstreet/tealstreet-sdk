@@ -142,3 +142,47 @@ fn a_frame_without_read_rows_still_lifts_on_its_stamp() {
     assert!(forward(&mut source, &mut page));
     assert!(btc_place_goes_out(&mut page, 2));
 }
+
+/// codex-hcmq3f: the same stale read rows, re-sent in a reconnect snapshot,
+/// must not lift the fence the delta that carried them kept.
+#[test]
+fn a_snapshot_cannot_restamp_the_same_stale_read_rows() {
+    let mut source = source_with_orders_read_out();
+    let mut page = frame_fed_page(&mut source);
+    source.advance(1_000.0);
+    page.advance(1_000.0);
+    lose_btc_placement(&mut page, 1);
+    source.advance(4_000.0);
+    page.advance(4_000.0);
+    answer_all(&mut source, "/v5/order/realtime", NO_ROWS);
+    assert!(forward(&mut source, &mut page));
+    assert!(
+        !btc_place_goes_out(&mut page, 2),
+        "working control: ordinary frame keeps old read fence"
+    );
+    for snapshot in [
+        source.engine.snapshot_frame(source.now).to_vec(),
+        source.engine.account_snapshot_frame(source.now).to_vec(),
+    ] {
+        page.engine.apply_frame(page.now, &snapshot, true).unwrap();
+        page.collect();
+        assert!(
+            !btc_place_goes_out(&mut page, 3),
+            "a reconnect snapshot of identical old rows must retain the fence"
+        );
+    }
+}
+
+/// A snapshot from a source that knows no read time for its rows lifts nothing.
+#[test]
+fn a_snapshot_without_a_read_time_lifts_nothing() {
+    let mut source = source_with_orders_read_out();
+    let mut page = frame_fed_page(&mut source);
+    lose_btc_placement(&mut page, 1);
+    source.advance(10_000.0);
+    page.advance(10_000.0);
+    let snapshot = source.engine.snapshot_frame(source.now).to_vec();
+    page.engine.apply_frame(page.now, &snapshot, true).unwrap();
+    page.collect();
+    assert!(!btc_place_goes_out(&mut page, 2));
+}

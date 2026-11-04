@@ -1737,10 +1737,6 @@ struct IoCore {
     /// The send time of the read `order_response_token` belongs to.
     #[cfg(feature = "order-locks")]
     order_response_sent: f64,
-    /// Data source: how old the order rows reaching the next frame are: the send
-    /// of the last complete read, or earlier if a partial read touched them since.
-    #[cfg(feature = "order-locks")]
-    orders_read_sent: Option<f64>,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -1949,8 +1945,6 @@ impl Default for IoCore {
             orders_refresh: None,
             #[cfg(feature = "order-locks")]
             order_response_sent: f64::NEG_INFINITY,
-            #[cfg(feature = "order-locks")]
-            orders_read_sent: None,
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -3087,11 +3081,8 @@ impl<P> Cx<'_, P> {
     /// asks for another read.
     #[cfg(feature = "order-locks")]
     fn orders_read(&mut self, complete: bool, token: u64) {
-        let sent = self.io.core.order_response_sent;
-        self.io.core.orders_read_sent = Some(match self.io.core.orders_read_sent {
-            Some(earlier) if !complete => earlier.min(sent),
-            _ => sent,
-        });
+        self.store
+            .note_orders_read(self.io.core.order_response_sent, complete);
         let Some(epoch) = self.io.core.orders_refresh.filter(|_| complete) else {
             return;
         };
@@ -4501,7 +4492,9 @@ impl<V: Venue> Engine<V> {
         // write can predate the venue showing it, and acting then would let a
         // retry place twice. On this host's clock when the offset is known;
         // otherwise a grace long enough to absorb the unmeasured skew.
-        let cover = applied.orders.then(|| {
+        // A snapshot's rows may be old reads re-sent: without their read time
+        // (an older source) they lift nothing.
+        let cover = (applied.orders && (!snapshot || applied.orders_read.is_some())).then(|| {
             let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
             // Rows from a venue read are as old as that read, however late it landed.
             let stamp = applied.orders_read.map_or(stamp, |sent| stamp.min(sent));
@@ -6911,12 +6904,6 @@ impl<V: Venue> Engine<V> {
         let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
-            #[cfg(feature = "order-locks")]
-            if let Some(sent) = self.io.core.orders_read_sent.take()
-                && pending.orders()
-            {
-                w.orders_read(sent);
-            }
             if let Some(state) = self.venue.export_venue_state_for(&self.store)
                 && self.venue_state_sent.as_deref() != Some(state.as_slice())
             {
