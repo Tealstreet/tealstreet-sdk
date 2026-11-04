@@ -94,7 +94,7 @@ impl H {
 }
 
 /// A started, loaded source with its private stream open and nothing out.
-fn loaded() -> H {
+fn started_with_orders_out() -> H {
     let mut h = H {
         e: support::engine(Options {
             key: Some("key".into()),
@@ -113,6 +113,11 @@ fn loaded() -> H {
     h.answer(MODE, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
     h.answer(POSITIONS, FLAT);
     h.answer(BALANCE, BALANCES);
+    h
+}
+
+fn loaded() -> H {
+    let mut h = started_with_orders_out();
     h.answer(ORDERS, OPEN);
     while h.http.iter().any(|r| r.url.contains(ORDERS)) {
         h.answer(ORDERS, OPEN);
@@ -179,5 +184,29 @@ fn asks_while_a_read_is_out_get_one_follow_up() {
     assert_eq!(h.account_cover(), Some(sent));
     h.now += 1_000.0;
     h.pump();
+    assert!(h.orders_reads().is_empty());
+}
+
+#[test]
+fn a_source_ask_joins_an_ordinary_census_and_owes_one_successor() {
+    let mut h = started_with_orders_out();
+    let first = h.orders_reads();
+    assert_eq!(first.len(), 1);
+    h.now += 100.;
+    for command in 100..200 {
+        h.refresh(command, None);
+    }
+    assert_eq!(h.orders_reads().iter().map(|r| r.id).collect::<Vec<_>>(),
+        first.iter().map(|r| r.id).collect::<Vec<_>>(), "retain the ordinary read, no competing batch");
+    h.now += 100.;
+    let fresh_sent = h.now;
+    h.answer_reads(&first);
+    let successor = h.orders_reads();
+    assert_eq!(successor.len(), 1);
+    assert_ne!(successor[0].id, first[0].id);
+    assert!(h.account_cover().is_none_or(|at| at < fresh_sent));
+    h.now += 100.;
+    h.answer_reads(&successor);
+    assert_eq!(h.account_cover(), Some(fresh_sent));
     assert!(h.orders_reads().is_empty());
 }
