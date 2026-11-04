@@ -1720,10 +1720,10 @@ fn review_3018_mixed_references_cannot_bypass_tp_to_sl_guard() {
     for _ in 0..3 {
         let next = fire_timers(&mut e);
         for action in &next {
-            if let Action::Http(r) = action {
-                if kind(r) == "orderStatus" {
-                    answer_order_status(&mut e, r);
-                }
+            if let Action::Http(r) = action
+                && kind(r) == "orderStatus"
+            {
+                answer_order_status(&mut e, r);
             }
         }
         actions.extend(next);
@@ -1779,10 +1779,10 @@ fn review_recheck_same_price_hl_observation_keeps_stop_guard_fresh() {
     for _ in 0..3 {
         let next = fire_timers(&mut e);
         for a in &next {
-            if let Action::Http(r) = a {
-                if kind(r) == "orderStatus" {
-                    answer_order_status(&mut e, r);
-                }
+            if let Action::Http(r) = a
+                && kind(r) == "orderStatus"
+            {
+                answer_order_status(&mut e, r);
             }
         }
         actions.extend(next);
@@ -1828,10 +1828,10 @@ fn review_recheck_changed_price_hl_observation_working_control() {
     for _ in 0..3 {
         let next = fire_timers(&mut e);
         for a in &next {
-            if let Action::Http(r) = a {
-                if kind(r) == "orderStatus" {
-                    answer_order_status(&mut e, r);
-                }
+            if let Action::Http(r) = a
+                && kind(r) == "orderStatus"
+            {
+                answer_order_status(&mut e, r);
             }
         }
         actions.extend(next);

@@ -1035,6 +1035,7 @@ impl BybitLinear {
 
     /// One trading-stop body for a Partial (or, at zero size, Full) position stop,
     /// and the trigger reference it names.
+    #[allow(clippy::too_many_arguments)]
     fn trading_stop_body(
         &self,
         cx: &Cx<'_, Pending>,
