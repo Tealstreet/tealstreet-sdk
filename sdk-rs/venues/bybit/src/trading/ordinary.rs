@@ -4,7 +4,7 @@
 //! seals. Options run here too; a Hyro placement founds or joins one planned
 //! execution of its retained intent (`placements`).
 use super::acknowledgement::{self as ack, Answer, Row};
-use super::codes::BYBIT;
+use super::codes::{BYBIT, MARGIN_MODE_ALREADY_SET};
 use super::{
     Call, Job, LocalWrite, Planned, check_client_order_ids, describe, is_virtual, mark_canceled,
     not_sent, trade_command_id, validate_stop_triggers,
@@ -12,7 +12,7 @@ use super::{
 use crate::sign::{self, Query};
 use crate::{BybitLinear, Category, Pending, Rest, Then};
 use safe_cex_engine::classify::{
-    self, BatchItem, Intent, Native, NativeCode, ReadRetry, Released, Verdict, WriteFact,
+    self, BatchItem, CodeTable, Intent, Native, NativeCode, ReadRetry, Released, Verdict, WriteFact,
 };
 use safe_cex_engine::model::{MarginType, OrderStatus};
 use safe_cex_engine::request_context::plan::{CallBound, CallTerms, RetryWindow, Slot, StepBound};
@@ -1157,16 +1157,18 @@ impl BybitLinear {
 
     /// Record the classified failure before anything else. `weaken` marks a
     /// refusal the codec cannot prove; `evidence` IDs are reconciliation-only.
+    #[allow(clippy::too_many_arguments)]
     fn record_failure(
         cx: &mut Cx<'_, Pending>,
         context: &Context,
+        table: &CodeTable,
         native: Option<&Native<'_>>,
         message: String,
         weaken: bool,
         evidence: &[String],
         known_effects: bool,
     ) -> Option<(Verdict, Option<ResendGrant>, VenueError)> {
-        let mut fact = cx.classify_write(context, &BYBIT, native, message).ok()?;
+        let mut fact = cx.classify_write(context, table, native, message).ok()?;
         if weaken {
             fact = fact.unproven();
         }
@@ -1194,7 +1196,16 @@ impl BybitLinear {
         message: &str,
         evidence: &[String],
     ) -> Decision {
-        match Self::record_failure(cx, context, None, message.into(), true, evidence, false) {
+        match Self::record_failure(
+            cx,
+            context,
+            &BYBIT,
+            None,
+            message.into(),
+            true,
+            evidence,
+            false,
+        ) {
             Some((_, _, error)) => Decision::Failed(error),
             None => Decision::Lost,
         }
@@ -1293,7 +1304,12 @@ impl BybitLinear {
             code: NativeCode::Int(code),
             message: &message,
         };
-        let Ok(probe) = cx.classify_write(context, &BYBIT, Some(&native), "") else {
+        let table = if code == 110026 && matches!(planned.call, Call::MarginMode { .. }) {
+            &MARGIN_MODE_ALREADY_SET
+        } else {
+            &BYBIT
+        };
+        let Ok(probe) = cx.classify_write(context, table, Some(&native), "") else {
             return Decision::Lost;
         };
         let rows = ack::carries_rows(result, ext);
@@ -1326,6 +1342,7 @@ impl BybitLinear {
         let Some((verdict, grant, error)) = Self::record_failure(
             cx,
             context,
+            table,
             Some(&native),
             describe((code, message.clone())),
             weaken,

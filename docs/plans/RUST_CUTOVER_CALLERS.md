@@ -10373,10 +10373,13 @@ requested-leverage shortcut remain successful. Binance `-4028` stays rejected:
 its documented meanings include invalid leverage as well as an already-existing
 value, so the numeric code alone does not prove the requested leverage.
 
-Bybit `110026` joins the existing `110043` leverage and `110025` position-mode
-already-set setting facts. Margin-mode no-ops use the same effects as normal
-success, including immediate account-wide settings/position updates and source
-frame holds. A contradictory `reasons` result remains unproven. HTTP gateway
+Bybit `110026` is admitted only by the margin-mode call's code table, selected
+before classification and fact recording. The general Bybit table rejects it:
+leverage, position mode and protective-order legs also use `Intent::Setting`,
+which alone is not proof of a margin change. Existing `110043` leverage and
+`110025` position-mode facts remain unchanged. Margin-mode no-ops use the same
+effects as normal success, including immediate account-wide settings/position
+updates and source frame holds. A contradictory `reasons` result remains unproven. HTTP gateway
 failures keep precedence over these codes, and non-setting writes cannot acquire
 setting-success authority.
 

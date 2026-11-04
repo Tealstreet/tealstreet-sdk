@@ -144,11 +144,6 @@ pub(crate) const BYBIT: CodeTable = CodeTable {
         ),
         // Not-modified answers: the requested setting already holds.
         only(
-            Key::Int(110026),
-            Verdict::Satisfied(SatisfiedIntent::Setting),
-            Intent::Setting,
-        ),
-        only(
             Key::Int(110043),
             Verdict::Satisfied(SatisfiedIntent::Setting),
             Intent::Setting,
@@ -193,10 +188,22 @@ pub(crate) const BYBIT: CodeTable = CodeTable {
     status: &[(403, Verdict::Unknown(Some(ErrorKind::RateLimited)))],
 };
 
+// Selected only for a MarginMode call carrying this native code. Intent::Setting
+// alone also covers leverage, position mode and protective-order operations.
+pub(crate) const MARGIN_MODE_ALREADY_SET: CodeTable = CodeTable {
+    rows: &[only(
+        Key::Int(110026),
+        Verdict::Satisfied(SatisfiedIntent::Setting),
+        Intent::Setting,
+    )],
+    ..BYBIT
+};
+
 #[cfg(test)]
 #[test]
 fn the_bybit_table_satisfies_the_engine_invariants() {
     safe_cex_engine::classify::assert_table(&BYBIT);
+    safe_cex_engine::classify::assert_table(&MARGIN_MODE_ALREADY_SET);
 }
 
 #[cfg(test)]
