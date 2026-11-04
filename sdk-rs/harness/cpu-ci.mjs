@@ -313,7 +313,7 @@ async function collectMeasurement(context, suite) {
     const family = readFamilyIdentityDirectory({ directory: resolve(context.root, 'sdk-rs/harness/out/cpu-family'),
       authority, state, runtimeManifest });
     unchanged = Boolean(family);
-    result = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect', family });
+    result = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect', family, sourceHead: state.sourceHead });
     if (unchanged) console.log(`${suite}: unchanged bytes, not measured`);
   }
   insist(!result.errors.length, result.errors.join('\n'));
@@ -538,7 +538,7 @@ async function gatherSuite(context, suite) {
   const bundle = jsonMember(tiny.entries, 'cohort.json'), state = jsonMember(strict.entries, 'cpu-collection/state.json');
   const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
   const family = await familyIdentityForSuite(context, suite, strict, state, tiny, needsComparison);
-  const assessed = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect', family });
+  const assessed = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect', family, sourceHead: state.sourceHead });
   insist(!assessed.errors.length, assessed.errors.join('\n'));
   insist(bundle.suite === suite && Array.isArray(bundle.claims) && bundle.claims.length === publicCases(suite).length, 'incomplete first claims');
   const { readSourceTree } = await import('./cpu-collection.mjs');

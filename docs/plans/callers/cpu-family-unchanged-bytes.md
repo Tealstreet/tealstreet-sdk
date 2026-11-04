@@ -56,3 +56,10 @@ The master merge retained its targeted-history workflow verbatim, replacing
 this PR's superseded depth-zero checkout. The real Git regression runs that
 production helper against a branch-updated PR composition and immutable event
 commits before asserting the unchanged authenticated parents and tree.
+
+Sealed-runtime gate reports intentionally omit ciWasm archive metadata. Family
+identity is bound to their issued runtime certificate and authenticated collection
+source (or original execution source in certification). Any supplied ciWasm
+metadata must still match. No metadata is fabricated on diagnostic reports.
+Controls pin missing/foreign source and forged certificate refusal, plus ordinary
+measurement and unchanged numeric eligibility when either base file changes.

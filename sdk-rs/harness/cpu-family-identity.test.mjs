@@ -116,7 +116,7 @@ test('first replay collection accepts a sealed CPU-only miss with complete publi
     status: 'PASS', failures: [], runs: 0, samples: Object.fromEntries(['ts', 'rust'].map(impl =>
       [impl, [{ ...first.report.samples[impl][0], measuredMode: 'correctness' }]])) };
   const entries = [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }];
-  const options = { suite: 'txflow', entries, manifest: declarations, mode: 'collect' };
+  const options = { suite: 'txflow', entries, manifest: declarations, mode: 'collect', sourceHead: data.state.sourceHead };
   assert.ok(verifyGateSuite(options).errors.length, 'old first collection rejects the large CPU miss');
   const family = readFamilyIdentity(data), accepted = verifyGateSuite({ ...options, family });
   assert.deepEqual(accepted.errors, []);
@@ -130,6 +130,60 @@ test('first replay collection accepts a sealed CPU-only miss with complete publi
   ]) {
     const invalid = structuredClone(entries); mutate(invalid);
     assert.ok(verifyGateSuite({ ...options, entries: invalid, family }).errors.length);
+  }
+});
+
+test('sealed-runtime reports without ciWasm metadata use the issued runtime proof and authenticated source', async () => {
+  for (const suite of ['bybit', 'okx', 'txflow']) {
+    const data = await fixture(suite), first = evidence(data.metadata);
+    delete first.report.ciWasm;
+    const before = JSON.stringify(first), certificate = readFamilyIdentity(data);
+    assert.equal(classifyInitialCase(first, declarations, undefined, certificate).decision, 'first');
+    assert.equal(JSON.stringify(first), before, 'do not invent ciWasm metadata on sealed-runtime reports');
+    const foreign = structuredClone(first); foreign.execution.measuredCheckoutSha = A;
+    assert.throws(() => classifyInitialCase(foreign, declarations, undefined, certificate));
+    assert.throws(() => classifyInitialCase(first, declarations, undefined, { ...certificate }));
+    for (const ciWasm of [null, { ...data.metadata, sourceHead: A }, { ...data.metadata, hashes: {} }]) {
+      const invalid = structuredClone(first); invalid.report.ciWasm = ciWasm;
+      assert.throws(() => classifyInitialCase(invalid, declarations, undefined, certificate));
+    }
+    for (const name of ['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js']) {
+      const changed = await fixture(suite);
+      changed.entries.set(`cpu-family/baseline/${name}`, Buffer.from('changed base bytes'));
+      changeMetadata(changed, 'baseline', metadata => { metadata.hashes[name] = sha('changed base bytes'); });
+      const proof = readFamilyIdentity(changed);
+      assert.equal(proof, undefined);
+      assert.equal(classifyInitialCase(first, declarations, undefined, proof).decision, 'second');
+      assert.equal(decideRemeasurement(first, evidence(data.metadata, true)).accepted, false);
+    }
+  }
+});
+
+test('first collection binds metadata-free sealed reports to the authenticated collection source', async () => {
+  const data = await fixture(), first = evidence(data.metadata, false, { ts: 17.924, rust: 20.579 });
+  delete first.report.ciWasm;
+  const privateReport = { ...first.report, ...expectedGateCases('txflow')[1], tapeSha256: sha('private tape'), private: true,
+    status: 'PASS', failures: [], runs: 0, samples: Object.fromEntries(['ts', 'rust'].map(impl =>
+      [impl, [{ ...first.report.samples[impl][0], measuredMode: 'correctness' }]])) };
+  const entries = [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }];
+  const options = { suite: 'txflow', entries, manifest: declarations, mode: 'collect',
+    sourceHead: data.state.sourceHead, family: readFamilyIdentity(data) };
+  const before = JSON.stringify(entries);
+  const result = verifyGateSuite(options);
+  assert.deepEqual(result.errors, []); assert.deepEqual(result.pending, []);
+  assert.equal(result.rows[0].label, 'UNCHANGED BYTES, NOT MEASURED');
+  assert.equal(JSON.stringify(entries), before);
+  for (const sourceHead of [undefined, A]) assert.throws(() => verifyGateSuite({ ...options, sourceHead }));
+  for (const name of ['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js']) {
+    const changed = await fixture();
+    changed.entries.set(`cpu-family/baseline/${name}`, Buffer.from('changed base bytes'));
+    changeMetadata(changed, 'baseline', metadata => { metadata.hashes[name] = sha('changed base bytes'); });
+    const measured = evidence(data.metadata); delete measured.report.ciWasm;
+    const family = readFamilyIdentity(changed); assert.equal(family, undefined);
+    const normal = verifyGateSuite({ ...options, family, entries: [{ ...measured, exitCode: 1 }, entries[1]] });
+    assert.deepEqual(normal.errors, []); assert.equal(normal.pending.length, 1);
+    assert.equal(normal.rows[0].label, 'UNRESOLVED CPU MISS (not certification)');
+    assert.ok(verifyGateSuite({ ...options, family }).errors.length, 'changed bytes retain the large-miss eligibility refusal');
   }
 });
 

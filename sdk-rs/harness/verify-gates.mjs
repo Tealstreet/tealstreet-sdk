@@ -14,7 +14,7 @@ import { pendingBitgetSteady } from './bitget-paired-steady.mjs';
 
 /** Strict remains the default. Collection may retain an eligible unresolved
  * CPU miss, but cannot label it PASS or supply final certification. */
-export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_DIFFERENCES, mode = 'strict', family }) {
+export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_DIFFERENCES, mode = 'strict', family, sourceHead }) {
   if (!['strict', 'collect', 'correctness'].includes(mode)) throw new Error('unknown gate verifier mode');
   const errors = [], cases = [], rows = [], pending = [], seen = new Set();
   let passes = 0, strictFailures = 0, knownFailures = 0, acceptedGates = 0;
@@ -32,7 +32,7 @@ export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_
     if (ledgerMismatch) errors.push(`Invalid ledger exit code: ${identity}`);
     let assessment = (mode === 'correctness' ? assessCorrectnessReport : assessGateReport)(report, manifest, accepted);
     const unchanged = mode === 'collect' && family && !ledgerMismatch && familyCpuMiss(entry, assessment);
-    if (unchanged) assessment = familyCpuAssessment(assessment, report, family, report.ciWasm?.sourceHead);
+    if (unchanged) assessment = familyCpuAssessment(assessment, report, family, sourceHead);
     const eligible = mode === 'collect' && cpuRemeasureEnabled(suite) && !ledgerMismatch && assessment.errors.length > 0 &&
       (assessEligibility({ report, raw: entry.raw }).eligible || suite === 'bitget' && pendingBitgetSteady(entry, manifest));
     if (eligible) pending.push({ venue: report.venue, tape: report.tape, books: report.books, tapeSha256: report.tapeSha256 });

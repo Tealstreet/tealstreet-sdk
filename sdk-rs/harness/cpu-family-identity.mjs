@@ -94,9 +94,11 @@ export function readFamilyIdentity({ entries, authority, state, runtimeManifest 
 
 export function familyCpuAssessment(assessment, report, certificate, source) {
   if (!certificate) return assessment;
-  insist(certificates.has(certificate) && report.private === false && report.ciWasm?.sourceHead === source &&
-    source === certificate.authority.candidate && venueFamily(report.venue) === certificate.authority.family &&
-    same(report.ciWasm.hashes, certificate.moduleHashes), 'unissued or mismatched family byte proof');
+  insist(certificates.has(certificate) && report.private === false &&
+    source === certificate.authority.candidate && venueFamily(report.venue) === certificate.authority.family,
+  'unissued or mismatched family byte proof');
+  insist(report.ciWasm === undefined || report.ciWasm?.sourceHead === source &&
+    same(report.ciWasm.hashes, certificate.moduleHashes), 'report metadata differs from issued family byte proof');
   const cpu = performanceObjectives(report.samples.ts, report.samples.rust).filter(value => CPU_FIELDS.includes(value.field));
   const failures = performanceFailures(report.samples.ts, report.samples.rust).filter(failure =>
     cpu.some(value => failure.startsWith(`performance ${value.label}:`)));
