@@ -1206,7 +1206,12 @@ export class RustEngineExchange extends BaseExchange {
     this.sourceOrdersAsk = undefined;
     this.sourceOrdersTimer = undefined;
     if (!ask || this.isDisposed || this.engineFailure) return;
-    void this.refreshAccountOrders(ask.symbols).catch((error: unknown) => {
+    this.refreshSourceOrders(ask.symbols);
+  };
+
+  private refreshSourceOrders = (symbols?: string[]) => {
+    if (this.isDisposed || this.engineFailure) return;
+    void this.refreshAccountOrders(symbols).catch((error: unknown) => {
       if (this.isDisposed) return;
       const reason = error instanceof Error ? error.message : String(error);
       this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
@@ -2225,6 +2230,10 @@ export class RustEngineExchange extends BaseExchange {
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
     if (event.code === 'orders.held' && this.frameFed) this.askSourceForOrders(event.fields);
+    if (event.code === 'orders.refresh' && this.frameFed) {
+      const named = typeof event.fields?.symbols === 'string' ? event.fields.symbols.split(',') : [''];
+      this.refreshSourceOrders(named.includes('') ? undefined : named);
+    }
     this.emitter.emit('engine-event', event);
     if (event.level === 'error')
       this.emitAndLogError(

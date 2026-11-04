@@ -1919,6 +1919,9 @@ struct IoCore {
     /// Data source: a frame-fed page's asks for fresh orders.
     #[cfg(feature = "order-locks")]
     orders_refresh: OrdersRefresh,
+    /// Frame-fed: a plain Unknown cancel owes a source read even without a fence.
+    #[cfg(feature = "order-locks")]
+    cancel_refresh: Option<(Option<Vec<String>>, f64)>,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -2193,6 +2196,8 @@ impl Default for IoCore {
             order_response_read: None,
             #[cfg(feature = "order-locks")]
             orders_refresh: OrdersRefresh::default(),
+            #[cfg(feature = "order-locks")]
+            cancel_refresh: None,
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -3262,6 +3267,16 @@ impl<P> Cx<'_, P> {
         false
     }
 
+    /// A source refresh ask is outstanding. Join an older census and owe one
+    /// successor rather than starting a competing read; its cover must still
+    /// come from a release after the ask. This grants no commit authority.
+    pub fn orders_refresh_pending(&self) -> bool {
+        #[cfg(feature = "order-locks")]
+        return self.io.core.orders_refresh.in_flight.is_some();
+        #[cfg(not(feature = "order-locks"))]
+        false
+    }
+
     /// The order-uncertainty epoch now. A read that spans several contexts (a
     /// paged census) records it before its first page and reports through
     /// `orders_reconciled_since`, so it clears only marks its first page saw.
@@ -3700,6 +3715,9 @@ impl crate::engine::CoreCx<'_> {
         };
         // A credential-free route's auth-kind refusal is no credential evidence.
         let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
+        #[cfg(feature = "order-locks")]
+        let cancel = self.io.core.request_contexts.owner_intent(command)
+            == Some(crate::classify::Intent::Cancel);
         self.io.finish_command_wait(command);
         self.io.retire_http_command(command);
         if !self.io.core.request_contexts.finish(command) {
@@ -3747,6 +3765,21 @@ impl crate::engine::CoreCx<'_> {
                     _ => 0.,
                 };
                 let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
+                if self.io.core.frame_fed && unknown && cancel {
+                    let at = if self.now.is_finite() {
+                        self.now + delay
+                    } else {
+                        0.
+                    };
+                    let (symbols, due) = match self.io.core.cancel_refresh.take() {
+                        Some((pending, due)) => {
+                            (OrdersRefresh::merge(pending, scope.clone()), due.max(at))
+                        }
+                        None => (scope.clone(), at),
+                    };
+                    // A long rate-limit wait cannot accumulate unbounded symbol names.
+                    self.io.core.cancel_refresh = Some((symbols.filter(|s| s.len() <= 64), due));
+                }
                 self.io.queue_reconcile(scope, self.now + delay);
             }
             self.io.core.active_commands.remove(&command);
@@ -6259,9 +6292,35 @@ impl<V: Venue> Engine<V> {
                 self.fence_marks.push((token, now));
             }
             self.announce_orders_held(now);
-            if let Some((timer, _)) = self.reconcile_timer.take() {
-                self.io.core.actions.push(Action::ClearTimer { timer });
-            }
+            let next = if self.venue.refreshes_orders() {
+                let due = self.io.core.cancel_refresh.as_ref().map(|(_, at)| *at);
+                if due.is_some_and(|at| at <= now || !now.is_finite()) {
+                    let (symbols, _) = self
+                        .io
+                        .core
+                        .cancel_refresh
+                        .take()
+                        .expect("due cancel refresh");
+                    let named = symbols.map(|s| s.join(",")).unwrap_or_default();
+                    // A control ask must survive the host's diagnostic log filter.
+                    self.io
+                        .core
+                        .actions
+                        .push(Action::Notice(Notice::Event(LogEvent {
+                            level: Level::Info,
+                            code: crate::log::code::ORDERS_REFRESH,
+                            message: "An unknown cancel requests a fresh source orders read".into(),
+                            fields: vec![("symbols", Value::Str(named))],
+                        })));
+                    None
+                } else {
+                    due
+                }
+            } else {
+                self.io.core.cancel_refresh = None;
+                None
+            };
+            self.arm_reconcile_timer(next);
             return;
         }
         // A refresh read that never landed frees its slot; its asks retry once.
@@ -6343,6 +6402,11 @@ impl<V: Venue> Engine<V> {
             .chain(self.io.core.fence_reread.map(|(at, _)| at))
             .chain(self.io.core.orders_refresh.deadline())
             .min_by(f64::total_cmp);
+        self.arm_reconcile_timer(next);
+    }
+
+    #[cfg(feature = "order-locks")]
+    fn arm_reconcile_timer(&mut self, next: Option<f64>) {
         if self.reconcile_timer.map(|(_, at)| at) == next {
             return;
         }

@@ -1745,9 +1745,14 @@ impl BybitLinear {
         }
     }
 
-    /// Reconcile an uncertain write with a fresh order read: an older read
-    /// still out predates the write, so it is abandoned rather than joined.
+    /// A source refresh joins an older census and owes one fresh successor;
+    /// its epoch/cover still proves only its own cut. Native uncertain writes
+    /// without a source ask keep abandoning their older read.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.orders_refresh_pending() && self.account.orders.is_some() {
+            self.account.orders_follow_up = true;
+            return;
+        }
         if let Some(old) = self.account.orders.take() {
             Self::finish_read_root(cx, old.root, &old.legs);
         }
