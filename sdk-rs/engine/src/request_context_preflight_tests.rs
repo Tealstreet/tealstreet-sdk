@@ -920,10 +920,10 @@ fn preflight_failure_refuses_invalid_custody_before_converting_the_error() {
     })
     .unwrap();
     let before = local.io.core.actions.len();
-    for (label, handle, now) in [
-        ("foreign", &foreign, 2.),
-        ("revoked", &revoked, 2.),
-        ("nonfinite", &live, f64::NAN),
+    for (label, handle, now, expected) in [
+        ("foreign", &foreign, 2., Error::Revoked),
+        ("revoked", &revoked, 2., Error::Revoked),
+        ("nonfinite", &live, f64::NAN, Error::Invalid),
     ] {
         for panic in [false, true] {
             let conversions = Cell::new(0);
@@ -939,8 +939,8 @@ fn preflight_failure_refuses_invalid_custody_before_converting_the_error() {
                 })
             }));
             assert!(
-                matches!(result, Ok(Err(_))),
-                "{label}: refusal must not run conversion"
+                matches!(result, Ok(Err(error)) if error == expected),
+                "{label}: typed refusal must not run conversion"
             );
             assert_eq!(conversions.get(), 0, "{label}: conversion is after custody");
             assert_eq!(

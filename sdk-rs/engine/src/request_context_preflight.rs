@@ -380,6 +380,10 @@ impl<P> Cx<'_, P> {
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        // Conversion is caller code; refused custody must not run it.
+        #[cfg(not(feature = "condition-waits"))]
+        self.core_ref()
+            .validate_preflight_failure_custody(preflight)?;
         self.core().fail_preflight(preflight, error.into())
     }
 }
