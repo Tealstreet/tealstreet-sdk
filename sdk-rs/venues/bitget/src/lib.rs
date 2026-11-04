@@ -1213,6 +1213,11 @@ impl Venue for BitgetFutures {
             );
         }
     }
+    fn on_signing_release(&mut self, target: safe_cex_engine::SigningTarget<'_, Pending>, release: safe_cex_engine::SigningRelease) {
+        if let safe_cex_engine::SigningTarget::Http { pending, .. } = target {
+            self.position_read_released(pending, release);
+        }
+    }
     fn on_sign_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
