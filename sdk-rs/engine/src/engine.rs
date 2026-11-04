@@ -11193,3 +11193,7 @@ mod read_cover_lift_tests;
 #[cfg(all(test, feature = "order-locks"))]
 #[path = "orders_refresh_tests.rs"]
 mod orders_refresh_tests;
+
+#[cfg(test)]
+#[path = "retried_read_diagnostic_tests.rs"]
+mod retried_read_diagnostic_tests;
