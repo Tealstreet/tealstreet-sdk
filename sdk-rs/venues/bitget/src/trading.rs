@@ -419,8 +419,16 @@ struct ReplyData<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReplyItem<'a> {
-    #[serde(borrow)]
+    #[serde(default, borrow)]
     order_id: Identifier<'a>,
+    #[serde(default, borrow)]
+    client_oid: Option<ReplyClientId<'a>>,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ReplyClientId<'a> {
+    Known(#[serde(borrow)] Identifier<'a>),
+    Invalid(serde::de::IgnoredAny),
 }
 #[derive(Deserialize)]
 struct ListResult {
@@ -1979,11 +1987,7 @@ impl BitgetFutures {
                 });
             } else if strategy {
                 let mut payload = self.classic(cx, &order.symbol)?;
-                if order.kind == OrderType::TrailingStopLoss {
-                    payload.order_id_list = Some(vec![CancelId { order_id: id }]);
-                } else {
-                    payload.order_id = Some(id);
-                }
+                payload.order_id_list = Some(vec![CancelId { order_id: id }]);
                 payload.plan_type = Some(
                     self.account
                         .plans
@@ -2500,8 +2504,29 @@ impl BitgetFutures {
                 d.success_list
                     .iter()
                     .map(|i| i.order_id.text().into_owned())
+                    .filter(|id| !id.is_empty())
                     .collect()
             });
+            if request.call.path == paths::CANCEL_PLAN
+                && let Some(data) = data
+            {
+                for item in &data.success_list {
+                    if !item.order_id.text().is_empty() {
+                        continue;
+                    }
+                    let Some(ReplyClientId::Known(client)) = &item.client_oid else {
+                        continue;
+                    };
+                    let client = client.text();
+                    if !client.is_empty() {
+                        for order in orders {
+                            if order.client_order_id.as_deref() == Some(client.as_ref()) {
+                                accepted.insert(native_id(order));
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(data) = data {
                 let native = data.order_id.text();
                 let client = data.client_oid.text();
@@ -2912,19 +2937,11 @@ impl BitgetFutures {
                     margin_coin: p.margin_coin.clone(),
                     ..Payload::default()
                 };
+                payload.order_id_list = Some(vec![CancelId {
+                    order_id: id.clone(),
+                }]);
                 if strategy {
                     payload.plan_type = p.plan_type.clone();
-                    if request.call.path == paths::PLACE_TRAILING {
-                        payload.order_id_list = Some(vec![CancelId {
-                            order_id: id.clone(),
-                        }]);
-                    } else {
-                        payload.order_id = Some(id.clone());
-                    }
-                } else {
-                    payload.order_id_list = Some(vec![CancelId {
-                        order_id: id.clone(),
-                    }]);
                 }
                 payload
             };
@@ -2961,7 +2978,7 @@ impl BitgetFutures {
                 remaining: 0.0,
                 reduce_only: false,
                 close: None,
-                client_order_id: None,
+                client_order_id: p.client_oid.clone(),
                 time_in_force: None,
                 last_update: cx.now,
                 trigger_type: None,

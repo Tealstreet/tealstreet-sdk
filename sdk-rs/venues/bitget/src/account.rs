@@ -2937,6 +2937,7 @@ pub(crate) fn plan_type(value: &str) -> Option<&'static str> {
         "sl" | "loss_plan" => "loss_plan",
         "tp" | "profit_plan" => "profit_plan",
         "track" | "track_plan" => "track_plan",
+        "moving_plan" => "moving_plan",
         _ => return None,
     })
 }
@@ -2946,7 +2947,7 @@ pub(crate) fn order_type(value: &str) -> Option<OrderType> {
         "market" => OrderType::Market,
         "pos_loss" | "loss_plan" | "psl" | "sl" => OrderType::StopLoss,
         "pos_profit" | "profit_plan" | "ptp" | "tp" => OrderType::TakeProfit,
-        "track_plan" | "track" | "trailing_stop" => OrderType::TrailingStopLoss,
+        "track_plan" | "moving_plan" | "track" | "trailing_stop" => OrderType::TrailingStopLoss,
         _ => return None,
     })
 }
