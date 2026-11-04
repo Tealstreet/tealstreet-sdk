@@ -2993,6 +2993,9 @@ impl crate::engine::IoCore {
 mod tests {
     use super::*;
     use crate::request_context::{Admission, Pacing, Policy, RetryPolicy, Scope};
+    mod completion {
+        include!("http_completion_tests.rs");
+    }
     #[cfg(feature = "http-plans")]
     include!("request_context_preflight_call_tests.rs");
     #[cfg(feature = "http-plans")]
@@ -3154,6 +3157,10 @@ mod tests {
     }
     #[derive(Default)]
     struct Probe {
+        #[cfg(feature = "session-bearer")]
+        session_fixture: Option<Session>,
+        #[cfg(feature = "session-bearer")]
+        bearer_fixture: Option<u64>,
         count: usize,
         command: Option<CommandId>,
         deny: bool,
@@ -3204,6 +3211,26 @@ mod tests {
         minimum_gap_ms: 450.,
     };
     impl Venue for Probe {
+        #[cfg(feature = "session-bearer")]
+        fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
+            self.session_fixture
+                .as_ref()
+                .filter(|s| s.owner() == Owner::Session { generation })
+                .and(self.bearer_fixture)
+        }
+        #[cfg(feature = "session-bearer")]
+        fn session_bearer(&self, generation: u64) -> crate::request_context::SessionBearer {
+            use crate::request_context::{SecretHeaderValue, SessionBearer, SessionHeaders};
+            match self.session_bearer_revision(generation) {
+                Some(revision) => SessionBearer::Ready {
+                    headers: SessionHeaders::authorization(
+                        SecretHeaderValue::new(format!("fixture-{revision}")).unwrap(),
+                    ),
+                    revision,
+                },
+                None => SessionBearer::NotReady,
+            }
+        }
         #[inline]
         fn dispatch_nonce() -> bool {
             true
