@@ -3076,6 +3076,62 @@ impl<P> Cx<'_, P> {
             .commit_orders_read(read, scope, in_scope, rows, unproven)
     }
 
+    /// The release of the read this response answers, only inside that response.
+    /// A venue whose census spans independent reads keeps the earliest of its
+    /// legs' marks and commits from it (`commit_orders_read_from`).
+    #[cfg(feature = "order-locks")]
+    pub fn order_read_mark(&self) -> Option<crate::order_read_cover::OrderReadMark> {
+        let (epoch, read) = self.io.core.order_response_read?;
+        (self.io.core.order_response_token == Some(epoch)).then_some(read)
+    }
+
+    /// `commit_orders_read` for rows drawn from several independent reads: the
+    /// cover and the refusals go by the earliest of `earliest` and this
+    /// response's own release, never the last leg's alone (H9).
+    #[cfg(feature = "order-locks")]
+    pub fn commit_orders_read_from(
+        &mut self,
+        earliest: crate::order_read_cover::OrderReadMark,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: Vec<crate::model::Order>,
+        unproven: &[String],
+    ) -> Option<Vec<String>> {
+        let read = self.order_read_mark()?.earliest(earliest);
+        self.store
+            .commit_orders_read(read, scope, in_scope, rows, unproven)
+    }
+
+    /// `orders_read_refusals` for rows drawn from several independent reads.
+    #[cfg(feature = "order-locks")]
+    pub fn orders_read_refusals_from(
+        &self,
+        earliest: crate::order_read_cover::OrderReadMark,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: &[crate::model::Order],
+    ) -> Option<Vec<String>> {
+        let read = self.order_read_mark()?.earliest(earliest);
+        self.store.orders_read_refusals(read, scope, in_scope, rows)
+    }
+
+    /// What `commit_orders_read` with these rows would refuse, without changing
+    /// anything (`None`: the whole read, or no read response to commit). A venue
+    /// updates its own per-order state only for the symbols this admits.
+    #[cfg(feature = "order-locks")]
+    pub fn orders_read_refusals(
+        &self,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: &[crate::model::Order],
+    ) -> Option<Vec<String>> {
+        let (epoch, read) = self.io.core.order_response_read?;
+        if self.io.core.order_response_token != Some(epoch) {
+            return None;
+        }
+        self.store.orders_read_refusals(read, scope, in_scope, rows)
+    }
+
     /// Call only after accepting a complete, fresh authoritative order read.
     /// A read started before an uncertain placement cannot clear its fence.
     pub fn orders_reconciled(&mut self, symbol: Option<&str>) {

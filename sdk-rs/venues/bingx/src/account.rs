@@ -90,6 +90,9 @@ pub enum Request {
     },
 }
 
+/// The one read-cover scope of BingX's account-wide open-orders read.
+const ORDERS_SCOPE: &str = "orders";
+
 type OrderMeta = (Order, String, String, bool, String);
 
 /// One background per-symbol settings refresh. Both legs share the issue-time
@@ -1497,43 +1500,65 @@ impl Account {
                     return;
                 }
                 let complete = skipped.is_empty();
-                let mut kept_ids = Vec::new();
-                let committed = cx.store.commit_orders_snapshot([snapshot], |current| {
-                    // Startup history is a baseline; later REST reads cannot consume live executions.
-                    if !self.orders_seeded {
-                        for order in &rows {
-                            if order.filled
-                                > self.cumulative_fills.get(&order.id).copied().unwrap_or(0.0)
-                            {
-                                self.covered_history.insert(order.id.clone());
-                            }
-                            self.record_cumulative(&order.id, order.filled);
+                // A malformed row never removes the known open order it names.
+                let unidentified = skipped.iter().any(String::is_empty);
+                let kept: Vec<_> = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| {
+                        o.status == OrderStatus::Open
+                            && (unidentified || skipped.contains(&o.id))
+                            && !self.terminal_orders.contains_key(&o.id)
+                            && !rows.iter().any(|row| row.id == o.id)
+                    })
+                    .cloned()
+                    .collect();
+                let kept_ids: Vec<String> = kept.iter().map(|order| order.id.clone()).collect();
+                let fresh: Vec<Order> = rows.clone();
+                rows.extend(kept);
+                // Rows and venue-side order state change together, only for the
+                // symbols this read may replace (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+                let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                    key: ORDERS_SCOPE,
+                    account: &[ORDERS_SCOPE],
+                };
+                // Refused whole: a newer read of these rows has already committed.
+                let Some(refused) = cx.orders_read_refusals(scope, |_| true, &rows) else {
+                    return;
+                };
+                let admitted = |symbol: &str| !refused.iter().any(|held| held == symbol);
+                // Startup history is a baseline; later REST reads cannot consume live executions.
+                if !self.orders_seeded {
+                    for order in fresh.iter().filter(|order| admitted(&order.symbol)) {
+                        if order.filled
+                            > self.cumulative_fills.get(&order.id).copied().unwrap_or(0.0)
+                        {
+                            self.covered_history.insert(order.id.clone());
                         }
+                        self.record_cumulative(&order.id, order.filled);
                     }
-                    self.orders_seeded = true;
-                    self.observations.extend(metas);
-                    // A malformed row never removes the known open order it names.
-                    let unidentified = skipped.iter().any(String::is_empty);
-                    let kept: Vec<_> = current
-                        .iter()
-                        .filter(|o| {
-                            o.status == OrderStatus::Open
-                                && (unidentified || skipped.contains(&o.id))
-                                && !self.terminal_orders.contains_key(&o.id)
-                                && !rows.iter().any(|row| row.id == o.id)
-                        })
-                        .cloned()
-                        .collect();
-                    kept_ids.extend(kept.iter().map(|order| order.id.clone()));
-                    rows.extend(kept);
-                    rows
-                });
-                if committed {
+                }
+                self.orders_seeded = true;
+                self.observations
+                    .extend(metas.into_iter().filter(|meta| admitted(&meta.0.symbol)));
+                // Any row the read could not map proves the account nothing.
+                let mut cover_unproven = unproven.clone();
+                if !complete {
+                    cover_unproven.push(String::new());
+                }
+                if cx
+                    .commit_orders_read(scope, |_| true, rows, &cover_unproven)
+                    .is_some()
+                {
+                    cx.store.set_orders_loaded();
                     open_order::log_issues(cx, &mut self.skip_logged, &issues, &kept_ids);
                     if complete {
                         self.orders_witness = cx.store.begin_orders_snapshot();
                     }
-                    cx.orders_reconciled_except(&unproven, read_epoch);
+                    let mut fenced = unproven;
+                    fenced.extend(refused);
+                    cx.orders_reconciled_except(&fenced, read_epoch);
                 }
             }
         }

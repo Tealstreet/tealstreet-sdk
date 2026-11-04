@@ -16,6 +16,16 @@ pub struct OrderReadMark {
     pub sent: f64,
 }
 
+impl OrderReadMark {
+    /// The earlier of two releases: rows from both are as old as the older.
+    pub fn earliest(self, other: Self) -> Self {
+        Self {
+            seq: self.seq.min(other.seq),
+            sent: self.sent.min(other.sent),
+        }
+    }
+}
+
 /// What one read commit speaks for.
 #[derive(Clone, Copy, Debug)]
 pub enum OrderReadScope<'a> {

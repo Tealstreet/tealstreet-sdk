@@ -552,26 +552,33 @@ impl Store {
         self.read_covers.sequence()
     }
 
-    /// Commit one read's rows for `scope`, atomically with the cover it proves.
-    /// A symbol whose rows changed after the read was released keeps them, and
-    /// the read proves nothing for it; an account scope committed after the
-    /// read refuses all of it. `in_scope` selects an account scope's symbols.
-    /// `unproven` names symbols whose rows the read could not map (rejected or
-    /// unsupported rows); its rows still commit, but it proves no cover for
-    /// them, and an empty symbol (a row naming no market) proves none at all.
-    /// Returns the refused symbols, or `None` when the whole read was refused.
-    pub fn commit_orders_read(
-        &mut self,
+    /// What `commit_orders_read` with these rows would refuse, decided now and
+    /// changing nothing: `None` when it would refuse the whole read. A venue
+    /// keeping its own per-order state applies it only for symbols this admits,
+    /// then commits the same rows in the same handler.
+    pub fn orders_read_refusals(
+        &self,
         read: OrderReadMark,
         scope: OrderReadScope<'_>,
         in_scope: impl Fn(&str) -> bool,
-        rows: Vec<Order>,
-        unproven: &[String],
+        rows: &[Order],
     ) -> Option<Vec<String>> {
         let selects = |symbol: &str| match scope {
             OrderReadScope::Account { .. } => in_scope(symbol),
             OrderReadScope::Symbols(listed) => listed.contains(&symbol),
         };
+        let (_, admission) = self.admit_orders_read(read, scope, &selects, rows);
+        (!admission.whole_scope_refused).then_some(admission.refused)
+    }
+
+    /// The symbols a read speaks for, and which of them it may replace.
+    fn admit_orders_read(
+        &self,
+        read: OrderReadMark,
+        scope: OrderReadScope<'_>,
+        selects: &dyn Fn(&str) -> bool,
+        rows: &[Order],
+    ) -> (Vec<String>, crate::order_read_cover::Admission) {
         let mut candidates: Vec<String> = Vec::new();
         let listed: &[&str] = match scope {
             OrderReadScope::Symbols(listed) => listed,
@@ -594,6 +601,30 @@ impl Store {
         let admission = self
             .read_covers
             .admit(read, scope, candidates.iter().map(String::as_str));
+        (candidates, admission)
+    }
+
+    /// Commit one read's rows for `scope`, atomically with the cover it proves.
+    /// A symbol whose rows changed after the read was released keeps them, and
+    /// the read proves nothing for it; an account scope committed after the
+    /// read refuses all of it. `in_scope` selects an account scope's symbols.
+    /// `unproven` names symbols whose rows the read could not map (rejected or
+    /// unsupported rows); its rows still commit, but it proves no cover for
+    /// them, and an empty symbol (a row naming no market) proves none at all.
+    /// Returns the refused symbols, or `None` when the whole read was refused.
+    pub fn commit_orders_read(
+        &mut self,
+        read: OrderReadMark,
+        scope: OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: Vec<Order>,
+        unproven: &[String],
+    ) -> Option<Vec<String>> {
+        let selects = |symbol: &str| match scope {
+            OrderReadScope::Account { .. } => in_scope(symbol),
+            OrderReadScope::Symbols(listed) => listed.contains(&symbol),
+        };
+        let (candidates, admission) = self.admit_orders_read(read, scope, &selects, &rows);
         if admission.whole_scope_refused {
             return None;
         }
@@ -1959,6 +1990,24 @@ mod tests {
             store.commit_orders_read(read, symbols, |_| false, vec![], &["BTC".to_owned()]);
             assert_eq!(store.read_covers.cover("BTC"), None);
             assert_eq!(store.read_covers.cover("ETH"), Some(2_000.));
+        }
+
+        // A preview refuses exactly what the commit then refuses, and changes
+        // nothing on the way.
+        #[test]
+        fn a_refusal_preview_matches_its_commit_and_changes_nothing() {
+            let mut store = Store::default();
+            let read = release(&store, 1.);
+            store.upsert_order(row("streamed", "BTC"));
+            let rows = vec![row("eth", "ETH")];
+            let before = store.order_read_sequence();
+            let preview = store.orders_read_refusals(read, ACCOUNT, |_| true, &rows);
+            assert_eq!(preview, Some(vec!["BTC".to_owned()]));
+            assert_eq!(store.order_read_sequence(), before);
+            assert_eq!(
+                store.commit_orders_read(read, ACCOUNT, |_| true, rows, &[]),
+                preview
+            );
         }
 
         // Until a read proves a cover, no output changes.
