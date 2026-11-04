@@ -38,6 +38,9 @@ const extractDomainFromUrl = (url: string): string | null => {
 };
 
 const WAITING_REDIAL_INTERVAL_MS = 5_000;
+const CONNECT_TIMEOUT_MS = 4_000;
+const CONNECT_AUDIT_MARGIN_MS = 2_000;
+const CONNECT_CHECK_TICK_MS = 1_000;
 
 export class HOWWebSocket {
   ws?: ReconnectingWebSocket;
@@ -95,6 +98,10 @@ export class HOWWebSocket {
   // The url the current connect attempt dialed, and whether that attempt opened.
   private dialedUrl = '';
   private dialOpened = false;
+  private dialStartedAt?: number;
+  private connectCheckTimeout?: ReturnType<typeof setTimeout>;
+  private lifecycleDocument?: Document;
+  private lifecycleWindow?: Window;
 
   constructor(
     url: string | (() => string),
@@ -114,7 +121,7 @@ export class HOWWebSocket {
     // 2. Pass Origin header for CloudFront to accept the WebSocket upgrade
     // 3. Force HTTP/1.1 via ALPNProtocols (WebSocket upgrade doesn't work over HTTP/2)
     // The library's own default, stated so a reader (and the network lint) can see the bound.
-    const options: Record<string, unknown> = { connectionTimeout: 4_000 };
+    const options: Record<string, unknown> = { connectionTimeout: CONNECT_TIMEOUT_MS };
 
     const Socket = this.WebSocketCtor ?? NodeWebSocket;
     if (Socket) {
@@ -131,9 +138,14 @@ export class HOWWebSocket {
     wsUrl.searchParams.set('t', String(Date.now()));
     // Resolved per attempt, so a reconnect after the lane falls back dials 443.
     const dialUrl = () => {
-      this.dialedUrl = tunnelDialUrl(wsUrl.toString());
-      this.dialOpened = false;
-      return this.dialedUrl;
+      const dialedUrl = tunnelDialUrl(wsUrl.toString());
+      // A disposed wrapper cannot update another connection's bookkeeping.
+      if (this.ws === ws && ws.loopState.phase === 'connecting') {
+        this.dialedUrl = dialedUrl;
+        this.dialOpened = false;
+        this.dialStartedAt = Date.now();
+      }
+      return dialedUrl;
     };
     ws = new ReconnectingWebSocket(dialUrl, protocols, options);
     ws.binaryType = 'arraybuffer';
@@ -225,6 +237,47 @@ export class HOWWebSocket {
     return true;
   };
 
+  /** Timer delivery is not a deadline: check elapsed wall time whenever JS runs. */
+  redialIfConnectExpired = (): boolean => {
+    const socket = this.ws;
+    const loop = socket?.loopState;
+    if (this.isDisposed || this.isOpen || !socket || loop?.phase !== 'connecting') return false;
+    const startedAt = this.dialStartedAt ?? loop.since;
+    if (socket.readyState === socket.OPEN || Date.now() - startedAt <= CONNECT_TIMEOUT_MS + CONNECT_AUDIT_MARGIN_MS)
+      return false;
+
+    // Native timeout wins when timers run normally; recovery keeps its retry count.
+    // onClose counts a failed handshake only if this attempt actually obtained a URL.
+    return socket.timeoutConnecting();
+  };
+
+  private checkConnectOnVisibility = () => {
+    if (this.lifecycleDocument?.visibilityState === 'visible') this.redialIfConnectExpired();
+  };
+
+  private checkConnectOnResume = () => {
+    this.redialIfConnectExpired();
+  };
+
+  private scheduleConnectCheck = () => {
+    if (
+      this.isDisposed ||
+      this.isOpen ||
+      !this.ws ||
+      this.ws.loopState.phase === 'stopped' ||
+      this.connectCheckTimeout !== undefined
+    )
+      return;
+    this.connectCheckTimeout = setTimeout(() => {
+      this.connectCheckTimeout = undefined;
+      try {
+        this.redialIfConnectExpired();
+      } finally {
+        this.scheduleConnectCheck();
+      }
+    }, CONNECT_CHECK_TICK_MS);
+  };
+
   connectAndSubscribe = () => {
     this.isInitialized = true;
     if (!this.isDisposed) {
@@ -235,6 +288,17 @@ export class HOWWebSocket {
       this.ws.onopen = this.onOpen.bind(this);
       this.ws.onmessage = this.onMessage.bind(this);
       this.ws.onclose = this.onClose.bind(this);
+
+      if (!this.lifecycleDocument && typeof document !== 'undefined') {
+        this.lifecycleDocument = document;
+        document.addEventListener('visibilitychange', this.checkConnectOnVisibility);
+        document.addEventListener('resume', this.checkConnectOnResume);
+      }
+      if (!this.lifecycleWindow && typeof window !== 'undefined') {
+        this.lifecycleWindow = window;
+        window.addEventListener('pageshow', this.checkConnectOnResume);
+      }
+      this.scheduleConnectCheck();
     }
   };
 
@@ -244,6 +308,8 @@ export class HOWWebSocket {
     noteTunnelDialOpened(this.dialedUrl);
     if (!this.isDisposed) {
       this.isOpen = true;
+      clearTimeout(this.connectCheckTimeout);
+      this.connectCheckTimeout = undefined;
 
       this.pingTimeoutId = setTimeout(() => this.ping(), 5_000);
       // A socket that opens and then never pongs must be redialed too, not only one that stops.
@@ -335,6 +401,8 @@ export class HOWWebSocket {
     this.epoch++;
     if (!this.dialOpened && this.dialedUrl && !this.isDisposed) noteTunnelDialFailed(this.dialedUrl);
     this.dialedUrl = '';
+    this.dialOpened = false;
+    this.dialStartedAt = undefined;
     this.isOpen = false;
     this.isTimeSynced = false;
     this.isTokenSent = false;
@@ -354,6 +422,7 @@ export class HOWWebSocket {
 
     // Stop latency checks
     this.stopLatencyChecks();
+    if (!this.isDisposed) this.scheduleConnectCheck();
   };
 
   // ==================== Latency Tracking ====================
@@ -527,6 +596,14 @@ export class HOWWebSocket {
     clearTimeout(this.lastMessageTimeout);
     this.lastMessageTimeout = undefined;
     this.stopLatencyChecks();
+
+    clearTimeout(this.connectCheckTimeout);
+    this.connectCheckTimeout = undefined;
+    this.lifecycleDocument?.removeEventListener('visibilitychange', this.checkConnectOnVisibility);
+    this.lifecycleDocument?.removeEventListener('resume', this.checkConnectOnResume);
+    this.lifecycleWindow?.removeEventListener('pageshow', this.checkConnectOnResume);
+    this.lifecycleDocument = undefined;
+    this.lifecycleWindow = undefined;
 
     this.ws?.terminate?.();
     this.ws = undefined;
