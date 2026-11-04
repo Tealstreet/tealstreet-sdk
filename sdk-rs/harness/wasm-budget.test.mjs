@@ -143,6 +143,7 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
     ['apexomni', 1_974_257, 1_984_512],
     ['asterdex', 2_113_727, 2_124_800],
     ['backpack', 1_876_304, 1_887_232],
+    ['binance', 2_184_476, 2_195_456],
     ['bingx', 2_015_091, 2_025_472],
     ['bitget', 2_306_497, 2_317_312],
     ['bitgetusdc', 2_306_497, 2_317_312],
@@ -202,13 +203,4 @@ test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
-});
-
-test('Binance refresh cap (PR run 41902169062 at a512a9d20f1) retains headroom', () => {
-  const [measured, cap] = [2_195_793, 2_206_720];
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES.binance, cap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'binance'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'binance'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'binance'), /exceeds/);
 });

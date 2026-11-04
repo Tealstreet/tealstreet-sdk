@@ -133,13 +133,11 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // cryptocom 1,716,657, kucoin 1,670,273, kucoinspot 2,253,260, lighter 1,991,579, mexc 1,729,817 B.
 // #3047 Phemex read covers at d8899b7a3e0: PR run 41868980693 measured phemex 2,054,401 and
 // kraken 2,121,746 B; CI size plus 10 KiB rounded up to the KiB, krakenspot equal to kraken.
-// #3062 PR run 41902169062 at a512a9d20f1 (master b0d2122742d with #3056's Binance refresh):
-// binance 2,195,793 B; CI size plus 10 KiB rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
   asterdex: 2_124_800,
   backpack: 1_887_232,
-  binance: 2_206_720,
+  binance: 2_195_456,
   bingx: 2_025_472,
   bitget: 2_317_312,
   bitgetusdc: 2_317_312,
