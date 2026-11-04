@@ -227,7 +227,8 @@ test('replay checkout preserves real merge parents after a branch update from ma
   const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   const gate = /^  gate:\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:\n)/m.exec(workflow)?.[1];
   assert(gate, 'missing replay measurement job');
-  const configuredDepth = Number(/uses: actions\/checkout@v7\n\s+with:\n\s+fetch-depth: (\d+)/.exec(gate)?.[1] ?? '1');
+  assert.match(gate, /uses: actions\/checkout@v7\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          fetch-depth: 1\n          fetch-tags: false\n      - uses: \.\/\.github\/actions\/fetch-rust-history\n(?=      - )/);
+  const historyHelper = resolve('.github/actions/fetch-rust-history/fetch-history.py');
   const root = fs.realpathSync(fs.mkdtempSync(resolve(tmpdir(), 'cpu-checkout-history-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const origin = resolve(root, 'origin'); fs.mkdirSync(origin);
@@ -250,7 +251,18 @@ test('replay checkout preserves real merge parents after a branch update from ma
   const shallow = clone('working-control-shallow', 1);
   assert.equal(git(shallow, 'show', '-s', '--format=%P', 'HEAD'), '', 'depth-one Git hides both parents');
   assert.deepEqual(git(shallow, 'cat-file', '-p', 'HEAD').split('\n').filter(line => line.startsWith('parent ')).map(line => line.slice(7)), [base, head]);
-  const actual = clone('configured-checkout', configuredDepth);
+  const actual = resolve(root, 'configured-checkout'); fs.mkdirSync(actual);
+  git(actual, 'init', '-q', '-b', 'master'); git(actual, 'remote', 'add', 'origin', url);
+  git(actual, 'fetch', '--no-tags', '--depth=1', 'origin', checkout);
+  git(actual, 'checkout', '-q', '--detach', checkout);
+  assert.equal(git(actual, 'show', '-s', '--format=%P', 'HEAD'), '', 'exact-SHA checkout begins shallow');
+  const eventPath = resolve(root, 'event.json');
+  fs.writeFileSync(eventPath, JSON.stringify({ pull_request: {
+    base: { sha: base, ref: 'master' }, head: { sha: head },
+  } }));
+  execFileSync('python3', [historyHelper], { cwd: actual, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, GITHUB_SHA: checkout, GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: eventPath } });
+  assert.equal(git(actual, 'rev-parse', '--is-shallow-repository'), 'false');
   assert.equal(git(actual, 'rev-parse', 'HEAD'), checkout);
   assert.equal(git(actual, 'rev-parse', 'HEAD^{tree}'), tree);
   assert.deepEqual(git(actual, 'show', '-s', '--format=%P', 'HEAD').split(' '), [base, head],

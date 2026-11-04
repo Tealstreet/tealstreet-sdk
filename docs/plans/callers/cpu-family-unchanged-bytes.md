@@ -28,7 +28,8 @@ proof. Collector controls pin the exact candidate state after success and a fail
 base build; failures cannot emit a completed proof.
 
 
-Replay measurement jobs now use a full-history checkout, as the shared source
+Replay measurement jobs use the master workflow's exact-SHA shallow checkout
+followed by its unconditional targeted full-history helper, as the shared source
 selector requires. At a depth-one shallow boundary, Git's %P output is empty
 although the commit object and API both contain the two correct PR parents.
 This caused the family selector's parent assertion to fail in #2967; the
@@ -50,3 +51,8 @@ generated tracked/untracked files cannot enter that checkout. The candidate's
 HEAD, tracked diff and status are preserved on success and failure; its node/web
 packages and Cargo cache are never cleaned or replaced. Candidate bytes remain
 bound to the original archived runtime and provenance checks as before.
+
+The master merge retained its targeted-history workflow verbatim, replacing
+this PR's superseded depth-zero checkout. The real Git regression runs that
+production helper against a branch-updated PR composition and immutable event
+commits before asserting the unchanged authenticated parents and tree.
