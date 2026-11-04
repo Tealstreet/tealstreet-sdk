@@ -43,7 +43,9 @@ export interface PreparedHttp {
 }
 export interface BoundHttp {
   ready(): boolean;
-  /** Invoke the transport API synchronously, return its response promise. */
+  /** Recheck shared admission, then invoke claim + dispatch synchronously in handoff. Not group-compatible. */
+  admitDispatch?(handoff: () => void): Promise<void>;
+  /** Invoke synchronously inside admitDispatch when supplied; otherwise synchronously at call. */
   dispatch(): Promise<HttpResponse>;
   cancel?(): void;
 }
@@ -87,6 +89,7 @@ export interface VenueErrorDetail {
   kind?: 'rejected' | 'invalidInput' | 'insufficientBalance' | 'authInvalid' | 'authExpired' | 'authPermission'
     | 'rateLimited' | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
   outcome?: 'notSent' | 'rejected' | 'unknown';
+  causeCode?: string;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
@@ -191,6 +194,7 @@ export class ExchangeError extends Error {
   readonly kind?: NonNullable<VenueErrorDetail['kind']>;
   /** `unknown`: the write may have executed; `notSent`/`rejected`: it did not take effect. */
   readonly outcome?: NonNullable<VenueErrorDetail['outcome']>;
+  readonly causeCode?: string;
   readonly venueCode?: string;
   readonly venueMessage?: string;
   readonly retryAfterMs?: number;

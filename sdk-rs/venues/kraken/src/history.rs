@@ -8,9 +8,38 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::time;
-use safe_cex_engine::{Command, Cx, Method, Query, Response, VenueError};
+use safe_cex_engine::{Command, Cx, ErrorCause, ErrorKind, Method, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap};
+
+// Futures error vocabulary: docs.kraken.com/api/docs/futures-api/trading/get-history.
+fn response_failure(status: u16, code: &str, message: String) -> VenueError {
+    let code = code.split(':').next().unwrap_or(code).trim();
+    let (kind, cause) = match (status, code) {
+        (500..=599, _) => (ErrorKind::VenueUnavailable, ErrorCause::HistoryVenueError),
+        (429, _) => (ErrorKind::RateLimited, ErrorCause::HistoryRateLimited),
+        (401, _) => (ErrorKind::AuthInvalid, ErrorCause::HistoryAuthInvalid),
+        (403, _) => (ErrorKind::AuthPermission, ErrorCause::HistoryAuthPermission),
+        (_, "apiLimitExceeded") => (ErrorKind::RateLimited, ErrorCause::HistoryRateLimited),
+        (_, "authenticationError" | "unauthorized" | "nonceBelowThreshold" | "nonceDuplicate") => {
+            (ErrorKind::AuthInvalid, ErrorCause::HistoryAuthInvalid)
+        }
+        (_, "Server Error" | "Unavailable" | "marketUnavailable") => {
+            (ErrorKind::VenueUnavailable, ErrorCause::HistoryVenueError)
+        }
+        (400, _)
+        | (_, "invalidArgument" | "requiredArgumentMissing" | "invalidAmount" | "invalidUnit") => {
+            (ErrorKind::InvalidInput, ErrorCause::HistoryInvalidParams)
+        }
+        _ => (ErrorKind::Rejected, ErrorCause::HistoryVenueError),
+    };
+    let error = VenueError::new(message).kind(kind).cause_code(cause);
+    if !code.is_empty() && code.len() <= 64 {
+        error.venue_code(code)
+    } else {
+        error
+    }
+}
 
 const FILLS_PAGE: usize = 100;
 const LEDGER_PAGE: usize = 500;
@@ -693,6 +722,39 @@ impl Kraken {
         });
         Ok(())
     }
+    pub(crate) fn history_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        let message = format!(
+            "Kraken history failed: response did not contain the expected list: {}",
+            response.body
+        );
+        let error = match serde_json::from_str::<Envelope<'_>>(response.body) {
+            Ok(body)
+                if !body.error.is_empty()
+                    || !body.reason.is_empty()
+                    || (!body.result.is_empty() && body.result != "success")
+                    || (!body.status.is_empty() && body.status != "success") =>
+            {
+                let code = if !body.error.is_empty() {
+                    &body.error
+                } else if !body.reason.is_empty() {
+                    &body.reason
+                } else {
+                    &body.status
+                };
+                response_failure(response.status, code, message)
+            }
+            _ => VenueError::new(message)
+                .kind(ErrorKind::Internal)
+                .cause_code(ErrorCause::HistoryDecode),
+        };
+        self.history_finish(cx, request, Err(error));
+    }
+
     pub(crate) fn history_http(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -709,18 +771,23 @@ impl Kraken {
                 envelope
             }
             Ok(envelope) => {
-                self.history_failed(
-                    cx,
-                    request,
-                    &format!(
-                        "HTTP {} {} {} {} {}",
-                        response.status,
-                        envelope.result,
-                        envelope.status,
-                        envelope.error,
-                        envelope.reason
-                    ),
+                let message = format!(
+                    "Kraken history failed: HTTP {} {} {} {} {}",
+                    response.status,
+                    envelope.result,
+                    envelope.status,
+                    envelope.error,
+                    envelope.reason
                 );
+                let code = if !envelope.error.is_empty() {
+                    &envelope.error
+                } else if !envelope.reason.is_empty() {
+                    &envelope.reason
+                } else {
+                    &envelope.status
+                };
+                let error = response_failure(response.status, code, message);
+                self.history_finish(cx, request, Err(error));
                 return;
             }
             Err(error) => {
@@ -861,11 +928,22 @@ impl Kraken {
         request: Request,
         error: &str,
     ) {
-        self.history_finish(
-            cx,
-            request,
-            Err(VenueError::new(format!("Kraken history failed: {error}"))),
-        );
+        let mut failure = self.account.read_error.clone().unwrap_or_else(|| {
+            VenueError::new(error)
+                .kind(ErrorKind::Internal)
+                .cause_code(ErrorCause::HistoryDecode)
+        });
+        failure.message = format!("Kraken history failed: {error}");
+        if failure.cause_code.is_none()
+            && let Some(cause) = match failure.kind {
+                Some(ErrorKind::Network) => Some(ErrorCause::HistoryNetwork),
+                Some(ErrorKind::Timeout) => Some(ErrorCause::HistoryTimeout),
+                _ => None,
+            }
+        {
+            failure = failure.cause_code(cause);
+        }
+        self.history_finish(cx, request, Err(failure));
     }
 }
 

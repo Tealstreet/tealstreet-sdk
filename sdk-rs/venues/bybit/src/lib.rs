@@ -1422,13 +1422,12 @@ impl BybitLinear {
         let diagnostic =
             hint.map_or_else(|| message.to_owned(), |hint| format!("{hint} [{message}]"));
         let text = format!("Bybit rejected the {which} ({code}): {diagnostic}");
-        cx.notice(Level::Error, code::AUTH_REJECTED, &text);
-        cx.startup_failed(
-            VenueError::new(text)
-                .kind(kind)
-                .venue_code(code.to_string())
-                .venue_message(message),
-        );
+        let error = VenueError::new(text)
+            .kind(kind)
+            .venue_code(code.to_string())
+            .venue_message(message);
+        cx.notice_error(Level::Error, code::AUTH_REJECTED, &error);
+        cx.startup_failed(error);
         if !read_key && code != 10010 {
             cx.deactivate();
         }

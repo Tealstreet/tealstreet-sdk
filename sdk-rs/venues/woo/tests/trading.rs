@@ -666,6 +666,131 @@ fn leverage_commits_only_after_matching_authoritative_readback() {
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
 }
 #[test]
+fn leverage_readback_without_margin_mode_confirms_only_leverage() {
+    for margin_type in [None, Some(MarginType::Cross), Some(MarginType::Isolated)] {
+        let mut e = engine();
+        e.store_mut().update_setting("BTCUSDT", |s| {
+            s.leverage = 10.0;
+            s.margin_type = margin_type;
+        });
+        e.handle(
+            1000.0,
+            Event::Command(Command::SetLeverage {
+                command: 1,
+                symbol: "BTCUSDT".into(),
+                leverage: 20.0,
+                side: None,
+            }),
+        );
+        let a = e.drain_actions().collect::<Vec<_>>();
+        let write = req(&a, Method::Post, "/v1/client/futures_leverage");
+        let a = reply(&mut e, &write, 1010.0, r#"{"success":true}"#);
+        let read = req(&a, Method::Get, "/v1/client/futures_leverage");
+        let a = reply(
+            &mut e,
+            &read,
+            1020.0,
+            r#"{"success":true,"data":{"symbol":"PERP_BTC_USDT","position_mode":"ONE_WAY","details":[{"position_side":"BOTH","leverage":"20"}]}}"#,
+        );
+        assert!(
+            a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1, .. }))),
+            "{a:?}"
+        );
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+        );
+        let setting = e.store().setting("BTCUSDT").unwrap();
+        assert_eq!(setting.leverage, 20.0);
+        assert_eq!(setting.buy_leverage, Some(20.0));
+        assert_eq!(setting.sell_leverage, Some(20.0));
+        assert_eq!(
+            setting.margin_type, margin_type,
+            "missing mode is not confirmation"
+        );
+    }
+}
+
+#[test]
+fn absent_margin_mode_does_not_relax_leverage_readback_scope_or_value() {
+    let valid = r#"{"success":true,"data":{"symbol":"PERP_BTC_USDT","position_mode":"ONE_WAY","details":[{"position_side":"BOTH","leverage":"20"}]}}"#;
+    for body in [
+        valid.replace("PERP_BTC_USDT", "PERP_ETH_USDT"),
+        valid.replace(
+            "\"position_mode\"",
+            "\"margin_mode\":\"ISOLATED\",\"position_mode\"",
+        ),
+        valid.replace("ONE_WAY", "HEDGE_MODE"),
+        valid.replace("BOTH", "LONG"),
+        valid.replace("\"20\"", "\"10\""),
+        valid.replace("\"20\"", "\"0\""),
+        valid.replace("\"leverage\":\"20\"", "\"other\":\"20\""),
+        valid.replace("\"position_mode\":\"ONE_WAY\",", ""),
+        valid.replace(r#"{"position_side":"BOTH","leverage":"20"}"#, ""),
+    ] {
+        let mut e = engine();
+        e.store_mut()
+            .update_setting("BTCUSDT", |s| s.leverage = 10.0);
+        e.handle(
+            1000.0,
+            Event::Command(Command::SetLeverage {
+                command: 1,
+                symbol: "BTCUSDT".into(),
+                leverage: 20.0,
+                side: None,
+            }),
+        );
+        let a = e.drain_actions().collect::<Vec<_>>();
+        let write = req(&a, Method::Post, "/v1/client/futures_leverage");
+        let mut a = reply(&mut e, &write, 1010.0, r#"{"success":true}"#);
+        for attempt in 0..3 {
+            let read = req(&a, Method::Get, "/v1/client/futures_leverage");
+            a = reply(&mut e, &read, 1020.0 + attempt as f64 * 300.0, &body);
+            if attempt < 2 {
+                a = tick(&mut e, &a);
+            }
+            assert!(
+                !a.iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+            );
+        }
+        let error = failure(&a);
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{body}"
+        );
+        assert!(
+            error.message.contains("readback remains unconfirmed"),
+            "{error:?}"
+        );
+        assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+    }
+}
+
+#[test]
+fn margin_mode_mutation_is_not_confirmed_by_a_leverage_only_reply() {
+    let mut e = engine();
+    e.handle(
+        1000.0,
+        Event::Command(Command::SetMarginType {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        }),
+    );
+    let a = e.drain_actions().collect::<Vec<_>>();
+    assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert!(
+        failure(&a)
+            .message
+            .contains("isolated margin mutation is not implemented")
+    );
+}
+
+#[test]
 fn mode_readback_retries_reads_only_and_never_invents_confirmation() {
     let mut e = engine();
     e.handle(

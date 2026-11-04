@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EngineHost, nativeTransport } from './host.mjs';
-import { prepareFetch } from './managed-http.mjs';
+import { HttpPreparationError, prepareFetch } from './managed-http.mjs';
 
 const tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const token = 'p1:7:18446744073709551615:1';
@@ -208,4 +208,46 @@ test('a nonce-stale final Claim sends nothing and drains cancel before fresh pre
   assert.equal(host.managedHttp.resources.size, 1);
   host.dispose();
   assert.equal(host.managedHttp.resources.size, 0);
+});
+
+
+test('shared admission completes before claim and keeps claim/send synchronous, including pacing wakes', async () => {
+  let release;
+  let r;
+  r = rig(() => ({ bind: () => ({
+    ready: () => true,
+    admitDispatch(handoff) { r.events.push(['admission']); return new Promise((resolve) => { release = () => { handoff(); resolve(); }; }); },
+    dispatch() { r.events.push(['send']); return new Promise(() => {}); },
+  }) }));
+  r.wait(450);
+  r.host.execute(prepare); await tick();
+  assert.deepEqual(r.events, [['prepared', token, '1'], ['admission']]);
+  release(); await tick();
+  assert.equal(r.events.filter(([kind]) => kind === 'send').length, 0);
+  r.at(450); [...r.timers.values()][0].fn();
+  assert.deepEqual(r.events.at(-1), ['admission']);
+  release();
+  assert.deepEqual(r.events.slice(-3), [['claim', permit, 450], ['send'], ['drain']]);
+  r.host.dispose();
+});
+
+test('a shared pause refuses before claim and cancellation prevents late admission from sending', async () => {
+  for (const cancelled of [false, true]) {
+    let release;
+    const r = rig(() => ({ bind: () => ({
+      ready: () => true,
+      admitDispatch(handoff) { return new Promise((resolve, reject) => { release = () => {
+        if (cancelled) { handoff(); resolve(); }
+        else reject(new HttpPreparationError('timedOut'));
+      }; }); },
+      dispatch() { assert.fail('refused or cancelled read sent'); },
+    }) }));
+    r.host.execute(prepare); await tick();
+    if (cancelled) r.host.execute(cancel);
+    release(); await tick();
+    assert.equal(r.events.filter(([kind]) => kind === 'claim').length, 0);
+    if (!cancelled) assert.deepEqual(r.events.at(-1), ['failed', token, 'timedOut']);
+    assert.equal(r.host.managedHttp.resources.size, 0);
+    r.host.dispose();
+  }
 });

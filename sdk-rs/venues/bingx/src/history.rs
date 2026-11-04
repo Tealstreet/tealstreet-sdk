@@ -12,11 +12,48 @@ use safe_cex_engine::selected_read::{
     LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
 };
 use safe_cex_engine::time;
-use safe_cex_engine::{CommandWait, Cx, Level, Method, Query, Response, TimerId, VenueError};
+use safe_cex_engine::{
+    CommandWait, Cx, ErrorCause, ErrorKind, Level, Method, Query, Response, TimerId, VenueError,
+};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+
+// BingX-API/api-ai-skills references/error-codes.md: preserve native codes,
+// but never make diagnostics depend on a free-form venue message.
+fn response_failure(response: &Response<'_>, message: String) -> VenueError {
+    let code = serde_json::from_str::<wire::Rejection<'_>>(response.body)
+        .ok()
+        .and_then(|body| body.code)
+        .filter(|code| *code != 0);
+    let (kind, cause) = match (response.status, code) {
+        (500..=599, _) => (ErrorKind::VenueUnavailable, ErrorCause::HistoryVenueError),
+        (429 | 418, _) => (ErrorKind::RateLimited, ErrorCause::HistoryRateLimited),
+        (401, _) => (ErrorKind::AuthInvalid, ErrorCause::HistoryAuthInvalid),
+        (403, _) => (ErrorKind::AuthPermission, ErrorCause::HistoryAuthPermission),
+        (_, Some(100410 | 109429)) => (ErrorKind::RateLimited, ErrorCause::HistoryRateLimited),
+        (_, Some(100001 | 100412 | 100413)) => {
+            (ErrorKind::AuthInvalid, ErrorCause::HistoryAuthInvalid)
+        }
+        (_, Some(100004 | 100419)) => {
+            (ErrorKind::AuthPermission, ErrorCause::HistoryAuthPermission)
+        }
+        (_, Some(100500 | 109500)) => (ErrorKind::VenueUnavailable, ErrorCause::HistoryVenueError),
+        (400, _) | (_, Some(100400 | 100404 | 100421 | 109400)) => {
+            (ErrorKind::InvalidInput, ErrorCause::HistoryInvalidParams)
+        }
+        (_, Some(_)) => (ErrorKind::Rejected, ErrorCause::HistoryVenueError),
+        (200..=299, _) => (ErrorKind::Internal, ErrorCause::HistoryDecode),
+        _ => (ErrorKind::VenueUnavailable, ErrorCause::HistoryHttpError),
+    };
+    let error = VenueError::new(message).kind(kind).cause_code(cause);
+    if let Some(code) = code {
+        error.venue_code(code.to_string())
+    } else {
+        error
+    }
+}
 
 const WEEK: f64 = 7.0 * 24.0 * 3_600_000.0;
 const PAGE_DELAY: f64 = 200.0;
@@ -806,14 +843,14 @@ impl History {
             return;
         }
         if let Ok(request) = self.resign(cx, request, response) {
-            self.on_failed(
-                cx,
-                request,
-                &format!(
+            let error = response_failure(
+                &response,
+                format!(
                     "response did not contain the expected list: {}",
                     response.body
                 ),
             );
+            self.on_http_failed(cx, request, error);
         }
     }
 
@@ -890,11 +927,18 @@ impl History {
         response: Response<'_>,
     ) {
         if !(200..300).contains(&response.status) {
-            self.on_failed(
-                cx,
-                request,
-                &format!("history HTTP {}: {}", response.status, response.body),
+            let error = response_failure(
+                &response,
+                format!("history HTTP {}: {}", response.status, response.body),
             );
+            self.on_http_failed(cx, request, error);
+            return;
+        }
+        if let Ok(body) = serde_json::from_str::<wire::Rejection<'_>>(response.body)
+            && let Some(code) = body.code.filter(|code| *code != 0)
+        {
+            let error = response_failure(&response, format!("{code}: {}", body.msg));
+            self.on_http_failed(cx, request, error);
             return;
         }
         let Some(read) = self.reads.get_mut(&request.page.command) else {
@@ -962,7 +1006,11 @@ impl History {
                 .iter()
                 .any(|row| row.timestamp() < fills.from || row.timestamp() > fills.to)
             {
-                return Err("fill history returned executions outside its requested window".into());
+                return Err(VenueError::new(
+                    "fill history returned executions outside its requested window",
+                )
+                .kind(ErrorKind::Internal)
+                .cause_code(ErrorCause::HistoryWindowMismatch));
             }
             let before = fills.seen.len();
             for row in request.rows.drain(..) {
@@ -972,7 +1020,8 @@ impl History {
             }
             if full {
                 if fills.seen.len() == before || fills.page >= MAX_FILL_PAGES {
-                    return Err("fill history is incomplete: native pagination made no progress or reached its page budget".into());
+                    return Err(VenueError::new("fill history is incomplete: native pagination made no progress or reached its page budget")
+                        .kind(ErrorKind::Internal).cause_code(ErrorCause::HistoryCursorStalled));
                 }
                 fills.page += 1;
                 None
@@ -1028,7 +1077,9 @@ impl History {
         if truncated {
             let _ = read.output.reject(
                 cx,
-                "history is incomplete: time window could not be fully paged".into(),
+                VenueError::new("history is incomplete: time window could not be fully paged")
+                    .kind(ErrorKind::Internal)
+                    .cause_code(ErrorCause::HistoryPageLimit),
             );
             return;
         }
@@ -1065,7 +1116,13 @@ impl History {
     }
 
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        self.on_http_failed(cx, request, error.into());
+        self.on_http_failed(
+            cx,
+            request,
+            VenueError::new(error)
+                .kind(ErrorKind::Internal)
+                .cause_code(ErrorCause::HistoryDecode),
+        );
     }
 
     pub fn on_http_failed(

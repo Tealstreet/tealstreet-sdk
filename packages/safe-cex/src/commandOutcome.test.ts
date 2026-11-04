@@ -241,3 +241,15 @@ describe('exchange error tags', () => {
     expect(exchangeErrorTags('plain text')).toEqual({});
   });
 });
+
+
+it('keeps a closed native history cause separately from the venue code through worker serialization', () => {
+  const error = Object.assign(new Error('history refused'), {
+    kind: 'rateLimited', causeCode: 'HISTORY_RATE_LIMITED', venueCode: '100410',
+  });
+  expect(deserializeCommandError(JSON.parse(JSON.stringify(serializeCommandError(error))))).toMatchObject({
+    message: 'history refused', kind: 'rateLimited', causeCode: 'HISTORY_RATE_LIMITED', venueCode: '100410',
+  });
+  expect(serializeCommandError({ message: 'bad cause', causeCode: 'https://signed?secret' }))
+    .not.toHaveProperty('causeCode');
+});

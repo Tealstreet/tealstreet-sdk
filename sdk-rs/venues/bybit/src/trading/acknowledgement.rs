@@ -284,30 +284,157 @@ pub(crate) fn created_rows(
     Ok(rows)
 }
 
-/// Cancel-batch: one status per requested order. A returned `result.list`
-/// must match the request one-for-one and echo each accepted target.
+/// Cancel-batch: every status must have a target. Named echoes are matched by
+/// native ID, with statuses kept beside their response rows, then restored to
+/// request order. A sole target is unambiguous even when its echo is empty.
 pub(crate) fn cancelled_rows(
     result: Option<&RawValue>,
     ext: Option<&RawValue>,
     order_ids: &[&str],
 ) -> Result<Vec<Row>, Malformed> {
-    rows(
-        result,
-        ext,
-        order_ids.len(),
-        false,
-        false,
-        &mut |index, row| {
-            let Some(row) = row else {
-                return Ok(order_ids[index].to_owned());
-            };
-            let id = native_id(row.order_id)?;
-            if id != order_ids[index] {
+    let echoed = result
+        .map(object)
+        .transpose()?
+        .map(|fields| fields.raw("list"))
+        .transpose()?
+        .flatten();
+    let mut results = echoed
+        .map(|rows| rows_of(rows, Identity::read))
+        .transpose()?;
+    let statuses = rows_of(list(ext.ok_or(Malformed)?)?, Status::read)?;
+    let expected = order_ids.len();
+    // The one-order partial-stop codec already accepts an empty affected list with one status.
+    if expected == 1 && results.as_ref().is_some_and(Vec::is_empty) {
+        results = None;
+    }
+    if expected == 0
+        || statuses.len() != expected
+        || results.as_ref().is_some_and(|rows| rows.len() != expected)
+    {
+        return Err(Malformed);
+    }
+    let mut matched = vec![false; expected];
+    let mut targets = Vec::with_capacity(expected);
+    for index in 0..expected {
+        let target = match results.as_ref().map(|rows| &rows[index]) {
+            Some(row) => match row.order_id.as_deref().filter(|id| !id.is_empty()) {
+                Some(id) if id.len() <= MAX_ID_BYTES => Some(
+                    order_ids
+                        .iter()
+                        .position(|target| *target == id)
+                        .ok_or(Malformed)?,
+                ),
+                Some(_) => return Err(Malformed),
+                None => None,
+            },
+            // Optional echoes do not replace the required complete per-request status list.
+            None => Some(index),
+        };
+        if let Some(target) = target {
+            if matched[target] {
                 return Err(Malformed);
             }
-            Ok(id)
-        },
+            matched[target] = true;
+        }
+        targets.push(target);
+    }
+    let missing = matched.iter().filter(|matched| !**matched).count();
+    for (index, target) in targets.iter_mut().enumerate() {
+        if target.is_some() {
+            continue;
+        }
+        // A single unnamed row has exactly one remaining target, including a partial refusal.
+        let remaining = if missing == 1 {
+            matched
+                .iter()
+                .position(|matched| !matched)
+                .ok_or(Malformed)?
+        } else if statuses[index].code != 0 && !matched[index] {
+            index
+        } else {
+            return Err(Malformed);
+        };
+        matched[remaining] = true;
+        *target = Some(remaining);
+    }
+    let mut rows: Vec<_> = statuses
+        .into_iter()
+        .zip(targets)
+        .map(|(status, target)| {
+            let target = target.ok_or(Malformed)?;
+            Ok((
+                target,
+                if status.code == 0 {
+                    Row::Accepted(order_ids[target].to_owned())
+                } else {
+                    Row::Refused {
+                        code: status.code,
+                        message: status.msg.unwrap_or_default(),
+                    }
+                },
+            ))
+        })
+        .collect::<Result<_, Malformed>>()?;
+    rows.sort_unstable_by_key(|(target, _)| *target);
+    Ok(rows.into_iter().map(|(_, row)| row).collect())
+}
+
+/// Counts and field presence only: no order IDs, client IDs, native messages or raw response.
+pub(crate) fn cancel_diagnostic(
+    result: Option<&RawValue>,
+    ext: Option<&RawValue>,
+    order_ids: &[&str],
+) -> String {
+    let (result_shape, results) = list_shape(result);
+    let (status_shape, statuses) = list_shape(ext);
+    let (mut native_fields, mut native_ids, mut target_matches, mut client_fields, mut client_ids) =
+        (0, 0, 0, 0, 0);
+    for raw in results.iter().flatten() {
+        if let Ok(fields) = object(raw) {
+            native_fields += usize::from(fields.raw("orderId").ok().flatten().is_some());
+            client_fields += usize::from(fields.raw("orderLinkId").ok().flatten().is_some());
+            if let Ok(Some(id)) = fields.text("orderId")
+                && !id.is_empty()
+            {
+                native_ids += 1;
+                target_matches += usize::from(order_ids.contains(&id.as_str()));
+            }
+            if let Ok(Some(id)) = fields.text("orderLinkId")
+                && !id.is_empty()
+            {
+                client_ids += 1;
+            }
+        }
+    }
+    let (mut success, mut failed, mut invalid) = (0, 0, 0);
+    for raw in statuses.iter().flatten() {
+        match Status::read(raw) {
+            Ok(status) if status.code == 0 => success += 1,
+            Ok(_) => failed += 1,
+            Err(_) => invalid += 1,
+        }
+    }
+    format!(
+        "targets={}; result.list={result_shape}/{}; retExtInfo.list={status_shape}/{}; orderId fields/nonempty/matched={native_fields}/{native_ids}/{target_matches}; orderLinkId fields/nonempty={client_fields}/{client_ids}; statuses success/failed/invalid={success}/{failed}/{invalid}",
+        order_ids.len(),
+        results.as_ref().map_or(0, Vec::len),
+        statuses.as_ref().map_or(0, Vec::len),
     )
+}
+
+fn list_shape(raw: Option<&RawValue>) -> (&'static str, Option<Vec<&RawValue>>) {
+    let Some(raw) = raw else {
+        return ("missing", None);
+    };
+    match object(raw).and_then(|fields| fields.raw("list")) {
+        Ok(None) => ("missing", None),
+        Ok(Some(raw)) if is_null(raw) => ("null", None),
+        Ok(Some(raw)) => match elements(raw) {
+            Ok(rows) => ("array", Some(rows)),
+            Err(_) => ("invalid", None),
+        },
+        Err(_) => ("invalid", None),
+    }
 }
 
 /// A one-order cancel-batch for a partial position stop: exactly one status

@@ -640,6 +640,36 @@ pub struct OpFrame<'a> {
     pub success: Option<bool>,
     #[serde(borrow, default)]
     pub ret_msg: Opt<'a>,
+    #[serde(borrow, default)]
+    pub ret_code: Option<&'a serde_json::value::RawValue>,
+    #[serde(borrow, default, rename = "retCode")]
+    pub camel_ret_code: Option<&'a serde_json::value::RawValue>,
+}
+
+impl OpFrame<'_> {
+    /// Optional diagnostic metadata never decides whether authentication succeeded.
+    pub fn venue_code(&self) -> Option<String> {
+        // The row integer() helper truncates floats; diagnostic codes must be exact.
+        fn integer(raw: &serde_json::value::RawValue) -> Option<i64> {
+            if raw.get().starts_with('"') {
+                serde_json::from_str::<Cow<'_, str>>(raw.get())
+                    .ok()?
+                    .parse()
+                    .ok()
+            } else {
+                raw.get().parse().ok()
+            }
+        }
+        let code = match (self.ret_code, self.camel_ret_code) {
+            (Some(a), Some(b)) => {
+                let a = integer(a)?;
+                (integer(b)? == a).then_some(a)
+            }
+            (Some(raw), None) | (None, Some(raw)) => integer(raw),
+            _ => None,
+        };
+        code.map(|code| code.to_string())
+    }
 }
 
 /// A private topic frame.

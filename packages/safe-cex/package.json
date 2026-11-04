@@ -79,6 +79,7 @@
     "@vitest/ui": "^5.0.5",
     "cross-env": "^7.0.3",
     "eslint": "^9.28.0",
+    "fake-indexeddb": "6.2.7",
     "npm-run-all2": "^9.0.3",
     "prettier": "^3.9.10",
     "rimraf": "^6.1.3",

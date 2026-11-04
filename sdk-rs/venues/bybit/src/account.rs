@@ -2366,15 +2366,15 @@ impl BybitLinear {
             }
             (_, Some(false)) => {
                 let message = frame.ret_msg.as_deref().unwrap_or_default();
-                cx.notice(
-                    Level::Error,
-                    if op == "auth" {
-                        code::AUTH_REJECTED
-                    } else {
-                        code::SUBSCRIPTION_REJECTED
-                    },
-                    format!("[WS]{op}:{message}"),
-                );
+                let mut error = VenueError::new(format!("[WS]{op}:{message}"));
+                if op == "auth" {
+                    if let Some(code) = frame.venue_code() {
+                        error = error.venue_code(code);
+                    }
+                    cx.notice_error(Level::Error, code::AUTH_REJECTED, &error);
+                } else {
+                    cx.notice(Level::Error, code::SUBSCRIPTION_REJECTED, error.message);
+                }
                 // Bybit's clock, read before the re-auth, corrects a slow host.
                 if op == "auth" {
                     self.read_auth_clock(cx);

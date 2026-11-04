@@ -1853,7 +1853,10 @@ export class BaseExchange implements Exchange {
         if (timing) emitWriteTiming(this, timing, 'error');
         reject(
           Object.assign(this.workerCommandTimeoutError(method, args), {
-            message: 'The account worker stopped before answering; reconcile interrupted writes before retrying',
+            ...(!WORKER_WRITE_METHODS.has(method) ? { code: 'WORKER_STOPPED' } : {}),
+            message: WORKER_WRITE_METHODS.has(method)
+              ? 'The account worker stopped before answering; reconcile interrupted writes before retrying'
+              : 'The account worker stopped before answering this read; retry after it reconnects',
           }),
         );
       };

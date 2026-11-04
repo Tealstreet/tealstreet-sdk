@@ -323,7 +323,7 @@ struct Leverage<'a> {
     #[serde(borrow)]
     symbol: Str<'a>,
     #[serde(borrow)]
-    margin_mode: Str<'a>,
+    margin_mode: Option<Str<'a>>,
     #[serde(borrow)]
     position_mode: Str<'a>,
     #[serde(borrow)]
@@ -521,6 +521,7 @@ impl Woo {
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
         leverage: f64,
+        margin_type: Option<MarginType>,
         revision: u64,
     ) {
         if self.account_revision(symbol) > revision {
@@ -531,7 +532,10 @@ impl Woo {
         self.account.metadata_at.insert(symbol.into(), cx.now);
         cx.store.update_setting(symbol, |s| {
             s.leverage = leverage;
-            s.margin_type = Some(MarginType::Cross);
+            // A leverage-only response cannot confirm a margin-mode change.
+            if let Some(margin_type) = margin_type {
+                s.margin_type = Some(margin_type);
+            }
             s.buy_leverage = Some(leverage);
             s.sell_leverage = Some(leverage);
         });
@@ -1534,7 +1538,10 @@ impl Woo {
                 let result = match parsed {
                     Ok(data) => {
                         let scoped = data.symbol == native(cx.store.market(&symbol).unwrap())
-                            && data.margin_mode == "CROSS"
+                            && data
+                                .margin_mode
+                                .as_deref()
+                                .is_none_or(|mode| mode == "CROSS")
                             && data.position_mode == "ONE_WAY"
                             && data.details.len() == 1;
                         let selected = scoped
@@ -1546,12 +1553,17 @@ impl Woo {
                                     cx,
                                     &symbol,
                                     detail.leverage,
+                                    data.margin_mode.as_ref().map(|_| MarginType::Cross),
                                     revision,
                                 );
                             }
                             let setting = cx.store.setting(&symbol).unwrap_or_default();
+                            let margin = data
+                                .margin_mode
+                                .as_ref()
+                                .map_or("", |_| r#","marginType":"cross""#);
                             Ok(format!(
-                                r#"{{"buyLeverage":{},"sellLeverage":{},"marginType":"cross"}}"#,
+                                r#"{{"buyLeverage":{},"sellLeverage":{}{margin}}}"#,
                                 num::format(setting.buy_leverage.unwrap_or(setting.leverage)),
                                 num::format(setting.sell_leverage.unwrap_or(setting.leverage))
                             ))

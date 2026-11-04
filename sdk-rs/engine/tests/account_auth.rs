@@ -22,6 +22,8 @@ struct AccountReads {
     tagged: bool,
     valid_before: Option<f64>,
     token: Option<safe_cex_engine::OrderSnapshotToken>,
+    refusal: Option<safe_cex_engine::VenueError>,
+    loaded_before_refusal: bool,
 }
 
 impl Venue for AccountReads {
@@ -85,6 +87,17 @@ impl Venue for AccountReads {
         *count += 1;
     }
     fn on_response(&mut self, cx: &mut Cx<'_, usize>, count: usize, _: Response<'_>) {
+        if let Some(error) = &self.refusal {
+            if self.loaded_before_refusal {
+                cx.store.set_balance(Default::default());
+                cx.store.set_orders(vec![]);
+                cx.store.set_positions(vec![]);
+            }
+            let first = cx.startup_read_refused(error);
+            let second = cx.startup_read_refused(error);
+            cx.notice(Level::Info, MARKER, format!("refusal:{first}:{second}"));
+            return;
+        }
         cx.store.invalidate_order_snapshots();
         cx.notice(Level::Info, MARKER, format!("response:{count}"));
     }
@@ -114,6 +127,8 @@ fn engine(streamed: bool, tagged: bool) -> Engine<AccountReads> {
         tagged,
         valid_before: None,
         token: None,
+        refusal: None,
+        loaded_before_refusal: false,
     });
     engine.start(0.);
     engine.drain_actions().for_each(drop);
@@ -318,6 +333,8 @@ fn response_event_time_preserves_time_sensitive_classifier_admission() {
             tagged: true,
             valid_before: Some(2.),
             token: None,
+            refusal: None,
+            loaded_before_refusal: false,
         });
         engine.start(0.);
         engine.drain_actions().for_each(drop);
@@ -369,5 +386,61 @@ fn token_stale_auth_is_suppressed_using_the_same_store_before_account_callbacks(
                 if streamed { "missing:0" } else { "response:0" }
             )]
         );
+    }
+}
+
+#[test]
+fn startup_refusal_notice_keeps_its_actual_venue_code_and_existing_guards() {
+    for (tagged, loaded) in [(false, false), (true, false), (false, true)] {
+        let error = safe_cex_engine::VenueError::new("key refused")
+            .kind(safe_cex_engine::ErrorKind::AuthPermission)
+            .venue_code("40018")
+            .venue_message("native reason");
+        let mut engine = support::seeded_engine(AccountReads {
+            streamed: false,
+            tagged,
+            valid_before: None,
+            token: None,
+            refusal: Some(error.clone()),
+            loaded_before_refusal: loaded,
+        });
+        engine.start(0.);
+        engine.drain_actions().for_each(drop);
+        let actions = complete(&mut engine, 401, "{}");
+        let notices: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::AUTH_REJECTED =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::StartupFailed { error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        if tagged || loaded {
+            assert!(notices.is_empty());
+            assert!(failures.is_empty());
+        } else {
+            assert_eq!(notices.len(), 1, "one-shot refusal");
+            assert_eq!(failures, vec![&error]);
+            assert!(
+                notices[0].fields.contains(&("venueCode", "40018".into())),
+                "{:?}",
+                notices[0]
+            );
+            assert!(
+                notices[0]
+                    .fields
+                    .contains(&("kind", "authPermission".into()))
+            );
+        }
     }
 }

@@ -43,3 +43,8 @@ after 45 seconds, with `Ping` every 15 seconds. Native `Ping`/`Pong` replies rem
 unchanged. Private expiry and watchdog recovery wait for backoff before POSTing
 a fresh key. Failed token acquisition retains a minimum 30-second retry pause.
 Retired epochs fence late token and keepalive responses.
+
+History read refusals retain a typed kind, the numeric venue code, and a closed
+`causeCode` (rate limit, key/permission, invalid parameters, venue failure, or
+decode). These diagnostics do not change one-resend or strict history recovery
+rules. Code meanings follow [BingX's error reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/error-codes.md).

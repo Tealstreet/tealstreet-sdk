@@ -74,6 +74,22 @@ fn definitive_key_rejections_fail_startup_and_deactivate() {
         );
         assert!(h.deactivated, "{code}");
         assert!(h.logs.contains(&failure.message), "{code}: {:?}", h.logs);
+        let notice = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::Event(event) if event.message == failure.message => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .expect("startup auth notice");
+        assert!(
+            notice
+                .fields
+                .contains(&("venueCode", code.to_string().into())),
+            "{notice:?}"
+        );
     }
 }
 

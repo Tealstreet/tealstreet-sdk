@@ -10333,3 +10333,56 @@ Phemex's income ledger has no symbol column, so it cannot prove an account-wide
 traded-symbol census. Callers must leave such fills/orders coverage incomplete;
 empty-symbol income rows are not evidence of an account with no trades. NX's
 companion stops non-retryable windows until the account/market inputs change.
+
+### Bybit batch cancel acknowledgements: identity matching and safe diagnostics
+
+`/v5/order/cancel-batch` (including one-order linear/demo batches) matches named
+response rows to the requested native `orderId`, rather than requiring the
+original request order. Each `retExtInfo.list` status remains paired with its
+response row, and the result is restored to request order before classification.
+A single unnamed remaining target is unambiguous; a sole-target empty result
+list follows the existing partial-stop cancel codec. Multiple ambiguous unnamed
+successes, foreign/duplicate IDs, missing/short/invalid statuses and malformed
+rows remain Unknown, keep live Store rows and never replay a cancel. A nonzero
+status still goes through the existing per-item refusal/absence classifier.
+
+The wire requests use native order IDs only. IDs remain opaque and case-sensitive;
+empty `orderLinkId` is harmless, and no client-ID alias or case folding is invented.
+Stock-token symbols use the same linear cancellation path. Cancel-all, single-cancel
+and partial-stop handling retain their own existing proof rules. Bybit's
+[batch cancel documentation](https://bybit-exchange.github.io/docs/v5/order/batch-cancel)
+describes separate identity and per-item status lists; it does not promise request-order echoes.
+An accepted acknowledgement retains the existing request-acceptance semantics,
+not a new guarantee of final asynchronous exchange execution.
+
+An unproven batch now asks the user to check open orders on Bybit before retrying.
+Its bounded diagnostic reports list presence/counts, order-ID/client-ID field
+presence and nonempty counts, target-match count, and success/refusal/invalid
+status counts. It never includes ID values, native messages or raw responses.
+The reported production events had no response body; the covered false-Unknown
+shapes are reproduced, while the specific live shape remains unconfirmed.
+
+
+### Binance and Bybit already-set margin acknowledgements
+
+Binance USD-M and COIN-M `SetMarginType` treat documented `-4046` as an
+already-applied setting, updating the requested stored margin type and completing
+once without an error or resend. The existing `-4059` position-mode success stays
+operation-specific. Ordinary leverage acknowledgements and the local already-at-
+requested-leverage shortcut remain successful. Binance `-4028` stays rejected:
+its documented meanings include invalid leverage as well as an already-existing
+value, so the numeric code alone does not prove the requested leverage.
+
+Bybit `110026` is admitted only by the margin-mode call's code table, selected
+before classification and fact recording. The general Bybit table rejects it:
+leverage, position mode and protective-order legs also use `Intent::Setting`,
+which alone is not proof of a margin change. Existing `110043` leverage and
+`110025` position-mode facts remain unchanged. Margin-mode no-ops use the same
+effects as normal success, including immediate account-wide settings/position
+updates and source frame holds. A contradictory `reasons` result remains unproven. HTTP gateway
+failures keep precedence over these codes, and non-setting writes cannot acquire
+setting-success authority.
+
+References: [Binance USD-M error codes](https://developers.binance.com/docs/derivatives/usds-margined-futures/error-code),
+[Binance COIN-M error codes](https://developers.binance.com/docs/derivatives/coin-margined-futures/error-code),
+[Bybit V5 error codes](https://bybit-exchange.github.io/docs/v5/error).
