@@ -122,11 +122,14 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // admission code is newly linked by KuCoin; Binance already carries this machinery.
 // #3039 CI run 41823036111: breakoutprop 1,495,000 B.
 // Shared signing bookkeeping: standing CI + 10 KiB, rounded up to the KiB.
+// #3018 protective amend at 824ff543b6d: CI run 41854021043 measured apexomni 1,972,043, backpack 1,874,324,
+// binance 2,183,974, bybit 2,189,768, coinbase 1,813,226, grvt 1,770,412, phemex 2,038,226, polymarket
+// 1,590,031 and weex 1,923,438 B; ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 1_970_176,
+  apexomni: 1_982_464,
   asterdex: 2_121_728,
-  backpack: 1_871_872,
-  binance: 2_183_168,
+  backpack: 1_885_184,
+  binance: 2_194_432,
   bingx: 2_020_352,
   bitget: 2_304_000,
   bitgetusdc: 2_304_000,
@@ -134,10 +137,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitunix: 1_837_056,
   blofin: 1_950_720,
   breakoutprop: 1_505_280,
-  bybit: 2_188_288,
-  coinbase: 1_811_456,
+  bybit: 2_200_576,
+  coinbase: 1_823_744,
   cryptocom: 1_715_200,
-  grvt: 1_767_424,
+  grvt: 1_780_736,
   hyperliquid: 2_094_080,
   hyperliquidspot: 2_094_080,
   kraken: 2_121_728,
@@ -150,10 +153,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   okx: 1_935_360,
   orderly: 1_721_344,
   paradex: 2_222_080,
-  phemex: 2_034_688,
-  polymarket: 1_587_200,
+  phemex: 2_049_024,
+  polymarket: 1_600_512,
   txflow: 1_830_912,
-  weex: 1_921_024,
+  weex: 1_934_336,
   woo: 2_387_968,
 });
 export const wasmBudgetBytes = (profile, venue) =>

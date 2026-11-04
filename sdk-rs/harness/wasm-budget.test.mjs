@@ -49,12 +49,17 @@ test('KuCoin 400002 resync caps retain the approved CI headroom and exact bounda
   }
 });
 
-test('master 41783084277 caps retain the ruled headroom and shared-family boundary', () => {
+test('#3018 protective-amend caps (run 41854021043 at 824ff543b6d) retain the ruled headroom', () => {
   for (const [venue, measured, cap] of [
-    ['apexomni', 1_959_768, 1_970_176],
-    ['backpack', 1_860_786, 1_871_872],
-    ['coinbase', 1_800_411, 1_811_456],
-    ['weex', 1_909_946, 1_921_024],
+    ['apexomni', 1_972_043, 1_982_464],
+    ['backpack', 1_874_324, 1_885_184],
+    ['binance', 2_183_974, 2_194_432],
+    ['bybit', 2_189_768, 2_200_576],
+    ['coinbase', 1_813_226, 1_823_744],
+    ['grvt', 1_770_412, 1_780_736],
+    ['phemex', 2_038_226, 2_049_024],
+    ['polymarket', 1_590_031, 1_600_512],
+    ['weex', 1_923_438, 1_934_336],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -153,11 +158,9 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
 
 test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['binance', 2_172_329, 2_183_168],
     ['bitget', 2_293_016, 2_304_000],
     ['bitunix', 1_826_666, 1_837_056],
     ['blofin', 1_939_942, 1_950_720],
-    ['bybit', 2_177_290, 2_188_288],
     ['cryptocom', 1_704_291, 1_715_200],
     ['hyperliquid', 2_083_308, 2_094_080],
     ['mexc', 1_717_351, 1_728_512],
