@@ -361,7 +361,8 @@ describe('HOWWebSocket reconnect recovery (real socket stack, fake tunnel)', () 
       // Flush request setup, while leaving every timer (including the connect timeout) held.
       for (let i = 0; i < 20; i++) await Promise.resolve();
       expect(socket.readyState).toBe(FakeTunnelSocket.CLOSED);
-      await advance(3_000);
+      // Recovery retains the existing randomized 1–5 s backoff, plus time sync.
+      await advance(6_100);
       expect(next.state(), String(next.error()?.message)).toBe('resolved');
       expect(FakeTunnelSocket.instances).toHaveLength(2);
       if (mode === 'managed') {

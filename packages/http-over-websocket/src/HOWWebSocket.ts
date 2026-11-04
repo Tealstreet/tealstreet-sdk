@@ -39,6 +39,7 @@ const extractDomainFromUrl = (url: string): string | null => {
 
 const WAITING_REDIAL_INTERVAL_MS = 5_000;
 const CONNECT_TIMEOUT_MS = 4_000;
+const CONNECT_AUDIT_MARGIN_MS = 2_000;
 const CONNECT_CHECK_TICK_MS = 1_000;
 
 export class HOWWebSocket {
@@ -97,7 +98,6 @@ export class HOWWebSocket {
   // The url the current connect attempt dialed, and whether that attempt opened.
   private dialedUrl = '';
   private dialOpened = false;
-  private dialBaseUrl = '';
   private dialStartedAt?: number;
   private connectCheckTimeout?: ReturnType<typeof setTimeout>;
   private lifecycleDocument?: Document;
@@ -137,10 +137,9 @@ export class HOWWebSocket {
     wsUrl.searchParams.set('v', '2');
     wsUrl.searchParams.set('t', String(Date.now()));
     // Resolved per attempt, so a reconnect after the lane falls back dials 443.
-    this.dialBaseUrl = wsUrl.toString();
     const dialUrl = () => {
       const dialedUrl = tunnelDialUrl(wsUrl.toString());
-      // A delayed URL callback from a terminated wrapper owns no new attempt.
+      // A disposed wrapper cannot update another connection's bookkeeping.
       if (this.ws === ws && ws.loopState.phase === 'connecting') {
         this.dialedUrl = dialedUrl;
         this.dialOpened = false;
@@ -244,20 +243,12 @@ export class HOWWebSocket {
     const loop = socket?.loopState;
     if (this.isDisposed || this.isOpen || !socket || loop?.phase !== 'connecting') return false;
     const startedAt = this.dialStartedAt ?? loop.since;
-    if (socket.readyState === socket.OPEN || Date.now() - startedAt < CONNECT_TIMEOUT_MS) return false;
+    if (socket.readyState === socket.OPEN || Date.now() - startedAt <= CONNECT_TIMEOUT_MS + CONNECT_AUDIT_MARGIN_MS)
+      return false;
 
-    // Retire before notifying listeners, and count the failed open exactly once,
-    // even if native close throws or the delayed timeout never runs.
-    this.ws = undefined;
-    this.dialedUrl ||= tunnelDialUrl(this.dialBaseUrl);
-    void this.onClose();
-    try {
-      socket.terminate();
-    } catch {
-      console.error('[HOWWebSocket] Expired handshake could not close; replacing its stopped wrapper');
-    }
-    this.connectAndSubscribe();
-    return true;
+    // Native timeout wins when timers run normally; recovery keeps its retry count.
+    // onClose counts a failed handshake only if this attempt actually obtained a URL.
+    return socket.timeoutConnecting();
   };
 
   private checkConnectOnVisibility = () => {

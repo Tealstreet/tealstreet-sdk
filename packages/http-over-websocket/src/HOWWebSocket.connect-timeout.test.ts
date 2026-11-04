@@ -76,13 +76,22 @@ describe('HOW wall-clock connect expiry', () => {
     vi.useRealTimers();
   });
 
+  async function advanceToNextDial() {
+    const count = ConnectingSocket.instances.length;
+    for (let elapsed = 0; elapsed < 10_000 && ConnectingSocket.instances.length === count; elapsed += 1) {
+      await vi.advanceTimersByTimeAsync(1);
+    }
+    expect(ConnectingSocket.instances).toHaveLength(count + 1);
+  }
+
   it('a hidden tick abandons a 997-second-old attempt before its delayed timeout callback', async () => {
     await vi.advanceTimersByTimeAsync(1);
     const first = ConnectingSocket.instances[0];
     vi.setSystemTime(Date.now() + 997_000);
     await vi.advanceTimersByTimeAsync(1_001);
     expect(first.closeCalls).toBe(1);
-    expect(ports()).toEqual(['8443', '8443']);
+    expect(ports()).toEqual(['8443']);
+    expect(how.ws?.loopState.phase).toBe('retry-scheduled');
     expect(tunnelLanePort()).toBe('8443');
   });
 
@@ -95,8 +104,8 @@ describe('HOW wall-clock connect expiry', () => {
       page.visibilityState = 'visible';
       (event === 'pageshow' ? browser : page).dispatchEvent(new Event(event));
       expect(first.closeCalls).toBe(1); // No timers ran, including RWS's one-shot.
-      await vi.advanceTimersByTimeAsync(1);
-      expect(ports()).toEqual(['8443', '8443']);
+      expect(ports()).toEqual(['8443']);
+      expect(how.ws?.loopState.phase).toBe('retry-scheduled');
     },
   );
 
@@ -106,34 +115,79 @@ describe('HOW wall-clock connect expiry', () => {
       ConnectingSocket.throwOnClose = throws;
       await vi.advanceTimersByTimeAsync(1);
       page.visibilityState = 'visible';
-      vi.setSystemTime(Date.now() + 4_000);
+      vi.setSystemTime(Date.now() + 6_001);
       page.dispatchEvent(new Event('visibilitychange'));
-      await vi.advanceTimersByTimeAsync(1);
+      expect(how.ws?.retryCount).toBe(1);
+      expect(how.ws?.loopState.phase).toBe('retry-scheduled');
+      await advanceToNextDial();
       expect(ports()).toEqual(['8443', '8443']);
       page.dispatchEvent(new Event('resume'));
       browser.dispatchEvent(new Event('pageshow'));
       expect(ConnectingSocket.instances[1].closeCalls).toBe(0);
       expect(tunnelLanePort()).toBe('8443');
-      vi.setSystemTime(Date.now() + 4_000);
+      vi.setSystemTime(Date.now() + 6_001);
       browser.dispatchEvent(new Event('pageshow'));
-      await vi.advanceTimersByTimeAsync(1);
+      expect(how.ws?.retryCount).toBe(2);
+      await advanceToNextDial();
       expect(ports()).toEqual(['8443', '8443', '443']);
       expect(fallback).toHaveBeenCalledExactlyOnceWith(2);
       expect(ConnectingSocket.instances.slice(0, 2).map((socket) => socket.closeCalls)).toEqual([1, 1]);
     },
   );
 
-  it('bounds connecting even before the delayed zero-timer creates a native socket', async () => {
+  it('retires a pre-dial stall without counting a handshake or changing the lane', async () => {
     expect(ConnectingSocket.instances).toHaveLength(0);
+    const wrapper = how.ws;
     vi.setSystemTime(Date.now() + 997_000);
     page.dispatchEvent(new Event('resume'));
-    await vi.advanceTimersByTimeAsync(1);
-    vi.setSystemTime(Date.now() + 4_000);
+    expect(how.ws).toBe(wrapper);
+    expect(how.ws?.loopState.phase).toBe('retry-scheduled');
+    await advanceToNextDial();
+    expect(ports()).toEqual(['8443']);
+    vi.setSystemTime(Date.now() + 6_001);
     page.visibilityState = 'visible';
     page.dispatchEvent(new Event('visibilitychange'));
+    await advanceToNextDial();
+    expect(ports()).toEqual(['8443', '8443']);
+    expect(tunnelLanePort()).toBe('8443');
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('lets the native timeout win through the audit margin', async () => {
     await vi.advanceTimersByTimeAsync(1);
-    expect(ports()).toEqual(['8443', '443']);
-    expect(fallback).toHaveBeenCalledExactlyOnceWith(2);
+    const wrapper = how.ws;
+    const first = ConnectingSocket.instances[0];
+    const now = Date.now();
+    vi.setSystemTime(now + 5_999);
+    page.dispatchEvent(new Event('resume'));
+    expect(first.closeCalls).toBe(0);
+    expect(how.ws).toBe(wrapper);
+    // Restore normal timer delivery after checking the suspended-clock margin.
+    vi.setSystemTime(now);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(first.closeCalls).toBe(1);
+    expect(how.ws).toBe(wrapper);
+    expect(how.ws?.retryCount).toBe(1);
+    expect(how.ws?.loopState.phase).toBe('retry-scheduled');
+  });
+
+  it('keeps the same wrapper and growing backoff after consecutive audited timeouts', async () => {
+    await vi.advanceTimersByTimeAsync(1);
+    const wrapper = how.ws;
+    const waits: number[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      vi.setSystemTime(Date.now() + 997_000);
+      page.dispatchEvent(new Event('resume'));
+      expect(how.ws).toBe(wrapper);
+      expect(wrapper?.retryCount).toBe(attempt + 1);
+      expect(wrapper?.loopState.phase).toBe('retry-scheduled');
+      const started = Date.now();
+      await advanceToNextDial();
+      waits.push(Date.now() - started);
+    }
+    expect(waits[0]).toBeGreaterThanOrEqual(1_000);
+    expect(waits[1]).toBeGreaterThan(waits[0]);
+    expect(waits[2]).toBeGreaterThan(waits[1]);
   });
 
   it('keeps a fresh connect and a healthy open socket on visibility changes', async () => {
@@ -154,9 +208,9 @@ describe('HOW wall-clock connect expiry', () => {
   it('ignores stale open/close events from an abandoned socket and removes lifecycle hooks on dispose', async () => {
     await vi.advanceTimersByTimeAsync(1);
     const first = ConnectingSocket.instances[0];
-    vi.setSystemTime(Date.now() + 4_000);
+    vi.setSystemTime(Date.now() + 6_001);
     page.dispatchEvent(new Event('resume'));
-    await vi.advanceTimersByTimeAsync(1);
+    await advanceToNextDial();
     first.open();
     first.fire('close', { code: 1006 });
     expect(how.isOpen).toBe(false);
