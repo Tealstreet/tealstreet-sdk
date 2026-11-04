@@ -3873,7 +3873,7 @@ pub trait Venue {
     /// The venue judges this stop or take profit edit's trigger itself: it may turn
     /// the order into the other kind by where the new price lies, or check a native
     /// kind the stored one does not show. The engine then keeps only its implausible-price guard.
-    fn judges_protective_amend(&self, _order: &crate::model::Order) -> bool {
+    fn judges_protective_amend(&self, _store: &Store, _order: &crate::model::Order) -> bool {
         false
     }
     /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
@@ -5463,28 +5463,36 @@ impl<V: Venue> Engine<V> {
             }
             // A stop or take profit edit that cannot stand: refused before its cancel.
             Event::Command(Command::AmendOrder {
-                command, ref id, price, ..
-            }) if crate::protective_amend::refusal(cx.store, id, price, now, |order| {
-                self.venue.judges_protective_amend(order)
+                command,
+                ref id,
+                price,
+                ..
+            }) if crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                self.venue.judges_protective_amend(store, order)
             })
             .is_some() =>
             {
-                let reason = crate::protective_amend::refusal(cx.store, id, price, now, |order| {
-                    self.venue.judges_protective_amend(order)
-                });
+                let reason =
+                    crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                        self.venue.judges_protective_amend(store, order)
+                    });
                 cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
             }
             #[cfg(feature = "command-kucoinspot")]
             Event::Command(Command::AmendOrderWithSymbol {
-                command, ref id, price, ..
-            }) if crate::protective_amend::refusal(cx.store, id, price, now, |order| {
-                self.venue.judges_protective_amend(order)
+                command,
+                ref id,
+                price,
+                ..
+            }) if crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                self.venue.judges_protective_amend(store, order)
             })
             .is_some() =>
             {
-                let reason = crate::protective_amend::refusal(cx.store, id, price, now, |order| {
-                    self.venue.judges_protective_amend(order)
-                });
+                let reason =
+                    crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                        self.venue.judges_protective_amend(store, order)
+                    });
                 cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
             }
             Event::Command(command) => {

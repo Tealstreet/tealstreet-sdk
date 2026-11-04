@@ -206,7 +206,11 @@ fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
         );
         e.drain_plain().for_each(drop);
         // A sell stop moves below the price, a take profit above it.
-        let moved = if raw.starts_with("take-profit") { 103. } else { 97. };
+        let moved = if raw.starts_with("take-profit") {
+            103.
+        } else {
+            97.
+        };
         e.handle(
             NOW,
             Event::Command(Command::AmendOrder {

@@ -41,11 +41,21 @@ pub fn refused(reason: Option<String>) -> crate::error::VenueError {
     }
 }
 
-/// The symbol's ticker changed recently enough to stand for the venue's price.
-pub fn fresh_ticker(store: &Store, symbol: &str, now: f64) -> bool {
-    store
-        .ticker_changed_at(symbol)
-        .is_some_and(|at| now - at <= FRESH_TICKER_MS)
+/// The symbol's `reference` price, if observed recently enough to stand for the venue's.
+pub fn fresh_reference(
+    store: &Store,
+    symbol: &str,
+    reference: StopTriggerType,
+    now: f64,
+) -> Option<f64> {
+    let ticker = store.ticker(symbol)?;
+    let price = match reference {
+        StopTriggerType::MarkPrice => ticker.mark,
+        StopTriggerType::LastPrice => ticker.last,
+        StopTriggerType::IndexPrice => ticker.index,
+    };
+    let seen = store.reference_seen_at(symbol, reference)?;
+    (price.is_finite() && price > 0.0 && now - seen <= FRESH_TICKER_MS).then_some(price)
 }
 
 /// Why an amend of order `id` to `price` must not be sent, if it must not.
@@ -56,7 +66,7 @@ pub fn refusal(
     id: &str,
     price: Option<f64>,
     now: f64,
-    reclassifies: impl FnOnce(&crate::model::Order) -> bool,
+    reclassifies: impl FnOnce(&Store, &crate::model::Order) -> bool,
 ) -> Option<String> {
     let order = store.order(id)?;
     // An attached or virtual leg is a field of its parent order, amended in place.
@@ -72,14 +82,10 @@ pub fn refusal(
     if order.status != OrderStatus::Open || trigger == order.price {
         return None;
     }
-    let ticker = store.ticker(&order.symbol)?;
-    // Only a fresh price stands for the venue's; a stale one refuses nothing.
-    if !fresh_ticker(store, &order.symbol, now) {
-        return None;
-    }
-    let usable = |price: f64| (price.is_finite() && price > 0.0).then_some(price);
+    // Only a freshly observed price stands for the venue's; a stale one refuses nothing.
+    let fresh = |reference| fresh_reference(store, &order.symbol, reference, now);
     let unchanged = format!("your {} {name} is unchanged", order.symbol);
-    if let Some(own) = usable(ticker.mark).or(usable(ticker.last))
+    if let Some(own) = fresh(StopTriggerType::MarkPrice).or(fresh(StopTriggerType::LastPrice))
         && (trigger / own > IMPLAUSIBLE_RATIO || own / trigger > IMPLAUSIBLE_RATIO)
     {
         return Some(format!(
@@ -87,14 +93,15 @@ pub fn refusal(
             order.symbol,
         ));
     }
-    if reclassifies(order) {
+    if reclassifies(store, order) {
         return None;
     }
-    let references: &[(&str, f64)] = match order.trigger_type {
-        Some(StopTriggerType::MarkPrice) => &[("mark", ticker.mark)],
-        Some(StopTriggerType::LastPrice) => &[("last", ticker.last)],
-        Some(StopTriggerType::IndexPrice) => &[("index", ticker.index)],
-        None => &[("mark", ticker.mark), ("last", ticker.last)],
+    use StopTriggerType::{IndexPrice, LastPrice, MarkPrice};
+    let references: &[(&str, StopTriggerType)] = match order.trigger_type {
+        Some(MarkPrice) => &[("mark", MarkPrice)],
+        Some(LastPrice) => &[("last", LastPrice)],
+        Some(IndexPrice) => &[("index", IndexPrice)],
+        None => &[("mark", MarkPrice), ("last", LastPrice)],
     };
     // A sell closes a long: its stop fires at or below the price, its take profit at or above.
     let fires = |reference: f64| match (order.side, order.kind) {
@@ -104,7 +111,7 @@ pub fn refusal(
         _ => trigger <= reference,
     };
     references.iter().find_map(|(label, reference)| {
-        let reference = usable(*reference)?;
+        let reference = fresh(*reference)?;
         fires(reference).then(|| {
             format!("A {name} at {trigger} would trigger at once against the {label} price {reference}; {unchanged}")
         })
@@ -171,7 +178,7 @@ mod tests {
         for (kind, side, trigger, price, refused) in cases {
             let store = fixture(kind, side, Some(trigger));
             assert_eq!(
-                refusal(&store, "o", Some(price), 1_000.0, |_| false).is_some(),
+                refusal(&store, "o", Some(price), 1_000.0, |_, _| false).is_some(),
                 refused,
                 "{kind:?} {side:?} {trigger:?} at {price}"
             );
@@ -181,42 +188,81 @@ mod tests {
     #[test]
     fn an_unknown_trigger_type_must_pass_both_mark_and_last() {
         let store = fixture(OrderType::StopLoss, OrderSide::Sell, None);
-        assert!(refusal(&store, "o", Some(100.5), 1_000.0, |_| false).is_some());
-        assert!(refusal(&store, "o", Some(99.0), 1_000.0, |_| false).is_none());
+        assert!(refusal(&store, "o", Some(100.5), 1_000.0, |_, _| false).is_some());
+        assert!(refusal(&store, "o", Some(99.0), 1_000.0, |_, _| false).is_none());
     }
 
     #[test]
     fn a_stale_ticker_refuses_nothing() {
-        let store = fixture(OrderType::StopLoss, OrderSide::Sell, Some(StopTriggerType::MarkPrice));
+        let store = fixture(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            Some(StopTriggerType::MarkPrice),
+        );
         let later = 1_000.0 + FRESH_TICKER_MS + 1.0;
-        assert!(refusal(&store, "o", Some(100.0), later, |_| false).is_none());
-        assert!(refusal(&store, "o", Some(18_800.0), later, |_| false).is_none());
+        assert!(refusal(&store, "o", Some(100.0), later, |_, _| false).is_none());
+        assert!(refusal(&store, "o", Some(18_800.0), later, |_, _| false).is_none());
     }
 
     #[test]
     fn a_far_but_real_stop_stands_and_another_symbols_price_does_not() {
-        let store = fixture(OrderType::StopLoss, OrderSide::Sell, Some(StopTriggerType::MarkPrice));
+        let store = fixture(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            Some(StopTriggerType::MarkPrice),
+        );
         // 60% below a volatile alt's price is a real stop.
-        assert!(refusal(&store, "o", Some(40.0), 1_000.0, |_| false).is_none());
-        assert!(refusal(&store, "o", Some(9.0), 1_000.0, |_| false).is_some());
-        let store = fixture(OrderType::TakeProfit, OrderSide::Sell, Some(StopTriggerType::LastPrice));
-        assert!(refusal(&store, "o", Some(250.0), 1_000.0, |_| false).is_none());
-        assert!(refusal(&store, "o", Some(1_880.0), 1_000.0, |_| false).is_some());
+        assert!(refusal(&store, "o", Some(40.0), 1_000.0, |_, _| false).is_none());
+        assert!(refusal(&store, "o", Some(9.0), 1_000.0, |_, _| false).is_some());
+        let store = fixture(
+            OrderType::TakeProfit,
+            OrderSide::Sell,
+            Some(StopTriggerType::LastPrice),
+        );
+        assert!(refusal(&store, "o", Some(250.0), 1_000.0, |_, _| false).is_none());
+        assert!(refusal(&store, "o", Some(1_880.0), 1_000.0, |_, _| false).is_some());
     }
 
     #[test]
     fn a_reclassifying_venue_keeps_only_the_implausible_guard() {
-        let store = fixture(OrderType::StopLoss, OrderSide::Sell, Some(StopTriggerType::MarkPrice));
-        assert!(refusal(&store, "o", Some(100.0), 1_000.0, |_| true).is_none());
-        assert!(refusal(&store, "o", Some(18_800.0), 1_000.0, |_| true).is_some());
+        let store = fixture(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            Some(StopTriggerType::MarkPrice),
+        );
+        assert!(refusal(&store, "o", Some(100.0), 1_000.0, |_, _| true).is_none());
+        assert!(refusal(&store, "o", Some(18_800.0), 1_000.0, |_, _| true).is_some());
+    }
+
+    /// codex-mxb4mq: freshness belongs to the trigger's own reference. A bid change
+    /// does not refresh a stale mark; a venue reporting the mark unchanged does.
+    #[test]
+    fn only_the_triggers_own_reference_observation_counts_as_fresh() {
+        let mut store = fixture(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            Some(StopTriggerType::MarkPrice),
+        );
+        let later = 1_000.0 + FRESH_TICKER_MS + 1.0;
+        store.set_clock(later);
+        store.update_ticker("X", |ticker| ticker.bid = 50.0);
+        assert!(
+            refusal(&store, "o", Some(100.0), later, |_, _| false).is_none(),
+            "a stale mark"
+        );
+        store.observe_ticker_fields("X", 1 << 3);
+        assert!(
+            refusal(&store, "o", Some(100.0), later, |_, _| false).is_some(),
+            "the mark, observed unchanged"
+        );
     }
 
     #[test]
     fn leaves_other_orders_and_missing_prices_alone() {
         let store = fixture(OrderType::Limit, OrderSide::Sell, None);
-        assert!(refusal(&store, "o", Some(1.0), 1_000.0, |_| false).is_none());
+        assert!(refusal(&store, "o", Some(1.0), 1_000.0, |_, _| false).is_none());
         let store = fixture(OrderType::StopLoss, OrderSide::Sell, None);
-        assert!(refusal(&store, "o", None, 1_000.0, |_| false).is_none());
-        assert!(refusal(&store, "missing", Some(100.0), 1_000.0, |_| false).is_none());
+        assert!(refusal(&store, "o", None, 1_000.0, |_, _| false).is_none());
+        assert!(refusal(&store, "missing", Some(100.0), 1_000.0, |_, _| false).is_none());
     }
 }

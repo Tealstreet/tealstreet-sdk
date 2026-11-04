@@ -1058,11 +1058,19 @@ impl Venue for Hyperliquid {
     }
     fn on_open(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId) {}
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
-    /// A take profit amended through the price is replaced as a stop (`trading.rs`).
-    fn judges_protective_amend(&self, order: &safe_cex_engine::model::Order) -> bool {
+    /// A take profit amended through the price is replaced as a stop (`trading.rs`),
+    /// but only where mark, last and index agree enough for that projection to run.
+    fn judges_protective_amend(
+        &self,
+        store: &safe_cex_engine::store::Store,
+        order: &safe_cex_engine::model::Order,
+    ) -> bool {
         order.kind == safe_cex_engine::model::OrderType::TakeProfit
+            && store
+                .ticker(&order.symbol)
+                .is_some_and(|ticker| trading::tp_projection_reference(ticker).is_some())
     }
-        fn cancel_needs_stored_order(&self) -> bool {
+    fn cancel_needs_stored_order(&self) -> bool {
         true
     }
 

@@ -1113,13 +1113,23 @@ impl BinanceFutures {
                     code: NativeCode::Int(code),
                     message: &message,
                 });
+                // The classifier decides first: only a proven refusal left nothing on the venue.
+                let Ok(verdict) = cx
+                    .classify_write(&context, &BINANCE, native.as_ref(), &message)
+                    .map(|fact| fact.verdict())
+                else {
+                    return;
+                };
+                // A signature refusal is as proven as any; once the cancel landed it is not resent.
+                let refused =
+                    !unproven && matches!(verdict, Verdict::Refused(_) | Verdict::RefusedResend(_));
                 // The cancel landed, so the leg's words lead with what the user lost.
                 let gone = self
                     .trading
                     .jobs
                     .get(&command)
                     .filter(|_| ids.is_empty())
-                    .and_then(|job| job.gone_text(unproven));
+                    .and_then(|job| job.gone_text(!refused));
                 known_cancel_effects |= gone.is_some();
                 let restoring = self
                     .trading
@@ -1127,14 +1137,21 @@ impl BinanceFutures {
                     .get(&command)
                     .and_then(|job| job.restoring.clone());
                 let told = match (&gone, &restoring) {
-                    (Some(gone), Some(refusal)) => {
+                    (Some(gone), Some(refusal)) if refused => {
                         format!("{gone}: {refusal}; putting it back failed too: {message}")
+                    }
+                    // The put-back itself may have landed: no claim either way.
+                    (Some(gone), Some(refusal)) => {
+                        format!(
+                            "{gone}: {refusal}; putting it back has an unknown outcome: {message}"
+                        )
                     }
                     (Some(gone), None) => format!("{gone}: {message}"),
                     _ => message.clone(),
                 };
-                // A definitive refusal of a stop's replacement puts the old stop back, once.
-                if gone.is_some() && !unproven {
+                // Only a proven refusal of a stop's replacement puts the old stop back, once;
+                // an unknown one may have landed, and a second protective order is never added.
+                if gone.is_some() && refused {
                     match restoring {
                         Some(_) => self.fail_unprotected(command, &told),
                         None => restore_planned = self.plan_restore(cx, command, &gone, &message),

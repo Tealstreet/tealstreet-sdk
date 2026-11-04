@@ -1046,7 +1046,15 @@ fn partial_stops_cancel_recreate_and_full_stops_keep_the_position_update_path() 
         let mut h = ready();
         // Partial: 87000 crosses the price and becomes a take profit (owner-decided drag);
         // Full: the stop stays a stop, below the price.
-        price_at(&mut h, "BTCUSDT", if mode == "Partial" { 80_000.0 } else { 90_000.0 });
+        price_at(
+            &mut h,
+            "BTCUSDT",
+            if mode == "Partial" {
+                80_000.0
+            } else {
+                90_000.0
+            },
+        );
         let stop = format!(
             r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"{mode}","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}}]}}"#
         );

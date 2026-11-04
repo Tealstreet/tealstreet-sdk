@@ -2374,6 +2374,13 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
         set(&mut t.volume, volume);
         set(&mut t.quote_volume, quote_volume);
     });
+    // A field this message carries is an observation even when unchanged; an
+    // omitted one (a delta) is not.
+    let observed = [(2, d.last_price), (3, d.mark_price), (4, d.index_price)]
+        .into_iter()
+        .filter(|(_, value)| value.is_some())
+        .fold(0u16, |mask, (bit, _)| mask | (1 << bit));
+    cx.store.observe_ticker_fields(&d.symbol, observed);
 }
 
 fn ticker_from_rest(t: &TickerRow<'_>, inverse: bool) -> Ticker {
@@ -2717,10 +2724,14 @@ impl Venue for BybitLinear {
         !self.variant.is_spot()
     }
 
-    fn judges_protective_amend(&self, order: &safe_cex_engine::model::Order) -> bool {
+    fn judges_protective_amend(
+        &self,
+        _store: &safe_cex_engine::store::Store,
+        order: &safe_cex_engine::model::Order,
+    ) -> bool {
         self.partial_stop(order)
     }
-        fn cancel_needs_stored_order(&self) -> bool {
+    fn cancel_needs_stored_order(&self) -> bool {
         true
     }
 

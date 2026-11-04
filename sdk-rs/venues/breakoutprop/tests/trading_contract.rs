@@ -64,11 +64,10 @@ fn open() -> Order {
 }
 /// The edited price: a sell stop (a long's) moves below the 3656 quote, anything else to 3660.
 fn amended_price(rig: &Rig) -> f64 {
-    let stop = rig
-        .engine
-        .store()
-        .order("816099:5")
-        .is_some_and(|order| order.kind == OrderType::StopLoss && order.side == OrderSide::Sell);
+    let stop =
+        rig.engine.store().order("816099:5").is_some_and(|order| {
+            order.kind == OrderType::StopLoss && order.side == OrderSide::Sell
+        });
     if stop { 3640.0 } else { 3660.0 }
 }
 fn amend(rig: &mut Rig, command: u32) {
@@ -779,7 +778,14 @@ fn zero_close_limit_and_stop_price_amendments_require_native_cancellation_proof(
         assert_eq!(payload["quantity"], 0.0);
         assert_eq!(payload["positionEffect"], "CLOSE");
         assert_eq!(payload["type"], native_type);
-        assert_eq!(payload[price_field], if kind == OrderType::StopLoss { 3640.0 } else { 3660.0 });
+        assert_eq!(
+            payload[price_field],
+            if kind == OrderType::StopLoss {
+                3640.0
+            } else {
+                3660.0
+            }
+        );
         assert!(payload.get(absent_price_field).is_none());
         assert!(payload.get("positionCode").is_none());
         rig.reply(&replacement, 200, r#"{"orderId":42}"#);

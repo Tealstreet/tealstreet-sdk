@@ -1043,6 +1043,7 @@ impl BybitLinear {
         price: f64,
         trigger: Option<StopTriggerType>,
         amount: f64,
+        limit: Option<f64>,
     ) -> (String, &'static str) {
         let partial = amount != 0.0;
         let (level, by, size, reference) = if kind == OrderType::StopLoss {
@@ -1079,6 +1080,22 @@ impl BybitLinear {
             .str(level, &number(price))
             .str(by, reference)
             .opt_str(size, partial.then(|| number(amount)).as_deref())
+            .opt_str(
+                if kind == OrderType::StopLoss {
+                    "slOrderType"
+                } else {
+                    "tpOrderType"
+                },
+                limit.map(|_| "Limit"),
+            )
+            .opt_str(
+                if kind == OrderType::StopLoss {
+                    "slLimitPrice"
+                } else {
+                    "tpLimitPrice"
+                },
+                limit.map(number).as_deref(),
+            )
             .finish();
         (body, reference)
     }
@@ -1141,24 +1158,47 @@ impl BybitLinear {
                 );
             }
             let trigger = (kind == order.kind).then_some(order.trigger_type).flatten();
-            let (body, reference) = self.trading_stop_body(cx, order, kind, price, trigger, amount);
+            let limit = order
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.conditional_order_price);
+            // A Limit stop's own price means nothing as the other kind: keep it as it is.
+            if limit.is_some() && kind != order.kind {
+                return Err(format!(
+                    "A limit {} cannot be dragged across the price into the other kind; your {} order is unchanged",
+                    if order.kind == OrderType::TakeProfit {
+                        "take profit"
+                    } else {
+                        "stop"
+                    },
+                    order.symbol
+                ));
+            }
+            let (body, reference) =
+                self.trading_stop_body(cx, order, kind, price, trigger, amount, limit);
             // Judged against the price that fires the kind it became, on a fresh ticker.
-            if safe_cex_engine::protective_amend::fresh_ticker(cx.store, &order.symbol, cx.now)
-                && let Some(ticker) = cx.store.ticker(&order.symbol)
-            {
-                let (label, current) = if reference == "LastPrice" {
-                    ("last", ticker.last)
-                } else {
-                    ("mark", ticker.mark)
-                };
+            let (label, by) = if reference == "LastPrice" {
+                ("last", StopTriggerType::LastPrice)
+            } else {
+                ("mark", StopTriggerType::MarkPrice)
+            };
+            if let Some(current) = safe_cex_engine::protective_amend::fresh_reference(
+                cx.store,
+                &order.symbol,
+                by,
+                cx.now,
+            ) {
                 let fires = match (order.side, kind) {
-                    (OrderSide::Sell, OrderType::StopLoss) | (OrderSide::Buy, OrderType::TakeProfit) => {
-                        price >= current
-                    }
+                    (OrderSide::Sell, OrderType::StopLoss)
+                    | (OrderSide::Buy, OrderType::TakeProfit) => price >= current,
                     _ => price <= current,
                 };
-                if current.is_finite() && current > 0.0 && fires {
-                    let name = if kind == OrderType::TakeProfit { "take profit" } else { "stop" };
+                if fires {
+                    let name = if kind == OrderType::TakeProfit {
+                        "take profit"
+                    } else {
+                        "stop"
+                    };
                     return Err(format!(
                         "A {name} at {} would trigger at once against the {label} price {current}; your {} order is unchanged",
                         number(price),
@@ -1174,6 +1214,7 @@ impl BybitLinear {
                 order.price,
                 order.trigger_type,
                 num::adjust(order.amount, market.precision.amount),
+                limit,
             );
             let mut job = self.plan_cancel(std::slice::from_ref(order));
             for planned in job.steps.iter_mut().flat_map(|step| &mut step.requests) {

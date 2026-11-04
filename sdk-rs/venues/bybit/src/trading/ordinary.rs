@@ -924,11 +924,13 @@ impl BybitLinear {
             return;
         }
         let decision = self.leg_decision(cx, id, &active, response);
-        // Its replacement has answered, so the already-gone mark has served.
-        if let Call::PartialStop {
-            restore: Some((replaced, _)),
-            ..
-        } = &active.leg.planned.call
+        // The logical replacement has settled (a resend is the same write, still
+        // open), so the already-gone mark has served.
+        if !matches!(decision, Decision::Resend(_))
+            && let Call::PartialStop {
+                restore: Some((replaced, _)),
+                ..
+            } = &active.leg.planned.call
         {
             self.trading.gone_before_cancel.remove(replaced);
         }
@@ -1445,7 +1447,7 @@ impl BybitLinear {
                     stop,
                     restore: Some((replaced, _)),
                 },
-            ) if !self.trading.gone_before_cancel.remove(replaced) => {
+            ) if !self.trading.gone_before_cancel.contains(replaced) => {
                 Decision::Restore(Call::RestorePartialStop {
                     stop: stop.clone(),
                     refusal: error.message.clone(),

@@ -4,7 +4,7 @@
 use crate::fence::{Epoch, Stamp};
 use crate::model::{
     Balance, CoinBalance, CurrencyBalance, Loaded, MarginType, Market, Order, OrderStatus,
-    Position, Ticker,
+    Position, StopTriggerType, Ticker,
 };
 #[cfg(any(test, feature = "product-semantics"))]
 use crate::model::{DerivativeProduct, InstrumentClassification, PositionGreeks, ProductKind};
@@ -61,8 +61,9 @@ pub struct Store {
     rejected_empty_catalogue: bool,
     /// Changed-field bits per ticker, in [`TICKER_FIELDS`] order.
     ticker_masks: Vec<u16>,
-    /// Host time each ticker row last changed (`clock` then); -inf before any data.
-    ticker_changed_at: Vec<f64>,
+    /// Host time each row's last, mark and index price was last observed: changed,
+    /// or explicitly reported unchanged by its venue. -inf before any data.
+    ticker_seen_at: Vec<[f64; 3]>,
     /// The engine's current host time, set at each entry, so rows can be dated.
     clock: f64,
     dirty_tickers: Vec<u32>,
@@ -379,7 +380,7 @@ impl Store {
             .collect();
         self.changes.tickers_replaced = true;
         self.ticker_masks = vec![0; self.tickers.len()];
-        self.ticker_changed_at = vec![self.clock; self.tickers.len()];
+        self.ticker_seen_at = vec![[self.clock; 3]; self.tickers.len()];
         self.dirty_tickers.clear();
         self.set_loaded(|loaded| loaded.tickers = true);
     }
@@ -391,10 +392,35 @@ impl Store {
         }
     }
 
-    /// When this symbol's ticker last changed, on the engine's host clock.
-    pub fn ticker_changed_at(&self, symbol: &str) -> Option<f64> {
+    /// When this symbol's `reference` price was last observed, on the engine's host clock.
+    pub fn reference_seen_at(&self, symbol: &str, reference: StopTriggerType) -> Option<f64> {
+        let slot = match reference {
+            StopTriggerType::LastPrice => 0,
+            StopTriggerType::MarkPrice => 1,
+            StopTriggerType::IndexPrice => 2,
+        };
         self.ticker_index(symbol)
-            .and_then(|index| self.ticker_changed_at.get(index as usize).copied())
+            .and_then(|index| self.ticker_seen_at.get(index as usize))
+            .map(|seen| seen[slot])
+    }
+
+    /// A venue message reported these fields (`TICKER_FIELDS` bits) for `symbol`,
+    /// changed or not; delta omissions are not observations.
+    pub fn observe_ticker_fields(&mut self, symbol: &str, mask: u16) {
+        if let Some(index) = self.ticker_index(symbol) {
+            self.mark_references_seen(index, mask);
+        }
+    }
+
+    // Bits 2, 3 and 4 of `TICKER_FIELDS` are last, mark and index.
+    fn mark_references_seen(&mut self, index: u32, mask: u16) {
+        if let Some(seen) = self.ticker_seen_at.get_mut(index as usize) {
+            for (slot, bit) in [2, 3, 4].into_iter().enumerate() {
+                if mask & (1 << bit) != 0 {
+                    seen[slot] = self.clock;
+                }
+            }
+        }
     }
 
     pub(crate) fn ticker_revision(&self) -> u64 {
@@ -420,7 +446,7 @@ impl Store {
         let index = self.tickers.len() as u32;
         self.tickers.push(ticker);
         self.ticker_masks.push(0);
-        self.ticker_changed_at.push(f64::NEG_INFINITY);
+        self.ticker_seen_at.push([f64::NEG_INFINITY; 3]);
         self.ticker_by_symbol.insert(symbol.into(), index);
         self.changes.tickers_replaced = true;
         Some(index)
@@ -481,7 +507,7 @@ impl Store {
         if mask == 0 {
             return;
         }
-        self.ticker_changed_at[index as usize] = self.clock;
+        self.mark_references_seen(index, mask);
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         let slot = &mut self.ticker_masks[index as usize];
         if *slot == 0 {

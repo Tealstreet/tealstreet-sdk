@@ -1208,7 +1208,15 @@ fn a_partial_drag_that_stands_as_neither_kind_is_refused_before_its_cancel() {
 fn a_refused_partial_replacement_puts_the_exact_old_stop_back() {
     let profile = PROFILES[0];
     let mut h = ready(profile);
-    seed(&mut h, profile, "Sell", "StopLoss", "MarkPrice", false, true);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
     amend(&mut h, Some(95.0), None);
     let replaced = h.take(profile.cancel_path());
     h.reply(replaced.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
@@ -1228,4 +1236,180 @@ fn a_refused_partial_replacement_puts_the_exact_old_stop_back() {
     let error = h.result(91).unwrap().as_ref().unwrap_err();
     assert!(error.contains("put back"), "{error}");
     assert!(!h.has_request("/v5/position/trading-stop"), "never loops");
+}
+
+/// codex-mxb4mq's P1: the cancel finds the old stop already gone (110001); the
+/// replacement is resent after a timestamp refusal (10002) and then refused (10001).
+/// The old stop is never recreated: it may have filled or triggered.
+#[test]
+fn a_stop_the_cancel_found_gone_is_never_recreated_even_after_a_resend() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    amend(&mut h, Some(95.0), None);
+    h.respond(
+        profile.cancel_path(),
+        200,
+        r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel"}"#,
+    );
+    let replacement = h.take("/v5/position/trading-stop");
+    h.reply(
+        replacement.id,
+        200,
+        r#"{"retCode":10002,"retMsg":"invalid request, please check your server timestamp or recv_window param","result":{},"time":1760352369814}"#,
+    );
+    let resent = h.take("/v5/position/trading-stop");
+    assert_eq!(body(&resent), body(&replacement), "an identical resend");
+    h.reply(
+        resent.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"StopLoss would trigger immediately","result":{}}"#,
+    );
+    assert!(
+        !h.has_request("/v5/position/trading-stop"),
+        "never recreates a gone stop"
+    );
+    let error = h.result(91).unwrap().as_ref().unwrap_err();
+    assert!(!error.contains("put back"), "{error}");
+}
+
+// codex-mxb4mq's #3018 reproducers (review_3018_*), kept as regression tests.
+
+fn review_3018_standalone_mark_stop() -> Harness {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    let mut row = h.engine.store().order("partial").unwrap().clone();
+    row.id = "standalone".into();
+    row.parent_id = None;
+    h.engine.store_mut().upsert_order(row);
+    let socket = h.socket("/v5/public/linear").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message("/v5/public/linear",r#"{"topic":"tickers.BTCUSDT","type":"snapshot","data":{"symbol":"BTCUSDT","markPrice":"100","lastPrice":"100","indexPrice":"100"}}"#);
+    h
+}
+#[test]
+fn review_3018_same_price_observation_keeps_guard_fresh() {
+    let mut h = review_3018_standalone_mark_stop();
+    h.now += 10_000.;
+    h.message("/v5/public/linear",r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","markPrice":"100","lastPrice":"100","indexPrice":"100"}}"#);
+    h.command(Command::AmendOrder {
+        command: 93,
+        id: "standalone".into(),
+        price: Some(110.),
+        amount: None,
+    });
+    assert!(
+        !h.has_request("/v5/order/amend"),
+        "unchanged but freshly observed mark should refuse crossed stop"
+    );
+    assert!(h.result(93).is_some_and(|r| r.is_err()));
+}
+#[test]
+fn review_3018_stale_reference_working_control() {
+    let mut h = review_3018_standalone_mark_stop();
+    h.now += 10_000.;
+    h.command(Command::AmendOrder {
+        command: 94,
+        id: "standalone".into(),
+        price: Some(110.),
+        amount: None,
+    });
+    assert!(
+        h.has_request("/v5/order/amend"),
+        "stale reference should admit"
+    );
+}
+
+#[test]
+fn review_3018_gone_cancel_survives_replacement_signature_resend() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    amend(&mut h, Some(110.0), None);
+    h.respond(
+        profile.cancel_path(),
+        200,
+        r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel"}"#,
+    );
+    let replacement = h.take("/v5/position/trading-stop");
+    let original_body = body(&replacement).to_owned();
+    h.reply(replacement.id,200,r#"{"retCode":10002,"retMsg":"invalid request, please check your server timestamp or recv_window param","result":{}}"#);
+    let resend = h.take("/v5/position/trading-stop");
+    assert_eq!(body(&resend), original_body);
+    h.reply(
+        resend.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
+    );
+    assert!(
+        !h.has_request("/v5/position/trading-stop"),
+        "an already gone stop must not be recreated after a replacement signature resend; requests: {:?}",
+        h.requests
+            .iter()
+            .filter(|r| r.url.contains("trading-stop"))
+            .map(|r| r.body.as_deref())
+            .collect::<Vec<_>>()
+    );
+    assert!(matches!(h.result(91), Some(Err(_))));
+}
+#[test]
+fn review_3018_exact_partial_restore_working_control() {
+    a_refused_partial_replacement_puts_the_exact_old_stop_back();
+}
+
+#[test]
+fn review_3018_limit_partial_restore_preserves_execution_type_and_price() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"partial","side":"Sell","orderType":"Limit","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Partial","qty":"7","cumExecQty":"0","price":"89","leavesQty":"7","triggerPrice":"90","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#);
+    assert_eq!(h.engine.store().order("partial").unwrap().price, 90.0);
+    amend(&mut h, Some(95.0), None);
+    accept_cancel(&mut h, profile);
+    let replacement = h.take("/v5/position/trading-stop");
+    h.reply(
+        replacement.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
+    );
+    let restore = h.take("/v5/position/trading-stop");
+    assert!(
+        body(&restore).contains(r#""slOrderType":"Limit""#)
+            && body(&restore).contains(r#""slLimitPrice":"89""#),
+        "restoring a native Limit Partial stop must preserve its execution type and limit price, got {}",
+        body(&restore)
+    );
 }

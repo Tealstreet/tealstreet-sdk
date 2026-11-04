@@ -152,6 +152,11 @@ fn live_stop(h: &mut Harness) {
     );
 }
 fn amend_must_stay_refused(h: &mut Harness) {
+    // The stop stays on its own side of the price, so the venue's stop-limit refusal decides.
+    h.engine.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 95_000.;
+        ticker.last = 95_000.;
+    });
     h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
         command: 900,
         id: "8886774".into(),
