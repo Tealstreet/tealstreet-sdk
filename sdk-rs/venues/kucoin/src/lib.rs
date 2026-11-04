@@ -1132,12 +1132,16 @@ impl Venue for Kucoin {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::Read(read) = pending {
-            match clock::respond(cx, *read, &response, Pending::Read) {
+            match clock::respond(cx, read, &response, Pending::Read) {
                 clock::Delivery::Page {
                     mut pending,
                     leg,
                     root,
+                    retried,
                 } => {
+                    if retried {
+                        pending.stop_read_retries();
+                    }
                     pending.set_read_leg(leg.clone());
                     self.on_response(cx, pending, response);
                     let _ = cx.finish_http_context(&leg);

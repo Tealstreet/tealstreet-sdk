@@ -1198,11 +1198,12 @@ impl Venue for KucoinSpot {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::Read(read) = pending {
-            match crate::clock::respond(cx, *read, &response, Pending::Read) {
+            match crate::clock::respond(cx, read, &response, Pending::Read) {
                 crate::clock::Delivery::Page {
                     mut pending,
                     leg,
                     root,
+                    retried: _,
                 } => {
                     if let Pending::Fills { leg: target, .. } = &mut pending {
                         *target = Some(leg.clone());

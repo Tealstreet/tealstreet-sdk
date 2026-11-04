@@ -1,10 +1,10 @@
 //! A native timestamp refusal grants one exact GET replay under the same root.
 use crate::sign;
+use crate::wire::Envelope;
 use safe_cex_engine::credential_selection::Selection;
 use safe_cex_engine::request_context::{Context, Operation, Owner, Policy, RetryPolicy};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::{Cx, Method, RequestId, Response, VenueError};
-use serde::Deserialize;
 
 pub struct Request<P> {
     pub(crate) pending: P,
@@ -24,6 +24,7 @@ pub enum Delivery<P> {
         pending: P,
         leg: Context,
         root: Context,
+        retried: bool,
     },
     Failed(P, VenueError),
     Waiting,
@@ -70,7 +71,7 @@ pub fn send<P>(
     };
     queue(
         cx,
-        Request {
+        Box::new(Request {
             pending,
             root,
             leg,
@@ -81,14 +82,14 @@ pub fn send<P>(
             clock: false,
             retried: false,
             stream,
-        },
+        }),
         wrap,
     )
 }
 
 fn queue<P>(
     cx: &mut Cx<'_, P>,
-    read: Request<P>,
+    read: Box<Request<P>>,
     wrap: fn(Box<Request<P>>) -> P,
 ) -> Result<RequestId, (P, VenueError)> {
     let leg = read.leg.clone();
@@ -100,7 +101,7 @@ fn queue<P>(
             Method::Get,
             format!("{}/api/v1/timestamp", read.origin),
             None,
-            wrap(Box::new(read)),
+            wrap(read),
         )
     } else if let Some((_, identity)) = &read.auth {
         let recipe = sign::dispatch::Http::new(
@@ -118,7 +119,7 @@ fn queue<P>(
             format!("{}{}", read.origin, crate::encoded_path(&read.path)),
             None,
             Box::new(recipe),
-            wrap(Box::new(read)),
+            wrap(read),
         )
     } else {
         cx.request_managed_with_headers(
@@ -128,7 +129,7 @@ fn queue<P>(
             format!("{}{}", read.origin, crate::encoded_path(&read.path)),
             sign::PUBLIC_HEADERS,
             None,
-            wrap(Box::new(read)),
+            wrap(read),
         )
     };
     match result {
@@ -142,21 +143,9 @@ fn queue<P>(
     }
 }
 
-#[derive(Deserialize)]
-struct Code<'a> {
-    code: &'a str,
-    #[serde(borrow)]
-    data: Option<&'a serde_json::value::RawValue>,
-}
-#[derive(Deserialize)]
-struct Time<'a> {
-    code: &'a str,
-    data: u64,
-}
-
 pub fn respond<P>(
     cx: &mut Cx<'_, P>,
-    mut read: Request<P>,
+    mut read: Box<Request<P>>,
     response: &Response<'_>,
     wrap: fn(Box<Request<P>>) -> P,
 ) -> Delivery<P> {
@@ -168,25 +157,19 @@ pub fn respond<P>(
         return Delivery::Waiting;
     }
     if read.clock {
-        let sample = serde_json::from_str::<Time>(response.body)
+        let sample = serde_json::from_str::<Envelope>(response.body)
             .ok()
-            .filter(|s| {
-                (200..300).contains(&response.status)
-                    && s.code == "200000"
-                    && s.data > 0
-                    && s.data <= 9_007_199_254_740_991
-            });
+            .filter(|e| (200..300).contains(&response.status) && e.code == "200000")
+            .and_then(|e| e.data?.get().parse::<u64>().ok())
+            .filter(|sample| *sample > 0 && *sample <= 9_007_199_254_740_991);
         let Some(sample) = sample else {
             return Delivery::Failed(
-                wrap(Box::new(read)),
+                wrap(read),
                 VenueError::new("Invalid KuCoin server-time response"),
             );
         };
-        if !cx.observe_protocol_time(sample.data as f64) {
-            return Delivery::Failed(
-                wrap(Box::new(read)),
-                VenueError::new("Invalid KuCoin server time"),
-            );
+        if !cx.observe_protocol_time(sample as f64) {
+            return Delivery::Failed(wrap(read), VenueError::new("Invalid KuCoin server time"));
         }
         let _ = cx.finish_http_context(&read.leg);
         read.clock = false;
@@ -201,11 +184,11 @@ pub fn respond<P>(
             },
         ) {
             Ok(leg) => leg,
-            Err(error) => return Delivery::Failed(wrap(Box::new(read)), error.venue_error()),
+            Err(error) => return Delivery::Failed(wrap(read), error.venue_error()),
         };
     } else if read.auth.is_some()
         && !read.retried
-        && serde_json::from_str::<Code>(response.body)
+        && serde_json::from_str::<Envelope>(response.body)
             .is_ok_and(|e| e.code == "400002" && e.data.is_none())
     {
         let _ = cx.finish_http_context(&read.leg);
@@ -213,13 +196,14 @@ pub fn respond<P>(
         read.clock = true;
         read.leg = match cx.http_leg_context(&read.root, policy(5_000)) {
             Ok(leg) => leg,
-            Err(error) => return Delivery::Failed(wrap(Box::new(read)), error.venue_error()),
+            Err(error) => return Delivery::Failed(wrap(read), error.venue_error()),
         };
     } else {
         return Delivery::Page {
             pending: read.pending,
             leg: read.leg,
             root: read.root,
+            retried: read.retried,
         };
     }
     match queue(cx, read, wrap) {

@@ -28,7 +28,8 @@ origin, calibrate the engine's protocol clock at receipt, then sign the exact
 same path and query with the original selected identity. Normal startup adds no
 clock request. The probe has a five-second cap; it and the resend remain under
 the original read root and caller deadline. Invalid time, expiry, transport
-failure, or a second timestamp refusal ends that attempt. Existing periodic
+failure, an HTTP failure on the resend, or a second timestamp refusal ends that
+attempt without reopening outer retries. Existing periodic
 account reconciliation can still start a new read on its normal schedule.
 
 History and spot lookup continuations retain their original command root across

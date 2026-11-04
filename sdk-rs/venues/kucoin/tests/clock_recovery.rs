@@ -404,3 +404,92 @@ fn managed_context_routes_private_secondary_then_public_probe_then_secondary_rep
     prepare(&mut h, RoutingIntent::Secondary);
     let _ = h.take("/user");
 }
+
+// Drive only short read retries, never unrelated socket or root deadlines.
+fn finish_recovery_failure(h: &mut H<Kucoin>, path: &str, status: u16) {
+    let first = h.take(path);
+    h.actions.clear();
+    h.reply(&first, 400, SKEW);
+    let clock = h.take("/timestamp");
+    h.reply(&clock, 200, TIME);
+    let replay = h.take(path);
+    h.reply(&replay, status, r#"{"code":"500000","msg":"Unavailable"}"#);
+    for _ in 0..4 {
+        if let Some(i) = h
+            .actions
+            .iter()
+            .position(|a| matches!(a, Action::Http(r) if r.url.contains(path)))
+        {
+            let Action::Http(next) = h.actions.remove(i) else {
+                unreachable!()
+            };
+            h.reply(&next, 400, SKEW);
+        } else if let Some((timer, at)) = h
+            .actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms: at } if *at < 5000. => Some((*timer, *at)),
+                _ => None,
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        {
+            h.actions
+                .retain(|a| !matches!(a, Action::SetTimer { timer: t, .. } if *t == timer));
+            h.now = at;
+            h.e.handle(h.now, Event::TimerFired { timer });
+            h.collect();
+        } else {
+            break;
+        }
+    }
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/timestamp"))),
+        "a failed resend must not regain a clock probe: {:?}",
+        h.actions
+    );
+}
+
+#[test]
+fn account_http_retry_after_resync_cannot_probe_the_clock_again() {
+    for status in [429, 503] {
+        let mut h = futures_snapshot();
+        finish_recovery_failure(&mut h, "/positions", status);
+        assert!(!h.e.store().loaded().positions);
+        assert!(h.actions.iter().any(|a| {
+            matches!(a, Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::REQUEST_FAILED)
+        }));
+    }
+}
+
+#[test]
+fn history_http_retry_after_resync_cannot_probe_the_clock_again() {
+    for status in [429, 503] {
+        let mut h = H::new(Kucoin::new);
+        h.e.handle_command(
+            h.now,
+            Command::Query {
+                command: 71,
+                query: safe_cex_engine::Query::Fills {
+                    symbol: None,
+                    order_id: None,
+                    from_ms: Some(1.),
+                    to_ms: Some(2.),
+                    limit: Some(10),
+                },
+            },
+            Some(20_000),
+        )
+        .unwrap();
+        h.collect();
+        finish_recovery_failure(&mut h, "/fills?", status);
+        assert_eq!(h.terminals(), 1);
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 71, .. })))
+        );
+    }
+}
