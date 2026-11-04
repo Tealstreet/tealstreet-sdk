@@ -1185,12 +1185,13 @@ impl BitgetFutures {
     /// so a host that ignores `reject_route` never redials hot.
     fn refuse_route(&mut self, cx: &mut Cx<'_, Pending>, code: f64, msg: &str) {
         let code = safe_cex_engine::num::format(code);
-        cx.notice(
+        cx.notice_error(
             Level::Warn,
             code::AUTH_REJECTED,
-            format!(
+            &VenueError::new(format!(
                 "Bitget private WS login refused this egress IP ({code}); trying the next route"
-            ),
+            ))
+            .venue_code(&code),
         );
         self.account.route_refused = Some((code, msg.to_owned()));
         self.account.route_refusals = self.account.route_refusals.saturating_add(1);
@@ -1241,24 +1242,21 @@ impl BitgetFutures {
         self.account.degraded = true;
         self.sockets[3].open = false;
         self.sockets[3].socket = None;
-        let detail = self
-            .account
-            .route_refused
-            .take()
-            .map_or_else(String::new, |(code, msg)| {
-                [code, msg]
-                    .into_iter()
-                    .filter(|part| !part.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            });
-        cx.notice(
-            Level::Error,
-            code::AUTH_REJECTED,
-            format!(
-                "Bitget private WS login rejected: {detail} — the API key's IP whitelist allows none of Tealstreet's WebSocket egress IPs"
-            ),
-        );
+        let refusal = self.account.route_refused.take();
+        let detail = refusal.as_ref().map_or_else(String::new, |(code, msg)| {
+            [code.as_str(), msg.as_str()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        });
+        let mut error = VenueError::new(format!(
+            "Bitget private WS login rejected: {detail} — the API key's IP whitelist allows none of Tealstreet's WebSocket egress IPs"
+        ));
+        if let Some((code, _)) = refusal {
+            error = error.venue_code(code);
+        }
+        cx.notice_error(Level::Error, code::AUTH_REJECTED, &error);
     }
 
     /// `Venue::refresh_settings`: re-read the account's mode, margin and
