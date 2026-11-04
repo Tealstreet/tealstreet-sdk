@@ -1059,6 +1059,8 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
   assert.equal(capabilities(1 << 15, 0).marketRefresh, true);
   assert.equal(capabilities(1 << 25, 0).scheduleCancel, true);
   assert.equal(capabilities(0, 0).scheduleCancel, false);
+  // Bit 30 (orderReadCovers) is the page engine's, read in Rust ingest; JS names no flag for it.
+  assert.deepEqual(capabilities(1 << 30, 0), capabilities(0, 0));
   assert.equal(capabilities(1 << 27, 0).freshPositions, true);
   assert.equal(capabilities(0, 0).freshPositions, false);
   assert.equal(capabilities(1 << 28, 0).nukeAccountCancel, true);
